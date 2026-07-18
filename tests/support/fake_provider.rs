@@ -90,7 +90,7 @@ pub fn claude_script(agent_text: &str, result_text: &str) -> String {
     format!(
         "#!/bin/sh\n\
          printf '%s\\n' '{{\"type\":\"assistant\",\"timestamp\":\"2026-07-05T00:00:00Z\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"{agent}\"}}]}}}}'\n\
-         printf '%s\\n' '{{\"type\":\"result\",\"result\":\"{result}\"}}'\n",
+         printf '%s\\n' '{{\"type\":\"result\",\"result\":\"{result}\",\"usage\":{{\"input_tokens\":1234,\"output_tokens\":56}}}}'\n",
         agent = agent_text,
         result = result_text,
     )

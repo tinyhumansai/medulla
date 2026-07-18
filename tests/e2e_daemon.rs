@@ -94,6 +94,7 @@ fn real_run_task() -> RunTaskFn {
 
 fn frame(kind: TaskFrameKind, task_id: &str, text: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
+        usage: None,
         proto: TINYPLACE_PROTO.to_string(),
         kind,
         task_id: task_id.to_string(),
@@ -138,6 +139,9 @@ async fn task_lifecycle_ack_status_reply() {
         last.text, "final answer",
         "claude result line wins over agent message"
     );
+    let usage = last.usage.expect("reply carries the child's token usage");
+    assert_eq!(usage.input_tokens, 1234);
+    assert_eq!(usage.output_tokens, 56);
     for middle in &frames[1..frames.len() - 1] {
         assert_eq!(
             middle.kind,
@@ -262,6 +266,7 @@ fn blocking_runner(ready: mpsc::UnboundedSender<()>, gate: Arc<Notify>) -> RunTa
             let _ = ready.send(());
             gate.notified().await;
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),
                 events: 0,
@@ -470,6 +475,7 @@ async fn idle_drains_all_dispatched_messages() {
             Box::pin(async move {
                 seen.fetch_add(1, Ordering::SeqCst);
                 Ok(RunTaskResult {
+                    usage: None,
                     provider: opts.provider,
                     reply: format!("echo:{}", opts.prompt),
                     events: 0,

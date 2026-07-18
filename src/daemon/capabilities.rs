@@ -292,7 +292,7 @@ mod tests {
     async fn probe_merges_agent_report_over_facts() {
         let run_task: RunTaskFn = Arc::new(|opts| {
             Box::pin(async move {
-                Ok(RunTaskResult {
+                Ok(RunTaskResult { usage: None,
                     provider: opts.provider,
                     reply: r#"{"tools":["Edit"],"mcpServers":["gh"],"accessibleDirs":["/x"],"summary":"can code"}"#
                         .to_string(),

@@ -97,6 +97,16 @@ impl TaskFrameKind {
 /// is the globally-unique dispatch key that responders must echo verbatim.
 /// `harness` names the provider that ran a task (set on responses); `provider`
 /// is an inbound-only hint naming the agent the orchestrator wants to run it.
+/// Token usage a responder reports for a completed task (child harness
+/// consumption, surfaced to the orchestrator).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    #[serde(rename = "inputTokens")]
+    pub input_tokens: i64,
+    #[serde(rename = "outputTokens")]
+    pub output_tokens: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFrame {
     pub proto: String,
@@ -115,6 +125,9 @@ pub struct TaskFrame {
     pub harness: Option<HarnessProvider>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub provider: Option<HarnessProvider>,
+    /// Reported on `reply` frames when the child harness surfaced token counts.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub usage: Option<TokenUsage>,
 }
 
 impl TaskFrame {
@@ -139,6 +152,11 @@ pub struct EncodeFrameInput {
 
 /// Build and serialize a task frame body.
 pub fn encode_task_frame(input: EncodeFrameInput) -> String {
+    encode_task_frame_with_usage(input, None)
+}
+
+/// [`encode_task_frame`] with reported token usage (reply frames).
+pub fn encode_task_frame_with_usage(input: EncodeFrameInput, usage: Option<TokenUsage>) -> String {
     TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
         kind: input.kind,
@@ -148,6 +166,7 @@ pub fn encode_task_frame(input: EncodeFrameInput) -> String {
         correlation_id: input.correlation_id,
         harness: input.harness,
         provider: input.provider,
+        usage,
     }
     .encode()
 }
@@ -184,6 +203,10 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .and_then(|v| v.as_str())
         .and_then(HarnessProvider::from_wire);
 
+    let usage = obj
+        .get("usage")
+        .and_then(|v| serde_json::from_value::<TokenUsage>(v.clone()).ok());
+
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
         kind,
@@ -193,6 +216,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         correlation_id,
         harness,
         provider,
+        usage,
     })
 }
 

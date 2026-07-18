@@ -29,8 +29,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::{mpsc, Mutex as TokioMutex, Notify, Semaphore};
 
 use crate::tinyplace_support::{
-    encode_task_frame, AgentCapabilities, EncodeFrameInput, HarnessEvent, HarnessEventKind,
-    HarnessProvider, TaskFrame, TaskFrameKind,
+    AgentCapabilities, EncodeFrameInput, HarnessEvent, HarnessEventKind, HarnessProvider,
+    TaskFrame, TaskFrameKind,
 };
 use tinyplace::auth::timestamp;
 
@@ -503,13 +503,14 @@ impl DaemonRuntime {
 
         match result {
             Ok(run) => {
-                self.reply(
+                self.reply_with_usage(
                     &from,
                     TaskFrameKind::Reply,
                     &frame.task_id,
                     &run.reply,
                     correlation.as_deref(),
                     Some(provider),
+                    run.usage,
                 )
                 .await;
                 self.log(&format!("task {} ✓ ({} events)", frame.task_id, run.events));
@@ -614,15 +615,33 @@ impl DaemonRuntime {
         correlation: Option<&str>,
         harness: Option<HarnessProvider>,
     ) {
-        let body = encode_task_frame(EncodeFrameInput {
-            kind,
-            task_id: task_id.to_string(),
-            text: text.to_string(),
-            ts: timestamp(),
-            correlation_id: correlation.map(str::to_string),
-            harness,
-            provider: None,
-        });
+        self.reply_with_usage(to, kind, task_id, text, correlation, harness, None)
+            .await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn reply_with_usage(
+        &self,
+        to: &str,
+        kind: TaskFrameKind,
+        task_id: &str,
+        text: &str,
+        correlation: Option<&str>,
+        harness: Option<HarnessProvider>,
+        usage: Option<crate::tinyplace_support::TokenUsage>,
+    ) {
+        let body = crate::tinyplace_support::encode_task_frame_with_usage(
+            EncodeFrameInput {
+                kind,
+                task_id: task_id.to_string(),
+                text: text.to_string(),
+                ts: timestamp(),
+                correlation_id: correlation.map(str::to_string),
+                harness,
+                provider: None,
+            },
+            usage,
+        );
         self.send_raw(to, &body).await;
     }
 

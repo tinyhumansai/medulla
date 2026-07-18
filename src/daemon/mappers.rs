@@ -11,7 +11,7 @@
 
 use serde_json::Value;
 
-use crate::tinyplace_support::HarnessEvent;
+use crate::tinyplace_support::{HarnessEvent, TokenUsage};
 
 /// Truncate cap for tool_result output text (bytes reported separately).
 const OUTPUT_CAP: usize = 4096;
@@ -40,6 +40,7 @@ pub struct HarnessLineMapper {
     provider: Provider,
     last_text: Option<String>,
     last_at_ms: i64,
+    usage: Option<TokenUsage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,11 +63,28 @@ impl HarnessLineMapper {
             provider,
             last_text: None,
             last_at_ms: i64::MIN,
+            usage: None,
         }
+    }
+
+    /// The most recent token usage seen on the stream, if any. Providers report
+    /// cumulative counts (claude on the result record, codex via token_count
+    /// events), so latest-wins is the correct fold.
+    pub fn usage(&self) -> Option<TokenUsage> {
+        self.usage
     }
 
     /// Map one raw JSONL line into zero or more semantic events.
     pub fn map_line(&mut self, raw: &str, line: i64) -> Vec<HarnessSemanticEvent> {
+        // Token accounting rides on assorted records per provider; scan any
+        // line that plausibly carries counts and keep the latest.
+        if raw.contains("okens") {
+            if let Ok(value) = serde_json::from_str::<Value>(raw) {
+                if let Some(usage) = scan_usage(&value, 0) {
+                    self.usage = Some(usage);
+                }
+            }
+        }
         let events = match self.provider {
             Provider::Claude => claude_events_from_line(raw, line),
             Provider::Codex => codex_events_from_line(raw, line),
@@ -925,9 +943,98 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
+/// Depth-bounded scan for a token-usage object: any JSON object carrying both
+/// input and output token counts (snake_case or camelCase), wherever the
+/// provider nests it (claude `result.usage`, codex `token_count` payloads).
+pub(crate) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
+    if depth > 4 {
+        return None;
+    }
+    if let Some(obj) = value.as_object() {
+        let num = |keys: [&str; 2]| {
+            keys.iter()
+                .find_map(|k| obj.get(*k))
+                .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+        };
+        if let (Some(input), Some(output)) = (
+            num(["input_tokens", "inputTokens"]),
+            num(["output_tokens", "outputTokens"]),
+        ) {
+            return Some(TokenUsage {
+                input_tokens: input,
+                output_tokens: output,
+            });
+        }
+        return obj.values().find_map(|v| scan_usage(v, depth + 1));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_usage_finds_nested_counts_in_all_shapes() {
+        // claude: usage on an assistant/result record.
+        let v: Value = serde_json::from_str(
+            r#"{"type":"result","result":"ok","usage":{"input_tokens":10,"output_tokens":2}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            scan_usage(&v, 0),
+            Some(TokenUsage {
+                input_tokens: 10,
+                output_tokens: 2
+            })
+        );
+        // codex: token_count info nesting.
+        let v: Value = serde_json::from_str(
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":7,"output_tokens":3}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            scan_usage(&v, 0),
+            Some(TokenUsage {
+                input_tokens: 7,
+                output_tokens: 3
+            })
+        );
+        // camelCase variant.
+        let v: Value =
+            serde_json::from_str(r#"{"usage":{"inputTokens":1,"outputTokens":9}}"#).unwrap();
+        assert_eq!(
+            scan_usage(&v, 0),
+            Some(TokenUsage {
+                input_tokens: 1,
+                output_tokens: 9
+            })
+        );
+        // No counts → None; one-sided → None.
+        let v: Value = serde_json::from_str(r#"{"usage":{"input_tokens":1}}"#).unwrap();
+        assert_eq!(scan_usage(&v, 0), None);
+    }
+
+    #[test]
+    fn mapper_accumulates_latest_usage() {
+        let mut mapper = HarnessLineMapper::new("codex");
+        assert_eq!(mapper.usage(), None);
+        let _ = mapper.map_line(
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"output_tokens":1}}}}"#,
+            0,
+        );
+        let _ = mapper.map_line(
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"output_tokens":11}}}}"#,
+            1,
+        );
+        assert_eq!(
+            mapper.usage(),
+            Some(TokenUsage {
+                input_tokens: 50,
+                output_tokens: 11
+            })
+        );
+    }
 
     fn map_all(provider: &str, lines: &[&str]) -> Vec<HarnessSemanticEvent> {
         let mut mapper = HarnessLineMapper::new(provider);

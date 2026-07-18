@@ -57,6 +57,7 @@ fn base_config() -> DaemonConfig {
 
 fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
+        usage: None,
         proto: TINYPLACE_PROTO.to_string(),
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
@@ -70,6 +71,7 @@ fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -> TaskFrame
 
 fn input_frame(task_id: &str, text: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
+        usage: None,
         kind: TaskFrameKind::Input,
         ..task_frame(task_id, text, correlation)
     }
@@ -84,6 +86,7 @@ fn blocking_runner(ready: mpsc::UnboundedSender<()>, gate: Arc<Notify>) -> RunTa
             let _ = ready.send(());
             gate.notified().await;
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),
                 events: 0,
@@ -117,6 +120,7 @@ fn stdin_runner(
             gate.notified().await;
             reader.abort();
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),
                 events: 0,
@@ -156,6 +160,7 @@ fn status_runner(count: usize) -> RunTaskFn {
                 }
             }
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply: "ok".to_string(),
                 events: count,
@@ -395,6 +400,7 @@ async fn plaintext_dm_runs_default_provider() {
     let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
         Box::pin(async move {
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply: format!("echo: {}", opts.prompt),
                 events: 0,
@@ -433,6 +439,7 @@ fn counting_capability_runner(count: Arc<AtomicUsize>) -> RunTaskFn {
         Box::pin(async move {
             count.fetch_add(1, Ordering::SeqCst);
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply:
                     r#"{"tools":["Bash"],"mcpServers":[],"accessibleDirs":[],"summary":"probe"}"#
@@ -445,6 +452,7 @@ fn counting_capability_runner(count: Arc<AtomicUsize>) -> RunTaskFn {
 
 fn capabilities_frame(task_id: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
+        usage: None,
         kind: TaskFrameKind::Capabilities,
         ..task_frame(task_id, "", correlation)
     }
@@ -489,6 +497,7 @@ async fn plaintext_without_available_provider_is_refused() {
     let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
         Box::pin(async move {
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply: "unreachable".to_string(),
                 events: 0,
@@ -572,6 +581,7 @@ async fn select_provider_falls_back_to_first_when_default_absent() {
     let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
         Box::pin(async move {
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply: "ok".to_string(),
                 events: 0,
@@ -605,6 +615,7 @@ async fn input_for_unknown_task_is_not_matched() {
     let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
         Box::pin(async move {
             Ok(RunTaskResult {
+                usage: None,
                 provider: opts.provider,
                 reply: "ok".to_string(),
                 events: 0,
@@ -659,6 +670,7 @@ async fn input_buffered_before_stdin_registration_is_drained() {
                 tokio::time::sleep(std::time::Duration::from_millis(30)).await;
                 reader.abort();
                 Ok(RunTaskResult {
+                    usage: None,
                     provider: opts.provider,
                     reply: "done".to_string(),
                     events: 0,

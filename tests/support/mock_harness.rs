@@ -60,6 +60,9 @@ pub enum Step {
     Thinking(String),
     /// An assistant message chunk (accumulates into the reply fallback).
     Message(String),
+    /// A provider-shaped token-usage record (claude result-style usage object,
+    /// codex token_count event, opencode usage record).
+    Usage { input: i64, output: i64 },
     /// A tool invocation followed by its result, as one call/result pair.
     Tool {
         name: String,
@@ -165,6 +168,11 @@ impl MockCli {
 
     pub fn message(self, text: &str) -> Self {
         self.step(Step::Message(text.to_string()))
+    }
+
+    /// Emit a provider-appropriate token-usage record.
+    pub fn usage(self, input: i64, output: i64) -> Self {
+        self.step(Step::Usage { input, output })
     }
 
     pub fn tool(self, name: &str, input: Value, output: &str, is_error: bool) -> Self {
@@ -357,6 +365,14 @@ impl MockCli {
                 "assistant",
                 json!({ "role": "assistant", "content": [{ "type": "text", "text": text }] }),
             )],
+            Step::Usage { input, output } => vec![claude_record(
+                "assistant",
+                json!({
+                    "role": "assistant",
+                    "content": [],
+                    "usage": { "input_tokens": input, "output_tokens": output }
+                }),
+            )],
             Step::Tool {
                 name,
                 input,
@@ -400,6 +416,15 @@ impl MockCli {
             Step::Message(text) => vec![codex_record(
                 "event_msg",
                 json!({ "type": "agent_message", "message": text }),
+            )],
+            Step::Usage { input, output } => vec![codex_record(
+                "event_msg",
+                json!({
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": { "input_tokens": input, "output_tokens": output }
+                    }
+                }),
             )],
             Step::Tool {
                 name,
@@ -448,6 +473,13 @@ impl MockCli {
             Step::Message(text) => vec![opencode_record(
                 "text",
                 json!({ "type": "text", "text": text }),
+            )],
+            Step::Usage { input, output } => vec![opencode_record(
+                "step-finish",
+                json!({
+                    "type": "step-finish",
+                    "tokens": { "input_tokens": input, "output_tokens": output }
+                }),
             )],
             Step::Tool {
                 name,

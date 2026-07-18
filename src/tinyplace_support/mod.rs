@@ -43,8 +43,9 @@ pub use control::{
     HARNESS_CONTROL_VERSION,
 };
 pub use frames::{
-    decode_task_frame, encode_task_frame, parse_agent_capabilities, AgentCapabilities,
-    EncodeFrameInput, HarnessProvider, TaskFrame, TaskFrameKind, TINYPLACE_PROTO,
+    decode_task_frame, encode_task_frame, encode_task_frame_with_usage, parse_agent_capabilities,
+    AgentCapabilities, EncodeFrameInput, HarnessProvider, TaskFrame, TaskFrameKind, TokenUsage,
+    TINYPLACE_PROTO,
 };
 pub use runtime::{
     load_or_create_identity, spawn_contact_auto_accepter, spawn_mailbox_poll,

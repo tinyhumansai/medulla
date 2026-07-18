@@ -259,6 +259,8 @@ pub struct RunTaskResult {
     pub reply: String,
     /// Count of semantic events observed.
     pub events: usize,
+    /// Latest token usage the child reported on its stream, if any.
+    pub usage: Option<crate::tinyplace_support::TokenUsage>,
 }
 
 /// The injectable executor signature (the daemon runtime defaults to
@@ -542,6 +544,7 @@ async fn run_provider_attempt(
         provider: spec.provider,
         reply,
         events,
+        usage: mapper.usage(),
     })
 }
 

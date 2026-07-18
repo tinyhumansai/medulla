@@ -217,7 +217,9 @@ fn handle(
 
 async fn connect(sock: &Path) -> CoreRuntime {
     let (client, rx) = CoreClient::connect(sock).await.unwrap();
-    CoreRuntime::connect(client, rx, "test").await.unwrap()
+    CoreRuntime::connect(client, rx, "test", None)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]

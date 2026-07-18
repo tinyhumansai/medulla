@@ -4,11 +4,7 @@
 //! [`util`] helpers.
 
 /// The medulla wordmark, rendered on the login screen and the Overview tab.
-pub const LOGO: [&str; 3] = [
-    "      ▌  ▜ ▜   ",
-    "▛▛▌█▌▛▌▌▌▐ ▐ ▀▌",
-    "▌▌▌▙▖▙▌▙▌▐▖▐▖█▌",
-];
+pub const LOGO: [&str; 3] = ["      ▌  ▜ ▜   ", "▛▛▌█▌▛▌▌▌▐ ▐ ▀▌", "▌▌▌▙▖▙▌▙▌▐▖▐▖█▌"];
 
 pub mod agents;
 pub mod app;

@@ -444,7 +444,7 @@ mod tests {
     fn renders_branding_and_backend() {
         let mut s = LoginScreen::new("http://localhost:5000");
         let out = render(&mut s);
-        assert!(out.contains("MEDULLA"), "branding: {out}");
+        assert!(out.contains("▛▛▌█▌▛▌▌▌▐ ▐ ▀▌"), "logo: {out}");
         assert!(out.contains("localhost:5000"), "base url: {out}");
         assert!(out.contains("google"), "default provider: {out}");
     }

@@ -30,7 +30,7 @@ fn render(screen: &mut LoginScreen) -> String {
 fn renders_branding_backend_and_provider() {
     let mut s = LoginScreen::new("http://localhost:5000");
     let out = render(&mut s);
-    assert!(out.contains("MEDULLA"), "branding: {out}");
+    assert!(out.contains("▛▛▌█▌▛▌▌▌▐ ▐ ▀▌"), "logo: {out}");
     assert!(out.contains("http://localhost:5000"), "backend url: {out}");
     assert!(out.contains("google"), "default provider shown: {out}");
     // Idle menu hints are visible.

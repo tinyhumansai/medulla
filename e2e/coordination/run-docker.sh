@@ -10,6 +10,8 @@
 #   E2E_SMOKE=0   skip the interactive opencode TUI smoke leg
 #   IMAGE=<tag>   override image tag (default: medulla-e2e)
 #   NO_CACHE=1    build with --no-cache
+#   SKIP_BUILD=1  skip `docker build` and run the existing $IMAGE (CI builds the
+#                 image separately with a layer cache)
 #   NET=<mode>    docker run --network mode (default: none — fully isolated;
 #                 set NET=host/bridge to opt out of network isolation)
 set -euo pipefail
@@ -25,11 +27,15 @@ log() { printf '[run-docker] %s\n' "$*" >&2; }
 # amd64 emulation (opencode + rust builds would run under qemu = slow/flaky).
 PLATFORM="linux/$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
 
-log "building image '$IMAGE' for $PLATFORM (this takes a few minutes cold)…"
-build_args=(build --platform "$PLATFORM" -t "$IMAGE" -f "$SCRIPT_DIR/Dockerfile")
-[ "${NO_CACHE:-0}" = "1" ] && build_args+=(--no-cache)
-build_args+=("$SDK_DIR")
-docker "${build_args[@]}" >&2
+if [ "${SKIP_BUILD:-0}" = "1" ]; then
+  log "SKIP_BUILD=1 — using existing image '$IMAGE'"
+else
+  log "building image '$IMAGE' for $PLATFORM (this takes a few minutes cold)…"
+  build_args=(build --platform "$PLATFORM" -t "$IMAGE" -f "$SCRIPT_DIR/Dockerfile")
+  [ "${NO_CACHE:-0}" = "1" ] && build_args+=(--no-cache)
+  build_args+=("$SDK_DIR")
+  docker "${build_args[@]}" >&2
+fi
 
 log "running harness in container '$CONTAINER'…"
 run_args=(run --name "$CONTAINER" --platform "$PLATFORM")

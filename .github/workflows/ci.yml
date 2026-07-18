@@ -58,6 +58,38 @@ jobs:
       - name: Build
         run: cargo build --locked --all-targets
 
+  e2e-docker:
+    name: E2E (docker + tmux + opencode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build the harness image once with a GHA layer cache (the Rust build
+      # stage is the expensive layer; warm runs skip it entirely), then run the
+      # suites in fully network-isolated containers via run-docker.sh.
+      - name: Build harness image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: e2e/coordination/Dockerfile
+          tags: medulla-e2e:latest
+          load: true
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Coordination round trip (run.sh, --network none)
+        run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh
+
+      - name: Functional scenarios (tests.sh, --network none)
+        run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests.sh
+
   rust-sdk-windows:
     name: Rust SDK (Windows)
     runs-on: windows-latest

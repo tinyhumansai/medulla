@@ -93,4 +93,13 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-Run tests and clippy before pushing. The e2e suites spin up in-process stand-ins (mock HTTP/SSE backend, fake provider scripts, a mock core socket server) so they are safe anywhere.
+Run tests and clippy before pushing. The e2e suites spin up in-process stand-ins so they are safe anywhere: a mock HTTP/SSE backend (`tests/support/mock_backend.rs`), a mock core Unix-socket server (`mock_core.rs`), a mock tiny.place API server (`mock_tinyplace.rs`), and mock `claude`/`codex`/`opencode` CLIs that emit realistic provider stream-JSONL (`mock_harness.rs`, selected via the `TINYPLACE_*_BIN` overrides).
+
+Coverage (requires `cargo install cargo-llvm-cov` + `rustup component add llvm-tools-preview`):
+
+```sh
+cargo llvm-cov                    # run suite with coverage, print summary
+cargo llvm-cov report --show-missing-lines
+```
+
+The suite holds ~92% line coverage; keep new code covered. `src/main.rs` (the terminal event loop, needs a real TTY) and the daemon's live-network entry points are the known uncovered remainder.

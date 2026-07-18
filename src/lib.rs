@@ -7,6 +7,7 @@ pub mod cli;
 pub mod client;
 pub mod config;
 pub mod daemon;
+pub mod memory;
 pub mod runtime;
 pub mod session_history;
 pub mod tinyplace_support;

@@ -29,6 +29,23 @@ jobs:
         with:
           workspaces: .
 
+      # The e2e suite exercises the real opencode CLI when it is on PATH.
+      # CI builds it from git (pinned to the version used for benchmarking)
+      # so that leg runs here instead of skipping.
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install opencode from git
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v1.17.18 https://github.com/sst/opencode /tmp/opencode
+          (cd /tmp/opencode && bun install --frozen-lockfile)
+          sudo tee /usr/local/bin/opencode > /dev/null <<'SH'
+          #!/bin/sh
+          exec bun run /tmp/opencode/packages/opencode/src/index.ts "$@"
+          SH
+          sudo chmod +x /usr/local/bin/opencode
+          opencode --version
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 

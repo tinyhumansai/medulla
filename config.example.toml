@@ -1,0 +1,102 @@
+# Medulla configuration (example).
+#
+# Copy this to one of the discovered locations, or point `--config` at it.
+# All keys are optional; anything omitted takes a built-in default.
+#
+# ---------------------------------------------------------------------------
+# Where this file can live (config discovery), and how values combine.
+# ---------------------------------------------------------------------------
+#
+# Precedence, highest wins:
+#
+#   1. CLI flags                    (e.g. --config, --core, --no-alt-screen)
+#   2. environment variables        (MEDULLA_API_URL, MEDULLA_TOKEN via tokenEnv,
+#                                     MEDULLA_STAGING, MEDULLA_STATE_DIR, TINYPLACE_*)
+#   3. project-local config file    ./.medulla/config.toml  or  ./medulla.toml
+#   4. user-global config file      <medulla_home>/config.toml
+#   5. built-in defaults            (production endpoints)
+#
+# Files are merged field-by-field (a project-local file can override just
+# `backend.baseUrl` without discarding the rest of a global file). An explicit
+# `--config <path>` (either .toml or .json) bypasses discovery of files 3 and 4,
+# but environment variables and CLI flags still override it.
+#
+# ---------------------------------------------------------------------------
+# Medulla home  (where all config/data lives)
+# ---------------------------------------------------------------------------
+#
+#   default              ~/.medulla
+#   MEDULLA_DEV=1         ./.medulla          (relative to the cwd; for local dev)
+#   MEDULLA_HOME=<path>   <path>              (explicit; beats both of the above)
+#
+# Under the home:
+#   <home>/credentials.json     saved by `medulla login`  (mode 0600)
+#   <home>/config.toml          the user-global config file
+#   <home>/state                default stateDir          (chats, core.sock)
+#   <home>/tinyplace            default tinyplace identity dir
+#
+# `.env` in the cwd is loaded at startup (KEY=VALUE, `#` comments, optional
+# `export `, quotes stripped). It never overrides variables already set in the
+# environment — this is the usual way to set `MEDULLA_DEV=1` for local dev.
+
+# ---------------------------------------------------------------------------
+# backend — the Medulla HTTP API
+# ---------------------------------------------------------------------------
+[backend]
+# Base URL. Env override: MEDULLA_API_URL. `MEDULLA_STAGING=1` flips the default
+# to https://staging-api.tinyhumans.ai. Default: https://api.tinyhumans.ai
+baseUrl = "https://api.tinyhumans.ai"
+# Name of the env var holding the bearer JWT. Default: MEDULLA_TOKEN
+tokenEnv = "MEDULLA_TOKEN"
+# Inline token (discouraged; prefer the env var or `medulla login`).
+# token = "eyJ..."
+
+# ---------------------------------------------------------------------------
+# core — the core-js orchestration socket (optional)
+# ---------------------------------------------------------------------------
+# [core]
+# Explicit NDJSON Unix socket path. When unset the socket is resolved from
+# $XDG_RUNTIME_DIR/medulla/core.sock, then <stateDir>/core.sock.
+# socketPath = "/run/user/1000/medulla/core.sock"
+
+# ---------------------------------------------------------------------------
+# stateDir — TUI state (chats, resolved core socket). Default: <home>/state
+# Env override: MEDULLA_STATE_DIR.
+# ---------------------------------------------------------------------------
+# stateDir = "/absolute/path/to/state"
+
+# ---------------------------------------------------------------------------
+# tinyplace — background presence + peer bridging (optional)
+# ---------------------------------------------------------------------------
+# [tinyplace]
+# Base URL (env staging switch applies as for backend). Default: https://api.tiny.place
+# baseUrl = "https://api.tiny.place"
+# Identity directory. Default: <home>/tinyplace
+# identityDir = "/absolute/path/to/tinyplace"
+# handle = "@me"
+# displayName = "Me"
+# bio = "..."
+# autoDiscoverPeers = true
+# acceptContacts = "peers"     # peers | all | none
+# peers = []                   # [{ id, handle, name, address, tags, description, protocol }]
+
+# ---------------------------------------------------------------------------
+# opencode — coding-agent worker defaults (optional)
+# ---------------------------------------------------------------------------
+# [opencode]
+# command = "opencode"
+# model = ""
+# agent = "build"
+# workspace = "."
+# maxConcurrency = 4
+
+# ---------------------------------------------------------------------------
+# medulla — orchestration knobs (all optional)
+# ---------------------------------------------------------------------------
+# [medulla]
+# maxPasses = 8
+# maxSteps = 24
+# maxDepth = 2
+# maxTasksPerDelegate = 8
+# maxTokens = 4096
+# contextWindowTokens = 32000

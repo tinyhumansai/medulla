@@ -7,6 +7,7 @@ node_modules/
 # Local state
 .env
 .medulla-state/
+.medulla/
 
 # OS
 .DS_Store

@@ -24,8 +24,9 @@ use medulla::auth::{
     LoopbackConfig, DEFAULT_LOGIN_TIMEOUT,
 };
 use medulla::cli::{
-    core_socket_plan, missing_token_note, parse_command, parse_login_args, parse_tui_args,
-    resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs,
+    core_socket_plan, missing_token_note, parse_command, parse_login_args, parse_memory_args,
+    parse_tui_args, resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs,
+    MemoryAction,
 };
 use medulla::client::error::ClientError;
 use medulla::client::MedullaClient;
@@ -101,6 +102,10 @@ fn set_mouse_capture(on: bool) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load a cwd `.env` into the process env before anything reads it (this is
+    // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
+    medulla::home::load_dotenv_from_cwd();
+
     let raw: Vec<String> = std::env::args().skip(1).collect();
     match parse_command(&raw) {
         Command::Daemon => medulla::daemon::run_daemon(&raw[1..]).await,
@@ -125,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout(),
+        Command::Memory => run_memory(&raw[1..]).await,
         Command::Wrapper(provider) => {
             let code = medulla::wrapper::run_wrapper(provider, &raw[1..]).await?;
             std::process::exit(code);
@@ -145,7 +151,8 @@ async fn run_login(args: &[String]) -> anyhow::Result<()> {
         }
     };
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let loaded = load_config(&parsed.config, &env)?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
     let base_url = loaded.config.backend.base_url.clone();
 
     let jwt = match parsed.token {
@@ -175,8 +182,7 @@ async fn run_login(args: &[String]) -> anyhow::Result<()> {
         Err(e) => return Err(anyhow::anyhow!("token verification failed: {e}")),
     }
 
-    let store = CredentialStore::at_default_location()
-        .ok_or_else(|| anyhow::anyhow!("could not resolve a config directory for credentials"))?;
+    let store = CredentialStore::at_home(&medulla::home::medulla_home(&env));
     store.save(&Credentials { base_url, jwt })?;
     println!("Credentials saved to {}", store.path().display());
     Ok(())
@@ -184,12 +190,91 @@ async fn run_login(args: &[String]) -> anyhow::Result<()> {
 
 /// `medulla logout`: clear stored credentials.
 fn run_logout() -> anyhow::Result<()> {
-    match CredentialStore::at_default_location() {
-        Some(store) => {
-            store.clear()?;
-            println!("Logged out ({} cleared).", store.path().display());
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let store = CredentialStore::at_home(&medulla::home::medulla_home(&env));
+    store.clear()?;
+    println!("Logged out ({} cleared).", store.path().display());
+    Ok(())
+}
+
+/// `medulla memory <status|ingest|backfill|compile|search <query>>`: manage the
+/// persona-memory layer from the command line.
+async fn run_memory(args: &[String]) -> anyhow::Result<()> {
+    let parsed = match parse_memory_args(args) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("medulla memory: {msg}");
+            std::process::exit(2);
         }
-        None => println!("No credential store location resolved; nothing to clear."),
+    };
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
+    let settings = medulla::memory::env::resolve(
+        loaded.config.memory.as_ref(),
+        &env,
+        &medulla::home::medulla_home(&env),
+    );
+    let service = medulla::memory::MemoryService::open(settings)?;
+
+    match parsed.action {
+        MemoryAction::Status => {
+            let status = service.status();
+            if parsed.json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                print!("{}", service.overview());
+            }
+        }
+        MemoryAction::Search(query) => {
+            let hits = service.search(&query, parsed.facet.as_deref(), parsed.k);
+            if parsed.json {
+                println!("{}", serde_json::to_string_pretty(&hits)?);
+            } else if hits.is_empty() {
+                println!("(no matches)");
+            } else {
+                for hit in &hits {
+                    println!("[{}] ({:.3}) {}", hit.facet, hit.score, hit.text);
+                }
+            }
+        }
+        MemoryAction::Compile => {
+            let report = service.compile()?;
+            print_ingest_report(&report, parsed.json)?;
+        }
+        MemoryAction::Ingest | MemoryAction::Backfill => {
+            let mode = if matches!(parsed.action, MemoryAction::Backfill) {
+                medulla::memory::IngestMode::Backfill
+            } else {
+                medulla::memory::IngestMode::Incremental
+            };
+            let report = service.ingest(mode).await?;
+            print_ingest_report(&report, parsed.json)?;
+        }
+    }
+    Ok(())
+}
+
+/// Print an ingest/compile report as JSON or a short human summary.
+fn print_ingest_report(report: &medulla::memory::IngestReport, json: bool) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+    } else {
+        println!(
+            "{}: {} files, {} sessions, {} observations{}",
+            report.mode,
+            report.files_seen,
+            report.sessions_processed,
+            report.observations,
+            if report.budget_hit {
+                " (budget hit)"
+            } else {
+                ""
+            },
+        );
+        if let Some(path) = &report.pack_path {
+            println!("pack: {path}");
+        }
     }
     Ok(())
 }
@@ -203,7 +288,9 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     }
 
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let loaded = load_config(&args.config, &env)?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let loaded = load_config(args.config.as_deref(), &env, &cwd)?;
+    let home = medulla::home::medulla_home(&env);
 
     // Runtime selection order (spec §5):
     //   1. `--core`, or a `[core]` config section, with a reachable core socket → CoreRuntime
@@ -218,12 +305,33 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             .as_ref()
             .and_then(|c| c.socket_path.as_deref()),
         env.get("XDG_RUNTIME_DIR").map(String::as_str),
-        env.get("MEDULLA_STATE_DIR").map(String::as_str),
+        // The resolved state dir already reflects MEDULLA_STATE_DIR / <home>/state.
+        Some(loaded.config.state_dir.as_str()),
         |p| p.exists(),
     );
 
     let mut runtime: Option<Arc<dyn Runtime>> = None;
     let mut startup_status: Option<String> = None;
+
+    // Optional persona-memory service (tinycortex). Built once here and attached
+    // to the core runtime so it can advertise + serve the memory toolset; also
+    // available to a later TUI surface via the runtime seam.
+    let memory_settings = medulla::memory::env::resolve(
+        loaded.config.memory.as_ref(),
+        &env,
+        &medulla::home::medulla_home(&env),
+    );
+    let memory_service: Option<Arc<medulla::memory::MemoryService>> = if memory_settings.enabled {
+        match medulla::memory::MemoryService::open(memory_settings) {
+            Ok(svc) => Some(Arc::new(svc)),
+            Err(e) => {
+                startup_status = Some(format!("memory service failed to open ({e})"));
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     match plan {
         CorePlan::Skip => {}
@@ -232,7 +340,9 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             let version = env!("CARGO_PKG_VERSION");
             match CoreClient::connect(&path).await {
                 Ok((client, events_rx)) => {
-                    match CoreRuntime::connect(client, events_rx, version).await {
+                    match CoreRuntime::connect(client, events_rx, version, memory_service.clone())
+                        .await
+                    {
                         Ok(rt) => runtime = Some(Arc::new(rt)),
                         Err(e) => {
                             startup_status =
@@ -258,7 +368,7 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     if runtime.is_none() {
         let backend = &loaded.config.backend;
         let core_note = startup_status.take();
-        let stored = CredentialStore::at_default_location().and_then(|s| s.load());
+        let stored = CredentialStore::at_home(&home).load_or_legacy();
         let token = resolve_backend_token(&env, backend, stored.as_ref());
 
         let (rt, note): (Option<Arc<dyn Runtime>>, Option<String>) = match (want_core, token) {
@@ -345,7 +455,7 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 match BackendRuntime::connect(client).await {
                     Ok(rt) => {
                         runtime = Some(Arc::new(rt));
-                        startup_status = save_credentials(&base_url, &jwt);
+                        startup_status = save_credentials(&home, &base_url, &jwt);
                     }
                     Err(e) => {
                         runtime = Some(Arc::new(MockRuntime::demo()));
@@ -398,18 +508,16 @@ fn is_auth_error(err: &ClientError) -> bool {
     err.is_token_expired() || matches!(err.status(), Some(401) | Some(403))
 }
 
-/// Persist a freshly-obtained JWT. Returns `None` on success or a non-fatal
-/// notice string on failure (the app still proceeds).
-fn save_credentials(base_url: &str, jwt: &str) -> Option<String> {
-    match CredentialStore::at_default_location() {
-        Some(store) => match store.save(&Credentials {
-            base_url: base_url.to_string(),
-            jwt: jwt.to_string(),
-        }) {
-            Ok(()) => None,
-            Err(e) => Some(format!("logged in, but saving credentials failed ({e})")),
-        },
-        None => Some("logged in, but no credential store location resolved".to_string()),
+/// Persist a freshly-obtained JWT under the Medulla home. Returns `None` on
+/// success or a non-fatal notice string on failure (the app still proceeds).
+fn save_credentials(home: &std::path::Path, base_url: &str, jwt: &str) -> Option<String> {
+    let store = CredentialStore::at_home(home);
+    match store.save(&Credentials {
+        base_url: base_url.to_string(),
+        jwt: jwt.to_string(),
+    }) {
+        Ok(()) => None,
+        Err(e) => Some(format!("logged in, but saving credentials failed ({e})")),
     }
 }
 

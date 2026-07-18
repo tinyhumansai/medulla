@@ -2029,10 +2029,15 @@ impl App {
     }
 
     fn draw_config(&mut self, f: &mut Frame, area: Rect) {
-        let json = self.loaded.pretty_json();
+        let sources = if self.loaded.sources.is_empty() {
+            "built-in defaults".to_string()
+        } else {
+            self.loaded.sources.join(" < ")
+        };
+        let body = format!("Sources: {sources}\n\n{}", self.loaded.pretty_json());
         let block = self.panel(format!("Configuration · {}", self.loaded.path));
         f.render_widget(
-            Paragraph::new(json).wrap(Wrap { trim: false }).block(block),
+            Paragraph::new(body).wrap(Wrap { trim: false }).block(block),
             area,
         );
     }

@@ -195,13 +195,21 @@ impl CoreClient {
 
     // --- typed methods (§2 table) -----------------------------------------------
 
-    /// The `initialize` handshake / liveness probe (§2).
-    pub async fn initialize(&self, client_version: &str) -> Result<Value, CallError> {
-        self.request(
-            "initialize",
-            json!({ "clientVersion": client_version, "protocolVersion": PROTOCOL_VERSION }),
-        )
-        .await
+    /// The `initialize` handshake / liveness probe (§2). When `memory` is set,
+    /// it advertises the persona-memory capability (tool names + pack path) so
+    /// the reasoning layer may issue `memory_query` events.
+    pub async fn initialize(
+        &self,
+        client_version: &str,
+        memory: Option<Value>,
+    ) -> Result<Value, CallError> {
+        let mut params = serde_json::Map::new();
+        params.insert("clientVersion".into(), json!(client_version));
+        params.insert("protocolVersion".into(), json!(PROTOCOL_VERSION));
+        if let Some(capability) = memory {
+            params.insert("memory".into(), capability);
+        }
+        self.request("initialize", Value::Object(params)).await
     }
 
     pub async fn thread_list(&self) -> Result<Value, CallError> {
@@ -309,6 +317,26 @@ impl CoreClient {
             json!({ "cycleId": cycle_id, "questionId": question_id, "body": body }),
         )
         .await
+    }
+
+    /// Answer a core-issued `memory_query` event by its `id`. Exactly one of
+    /// `ok` / `error` should be set: `memory.answer` mirrors `question.answer`,
+    /// serving a memory tool result (or an error) back to the reasoning layer.
+    pub async fn memory_answer(
+        &self,
+        id: &str,
+        ok: Option<Value>,
+        error: Option<&str>,
+    ) -> Result<Value, CallError> {
+        let mut params = serde_json::Map::new();
+        params.insert("id".into(), json!(id));
+        if let Some(result) = ok {
+            params.insert("ok".into(), result);
+        }
+        if let Some(message) = error {
+            params.insert("error".into(), json!({ "message": message }));
+        }
+        self.request("memory.answer", Value::Object(params)).await
     }
 
     /// `snapshot.get` — the resync path (§3.4/§6). A `resync.required` RPC error still

@@ -73,7 +73,7 @@ TUI flags:
 
 | Flag | Effect |
 | --- | --- |
-| `--config <path>` | Path to the config file (default: `medulla.tui.json` in the cwd) |
+| `--config <path>` | Explicit config file (`.toml` or `.json`); bypasses layered discovery |
 | `--core` | Drive the core orchestration server over its Unix socket |
 | `--no-alt-screen` | Stay on the main screen buffer (useful for scrollback while debugging) |
 
@@ -132,7 +132,7 @@ medulla login --no-browser          # just print the URL to open yourself
 medulla login --token <64-hex>      # headless: redeem a one-time login token
 ```
 
-`login` runs an RFC 8252 loopback flow: it binds a local `127.0.0.1:<port>` listener, sends you to the backend's OAuth page, and captures the JWT the backend redirects back with. It then verifies the token via `/auth/me`, prints who you are, and saves credentials to `<config-dir>/medulla/credentials.json` (mode `0600` on unix) — for example `~/Library/Application Support/medulla/credentials.json` on macOS or `~/.config/medulla/credentials.json` on Linux. The base URL comes from `backend.baseUrl` in the config (`--config <path>` to point at a different config).
+`login` runs an RFC 8252 loopback flow: it binds a local `127.0.0.1:<port>` listener, sends you to the backend's OAuth page, and captures the JWT the backend redirects back with. It then verifies the token via `/auth/me`, prints who you are, and saves credentials to `<home>/credentials.json` (mode `0600` on unix) — e.g. `~/.medulla/credentials.json`. For backward compatibility, a missing home file falls back to reading the retired `<config-dir>/medulla/credentials.json` location (nothing is moved). The base URL comes from `backend.baseUrl` in the config (`--config <path>` to point at a different config).
 
 On the next `medulla` run the TUI uses those stored credentials automatically, provided their `baseUrl` matches the configured backend. `medulla logout` clears the file. Precedence for the backend token stays: inline `backend.token` > `backend.tokenEnv` > stored credentials.
 
@@ -157,7 +157,7 @@ For driving a locally running core orchestration server over its NDJSON Unix-soc
 medulla --core
 ```
 
-The socket path resolves as: `core.socketPath` from the config if set, else `$XDG_RUNTIME_DIR/medulla/core.sock`, else `$MEDULLA_STATE_DIR/core.sock`. Config form:
+The socket path resolves as: `core.socketPath` from the config if set, else `$XDG_RUNTIME_DIR/medulla/core.sock`, else `<stateDir>/core.sock` (the resolved `stateDir`, which defaults to `<home>/state` and honors `MEDULLA_STATE_DIR`). Config form:
 
 ```json
 {
@@ -167,9 +167,31 @@ The socket path resolves as: `core.socketPath` from the config if set, else `$XD
 
 The core runtime unlocks the Workers tab (fleet peer management) and task steering (`X` cancel task, `A` answer a pending question).
 
+## Medulla home
+
+Everything Medulla persists lives under a single home directory:
+
+- Default: `~/.medulla`.
+- Local dev: set `MEDULLA_DEV=1` (truthy is `1`/`true`, case-insensitive) and the home becomes `./.medulla` (relative to the cwd; gitignored).
+- Explicit: `MEDULLA_HOME=<path>` overrides both.
+
+Under the home: `credentials.json` (saved by `medulla login`, mode `0600`), `config.toml` (the user-global config file), `state/` (the default `stateDir`, holding chat history under `chats/` and the resolved `core.sock`), and `tinyplace/` (the default tiny.place identity dir).
+
+A `.env` file in the current directory is loaded at startup (before anything reads the environment): `KEY=VALUE` lines, `#` comments, an optional `export ` prefix, and single/double quotes are stripped. It never overrides variables already set in the process environment — this is the usual way to opt into `MEDULLA_DEV=1` for local dev.
+
 ## Configuration
 
-The TUI reads `medulla.tui.json` from the current directory (or `--config <path>`). Every section is optional; an absent file just means all defaults. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `.medulla-state/`, holds chat history under `chats/`), `opencode` (worker display), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections in existing config files are ignored. See `src/config.rs` for the full schema — fields are camelCase.
+Config is layered. From lowest to highest precedence (highest wins):
+
+1. Built-in defaults (production endpoints; `MEDULLA_STAGING` flips the default URLs).
+2. User-global `<home>/config.toml`.
+3. Project-local `./.medulla/config.toml` (else `./medulla.toml`).
+4. Environment variables (`MEDULLA_API_URL`, `MEDULLA_TOKEN` via `tokenEnv`, `MEDULLA_STAGING`, `MEDULLA_STATE_DIR`, `TINYPLACE_*`).
+5. CLI flags.
+
+Files are merged field-by-field (a recursive table merge), so a project-local file can override just `backend.baseUrl` without discarding the rest of a global file. TOML is the primary format; `--config <path>` still accepts either `.toml` or `.json` (parser chosen by extension) and bypasses file discovery, but env vars and CLI flags still override it. The Config tab shows the merged effective config and lists the source files that contributed.
+
+Every section is optional; with no file anywhere all defaults apply. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored. See `config.example.toml` for a commented reference and `src/config.rs` for the full schema — fields are camelCase.
 
 ## Validation
 

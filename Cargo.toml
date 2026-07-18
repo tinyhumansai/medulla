@@ -19,6 +19,7 @@ tinyplace = { path = "vendor/tinyplace/sdk/rust" }
 tinycortex = { path = "vendor/tinycortex", features = ["persona", "providers-http"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "process", "fs", "signal", "net"] }
 futures = "0.3"

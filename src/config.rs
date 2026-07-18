@@ -3,10 +3,12 @@
 //! defaults, unknown fields are ignored.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::home::medulla_home;
 
 /// Production backend API base URL (the default).
 pub const PROD_BACKEND_BASE_URL: &str = "https://api.tinyhumans.ai";
@@ -79,13 +81,17 @@ pub fn resolve_tinyplace_base_url(
 }
 
 fn d_state_dir() -> String {
-    ".medulla-state/tui".into()
+    // Placeholder for `TuiConfig::default()` / bare deserialization; the real
+    // value is `<medulla_home>/state`, filled in by `load_config`.
+    "state".into()
 }
 fn d_tp_base() -> String {
     PROD_TINYPLACE_BASE_URL.into()
 }
 fn d_tp_identity() -> String {
-    ".medulla-state/tui-tinyplace".into()
+    // Placeholder; the real value is `<medulla_home>/tinyplace`, filled in by
+    // `load_config`.
+    "tinyplace".into()
 }
 fn d_accept() -> String {
     "peers".into()
@@ -229,6 +235,38 @@ pub struct CoreConfig {
     pub socket_path: Option<String>,
 }
 
+/// The optional `memory` section: tinycortex persona memory integration. All
+/// fields are optional overrides; the effective settings are resolved against
+/// the environment in [`crate::memory::env`].
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MemoryConfigSection {
+    /// On/off switch (also settable via `MEDULLA_MEMORY`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Workspace root for the chunk store / facet trees / `persona/` outputs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Identity line for the compiled pack header.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    /// Claude Code transcript root override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_root: Option<String>,
+    /// Codex rollout root override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_root: Option<String>,
+    /// Project roots walked for instruction files + git history.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub project_roots: Vec<String>,
+    /// Chat/digest model id override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Per-run provider spend ceiling, USD.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_cost_usd: Option<f64>,
+}
+
 /// Where the TUI reaches the Medulla backend HTTP API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -264,6 +302,8 @@ pub struct TuiConfig {
     pub backend: BackendConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub core: Option<CoreConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryConfigSection>,
 }
 
 impl Default for TuiConfig {
@@ -275,15 +315,19 @@ impl Default for TuiConfig {
             state_dir: d_state_dir(),
             backend: BackendConfig::default(),
             core: None,
+            memory: None,
         }
     }
 }
 
-/// The parsed config alongside the absolute path it came from.
+/// The parsed config alongside the path it is primarily identified by and the
+/// ordered list of config files that actually contributed to it (low → high
+/// precedence). `sources` is empty when only built-in defaults applied.
 #[derive(Debug, Clone)]
 pub struct LoadedConfig {
     pub config: TuiConfig,
     pub path: String,
+    pub sources: Vec<String>,
 }
 
 impl LoadedConfig {
@@ -292,6 +336,7 @@ impl LoadedConfig {
         LoadedConfig {
             config: TuiConfig::default(),
             path,
+            sources: Vec::new(),
         }
     }
 
@@ -328,61 +373,174 @@ impl LoadedConfig {
     }
 }
 
-/// Load and parse the TUI config from `path`, resolving endpoint base URLs
-/// against `env`. A missing file yields defaults (still env-resolved); a
+/// Turn a path into a canonical (or best-effort) absolute-ish display string.
+fn display_path(path: &Path) -> String {
+    std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string_lossy().into_owned())
+}
+
+/// Read one config file into a JSON `Value`, choosing the parser by extension
+/// (`.toml` → TOML, everything else → JSON). A missing file yields `None`; a
 /// present-but-invalid file is an error.
+fn read_config_value(path: &Path) -> anyhow::Result<Option<Value>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "Cannot read config at {}: {err}",
+                display_path(path)
+            ))
+        }
+    };
+    let is_toml = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("toml"))
+        .unwrap_or(false);
+    let value = if is_toml {
+        let parsed: toml::Value = toml::from_str(&text)
+            .map_err(|err| anyhow::anyhow!("Invalid TOML in {}: {err}", display_path(path)))?;
+        serde_json::to_value(parsed)
+            .map_err(|err| anyhow::anyhow!("Invalid TOML in {}: {err}", display_path(path)))?
+    } else {
+        serde_json::from_str(&text)
+            .map_err(|err| anyhow::anyhow!("Invalid JSON in {}: {err}", display_path(path)))?
+    };
+    Ok(Some(value))
+}
+
+/// Recursively merge `overlay` into `base`: tables are merged key-by-key (so a
+/// project-local file can override just `backend.baseUrl`); any non-table value
+/// replaces whatever was there.
+fn merge_value(base: &mut Value, overlay: Value) {
+    match (base, overlay) {
+        (Value::Object(base_map), Value::Object(overlay_map)) => {
+            for (key, value) in overlay_map {
+                match base_map.get_mut(&key) {
+                    Some(existing) => merge_value(existing, value),
+                    None => {
+                        base_map.insert(key, value);
+                    }
+                }
+            }
+        }
+        (slot, value) => *slot = value,
+    }
+}
+
+/// Resolve the ordered list of config files to merge (low → high precedence).
+///
+/// An explicit `--config` path bypasses discovery and is the sole file. Without
+/// one, discovery layers the user-global `<home>/config.toml` under the
+/// project-local file (`./.medulla/config.toml`, else `./medulla.toml`).
+fn config_file_layers(explicit_config: Option<&str>, home: &Path, cwd: &Path) -> Vec<PathBuf> {
+    if let Some(path) = explicit_config {
+        return vec![PathBuf::from(path)];
+    }
+    let mut layers = vec![home.join("config.toml")];
+    let project_local = cwd.join(".medulla").join("config.toml");
+    if project_local.exists() {
+        layers.push(project_local);
+    } else {
+        layers.push(cwd.join("medulla.toml"));
+    }
+    layers
+}
+
+/// Load and parse the layered TUI config, resolving endpoint base URLs and
+/// home-derived paths against `env`.
+///
+/// Precedence (highest wins): env vars > project-local config
+/// (`./.medulla/config.toml` or `./medulla.toml`) > user-global
+/// `<home>/config.toml` > built-in defaults. An explicit `--config` path bypasses
+/// file discovery (JSON or TOML by extension) but env still overrides on top.
 ///
 /// Base-URL precedence is applied here rather than via serde defaults (which
 /// cannot see the environment): backend `MEDULLA_API_URL` > config `baseUrl` >
 /// staging/prod default; tiny.place config `baseUrl` > staging/prod default.
-pub fn load_config(path: &str, env: &HashMap<String, String>) -> anyhow::Result<LoadedConfig> {
-    let absolute = std::fs::canonicalize(path)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| {
-            Path::new(path)
-                .to_str()
-                .map(str::to_string)
-                .unwrap_or_else(|| path.to_string())
-        });
-    // The raw JSON (when a file exists) lets us tell an explicitly-set base URL
-    // from a serde-defaulted one, so an explicit config value beats the default.
-    let raw: Option<Value> = match std::fs::read_to_string(path) {
-        Ok(text) => Some(
-            serde_json::from_str(&text)
-                .map_err(|err| anyhow::anyhow!("Invalid JSON in {absolute}: {err}"))?,
-        ),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => {
-            return Err(anyhow::anyhow!(
-                "Cannot read TUI config at {absolute}: {err}"
-            ))
+/// `stateDir` and `tinyplace.identityDir` default to `<home>/state` and
+/// `<home>/tinyplace` when not explicitly configured; `MEDULLA_STATE_DIR`
+/// overrides `stateDir`.
+pub fn load_config(
+    explicit_config: Option<&str>,
+    env: &HashMap<String, String>,
+    cwd: &Path,
+) -> anyhow::Result<LoadedConfig> {
+    let home = medulla_home(env);
+    let layers = config_file_layers(explicit_config, &home, cwd);
+
+    // Merge every present file (low → high) into one JSON table. The merged
+    // value doubles as the "raw" used to tell an explicitly-set field from a
+    // serde-defaulted one, so an explicit config value beats a default.
+    let mut merged = Value::Object(serde_json::Map::new());
+    let mut sources: Vec<String> = Vec::new();
+    for layer in &layers {
+        if let Some(value) = read_config_value(layer)? {
+            merge_value(&mut merged, value);
+            sources.push(display_path(layer));
         }
-    };
-    let mut config: TuiConfig = match &raw {
-        Some(value) => serde_json::from_value(value.clone())
-            .map_err(|err| anyhow::anyhow!("Invalid JSON in {absolute}: {err}"))?,
-        None => TuiConfig::default(),
+    }
+
+    let has_content = merged.as_object().map(|m| !m.is_empty()).unwrap_or(false);
+    let mut config: TuiConfig = if has_content {
+        serde_json::from_value(merged.clone())
+            .map_err(|err| anyhow::anyhow!("Invalid config: {err}"))?
+    } else {
+        TuiConfig::default()
     };
 
-    let backend_url = raw
-        .as_ref()
-        .and_then(|v| v.get("backend"))
+    let backend_url = merged
+        .get("backend")
         .and_then(|b| b.get("baseUrl"))
         .and_then(|v| v.as_str());
     config.backend.base_url = resolve_backend_base_url(env, backend_url);
 
     if let Some(tp) = config.tinyplace.as_mut() {
-        let tp_url = raw
-            .as_ref()
-            .and_then(|v| v.get("tinyplace"))
+        let tp_raw = merged.get("tinyplace");
+        let tp_url = tp_raw
             .and_then(|t| t.get("baseUrl"))
             .and_then(|v| v.as_str());
         tp.base_url = resolve_tinyplace_base_url(env, tp_url);
+        // Home-derived identity dir unless the file set one explicitly.
+        let id_explicit = tp_raw
+            .and_then(|t| t.get("identityDir"))
+            .map(|v| !v.is_null())
+            .unwrap_or(false);
+        if !id_explicit {
+            tp.identity_dir = home.join("tinyplace").to_string_lossy().into_owned();
+        }
     }
+
+    // stateDir: MEDULLA_STATE_DIR env override > explicit config > <home>/state.
+    let state_explicit = merged
+        .get("stateDir")
+        .map(|v| !v.is_null())
+        .unwrap_or(false);
+    if let Some(dir) = env
+        .get("MEDULLA_STATE_DIR")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        config.state_dir = dir.to_string();
+    } else if !state_explicit {
+        config.state_dir = home.join("state").to_string_lossy().into_owned();
+    }
+
+    let path = if let Some(explicit) = explicit_config {
+        display_path(Path::new(explicit))
+    } else {
+        sources
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "(built-in defaults)".to_string())
+    };
 
     Ok(LoadedConfig {
         config,
-        path: absolute,
+        path,
+        sources,
     })
 }
 
@@ -397,11 +555,23 @@ mod tests {
             .collect()
     }
 
+    /// A unique temp dir for a test, used as an injected `MEDULLA_HOME` and/or cwd.
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "medulla-cfg-{tag}-{}-{:p}",
+            std::process::id(),
+            &tag as *const _
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn defaults_are_applied() {
-        // Serde defaults (no env resolution) produce the PROD urls.
+        // Serde defaults (no env resolution) produce the PROD urls and the
+        // home-less state-dir placeholder (real value filled by load_config).
         let cfg: TuiConfig = serde_json::from_str("{}").unwrap();
-        assert_eq!(cfg.state_dir, ".medulla-state/tui");
+        assert_eq!(cfg.state_dir, "state");
         assert_eq!(cfg.backend.base_url, "https://api.tinyhumans.ai");
         assert_eq!(cfg.backend.token_env, "MEDULLA_TOKEN");
         assert_eq!(cfg.medulla.context_window(), 32_000);
@@ -470,23 +640,22 @@ mod tests {
 
     #[test]
     fn load_config_applies_staging_switch_to_both_urls() {
-        let path = std::env::temp_dir()
-            .join(format!("medulla-staging-{}.json", std::process::id()))
-            .to_string_lossy()
-            .into_owned();
-        // Missing file + staging env → staging defaults for backend (+ tinyplace
-        // when a section is present).
-        let loaded = load_config(&path, &env(&[("MEDULLA_STAGING", "1")])).unwrap();
+        let home = temp_dir("staging-home");
+        let cwd = temp_dir("staging-cwd");
+        let base_env = &[
+            ("MEDULLA_HOME", home.to_str().unwrap()),
+            ("MEDULLA_STAGING", "1"),
+        ];
+        // No config file + staging env → staging defaults for backend.
+        let loaded = load_config(None, &env(base_env), &cwd).unwrap();
         assert_eq!(
             loaded.config.backend.base_url,
             "https://staging-api.tinyhumans.ai"
         );
 
-        let dir = std::env::temp_dir().join(format!("medulla-staging-cfg-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let cfg = dir.join("medulla.tui.json");
+        let cfg = cwd.join("medulla.tui.json");
         std::fs::write(&cfg, r#"{"tinyplace":{"peers":[]}}"#).unwrap();
-        let loaded = load_config(cfg.to_str().unwrap(), &env(&[("MEDULLA_STAGING", "1")])).unwrap();
+        let loaded = load_config(Some(cfg.to_str().unwrap()), &env(base_env), &cwd).unwrap();
         assert_eq!(
             loaded.config.backend.base_url,
             "https://staging-api.tinyhumans.ai"
@@ -495,31 +664,40 @@ mod tests {
             loaded.config.tinyplace.unwrap().base_url,
             "https://staging-api.tiny.place"
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
     }
 
     #[test]
     fn load_config_explicit_urls_win_over_env() {
-        let dir = std::env::temp_dir().join(format!("medulla-explicit-cfg-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let cfg = dir.join("medulla.tui.json");
+        let home = temp_dir("explicit-home");
+        let cwd = temp_dir("explicit-cwd");
+        let cfg = cwd.join("medulla.tui.json");
         std::fs::write(
             &cfg,
             r#"{"backend":{"baseUrl":"http://be:1"},"tinyplace":{"baseUrl":"http://tp:2","peers":[]}}"#,
         )
         .unwrap();
+        let home_env = ("MEDULLA_HOME", home.to_str().unwrap());
         // Staging set, but explicit config baseUrls win.
-        let loaded = load_config(cfg.to_str().unwrap(), &env(&[("MEDULLA_STAGING", "1")])).unwrap();
+        let loaded = load_config(
+            Some(cfg.to_str().unwrap()),
+            &env(&[home_env, ("MEDULLA_STAGING", "1")]),
+            &cwd,
+        )
+        .unwrap();
         assert_eq!(loaded.config.backend.base_url, "http://be:1");
         assert_eq!(loaded.config.tinyplace.unwrap().base_url, "http://tp:2");
         // But MEDULLA_API_URL still beats an explicit backend baseUrl.
         let loaded = load_config(
-            cfg.to_str().unwrap(),
-            &env(&[("MEDULLA_API_URL", "http://env:9")]),
+            Some(cfg.to_str().unwrap()),
+            &env(&[home_env, ("MEDULLA_API_URL", "http://env:9")]),
+            &cwd,
         )
         .unwrap();
         assert_eq!(loaded.config.backend.base_url, "http://env:9");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
     }
 
     #[test]
@@ -609,37 +787,196 @@ mod tests {
     }
 
     #[test]
-    fn load_config_missing_file_yields_defaults() {
-        let path = std::env::temp_dir()
-            .join(format!("medulla-nope-{}.json", std::process::id()))
-            .to_string_lossy()
-            .into_owned();
-        let loaded = load_config(&path, &env(&[])).unwrap();
-        // Defaults applied; the absolute-ish path is preserved.
-        assert_eq!(loaded.config.state_dir, ".medulla-state/tui");
-        assert!(loaded.path.contains("medulla-nope-"));
+    fn load_config_missing_file_yields_home_derived_defaults() {
+        let home = temp_dir("nope-home");
+        let cwd = temp_dir("nope-cwd");
+        // No files anywhere → defaults, with state dir under <home>/state.
+        let loaded = load_config(
+            None,
+            &env(&[("MEDULLA_HOME", home.to_str().unwrap())]),
+            &cwd,
+        )
+        .unwrap();
+        assert_eq!(
+            loaded.config.state_dir,
+            home.join("state").to_string_lossy()
+        );
+        assert_eq!(loaded.path, "(built-in defaults)");
+        assert!(loaded.sources.is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
     }
 
     #[test]
     fn load_config_reads_and_parses_a_file() {
-        let dir = std::env::temp_dir().join(format!("medulla-cfg-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let home = temp_dir("reads-home");
+        let dir = temp_dir("reads-cwd");
         let path = dir.join("medulla.tui.json");
         std::fs::write(&path, r#"{"stateDir":"/custom/state"}"#).unwrap();
-        let loaded = load_config(path.to_str().unwrap(), &env(&[])).unwrap();
+        let loaded = load_config(
+            Some(path.to_str().unwrap()),
+            &env(&[("MEDULLA_HOME", home.to_str().unwrap())]),
+            &dir,
+        )
+        .unwrap();
+        // An explicit stateDir is preserved (not overridden by <home>/state).
         assert_eq!(loaded.config.state_dir, "/custom/state");
+        assert_eq!(loaded.sources.len(), 1);
+        let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn load_config_invalid_json_errors() {
-        let dir = std::env::temp_dir().join(format!("medulla-cfg-bad-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = temp_dir("bad-cwd");
         let path = dir.join("bad.json");
         std::fs::write(&path, "{ this is not json").unwrap();
-        let err = load_config(path.to_str().unwrap(), &env(&[])).unwrap_err();
+        let err = load_config(Some(path.to_str().unwrap()), &env(&[]), &dir).unwrap_err();
         assert!(err.to_string().contains("Invalid JSON"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_config_state_and_identity_derive_from_home() {
+        let home = temp_dir("derive-home");
+        let cwd = temp_dir("derive-cwd");
+        // A tinyplace section with no identityDir → <home>/tinyplace; stateDir → <home>/state.
+        let cfg = cwd.join("medulla.toml");
+        std::fs::write(&cfg, "[tinyplace]\npeers = []\n").unwrap();
+        let loaded = load_config(
+            None,
+            &env(&[("MEDULLA_HOME", home.to_str().unwrap())]),
+            &cwd,
+        )
+        .unwrap();
+        assert_eq!(
+            loaded.config.state_dir,
+            home.join("state").to_string_lossy()
+        );
+        assert_eq!(
+            loaded.config.tinyplace.unwrap().identity_dir,
+            home.join("tinyplace").to_string_lossy()
+        );
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn load_config_state_dir_env_override_wins() {
+        let home = temp_dir("stateenv-home");
+        let cwd = temp_dir("stateenv-cwd");
+        let loaded = load_config(
+            None,
+            &env(&[
+                ("MEDULLA_HOME", home.to_str().unwrap()),
+                ("MEDULLA_STATE_DIR", "/env/state"),
+            ]),
+            &cwd,
+        )
+        .unwrap();
+        assert_eq!(loaded.config.state_dir, "/env/state");
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn load_config_layers_global_project_env_flag() {
+        let home = temp_dir("layer-home");
+        let cwd = temp_dir("layer-cwd");
+        // Global config sets a base URL and a token env name.
+        std::fs::write(
+            home.join("config.toml"),
+            "[backend]\nbaseUrl = \"http://global:1\"\ntokenEnv = \"GLOBAL_TOK\"\n",
+        )
+        .unwrap();
+        // Project-local overrides just backend.baseUrl (field-level merge).
+        std::fs::create_dir_all(cwd.join(".medulla")).unwrap();
+        std::fs::write(
+            cwd.join(".medulla").join("config.toml"),
+            "[backend]\nbaseUrl = \"http://project:2\"\n",
+        )
+        .unwrap();
+
+        // Global < project: project wins on baseUrl, global's tokenEnv survives.
+        let loaded = load_config(
+            None,
+            &env(&[("MEDULLA_HOME", home.to_str().unwrap())]),
+            &cwd,
+        )
+        .unwrap();
+        assert_eq!(loaded.config.backend.base_url, "http://project:2");
+        assert_eq!(loaded.config.backend.token_env, "GLOBAL_TOK");
+        assert_eq!(loaded.sources.len(), 2);
+
+        // Env beats both files.
+        let loaded = load_config(
+            None,
+            &env(&[
+                ("MEDULLA_HOME", home.to_str().unwrap()),
+                ("MEDULLA_API_URL", "http://env:3"),
+            ]),
+            &cwd,
+        )
+        .unwrap();
+        assert_eq!(loaded.config.backend.base_url, "http://env:3");
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn load_config_toml_and_json_parity() {
+        let home = temp_dir("parity-home");
+        let cwd = temp_dir("parity-cwd");
+        let home_env = ("MEDULLA_HOME", home.to_str().unwrap());
+        let json = cwd.join("c.json");
+        std::fs::write(
+            &json,
+            r#"{"backend":{"baseUrl":"http://x:1"},"medulla":{"maxPasses":3}}"#,
+        )
+        .unwrap();
+        let toml_path = cwd.join("c.toml");
+        std::fs::write(
+            &toml_path,
+            "[backend]\nbaseUrl = \"http://x:1\"\n\n[medulla]\nmaxPasses = 3\n",
+        )
+        .unwrap();
+        let from_json = load_config(Some(json.to_str().unwrap()), &env(&[home_env]), &cwd).unwrap();
+        let from_toml =
+            load_config(Some(toml_path.to_str().unwrap()), &env(&[home_env]), &cwd).unwrap();
+        assert_eq!(from_json.config.backend.base_url, "http://x:1");
+        assert_eq!(from_toml.config.backend.base_url, "http://x:1");
+        assert_eq!(from_json.config.medulla.max_passes, Some(3));
+        assert_eq!(from_toml.config.medulla.max_passes, Some(3));
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn merge_value_is_recursive() {
+        let mut base = serde_json::json!({"a":{"x":1,"y":2},"b":9});
+        merge_value(&mut base, serde_json::json!({"a":{"y":5,"z":3},"c":7}));
+        assert_eq!(
+            base,
+            serde_json::json!({"a":{"x":1,"y":5,"z":3},"b":9,"c":7})
+        );
+    }
+
+    #[test]
+    fn memory_section_parses_camel_case() {
+        let cfg: TuiConfig = serde_json::from_str(
+            r#"{"memory":{"enabled":true,"workspace":"/ws","identity":"a@b","projectRoots":["/x","/y"],"model":"m","maxCostUsd":3.0}}"#,
+        )
+        .unwrap();
+        let mem = cfg.memory.unwrap();
+        assert_eq!(mem.enabled, Some(true));
+        assert_eq!(mem.workspace.as_deref(), Some("/ws"));
+        assert_eq!(mem.identity.as_deref(), Some("a@b"));
+        assert_eq!(mem.project_roots, vec!["/x".to_string(), "/y".to_string()]);
+        assert_eq!(mem.model.as_deref(), Some("m"));
+        assert_eq!(mem.max_cost_usd, Some(3.0));
+        // Absent by default.
+        let bare: TuiConfig = serde_json::from_str("{}").unwrap();
+        assert!(bare.memory.is_none());
     }
 
     #[test]

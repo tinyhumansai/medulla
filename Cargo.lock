@@ -1143,6 +1143,7 @@ dependencies = [
  "tinycortex",
  "tinyplace",
  "tokio",
+ "toml",
  "tracing",
 ]
 

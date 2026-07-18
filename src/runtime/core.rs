@@ -26,6 +26,7 @@ use futures::future::BoxFuture;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
 
+use crate::memory::{MemoryHit, MemoryService, MemoryStatus};
 use crate::runtime::core_client::{CoreClient, CoreEvent, SeqTracker};
 use crate::runtime::{
     AgentDescriptor, ContextItem, CycleResultSummary, Runtime, RuntimeSnapshot, StreamState,
@@ -358,6 +359,54 @@ fn workers_from_payload(payload: &Value) -> Vec<WorkerInfo> {
         .unwrap_or_default()
 }
 
+/// The persona-memory tools advertised to the reasoning layer.
+pub const MEMORY_TOOLS: [&str; 4] = [
+    "memory_search",
+    "memory_directives",
+    "memory_overview",
+    "memory_status",
+];
+
+/// Build the memory capability object advertised at `initialize`: the tool names
+/// plus the compiled `PERSONA.md` pack path.
+fn memory_capability(service: &MemoryService) -> Value {
+    json!({
+        "tools": MEMORY_TOOLS,
+        "packPath": service.pack_path(),
+    })
+}
+
+/// Serve one `memory_query` event body against the attached [`MemoryService`].
+/// Returns `(id, result)` where `result` is the tool payload or an error string.
+/// An unknown tool is an error answer.
+fn serve_memory_query(service: &MemoryService, body: &Value) -> (String, Result<Value, String>) {
+    let id = body
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let tool = body.get("tool").and_then(Value::as_str).unwrap_or("");
+    let params = body.get("params").cloned().unwrap_or_else(|| json!({}));
+    let result = match tool {
+        "memory_search" => {
+            let query = params.get("query").and_then(Value::as_str).unwrap_or("");
+            let facet = params
+                .get("facet")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let k = params.get("k").and_then(Value::as_u64).unwrap_or(5) as usize;
+            let hits = service.search(query, facet.as_deref(), k);
+            Ok(json!({ "hits": hits }))
+        }
+        "memory_directives" => Ok(json!({ "directives": service.directives() })),
+        "memory_overview" => Ok(json!({ "overview": service.overview() })),
+        "memory_status" => Ok(json!({ "status": service.status() })),
+        other => Err(format!("unknown memory tool '{other}'")),
+    };
+    (id, result)
+}
+
 /// A [`Runtime`] over a connected [`CoreClient`].
 pub struct CoreRuntime {
     client: Arc<CoreClient>,
@@ -365,6 +414,8 @@ pub struct CoreRuntime {
     tx: broadcast::Sender<()>,
     /// Set once the connection drops, so the UI can stop treating the stream as live.
     closed: Arc<AtomicBool>,
+    /// The attached persona-memory service, when memory is enabled.
+    memory: Option<Arc<MemoryService>>,
 }
 
 impl CoreRuntime {
@@ -374,9 +425,17 @@ impl CoreRuntime {
         client: CoreClient,
         events_rx: mpsc::UnboundedReceiver<CoreEvent>,
         client_version: &str,
+        memory: Option<Arc<MemoryService>>,
     ) -> anyhow::Result<Self> {
+        // Advertise the memory toolset in the handshake when a service is
+        // attached and enabled; otherwise the reasoning layer never emits
+        // `memory_query` events.
+        let capability = memory
+            .as_ref()
+            .filter(|m| m.settings().enabled)
+            .map(|m| memory_capability(m));
         client
-            .initialize(client_version)
+            .initialize(client_version, capability)
             .await
             .map_err(|e| anyhow!("core handshake failed: {e}"))?;
 
@@ -443,12 +502,17 @@ impl CoreRuntime {
             state.workers = workers_from_payload(&list);
         }
 
+        // Only keep an enabled service attached; a disabled one is dropped so
+        // the runtime never advertises or serves memory.
+        let memory = memory.filter(|m| m.settings().enabled);
+
         let (tx, _rx) = broadcast::channel(256);
         let rt = CoreRuntime {
             client: Arc::new(client),
             state: Arc::new(Mutex::new(state)),
             tx,
             closed: Arc::new(AtomicBool::new(false)),
+            memory,
         };
 
         rt.spawn_fold_loop(events_rx);
@@ -475,8 +539,25 @@ impl CoreRuntime {
         let state = self.state.clone();
         let tx = self.tx.clone();
         let closed = self.closed.clone();
+        let memory = self.memory.clone();
         tokio::spawn(async move {
             while let Some(ev) = events_rx.recv().await {
+                // A core-issued memory tool call: serve it from the attached
+                // service and reply via `memory.answer`, never folding it as a
+                // display event. With no service attached the event is ignored.
+                if ev.kind() == "memory_query" {
+                    if let Some(service) = memory.as_ref() {
+                        let (id, result) = serve_memory_query(service, &ev.event);
+                        let client = client.clone();
+                        tokio::spawn(async move {
+                            let _ = match result {
+                                Ok(ok) => client.memory_answer(&id, Some(ok), None).await,
+                                Err(msg) => client.memory_answer(&id, None, Some(&msg)).await,
+                            };
+                        });
+                    }
+                    continue;
+                }
                 // Detect a gap under the thread's tracker before folding.
                 let (gap, resync_from, core_id) = {
                     let mut s = state.lock().unwrap();
@@ -1014,6 +1095,24 @@ impl Runtime for CoreRuntime {
                 Err(e) => Err(anyhow!(e.to_string())),
             }
         })
+    }
+
+    fn memory_status(&self) -> Option<MemoryStatus> {
+        self.memory.as_ref().map(|m| m.status())
+    }
+
+    fn memory_search(&self, query: String, facet: Option<String>, k: usize) -> Vec<MemoryHit> {
+        match &self.memory {
+            Some(m) => m.search(&query, facet.as_deref(), k),
+            None => Vec::new(),
+        }
+    }
+
+    fn memory_directives(&self) -> Vec<String> {
+        self.memory
+            .as_ref()
+            .map(|m| m.directives())
+            .unwrap_or_default()
     }
 
     fn stream_state(&self) -> Option<StreamState> {

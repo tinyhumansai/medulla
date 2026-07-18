@@ -33,9 +33,10 @@ pub struct Credentials {
 
 /// A JSON credential file (`{"baseUrl","jwt"}`) at a fixed path.
 ///
-/// The default location is `<config-dir>/medulla/credentials.json`; tests inject
-/// an explicit path. On unix the file is written mode `0600`. A missing or
-/// corrupt file is treated as "no credentials".
+/// The default location is `<medulla_home>/credentials.json`; tests inject an
+/// explicit path. On unix the file is written mode `0600`. A missing or corrupt
+/// file is treated as "no credentials". For backward compatibility, reads fall
+/// back to the retired `<config-dir>/medulla/credentials.json` location.
 #[derive(Debug, Clone)]
 pub struct CredentialStore {
     path: PathBuf,
@@ -47,8 +48,16 @@ impl CredentialStore {
         Self { path: path.into() }
     }
 
-    /// The default store under the OS config directory, if one is resolvable.
-    pub fn at_default_location() -> Option<Self> {
+    /// The default store under the Medulla home directory
+    /// (`<home>/credentials.json`).
+    pub fn at_home(home: &Path) -> Self {
+        Self::new(home.join("credentials.json"))
+    }
+
+    /// The retired store under the OS config directory
+    /// (`<config-dir>/medulla/credentials.json`), consulted only as a migration
+    /// fallback when the home-based file is absent.
+    pub fn legacy_config_dir_location() -> Option<Self> {
         dirs::config_dir().map(|d| Self::new(d.join("medulla").join("credentials.json")))
     }
 
@@ -61,6 +70,17 @@ impl CredentialStore {
     pub fn load(&self) -> Option<Credentials> {
         let text = std::fs::read_to_string(&self.path).ok()?;
         serde_json::from_str(&text).ok()
+    }
+
+    /// Load from this store, falling back to the retired config-dir location when
+    /// this store has no file yet (read-only migration; nothing is moved).
+    pub fn load_or_legacy(&self) -> Option<Credentials> {
+        if let Some(creds) = self.load() {
+            return Some(creds);
+        }
+        Self::legacy_config_dir_location()
+            .filter(|legacy| legacy.path() != self.path())
+            .and_then(|legacy| legacy.load())
     }
 
     /// Persist credentials, creating the parent directory and (on unix) tightening
@@ -757,5 +777,52 @@ mod tests {
         store.clear().unwrap();
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn at_home_uses_home_credentials_json() {
+        let home = std::path::Path::new("/tmp/some-medulla-home");
+        let store = CredentialStore::at_home(home);
+        assert_eq!(store.path(), home.join("credentials.json"));
+    }
+
+    #[test]
+    fn load_or_legacy_prefers_home_then_falls_back() {
+        let base = std::env::temp_dir().join(format!("medulla-cred-fb-{}", std::process::id()));
+        let home = base.join("home");
+        let legacy = base.join("legacy");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+
+        let home_store = CredentialStore::at_home(&home);
+        let legacy_store = CredentialStore::new(legacy.join("credentials.json"));
+
+        // Only the legacy file exists → fallback reads it (simulated by calling
+        // the store's own load, since the real config-dir isn't writable here).
+        legacy_store
+            .save(&Credentials {
+                base_url: "http://legacy".into(),
+                jwt: "legacy-jwt".into(),
+            })
+            .unwrap();
+        assert!(home_store.load().is_none());
+        assert_eq!(
+            legacy_store.load().map(|c| c.jwt),
+            Some("legacy-jwt".to_string())
+        );
+
+        // Once the home file exists it wins over any legacy file.
+        home_store
+            .save(&Credentials {
+                base_url: "http://home".into(),
+                jwt: "home-jwt".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            home_store.load_or_legacy().map(|c| c.jwt),
+            Some("home-jwt".to_string())
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

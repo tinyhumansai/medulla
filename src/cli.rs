@@ -27,6 +27,8 @@ pub enum Command {
     Login,
     /// Clear stored credentials.
     Logout,
+    /// Persona-memory management (`status`/`ingest`/`backfill`/`compile`/`search`).
+    Memory,
     /// Launch a coding-agent CLI as a transparent tiny.place-bridged wrapper.
     Wrapper(HarnessProvider),
 }
@@ -40,6 +42,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("sessions") => Command::Sessions,
         Some("login") => Command::Login,
         Some("logout") => Command::Logout,
+        Some("memory") => Command::Memory,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),
@@ -48,25 +51,15 @@ pub fn parse_command(args: &[String]) -> Command {
 }
 
 /// Parsed `medulla login` flags.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LoginArgs {
-    /// TUI config path used only to resolve `backend.baseUrl`.
-    pub config: String,
+    /// Explicit `--config` path used only to resolve `backend.baseUrl`. `None`
+    /// selects the layered config discovery.
+    pub config: Option<String>,
     pub provider: Provider,
     pub no_browser: bool,
     /// A 64-hex one-time login token (headless fallback); skips the listener.
     pub token: Option<String>,
-}
-
-impl Default for LoginArgs {
-    fn default() -> Self {
-        LoginArgs {
-            config: "medulla.tui.json".to_string(),
-            provider: Provider::default(),
-            no_browser: false,
-            token: None,
-        }
-    }
 }
 
 /// Parse `medulla login` flags out of the args following `login`. Returns the
@@ -78,7 +71,7 @@ pub fn parse_login_args(args: &[String]) -> Result<LoginArgs, String> {
         match arg.as_str() {
             "--config" => {
                 if let Some(v) = it.next() {
-                    out.config = v.clone();
+                    out.config = Some(v.clone());
                 }
             }
             "--provider" => {
@@ -99,10 +92,96 @@ pub fn parse_login_args(args: &[String]) -> Result<LoginArgs, String> {
     Ok(out)
 }
 
+/// The `medulla memory` action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryAction {
+    /// Print the memory-layer status.
+    Status,
+    /// Incremental ingest pass (LLM-backed; needs an API key).
+    Ingest,
+    /// Full backfill ingest pass (LLM-backed; needs an API key).
+    Backfill,
+    /// Recompile the pack from the persisted trees (offline).
+    Compile,
+    /// BM25 search over the persona corpus (offline).
+    Search(String),
+}
+
+/// Parsed `medulla memory` flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryArgs {
+    /// Explicit `--config` path. `None` selects the layered config discovery.
+    pub config: Option<String>,
+    /// Emit JSON instead of human-readable output.
+    pub json: bool,
+    /// Optional `--facet <name>` filter (search only).
+    pub facet: Option<String>,
+    /// Optional `--k <n>` result cap (search only).
+    pub k: usize,
+    /// The selected action.
+    pub action: MemoryAction,
+}
+
+/// Parse `medulla memory <action> [flags]`. Returns a usage error on a missing
+/// or unknown action, or a `search` with no query.
+pub fn parse_memory_args(args: &[String]) -> Result<MemoryArgs, String> {
+    let action_word = args.first().map(String::as_str).ok_or_else(|| {
+        "expected a subcommand: status|ingest|backfill|compile|search".to_string()
+    })?;
+
+    let mut config: Option<String> = None;
+    let mut json = false;
+    let mut facet: Option<String> = None;
+    let mut k: usize = 5;
+    let mut query_parts: Vec<String> = Vec::new();
+
+    let mut it = args.iter().skip(1);
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => config = it.next().cloned(),
+            "--json" => json = true,
+            "--facet" => facet = it.next().cloned(),
+            "--k" => {
+                if let Some(v) = it.next() {
+                    k = v
+                        .parse::<usize>()
+                        .map_err(|_| format!("invalid --k value '{v}'"))?;
+                }
+            }
+            other => query_parts.push(other.to_string()),
+        }
+    }
+
+    let action = match action_word {
+        "status" => MemoryAction::Status,
+        "ingest" => MemoryAction::Ingest,
+        "backfill" => MemoryAction::Backfill,
+        "compile" => MemoryAction::Compile,
+        "search" => {
+            let query = query_parts.join(" ");
+            if query.trim().is_empty() {
+                return Err("memory search: expected a query".to_string());
+            }
+            MemoryAction::Search(query)
+        }
+        other => return Err(format!("unknown memory subcommand '{other}'")),
+    };
+
+    Ok(MemoryArgs {
+        config,
+        json,
+        facet,
+        k,
+        action,
+    })
+}
+
 /// Parsed TUI flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TuiArgs {
-    pub config: String,
+    /// Explicit `--config` path. `None` selects the layered config discovery
+    /// (`./.medulla/config.toml` / `./medulla.toml` / `<home>/config.toml`).
+    pub config: Option<String>,
     pub alt_screen: bool,
     pub core: bool,
 }
@@ -110,7 +189,7 @@ pub struct TuiArgs {
 impl Default for TuiArgs {
     fn default() -> Self {
         TuiArgs {
-            config: "medulla.tui.json".to_string(),
+            config: None,
             alt_screen: true,
             core: false,
         }
@@ -125,7 +204,7 @@ pub fn parse_tui_args(args: &[String]) -> TuiArgs {
         match arg.as_str() {
             "--config" => {
                 if let Some(v) = it.next() {
-                    out.config = v.clone();
+                    out.config = Some(v.clone());
                 }
             }
             "--no-alt-screen" => out.alt_screen = false,
@@ -149,6 +228,7 @@ medulla claude [args]   Run Claude Code in your terminal, bridged to tiny.place\
 medulla opencode [args] Run OpenCode in your terminal, bridged to tiny.place\n  \
 medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
+medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
 Wrapper flags:\n  \
@@ -158,9 +238,14 @@ Login flags:\n  \
 --provider <name>       OAuth provider: google (default), github, twitter, discord\n  \
 --no-browser            Print the login URL without launching a browser\n  \
 --token <64-hex>        Redeem a one-time login token instead (headless)\n  \
---config <path>         Config file to read backend.baseUrl from\n\n\
+--config <path>         Config file to read backend.baseUrl from (.toml or .json)\n\n\
+Memory flags:\n  \
+--json                  Emit JSON instead of human-readable output\n  \
+--facet <name>          Restrict a search to one facet\n  \
+--k <n>                 Max search results (default 5)\n  \
+--config <path>         Explicit config file (.toml or .json)\n\n\
 TUI flags:\n  \
---config <path>         Path to medulla.tui.json (default: medulla.tui.json)\n  \
+--config <path>         Explicit config file (.toml or .json); bypasses layered discovery\n  \
 --core                  Drive the core-js orchestration core over its Unix socket\n  \
 --no-alt-screen         Do not switch to the alternate screen\n",
         version = env!("CARGO_PKG_VERSION"),
@@ -272,7 +357,37 @@ mod tests {
             parse_command(&argv(&["opencode", "--foo"])),
             Command::Wrapper(HarnessProvider::Opencode)
         );
+        assert_eq!(parse_command(&argv(&["memory", "status"])), Command::Memory);
         assert_eq!(parse_command(&argv(&["--config", "x.json"])), Command::Tui);
+    }
+
+    #[test]
+    fn memory_args_parse() {
+        // Simple actions.
+        assert_eq!(
+            parse_memory_args(&argv(&["status"])).unwrap().action,
+            MemoryAction::Status
+        );
+        assert_eq!(
+            parse_memory_args(&argv(&["backfill"])).unwrap().action,
+            MemoryAction::Backfill
+        );
+        // Search joins the query words and honors flags.
+        let a = parse_memory_args(&argv(&[
+            "search", "how", "to", "test", "--facet", "stack", "--k", "3", "--json", "--config",
+            "c.toml",
+        ]))
+        .unwrap();
+        assert_eq!(a.action, MemoryAction::Search("how to test".into()));
+        assert_eq!(a.facet.as_deref(), Some("stack"));
+        assert_eq!(a.k, 3);
+        assert!(a.json);
+        assert_eq!(a.config.as_deref(), Some("c.toml"));
+        // Errors: no action, empty search, unknown action, bad --k.
+        assert!(parse_memory_args(&argv(&[])).is_err());
+        assert!(parse_memory_args(&argv(&["search"])).is_err());
+        assert!(parse_memory_args(&argv(&["frobnicate"])).is_err());
+        assert!(parse_memory_args(&argv(&["search", "q", "--k", "nan"])).is_err());
     }
 
     #[test]
@@ -282,16 +397,13 @@ mod tests {
         assert_eq!(
             a,
             TuiArgs {
-                config: "c.json".into(),
+                config: Some("c.json".into()),
                 alt_screen: false,
                 core: true
             }
         );
-        // A dangling --config keeps the default.
-        assert_eq!(
-            parse_tui_args(&argv(&["--config"])).config,
-            "medulla.tui.json"
-        );
+        // A dangling --config keeps the default (None → layered discovery).
+        assert_eq!(parse_tui_args(&argv(&["--config"])).config, None);
     }
 
     #[test]
@@ -405,7 +517,7 @@ mod tests {
         assert_eq!(a.provider, Provider::Github);
         assert!(a.no_browser);
         assert_eq!(a.token.as_deref(), Some("deadbeef"));
-        assert_eq!(a.config, "c.json");
+        assert_eq!(a.config.as_deref(), Some("c.json"));
         // Unknown provider is a friendly error.
         assert!(parse_login_args(&argv(&["--provider", "myspace"])).is_err());
     }
@@ -456,7 +568,7 @@ mod tests {
     #[test]
     fn tui_args_default_and_debug() {
         let d = TuiArgs::default();
-        assert_eq!(d.config, "medulla.tui.json");
+        assert_eq!(d.config, None);
         assert!(d.alt_screen);
         assert!(!d.core);
         // Command derives Debug/Eq for assertions.

@@ -26,7 +26,9 @@ const T: Duration = Duration::from_secs(5);
 
 async fn connect(sock: &Path) -> CoreRuntime {
     let (client, rx) = CoreClient::connect(sock).await.unwrap();
-    CoreRuntime::connect(client, rx, "test").await.unwrap()
+    CoreRuntime::connect(client, rx, "test", None)
+        .await
+        .unwrap()
 }
 
 fn tmp_sock() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -382,7 +384,7 @@ async fn initialize_error_fails_connect() {
     let _mock = MockCore::start_with(&sock, cfg).await;
 
     let (client, rx) = CoreClient::connect(&sock).await.unwrap();
-    let result = CoreRuntime::connect(client, rx, "test").await;
+    let result = CoreRuntime::connect(client, rx, "test", None).await;
     assert!(result.is_err(), "handshake failure must fail connect");
 }
 

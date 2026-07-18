@@ -108,6 +108,17 @@ pub struct MockRuntime {
     state: Arc<Mutex<State>>,
     tx: broadcast::Sender<()>,
     calls: Arc<Mutex<Vec<String>>>,
+    /// Scripted persona-memory surface (test seam). `None` = no memory service.
+    memory: Arc<Mutex<Option<ScriptedMemory>>>,
+}
+
+/// A scripted stand-in for a `MemoryService`, driven by tests via the
+/// `set_memory_*` seams.
+#[derive(Default, Clone)]
+struct ScriptedMemory {
+    status: Option<crate::memory::MemoryStatus>,
+    hits: Vec<crate::memory::MemoryHit>,
+    directives: Vec<String>,
 }
 
 impl MockRuntime {
@@ -117,7 +128,26 @@ impl MockRuntime {
             state: Arc::new(Mutex::new(state)),
             tx,
             calls: Arc::new(Mutex::new(Vec::new())),
+            memory: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Attach a scripted memory status. Enables the mock's memory surface.
+    pub fn set_memory_status(&self, status: crate::memory::MemoryStatus) {
+        let mut guard = self.memory.lock().unwrap();
+        guard.get_or_insert_with(ScriptedMemory::default).status = Some(status);
+    }
+
+    /// Script the hits returned by [`Runtime::memory_search`].
+    pub fn set_memory_hits(&self, hits: Vec<crate::memory::MemoryHit>) {
+        let mut guard = self.memory.lock().unwrap();
+        guard.get_or_insert_with(ScriptedMemory::default).hits = hits;
+    }
+
+    /// Script the directives returned by [`Runtime::memory_directives`].
+    pub fn set_memory_directives(&self, directives: Vec<String>) {
+        let mut guard = self.memory.lock().unwrap();
+        guard.get_or_insert_with(ScriptedMemory::default).directives = directives;
     }
 
     fn record(&self, name: &str) {
@@ -575,6 +605,37 @@ impl Runtime for MockRuntime {
     fn shutdown(&self) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async move { Ok(()) })
     }
+
+    fn memory_status(&self) -> Option<crate::memory::MemoryStatus> {
+        self.memory
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|m| m.status.clone())
+    }
+
+    fn memory_search(
+        &self,
+        _query: String,
+        _facet: Option<String>,
+        k: usize,
+    ) -> Vec<crate::memory::MemoryHit> {
+        self.memory
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|m| m.hits.iter().take(k).cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn memory_directives(&self) -> Vec<String> {
+        self.memory
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|m| m.directives.clone())
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -726,6 +787,40 @@ mod tests {
         let main = &snap.threads[0];
         assert_eq!(main.running_tasks, 1, "one open task");
         assert_eq!(main.attention, 2, "attention + error both count");
+    }
+
+    #[test]
+    fn memory_surface_defaults_empty_and_is_scriptable() {
+        use crate::memory::{MemoryHit, MemoryStatus};
+        let rt = MockRuntime::empty();
+        // No scripted memory → the seam is inert.
+        assert!(rt.memory_status().is_none());
+        assert!(rt.memory_search("q".into(), None, 5).is_empty());
+        assert!(rt.memory_directives().is_empty());
+
+        rt.set_memory_status(MemoryStatus {
+            enabled: true,
+            workspace: "/ws".into(),
+            pack_exists: false,
+            pack_path: "/ws/persona/PERSONA.md".into(),
+            entry_count: 2,
+            directives_count: 1,
+            facet_counts: Default::default(),
+        });
+        rt.set_memory_directives(vec!["Always branch first".into()]);
+        rt.set_memory_hits(vec![MemoryHit {
+            facet: "workflow".into(),
+            tier: "t0".into(),
+            text: "Commit small and often".into(),
+            quote: None,
+            timestamp: "2020-01-01T00:00:00+00:00".into(),
+            score: 1.0,
+        }]);
+        assert!(rt.memory_status().unwrap().enabled);
+        assert_eq!(rt.memory_directives(), vec!["Always branch first"]);
+        // `k` caps the scripted hits.
+        assert_eq!(rt.memory_search("q".into(), None, 0).len(), 0);
+        assert_eq!(rt.memory_search("q".into(), None, 5).len(), 1);
     }
 
     #[test]

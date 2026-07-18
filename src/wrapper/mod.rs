@@ -115,6 +115,20 @@ pub async fn run_wrapper(provider: HarnessProvider, args: &[String]) -> anyhow::
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
+
+    // First-run worker registration (naming + owner). Skipped when running a plain
+    // passthrough (no bridge). On a TTY this walks the operator through onboarding;
+    // headless it auto-registers. Aborting exits cleanly before launching the CLI.
+    if !no_bridge {
+        let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        if crate::onboarding::ensure_registered(&env, is_tty, false)
+            .await?
+            .is_none()
+        {
+            return Ok(0);
+        }
+    }
+
     run_wrapper_with(WrapperConfig {
         provider,
         child_args,
@@ -146,8 +160,13 @@ fn provider_env_key(provider: HarnessProvider, suffix: &str) -> String {
 }
 
 /// The owner this session forwards envelopes to (and, by default, receives input
-/// from). Order mirrors the TS wrapper's `dmRecipient` resolution.
-fn resolve_recipient(provider: HarnessProvider, env: &HashMap<String, String>) -> Option<String> {
+/// from). Order mirrors the TS wrapper's `dmRecipient` resolution, with the
+/// persisted worker profile's owner as the final fallback (env always wins).
+fn resolve_recipient(
+    provider: HarnessProvider,
+    env: &HashMap<String, String>,
+    profile_owner: Option<&str>,
+) -> Option<String> {
     first_env(
         env,
         &[
@@ -158,6 +177,7 @@ fn resolve_recipient(provider: HarnessProvider, env: &HashMap<String, String>) -
         ],
     )
     .cloned()
+    .or_else(|| profile_owner.map(str::to_string).filter(|s| !s.is_empty()))
 }
 
 /// The peer whose inbound control frames / plain DMs are injected as input.
@@ -320,7 +340,15 @@ async fn build_bridge(
     if config.no_bridge {
         return None;
     }
-    let recipient = resolve_recipient(config.provider, &config.env);
+    // The persisted worker profile's owner is the recipient fallback when no env
+    // owner is set (env still wins).
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let profile = crate::worker_profile::WorkerProfile::load(&crate::worker_profile::profile_path(
+        &config.env,
+        &home,
+    ));
+    let profile_owner = profile.as_ref().and_then(|p| p.owner.as_deref());
+    let recipient = resolve_recipient(config.provider, &config.env, profile_owner);
     let receive_from = resolve_receive_from(config.provider, &config.env, recipient.as_deref());
     if recipient.is_none() && receive_from.is_none() {
         eprintln!(
@@ -679,7 +707,7 @@ mod tests {
             "owner-a".to_string(),
         );
         assert_eq!(
-            resolve_recipient(HarnessProvider::Codex, &env).as_deref(),
+            resolve_recipient(HarnessProvider::Codex, &env, None).as_deref(),
             Some("owner-a")
         );
         // A per-provider override wins.
@@ -688,7 +716,7 @@ mod tests {
             "owner-codex".to_string(),
         );
         assert_eq!(
-            resolve_recipient(HarnessProvider::Codex, &env).as_deref(),
+            resolve_recipient(HarnessProvider::Codex, &env, None).as_deref(),
             Some("owner-codex")
         );
         // receive_from falls back to the recipient.
@@ -704,6 +732,33 @@ mod tests {
             resolve_receive_from(HarnessProvider::Codex, &env, Some("owner-codex")).as_deref(),
             Some("sender-b")
         );
+    }
+
+    #[test]
+    fn profile_owner_is_the_last_recipient_fallback() {
+        // No env owner → the profile owner is used.
+        let env = HashMap::new();
+        assert_eq!(
+            resolve_recipient(HarnessProvider::Codex, &env, Some("@profile-owner")).as_deref(),
+            Some("@profile-owner")
+        );
+        // An env owner beats the profile owner.
+        let mut env = HashMap::new();
+        env.insert(
+            "TINYPLACE_OPENHUMAN_OWNER".to_string(),
+            "@env-owner".to_string(),
+        );
+        assert_eq!(
+            resolve_recipient(HarnessProvider::Codex, &env, Some("@profile-owner")).as_deref(),
+            Some("@env-owner")
+        );
+        // An empty profile owner is treated as absent.
+        let env = HashMap::new();
+        assert_eq!(
+            resolve_recipient(HarnessProvider::Codex, &env, Some("")),
+            None
+        );
+        assert_eq!(resolve_recipient(HarnessProvider::Codex, &env, None), None);
     }
 
     #[test]

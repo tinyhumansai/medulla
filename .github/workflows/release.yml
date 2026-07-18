@@ -1,0 +1,146 @@
+name: Release
+
+# One-click release: pick a semver bump, and this workflow updates
+# Cargo.toml/Cargo.lock, commits, pushes a matching vX.Y.Z tag, builds the
+# `medulla` binary for each supported target, and publishes a GitHub Release
+# with the packaged binaries attached.
+#
+# Always releases from main (checks out and pushes back to main regardless of
+# where it is dispatched). The release is created in this same workflow, so the
+# GITHUB_TOKEN tag-push not firing other workflows is fine.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver bump to apply
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version, commit, and tag
+        id: bump
+        run: |
+          set -euo pipefail
+          current="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+          IFS=. read -r major minor patch <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) new_version="$((major + 1)).0.0" ;;
+            minor) new_version="${major}.$((minor + 1)).0" ;;
+            patch) new_version="${major}.${minor}.$((patch + 1))" ;;
+          esac
+          # First `version =` line is the [package] version; mirror it into the
+          # lockfile's own `medulla` entry so --locked builds stay consistent.
+          sed -i "0,/^version = \"${current}\"$/s//version = \"${new_version}\"/" Cargo.toml
+          python3 - "$current" "$new_version" <<'EOF'
+          import re, sys
+          current, new = sys.argv[1], sys.argv[2]
+          lock = open("Cargo.lock").read()
+          lock = lock.replace(
+              f'name = "medulla"\nversion = "{current}"',
+              f'name = "medulla"\nversion = "{new}"',
+          )
+          open("Cargo.lock", "w").write(lock)
+          EOF
+          tag="v${new_version}"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(release): ${tag}"
+          git tag "${tag}"
+          git push origin HEAD:main --follow-tags
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${new_version}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: tag
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          pkg="medulla-${{ needs.tag.outputs.tag }}-${{ matrix.target }}"
+          mkdir "${pkg}"
+          cp "target/${{ matrix.target }}/release/medulla" "${pkg}/"
+          cp README.md DEVELOPING.md config.example.toml "${pkg}/"
+          tar -czf "${pkg}.tar.gz" "${pkg}"
+          shasum -a 256 "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: medulla-${{ matrix.target }}
+          path: |
+            medulla-*.tar.gz
+            medulla-*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          name: medulla ${{ needs.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256

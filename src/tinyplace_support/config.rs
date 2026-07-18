@@ -96,7 +96,9 @@ fn set_owner_only(_path: &Path) -> io::Result<()> {
 }
 
 /// Resolve the API endpoint. Order: `TINYPLACE_ENDPOINT` > `TINYPLACE_API_URL` >
-/// `NEXT_PUBLIC_API_URL` > `config.endpoint` > [`DEFAULT_ENDPOINT`].
+/// `NEXT_PUBLIC_API_URL` > `config.endpoint` > the staging/prod default. The
+/// default is [`DEFAULT_ENDPOINT`] (prod), or the staging tiny.place URL when
+/// `MEDULLA_STAGING` is truthy.
 pub fn resolve_endpoint(env: &HashMap<String, String>, config: &TinyPlaceConfig) -> String {
     for key in [
         "TINYPLACE_ENDPOINT",
@@ -113,7 +115,7 @@ pub fn resolve_endpoint(env: &HashMap<String, String>, config: &TinyPlaceConfig)
         .endpoint
         .clone()
         .filter(|e| !e.is_empty())
-        .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string())
+        .unwrap_or_else(|| crate::config::default_tinyplace_base_url(env))
 }
 
 #[cfg(test)]

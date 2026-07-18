@@ -64,11 +64,28 @@ use control::frame_targets_session;
 use envelope::EnvelopeBuilder;
 use tail::SessionTailer;
 
-const TAIL_POLL_MS: u64 = 500;
-const RECEIVE_POLL_MS: u64 = 1_500;
-const STATUS_THROTTLE_MS: i64 = 4_000;
-const STATUS_IDLE_MS: i64 = 30_000;
 const INBOX_LIMIT: i64 = 50;
+
+/// Poll intervals and status timings for one wrapped session, resolved from the
+/// environment (see [`crate::tinyplace_support::env`]).
+struct WrapperTimings {
+    tail_poll_ms: u64,
+    receive_poll_ms: u64,
+    status_throttle_ms: i64,
+    status_idle_ms: i64,
+}
+
+impl WrapperTimings {
+    fn resolve(provider: HarnessProvider, env: &HashMap<String, String>) -> Self {
+        use crate::tinyplace_support::env as tp_env;
+        WrapperTimings {
+            tail_poll_ms: tp_env::session_poll_ms(provider, env),
+            receive_poll_ms: tp_env::receive_poll_ms(provider, env),
+            status_throttle_ms: tp_env::status_heartbeat_ms(provider, env) as i64,
+            status_idle_ms: tp_env::status_idle_ms(provider, env) as i64,
+        }
+    }
+}
 
 /// Everything a wrapper run needs. Built from the process environment by
 /// [`run_wrapper`]; constructed explicitly by tests.
@@ -135,62 +152,9 @@ fn agent_kind(provider: HarnessProvider) -> Option<SessionAgentKind> {
     }
 }
 
-fn first_env<'a>(env: &'a HashMap<String, String>, keys: &[&str]) -> Option<&'a String> {
-    keys.iter()
-        .filter_map(|key| env.get(*key))
-        .find(|value| !value.is_empty())
-}
-
-fn provider_env_key(provider: HarnessProvider, suffix: &str) -> String {
-    format!("TINYPLACE_{}_{suffix}", provider.as_str().to_uppercase())
-}
-
-/// The owner this session forwards envelopes to (and, by default, receives input
-/// from). Order mirrors the TS wrapper's `dmRecipient` resolution.
-fn resolve_recipient(provider: HarnessProvider, env: &HashMap<String, String>) -> Option<String> {
-    first_env(
-        env,
-        &[
-            &provider_env_key(provider, "DM_TO"),
-            "TINYPLACE_HARNESS_DM_TO",
-            "TINYPLACE_OPENHUMAN_OWNER",
-            "OPENHUMAN_OWNER_AGENT",
-        ],
-    )
-    .cloned()
-}
-
-/// The peer whose inbound control frames / plain DMs are injected as input.
-fn resolve_receive_from(
-    provider: HarnessProvider,
-    env: &HashMap<String, String>,
-    recipient: Option<&str>,
-) -> Option<String> {
-    first_env(
-        env,
-        &[
-            &provider_env_key(provider, "RECEIVE_FROM"),
-            "TINYPLACE_HARNESS_RECEIVE_FROM",
-        ],
-    )
-    .cloned()
-    .or_else(|| recipient.map(str::to_string))
-}
-
-/// Inbound input is on unless `TINYPLACE_<P>_RECEIVE` / `TINYPLACE_HARNESS_RECEIVE`
-/// is set to `0`.
-fn receive_enabled(provider: HarnessProvider, env: &HashMap<String, String>) -> bool {
-    for key in [
-        provider_env_key(provider, "RECEIVE"),
-        "TINYPLACE_HARNESS_RECEIVE".to_string(),
-    ] {
-        if let Some(value) = env.get(&key) {
-            if value == "0" {
-                return false;
-            }
-        }
-    }
-    true
+/// The `TINYPLACE_<P>_BIN` env key, for the missing-binary error hint.
+fn provider_bin_env_key(provider: HarnessProvider) -> String {
+    format!("TINYPLACE_{}_BIN", provider.as_str().to_uppercase())
 }
 
 /// Mint a wrapper session id: `tp-<provider>-<iso>-<rand>`, id-safe.
@@ -224,6 +188,8 @@ struct Bridge {
     tailer: Option<SessionTailer>,
     wrapper_session_id: String,
     harness_session_id: String,
+    status_throttle_ms: i64,
+    status_idle_ms: i64,
 }
 
 impl Bridge {
@@ -283,8 +249,8 @@ impl Bridge {
     }
 
     async fn tick_status(&mut self) {
-        let heartbeat = now_ms().saturating_sub(self.last_status_ms) >= STATUS_THROTTLE_MS;
-        let step = tick_status(&self.status, now_ms(), STATUS_IDLE_MS, heartbeat);
+        let heartbeat = now_ms().saturating_sub(self.last_status_ms) >= self.status_throttle_ms;
+        let step = tick_status(&self.status, now_ms(), self.status_idle_ms, heartbeat);
         self.status = step.next;
         if let Some(payload) = step.emit {
             self.maybe_publish_status(payload).await;
@@ -293,7 +259,7 @@ impl Bridge {
 
     async fn maybe_publish_status(&mut self, payload: crate::tinyplace_support::StatusPayload) {
         let now = now_ms();
-        if now.saturating_sub(self.last_status_ms) < STATUS_THROTTLE_MS {
+        if now.saturating_sub(self.last_status_ms) < self.status_throttle_ms {
             return;
         }
         self.last_status_ms = now;
@@ -320,8 +286,9 @@ async fn build_bridge(
     if config.no_bridge {
         return None;
     }
-    let recipient = resolve_recipient(config.provider, &config.env);
-    let receive_from = resolve_receive_from(config.provider, &config.env, recipient.as_deref());
+    use crate::tinyplace_support::env as tp_env;
+    let recipient = tp_env::dm_recipient(config.provider, &config.env);
+    let receive_from = tp_env::receive_from(config.provider, &config.env, recipient.as_deref());
     if recipient.is_none() && receive_from.is_none() {
         eprintln!(
             "medulla wrapper: no tiny.place owner configured (set TINYPLACE_HARNESS_DM_TO or TINYPLACE_OPENHUMAN_OWNER) — running as a plain passthrough"
@@ -357,14 +324,14 @@ async fn build_bridge(
         eprintln!("medulla wrapper: pre-key publish failed: {err}");
     }
 
-    let receive_active = receive_from.is_some() && receive_enabled(config.provider, &config.env);
+    let receive_active =
+        receive_from.is_some() && tp_env::receive_enabled(config.provider, &config.env);
     let tailer = agent_kind(config.provider)
         .map(|kind| SessionTailer::new(config.env.clone(), kind, config.cwd.clone(), start_ms));
 
-    let mut argv = vec![crate::daemon::providers::provider_bin(
-        config.provider,
-        &config.env,
-    )];
+    let timings = WrapperTimings::resolve(config.provider, &config.env);
+    let mut argv = vec![tp_env::provider_bin(config.provider, &config.env)];
+    argv.extend(tp_env::provider_args(config.provider, &config.env));
     argv.extend(config.child_args.iter().cloned());
     let builder = EnvelopeBuilder::new(
         wrapper_session_id,
@@ -387,18 +354,21 @@ async fn build_bridge(
         tailer,
         wrapper_session_id: wrapper_session_id.to_string(),
         harness_session_id: wrapper_session_id.to_string(),
+        status_throttle_ms: timings.status_throttle_ms,
+        status_idle_ms: timings.status_idle_ms,
     })
 }
 
 /// Run the wrapper described by `config`, returning the child's exit code.
 pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
-    let bin = crate::daemon::providers::provider_bin(config.provider, &config.env);
+    use crate::tinyplace_support::env as tp_env;
+    let bin = tp_env::provider_bin(config.provider, &config.env);
     let lookup = crate::daemon::providers::make_path_lookup(&config.env);
     if !lookup(&bin) {
         anyhow::bail!(
             "coding-agent CLI '{bin}' not found on PATH (install {} or set {})",
             config.provider.as_str(),
-            provider_env_key(config.provider, "BIN"),
+            provider_bin_env_key(config.provider),
         );
     }
 
@@ -408,15 +378,20 @@ pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
         .clone()
         .unwrap_or_else(|| mint_session_id(config.provider));
 
+    let timings = WrapperTimings::resolve(config.provider, &config.env);
     let mut bridge = build_bridge(&config, &wrapper_session_id, start_ms).await;
     let receive_active = bridge.as_ref().map(|b| b.receive_active).unwrap_or(false);
+
+    // Extra args from `TINYPLACE_<P>_ARGS` are prepended to the child argv.
+    let mut child_args = tp_env::provider_args(config.provider, &config.env);
+    child_args.extend(config.child_args.iter().cloned());
 
     // Spawn the child. stdout/stderr are always inherited (the user interacts with
     // the real CLI). stdin is piped only when we must inject input — otherwise it
     // is inherited so a full-screen TUI stays fully interactive.
     let mut command = Command::new(&bin);
     command
-        .args(&config.child_args)
+        .args(&child_args)
         .envs(&config.env)
         .current_dir(&config.cwd)
         .stdout(std::process::Stdio::inherit())
@@ -474,9 +449,10 @@ pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
         bridge.lifecycle("session_start").await;
     }
 
-    let mut tail_tick = tokio::time::interval(Duration::from_millis(TAIL_POLL_MS));
-    let mut recv_tick = tokio::time::interval(Duration::from_millis(RECEIVE_POLL_MS));
-    let mut status_tick = tokio::time::interval(Duration::from_millis(STATUS_THROTTLE_MS as u64));
+    let mut tail_tick = tokio::time::interval(Duration::from_millis(timings.tail_poll_ms));
+    let mut recv_tick = tokio::time::interval(Duration::from_millis(timings.receive_poll_ms));
+    let mut status_tick =
+        tokio::time::interval(Duration::from_millis(timings.status_throttle_ms as u64));
     let mut signal_fut = signal_future();
 
     let status = loop {
@@ -669,49 +645,6 @@ mod tests {
             Some(SessionAgentKind::Codex)
         );
         assert_eq!(agent_kind(HarnessProvider::Opencode), None);
-    }
-
-    #[test]
-    fn recipient_and_receive_resolution_order() {
-        let mut env = HashMap::new();
-        env.insert(
-            "TINYPLACE_OPENHUMAN_OWNER".to_string(),
-            "owner-a".to_string(),
-        );
-        assert_eq!(
-            resolve_recipient(HarnessProvider::Codex, &env).as_deref(),
-            Some("owner-a")
-        );
-        // A per-provider override wins.
-        env.insert(
-            "TINYPLACE_CODEX_DM_TO".to_string(),
-            "owner-codex".to_string(),
-        );
-        assert_eq!(
-            resolve_recipient(HarnessProvider::Codex, &env).as_deref(),
-            Some("owner-codex")
-        );
-        // receive_from falls back to the recipient.
-        assert_eq!(
-            resolve_receive_from(HarnessProvider::Codex, &env, Some("owner-codex")).as_deref(),
-            Some("owner-codex")
-        );
-        env.insert(
-            "TINYPLACE_HARNESS_RECEIVE_FROM".to_string(),
-            "sender-b".to_string(),
-        );
-        assert_eq!(
-            resolve_receive_from(HarnessProvider::Codex, &env, Some("owner-codex")).as_deref(),
-            Some("sender-b")
-        );
-    }
-
-    #[test]
-    fn receive_disabled_by_zero() {
-        let mut env = HashMap::new();
-        assert!(receive_enabled(HarnessProvider::Claude, &env));
-        env.insert("TINYPLACE_CLAUDE_RECEIVE".to_string(), "0".to_string());
-        assert!(!receive_enabled(HarnessProvider::Claude, &env));
     }
 
     #[test]

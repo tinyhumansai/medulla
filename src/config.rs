@@ -2,16 +2,87 @@
 //! `backend` section for the HTTP runtime. Permissive: missing fields take
 //! defaults, unknown fields are ignored.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Production backend API base URL (the default).
+pub const PROD_BACKEND_BASE_URL: &str = "https://api.tinyhumans.ai";
+/// Staging backend API base URL (selected by `MEDULLA_STAGING`).
+pub const STAGING_BACKEND_BASE_URL: &str = "https://staging-api.tinyhumans.ai";
+/// Production tiny.place base URL (the default).
+pub const PROD_TINYPLACE_BASE_URL: &str = "https://api.tiny.place";
+/// Staging tiny.place base URL (selected by `MEDULLA_STAGING`).
+pub const STAGING_TINYPLACE_BASE_URL: &str = "https://staging-api.tiny.place";
+
+/// Whether `MEDULLA_STAGING` selects the staging defaults. Truthy is `"1"` or
+/// `"true"` (case-insensitive, trimmed).
+pub fn is_staging(env: &HashMap<String, String>) -> bool {
+    matches!(
+        env.get("MEDULLA_STAGING")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("1") | Some("true")
+    )
+}
+
+/// The default backend base URL for this environment (staging vs prod).
+pub fn default_backend_base_url(env: &HashMap<String, String>) -> String {
+    if is_staging(env) {
+        STAGING_BACKEND_BASE_URL.to_string()
+    } else {
+        PROD_BACKEND_BASE_URL.to_string()
+    }
+}
+
+/// The default tiny.place base URL for this environment (staging vs prod).
+pub fn default_tinyplace_base_url(env: &HashMap<String, String>) -> String {
+    if is_staging(env) {
+        STAGING_TINYPLACE_BASE_URL.to_string()
+    } else {
+        PROD_TINYPLACE_BASE_URL.to_string()
+    }
+}
+
+/// Resolve the backend base URL. Order: `MEDULLA_API_URL` env override >
+/// explicitly-configured `backend.baseUrl` > staging/prod default. `config_url`
+/// is the value present in the config file (`None` when the key was absent), so
+/// an explicit config value is never clobbered by the default.
+pub fn resolve_backend_base_url(env: &HashMap<String, String>, config_url: Option<&str>) -> String {
+    if let Some(value) = env
+        .get("MEDULLA_API_URL")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        return value.to_string();
+    }
+    if let Some(value) = config_url.map(str::trim).filter(|v| !v.is_empty()) {
+        return value.to_string();
+    }
+    default_backend_base_url(env)
+}
+
+/// Resolve the tiny.place base URL for the `[tinyplace]` section. Order:
+/// explicitly-configured `tinyplace.baseUrl` > staging/prod default. (The
+/// `TINYPLACE_*`/`NEXT_PUBLIC_API_URL` env chain is applied later, at endpoint
+/// resolution in [`crate::tinyplace_support::config`].)
+pub fn resolve_tinyplace_base_url(
+    env: &HashMap<String, String>,
+    config_url: Option<&str>,
+) -> String {
+    if let Some(value) = config_url.map(str::trim).filter(|v| !v.is_empty()) {
+        return value.to_string();
+    }
+    default_tinyplace_base_url(env)
+}
+
 fn d_state_dir() -> String {
     ".medulla-state/tui".into()
 }
 fn d_tp_base() -> String {
-    "https://staging-api.tiny.place".into()
+    PROD_TINYPLACE_BASE_URL.into()
 }
 fn d_tp_identity() -> String {
     ".medulla-state/tui-tinyplace".into()
@@ -35,7 +106,7 @@ fn d_true() -> bool {
     true
 }
 fn d_backend_base() -> String {
-    "http://localhost:5000".into()
+    PROD_BACKEND_BASE_URL.into()
 }
 fn d_token_env() -> String {
     "MEDULLA_TOKEN".into()
@@ -257,9 +328,14 @@ impl LoadedConfig {
     }
 }
 
-/// Load and parse the TUI config from `path`. A missing file yields defaults; a
+/// Load and parse the TUI config from `path`, resolving endpoint base URLs
+/// against `env`. A missing file yields defaults (still env-resolved); a
 /// present-but-invalid file is an error.
-pub fn load_config(path: &str) -> anyhow::Result<LoadedConfig> {
+///
+/// Base-URL precedence is applied here rather than via serde defaults (which
+/// cannot see the environment): backend `MEDULLA_API_URL` > config `baseUrl` >
+/// staging/prod default; tiny.place config `baseUrl` > staging/prod default.
+pub fn load_config(path: &str, env: &HashMap<String, String>) -> anyhow::Result<LoadedConfig> {
     let absolute = std::fs::canonicalize(path)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| {
@@ -268,19 +344,42 @@ pub fn load_config(path: &str) -> anyhow::Result<LoadedConfig> {
                 .map(str::to_string)
                 .unwrap_or_else(|| path.to_string())
         });
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(LoadedConfig::defaults(absolute));
-        }
+    // The raw JSON (when a file exists) lets us tell an explicitly-set base URL
+    // from a serde-defaulted one, so an explicit config value beats the default.
+    let raw: Option<Value> = match std::fs::read_to_string(path) {
+        Ok(text) => Some(
+            serde_json::from_str(&text)
+                .map_err(|err| anyhow::anyhow!("Invalid JSON in {absolute}: {err}"))?,
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(err) => {
             return Err(anyhow::anyhow!(
                 "Cannot read TUI config at {absolute}: {err}"
             ))
         }
     };
-    let config: TuiConfig = serde_json::from_str(&text)
-        .map_err(|err| anyhow::anyhow!("Invalid JSON in {absolute}: {err}"))?;
+    let mut config: TuiConfig = match &raw {
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|err| anyhow::anyhow!("Invalid JSON in {absolute}: {err}"))?,
+        None => TuiConfig::default(),
+    };
+
+    let backend_url = raw
+        .as_ref()
+        .and_then(|v| v.get("backend"))
+        .and_then(|b| b.get("baseUrl"))
+        .and_then(|v| v.as_str());
+    config.backend.base_url = resolve_backend_base_url(env, backend_url);
+
+    if let Some(tp) = config.tinyplace.as_mut() {
+        let tp_url = raw
+            .as_ref()
+            .and_then(|v| v.get("tinyplace"))
+            .and_then(|t| t.get("baseUrl"))
+            .and_then(|v| v.as_str());
+        tp.base_url = resolve_tinyplace_base_url(env, tp_url);
+    }
+
     Ok(LoadedConfig {
         config,
         path: absolute,
@@ -291,13 +390,136 @@ pub fn load_config(path: &str) -> anyhow::Result<LoadedConfig> {
 mod tests {
     use super::*;
 
+    fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
     #[test]
     fn defaults_are_applied() {
+        // Serde defaults (no env resolution) produce the PROD urls.
         let cfg: TuiConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(cfg.state_dir, ".medulla-state/tui");
-        assert_eq!(cfg.backend.base_url, "http://localhost:5000");
+        assert_eq!(cfg.backend.base_url, "https://api.tinyhumans.ai");
         assert_eq!(cfg.backend.token_env, "MEDULLA_TOKEN");
         assert_eq!(cfg.medulla.context_window(), 32_000);
+    }
+
+    #[test]
+    fn backend_url_precedence() {
+        // Nothing set → prod default.
+        assert_eq!(
+            resolve_backend_base_url(&env(&[]), None),
+            "https://api.tinyhumans.ai"
+        );
+        // Staging switch flips the default.
+        assert_eq!(
+            resolve_backend_base_url(&env(&[("MEDULLA_STAGING", "1")]), None),
+            "https://staging-api.tinyhumans.ai"
+        );
+        assert_eq!(
+            resolve_backend_base_url(&env(&[("MEDULLA_STAGING", "TRUE")]), None),
+            "https://staging-api.tinyhumans.ai"
+        );
+        // A non-truthy value keeps prod.
+        assert_eq!(
+            resolve_backend_base_url(&env(&[("MEDULLA_STAGING", "no")]), None),
+            "https://api.tinyhumans.ai"
+        );
+        // Explicit config beats the (staging) default.
+        assert_eq!(
+            resolve_backend_base_url(&env(&[("MEDULLA_STAGING", "1")]), Some("http://x:1")),
+            "http://x:1"
+        );
+        // MEDULLA_API_URL beats both config and default.
+        assert_eq!(
+            resolve_backend_base_url(
+                &env(&[
+                    ("MEDULLA_STAGING", "1"),
+                    ("MEDULLA_API_URL", "http://env:2")
+                ]),
+                Some("http://x:1")
+            ),
+            "http://env:2"
+        );
+        // An empty MEDULLA_API_URL is ignored; config wins.
+        assert_eq!(
+            resolve_backend_base_url(&env(&[("MEDULLA_API_URL", "")]), Some("http://x:1")),
+            "http://x:1"
+        );
+    }
+
+    #[test]
+    fn tinyplace_url_precedence() {
+        assert_eq!(
+            resolve_tinyplace_base_url(&env(&[]), None),
+            "https://api.tiny.place"
+        );
+        assert_eq!(
+            resolve_tinyplace_base_url(&env(&[("MEDULLA_STAGING", "true")]), None),
+            "https://staging-api.tiny.place"
+        );
+        // Explicit config beats the staging default.
+        assert_eq!(
+            resolve_tinyplace_base_url(&env(&[("MEDULLA_STAGING", "1")]), Some("https://cfg")),
+            "https://cfg"
+        );
+    }
+
+    #[test]
+    fn load_config_applies_staging_switch_to_both_urls() {
+        let path = std::env::temp_dir()
+            .join(format!("medulla-staging-{}.json", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        // Missing file + staging env → staging defaults for backend (+ tinyplace
+        // when a section is present).
+        let loaded = load_config(&path, &env(&[("MEDULLA_STAGING", "1")])).unwrap();
+        assert_eq!(
+            loaded.config.backend.base_url,
+            "https://staging-api.tinyhumans.ai"
+        );
+
+        let dir = std::env::temp_dir().join(format!("medulla-staging-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("medulla.tui.json");
+        std::fs::write(&cfg, r#"{"tinyplace":{"peers":[]}}"#).unwrap();
+        let loaded = load_config(cfg.to_str().unwrap(), &env(&[("MEDULLA_STAGING", "1")])).unwrap();
+        assert_eq!(
+            loaded.config.backend.base_url,
+            "https://staging-api.tinyhumans.ai"
+        );
+        assert_eq!(
+            loaded.config.tinyplace.unwrap().base_url,
+            "https://staging-api.tiny.place"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_config_explicit_urls_win_over_env() {
+        let dir = std::env::temp_dir().join(format!("medulla-explicit-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("medulla.tui.json");
+        std::fs::write(
+            &cfg,
+            r#"{"backend":{"baseUrl":"http://be:1"},"tinyplace":{"baseUrl":"http://tp:2","peers":[]}}"#,
+        )
+        .unwrap();
+        // Staging set, but explicit config baseUrls win.
+        let loaded = load_config(cfg.to_str().unwrap(), &env(&[("MEDULLA_STAGING", "1")])).unwrap();
+        assert_eq!(loaded.config.backend.base_url, "http://be:1");
+        assert_eq!(loaded.config.tinyplace.unwrap().base_url, "http://tp:2");
+        // But MEDULLA_API_URL still beats an explicit backend baseUrl.
+        let loaded = load_config(
+            cfg.to_str().unwrap(),
+            &env(&[("MEDULLA_API_URL", "http://env:9")]),
+        )
+        .unwrap();
+        assert_eq!(loaded.config.backend.base_url, "http://env:9");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -311,7 +533,8 @@ mod tests {
         let tp = cfg.tinyplace.unwrap();
         assert_eq!(tp.peers.len(), 1);
         assert_eq!(tp.peers[0].protocol, "task");
-        assert_eq!(tp.base_url, "https://staging-api.tiny.place");
+        // Serde default (no env resolution) is the prod tiny.place URL.
+        assert_eq!(tp.base_url, "https://api.tiny.place");
     }
 
     #[test]
@@ -391,7 +614,7 @@ mod tests {
             .join(format!("medulla-nope-{}.json", std::process::id()))
             .to_string_lossy()
             .into_owned();
-        let loaded = load_config(&path).unwrap();
+        let loaded = load_config(&path, &env(&[])).unwrap();
         // Defaults applied; the absolute-ish path is preserved.
         assert_eq!(loaded.config.state_dir, ".medulla-state/tui");
         assert!(loaded.path.contains("medulla-nope-"));
@@ -403,7 +626,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("medulla.tui.json");
         std::fs::write(&path, r#"{"stateDir":"/custom/state"}"#).unwrap();
-        let loaded = load_config(path.to_str().unwrap()).unwrap();
+        let loaded = load_config(path.to_str().unwrap(), &env(&[])).unwrap();
         assert_eq!(loaded.config.state_dir, "/custom/state");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -414,7 +637,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("bad.json");
         std::fs::write(&path, "{ this is not json").unwrap();
-        let err = load_config(path.to_str().unwrap()).unwrap_err();
+        let err = load_config(path.to_str().unwrap(), &env(&[])).unwrap_err();
         assert!(err.to_string().contains("Invalid JSON"));
         let _ = std::fs::remove_dir_all(&dir);
     }

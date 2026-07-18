@@ -182,7 +182,7 @@ fn resolve_endpoint_with_config(
     // neither is set the resolver returns the DEFAULT_ENDPOINT, in which case we
     // prefer the TUI's explicit base_url.
     let resolved = resolve_endpoint(env, tp_config);
-    if resolved == crate::tinyplace_support::DEFAULT_ENDPOINT && !tui_base_url.is_empty() {
+    if resolved == crate::config::default_tinyplace_base_url(env) && !tui_base_url.is_empty() {
         tui_base_url.to_string()
     } else {
         resolved

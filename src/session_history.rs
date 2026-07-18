@@ -137,25 +137,20 @@ pub fn list_recent_sessions(
     sessions
 }
 
-/// Resolve the Claude session directory, honoring the env overrides.
+/// Resolve the Claude session directory via the central env resolver.
 pub fn claude_sessions_dir(env: &HashMap<String, String>) -> PathBuf {
-    first_env(
+    crate::tinyplace_support::env::sessions_dir(
+        crate::tinyplace_support::HarnessProvider::Claude,
         env,
-        &[
-            "TINYVERSE_CLAUDE_SESSIONS_DIR",
-            "TINYPLACE_CLAUDE_SESSIONS_DIR",
-        ],
     )
-    .map(PathBuf::from)
-    .unwrap_or_else(|| home_dir().join(".claude").join("projects"))
 }
 
-/// Resolve the Codex session directory, honoring the env override.
+/// Resolve the Codex session directory via the central env resolver.
 pub fn codex_sessions_dir(env: &HashMap<String, String>) -> PathBuf {
-    env.get("TINYPLACE_CODEX_SESSIONS_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".codex").join("sessions"))
+    crate::tinyplace_support::env::sessions_dir(
+        crate::tinyplace_support::HarnessProvider::Codex,
+        env,
+    )
 }
 
 fn collect_session_files(agent: SessionAgentKind, dir: &Path) -> Vec<RawSessionFile> {
@@ -469,21 +464,9 @@ fn safe_resolve(path: &str) -> Option<String> {
         })
 }
 
-fn first_env(env: &HashMap<String, String>, names: &[&str]) -> Option<String> {
-    names
-        .iter()
-        .filter_map(|name| env.get(*name))
-        .find(|value| !value.is_empty())
-        .cloned()
-}
-
 fn parse_object(raw: &str) -> Option<serde_json::Map<String, Value>> {
     let value: Value = serde_json::from_str(raw).ok()?;
     value.as_object().cloned()
-}
-
-fn home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
 #[cfg(test)]

@@ -20,6 +20,7 @@
 pub mod config;
 pub mod consumer;
 pub mod control;
+pub mod env;
 pub mod frames;
 pub mod runtime;
 pub mod service;

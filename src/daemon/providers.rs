@@ -82,27 +82,11 @@ impl Abort {
     }
 }
 
-/// Per-provider binary name + env overrides for it.
-fn provider_bin_spec(provider: HarnessProvider) -> (&'static str, &'static [&'static str]) {
-    match provider {
-        HarnessProvider::Claude => ("claude", &["TINYVERSE_CLAUDE_BIN", "TINYPLACE_CLAUDE_BIN"]),
-        HarnessProvider::Codex => ("codex", &["TINYPLACE_CODEX_BIN"]),
-        HarnessProvider::Opencode => ("opencode", &["TINYPLACE_OPENCODE_BIN"]),
-    }
-}
-
-/// Resolve the binary name/path for a provider (env override wins).
+/// Resolve the binary name/path for a provider (env override wins). Delegates to
+/// the central resolver ([`crate::tinyplace_support::env::provider_bin`]) so the
+/// daemon and wrapper share one bin-override contract.
 pub fn provider_bin(provider: HarnessProvider, env: &HashMap<String, String>) -> String {
-    let (default_bin, bin_env) = provider_bin_spec(provider);
-    for key in bin_env {
-        if let Some(value) = env.get(*key) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
-        }
-    }
-    default_bin.to_string()
+    crate::tinyplace_support::env::provider_bin(provider, env)
 }
 
 /// A PATH-lookup predicate (injectable for tests).
@@ -363,12 +347,17 @@ async fn run_provider_attempt(
         ));
     }
 
+    // `TINYPLACE_<P>_ARGS` (whitespace-split) is prepended to any configured
+    // extra args, so a per-provider env override applies to headless daemon runs
+    // too — matching the wrapper's child-argv prefix.
+    let mut extra_args = crate::tinyplace_support::env::provider_args(spec.provider, &spec.env);
+    extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_run_args(
         spec.provider,
         &spec.prompt,
         spec.model.as_deref(),
         spec.agent.as_deref(),
-        &spec.extra_args,
+        &extra_args,
         spec.skip_permissions,
     );
     let bin = provider_bin(spec.provider, &spec.env);

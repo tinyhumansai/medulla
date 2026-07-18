@@ -210,6 +210,78 @@ async fn bridges_transcript_and_injects_owner_input() {
     );
 }
 
+/// A per-provider `TINYPLACE_CODEX_DM_TO` beats the generic `TINYPLACE_HARNESS_DM_TO`
+/// end-to-end: with a decoy generic recipient and the real owner set per-provider,
+/// envelopes must reach the real owner.
+#[tokio::test]
+async fn per_provider_dm_to_beats_generic() {
+    let relay = MockRelay::start().await;
+    let owner_dir = TempDir::new("owner-pp");
+    let (owner, owner_signer) = make_owner(&relay.base_url, &owner_dir).await;
+    let owner_id = owner_signer.agent_id();
+
+    let wrapper_signer = LocalSigner::generate();
+    let wrapper_seed = seed_hex(&wrapper_signer);
+
+    let work = TempDir::new("work-pp");
+    let cwd = work.path.to_string_lossy().into_owned();
+    let sessions_dir = work.path.join("codex-sessions");
+    let log_path = sessions_dir.join("rollout-pp.jsonl");
+
+    let mock = MockCli::new(MockProvider::Codex)
+        .message("hello via per-provider")
+        .write_session_log(&log_path, "codex-pp", &cwd);
+    let mock_dir = MockDir::new();
+    let bin = mock_dir.install(&mock);
+
+    let config_file = work.path.join("tinyplace-config.json");
+    let mut env: HashMap<String, String> = HashMap::new();
+    if let Ok(path) = std::env::var("PATH") {
+        env.insert("PATH".to_string(), path);
+    }
+    env.insert("TINYPLACE_ENDPOINT".to_string(), relay.base_url.clone());
+    env.insert(
+        "TINYPLACE_CONFIG".to_string(),
+        config_file.to_string_lossy().into_owned(),
+    );
+    env.insert("TINYPLACE_SECRET_KEY".to_string(), wrapper_seed);
+    env.insert("TINYPLACE_CODEX_BIN".to_string(), bin);
+    env.insert(
+        "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+        sessions_dir.to_string_lossy().into_owned(),
+    );
+    // Decoy generic recipient (a bogus id nobody drains) + real per-provider owner.
+    env.insert(
+        "TINYPLACE_HARNESS_DM_TO".to_string(),
+        "decoy-generic-owner".to_string(),
+    );
+    env.insert("TINYPLACE_CODEX_DM_TO".to_string(), owner_id.clone());
+    // No inbound receive for this test.
+    env.insert("TINYPLACE_CODEX_RECEIVE".to_string(), "0".to_string());
+
+    let wrapper = tokio::spawn(run_wrapper_with(WrapperConfig {
+        provider: HarnessProvider::Codex,
+        child_args: Vec::new(),
+        env,
+        cwd,
+        no_bridge: false,
+        session_id: Some("tp-codex-pp".to_string()),
+    }));
+
+    let mut view = OwnerView::default();
+    let saw = drain_until(&owner, &mut view, Duration::from_secs(15), |v| {
+        v.messages.iter().any(|m| m == "hello via per-provider")
+    })
+    .await;
+    assert!(
+        saw,
+        "per-provider DM_TO owner never received the transcript message"
+    );
+
+    let code = wrapper.await.unwrap().unwrap();
+    assert_eq!(code, 0);
+}
+
 #[tokio::test]
 async fn passthrough_propagates_exit_code() {
     // --no-bridge: no relay, no envelopes — just run the child and return its code.

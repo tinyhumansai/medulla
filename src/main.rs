@@ -144,7 +144,8 @@ async fn run_login(args: &[String]) -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
-    let loaded = load_config(&parsed.config)?;
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let loaded = load_config(&parsed.config, &env)?;
     let base_url = loaded.config.backend.base_url.clone();
 
     let jwt = match parsed.token {
@@ -201,13 +202,13 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    let loaded = load_config(&args.config)?;
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let loaded = load_config(&args.config, &env)?;
 
     // Runtime selection order (spec §5):
     //   1. `--core`, or a `[core]` config section, with a reachable core socket → CoreRuntime
     //   2. a backend token (inline or via `backend.tokenEnv`)             → BackendRuntime
     //   3. otherwise                                                       → MockRuntime
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let want_core = args.core || loaded.config.core.is_some();
     let plan = core_socket_plan(
         want_core,

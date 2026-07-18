@@ -101,7 +101,14 @@ Point the TUI at a running Medulla backend and give it a JWT:
 MEDULLA_TOKEN=<jwt> medulla
 ```
 
-The base URL defaults to `http://localhost:5000`; override it (and the token env var name) in the config file:
+The backend base URL defaults to the production API, `https://api.tinyhumans.ai`, and the tiny.place endpoint to `https://api.tiny.place`. Set `MEDULLA_STAGING=1` (or `true`, case-insensitive) to switch both defaults to their staging hosts (`https://staging-api.tinyhumans.ai` and `https://staging-api.tiny.place`).
+
+Base-URL precedence, highest first:
+
+- **Backend:** `MEDULLA_API_URL` env var > config-file `backend.baseUrl` > staging/prod default.
+- **tiny.place:** the existing `TINYPLACE_ENDPOINT` / `TINYPLACE_API_URL` / `NEXT_PUBLIC_API_URL` env chain > tinyplace config-file `endpoint` > config-file `tinyplace.baseUrl` > staging/prod default.
+
+Override the base URL (and the token env var name) in the config file — e.g. to point at a local backend:
 
 ```json
 {

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "mockllm/mock-model",
+  "provider": {
+    "mockllm": {
+      "name": "Mock LLM",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "mock-key",
+        "baseURL": "http://127.0.0.1:MOCK_LLM_PORT/v1"
+      },
+      "models": {
+        "mock-model": {
+          "name": "Mock Model"
+        }
+      }
+    }
+  }
+}

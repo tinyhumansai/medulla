@@ -364,13 +364,23 @@ async fn run_provider_attempt(
     );
     let bin = provider_bin(spec.provider, &spec.env);
 
+    // `opencode run` treats a non-TTY stdin as prompt content and blocks at
+    // startup reading it until EOF; it has no interactive mid-run stdin channel.
+    // Piping (and holding) its stdin open therefore deadlocks the run, so give it
+    // an immediate-EOF null stdin. Claude/Codex accept forwarded `input` frames
+    // over a live stdin pipe, so they keep it piped.
+    let stdin_mode = if spec.provider == HarnessProvider::Opencode {
+        Stdio::null()
+    } else {
+        Stdio::piped()
+    };
     let mut command = Command::new(&bin);
     command
         .args(&args)
         .current_dir(&spec.cwd)
         .env_clear()
         .envs(&spec.env)
-        .stdin(Stdio::piped())
+        .stdin(stdin_mode)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);

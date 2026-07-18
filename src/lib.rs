@@ -1,10 +1,11 @@
-//! medulla-tui: a ratatui terminal UI for Medulla, driven through a `Runtime`
-//! trait. This crate is self-contained against that trait; the concrete backend
-//! runtime is wired separately.
+//! medulla: client SDK and ratatui terminal UI for Medulla. The UI is driven
+//! through a `Runtime` trait; concrete runtimes (backend HTTP/SSE, core
+//! socket, mock) are wired in `main`. The HTTP/SSE client lives in [`client`].
 
 pub mod agents;
 pub mod app;
 pub mod backend_runtime;
+pub mod client;
 pub mod chat_store;
 pub mod clipboard;
 pub mod composer;

@@ -12,11 +12,11 @@ use crossterm::event::{
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-use medulla_tui::app::{App, Cmd, TABS};
-use medulla_tui::chat_store::MainChatSummary;
-use medulla_tui::config::{LoadedConfig, TinyplaceConfig};
-use medulla_tui::events::TuiEvent;
-use medulla_tui::mock_runtime::MockRuntime;
+use medulla::app::{App, Cmd, TABS};
+use medulla::chat_store::MainChatSummary;
+use medulla::config::{LoadedConfig, TinyplaceConfig};
+use medulla::events::TuiEvent;
+use medulla::mock_runtime::MockRuntime;
 
 // --- harness helpers --------------------------------------------------------
 

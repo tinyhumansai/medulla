@@ -1,7 +1,7 @@
 //! A minimal in-test mock of the Medulla backend HTTP + SSE API.
 //!
 //! Speaks just enough HTTP/1.1 (one request per connection, `Connection: close`)
-//! to satisfy [`medulla_client::MedullaClient`]:
+//! to satisfy [`medulla::client::MedullaClient`]:
 //!
 //! - `POST /medulla/v1/sessions`            → 201 `{sessionId}`
 //! - `GET  /medulla/v1/sessions`            → 200 session list

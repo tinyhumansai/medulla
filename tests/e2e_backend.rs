@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use medulla_client::MedullaClient;
-use medulla_tui::backend_runtime::BackendRuntime;
-use medulla_tui::events::TuiEvent;
-use medulla_tui::runtime::{Runtime, RuntimeSnapshot};
+use medulla::client::MedullaClient;
+use medulla::backend_runtime::BackendRuntime;
+use medulla::events::TuiEvent;
+use medulla::runtime::{Runtime, RuntimeSnapshot};
 
 use support::mock_backend::{MockBackend, MockConfig};
 use support::wait_until;

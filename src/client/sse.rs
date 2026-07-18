@@ -18,8 +18,8 @@ use std::collections::VecDeque;
 
 use futures::stream::{Stream, StreamExt};
 
-use crate::error::{ClientError, Result};
-use crate::types::EventEnvelope;
+use crate::client::error::{ClientError, Result};
+use crate::client::types::EventEnvelope;
 
 /// A completed SSE frame.
 #[derive(Debug, Clone, PartialEq)]

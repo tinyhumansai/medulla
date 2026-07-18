@@ -29,7 +29,7 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use medulla_client::{
+use crate::client::{
     EventEnvelope as ClientEnvelope, EventKind, MedullaClient, Role, SessionSummary,
 };
 

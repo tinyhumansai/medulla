@@ -14,10 +14,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 
-use medulla_tui::agents::{derive_agent_lanes, TaskStatus};
-use medulla_tui::core_client::CoreClient;
-use medulla_tui::core_runtime::CoreRuntime;
-use medulla_tui::runtime::{Runtime, WorkerOp};
+use medulla::agents::{derive_agent_lanes, TaskStatus};
+use medulla::core_client::CoreClient;
+use medulla::core_runtime::CoreRuntime;
+use medulla::runtime::{Runtime, WorkerOp};
 
 use support::wait_until;
 

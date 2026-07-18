@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-/// Errors returned by [`crate::MedullaClient`].
+/// Errors returned by [`crate::client::MedullaClient`].
 ///
 /// API-level failures preserve the backend `errorCode` (for example
 /// `TOKEN_EXPIRED`) so callers can react to specific conditions.

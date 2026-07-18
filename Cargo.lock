@@ -997,20 +997,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
-name = "medulla-client"
-version = "0.1.0"
-dependencies = [
- "futures",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "medulla-tui"
+name = "medulla"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1019,8 +1006,8 @@ dependencies = [
  "crossterm",
  "dirs",
  "futures",
- "medulla-client",
  "ratatui",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",

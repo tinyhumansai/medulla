@@ -1,6 +1,5 @@
 # Rust
 target/
-frontend-rust/target/
 
 # Node
 node_modules/

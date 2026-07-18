@@ -18,9 +18,9 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, Notify};
 
-use medulla_tui::daemon::providers::{run_provider_task, RunTaskFn, RunTaskOptions, RunTaskResult};
-use medulla_tui::daemon::{DaemonConfig, DaemonRuntime, SendFn};
-use medulla_tui::tinyplace_support::{
+use medulla::daemon::providers::{run_provider_task, RunTaskFn, RunTaskOptions, RunTaskResult};
+use medulla::daemon::{DaemonConfig, DaemonRuntime, SendFn};
+use medulla::tinyplace_support::{
     decode_task_frame, parse_agent_capabilities, HarnessProvider, TaskFrame, TaskFrameKind,
     TINYPLACE_PROTO,
 };

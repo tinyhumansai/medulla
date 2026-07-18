@@ -308,7 +308,7 @@ pub struct RunOrchestrationOptions {
     pub limits: Option<RunLimits>,
 }
 
-/// Optional inputs to [`crate::MedullaClient::run`].
+/// Optional inputs to [`crate::client::MedullaClient::run`].
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunOptions {
@@ -381,7 +381,7 @@ pub enum LoopEvent {
     },
 }
 
-/// Outcome of [`crate::MedullaClient::run`]: either a final reply (tool-less)
+/// Outcome of [`crate::client::MedullaClient::run`]: either a final reply (tool-less)
 /// or a tool-loop event (when tools were supplied).
 #[derive(Debug, Clone)]
 pub enum RunResult {

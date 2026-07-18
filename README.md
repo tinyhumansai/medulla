@@ -59,17 +59,16 @@ Fleets with everyone.
 
 ## Rust SDK & TUI
 
-This repo also hosts the Rust workspace for the Medulla client and terminal UI:
+This repo also hosts the `medulla` Rust crate — the client SDK and terminal UI in one package:
 
-- `crates/medulla-client` — HTTP/SSE client for the Medulla backend API (auth, durable sessions, streaming events, the orchestration tool loop).
-- `crates/medulla-tui` — a ratatui terminal UI over that API: chat with the orchestrator, watch agent lanes, traces, and context live.
-- `crates/tinyplace-proto` — the tinyplace protocol data layer (task frames, harness session envelopes, status folds) used to bring agent channels together.
+- `src/client/` — HTTP/SSE client for the Medulla backend API (auth, durable sessions, streaming events, the orchestration tool loop).
+- `src/` — a ratatui terminal UI over that API: chat with the orchestrator, watch agent lanes, traces, and context live, plus the tinyplace integration that brings agent channels together (`src/tinyplace_support/`, `src/daemon/`).
 
 Build and run:
 
 ```sh
-cargo install --path crates/medulla-tui   # installs the `medulla` binary
-MEDULLA_TOKEN=<jwt> medulla               # bare invocation starts the TUI
+cargo install --path .        # installs the `medulla` binary
+MEDULLA_TOKEN=<jwt> medulla   # bare invocation starts the TUI
 ```
 
 Without a token the TUI starts against a scripted mock runtime, useful for exploring the interface. Other subcommands:

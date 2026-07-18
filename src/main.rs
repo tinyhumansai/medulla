@@ -19,14 +19,14 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use medulla_client::MedullaClient;
-use medulla_tui::app::{App, Cmd, TABS};
-use medulla_tui::backend_runtime::BackendRuntime;
-use medulla_tui::config::load_config;
-use medulla_tui::core_client::{resolve_socket_path, CoreClient};
-use medulla_tui::core_runtime::CoreRuntime;
-use medulla_tui::mock_runtime::MockRuntime;
-use medulla_tui::runtime::{ContextItem, Runtime};
+use medulla::client::MedullaClient;
+use medulla::app::{App, Cmd, TABS};
+use medulla::backend_runtime::BackendRuntime;
+use medulla::config::load_config;
+use medulla::core_client::{resolve_socket_path, CoreClient};
+use medulla::core_runtime::CoreRuntime;
+use medulla::mock_runtime::MockRuntime;
+use medulla::runtime::{ContextItem, Runtime};
 
 struct Args {
     config: String,
@@ -58,7 +58,7 @@ fn parse_args() -> Args {
 enum AppMsg {
     Status(String),
     Contexts(Vec<ContextItem>),
-    OpenResume(Vec<medulla_tui::chat_store::MainChatSummary>),
+    OpenResume(Vec<medulla::chat_store::MainChatSummary>),
     Resumed(String),
 }
 
@@ -137,7 +137,7 @@ fn print_sessions() {
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
-    let sessions = medulla_tui::session_history::list_recent_sessions(&env, &cwd, None, None);
+    let sessions = medulla::session_history::list_recent_sessions(&env, &cwd, None, None);
     match serde_json::to_string_pretty(&sessions) {
         Ok(json) => println!("{json}"),
         Err(err) => eprintln!("failed to serialize sessions: {err}"),
@@ -148,7 +148,7 @@ fn print_sessions() {
 async fn main() -> anyhow::Result<()> {
     let raw: Vec<String> = std::env::args().skip(1).collect();
     match raw.first().map(String::as_str) {
-        Some("daemon") => return medulla_tui::daemon::run_daemon(&raw[1..]).await,
+        Some("daemon") => return medulla::daemon::run_daemon(&raw[1..]).await,
         Some("version") | Some("--version") | Some("-v") => {
             println!("medulla {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
@@ -261,7 +261,7 @@ async fn run_tui() -> anyhow::Result<()> {
     // surfacing all of it into the Overview panel and Agents lanes.
     let mut tinyplace_status: Option<String> = None;
     let tinyplace_service = match &loaded.config.tinyplace {
-        Some(tp) => match medulla_tui::tinyplace_service::TinyplaceService::start(tp) {
+        Some(tp) => match medulla::tinyplace_service::TinyplaceService::start(tp) {
             Ok(service) => Some(service),
             Err(e) => {
                 tinyplace_status = Some(format!("tinyplace service failed to start ({e})"));
@@ -302,10 +302,10 @@ async fn run_tui() -> anyhow::Result<()> {
 async fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     runtime: Arc<dyn Runtime>,
-    loaded: medulla_tui::config::LoadedConfig,
+    loaded: medulla::config::LoadedConfig,
     startup_status: Option<String>,
     tinyplace_obs: Option<
-        Arc<std::sync::Mutex<medulla_tui::tinyplace_service::TinyplaceObservation>>,
+        Arc<std::sync::Mutex<medulla::tinyplace_service::TinyplaceObservation>>,
     >,
 ) -> anyhow::Result<()> {
     let mut app = App::new(runtime.clone(), loaded);

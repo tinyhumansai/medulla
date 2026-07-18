@@ -3,7 +3,7 @@
 //! Writes small executable shell scripts into a self-cleaning temp dir that emit
 //! realistic provider JSONL on stdout (claude `stream-json`, codex `exec --json`,
 //! opencode `run --format json`). The daemon's real spawn path
-//! ([`medulla_tui::daemon::providers::run_provider_task`]) runs them via the
+//! ([`medulla::daemon::providers::run_provider_task`]) runs them via the
 //! `TINYPLACE_*_BIN` env overrides, so tests exercise process spawning, JSONL
 //! mapping, and reply extraction without any real coding-agent CLI.
 

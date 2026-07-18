@@ -1,7 +1,7 @@
 //! Unit and integration tests for the Medulla client.
 
 use super::*;
-use crate::sse::{SeqDedup, SseFrame, SseParser};
+use crate::client::sse::{SeqDedup, SseFrame, SseParser};
 use futures::StreamExt;
 use serde_json::json;
 

@@ -1,0 +1,13 @@
+# Rust
+target/
+frontend-rust/target/
+
+# Node
+node_modules/
+
+# Local state
+.env
+.medulla-state/
+
+# OS
+.DS_Store

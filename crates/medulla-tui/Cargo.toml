@@ -1,0 +1,39 @@
+[package]
+name = "medulla-tui"
+description = "Terminal UI for Medulla, backed by the Medulla backend API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "medulla_tui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "medulla"
+path = "src/main.rs"
+
+[dependencies]
+medulla-client = { path = "../medulla-client" }
+tinyplace.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net"] }
+futures.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+base64 = "0.22"
+async-trait = "0.1"
+dirs = "6"
+
+[dev-dependencies]
+medulla-client = { path = "../medulla-client" }
+tokio = { workspace = true, features = ["net"] }
+futures = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tempfile = "3"

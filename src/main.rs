@@ -24,8 +24,9 @@ use medulla::auth::{
     LoopbackConfig, DEFAULT_LOGIN_TIMEOUT,
 };
 use medulla::cli::{
-    core_socket_plan, missing_token_note, parse_command, parse_login_args, parse_tui_args,
-    resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs,
+    core_socket_plan, missing_token_note, parse_command, parse_login_args, parse_memory_args,
+    parse_tui_args, resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs,
+    MemoryAction,
 };
 use medulla::client::error::ClientError;
 use medulla::client::MedullaClient;
@@ -125,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout(),
+        Command::Memory => run_memory(&raw[1..]).await,
         Command::Wrapper(provider) => {
             let code = medulla::wrapper::run_wrapper(provider, &raw[1..]).await?;
             std::process::exit(code);
@@ -194,6 +196,88 @@ fn run_logout() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `medulla memory <status|ingest|backfill|compile|search <query>>`: manage the
+/// persona-memory layer from the command line.
+async fn run_memory(args: &[String]) -> anyhow::Result<()> {
+    let parsed = match parse_memory_args(args) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("medulla memory: {msg}");
+            std::process::exit(2);
+        }
+    };
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let config_path = parsed.config.as_deref().unwrap_or("medulla.tui.json");
+    let loaded = load_config(config_path, &env)?;
+    let settings = medulla::memory::env::resolve(
+        loaded.config.memory.as_ref(),
+        &env,
+        &medulla::memory::default_medulla_home(),
+    );
+    let service = medulla::memory::MemoryService::open(settings)?;
+
+    match parsed.action {
+        MemoryAction::Status => {
+            let status = service.status();
+            if parsed.json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                print!("{}", service.overview());
+            }
+        }
+        MemoryAction::Search(query) => {
+            let hits = service.search(&query, parsed.facet.as_deref(), parsed.k);
+            if parsed.json {
+                println!("{}", serde_json::to_string_pretty(&hits)?);
+            } else if hits.is_empty() {
+                println!("(no matches)");
+            } else {
+                for hit in &hits {
+                    println!("[{}] ({:.3}) {}", hit.facet, hit.score, hit.text);
+                }
+            }
+        }
+        MemoryAction::Compile => {
+            let report = service.compile()?;
+            print_ingest_report(&report, parsed.json)?;
+        }
+        MemoryAction::Ingest | MemoryAction::Backfill => {
+            let mode = if matches!(parsed.action, MemoryAction::Backfill) {
+                medulla::memory::IngestMode::Backfill
+            } else {
+                medulla::memory::IngestMode::Incremental
+            };
+            let report = service.ingest(mode).await?;
+            print_ingest_report(&report, parsed.json)?;
+        }
+    }
+    Ok(())
+}
+
+/// Print an ingest/compile report as JSON or a short human summary.
+fn print_ingest_report(report: &medulla::memory::IngestReport, json: bool) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+    } else {
+        println!(
+            "{}: {} files, {} sessions, {} observations{}",
+            report.mode,
+            report.files_seen,
+            report.sessions_processed,
+            report.observations,
+            if report.budget_hit {
+                " (budget hit)"
+            } else {
+                ""
+            },
+        );
+        if let Some(path) = &report.pack_path {
+            println!("pack: {path}");
+        }
+    }
+    Ok(())
+}
+
 async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let args = parse_tui_args(raw);
 
@@ -225,6 +309,26 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let mut runtime: Option<Arc<dyn Runtime>> = None;
     let mut startup_status: Option<String> = None;
 
+    // Optional persona-memory service (tinycortex). Built once here and attached
+    // to the core runtime so it can advertise + serve the memory toolset; also
+    // available to a later TUI surface via the runtime seam.
+    let memory_settings = medulla::memory::env::resolve(
+        loaded.config.memory.as_ref(),
+        &env,
+        &medulla::memory::default_medulla_home(),
+    );
+    let memory_service: Option<Arc<medulla::memory::MemoryService>> = if memory_settings.enabled {
+        match medulla::memory::MemoryService::open(memory_settings) {
+            Ok(svc) => Some(Arc::new(svc)),
+            Err(e) => {
+                startup_status = Some(format!("memory service failed to open ({e})"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     match plan {
         CorePlan::Skip => {}
         CorePlan::Fallback(note) => startup_status = Some(note),
@@ -232,7 +336,9 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             let version = env!("CARGO_PKG_VERSION");
             match CoreClient::connect(&path).await {
                 Ok((client, events_rx)) => {
-                    match CoreRuntime::connect(client, events_rx, version).await {
+                    match CoreRuntime::connect(client, events_rx, version, memory_service.clone())
+                        .await
+                    {
                         Ok(rt) => runtime = Some(Arc::new(rt)),
                         Err(e) => {
                             startup_status =

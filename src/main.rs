@@ -19,46 +19,24 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
+use medulla::cli::{
+    core_socket_plan, missing_token_note, parse_command, parse_tui_args, resolve_backend_token,
+    sessions_json, Command, CorePlan,
+};
 use medulla::client::MedullaClient;
-use medulla::app::{App, Cmd, TABS};
-use medulla::backend_runtime::BackendRuntime;
 use medulla::config::load_config;
-use medulla::core_client::{resolve_socket_path, CoreClient};
-use medulla::core_runtime::CoreRuntime;
-use medulla::mock_runtime::MockRuntime;
+use medulla::runtime::backend::BackendRuntime;
+use medulla::runtime::core::CoreRuntime;
+use medulla::runtime::core_client::CoreClient;
+use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{ContextItem, Runtime};
-
-struct Args {
-    config: String,
-    alt_screen: bool,
-    core: bool,
-}
-
-fn parse_args() -> Args {
-    let mut config = "medulla.tui.json".to_string();
-    let mut alt_screen = true;
-    let mut core = false;
-    let mut it = std::env::args().skip(1);
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--config" => {
-                if let Some(v) = it.next() {
-                    config = v;
-                }
-            }
-            "--no-alt-screen" => alt_screen = false,
-            "--core" => core = true,
-            _ => {}
-        }
-    }
-    Args { config, alt_screen, core }
-}
+use medulla::ui::app::{App, Cmd, TABS};
 
 /// Messages sent from spawned async tasks back to the event loop.
 enum AppMsg {
     Status(String),
     Contexts(Vec<ContextItem>),
-    OpenResume(Vec<medulla::chat_store::MainChatSummary>),
+    OpenResume(Vec<medulla::ui::chat_store::MainChatSummary>),
     Resumed(String),
 }
 
@@ -115,59 +93,37 @@ fn set_mouse_capture(on: bool) {
     }
 }
 
-fn print_help() {
-    println!(
-        "medulla {version}\n\n\
-Usage:\n  \
-medulla                 Start the interactive chat TUI (default)\n  \
-medulla daemon [flags]  Run the headless coding-agent daemon (serves tasks over tiny.place)\n  \
-medulla sessions        List recent claude/codex sessions as JSON\n  \
-medulla version         Print the version\n  \
-medulla help            Show this help\n\n\
-TUI flags:\n  \
---config <path>         Path to medulla.tui.json (default: medulla.tui.json)\n  \
---core                  Drive the core-js orchestration core over its Unix socket\n  \
---no-alt-screen         Do not switch to the alternate screen\n",
-        version = env!("CARGO_PKG_VERSION"),
-    );
-}
-
-fn print_sessions() {
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| ".".to_string());
-    let sessions = medulla::session_history::list_recent_sessions(&env, &cwd, None, None);
-    match serde_json::to_string_pretty(&sessions) {
-        Ok(json) => println!("{json}"),
-        Err(err) => eprintln!("failed to serialize sessions: {err}"),
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let raw: Vec<String> = std::env::args().skip(1).collect();
-    match raw.first().map(String::as_str) {
-        Some("daemon") => return medulla::daemon::run_daemon(&raw[1..]).await,
-        Some("version") | Some("--version") | Some("-v") => {
+    match parse_command(&raw) {
+        Command::Daemon => medulla::daemon::run_daemon(&raw[1..]).await,
+        Command::Version => {
             println!("medulla {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
+            Ok(())
         }
-        Some("help") | Some("--help") | Some("-h") => {
-            print_help();
-            return Ok(());
+        Command::Help => {
+            print!("{}", medulla::cli::help_text());
+            Ok(())
         }
-        Some("sessions") => {
-            print_sessions();
-            return Ok(());
+        Command::Sessions => {
+            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| ".".to_string());
+            match sessions_json(&env, &cwd) {
+                Ok(json) => println!("{json}"),
+                Err(err) => eprintln!("failed to serialize sessions: {err}"),
+            }
+            Ok(())
         }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.
-        _ => run_tui().await,
+        Command::Tui => run_tui(&raw).await,
     }
 }
 
-async fn run_tui() -> anyhow::Result<()> {
-    let args = parse_args();
+async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
+    let args = parse_tui_args(raw);
 
     if !io::stdout().is_terminal() {
         eprintln!("medulla-tui requires an interactive terminal (TTY).");
@@ -180,75 +136,70 @@ async fn run_tui() -> anyhow::Result<()> {
     //   1. `--core`, or a `[core]` config section, with a reachable core socket → CoreRuntime
     //   2. a backend token (inline or via `backend.tokenEnv`)             → BackendRuntime
     //   3. otherwise                                                       → MockRuntime
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").ok();
-    let state_dir = std::env::var("MEDULLA_STATE_DIR").ok();
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let want_core = args.core || loaded.config.core.is_some();
-    let core_socket = resolve_socket_path(
-        loaded.config.core.as_ref().and_then(|c| c.socket_path.as_deref()),
-        runtime_dir.as_deref(),
-        state_dir.as_deref(),
+    let plan = core_socket_plan(
+        want_core,
+        loaded
+            .config
+            .core
+            .as_ref()
+            .and_then(|c| c.socket_path.as_deref()),
+        env.get("XDG_RUNTIME_DIR").map(String::as_str),
+        env.get("MEDULLA_STATE_DIR").map(String::as_str),
+        |p| p.exists(),
     );
 
     let mut runtime: Option<Arc<dyn Runtime>> = None;
     let mut startup_status: Option<String> = None;
 
-    if want_core {
-        match core_socket {
-            Some(path) if path.exists() => {
-                let version = env!("CARGO_PKG_VERSION");
-                match CoreClient::connect(&path).await {
-                    Ok((client, events_rx)) => match CoreRuntime::connect(client, events_rx, version).await {
+    match plan {
+        CorePlan::Skip => {}
+        CorePlan::Fallback(note) => startup_status = Some(note),
+        CorePlan::Connect(path) => {
+            let version = env!("CARGO_PKG_VERSION");
+            match CoreClient::connect(&path).await {
+                Ok((client, events_rx)) => {
+                    match CoreRuntime::connect(client, events_rx, version).await {
                         Ok(rt) => runtime = Some(Arc::new(rt)),
                         Err(e) => {
                             startup_status =
                                 Some(format!("core handshake failed ({e}) — falling back"));
                         }
-                    },
-                    Err(e) => {
-                        startup_status = Some(format!(
-                            "core socket {} unreachable ({e}) — falling back",
-                            path.display()
-                        ));
                     }
                 }
-            }
-            Some(path) => {
-                startup_status =
-                    Some(format!("core socket {} not present — falling back", path.display()));
-            }
-            None => {
-                startup_status =
-                    Some("no core socket resolved (set XDG_RUNTIME_DIR / MEDULLA_STATE_DIR / [core].socketPath) — falling back".into());
+                Err(e) => {
+                    startup_status = Some(format!(
+                        "core socket {} unreachable ({e}) — falling back",
+                        path.display()
+                    ));
+                }
             }
         }
     }
 
     if runtime.is_none() {
         let backend = &loaded.config.backend;
-        let token = backend
-            .token
-            .clone()
-            .or_else(|| std::env::var(&backend.token_env).ok().filter(|s| !s.is_empty()));
         let core_note = startup_status.take();
-        let (rt, note): (Arc<dyn Runtime>, Option<String>) = match token {
-            Some(tok) => {
-                let client = MedullaClient::new(backend.base_url.clone(), tok);
-                match BackendRuntime::connect(client).await {
-                    Ok(rt) => (Arc::new(rt), None),
-                    Err(e) => (
-                        Arc::new(MockRuntime::demo()),
-                        Some(format!("backend connect failed ({e}) — running with mock runtime")),
-                    ),
+        let (rt, note): (Arc<dyn Runtime>, Option<String>) =
+            match resolve_backend_token(&env, backend) {
+                Some(tok) => {
+                    let client = MedullaClient::new(backend.base_url.clone(), tok);
+                    match BackendRuntime::connect(client).await {
+                        Ok(rt) => (Arc::new(rt), None),
+                        Err(e) => (
+                            Arc::new(MockRuntime::demo()),
+                            Some(format!(
+                                "backend connect failed ({e}) — running with mock runtime"
+                            )),
+                        ),
+                    }
                 }
-            }
-            None => (
-                Arc::new(MockRuntime::demo()),
-                Some(format!(
-                    "backend token missing (set ${}) — running with mock runtime",
-                    backend.token_env
-                )),
-            ),
-        };
+                None => (
+                    Arc::new(MockRuntime::demo()),
+                    Some(missing_token_note(backend)),
+                ),
+            };
         runtime = Some(rt);
         // Prefer the more specific fallback note (core → backend → mock).
         startup_status = core_note.or(note);
@@ -261,7 +212,7 @@ async fn run_tui() -> anyhow::Result<()> {
     // surfacing all of it into the Overview panel and Agents lanes.
     let mut tinyplace_status: Option<String> = None;
     let tinyplace_service = match &loaded.config.tinyplace {
-        Some(tp) => match medulla::tinyplace_service::TinyplaceService::start(tp) {
+        Some(tp) => match medulla::tinyplace_support::service::TinyplaceService::start(tp) {
             Ok(service) => Some(service),
             Err(e) => {
                 tinyplace_status = Some(format!("tinyplace service failed to start ({e})"));
@@ -305,7 +256,7 @@ async fn run(
     loaded: medulla::config::LoadedConfig,
     startup_status: Option<String>,
     tinyplace_obs: Option<
-        Arc<std::sync::Mutex<medulla::tinyplace_service::TinyplaceObservation>>,
+        Arc<std::sync::Mutex<medulla::tinyplace_support::service::TinyplaceObservation>>,
     >,
 ) -> anyhow::Result<()> {
     let mut app = App::new(runtime.clone(), loaded);

@@ -57,7 +57,12 @@ fn decoded_frames(recorded: &Recorded) -> Vec<TaskFrame> {
 }
 
 fn raw_bodies(recorded: &Recorded) -> Vec<String> {
-    recorded.lock().unwrap().iter().map(|(_, b)| b.clone()).collect()
+    recorded
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, b)| b.clone())
+        .collect()
 }
 
 fn config(
@@ -129,9 +134,16 @@ async fn task_lifecycle_ack_status_reply() {
     assert_eq!(frames[0].text, "task accepted");
     let last = frames.last().unwrap();
     assert_eq!(last.kind, TaskFrameKind::Reply);
-    assert_eq!(last.text, "final answer", "claude result line wins over agent message");
+    assert_eq!(
+        last.text, "final answer",
+        "claude result line wins over agent message"
+    );
     for middle in &frames[1..frames.len() - 1] {
-        assert_eq!(middle.kind, TaskFrameKind::Status, "middle frames are status");
+        assert_eq!(
+            middle.kind,
+            TaskFrameKind::Status,
+            "middle frames are status"
+        );
     }
     assert!(
         frames.iter().any(|f| f.kind == TaskFrameKind::Status),
@@ -215,7 +227,12 @@ async fn input_frame_reaches_provider_stdin() {
     runtime.handle_message(
         "peer".into(),
         String::new(),
-        Some(frame(TaskFrameKind::Input, "in-1", "extra guidance", Some("c9"))),
+        Some(frame(
+            TaskFrameKind::Input,
+            "in-1",
+            "extra guidance",
+            Some("c9"),
+        )),
     );
     runtime.idle().await;
 
@@ -230,7 +247,10 @@ async fn input_frame_reaches_provider_stdin() {
         .iter()
         .find(|f| f.kind == TaskFrameKind::Reply)
         .expect("reply");
-    assert_eq!(reply.text, "got: extra guidance", "forwarded input reached the provider");
+    assert_eq!(
+        reply.text, "got: extra guidance",
+        "forwarded input reached the provider"
+    );
 }
 
 /// A runner that signals readiness, then blocks until `gate` is released.
@@ -262,10 +282,18 @@ async fn capacity_and_duplicate_rejection() {
     cfg.max_pending = 1;
     let runtime = DaemonRuntime::new(cfg, blocking_runner(ready_tx, gate.clone()), send);
 
-    runtime.handle_message("peer".into(), String::new(), Some(frame(TaskFrameKind::Task, "t1", "a", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(TaskFrameKind::Task, "t1", "a", None)),
+    );
     tokio::time::timeout(T, ready_rx.recv()).await.unwrap();
 
-    runtime.handle_message("peer".into(), String::new(), Some(frame(TaskFrameKind::Task, "t2", "b", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(TaskFrameKind::Task, "t2", "b", None)),
+    );
     let capacity = {
         let recorded = recorded.clone();
         wait_until("capacity error", T, || {
@@ -279,7 +307,11 @@ async fn capacity_and_duplicate_rejection() {
             .find(|f| f.kind == TaskFrameKind::Error && f.task_id == "t2")
             .unwrap()
     };
-    assert!(capacity.text.contains("at capacity"), "got: {}", capacity.text);
+    assert!(
+        capacity.text.contains("at capacity"),
+        "got: {}",
+        capacity.text
+    );
     gate.notify_waiters();
     runtime.idle().await;
 
@@ -292,9 +324,17 @@ async fn capacity_and_duplicate_rejection() {
         blocking_runner(ready_tx, gate.clone()),
         send,
     );
-    runtime.handle_message("peer".into(), String::new(), Some(frame(TaskFrameKind::Task, "dup", "one", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(TaskFrameKind::Task, "dup", "one", None)),
+    );
     tokio::time::timeout(T, ready_rx.recv()).await.unwrap();
-    runtime.handle_message("peer".into(), String::new(), Some(frame(TaskFrameKind::Task, "dup", "two", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(TaskFrameKind::Task, "dup", "two", None)),
+    );
     wait_until("dup error", T, || {
         decoded_frames(&recorded)
             .iter()
@@ -327,7 +367,12 @@ async fn capabilities_result_merges_daemon_and_report() {
     runtime.handle_message(
         "peer".into(),
         String::new(),
-        Some(frame(TaskFrameKind::Capabilities, "cap-1", "", Some("corr-9"))),
+        Some(frame(
+            TaskFrameKind::Capabilities,
+            "cap-1",
+            "",
+            Some("corr-9"),
+        )),
     );
     runtime.idle().await;
 
@@ -341,7 +386,10 @@ async fn capabilities_result_merges_daemon_and_report() {
 
     let caps = parse_agent_capabilities(&result.text).expect("parseable capabilities");
     // cwd from the daemon (canonicalized workspace) wins.
-    let expected_cwd = std::fs::canonicalize(tmp.path()).unwrap().to_string_lossy().into_owned();
+    let expected_cwd = std::fs::canonicalize(tmp.path())
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     assert_eq!(caps.cwd.as_deref(), Some(expected_cwd.as_str()));
     // tools/mcpServers come from the report.
     assert_eq!(caps.tools, vec!["Bash", "Read"]);
@@ -369,10 +417,16 @@ async fn plaintext_dm_replies_raw() {
     runtime.idle().await;
 
     let bodies = raw_bodies(&recorded);
-    assert!(bodies.iter().any(|b| b == "plain reply"), "raw reply: {bodies:?}");
+    assert!(
+        bodies.iter().any(|b| b == "plain reply"),
+        "raw reply: {bodies:?}"
+    );
     // The reply is not a protocol frame.
     for body in &bodies {
-        assert!(decode_task_frame(body).is_none(), "plaintext reply must not be a frame");
+        assert!(
+            decode_task_frame(body).is_none(),
+            "plaintext reply must not be a frame"
+        );
     }
 }
 
@@ -435,9 +489,16 @@ async fn idle_drains_all_dispatched_messages() {
     }
     runtime.idle().await;
 
-    assert_eq!(seen.load(Ordering::SeqCst), 3, "every dispatch ran before idle resolved");
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        3,
+        "every dispatch ran before idle resolved"
+    );
     let bodies = raw_bodies(&recorded);
     for i in 0..3 {
-        assert!(bodies.iter().any(|b| b == &format!("echo:msg{i}")), "reply for msg{i}");
+        assert!(
+            bodies.iter().any(|b| b == &format!("echo:msg{i}")),
+            "reply for msg{i}"
+        );
     }
 }

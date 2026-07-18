@@ -4,7 +4,7 @@
 //! folds the backend's `EventEnvelope`s into the thread's local event log, from
 //! which snapshots are rendered. State lives behind an `Arc<Mutex<...>>` and a
 //! tokio broadcast channel notifies the UI to re-pull a snapshot after every
-//! fold, exactly like [`MockRuntime`](crate::mock_runtime::MockRuntime).
+//! fold, exactly like [`MockRuntime`](crate::runtime::mock::MockRuntime).
 //!
 //! Divergences from the mock / TS runtime, all because the backend does not (yet)
 //! expose the surface:
@@ -33,12 +33,12 @@ use crate::client::{
     EventEnvelope as ClientEnvelope, EventKind, MedullaClient, Role, SessionSummary,
 };
 
-use crate::chat_store::{iso8601_utc, now_millis, ChatMessage, MainChatSummary};
-use crate::events::{EventEnvelope, TuiEvent};
 use crate::runtime::{
     AgentDescriptor, AgentPresence, ContextItem, CycleResultSummary, PeerSession, Runtime,
     RuntimeSnapshot, ThreadSummary, TinyplaceIdentity,
 };
+use crate::ui::chat_store::{iso8601_utc, now_millis, ChatMessage, MainChatSummary};
+use crate::ui::events::{EventEnvelope, TuiEvent};
 
 const EVENT_CAP: usize = 5000;
 const CHAT_CAP: usize = 2000;
@@ -360,7 +360,13 @@ fn start_stream_on(
         h.abort();
     }
     let session_id = t.session_id.clone();
-    let handle = spawn_stream(client.clone(), state.clone(), tx.clone(), session_id, cursor);
+    let handle = spawn_stream(
+        client.clone(),
+        state.clone(),
+        tx.clone(),
+        session_id,
+        cursor,
+    );
     if let Some(t) = s.by_id(thread_id) {
         t.stream_task = Some(handle);
     }
@@ -516,8 +522,11 @@ impl Runtime for BackendRuntime {
                     active.chat_events.clone(),
                 )
             };
-            let mut child =
-                Thread::new(&id, &name.unwrap_or_else(|| format!("fork {id}")), String::new());
+            let mut child = Thread::new(
+                &id,
+                &name.unwrap_or_else(|| format!("fork {id}")),
+                String::new(),
+            );
             child.parent_id = Some(parent_id);
             // Copy the parent transcript locally; the backend has no fork, so the
             // fresh session below starts empty and diverges from here on.
@@ -605,9 +614,13 @@ impl Runtime for BackendRuntime {
                     let seq = s.seq;
                     let at = m.ts.unwrap_or(0);
                     let event = if role == "user" {
-                        TuiEvent::User { body: m.body.clone() }
+                        TuiEvent::User {
+                            body: m.body.clone(),
+                        }
                     } else {
-                        TuiEvent::Assistant { body: m.body.clone() }
+                        TuiEvent::Assistant {
+                            body: m.body.clone(),
+                        }
                     };
                     if let Some(t) = s.by_id(&id) {
                         t.messages.push(ChatMessage {
@@ -682,24 +695,55 @@ mod tests {
     #[test]
     fn folds_kinds_into_tui_events() {
         let mut s = state_with_thread();
-        s.fold("sess-1", &client_env("sess-1", Some(1), json!({"kind":"user","body":"hi"})));
+        s.fold(
+            "sess-1",
+            &client_env("sess-1", Some(1), json!({"kind":"user","body":"hi"})),
+        );
         s.fold(
             "sess-1",
             &client_env("sess-1", Some(2), json!({"kind":"assistant","body":"yo"})),
         );
-        s.fold("sess-1", &client_env("sess-1", None, json!({"kind":"assistant_delta","delta":"y"})));
-        s.fold("sess-1", &client_env("sess-1", None, json!({"kind":"reasoning_delta","delta":"r"})));
         s.fold(
             "sess-1",
-            &client_env("sess-1", None, json!({"kind":"tool_call_delta","index":2,"argsDelta":"{"})),
+            &client_env(
+                "sess-1",
+                None,
+                json!({"kind":"assistant_delta","delta":"y"}),
+            ),
         );
-        s.fold("sess-1", &client_env("sess-1", Some(3), json!({"kind":"weird","x":1})));
+        s.fold(
+            "sess-1",
+            &client_env(
+                "sess-1",
+                None,
+                json!({"kind":"reasoning_delta","delta":"r"}),
+            ),
+        );
+        s.fold(
+            "sess-1",
+            &client_env(
+                "sess-1",
+                None,
+                json!({"kind":"tool_call_delta","index":2,"argsDelta":"{"}),
+            ),
+        );
+        s.fold(
+            "sess-1",
+            &client_env("sess-1", Some(3), json!({"kind":"weird","x":1})),
+        );
 
         let t = &s.threads[0];
         let kinds: Vec<&str> = t.events.iter().map(|e| e.event.kind()).collect();
         assert_eq!(
             kinds,
-            vec!["user", "assistant", "assistant_delta", "reasoning_delta", "tool_call_delta", "weird"]
+            vec![
+                "user",
+                "assistant",
+                "assistant_delta",
+                "reasoning_delta",
+                "tool_call_delta",
+                "weird"
+            ]
         );
         // Chat events are the user/assistant/error subset only.
         let chat: Vec<&str> = t.chat_events.iter().map(|e| e.event.kind()).collect();
@@ -722,11 +766,22 @@ mod tests {
     fn cycle_bracket_drives_running_and_last_result() {
         let mut s = state_with_thread();
         s.threads[0].running = true;
-        s.fold("sess-1", &client_env("sess-1", Some(1), json!({"kind":"cycle_start","cycleId":"c1"})));
+        s.fold(
+            "sess-1",
+            &client_env(
+                "sess-1",
+                Some(1),
+                json!({"kind":"cycle_start","cycleId":"c1"}),
+            ),
+        );
         assert!(s.threads[0].running);
         s.fold(
             "sess-1",
-            &client_env("sess-1", Some(2), json!({"kind":"cycle_end","cycleId":"c1","passCount":3,"durationMs":42})),
+            &client_env(
+                "sess-1",
+                Some(2),
+                json!({"kind":"cycle_end","cycleId":"c1","passCount":3,"durationMs":42}),
+            ),
         );
         assert!(!s.threads[0].running);
         let lr = s.threads[0].last_result.as_ref().unwrap();
@@ -740,12 +795,18 @@ mod tests {
         assert_eq!(s.threads[0].events.len(), 1);
         assert!(s.threads[0].running);
         // The stream echoes the same user turn — it must not duplicate.
-        let folded = s.fold("sess-1", &client_env("sess-1", Some(1), json!({"kind":"user","body":"hello"})));
+        let folded = s.fold(
+            "sess-1",
+            &client_env("sess-1", Some(1), json!({"kind":"user","body":"hello"})),
+        );
         assert!(folded.is_none());
         assert_eq!(s.threads[0].events.len(), 1);
         assert_eq!(s.threads[0].messages.len(), 1);
         // A different user turn is not swallowed.
-        let folded = s.fold("sess-1", &client_env("sess-1", Some(2), json!({"kind":"user","body":"world"})));
+        let folded = s.fold(
+            "sess-1",
+            &client_env("sess-1", Some(2), json!({"kind":"user","body":"world"})),
+        );
         assert!(folded.is_some());
         assert_eq!(s.threads[0].messages.len(), 2);
     }
@@ -757,9 +818,23 @@ mod tests {
             let body = format!("m{i}");
             // Alternate a chatty and a non-chatty event to exercise both caps.
             if i % 2 == 0 {
-                s.fold("sess-1", &client_env("sess-1", Some(i as u64), json!({"kind":"assistant","body":body})));
+                s.fold(
+                    "sess-1",
+                    &client_env(
+                        "sess-1",
+                        Some(i as u64),
+                        json!({"kind":"assistant","body":body}),
+                    ),
+                );
             } else {
-                s.fold("sess-1", &client_env("sess-1", None, json!({"kind":"assistant_delta","delta":body})));
+                s.fold(
+                    "sess-1",
+                    &client_env(
+                        "sess-1",
+                        None,
+                        json!({"kind":"assistant_delta","delta":body}),
+                    ),
+                );
             }
         }
         let t = &s.threads[0];

@@ -78,8 +78,14 @@ pub fn list_recent_sessions(
     let scan_limit = scan_limit.unwrap_or(DEFAULT_SCAN_LIMIT);
 
     let mut raw: Vec<RawSessionFile> = Vec::new();
-    raw.extend(collect_session_files(SessionAgentKind::Claude, &claude_sessions_dir(env)));
-    raw.extend(collect_session_files(SessionAgentKind::Codex, &codex_sessions_dir(env)));
+    raw.extend(collect_session_files(
+        SessionAgentKind::Claude,
+        &claude_sessions_dir(env),
+    ));
+    raw.extend(collect_session_files(
+        SessionAgentKind::Codex,
+        &codex_sessions_dir(env),
+    ));
     raw.sort_by_key(|file| std::cmp::Reverse(file.mtime_ms));
     raw.truncate(scan_limit);
 
@@ -112,8 +118,16 @@ pub fn list_recent_sessions(
 
     let mut sessions: Vec<RecentSession> = by_id.into_values().collect();
     sessions.sort_by(|left, right| {
-        let left_here = if is_here(left.cwd.as_deref(), here.as_deref()) { 0 } else { 1 };
-        let right_here = if is_here(right.cwd.as_deref(), here.as_deref()) { 0 } else { 1 };
+        let left_here = if is_here(left.cwd.as_deref(), here.as_deref()) {
+            0
+        } else {
+            1
+        };
+        let right_here = if is_here(right.cwd.as_deref(), here.as_deref()) {
+            0
+        } else {
+            1
+        };
         if left_here != right_here {
             return left_here.cmp(&right_here);
         }
@@ -125,9 +139,15 @@ pub fn list_recent_sessions(
 
 /// Resolve the Claude session directory, honoring the env overrides.
 pub fn claude_sessions_dir(env: &HashMap<String, String>) -> PathBuf {
-    first_env(env, &["TINYVERSE_CLAUDE_SESSIONS_DIR", "TINYPLACE_CLAUDE_SESSIONS_DIR"])
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".claude").join("projects"))
+    first_env(
+        env,
+        &[
+            "TINYVERSE_CLAUDE_SESSIONS_DIR",
+            "TINYPLACE_CLAUDE_SESSIONS_DIR",
+        ],
+    )
+    .map(PathBuf::from)
+    .unwrap_or_else(|| home_dir().join(".claude").join("projects"))
 }
 
 /// Resolve the Codex session directory, honoring the env override.
@@ -173,7 +193,11 @@ fn visit(agent: SessionAgentKind, directory: &Path, out: &mut Vec<RawSessionFile
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
-            out.push(RawSessionFile { agent, path, mtime_ms });
+            out.push(RawSessionFile {
+                agent,
+                path,
+                mtime_ms,
+            });
         }
     }
 }
@@ -342,7 +366,10 @@ fn read_head_lines(path: &Path) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
     let text = String::from_utf8_lossy(&buffer[..read]);
-    let mut lines: Vec<String> = text.split('\n').map(|l| l.trim_end_matches('\r').to_string()).collect();
+    let mut lines: Vec<String> = text
+        .split('\n')
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .collect();
     // When the read hit the cap the final line is likely truncated — drop it.
     if read >= HEAD_BYTES && lines.len() > 1 {
         lines.pop();
@@ -457,7 +484,9 @@ mod tests {
     #[test]
     fn skips_bracketed_system_prompts_for_label() {
         assert_eq!(
-            first_prompt_text(Some(Value::String("<command-name>foo</command-name>".into()))),
+            first_prompt_text(Some(Value::String(
+                "<command-name>foo</command-name>".into()
+            ))),
             None
         );
         assert_eq!(

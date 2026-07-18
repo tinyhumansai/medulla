@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 use serde_json::json;
 use tokio::sync::{mpsc, Notify};
 
-use crate::tinyplace_support::{decode_task_frame, HarnessEvent, HarnessProvider, TaskFrame, TaskFrameKind, TINYPLACE_PROTO};
+use crate::tinyplace_support::{
+    decode_task_frame, HarnessEvent, HarnessProvider, TaskFrame, TaskFrameKind, TINYPLACE_PROTO,
+};
 
 use super::mappers::HarnessSemanticEvent;
 use super::providers::{RunTaskOptions, RunTaskResult};
@@ -180,11 +182,19 @@ async fn rejects_tasks_over_max_pending() {
     let runtime = DaemonRuntime::new(config, run_task, send);
 
     // Task A occupies the single pending slot and blocks.
-    runtime.handle_message("peer".into(), String::new(), Some(task_frame("t1", "work", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
     wait_ready(&mut ready_rx).await;
 
     // Task B is rejected at capacity.
-    runtime.handle_message("peer".into(), String::new(), Some(task_frame("t2", "more", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t2", "more", None)),
+    );
     // Let B settle (it errors without ever running).
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -193,7 +203,11 @@ async fn rejects_tasks_over_max_pending() {
         .iter()
         .find(|f| f.kind == TaskFrameKind::Error && f.task_id == "t2")
         .expect("t2 should be rejected");
-    assert!(capacity.text.contains("at capacity"), "got: {}", capacity.text);
+    assert!(
+        capacity.text.contains("at capacity"),
+        "got: {}",
+        capacity.text
+    );
 
     gate.notify_waiters();
     runtime.idle().await;
@@ -207,10 +221,18 @@ async fn rejects_duplicate_task_id_from_same_sender() {
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(base_config(), run_task, send);
 
-    runtime.handle_message("peer".into(), String::new(), Some(task_frame("dup", "one", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("dup", "one", None)),
+    );
     wait_ready(&mut ready_rx).await;
 
-    runtime.handle_message("peer".into(), String::new(), Some(task_frame("dup", "two", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("dup", "two", None)),
+    );
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let frames = decoded_frames(&recorded);
@@ -218,9 +240,15 @@ async fn rejects_duplicate_task_id_from_same_sender() {
         .iter()
         .find(|f| f.kind == TaskFrameKind::Error && f.task_id == "dup")
         .expect("duplicate should error");
-    assert!(dup_error.text.contains("already running"), "got: {}", dup_error.text);
+    assert!(
+        dup_error.text.contains("already running"),
+        "got: {}",
+        dup_error.text
+    );
     // The original ack is still present.
-    assert!(frames.iter().any(|f| f.kind == TaskFrameKind::Ack && f.text == "task accepted"));
+    assert!(frames
+        .iter()
+        .any(|f| f.kind == TaskFrameKind::Ack && f.text == "task accepted"));
 
     gate.notify_waiters();
     runtime.idle().await;
@@ -235,7 +263,11 @@ async fn forwards_input_into_running_task() {
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(base_config(), run_task, send);
 
-    runtime.handle_message("peer".into(), String::new(), Some(task_frame("t1", "work", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
     wait_ready(&mut ready_rx).await;
 
     runtime.handle_message(
@@ -245,7 +277,10 @@ async fn forwards_input_into_running_task() {
     );
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    assert_eq!(received.lock().unwrap().as_slice(), &["extra guidance".to_string()]);
+    assert_eq!(
+        received.lock().unwrap().as_slice(),
+        &["extra guidance".to_string()]
+    );
     let frames = decoded_frames(&recorded);
     assert!(frames
         .iter()
@@ -278,7 +313,10 @@ async fn input_with_mismatched_correlation_does_not_match() {
     );
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    assert!(received.lock().unwrap().is_empty(), "mismatched correlation must not forward");
+    assert!(
+        received.lock().unwrap().is_empty(),
+        "mismatched correlation must not forward"
+    );
     let frames = decoded_frames(&recorded);
     assert!(frames
         .iter()
@@ -304,13 +342,25 @@ async fn throttles_status_frames() {
     });
     let runtime = runtime.with_now(now);
 
-    runtime.handle_message("peer".into(), String::new(), Some(task_frame("t1", "work", None)));
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
     runtime.idle().await;
 
     let frames = decoded_frames(&recorded);
-    let status_count = frames.iter().filter(|f| f.kind == TaskFrameKind::Status).count();
-    assert_eq!(status_count, 1, "exactly one status frame should survive throttling");
-    assert!(frames.iter().any(|f| f.kind == TaskFrameKind::Reply && f.text == "ok"));
+    let status_count = frames
+        .iter()
+        .filter(|f| f.kind == TaskFrameKind::Status)
+        .count();
+    assert_eq!(
+        status_count, 1,
+        "exactly one status frame should survive throttling"
+    );
+    assert!(frames
+        .iter()
+        .any(|f| f.kind == TaskFrameKind::Reply && f.text == "ok"));
 }
 
 #[tokio::test]
@@ -334,7 +384,10 @@ async fn no_provider_for_requested_errors_without_harness() {
         .expect("should error");
     assert!(error.text.contains("no available provider"));
     assert!(error.text.contains("codex"));
-    assert!(error.harness.is_none(), "provider-selection error carries no harness");
+    assert!(
+        error.harness.is_none(),
+        "provider-selection error carries no harness"
+    );
 }
 
 #[tokio::test]
@@ -363,7 +416,10 @@ async fn plaintext_dm_runs_default_provider() {
 #[tokio::test]
 async fn status_detail_maps_event_kinds() {
     let tool_call = tool_call_event().event;
-    assert_eq!(status_detail(&tool_call).as_deref(), Some("running Bash: ls -la"));
+    assert_eq!(
+        status_detail(&tool_call).as_deref(),
+        Some("running Bash: ls -la")
+    );
 
     let thinking = HarnessEvent {
         kind: "agent_thinking".to_string(),

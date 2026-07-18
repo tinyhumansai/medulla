@@ -113,9 +113,7 @@ pub fn opencode_script(reply_text: &str) -> String {
 pub fn claude_capabilities_script() -> String {
     // The inner JSON quotes are escaped for the result string field.
     let report = r#"{\"tools\":[\"Bash\",\"Read\"],\"mcpServers\":[\"langfuse\"],\"accessibleDirs\":[\"/opt/extra\"],\"summary\":\"fake claude\"}"#;
-    format!(
-        "#!/bin/sh\nprintf '%s\\n' '{{\"type\":\"result\",\"result\":\"{report}\"}}'\n"
-    )
+    format!("#!/bin/sh\nprintf '%s\\n' '{{\"type\":\"result\",\"result\":\"{report}\"}}'\n")
 }
 
 /// A claude script that waits for one stdin line, then emits it back in the

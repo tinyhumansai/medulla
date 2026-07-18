@@ -337,7 +337,11 @@ fn de_session(value: &SerializedSession) -> RuntimeResult<SessionState> {
     }
     Ok(SessionState {
         dh_send_key_pair: de_key_pair(&value.dh_send_key_pair)?,
-        dh_recv_public_key: value.dh_recv_public_key.as_deref().map(de_b32).transpose()?,
+        dh_recv_public_key: value
+            .dh_recv_public_key
+            .as_deref()
+            .map(de_b32)
+            .transpose()?,
         root_key: de_b32(&value.root_key)?,
         send_chain_key: value.send_chain_key.as_deref().map(de_b32).transpose()?,
         recv_chain_key: value.recv_chain_key.as_deref().map(de_b32).transpose()?,
@@ -393,7 +397,9 @@ impl SessionStore for FileSessionStore {
     async fn store_signed_pre_key(&self, pre_key: SignedPreKeyPair) -> SdkResult<()> {
         let mut state = self.load()?;
         let key_id = pre_key.key_id.clone();
-        state.signed_pre_keys.insert(key_id.clone(), ser_pre_key(&pre_key));
+        state
+            .signed_pre_keys
+            .insert(key_id.clone(), ser_pre_key(&pre_key));
         state.active_signed_pre_key_id = Some(key_id);
         self.flush(&state)?;
         Ok(())
@@ -571,143 +577,146 @@ pub fn spawn_presence_heartbeat(client: TinyPlaceClient, interval: Duration) -> 
 
 #[cfg(test)]
 mod tests {
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::tinyplace_support::runtime::{load_or_create_identity, FileSessionStore};
-use tinyplace::signal::crypto::generate_x25519_keypair;
-use tinyplace::signal::keys::PreKeyPair;
-use tinyplace::signal::store::{SessionState, SessionStore};
-use tinyplace::Signer;
+    use crate::tinyplace_support::runtime::{load_or_create_identity, FileSessionStore};
+    use tinyplace::signal::crypto::generate_x25519_keypair;
+    use tinyplace::signal::keys::PreKeyPair;
+    use tinyplace::signal::store::{SessionState, SessionStore};
+    use tinyplace::Signer;
 
-/// A process/time-unique temp directory, created on demand.
-fn unique_temp_dir(tag: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("tinyplace-proto-{tag}-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
+    /// A process/time-unique temp directory, created on demand.
+    fn unique_temp_dir(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "tinyplace-proto-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
-#[tokio::test]
-async fn file_session_store_round_trips_prekeys_and_sessions() {
-    let dir = unique_temp_dir("store");
-    let path = FileSessionStore::default_path(&dir, "@alice:agent");
-    assert!(path.ends_with("signal/_alice_agent.json"));
+    #[tokio::test]
+    async fn file_session_store_round_trips_prekeys_and_sessions() {
+        let dir = unique_temp_dir("store");
+        let path = FileSessionStore::default_path(&dir, "@alice:agent");
+        assert!(path.ends_with("signal/_alice_agent.json"));
 
-    let identity = generate_x25519_keypair();
-    let store = FileSessionStore::new(&path, identity.clone());
+        let identity = generate_x25519_keypair();
+        let store = FileSessionStore::new(&path, identity.clone());
 
-    // Identity key pair comes straight back.
-    let got_identity = store.identity_x25519_key_pair().await.unwrap();
-    assert_eq!(got_identity.public_key, identity.public_key);
-    assert_eq!(got_identity.private_key, identity.private_key);
+        // Identity key pair comes straight back.
+        let got_identity = store.identity_x25519_key_pair().await.unwrap();
+        assert_eq!(got_identity.public_key, identity.public_key);
+        assert_eq!(got_identity.private_key, identity.private_key);
 
-    // Store a signed pre-key (also becomes the active one) and a one-time pre-key.
-    let signed = PreKeyPair {
-        key_id: "spk_1".to_string(),
-        key_pair: generate_x25519_keypair(),
-        signature: vec![1, 2, 3, 4, 5],
-    };
-    store.store_signed_pre_key(signed.clone()).await.unwrap();
+        // Store a signed pre-key (also becomes the active one) and a one-time pre-key.
+        let signed = PreKeyPair {
+            key_id: "spk_1".to_string(),
+            key_pair: generate_x25519_keypair(),
+            signature: vec![1, 2, 3, 4, 5],
+        };
+        store.store_signed_pre_key(signed.clone()).await.unwrap();
 
-    let one_time = PreKeyPair {
-        key_id: "pk_7".to_string(),
-        key_pair: generate_x25519_keypair(),
-        signature: vec![9, 8, 7],
-    };
-    store.store_pre_key(one_time.clone()).await.unwrap();
+        let one_time = PreKeyPair {
+            key_id: "pk_7".to_string(),
+            key_pair: generate_x25519_keypair(),
+            signature: vec![9, 8, 7],
+        };
+        store.store_pre_key(one_time.clone()).await.unwrap();
 
-    // A ratchet session with skipped keys.
-    let mut skipped = HashMap::new();
-    skipped.insert("abc:3".to_string(), [7u8; 32]);
-    let session = SessionState {
-        dh_send_key_pair: generate_x25519_keypair(),
-        dh_recv_public_key: Some([2u8; 32]),
-        root_key: [3u8; 32],
-        send_chain_key: Some([4u8; 32]),
-        recv_chain_key: None,
-        send_message_number: 5,
-        recv_message_number: 6,
-        previous_chain_length: 7,
-        skipped_keys: skipped,
-    };
-    store.store_session("@peer", session.clone()).await.unwrap();
+        // A ratchet session with skipped keys.
+        let mut skipped = HashMap::new();
+        skipped.insert("abc:3".to_string(), [7u8; 32]);
+        let session = SessionState {
+            dh_send_key_pair: generate_x25519_keypair(),
+            dh_recv_public_key: Some([2u8; 32]),
+            root_key: [3u8; 32],
+            send_chain_key: Some([4u8; 32]),
+            recv_chain_key: None,
+            send_message_number: 5,
+            recv_message_number: 6,
+            previous_chain_length: 7,
+            skipped_keys: skipped,
+        };
+        store.store_session("@peer", session.clone()).await.unwrap();
 
-    // A fresh store instance reads the same file from disk (no shared cache).
-    let reopened = FileSessionStore::new(&path, identity.clone());
+        // A fresh store instance reads the same file from disk (no shared cache).
+        let reopened = FileSessionStore::new(&path, identity.clone());
 
-    let active = reopened.active_signed_pre_key().await.unwrap();
-    assert_eq!(active.key_id, "spk_1");
-    assert_eq!(active.key_pair.public_key, signed.key_pair.public_key);
-    assert_eq!(active.signature, signed.signature);
+        let active = reopened.active_signed_pre_key().await.unwrap();
+        assert_eq!(active.key_id, "spk_1");
+        assert_eq!(active.key_pair.public_key, signed.key_pair.public_key);
+        assert_eq!(active.signature, signed.signature);
 
-    let got_signed = reopened.signed_pre_key("spk_1").await.unwrap().unwrap();
-    assert_eq!(got_signed.key_pair.private_key, signed.key_pair.private_key);
+        let got_signed = reopened.signed_pre_key("spk_1").await.unwrap().unwrap();
+        assert_eq!(got_signed.key_pair.private_key, signed.key_pair.private_key);
 
-    let got_pre = reopened.pre_key("pk_7").await.unwrap().unwrap();
-    assert_eq!(got_pre.key_pair.public_key, one_time.key_pair.public_key);
-    assert_eq!(got_pre.signature, one_time.signature);
-    assert_eq!(reopened.all_pre_keys().await.unwrap().len(), 1);
+        let got_pre = reopened.pre_key("pk_7").await.unwrap().unwrap();
+        assert_eq!(got_pre.key_pair.public_key, one_time.key_pair.public_key);
+        assert_eq!(got_pre.signature, one_time.signature);
+        assert_eq!(reopened.all_pre_keys().await.unwrap().len(), 1);
 
-    let got_session = reopened.session("@peer").await.unwrap().unwrap();
-    assert_eq!(
-        got_session.dh_send_key_pair.public_key,
-        session.dh_send_key_pair.public_key
-    );
-    assert_eq!(got_session.dh_recv_public_key, Some([2u8; 32]));
-    assert_eq!(got_session.root_key, [3u8; 32]);
-    assert_eq!(got_session.send_chain_key, Some([4u8; 32]));
-    assert_eq!(got_session.recv_chain_key, None);
-    assert_eq!(got_session.send_message_number, 5);
-    assert_eq!(got_session.recv_message_number, 6);
-    assert_eq!(got_session.previous_chain_length, 7);
-    assert_eq!(got_session.skipped_keys.get("abc:3"), Some(&[7u8; 32]));
+        let got_session = reopened.session("@peer").await.unwrap().unwrap();
+        assert_eq!(
+            got_session.dh_send_key_pair.public_key,
+            session.dh_send_key_pair.public_key
+        );
+        assert_eq!(got_session.dh_recv_public_key, Some([2u8; 32]));
+        assert_eq!(got_session.root_key, [3u8; 32]);
+        assert_eq!(got_session.send_chain_key, Some([4u8; 32]));
+        assert_eq!(got_session.recv_chain_key, None);
+        assert_eq!(got_session.send_message_number, 5);
+        assert_eq!(got_session.recv_message_number, 6);
+        assert_eq!(got_session.previous_chain_length, 7);
+        assert_eq!(got_session.skipped_keys.get("abc:3"), Some(&[7u8; 32]));
 
-    // Removal persists.
-    reopened.remove_pre_key("pk_7").await.unwrap();
-    reopened.remove_session("@peer").await.unwrap();
-    assert!(reopened.pre_key("pk_7").await.unwrap().is_none());
-    assert!(reopened.session("@peer").await.unwrap().is_none());
+        // Removal persists.
+        reopened.remove_pre_key("pk_7").await.unwrap();
+        reopened.remove_session("@peer").await.unwrap();
+        assert!(reopened.pre_key("pk_7").await.unwrap().is_none());
+        assert!(reopened.session("@peer").await.unwrap().is_none());
 
-    // The on-disk file uses the TS-compatible camelCase layout.
-    let raw = std::fs::read_to_string(&path).unwrap();
-    assert!(raw.contains("\"signedPreKeys\""));
-    assert!(raw.contains("\"activeSignedPreKeyId\""));
+        // The on-disk file uses the TS-compatible camelCase layout.
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("\"signedPreKeys\""));
+        assert!(raw.contains("\"activeSignedPreKeyId\""));
 
-    let _ = std::fs::remove_dir_all(&dir);
-}
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
-#[test]
-fn load_or_create_identity_is_deterministic_across_calls() {
-    let dir = unique_temp_dir("identity");
-    let config_path = dir.join("config.json");
-    let env: HashMap<String, String> = HashMap::new();
+    #[test]
+    fn load_or_create_identity_is_deterministic_across_calls() {
+        let dir = unique_temp_dir("identity");
+        let config_path = dir.join("config.json");
+        let env: HashMap<String, String> = HashMap::new();
 
-    // First call: no key anywhere, mint and persist.
-    let (signer1, config1) = load_or_create_identity(&config_path, &env).unwrap();
-    let agent1 = signer1.agent_id();
-    let key = config1.secret_key.clone().expect("secret persisted");
-    assert_eq!(key.len(), 64, "seed is 64 hex chars");
-    assert!(config_path.exists(), "config written");
+        // First call: no key anywhere, mint and persist.
+        let (signer1, config1) = load_or_create_identity(&config_path, &env).unwrap();
+        let agent1 = signer1.agent_id();
+        let key = config1.secret_key.clone().expect("secret persisted");
+        assert_eq!(key.len(), 64, "seed is 64 hex chars");
+        assert!(config_path.exists(), "config written");
 
-    // Second call: reads the persisted seed and yields the same identity.
-    let (signer2, config2) = load_or_create_identity(&config_path, &env).unwrap();
-    assert_eq!(signer2.agent_id(), agent1);
-    assert_eq!(config2.secret_key.as_deref(), Some(key.as_str()));
+        // Second call: reads the persisted seed and yields the same identity.
+        let (signer2, config2) = load_or_create_identity(&config_path, &env).unwrap();
+        assert_eq!(signer2.agent_id(), agent1);
+        assert_eq!(config2.secret_key.as_deref(), Some(key.as_str()));
 
-    // An env-provided key overrides the file.
-    let other = tinyplace::LocalSigner::generate();
-    let other_hex: String = other.seed().iter().map(|b| format!("{b:02x}")).collect();
-    let mut env2 = HashMap::new();
-    env2.insert("TINYPLACE_SECRET_KEY".to_string(), other_hex.clone());
-    let (signer3, config3) = load_or_create_identity(&config_path, &env2).unwrap();
-    assert_eq!(signer3.agent_id(), other.agent_id());
-    assert_eq!(config3.secret_key.as_deref(), Some(other_hex.as_str()));
+        // An env-provided key overrides the file.
+        let other = tinyplace::LocalSigner::generate();
+        let other_hex: String = other.seed().iter().map(|b| format!("{b:02x}")).collect();
+        let mut env2 = HashMap::new();
+        env2.insert("TINYPLACE_SECRET_KEY".to_string(), other_hex.clone());
+        let (signer3, config3) = load_or_create_identity(&config_path, &env2).unwrap();
+        assert_eq!(signer3.agent_id(), other.agent_id());
+        assert_eq!(config3.secret_key.as_deref(), Some(other_hex.as_str()));
 
-    let _ = std::fs::remove_dir_all(&dir);
-}
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

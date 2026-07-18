@@ -213,7 +213,10 @@ fn claude_user_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSemanticEv
             }
         }
         Some("tool_result") => {
-            let call_id = object.get("tool_use_id").and_then(Value::as_str).unwrap_or("");
+            let call_id = object
+                .get("tool_use_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             let is_error = object.get("is_error") == Some(&Value::Bool(true));
             let output = flatten_claude_tool_result(object.get("content"));
             vec![semantic(
@@ -270,7 +273,10 @@ fn claude_assistant_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSeman
             }
         }
         Some("tool_use") => {
-            let tool_name = object.get("name").and_then(Value::as_str).unwrap_or("unknown");
+            let tool_name = object
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
             let call_id = object.get("id").and_then(Value::as_str).unwrap_or("");
             let input = object.get("input").cloned().unwrap_or(Value::Null);
             vec![semantic(
@@ -296,7 +302,10 @@ fn flatten_claude_tool_result(content: Option<&Value>) -> String {
                 if object.get("type").and_then(Value::as_str) != Some("text") {
                     return None;
                 }
-                object.get("text").and_then(Value::as_str).map(str::to_string)
+                object
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -338,9 +347,7 @@ fn codex_events_from_line(raw: &str, line: i64) -> Vec<HarnessSemanticEvent> {
             .get("message")
             .and_then(Value::as_str)
             .map(str::to_string)
-            .unwrap_or_else(|| {
-                text_from_content(payload.get("content"), &["output_text", "text"])
-            });
+            .unwrap_or_else(|| text_from_content(payload.get("content"), &["output_text", "text"]));
         return if text.is_empty() {
             Vec::new()
         } else {
@@ -510,7 +517,11 @@ fn opencode_events_from_line(raw: &str, line: i64) -> Vec<HarnessSemanticEvent> 
 
     if record_type == Some("error") {
         let message = describe_opencode_error(record.get("error")).unwrap_or_else(|| {
-            safe_stringify(record.get("error").unwrap_or(&Value::Object(record.clone())))
+            safe_stringify(
+                record
+                    .get("error")
+                    .unwrap_or(&Value::Object(record.clone())),
+            )
         });
         return vec![semantic(
             line,
@@ -646,7 +657,10 @@ pub fn normalize_tool_kind(name: &str) -> &'static str {
     if lower.starts_with("mcp__") || lower.contains("mcp") {
         return "mcp";
     }
-    if contains_any(&lower, &["bash", "shell", "exec", "command", "terminal", "run"]) {
+    if contains_any(
+        &lower,
+        &["bash", "shell", "exec", "command", "terminal", "run"],
+    ) {
         return "shell";
     }
     if contains_any(&lower, &["multiedit", "edit", "apply_patch", "patch"]) {
@@ -762,7 +776,10 @@ fn text_from_content(content: Option<&Value>, allowed_types: &[&str]) -> String 
                 if !allowed_types.contains(&kind) {
                     return None;
                 }
-                object.get("text").and_then(Value::as_str).map(str::to_string)
+                object
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -944,8 +961,15 @@ mod tests {
         let event_msg = r#"{"type":"event_msg","timestamp":"2026-07-05T00:00:00.000Z","payload":{"type":"agent_message","message":"final answer"}}"#;
         let response_item = r#"{"type":"response_item","timestamp":"2026-07-05T00:00:00.500Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"final answer"}]}}"#;
         let events = map_all("codex", &[event_msg, response_item]);
-        let messages: Vec<_> = events.iter().filter(|e| kind_of(e) == "agent_message").collect();
-        assert_eq!(messages.len(), 1, "duplicate agent_message should be dropped");
+        let messages: Vec<_> = events
+            .iter()
+            .filter(|e| kind_of(e) == "agent_message")
+            .collect();
+        assert_eq!(
+            messages.len(),
+            1,
+            "duplicate agent_message should be dropped"
+        );
         assert_eq!(messages[0].event.payload["text"], "final answer");
     }
 
@@ -979,7 +1003,8 @@ mod tests {
         let text = r#"{"type":"text","part":{"type":"text","text":"working on it"}}"#;
         let tool_call = r#"{"type":"tool","part":{"type":"tool","tool":"read","callID":"r1","state":{"status":"running","input":{"file_path":"/a/b.rs"}}}}"#;
         let tool_result = r#"{"type":"tool","part":{"type":"tool","tool":"read","callID":"r1","state":{"status":"completed","output":"contents"}}}"#;
-        let error = r#"{"type":"error","error":{"name":"ProviderError","data":{"message":"no creds"}}}"#;
+        let error =
+            r#"{"type":"error","error":{"name":"ProviderError","data":{"message":"no creds"}}}"#;
         let events = map_all("opencode", &[text, tool_call, tool_result, error]);
         assert_eq!(kind_of(&events[0]), "agent_message");
         assert_eq!(events[0].event.payload["text"], "working on it");
@@ -989,7 +1014,10 @@ mod tests {
         assert_eq!(kind_of(&events[2]), "tool_result");
         assert_eq!(events[2].event.payload["output"], "contents");
         assert_eq!(kind_of(&events[3]), "error");
-        assert_eq!(events[3].event.payload["message"], "ProviderError: no creds");
+        assert_eq!(
+            events[3].event.payload["message"],
+            "ProviderError: no creds"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! A [`Runtime`] backed by the core-js orchestration core over its NDJSON Unix
 //! socket ([`CoreClient`]). This is the second concrete runtime alongside
-//! [`BackendRuntime`](crate::backend_runtime) (HTTP/SSE) and
-//! [`MockRuntime`](crate::mock_runtime).
+//! [`BackendRuntime`](crate::runtime::backend) (HTTP/SSE) and
+//! [`MockRuntime`](crate::runtime::mock).
 //!
 //! Threads map to core threads (`thread.list`/`create`/`resume`/`fork`), each with a
 //! `thread.subscribe` tap. One connection-wide event receiver funnels every frame;
@@ -26,13 +26,13 @@ use futures::future::BoxFuture;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::chat_store::{now_millis, ChatMessage, MainChatSummary};
-use crate::core_client::{CoreClient, CoreEvent, SeqTracker};
-use crate::events::{EventEnvelope, TaskDigest, TuiEvent, Usage};
+use crate::runtime::core_client::{CoreClient, CoreEvent, SeqTracker};
 use crate::runtime::{
     AgentDescriptor, ContextItem, CycleResultSummary, Runtime, RuntimeSnapshot, StreamState,
     ThreadSummary, TinyplaceIdentity, WorkerInfo, WorkerOp,
 };
+use crate::ui::chat_store::{now_millis, ChatMessage, MainChatSummary};
+use crate::ui::events::{EventEnvelope, TaskDigest, TuiEvent, Usage};
 
 const EVENT_CAP: usize = 5000;
 const CHAT_CAP: usize = 2000;
@@ -50,14 +50,22 @@ fn compose_task_id(cycle_id: &str, task_id: &str) -> String {
 }
 
 fn opt_str(v: &Value, k: &str) -> Option<String> {
-    v.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string)
+    v.get(k)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// Map a core event body `{kind, ...}` onto the TUI's [`TuiEvent`], applying the §3.3
 /// normalizations. `cycle_id` comes from the envelope (§3.2).
 pub fn map_core_event(body: &Value, cycle_id: &str) -> TuiEvent {
     let kind = body.get("kind").and_then(Value::as_str).unwrap_or("");
-    let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let s = |k: &str| {
+        body.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     let i = |k: &str| body.get(k).and_then(Value::as_i64).unwrap_or(0);
     match kind {
         "task_start" => TuiEvent::TaskStart {
@@ -83,7 +91,11 @@ pub fn map_core_event(body: &Value, cycle_id: &str) -> TuiEvent {
             // level, not under `digest`. Rebuild the TUI's nested `TaskDigest`.
             let status = {
                 let raw = s("status");
-                if raw.is_empty() { "done".into() } else { raw }
+                if raw.is_empty() {
+                    "done".into()
+                } else {
+                    raw
+                }
             };
             let usage = body
                 .get("usage")
@@ -101,10 +113,12 @@ pub fn map_core_event(body: &Value, cycle_id: &str) -> TuiEvent {
         }
         // Everything else deserializes straight through the TuiEvent vocabulary; an
         // unknown kind rides through as `Unknown` rather than being dropped.
-        _ => serde_json::from_value::<TuiEvent>(body.clone()).unwrap_or_else(|_| TuiEvent::Unknown {
-            kind: kind.to_string(),
-            data: body.as_object().cloned().unwrap_or_default(),
-        }),
+        _ => {
+            serde_json::from_value::<TuiEvent>(body.clone()).unwrap_or_else(|_| TuiEvent::Unknown {
+                kind: kind.to_string(),
+                data: body.as_object().cloned().unwrap_or_default(),
+            })
+        }
     }
 }
 
@@ -114,14 +128,25 @@ pub fn map_core_event(body: &Value, cycle_id: &str) -> TuiEvent {
 /// assistant turn. The synthetic seqs start at `*seq` and advance it.
 fn synth_from_snapshot(snapshot: &Value, seq: &mut u64) -> Vec<EventEnvelope> {
     let mut out = Vec::new();
-    let at = snapshot.get("at").and_then(Value::as_i64).unwrap_or_else(now_millis);
+    let at = snapshot
+        .get("at")
+        .and_then(Value::as_i64)
+        .unwrap_or_else(now_millis);
     let mut push = |seq: &mut u64, event: TuiEvent| {
         *seq += 1;
-        out.push(EventEnvelope { seq: *seq, at, event });
+        out.push(EventEnvelope {
+            seq: *seq,
+            at,
+            event,
+        });
     };
     if let Some(chat) = snapshot.get("chat").and_then(Value::as_array) {
         for c in chat {
-            let body = c.get("body").and_then(Value::as_str).unwrap_or("").to_string();
+            let body = c
+                .get("body")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             match c.get("role").and_then(Value::as_str) {
                 Some("user") => push(seq, TuiEvent::User { body }),
                 Some("assistant") => push(seq, TuiEvent::Assistant { body }),
@@ -132,12 +157,19 @@ fn synth_from_snapshot(snapshot: &Value, seq: &mut u64) -> Vec<EventEnvelope> {
     if let Some(tasks) = snapshot.get("tasks").and_then(Value::as_array) {
         for t in tasks {
             let cycle_id = t.get("cycleId").and_then(Value::as_str).unwrap_or("");
-            let task_id = compose_task_id(cycle_id, t.get("taskId").and_then(Value::as_str).unwrap_or(""));
+            let task_id = compose_task_id(
+                cycle_id,
+                t.get("taskId").and_then(Value::as_str).unwrap_or(""),
+            );
             push(
                 seq,
                 TuiEvent::TaskStart {
                     task_id: task_id.clone(),
-                    instruction: t.get("instruction").and_then(Value::as_str).unwrap_or("").to_string(),
+                    instruction: t
+                        .get("instruction")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
                     depth: t.get("depth").and_then(Value::as_i64).unwrap_or(0),
                     agent_id: opt_str(t, "agentId"),
                 },
@@ -147,22 +179,36 @@ fn synth_from_snapshot(snapshot: &Value, seq: &mut u64) -> Vec<EventEnvelope> {
                     seq,
                     TuiEvent::TaskEvent {
                         task_id: task_id.clone(),
-                        event_kind: le.get("eventKind").and_then(Value::as_str).unwrap_or("status").to_string(),
-                        content: le.get("content").and_then(Value::as_str).unwrap_or("").to_string(),
+                        event_kind: le
+                            .get("eventKind")
+                            .and_then(Value::as_str)
+                            .unwrap_or("status")
+                            .to_string(),
+                        content: le
+                            .get("content")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
                         harness: opt_str(t, "harness"),
                     },
                 );
             }
             let status = t.get("status").and_then(Value::as_str).unwrap_or("running");
             if status != "running" {
-                let usage = t.get("usage").and_then(|u| serde_json::from_value::<Usage>(u.clone()).ok());
+                let usage = t
+                    .get("usage")
+                    .and_then(|u| serde_json::from_value::<Usage>(u.clone()).ok());
                 push(
                     seq,
                     TuiEvent::TaskComplete {
                         digest: TaskDigest {
                             task_id,
                             status: status.to_string(),
-                            digest: t.get("digest").and_then(Value::as_str).unwrap_or("").to_string(),
+                            digest: t
+                                .get("digest")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
                             result_ref: None,
                             usage,
                             depth: t.get("depth").and_then(Value::as_i64).unwrap_or(0),
@@ -224,7 +270,10 @@ struct State {
 
 impl State {
     fn active(&self) -> &Thread {
-        self.threads.iter().find(|t| t.id == self.active_id).expect("active thread")
+        self.threads
+            .iter()
+            .find(|t| t.id == self.active_id)
+            .expect("active thread")
     }
     fn by_id(&mut self, id: &str) -> Option<&mut Thread> {
         self.threads.iter_mut().find(|t| t.id == id)
@@ -329,7 +378,10 @@ impl CoreRuntime {
             .map_err(|e| anyhow!("core handshake failed: {e}"))?;
 
         // Adopt the first existing thread, or create one.
-        let listed = client.thread_list().await.map_err(|e| anyhow!(e.to_string()))?;
+        let listed = client
+            .thread_list()
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?;
         let core_id = listed
             .get("threads")
             .and_then(Value::as_array)
@@ -357,15 +409,25 @@ impl CoreRuntime {
         };
 
         // Subscribe + seed the active thread's snapshot before any live event lands.
-        let sub = client.thread_subscribe(&core_id, None).await.map_err(|e| anyhow!(e.to_string()))?;
+        let sub = client
+            .thread_subscribe(&core_id, None)
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?;
         let baseline = sub.get("baselineSeq").and_then(Value::as_u64).unwrap_or(0);
         if let Some(snapshot) = sub.get("snapshot") {
             let synth = synth_from_snapshot(snapshot, &mut state.seq);
             let t = &mut state.threads[0];
             for env in synth {
                 if let TuiEvent::User { body } | TuiEvent::Assistant { body } = &env.event {
-                    let role = if matches!(env.event, TuiEvent::User { .. }) { "user" } else { "assistant" };
-                    t.messages.push(ChatMessage { role: role.into(), content: body.clone() });
+                    let role = if matches!(env.event, TuiEvent::User { .. }) {
+                        "user"
+                    } else {
+                        "assistant"
+                    };
+                    t.messages.push(ChatMessage {
+                        role: role.into(),
+                        content: body.clone(),
+                    });
                 }
                 State::push_event(t, env);
             }
@@ -437,13 +499,18 @@ impl CoreRuntime {
                             t.chat_events.clear();
                             t.messages.clear();
                             for env in synth {
-                                if let TuiEvent::User { body } | TuiEvent::Assistant { body } = &env.event {
+                                if let TuiEvent::User { body } | TuiEvent::Assistant { body } =
+                                    &env.event
+                                {
                                     let role = if matches!(env.event, TuiEvent::User { .. }) {
                                         "user"
                                     } else {
                                         "assistant"
                                     };
-                                    t.messages.push(ChatMessage { role: role.into(), content: body.clone() });
+                                    t.messages.push(ChatMessage {
+                                        role: role.into(),
+                                        content: body.clone(),
+                                    });
                                 }
                                 State::push_event(t, env);
                             }
@@ -484,12 +551,14 @@ impl CoreRuntime {
                     }
                     if let Some(t) = s.by_core(&ev.thread_id) {
                         match &event {
-                            TuiEvent::User { body } => {
-                                t.messages.push(ChatMessage { role: "user".into(), content: body.clone() })
-                            }
-                            TuiEvent::Assistant { body } => t
-                                .messages
-                                .push(ChatMessage { role: "assistant".into(), content: body.clone() }),
+                            TuiEvent::User { body } => t.messages.push(ChatMessage {
+                                role: "user".into(),
+                                content: body.clone(),
+                            }),
+                            TuiEvent::Assistant { body } => t.messages.push(ChatMessage {
+                                role: "assistant".into(),
+                                content: body.clone(),
+                            }),
                             TuiEvent::CycleStart { .. } => t.running = true,
                             TuiEvent::CycleEnd { pass_count, .. } => {
                                 t.running = false;
@@ -500,7 +569,14 @@ impl CoreRuntime {
                             }
                             _ => {}
                         }
-                        State::push_event(t, EventEnvelope { seq, at: ev.at, event });
+                        State::push_event(
+                            t,
+                            EventEnvelope {
+                                seq,
+                                at: ev.at,
+                                event,
+                            },
+                        );
                     }
                 }
                 let _ = tx.send(());
@@ -655,9 +731,18 @@ impl Runtime for CoreRuntime {
             s.next_thread += 1;
             let (src_core, parent, messages, chat_events) = {
                 let a = s.active();
-                (a.core_id.clone(), a.id.clone(), a.messages.clone(), a.chat_events.clone())
+                (
+                    a.core_id.clone(),
+                    a.id.clone(),
+                    a.messages.clone(),
+                    a.chat_events.clone(),
+                )
             };
-            let mut child = Thread::new(&id, &name.clone().unwrap_or_else(|| format!("fork {id}")), String::new());
+            let mut child = Thread::new(
+                &id,
+                &name.clone().unwrap_or_else(|| format!("fork {id}")),
+                String::new(),
+            );
             child.parent_id = Some(parent);
             child.messages = messages.clone();
             child.events = chat_events.clone();
@@ -706,7 +791,10 @@ impl Runtime for CoreRuntime {
     fn list_main_chats(&self) -> BoxFuture<'static, anyhow::Result<Vec<MainChatSummary>>> {
         let client = self.client.clone();
         Box::pin(async move {
-            let listed = client.thread_list().await.map_err(|e| anyhow!(e.to_string()))?;
+            let listed = client
+                .thread_list()
+                .await
+                .map_err(|e| anyhow!(e.to_string()))?;
             let rows = listed
                 .get("threads")
                 .and_then(Value::as_array)
@@ -724,7 +812,8 @@ impl Runtime for CoreRuntime {
                             Some(MainChatSummary {
                                 session_id: id,
                                 name,
-                                turns: t.get("cycleSeq").and_then(Value::as_u64).unwrap_or(0) as usize,
+                                turns: t.get("cycleSeq").and_then(Value::as_u64).unwrap_or(0)
+                                    as usize,
                                 thread_count: 1,
                                 updated_at: String::new(),
                             })
@@ -741,7 +830,10 @@ impl Runtime for CoreRuntime {
         let state = self.state.clone();
         let tx = self.tx.clone();
         Box::pin(async move {
-            client.thread_resume(&main_session_id).await.map_err(|e| anyhow!(e.to_string()))?;
+            client
+                .thread_resume(&main_session_id)
+                .await
+                .map_err(|e| anyhow!(e.to_string()))?;
             let sub = client
                 .thread_subscribe(&main_session_id, None)
                 .await
@@ -753,7 +845,10 @@ impl Runtime for CoreRuntime {
             }
             let base = s.seq;
             let mut seq = base;
-            let synth = sub.get("snapshot").map(|snap| synth_from_snapshot(snap, &mut seq)).unwrap_or_default();
+            let synth = sub
+                .get("snapshot")
+                .map(|snap| synth_from_snapshot(snap, &mut seq))
+                .unwrap_or_default();
             s.seq = seq;
             let id = s.active_id.clone();
             if let Some(t) = s.by_id(&id) {
@@ -764,8 +859,15 @@ impl Runtime for CoreRuntime {
                 t.seq_tracker = SeqTracker::new(baseline);
                 for env in synth {
                     if let TuiEvent::User { body } | TuiEvent::Assistant { body } = &env.event {
-                        let role = if matches!(env.event, TuiEvent::User { .. }) { "user" } else { "assistant" };
-                        t.messages.push(ChatMessage { role: role.into(), content: body.clone() });
+                        let role = if matches!(env.event, TuiEvent::User { .. }) {
+                            "user"
+                        } else {
+                            "assistant"
+                        };
+                        t.messages.push(ChatMessage {
+                            role: role.into(),
+                            content: body.clone(),
+                        });
                     }
                     State::push_event(t, env);
                 }
@@ -789,8 +891,13 @@ impl Runtime for CoreRuntime {
         let client = self.client.clone();
         let cycle_id = { self.state.lock().unwrap().active().latest_cycle_id.clone() };
         Box::pin(async move {
-            let Some(cid) = cycle_id else { return Ok(Vec::new()) };
-            let payload = client.context_inspect(&cid).await.map_err(|e| anyhow!(e.to_string()))?;
+            let Some(cid) = cycle_id else {
+                return Ok(Vec::new());
+            };
+            let payload = client
+                .context_inspect(&cid)
+                .await
+                .map_err(|e| anyhow!(e.to_string()))?;
             let items = payload
                 .get("chunks")
                 .and_then(Value::as_array)
@@ -798,10 +905,22 @@ impl Runtime for CoreRuntime {
                     chunks
                         .iter()
                         .map(|c| {
-                            let text = c.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+                            let text = c
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
                             ContextItem {
-                                ref_: c.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
-                                kind: c.get("kind").and_then(Value::as_str).unwrap_or("chunk").to_string(),
+                                ref_: c
+                                    .get("id")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_string(),
+                                kind: c
+                                    .get("kind")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("chunk")
+                                    .to_string(),
                                 bytes: text.len(),
                                 content: text,
                             }
@@ -846,7 +965,12 @@ impl Runtime for CoreRuntime {
         let tx = self.tx.clone();
         Box::pin(async move {
             let result = match op {
-                WorkerOp::Add { address, handle, label, harness } => {
+                WorkerOp::Add {
+                    address,
+                    handle,
+                    label,
+                    harness,
+                } => {
                     client
                         .worker_add(
                             address.as_deref(),
@@ -857,7 +981,9 @@ impl Runtime for CoreRuntime {
                         .await
                 }
                 WorkerOp::Select { id } => client.worker_select(&id).await,
-                WorkerOp::Update { id, patch } => client.worker_update(&id, Value::Object(patch)).await,
+                WorkerOp::Update { id, patch } => {
+                    client.worker_update(&id, Value::Object(patch)).await
+                }
                 WorkerOp::Remove { id } => client.worker_remove(&id).await,
             };
             match result {
@@ -893,7 +1019,11 @@ impl State {
     /// Reset the active thread's local state (keeps its id, clears its core binding).
     fn active_mut_reset(&mut self) -> &mut Thread {
         let id = self.active_id.clone();
-        let t = self.threads.iter_mut().find(|t| t.id == id).expect("active thread");
+        let t = self
+            .threads
+            .iter_mut()
+            .find(|t| t.id == id)
+            .expect("active thread");
         t.core_id.clear();
         t.messages.clear();
         t.events.clear();
@@ -908,7 +1038,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::{derive_agent_lanes, TaskStatus};
+    use crate::ui::agents::{derive_agent_lanes, TaskStatus};
 
     fn ev(cycle: &str, body: Value) -> TuiEvent {
         map_core_event(&body, cycle)
@@ -936,15 +1066,28 @@ mod tests {
     fn cycle_id_folds_into_the_lane_key() {
         // §3.3(2): two cycles delegating the bare `t1` never collide into one lane.
         let events: Vec<EventEnvelope> = [
-            ev("cyc:app:th:1", json!({"kind":"task_start","taskId":"t1","instruction":"a","depth":1})),
-            ev("cyc:app:th:2", json!({"kind":"task_start","taskId":"t1","instruction":"b","depth":1})),
+            ev(
+                "cyc:app:th:1",
+                json!({"kind":"task_start","taskId":"t1","instruction":"a","depth":1}),
+            ),
+            ev(
+                "cyc:app:th:2",
+                json!({"kind":"task_start","taskId":"t1","instruction":"b","depth":1}),
+            ),
         ]
         .into_iter()
         .enumerate()
-        .map(|(i, event)| EventEnvelope { seq: i as u64, at: i as i64, event })
+        .map(|(i, event)| EventEnvelope {
+            seq: i as u64,
+            at: i as i64,
+            event,
+        })
         .collect();
         let lanes = derive_agent_lanes(&events, "CORE", &[]);
-        let workers: Vec<_> = lanes.iter().filter(|l| l.key.starts_with("worker:")).collect();
+        let workers: Vec<_> = lanes
+            .iter()
+            .filter(|l| l.key.starts_with("worker:"))
+            .collect();
         assert_eq!(workers.len(), 2, "two distinct cycle-scoped lanes expected");
     }
 
@@ -954,7 +1097,10 @@ mod tests {
         let events = vec![EventEnvelope {
             seq: 1,
             at: 1,
-            event: ev("cyc:app:th:1", json!({"kind":"task_complete","taskId":"t1","status":"cancelled","digest":""})),
+            event: ev(
+                "cyc:app:th:1",
+                json!({"kind":"task_complete","taskId":"t1","status":"cancelled","digest":""}),
+            ),
         }];
         let lanes = derive_agent_lanes(&events, "CORE", &[]);
         let lane = lanes.iter().find(|l| l.key.starts_with("worker:")).unwrap();
@@ -967,7 +1113,10 @@ mod tests {
         let events = vec![EventEnvelope {
             seq: 1,
             at: 1,
-            event: ev("cyc:app:th:1", json!({"kind":"task_complete","taskId":"orphan","status":"done","digest":"d"})),
+            event: ev(
+                "cyc:app:th:1",
+                json!({"kind":"task_complete","taskId":"orphan","status":"done","digest":"d"}),
+            ),
         }];
         let lanes = derive_agent_lanes(&events, "CORE", &[]);
         let lane = lanes.iter().find(|l| l.key.starts_with("worker:"));
@@ -985,7 +1134,10 @@ mod tests {
         let mut seq = 0;
         let synth = synth_from_snapshot(&snapshot, &mut seq);
         let kinds: Vec<&str> = synth.iter().map(|e| e.event.kind()).collect();
-        assert_eq!(kinds, vec!["user", "assistant", "task_start", "task_complete"]);
+        assert_eq!(
+            kinds,
+            vec!["user", "assistant", "task_start", "task_complete"]
+        );
         assert_eq!(seq, 4);
     }
 

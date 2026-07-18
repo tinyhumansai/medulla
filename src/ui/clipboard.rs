@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 
 use base64::Engine;
 
-use crate::events::{chat_transcript, last_assistant_message, EventEnvelope};
+use crate::ui::events::{chat_transcript, last_assistant_message, EventEnvelope};
 
 /// Sentinel returned when the copy fell through to the OSC 52 backstop. Unlike a
 /// writer exiting 0 this is "handed to the terminal", NOT "copied" — callers must
@@ -24,12 +24,27 @@ pub struct Writer {
 /// Clipboard binaries to try, in order. The X11/Wayland set backstops the other
 /// unixes, which ship the same tools.
 pub fn writers(platform: &str) -> &'static [Writer] {
-    const DARWIN: &[Writer] = &[Writer { cmd: "pbcopy", args: &[] }];
-    const WIN: &[Writer] = &[Writer { cmd: "clip", args: &[] }];
+    const DARWIN: &[Writer] = &[Writer {
+        cmd: "pbcopy",
+        args: &[],
+    }];
+    const WIN: &[Writer] = &[Writer {
+        cmd: "clip",
+        args: &[],
+    }];
     const LINUX: &[Writer] = &[
-        Writer { cmd: "wl-copy", args: &[] },
-        Writer { cmd: "xclip", args: &["-selection", "clipboard"] },
-        Writer { cmd: "xsel", args: &["--clipboard", "--input"] },
+        Writer {
+            cmd: "wl-copy",
+            args: &[],
+        },
+        Writer {
+            cmd: "xclip",
+            args: &["-selection", "clipboard"],
+        },
+        Writer {
+            cmd: "xsel",
+            args: &["--clipboard", "--input"],
+        },
     ];
     match platform {
         "macos" => DARWIN,
@@ -99,7 +114,7 @@ pub fn copy_text(events: &[EventEnvelope], scope: &CopyScope) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::TuiEvent;
+    use crate::ui::events::TuiEvent;
 
     #[test]
     fn osc52_wraps_base64() {
@@ -132,8 +147,16 @@ mod tests {
     #[test]
     fn copy_text_scopes() {
         let events = vec![
-            EventEnvelope { seq: 1, at: 0, event: TuiEvent::User { body: "q".into() } },
-            EventEnvelope { seq: 2, at: 0, event: TuiEvent::Assistant { body: "a".into() } },
+            EventEnvelope {
+                seq: 1,
+                at: 0,
+                event: TuiEvent::User { body: "q".into() },
+            },
+            EventEnvelope {
+                seq: 2,
+                at: 0,
+                event: TuiEvent::Assistant { body: "a".into() },
+            },
         ];
         assert_eq!(copy_text(&events, &CopyScope::Last), "a");
         assert_eq!(copy_text(&events, &CopyScope::All), "> q\n\na");

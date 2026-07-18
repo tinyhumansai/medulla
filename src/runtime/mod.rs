@@ -1,6 +1,12 @@
-//! The `Runtime` trait the UI drives, plus its snapshot contract. A concrete
-//! backend implementation lands separately; the UI depends only on this trait
-//! and the [`MockRuntime`](crate::mock_runtime::MockRuntime).
+//! The `Runtime` trait the UI drives, plus its snapshot contract. Concrete
+//! implementations live alongside: [`backend`] (HTTP/SSE), [`core`] (the
+//! core-js Unix socket, via [`core_client`]), and [`mock`] for tests and demos.
+//! The UI depends only on the trait and its types.
+
+pub mod backend;
+pub mod core;
+pub mod core_client;
+pub mod mock;
 
 use std::collections::HashMap;
 
@@ -9,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::broadcast;
 
-use crate::chat_store::{ChatMessage, MainChatSummary};
-use crate::events::{EventEnvelope, TaskDigest};
+use crate::ui::chat_store::{ChatMessage, MainChatSummary};
+use crate::ui::events::{EventEnvelope, TaskDigest};
 
 /// A connected agent medulla can delegate to.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

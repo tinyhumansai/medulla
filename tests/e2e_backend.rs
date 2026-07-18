@@ -9,9 +9,9 @@ use std::time::Duration;
 use serde_json::json;
 
 use medulla::client::MedullaClient;
-use medulla::backend_runtime::BackendRuntime;
-use medulla::events::TuiEvent;
+use medulla::runtime::backend::BackendRuntime;
 use medulla::runtime::{Runtime, RuntimeSnapshot};
+use medulla::ui::events::TuiEvent;
 
 use support::mock_backend::{MockBackend, MockConfig};
 use support::wait_until;
@@ -22,7 +22,10 @@ const T: Duration = Duration::from_secs(5);
 async fn connect(mock: &MockBackend) -> BackendRuntime {
     let client = MedullaClient::new(&mock.base_url, "jwt-test");
     let rt = BackendRuntime::connect(client).await.expect("connect");
-    wait_until("initial stream connects", T, || mock.stream_connections() >= 1).await;
+    wait_until("initial stream connects", T, || {
+        mock.stream_connections() >= 1
+    })
+    .await;
     rt
 }
 
@@ -32,7 +35,9 @@ fn chat_bodies(snap: &RuntimeSnapshot) -> Vec<(String, String)> {
         .filter_map(|env| match &env.event {
             TuiEvent::User { body } => Some(("user".to_string(), body.clone())),
             TuiEvent::Assistant { body } => Some(("assistant".to_string(), body.clone())),
-            TuiEvent::Error { source, message } => Some((format!("error:{source}"), message.clone())),
+            TuiEvent::Error { source, message } => {
+                Some((format!("error:{source}"), message.clone()))
+            }
             _ => None,
         })
         .collect()
@@ -50,7 +55,11 @@ async fn full_chat_round_trip() {
 
     mock.emit_ping();
     mock.emit(2, "sess-1", json!({"kind": "cycle_start", "cycleId": "c1"}));
-    mock.emit(3, "sess-1", json!({"kind": "assistant", "body": "hi there"}));
+    mock.emit(
+        3,
+        "sess-1",
+        json!({"kind": "assistant", "body": "hi there"}),
+    );
     mock.emit(
         4,
         "sess-1",
@@ -69,8 +78,14 @@ async fn full_chat_round_trip() {
     assert_eq!(lr.pass_count, 2);
 
     let chat = chat_bodies(&snap);
-    assert!(chat.contains(&("user".into(), "hello".into())), "chat: {chat:?}");
-    assert!(chat.contains(&("assistant".into(), "hi there".into())), "chat: {chat:?}");
+    assert!(
+        chat.contains(&("user".into(), "hello".into())),
+        "chat: {chat:?}"
+    );
+    assert!(
+        chat.contains(&("assistant".into(), "hi there".into())),
+        "chat: {chat:?}"
+    );
     // Messages track user + assistant turns.
     assert_eq!(snap.messages.len(), 2);
     assert_eq!(snap.messages[0].role, "user");
@@ -100,7 +115,11 @@ async fn optimistic_user_echo_is_deduped() {
         .into_iter()
         .filter(|(r, _)| r == "user")
         .collect();
-    assert_eq!(users.len(), 1, "duplicate user echo must be dropped: {users:?}");
+    assert_eq!(
+        users.len(),
+        1,
+        "duplicate user echo must be dropped: {users:?}"
+    );
     let user_msgs = snap.messages.iter().filter(|m| m.role == "user").count();
     assert_eq!(user_msgs, 1, "no duplicate user message");
 }
@@ -149,7 +168,10 @@ async fn stream_reconnect_resumes_without_dupes() {
 
     // Drop the connection; the client reconnects (with its cursor) after backoff.
     mock.close_stream();
-    wait_until("reconnect", Duration::from_secs(8), || mock.stream_connections() >= 2).await;
+    wait_until("reconnect", Duration::from_secs(8), || {
+        mock.stream_connections() >= 2
+    })
+    .await;
 
     // Remaining events on the new connection. The reconnect replays 1&2 (deduped).
     mock.emit(3, "sess-1", json!({"kind": "assistant", "body": "part2"}));
@@ -166,7 +188,11 @@ async fn stream_reconnect_resumes_without_dupes() {
         .filter(|(r, _)| r == "assistant")
         .map(|(_, b)| b)
         .collect();
-    assert_eq!(assistants, vec!["part1", "part2"], "each event exactly once");
+    assert_eq!(
+        assistants,
+        vec!["part1", "part2"],
+        "each event exactly once"
+    );
 
     // The reconnect carried a Last-Event-ID header.
     let stream_reqs: Vec<_> = mock
@@ -255,7 +281,11 @@ async fn resume_chat_rebuilds_then_appends_live() {
         mock.stream_connections() > streams_before
     })
     .await;
-    mock.emit(3, "sess-2", json!({"kind": "assistant", "body": "new answer"}));
+    mock.emit(
+        3,
+        "sess-2",
+        json!({"kind": "assistant", "body": "new answer"}),
+    );
 
     wait_until("live event appends after resume", T, || {
         rt.snapshot().messages.len() == 3
@@ -263,9 +293,7 @@ async fn resume_chat_rebuilds_then_appends_live() {
     .await;
     let snap = rt.snapshot();
     assert_eq!(snap.messages[2].content, "new answer");
-    assert!(chat_bodies(&snap)
-        .iter()
-        .any(|(_, b)| b == "new answer"));
+    assert!(chat_bodies(&snap).iter().any(|(_, b)| b == "new answer"));
 }
 
 // 7. Send failure: 500 on POST messages folds an error and clears running.

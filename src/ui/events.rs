@@ -207,19 +207,25 @@ impl TuiEvent {
                 instruction,
                 depth,
                 agent_id,
-            } => json!({ "taskId": task_id, "instruction": instruction, "depth": depth, "agentId": agent_id }),
+            } => {
+                json!({ "taskId": task_id, "instruction": instruction, "depth": depth, "agentId": agent_id })
+            }
             TuiEvent::TaskEvent {
                 task_id,
                 event_kind,
                 content,
                 harness,
-            } => json!({ "taskId": task_id, "eventKind": event_kind, "content": content, "harness": harness }),
+            } => {
+                json!({ "taskId": task_id, "eventKind": event_kind, "content": content, "harness": harness })
+            }
             TuiEvent::TaskAttention {
                 task_id,
                 reason,
                 content,
                 question_id,
-            } => json!({ "taskId": task_id, "reason": reason, "content": content, "questionId": question_id }),
+            } => {
+                json!({ "taskId": task_id, "reason": reason, "content": content, "questionId": question_id })
+            }
             TuiEvent::TaskComplete { digest } => json!({ "digest": digest }),
             TuiEvent::Trace { entry } => json!({ "entry": entry }),
             TuiEvent::Error { source, message } => json!({ "source": source, "message": message }),
@@ -239,13 +245,17 @@ impl TuiEvent {
                 session_id,
                 event_kind,
                 content,
-            } => json!({ "agentId": agent_id, "sessionId": session_id, "eventKind": event_kind, "content": content }),
+            } => {
+                json!({ "agentId": agent_id, "sessionId": session_id, "eventKind": event_kind, "content": content })
+            }
             TuiEvent::PeerSession {
                 agent_id,
                 session_id,
                 state,
                 harness,
-            } => json!({ "agentId": agent_id, "sessionId": session_id, "state": state, "harness": harness }),
+            } => {
+                json!({ "agentId": agent_id, "sessionId": session_id, "state": state, "harness": harness })
+            }
             TuiEvent::User { body } => json!({ "body": body }),
             TuiEvent::Assistant { body } => json!({ "body": body }),
             TuiEvent::Effect { effect } => json!({ "effect": effect }),
@@ -279,7 +289,8 @@ fn get_i64(m: &Map<String, Value>, k: &str) -> i64 {
     m.get(k).and_then(Value::as_i64).unwrap_or(0)
 }
 fn from_field<T: for<'d> Deserialize<'d>>(m: &Map<String, Value>, k: &str) -> Option<T> {
-    m.get(k).and_then(|v| serde_json::from_value(v.clone()).ok())
+    m.get(k)
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
 }
 
 impl<'de> Deserialize<'de> for TuiEvent {
@@ -477,7 +488,10 @@ pub fn describe_event(event: &TuiEvent) -> String {
             availability,
             detail,
         } => {
-            let extra = detail.as_deref().map(|d| format!(" · {d}")).unwrap_or_default();
+            let extra = detail
+                .as_deref()
+                .map(|d| format!(" · {d}"))
+                .unwrap_or_default();
             format!("agent {agent_id} · {availability}{extra}")
         }
         TuiEvent::PeerSession {
@@ -486,7 +500,10 @@ pub fn describe_event(event: &TuiEvent) -> String {
             state,
             harness,
         } => {
-            let h = harness.as_deref().map(|h| format!(" · {h}")).unwrap_or_default();
+            let h = harness
+                .as_deref()
+                .map(|h| format!(" · {h}"))
+                .unwrap_or_default();
             format!("session {session_id} on {agent_id} · {state}{h}")
         }
         TuiEvent::SessionEvent {
@@ -506,7 +523,10 @@ pub fn describe_event(event: &TuiEvent) -> String {
             format!("{}{} · {}ms", entry.node, tool, entry.ms)
         }
         TuiEvent::Effect { effect } => {
-            let k = effect.get("kind").and_then(Value::as_str).unwrap_or("effect");
+            let k = effect
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("effect");
             format!("effect {k}")
         }
         TuiEvent::User { body } => format!("you: {body}"),
@@ -527,11 +547,24 @@ mod tests {
     #[test]
     fn transcript_quotes_user_and_verbatim_assistant() {
         let events = vec![
-            env(1, TuiEvent::User { body: "hi\n\nthere".into() }),
-            env(2, TuiEvent::Assistant { body: "line1\nline2".into() }),
+            env(
+                1,
+                TuiEvent::User {
+                    body: "hi\n\nthere".into(),
+                },
+            ),
+            env(
+                2,
+                TuiEvent::Assistant {
+                    body: "line1\nline2".into(),
+                },
+            ),
             env(
                 3,
-                TuiEvent::Error { source: "cycle".into(), message: "boom".into() },
+                TuiEvent::Error {
+                    source: "cycle".into(),
+                    message: "boom".into(),
+                },
             ),
         ];
         let t = chat_transcript(&events);
@@ -541,8 +574,18 @@ mod tests {
     #[test]
     fn last_assistant_scans_from_end() {
         let events = vec![
-            env(1, TuiEvent::Assistant { body: "first".into() }),
-            env(2, TuiEvent::Assistant { body: "second".into() }),
+            env(
+                1,
+                TuiEvent::Assistant {
+                    body: "first".into(),
+                },
+            ),
+            env(
+                2,
+                TuiEvent::Assistant {
+                    body: "second".into(),
+                },
+            ),
         ];
         assert_eq!(last_assistant_message(&events).as_deref(), Some("second"));
     }
@@ -570,7 +613,10 @@ mod tests {
             op: "execute_step".into(),
             model: Some("gpt".into()),
             duration_ms: 120,
-            usage: Some(Usage { input_tokens: 10, output_tokens: 5 }),
+            usage: Some(Usage {
+                input_tokens: 10,
+                output_tokens: 5,
+            }),
             content: None,
             reasoning: None,
             tool_calls: None,

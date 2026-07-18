@@ -256,7 +256,10 @@ mod tests {
         let reported = parse_capability_reply("I can help with Rust code.");
         assert!(reported.tools.is_empty());
         assert!(reported.mcp_servers.is_empty());
-        assert_eq!(reported.summary.as_deref(), Some("I can help with Rust code."));
+        assert_eq!(
+            reported.summary.as_deref(),
+            Some("I can help with Rust code.")
+        );
     }
 
     #[test]
@@ -268,9 +271,21 @@ mod tests {
 
     #[test]
     fn repo_name_strips_suffixes_and_tokens() {
-        assert_eq!(repo_name_from_remote("git@github.com:org/repo.git").as_deref(), Some("repo"));
-        assert_eq!(repo_name_from_remote("https://host/org/repo.git").as_deref(), Some("repo"));
-        assert_eq!(repo_name_from_remote("https://x-token@host/org/repo?foo=1").as_deref(), Some("repo"));
-        assert_eq!(repo_name_from_remote("/path/to/myrepo/").as_deref(), Some("myrepo"));
+        assert_eq!(
+            repo_name_from_remote("git@github.com:org/repo.git").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            repo_name_from_remote("https://host/org/repo.git").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            repo_name_from_remote("https://x-token@host/org/repo?foo=1").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            repo_name_from_remote("/path/to/myrepo/").as_deref(),
+            Some("myrepo")
+        );
     }
 }

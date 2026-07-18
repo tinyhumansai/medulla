@@ -3,7 +3,7 @@
 //! When the TUI config carries a `[tinyplace]` section, this service loads (or
 //! mints) the machine identity, keeps it marked online, auto-accepts contact
 //! requests from configured peers, and polls peer presence — surfacing all of it
-//! into a shared [`TinyplaceObservation`] the [`App`](crate::app::App) merges
+//! into a shared [`TinyplaceObservation`] the [`App`](crate::ui::app::App) merges
 //! into its render snapshot.
 //!
 //! This slice is deliberately **read-only / observational**: it does not
@@ -19,11 +19,11 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::task::JoinHandle;
 
-use tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 use crate::tinyplace_support::{
     load_or_create_identity, resolve_endpoint, spawn_contact_auto_accepter,
     spawn_presence_heartbeat, TinyPlaceConfig,
 };
+use tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
 use crate::config::TinyplaceConfig;
 use crate::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity};
@@ -131,7 +131,10 @@ impl TinyplaceService {
             }));
         }
 
-        Ok(TinyplaceService { observation, handles })
+        Ok(TinyplaceService {
+            observation,
+            handles,
+        })
     }
 }
 
@@ -141,7 +144,10 @@ fn roster_from_peers(config: &TinyplaceConfig) -> Vec<AgentDescriptor> {
         .iter()
         .map(|peer| {
             let mut metadata = serde_json::Map::new();
-            metadata.insert("harness".to_string(), Value::String("tinyplace".to_string()));
+            metadata.insert(
+                "harness".to_string(),
+                Value::String("tinyplace".to_string()),
+            );
             if let Some(handle) = &peer.handle {
                 metadata.insert("handle".to_string(), Value::String(handle.clone()));
             }

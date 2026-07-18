@@ -1,0 +1,3 @@
+[submodule "vendor/tinyplace"]
+	path = vendor/tinyplace
+	url = git@github.com:tinyhumansai/tiny.place.git

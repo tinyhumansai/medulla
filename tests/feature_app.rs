@@ -12,11 +12,11 @@ use crossterm::event::{
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-use medulla::app::{App, Cmd, TABS};
-use medulla::chat_store::MainChatSummary;
 use medulla::config::{LoadedConfig, TinyplaceConfig};
-use medulla::events::TuiEvent;
-use medulla::mock_runtime::MockRuntime;
+use medulla::runtime::mock::MockRuntime;
+use medulla::ui::app::{App, Cmd, TABS};
+use medulla::ui::chat_store::MainChatSummary;
+use medulla::ui::events::TuiEvent;
 
 // --- harness helpers --------------------------------------------------------
 
@@ -54,7 +54,12 @@ fn ctrl(code: KeyCode) -> Event {
 }
 
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> Event {
-    Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE })
+    Event::Mouse(MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
 }
 
 fn type_str(app: &mut App, s: &str) {
@@ -161,7 +166,11 @@ fn slash_async_toggles_flag() {
 fn slash_copy_empty_chat_reports_nothing_to_copy() {
     let (mut app, _rt) = empty_app();
     let _ = submit_line(&mut app, "/copy");
-    assert!(app.status().contains("Nothing to copy"), "status: {}", app.status());
+    assert!(
+        app.status().contains("Nothing to copy"),
+        "status: {}",
+        app.status()
+    );
 }
 
 #[test]
@@ -176,7 +185,11 @@ fn slash_mouse_toggles_capture_flag() {
 fn unknown_slash_command_sets_status() {
     let (mut app, _rt) = empty_app();
     let _ = submit_line(&mut app, "/bogus");
-    assert!(app.status().contains("Unknown command"), "status: {}", app.status());
+    assert!(
+        app.status().contains("Unknown command"),
+        "status: {}",
+        app.status()
+    );
 }
 
 #[test]
@@ -236,7 +249,9 @@ fn each_tab_renders_its_signature() {
 
 fn script_many_chat(rt: &Arc<MockRuntime>, n: usize) {
     for i in 0..n {
-        rt.script_event(TuiEvent::Assistant { body: format!("reply {i}") });
+        rt.script_event(TuiEvent::Assistant {
+            body: format!("reply {i}"),
+        });
     }
 }
 
@@ -252,8 +267,14 @@ fn page_up_scrolls_and_page_down_returns_to_bottom() {
 
     let _ = app.on_event(key(KeyCode::PageUp));
     let out = render(&mut app, 80, 24);
-    assert!(app.chat_scroll() > 0, "PageUp should grow the scroll offset");
-    assert!(out.contains("line(s) below"), "expected a below-fold notice");
+    assert!(
+        app.chat_scroll() > 0,
+        "PageUp should grow the scroll offset"
+    );
+    assert!(
+        out.contains("line(s) below"),
+        "expected a below-fold notice"
+    );
 
     let _ = app.on_event(key(KeyCode::PageDown));
     let _ = render(&mut app, 80, 24);
@@ -294,7 +315,10 @@ fn inference_start_shows_working_then_cycle_end_idles() {
     app.tab_index = 1;
     let out = render(&mut app, 100, 30);
     assert!(out.contains("thinking"), "expected a working indicator");
-    assert!(out.contains("in flight"), "expected model-call-in-flight notice");
+    assert!(
+        out.contains("in flight"),
+        "expected model-call-in-flight notice"
+    );
 
     // Cycle ends → idle: the working notice is gone.
     rt.set_running(false);
@@ -305,7 +329,10 @@ fn inference_start_shows_working_then_cycle_end_idles() {
     });
     app.refresh_snapshot();
     let out = render(&mut app, 100, 30);
-    assert!(!out.contains("in flight"), "idle should drop the in-flight notice");
+    assert!(
+        !out.contains("in flight"),
+        "idle should drop the in-flight notice"
+    );
 }
 
 // --- 6. resume picker -------------------------------------------------------
@@ -330,7 +357,10 @@ fn resume_picker_navigates_and_enter_resumes() {
     // Down once, then Enter → resume the second chat.
     let _ = app.on_event(key(KeyCode::Down));
     let cmd = app.on_event(key(KeyCode::Enter));
-    assert!(matches!(&cmd, Some(Cmd::Resume(id)) if id == "sess-1"), "cmd: {cmd:?}");
+    assert!(
+        matches!(&cmd, Some(Cmd::Resume(id)) if id == "sess-1"),
+        "cmd: {cmd:?}"
+    );
     assert!(!app.resume_open(), "Enter should close the picker");
 }
 
@@ -391,8 +421,12 @@ fn ctrl_x_aborts_and_ctrl_n_starts_new_session() {
 #[test]
 fn ctrl_y_copies_transcript_via_captured_clipboard() {
     let (mut app, rt) = empty_app();
-    rt.script_event(TuiEvent::User { body: "hello".into() });
-    rt.script_event(TuiEvent::Assistant { body: "hi there".into() });
+    rt.script_event(TuiEvent::User {
+        body: "hello".into(),
+    });
+    rt.script_event(TuiEvent::Assistant {
+        body: "hi there".into(),
+    });
     app.refresh_snapshot();
     let sink = app.capture_clipboard();
 

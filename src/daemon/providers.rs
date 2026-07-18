@@ -357,7 +357,10 @@ async fn run_provider_attempt(
     on_stdin: Option<OnStdin>,
 ) -> Result<RunTaskResult, String> {
     if spec.abort.is_aborted() {
-        return Err(format!("{} task aborted before start", provider_name(spec.provider)));
+        return Err(format!(
+            "{} task aborted before start",
+            provider_name(spec.provider)
+        ));
     }
 
     let args = build_run_args(
@@ -516,7 +519,14 @@ async fn run_provider_attempt(
             } else {
                 stderr
             };
-            let tail: String = tail.chars().rev().take(600).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail: String = tail
+                .chars()
+                .rev()
+                .take(600)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             return Err(format!(
                 "{} exited {code}: {}",
                 provider_name(spec.provider),
@@ -630,11 +640,25 @@ mod tests {
             ]
         );
         assert_eq!(
-            build_run_args(HarnessProvider::Codex, "do", Some("gpt-5"), None, &[], false),
+            build_run_args(
+                HarnessProvider::Codex,
+                "do",
+                Some("gpt-5"),
+                None,
+                &[],
+                false
+            ),
             vec!["exec", "--json", "-m", "gpt-5", "do"]
         );
         assert_eq!(
-            build_run_args(HarnessProvider::Opencode, "do", None, Some("plan"), &[], false),
+            build_run_args(
+                HarnessProvider::Opencode,
+                "do",
+                None,
+                Some("plan"),
+                &[],
+                false
+            ),
             vec!["run", "--agent", "plan", "--format", "json", "do"]
         );
     }

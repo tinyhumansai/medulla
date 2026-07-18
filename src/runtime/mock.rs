@@ -9,12 +9,12 @@ use futures::future::BoxFuture;
 use serde_json::{json, Map};
 use tokio::sync::broadcast;
 
-use crate::chat_store::{ChatMessage, MainChatSummary};
-use crate::events::{EventEnvelope, TaskDigest, TuiEvent, Usage};
 use crate::runtime::{
     AgentDescriptor, AgentPresence, ContextItem, CycleResultSummary, PeerSession, Runtime,
     RuntimeSnapshot, ThreadSummary, TinyplaceIdentity,
 };
+use crate::ui::chat_store::{ChatMessage, MainChatSummary};
+use crate::ui::events::{EventEnvelope, TaskDigest, TuiEvent, Usage};
 
 const EVENT_CAP: usize = 5000;
 const CHAT_CAP: usize = 2000;
@@ -47,16 +47,26 @@ struct State {
 impl State {
     fn active_mut(&mut self) -> &mut Thread {
         let id = self.active_id.clone();
-        self.threads.iter_mut().find(|t| t.id == id).expect("active thread")
+        self.threads
+            .iter_mut()
+            .find(|t| t.id == id)
+            .expect("active thread")
     }
 
     fn active(&self) -> &Thread {
-        self.threads.iter().find(|t| t.id == self.active_id).expect("active thread")
+        self.threads
+            .iter()
+            .find(|t| t.id == self.active_id)
+            .expect("active thread")
     }
 
     fn emit(&mut self, event: TuiEvent) {
         self.seq += 1;
-        let env = EventEnvelope { seq: self.seq, at: now_millis(), event };
+        let env = EventEnvelope {
+            seq: self.seq,
+            at: now_millis(),
+            event,
+        };
         let chatty = matches!(
             env.event,
             TuiEvent::User { .. } | TuiEvent::Assistant { .. } | TuiEvent::Error { .. }
@@ -78,7 +88,7 @@ impl State {
 }
 
 fn now_millis() -> i64 {
-    crate::chat_store::now_millis()
+    crate::ui::chat_store::now_millis()
 }
 
 fn gen_id(prefix: &str) -> String {
@@ -87,7 +97,9 @@ fn gen_id(prefix: &str) -> String {
 
 fn rand_suffix() -> u16 {
     // Cheap, dependency-free pseudo-random from the clock.
-    (now_millis() as u64).wrapping_mul(2654435761).rotate_left(13) as u16
+    (now_millis() as u64)
+        .wrapping_mul(2654435761)
+        .rotate_left(13) as u16
 }
 
 /// A scripted runtime. Construct with [`MockRuntime::demo`] for a populated
@@ -182,7 +194,11 @@ impl MockRuntime {
             }];
             s.presence.insert(
                 "dev-1".into(),
-                AgentPresence { online: true, detail: Some("idle".into()), at: now_millis() },
+                AgentPresence {
+                    online: true,
+                    detail: Some("idle".into()),
+                    at: now_millis(),
+                },
             );
             s.tinyplace = Some(TinyplaceIdentity {
                 agent_id: "cid-abc123".into(),
@@ -191,8 +207,12 @@ impl MockRuntime {
             });
             s.tracing = true;
 
-            s.emit(TuiEvent::CycleStart { cycle_id: "cyc-1".into() });
-            s.emit(TuiEvent::User { body: "Summarize the repo and delegate a refactor.".into() });
+            s.emit(TuiEvent::CycleStart {
+                cycle_id: "cyc-1".into(),
+            });
+            s.emit(TuiEvent::User {
+                body: "Summarize the repo and delegate a refactor.".into(),
+            });
             s.active_mut().messages.push(ChatMessage {
                 role: "user".into(),
                 content: "Summarize the repo and delegate a refactor.".into(),
@@ -202,7 +222,10 @@ impl MockRuntime {
                 op: "orchestrate".into(),
                 model: Some("gpt-4o".into()),
                 duration_ms: 820,
-                usage: Some(Usage { input_tokens: 1200, output_tokens: 90 }),
+                usage: Some(Usage {
+                    input_tokens: 1200,
+                    output_tokens: 90,
+                }),
                 content: None,
                 reasoning: None,
                 tool_calls: None,
@@ -225,7 +248,10 @@ impl MockRuntime {
                     status: "done".into(),
                     digest: "Refactored auth into 3 focused modules.".into(),
                     result_ref: None,
-                    usage: Some(Usage { input_tokens: 6400, output_tokens: 420 }),
+                    usage: Some(Usage {
+                        input_tokens: 6400,
+                        output_tokens: 420,
+                    }),
                     depth: 2,
                 },
             });
@@ -248,11 +274,17 @@ impl MockRuntime {
                     status: "done".into(),
                     digest: "Refactored auth into 3 focused modules.".into(),
                     result_ref: None,
-                    usage: Some(Usage { input_tokens: 6400, output_tokens: 420 }),
+                    usage: Some(Usage {
+                        input_tokens: 6400,
+                        output_tokens: 420,
+                    }),
                     depth: 2,
                 },
             );
-            s.active_mut().last_result = Some(CycleResultSummary { pass_count: 2, task_ledger: ledger });
+            s.active_mut().last_result = Some(CycleResultSummary {
+                pass_count: 2,
+                task_ledger: ledger,
+            });
             s.sessions.insert(
                 "dev-1".into(),
                 vec![PeerSession {
@@ -339,9 +371,16 @@ impl Runtime for MockRuntime {
                 s.cycle_seq += 1;
                 let cid = format!("cyc-{}", s.cycle_seq);
                 s.active_mut().running = true;
-                s.emit(TuiEvent::CycleStart { cycle_id: cid.clone() });
-                s.emit(TuiEvent::User { body: input.clone() });
-                s.active_mut().messages.push(ChatMessage { role: "user".into(), content: input });
+                s.emit(TuiEvent::CycleStart {
+                    cycle_id: cid.clone(),
+                });
+                s.emit(TuiEvent::User {
+                    body: input.clone(),
+                });
+                s.active_mut().messages.push(ChatMessage {
+                    role: "user".into(),
+                    content: input,
+                });
                 s.emit(TuiEvent::InferenceStart {
                     tier: "reasoning".into(),
                     op: "execute_step".into(),
@@ -357,19 +396,33 @@ impl Runtime for MockRuntime {
                     op: "execute_step".into(),
                     model: Some("gpt-4o".into()),
                     duration_ms: 500,
-                    usage: Some(Usage { input_tokens: 800, output_tokens: 120 }),
+                    usage: Some(Usage {
+                        input_tokens: 800,
+                        output_tokens: 120,
+                    }),
                     content: Some("Here is my reasoning.".into()),
                     reasoning: None,
                     tool_calls: None,
                 });
                 let reply = "(mock) I processed your request.".to_string();
-                s.emit(TuiEvent::Assistant { body: reply.clone() });
-                s.active_mut().messages.push(ChatMessage { role: "assistant".into(), content: reply });
+                s.emit(TuiEvent::Assistant {
+                    body: reply.clone(),
+                });
+                s.active_mut().messages.push(ChatMessage {
+                    role: "assistant".into(),
+                    content: reply,
+                });
                 let cid = format!("cyc-{}", s.cycle_seq);
-                s.emit(TuiEvent::CycleEnd { cycle_id: cid, pass_count: 1, duration_ms: 500 });
+                s.emit(TuiEvent::CycleEnd {
+                    cycle_id: cid,
+                    pass_count: 1,
+                    duration_ms: 500,
+                });
                 s.active_mut().running = false;
-                s.active_mut().last_result =
-                    Some(CycleResultSummary { pass_count: 1, task_ledger: HashMap::new() });
+                s.active_mut().last_result = Some(CycleResultSummary {
+                    pass_count: 1,
+                    task_ledger: HashMap::new(),
+                });
             }
             let _ = tx.send(());
             Ok(())
@@ -458,14 +511,14 @@ impl Runtime for MockRuntime {
                     name: "Auth refactor".into(),
                     turns: 4,
                     thread_count: 2,
-                    updated_at: crate::chat_store::iso8601_utc(now_millis()),
+                    updated_at: crate::ui::chat_store::iso8601_utc(now_millis()),
                 },
                 MainChatSummary {
                     session_id: "tui-demo-2".into(),
                     name: "Repo audit".into(),
                     turns: 2,
                     thread_count: 1,
-                    updated_at: crate::chat_store::iso8601_utc(now_millis() - 86_400_000),
+                    updated_at: crate::ui::chat_store::iso8601_utc(now_millis() - 86_400_000),
                 },
             ])
         })
@@ -564,6 +617,6 @@ mod tests {
         let snap = rt.snapshot();
         assert!(!snap.running);
         assert_eq!(snap.messages.len(), 2);
-        assert!(crate::events::last_assistant_message(&snap.chat_events).is_some());
+        assert!(crate::ui::events::last_assistant_message(&snap.chat_events).is_some());
     }
 }

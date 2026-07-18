@@ -12,19 +12,20 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::agents::{
+use crate::config::LoadedConfig;
+use crate::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerInfo, WorkerOp};
+use crate::ui::agents::{
     agent_row_model, derive_agent_lanes, lane_lines, task_lines, AgentLane, AgentRole, AgentRow,
     Line as StyledLine, TaskState, TaskStatus,
 };
-use crate::clipboard::{copy_text, copy_to_clipboard, current_platform, CopyScope, OSC_52};
-use crate::composer::{caret_row_col, delete_before, insert_at, move_caret_row, Draft};
-use crate::config::LoadedConfig;
-use crate::events::{describe_event, EventEnvelope, TuiEvent};
-use crate::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerInfo, WorkerOp};
-use crate::util::{clip, clock, fmt_tokens, wrap};
+use crate::ui::clipboard::{copy_text, copy_to_clipboard, current_platform, CopyScope, OSC_52};
+use crate::ui::composer::{caret_row_col, delete_before, insert_at, move_caret_row, Draft};
+use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
+use crate::ui::util::{clip, clock, fmt_tokens, wrap};
 
-pub const TABS: [&str; 8] =
-    ["Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Config", "Help"];
+pub const TABS: [&str; 8] = [
+    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Config", "Help",
+];
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// The index of a tab by name, or 0 if unknown. Keeps tab jumps robust as the tab
@@ -45,7 +46,7 @@ pub enum Cmd {
 }
 
 struct ResumePicker {
-    chats: Vec<crate::chat_store::MainChatSummary>,
+    chats: Vec<crate::ui::chat_store::MainChatSummary>,
     index: usize,
 }
 
@@ -53,7 +54,10 @@ struct ResumePicker {
 enum PromptKind {
     WorkerAdd,
     WorkerEditLabel(String),
-    AnswerQuestion { cycle_id: String, question_id: String },
+    AnswerQuestion {
+        cycle_id: String,
+        question_id: String,
+    },
 }
 
 /// A single-line inline input overlay, composer-styled, reused for the fleet and
@@ -103,7 +107,8 @@ pub struct App {
     // this TUI's own identity, its peer roster, and peer presence. Merged into
     // the snapshot on every refresh so the Overview panel and Agents lanes light
     // up without the runtime having to know about tiny.place.
-    tinyplace_obs: Option<Arc<std::sync::Mutex<crate::tinyplace_service::TinyplaceObservation>>>,
+    tinyplace_obs:
+        Option<Arc<std::sync::Mutex<crate::tinyplace_support::service::TinyplaceObservation>>>,
 }
 
 fn color(name: &str) -> Color {
@@ -129,7 +134,11 @@ fn styled_to_tline(line: &StyledLine) -> TLine<'static> {
     if line.dim {
         style = style.add_modifier(Modifier::DIM);
     }
-    let text = if line.text.is_empty() { " ".to_string() } else { line.text.clone() };
+    let text = if line.text.is_empty() {
+        " ".to_string()
+    } else {
+        line.text.clone()
+    };
     TLine::from(Span::styled(text, style))
 }
 
@@ -141,9 +150,11 @@ fn event_color(env: &EventEnvelope) -> Option<&'static str> {
         }
         TuiEvent::User { .. } => Some("cyan"),
         TuiEvent::Assistant { .. } => Some("green"),
-        TuiEvent::AgentStatus { availability, .. } => {
-            Some(if availability == "online" { "green" } else { "red" })
-        }
+        TuiEvent::AgentStatus { availability, .. } => Some(if availability == "online" {
+            "green"
+        } else {
+            "red"
+        }),
         TuiEvent::InferenceStart { .. } | TuiEvent::InferenceEnd { .. } => Some("blue"),
         _ => None,
     }
@@ -159,7 +170,11 @@ fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLine> {
                 out.push(StyledLine::default());
                 for (i, row) in wrap(body, cols.saturating_sub(2)).into_iter().enumerate() {
                     out.push(StyledLine {
-                        text: if i == 0 { format!("❯ {row}") } else { format!("  {row}") },
+                        text: if i == 0 {
+                            format!("❯ {row}")
+                        } else {
+                            format!("  {row}")
+                        },
                         color: Some("cyan".into()),
                         dim: false,
                     });
@@ -168,7 +183,11 @@ fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLine> {
             TuiEvent::Assistant { body } => {
                 for (i, row) in wrap(body, cols.saturating_sub(2)).into_iter().enumerate() {
                     out.push(StyledLine {
-                        text: if i == 0 { format!("⏺ {row}") } else { format!("  {row}") },
+                        text: if i == 0 {
+                            format!("⏺ {row}")
+                        } else {
+                            format!("  {row}")
+                        },
                         color: Some("green".into()),
                         dim: false,
                     });
@@ -176,7 +195,11 @@ fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLine> {
             }
             TuiEvent::Error { source, message } => {
                 for row in wrap(&format!("{source}: {message}"), cols) {
-                    out.push(StyledLine { text: row, color: Some("red".into()), dim: false });
+                    out.push(StyledLine {
+                        text: row,
+                        color: Some("red".into()),
+                        dim: false,
+                    });
                 }
             }
             _ => {}
@@ -258,7 +281,7 @@ impl App {
     /// roster, and presence are merged into every snapshot refresh.
     pub fn set_tinyplace_observation(
         &mut self,
-        obs: Arc<std::sync::Mutex<crate::tinyplace_service::TinyplaceObservation>>,
+        obs: Arc<std::sync::Mutex<crate::tinyplace_support::service::TinyplaceObservation>>,
     ) {
         self.tinyplace_obs = Some(obs);
         self.refresh_snapshot();
@@ -291,7 +314,7 @@ impl App {
         self.contexts = c;
     }
 
-    pub fn open_resume(&mut self, chats: Vec<crate::chat_store::MainChatSummary>) {
+    pub fn open_resume(&mut self, chats: Vec<crate::ui::chat_store::MainChatSummary>) {
         if chats.is_empty() {
             self.set_status("No saved chats to resume.");
         } else {
@@ -305,7 +328,11 @@ impl App {
     }
 
     fn lanes(&self) -> Vec<AgentLane> {
-        derive_agent_lanes(&self.snapshot.events, &self.loaded.harness(), &self.snapshot.roster)
+        derive_agent_lanes(
+            &self.snapshot.events,
+            &self.loaded.harness(),
+            &self.snapshot.roster,
+        )
     }
 
     fn active_thread_idx(&self) -> usize {
@@ -592,9 +619,7 @@ impl App {
             KeyCode::Right if tab == "Chat" => {
                 self.draft.cursor = (self.draft.cursor + 1).min(self.draft.text.chars().count());
             }
-            KeyCode::Up | KeyCode::Down
-                if tab == "Agents" && self.draft.text.is_empty() =>
-            {
+            KeyCode::Up | KeyCode::Down if tab == "Agents" && self.draft.text.is_empty() => {
                 self.agent_scroll = 0;
                 self.move_agent_index(matches!(k.code, KeyCode::Up));
             }
@@ -631,13 +656,19 @@ impl App {
             }
             KeyCode::Char('s') | KeyCode::Enter if tab == "Workers" => {
                 if let Some(w) = self.selected_worker() {
-                    self.set_status(format!("Selecting {}", w.label.as_deref().unwrap_or(&w.address)));
+                    self.set_status(format!(
+                        "Selecting {}",
+                        w.label.as_deref().unwrap_or(&w.address)
+                    ));
                     return Some(Cmd::WorkerOp(WorkerOp::Select { id: w.id }));
                 }
             }
             KeyCode::Char('d') | KeyCode::Char('x') if tab == "Workers" => {
                 if let Some(w) = self.selected_worker() {
-                    self.set_status(format!("Removing {}", w.label.as_deref().unwrap_or(&w.address)));
+                    self.set_status(format!(
+                        "Removing {}",
+                        w.label.as_deref().unwrap_or(&w.address)
+                    ));
                     return Some(Cmd::WorkerOp(WorkerOp::Remove { id: w.id }));
                 }
             }
@@ -719,7 +750,10 @@ impl App {
                 .get(self.history.len() - 1 - next as usize)
                 .cloned()
                 .unwrap_or_default();
-            self.draft = Draft { cursor: recalled.chars().count(), text: recalled };
+            self.draft = Draft {
+                cursor: recalled.chars().count(),
+                text: recalled,
+            };
         }
     }
 
@@ -735,7 +769,10 @@ impl App {
             } else {
                 String::new()
             };
-            self.draft = Draft { cursor: recalled.chars().count(), text: recalled };
+            self.draft = Draft {
+                cursor: recalled.chars().count(),
+                text: recalled,
+            };
         }
     }
 
@@ -778,7 +815,7 @@ impl App {
     fn cancel_selected_task(&mut self) {
         match self.selected_agent_task() {
             Some(t) => {
-                let (cycle, task) = crate::agents::parse_task_key(&t.task_id);
+                let (cycle, task) = crate::ui::agents::parse_task_key(&t.task_id);
                 match cycle {
                     Some(c) => {
                         self.runtime.cancel_task(c.to_string(), task.to_string());
@@ -793,7 +830,10 @@ impl App {
 
     fn answer_selected_task(&mut self) {
         match self.selected_agent_task() {
-            Some(t) => match (t.question_id.clone(), crate::agents::parse_task_key(&t.task_id).0) {
+            Some(t) => match (
+                t.question_id.clone(),
+                crate::ui::agents::parse_task_key(&t.task_id).0,
+            ) {
                 (Some(qid), Some(cycle)) => {
                     self.prompt = Some(Prompt {
                         kind: PromptKind::AnswerQuestion {
@@ -837,7 +877,12 @@ impl App {
                     (Some(addr), None)
                 };
                 self.set_status("Adding worker…");
-                Some(Cmd::WorkerOp(WorkerOp::Add { address, handle, label, harness: None }))
+                Some(Cmd::WorkerOp(WorkerOp::Add {
+                    address,
+                    handle,
+                    label,
+                    harness: None,
+                }))
             }
             PromptKind::WorkerEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
@@ -845,7 +890,10 @@ impl App {
                 self.set_status("Updating label…");
                 Some(Cmd::WorkerOp(WorkerOp::Update { id, patch }))
             }
-            PromptKind::AnswerQuestion { cycle_id, question_id } => {
+            PromptKind::AnswerQuestion {
+                cycle_id,
+                question_id,
+            } => {
                 if text.is_empty() {
                     self.set_status("Answer cancelled (empty)");
                     return None;
@@ -890,7 +938,11 @@ impl App {
             CopyScope::Last => "last reply",
             CopyScope::All => "chat",
         };
-        let size = format!("{rows} line{} · {} chars", if rows == 1 { "" } else { "s" }, text.len());
+        let size = format!(
+            "{rows} line{} · {} chars",
+            if rows == 1 { "" } else { "s" },
+            text.len()
+        );
         self.set_status(if via == OSC_52 {
             format!("Sent {what} · {size} → terminal (OSC 52); check your clipboard")
         } else {
@@ -944,7 +996,11 @@ impl App {
                     if !arg.is_empty() && arg != "all" && arg != "last" {
                         self.set_status("Usage: /copy [all|last]");
                     } else {
-                        self.copy_chat(if arg == "last" { CopyScope::Last } else { CopyScope::All });
+                        self.copy_chat(if arg == "last" {
+                            CopyScope::Last
+                        } else {
+                            CopyScope::All
+                        });
                     }
                 }
                 "async" => {
@@ -1029,16 +1085,26 @@ impl App {
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(area);
         let mut spans = vec![
-            Span::styled("MEDULLA LAB", Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "MEDULLA LAB",
+                Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("  "),
         ];
         if self.snapshot.async_mode {
             spans.push(Span::styled(
                 "⚡ ASYNC ON",
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled("async off", Style::default().add_modifier(Modifier::DIM)));
+            spans.push(Span::styled(
+                "async off",
+                Style::default().add_modifier(Modifier::DIM),
+            ));
         }
         f.render_widget(Paragraph::new(TLine::from(spans)), halves[0]);
         // Stream health sits right next to the status when a cycle runs under a
@@ -1051,10 +1117,16 @@ impl App {
                     crate::runtime::StreamState::Resyncing => Color::Yellow,
                     crate::runtime::StreamState::Stalled => Color::Red,
                 };
-                right.push(Span::styled(format!("{} {}  ", st.glyph(), st.label()), Style::default().fg(c)));
+                right.push(Span::styled(
+                    format!("{} {}  ", st.glyph(), st.label()),
+                    Style::default().fg(c),
+                ));
             }
         }
-        right.push(Span::styled(self.status.clone(), Style::default().add_modifier(Modifier::DIM)));
+        right.push(Span::styled(
+            self.status.clone(),
+            Style::default().add_modifier(Modifier::DIM),
+        ));
         f.render_widget(
             Paragraph::new(TLine::from(right)).alignment(Alignment::Right),
             halves[1],
@@ -1088,8 +1160,11 @@ impl App {
             if self.snapshot.async_mode { "on" } else { "off" },
         );
         f.render_widget(
-            Paragraph::new(TLine::from(Span::styled(text, Style::default().add_modifier(Modifier::DIM))))
-                .wrap(Wrap { trim: true }),
+            Paragraph::new(TLine::from(Span::styled(
+                text,
+                Style::default().add_modifier(Modifier::DIM),
+            )))
+            .wrap(Wrap { trim: true }),
             area,
         );
     }
@@ -1101,7 +1176,9 @@ impl App {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(Span::styled(
                 title.into(),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ))
     }
 
@@ -1121,37 +1198,76 @@ impl App {
     fn draw_overview(&mut self, f: &mut Frame, area: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(7), Constraint::Length(5), Constraint::Min(0)])
+            .constraints([
+                Constraint::Length(7),
+                Constraint::Length(5),
+                Constraint::Min(0),
+            ])
             .split(area);
         let top = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(33), Constraint::Percentage(33), Constraint::Percentage(34)])
+            .constraints([
+                Constraint::Percentage(33),
+                Constraint::Percentage(33),
+                Constraint::Percentage(34),
+            ])
             .split(rows[0]);
 
         // Session panel.
         let mut session = vec![
             TLine::from(format!("id {}", clip(&self.snapshot.session_id, 24))),
-            TLine::from(format!("turns {}", self.snapshot.messages.len().div_ceil(2))),
+            TLine::from(format!(
+                "turns {}",
+                self.snapshot.messages.len().div_ceil(2)
+            )),
             TLine::from(Span::styled(
-                if self.snapshot.running { "● running" } else { "● idle" },
-                Style::default().fg(if self.snapshot.running { Color::Yellow } else { Color::Green }),
+                if self.snapshot.running {
+                    "● running"
+                } else {
+                    "● idle"
+                },
+                Style::default().fg(if self.snapshot.running {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                }),
             )),
         ];
         session.push(if self.snapshot.async_mode {
-            TLine::from(Span::styled("async ● on", Style::default().fg(Color::Magenta)))
+            TLine::from(Span::styled(
+                "async ● on",
+                Style::default().fg(Color::Magenta),
+            ))
         } else {
-            TLine::from(Span::styled("async ○ off", Style::default().add_modifier(Modifier::DIM)))
+            TLine::from(Span::styled(
+                "async ○ off",
+                Style::default().add_modifier(Modifier::DIM),
+            ))
         });
         session.push(if self.snapshot.tracing {
-            TLine::from(Span::styled("langfuse ● tracing", Style::default().fg(Color::Green)))
+            TLine::from(Span::styled(
+                "langfuse ● tracing",
+                Style::default().fg(Color::Green),
+            ))
         } else {
-            TLine::from(Span::styled("langfuse ○ off", Style::default().add_modifier(Modifier::DIM)))
+            TLine::from(Span::styled(
+                "langfuse ○ off",
+                Style::default().add_modifier(Modifier::DIM),
+            ))
         });
-        f.render_widget(Paragraph::new(Text::from(session)).block(self.panel("Session")), top[0]);
+        f.render_widget(
+            Paragraph::new(Text::from(session)).block(self.panel("Session")),
+            top[0],
+        );
 
         // Orchestration panel.
         let running_calls = self.running_calls();
-        let completed = self.snapshot.last_result.as_ref().map(|r| r.task_ledger.len()).unwrap_or(0);
+        let completed = self
+            .snapshot
+            .last_result
+            .as_ref()
+            .map(|r| r.task_ledger.len())
+            .unwrap_or(0);
         let passes = self
             .snapshot
             .last_result
@@ -1163,7 +1279,10 @@ impl App {
             TLine::from(format!("agents {completed}")),
             TLine::from(format!("active model calls {running_calls}")),
         ];
-        f.render_widget(Paragraph::new(Text::from(orch)).block(self.panel("Orchestration")), top[1]);
+        f.render_widget(
+            Paragraph::new(Text::from(orch)).block(self.panel("Orchestration")),
+            top[1],
+        );
 
         // Third panel: tinyplace or opencode.
         self.draw_overview_third(f, top[2]);
@@ -1173,7 +1292,12 @@ impl App {
         let workers_val = if let Some(tp) = &self.loaded.config.tinyplace {
             format!("tiny.place · {} peer(s)", tp.peers.len())
         } else {
-            self.loaded.config.opencode.as_ref().map(|o| o.model.clone()).unwrap_or_default()
+            self.loaded
+                .config
+                .opencode
+                .as_ref()
+                .map(|o| o.model.clone())
+                .unwrap_or_default()
         };
         let routing = vec![
             TLine::from(vec![
@@ -1193,7 +1317,10 @@ impl App {
                 Span::raw(workers_val),
             ]),
         ];
-        f.render_widget(Paragraph::new(Text::from(routing)).block(self.panel("Model routing")), rows[1]);
+        f.render_widget(
+            Paragraph::new(Text::from(routing)).block(self.panel("Model routing")),
+            rows[1],
+        );
 
         // Live activity.
         let take = self.visible_count().saturating_sub(7).max(5);
@@ -1203,11 +1330,17 @@ impl App {
             .map(|e| self.event_line(e, area.width.saturating_sub(6) as usize, false))
             .collect();
         let body = if recent.is_empty() {
-            Text::from(TLine::from(Span::styled("No events yet.", Style::default().add_modifier(Modifier::DIM))))
+            Text::from(TLine::from(Span::styled(
+                "No events yet.",
+                Style::default().add_modifier(Modifier::DIM),
+            )))
         } else {
             Text::from(recent)
         };
-        f.render_widget(Paragraph::new(body).block(self.panel("Live activity")), rows[2]);
+        f.render_widget(
+            Paragraph::new(body).block(self.panel("Live activity")),
+            rows[2],
+        );
     }
 
     fn draw_overview_third(&self, f: &mut Frame, area: Rect) {
@@ -1218,10 +1351,19 @@ impl App {
                 .iter()
                 .filter(|a| a.metadata.get("harness").and_then(|v| v.as_str()) == Some("tinyplace"))
                 .collect();
-            let readings = peers.iter().filter(|a| self.snapshot.presence.contains_key(&a.id)).count();
+            let readings = peers
+                .iter()
+                .filter(|a| self.snapshot.presence.contains_key(&a.id))
+                .count();
             let online = peers
                 .iter()
-                .filter(|a| self.snapshot.presence.get(&a.id).map(|p| p.online).unwrap_or(false))
+                .filter(|a| {
+                    self.snapshot
+                        .presence
+                        .get(&a.id)
+                        .map(|p| p.online)
+                        .unwrap_or(false)
+                })
                 .count();
             let all_sessions: Vec<_> = self.snapshot.sessions.values().flatten().collect();
             let live = all_sessions.iter().filter(|s| s.state != "ended").count();
@@ -1232,18 +1374,30 @@ impl App {
                     Style::default().fg(if online > 0 { Color::Green } else { Color::Red }),
                 )));
             } else {
-                lines.push(TLine::from(format!("agents {} · presence pending", peers.len())));
+                lines.push(TLine::from(format!(
+                    "agents {} · presence pending",
+                    peers.len()
+                )));
             }
             if !all_sessions.is_empty() {
-                lines.push(TLine::from(format!("sessions {live} live / {} known", all_sessions.len())));
+                lines.push(TLine::from(format!(
+                    "sessions {live} live / {} known",
+                    all_sessions.len()
+                )));
             }
             if let Some(me) = &self.snapshot.tinyplace {
                 let who = me.handle.clone().unwrap_or_else(|| clip(&me.agent_id, 24));
                 lines.push(TLine::from(format!("me {who}")));
             } else {
-                lines.push(TLine::from(Span::styled("me · connecting…", Style::default().add_modifier(Modifier::DIM))));
+                lines.push(TLine::from(Span::styled(
+                    "me · connecting…",
+                    Style::default().add_modifier(Modifier::DIM),
+                )));
             }
-            f.render_widget(Paragraph::new(Text::from(lines)).block(self.panel("tiny.place")), area);
+            f.render_widget(
+                Paragraph::new(Text::from(lines)).block(self.panel("tiny.place")),
+                area,
+            );
         } else {
             let oc = self.loaded.config.opencode.clone().unwrap_or_default();
             let lines = vec![
@@ -1275,7 +1429,11 @@ impl App {
         if selected {
             style = style.add_modifier(Modifier::REVERSED);
         }
-        let text = format!("{} {}", clock(env.at), clip(&describe_event(&env.event), width.saturating_sub(11)));
+        let text = format!(
+            "{} {}",
+            clock(env.at),
+            clip(&describe_event(&env.event), width.saturating_sub(11))
+        );
         TLine::from(Span::styled(text, style))
     }
 
@@ -1299,7 +1457,11 @@ impl App {
         let mut lines: Vec<TLine> = Vec::new();
         for t in self.snapshot.threads.iter().skip(window_start).take(cap) {
             let d = *depth.get(&t.id).unwrap_or(&0);
-            let indent = if d == 0 { String::new() } else { format!("{}⑃ ", "  ".repeat(d - 1)) };
+            let indent = if d == 0 {
+                String::new()
+            } else {
+                format!("{}⑃ ", "  ".repeat(d - 1))
+            };
             let marker = if t.running { "▶" } else { "●" };
             let mut badges = Vec::new();
             if t.running_tasks > 0 {
@@ -1308,7 +1470,11 @@ impl App {
             if t.attention > 0 {
                 badges.push(format!("{}⚠", t.attention));
             }
-            let badge = if badges.is_empty() { String::new() } else { format!(" · {}", badges.join(" ")) };
+            let badge = if badges.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", badges.join(" "))
+            };
             let text = format!("{indent}{marker} {} · {}t{badge}", t.name, t.turns);
             let mut style = Style::default();
             if t.running {
@@ -1319,7 +1485,10 @@ impl App {
             }
             lines.push(TLine::from(Span::styled(text, style)));
         }
-        lines.push(TLine::from(Span::styled("^F fork · ^↑↓ switch", Style::default().add_modifier(Modifier::DIM))));
+        lines.push(TLine::from(Span::styled(
+            "^F fork · ^↑↓ switch",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         // Transcript.
@@ -1329,7 +1498,10 @@ impl App {
             .get(active_idx)
             .map(|t| t.name.clone())
             .unwrap_or_else(|| "main".into());
-        let title = format!("{name} · {} turns", self.snapshot.messages.len().div_ceil(2));
+        let title = format!(
+            "{name} · {} turns",
+            self.snapshot.messages.len().div_ceil(2)
+        );
         let block = self.panel(title);
         let inner = block.inner(cols[1]);
         f.render_widget(block, cols[1]);
@@ -1358,7 +1530,10 @@ impl App {
         } else if self.snapshot.running {
             let rc = self.running_calls();
             let msg = if rc > 0 {
-                format!("thinking · {rc} model call{} in flight", if rc == 1 { "" } else { "s" })
+                format!(
+                    "thinking · {rc} model call{} in flight",
+                    if rc == 1 { "" } else { "s" }
+                )
             } else {
                 "working…".into()
             };
@@ -1415,7 +1590,12 @@ impl App {
 
         let running_tasks: usize = lanes
             .iter()
-            .map(|l| l.tasks.iter().filter(|t| t.status == TaskStatus::Running).count())
+            .map(|l| {
+                l.tasks
+                    .iter()
+                    .filter(|t| t.status == TaskStatus::Running)
+                    .count()
+            })
             .sum();
         let agent_count = lanes.iter().filter(|l| !l.role.is_function()).count();
         let title = if running_tasks > 0 {
@@ -1447,7 +1627,12 @@ impl App {
             lane_lines(lane, pane_width)
         };
         let title = if let Some(t) = &selected_task {
-            format!("{} › {} · {} turns", lane.map(|l| l.label.as_str()).unwrap_or("task"), t.task_id, t.turns)
+            format!(
+                "{} › {} · {} turns",
+                lane.map(|l| l.label.as_str()).unwrap_or("task"),
+                t.task_id,
+                t.turns
+            )
         } else if let Some(l) = lane {
             format!("{} · {} turns", l.label, l.turns.len())
         } else {
@@ -1463,14 +1648,27 @@ impl App {
                 let window = self.loaded.config.medulla.context_window() as i64;
                 let pct = ((used as f64 / window as f64) * 100.0).round().min(100.0) as i64;
                 let filled = ((pct as f64 / 100.0) * 16.0).round() as usize;
-                let bar = format!("{}{}", "█".repeat(filled), "░".repeat(16usize.saturating_sub(filled)));
-                let c = if pct >= 90 { Color::Red } else if pct >= 70 { Color::Yellow } else { Color::DarkGray };
+                let bar = format!(
+                    "{}{}",
+                    "█".repeat(filled),
+                    "░".repeat(16usize.saturating_sub(filled))
+                );
+                let c = if pct >= 90 {
+                    Color::Red
+                } else if pct >= 70 {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                };
                 let detail = if l.role == AgentRole::Worker {
                     format!("{} tokens", fmt_tokens(used))
                 } else {
                     format!("{}/{} ({pct}%)", fmt_tokens(used), fmt_tokens(window))
                 };
-                header.push(TLine::from(Span::styled(format!("context {bar} {detail}"), Style::default().fg(c))));
+                header.push(TLine::from(Span::styled(
+                    format!("context {bar} {detail}"),
+                    Style::default().fg(c),
+                )));
             }
         }
         let capacity = (inner.height as usize).saturating_sub(header.len()).max(4);
@@ -1491,10 +1689,14 @@ impl App {
 
     fn agent_row_line(&self, row: &AgentRow, lanes: &[AgentLane], active: bool) -> TLine<'static> {
         match row {
-            AgentRow::Separator => TLine::from(Span::styled("── functions ──", Style::default().add_modifier(Modifier::DIM))),
-            AgentRow::More { hidden, .. } => {
-                TLine::from(Span::styled(format!("   └ +{hidden} more"), Style::default().add_modifier(Modifier::DIM)))
-            }
+            AgentRow::Separator => TLine::from(Span::styled(
+                "── functions ──",
+                Style::default().add_modifier(Modifier::DIM),
+            )),
+            AgentRow::More { hidden, .. } => TLine::from(Span::styled(
+                format!("   └ +{hidden} more"),
+                Style::default().add_modifier(Modifier::DIM),
+            )),
             AgentRow::Sub { task, last, .. } => {
                 let branch = if *last { "└" } else { "├" };
                 let mut style = Style::default();
@@ -1503,7 +1705,10 @@ impl App {
                 }
                 TLine::from(vec![
                     Span::styled(format!("   {branch} {} · ", task.task_id), style),
-                    Span::styled(task.status.label().to_string(), style.fg(color(task.status.color()))),
+                    Span::styled(
+                        task.status.label().to_string(),
+                        style.fg(color(task.status.color())),
+                    ),
                     Span::styled(format!(" · {} turns", task.turns), style),
                 ])
             }
@@ -1515,7 +1720,9 @@ impl App {
                 let is_fn = item.role.is_function();
                 let ctx = match item.context_tokens {
                     None => String::new(),
-                    Some(used) if item.role == AgentRole::Worker => format!(" · ctx {}", fmt_tokens(used)),
+                    Some(used) if item.role == AgentRole::Worker => {
+                        format!(" · ctx {}", fmt_tokens(used))
+                    }
                     Some(used) => format!(
                         " · ctx {}/{} {}%",
                         fmt_tokens(used),
@@ -1543,7 +1750,11 @@ impl App {
                 if active {
                     style = style.add_modifier(Modifier::REVERSED);
                 }
-                let text = format!("{marker} {} · {}{ctx}{state}{sessions_note}", item.label, item.turns.len());
+                let text = format!(
+                    "{marker} {} · {}{ctx}{state}{sessions_note}",
+                    item.label,
+                    item.turns.len()
+                );
                 TLine::from(Span::styled(text, style))
             }
         }
@@ -1630,17 +1841,27 @@ impl App {
             )));
         } else {
             let vis = self.visible_count();
-            let start = selected.saturating_sub(vis / 2).min(workers.len().saturating_sub(vis));
+            let start = selected
+                .saturating_sub(vis / 2)
+                .min(workers.len().saturating_sub(vis));
             for (i, w) in workers.iter().enumerate().skip(start).take(vis) {
                 let marker = if w.selected { "●" } else { " " };
                 let handle = w.handle.as_deref().unwrap_or(&w.address);
                 let label = w.label.as_deref().unwrap_or("");
-                let harness = w.harness.as_deref().map(|h| format!(" · {}", h.to_uppercase())).unwrap_or_default();
+                let harness = w
+                    .harness
+                    .as_deref()
+                    .map(|h| format!(" · {}", h.to_uppercase()))
+                    .unwrap_or_default();
                 let text = format!(
                     "{marker} {} · {}{}{}",
                     w.id,
                     handle,
-                    if label.is_empty() { String::new() } else { format!(" · {label}") },
+                    if label.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {label}")
+                    },
                     harness,
                 );
                 let mut style = Style::default();
@@ -1668,13 +1889,18 @@ impl App {
             .border_style(Style::default().fg(Color::Magenta))
             .title(Span::styled(
                 prompt.title.clone(),
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             ));
         let inner = block.inner(area);
         f.render_widget(block, area);
         let chars: Vec<char> = prompt.draft.text.chars().collect();
         let before: String = chars.iter().take(prompt.draft.cursor).collect();
-        let at: String = chars.get(prompt.draft.cursor).map(|c| c.to_string()).unwrap_or_else(|| " ".into());
+        let at: String = chars
+            .get(prompt.draft.cursor)
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| " ".into());
         let after: String = chars.iter().skip(prompt.draft.cursor + 1).collect();
         let spans = vec![
             Span::styled("❯ ", Style::default().fg(Color::Magenta)),
@@ -1699,13 +1925,21 @@ impl App {
         let start = self.selected.min(source.len().saturating_sub(vis));
         let page: Vec<&EventEnvelope> = source.into_iter().skip(start).take(vis).collect();
         let mut lines: Vec<TLine> = if page.is_empty() {
-            vec![TLine::from(Span::styled("No events yet.", Style::default().add_modifier(Modifier::DIM)))]
+            vec![TLine::from(Span::styled(
+                "No events yet.",
+                Style::default().add_modifier(Modifier::DIM),
+            ))]
         } else {
-            page.iter().map(|e| self.event_line(e, area.width.saturating_sub(6) as usize, false)).collect()
+            page.iter()
+                .map(|e| self.event_line(e, area.width.saturating_sub(6) as usize, false))
+                .collect()
         };
         if let Some(first) = page.first() {
             if let Ok(json) = serde_json::to_string(&first.event) {
-                lines.push(TLine::from(Span::styled(json, Style::default().add_modifier(Modifier::DIM))));
+                lines.push(TLine::from(Span::styled(
+                    json,
+                    Style::default().add_modifier(Modifier::DIM),
+                )));
             }
         }
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
@@ -1720,7 +1954,9 @@ impl App {
         let inner = block.inner(cols[0]);
         f.render_widget(block, cols[0]);
         self.hit_context = Some(inner);
-        let idx = self.context_index.min(self.contexts.len().saturating_sub(1));
+        let idx = self
+            .context_index
+            .min(self.contexts.len().saturating_sub(1));
         let vis = self.visible_count();
         let mut lines: Vec<TLine> = Vec::new();
         for (i, item) in self.contexts.iter().take(vis).enumerate() {
@@ -1734,17 +1970,24 @@ impl App {
             )));
         }
         if self.contexts.is_empty() {
-            lines.push(TLine::from(Span::styled("No context chunks yet.", Style::default().add_modifier(Modifier::DIM))));
+            lines.push(TLine::from(Span::styled(
+                "No context chunks yet.",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
         }
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         let selected = self.contexts.get(idx);
-        let title = selected.map(|c| c.ref_.clone()).unwrap_or_else(|| "Chunk detail".into());
+        let title = selected
+            .map(|c| c.ref_.clone())
+            .unwrap_or_else(|| "Chunk detail".into());
         let content = selected
             .map(|c| c.content.clone())
             .unwrap_or_else(|| "Select a chunk with j/k.".into());
         f.render_widget(
-            Paragraph::new(content).wrap(Wrap { trim: false }).block(self.panel(title)),
+            Paragraph::new(content)
+                .wrap(Wrap { trim: false })
+                .block(self.panel(title)),
             cols[1],
         );
     }
@@ -1752,7 +1995,10 @@ impl App {
     fn draw_config(&mut self, f: &mut Frame, area: Rect) {
         let json = self.loaded.pretty_json();
         let block = self.panel(format!("Configuration · {}", self.loaded.path));
-        f.render_widget(Paragraph::new(json).wrap(Wrap { trim: false }).block(block), area);
+        f.render_widget(
+            Paragraph::new(json).wrap(Wrap { trim: false }).block(block),
+            area,
+        );
     }
 
     fn draw_help(&mut self, f: &mut Frame, area: Rect) {
@@ -1784,7 +2030,9 @@ impl App {
             TLine::from("/mouse · /async [on|off] · /help · /quit"),
         ];
         f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }).block(self.panel("Keyboard & REPL help")),
+            Paragraph::new(Text::from(lines))
+                .wrap(Wrap { trim: true })
+                .block(self.panel("Keyboard & REPL help")),
             area,
         );
     }
@@ -1793,7 +2041,11 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if self.snapshot.running { Color::Yellow } else { Color::Cyan }));
+            .border_style(Style::default().fg(if self.snapshot.running {
+                Color::Yellow
+            } else {
+                Color::Cyan
+            }));
         let inner = block.inner(area);
         f.render_widget(block, area);
         let caret = caret_row_col(&self.draft.text, self.draft.cursor);
@@ -1804,10 +2056,16 @@ impl App {
             if index == caret.row {
                 let chars: Vec<char> = row.chars().collect();
                 let before: String = chars.iter().take(caret.col).collect();
-                let at: String = chars.get(caret.col).map(|c| c.to_string()).unwrap_or_else(|| " ".into());
+                let at: String = chars
+                    .get(caret.col)
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| " ".into());
                 let after: String = chars.iter().skip(caret.col + 1).collect();
                 spans.push(Span::raw(before));
-                spans.push(Span::styled(at, Style::default().add_modifier(Modifier::REVERSED)));
+                spans.push(Span::styled(
+                    at,
+                    Style::default().add_modifier(Modifier::REVERSED),
+                ));
                 spans.push(Span::raw(after));
             } else {
                 spans.push(Span::raw(row.to_string()));
@@ -1818,7 +2076,9 @@ impl App {
     }
 
     fn draw_resume(&mut self, f: &mut Frame, area: Rect) {
-        let Some(picker) = &self.resume_picker else { return };
+        let Some(picker) = &self.resume_picker else {
+            return;
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -1828,7 +2088,9 @@ impl App {
                     "Resume a chat — ↑/↓ select · Enter load · Esc cancel ({})",
                     picker.chats.len()
                 ),
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             ));
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -1861,7 +2123,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock_runtime::MockRuntime;
+    use crate::runtime::mock::MockRuntime;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 

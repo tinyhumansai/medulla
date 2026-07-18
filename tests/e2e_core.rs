@@ -14,15 +14,18 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 
-use medulla::agents::{derive_agent_lanes, TaskStatus};
-use medulla::core_client::CoreClient;
-use medulla::core_runtime::CoreRuntime;
+use medulla::runtime::core::CoreRuntime;
+use medulla::runtime::core_client::CoreClient;
 use medulla::runtime::{Runtime, WorkerOp};
+use medulla::ui::agents::{derive_agent_lanes, TaskStatus};
 
 use support::wait_until;
 
 fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
 }
 
 /// A scripted mock core: answers the RPC methods `CoreRuntime` issues and lets the
@@ -41,7 +44,8 @@ impl MockCore {
         let listener = UnixListener::bind(path).unwrap();
         let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<Value>();
         let calls: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let workers: Arc<Mutex<(Vec<Value>, Option<String>)>> = Arc::new(Mutex::new((Vec::new(), None)));
+        let workers: Arc<Mutex<(Vec<Value>, Option<String>)>> =
+            Arc::new(Mutex::new((Vec::new(), None)));
 
         let calls_h = calls.clone();
         let workers_h = workers.clone();
@@ -77,7 +81,11 @@ impl MockCore {
                     Err(_) => continue,
                 };
                 let id = req.get("id").cloned().unwrap_or(Value::Null);
-                let method = req.get("method").and_then(Value::as_str).unwrap_or("").to_string();
+                let method = req
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 let params = req.get("params").cloned().unwrap_or(json!({}));
                 calls_h.lock().unwrap().push(method.clone());
                 let ok = handle(&method, &params, &workers_h);
@@ -85,7 +93,11 @@ impl MockCore {
             }
         });
 
-        MockCore { path: path.to_path_buf(), frame_tx, calls }
+        MockCore {
+            path: path.to_path_buf(),
+            frame_tx,
+            calls,
+        }
     }
 
     fn push_event(&self, seq: u64, cycle_id: &str, body: Value) {
@@ -106,7 +118,11 @@ impl MockCore {
 }
 
 /// Compute a response `ok` payload for one request method.
-fn handle(method: &str, params: &Value, workers: &Arc<Mutex<(Vec<Value>, Option<String>)>>) -> Value {
+fn handle(
+    method: &str,
+    params: &Value,
+    workers: &Arc<Mutex<(Vec<Value>, Option<String>)>>,
+) -> Value {
     match method {
         "initialize" => json!({
             "coreVersion": "mock",
@@ -171,7 +187,11 @@ fn handle(method: &str, params: &Value, workers: &Arc<Mutex<(Vec<Value>, Option<
         }
         "worker.select" => {
             let mut g = workers.lock().unwrap();
-            let id = params.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let id = params
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             g.1 = Some(id.clone());
             for w in g.0.iter_mut() {
                 let is = w.get("id").and_then(Value::as_str) == Some(id.as_str());
@@ -183,7 +203,11 @@ fn handle(method: &str, params: &Value, workers: &Arc<Mutex<(Vec<Value>, Option<
         }
         "worker.remove" => {
             let mut g = workers.lock().unwrap();
-            let id = params.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let id = params
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             g.0.retain(|w| w.get("id").and_then(Value::as_str) != Some(id.as_str()));
             json!({ "workers": g.0.clone(), "selectedId": g.1.clone() })
         }
@@ -209,15 +233,29 @@ async fn core_cycle_folds_lanes_and_running_transitions() {
 
     let cyc = "cyc:app:th_test:1";
     mock.push_event(1, cyc, json!({"kind":"cycle_start","cycleId":cyc}));
-    mock.push_event(2, cyc, json!({"kind":"task_start","taskId":"t1","instruction":"do it","depth":1}));
+    mock.push_event(
+        2,
+        cyc,
+        json!({"kind":"task_start","taskId":"t1","instruction":"do it","depth":1}),
+    );
     mock.push_event(3, cyc, json!({"kind":"task_event","taskId":"t1","eventKind":"text","content":"working","harness":"echo"}));
     mock.push_event(4, cyc, json!({"kind":"task_attention","taskId":"t1","reason":"approval","content":"ok?","questionId":"q_1"}));
-    mock.push_event(5, cyc, json!({"kind":"task_complete","taskId":"t1","status":"cancelled","digest":"stopped"}));
-    mock.push_event(6, cyc, json!({"kind":"cycle_end","cycleId":cyc,"passCount":1,"durationMs":10}));
+    mock.push_event(
+        5,
+        cyc,
+        json!({"kind":"task_complete","taskId":"t1","status":"cancelled","digest":"stopped"}),
+    );
+    mock.push_event(
+        6,
+        cyc,
+        json!({"kind":"cycle_end","cycleId":cyc,"passCount":1,"durationMs":10}),
+    );
 
-    wait_until("cycle_end folds and clears running", Duration::from_secs(5), || {
-        !rt.snapshot().running
-    })
+    wait_until(
+        "cycle_end folds and clears running",
+        Duration::from_secs(5),
+        || !rt.snapshot().running,
+    )
     .await;
 
     let snap = rt.snapshot();
@@ -245,13 +283,23 @@ async fn core_seq_gap_triggers_snapshot_resync() {
 
     let cyc = "cyc:app:th_test:1";
     mock.push_event(1, cyc, json!({"kind":"cycle_start","cycleId":cyc}));
-    mock.push_event(2, cyc, json!({"kind":"task_start","taskId":"t1","instruction":"a","depth":1}));
+    mock.push_event(
+        2,
+        cyc,
+        json!({"kind":"task_start","taskId":"t1","instruction":"a","depth":1}),
+    );
     // Gap: the next seq jumps to 10 (the core coalesced 3..9) — forces a resync.
-    mock.push_event(10, cyc, json!({"kind":"task_event","taskId":"t1","eventKind":"text","content":"late"}));
+    mock.push_event(
+        10,
+        cyc,
+        json!({"kind":"task_event","taskId":"t1","eventKind":"text","content":"late"}),
+    );
 
-    wait_until("snapshot.get is called on the seq gap", Duration::from_secs(5), || {
-        mock.calls().iter().any(|m| m == "snapshot.get")
-    })
+    wait_until(
+        "snapshot.get is called on the seq gap",
+        Duration::from_secs(5),
+        || mock.calls().iter().any(|m| m == "snapshot.get"),
+    )
     .await;
 
     // The rebuild seeded a lane from the returned snapshot.
@@ -288,7 +336,9 @@ async fn core_worker_registry_round_trips() {
     assert!(ws[0].selected, "the first worker is selected by default");
 
     let id = ws[0].id.clone();
-    rt.worker_op(WorkerOp::Select { id: id.clone() }).await.unwrap();
+    rt.worker_op(WorkerOp::Select { id: id.clone() })
+        .await
+        .unwrap();
     assert!(rt.workers().iter().any(|w| w.id == id && w.selected));
 
     rt.worker_op(WorkerOp::Remove { id }).await.unwrap();

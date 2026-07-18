@@ -5,9 +5,9 @@
 
 use std::collections::HashMap;
 
-use crate::events::{EventEnvelope, TuiEvent, Usage};
 use crate::runtime::AgentDescriptor;
-use crate::util::wrap;
+use crate::ui::events::{EventEnvelope, TuiEvent, Usage};
+use crate::ui::util::wrap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentRole {
@@ -169,7 +169,10 @@ struct Lanes {
 
 impl Lanes {
     fn new() -> Self {
-        Lanes { order: Vec::new(), map: HashMap::new() }
+        Lanes {
+            order: Vec::new(),
+            map: HashMap::new(),
+        }
     }
     fn insert(&mut self, lane: AgentLane) {
         if !self.map.contains_key(&lane.key) {
@@ -337,7 +340,10 @@ pub fn derive_agent_lanes(
                 if !workers.contains(&key) {
                     let mut lane = new_worker_lane(
                         key.clone(),
-                        task_agent.get(task_id).cloned().unwrap_or_else(|| task_id.clone()),
+                        task_agent
+                            .get(task_id)
+                            .cloned()
+                            .unwrap_or_else(|| task_id.clone()),
                     );
                     lane.last_at = at;
                     if let Some(a) = task_agent.get(task_id) {
@@ -347,9 +353,14 @@ pub fn derive_agent_lanes(
                 }
                 let lane = workers.get_mut(&key).unwrap();
                 if agent_id.is_none() {
-                    let label: String = instruction.split_whitespace().collect::<Vec<_>>().join(" ");
+                    let label: String =
+                        instruction.split_whitespace().collect::<Vec<_>>().join(" ");
                     let label: String = label.chars().take(48).collect();
-                    lane.label = if label.is_empty() { task_id.clone() } else { label };
+                    lane.label = if label.is_empty() {
+                        task_id.clone()
+                    } else {
+                        label
+                    };
                 }
                 let tag = if agent_id.is_some() {
                     format!(" · {task_id}")
@@ -544,10 +555,16 @@ pub fn derive_agent_lanes(
     }
 
     // Group each machine's session lanes directly under its lane.
-    let session_lanes: Vec<AgentLane> =
-        worker_lanes.iter().filter(|l| l.session_id.is_some()).cloned().collect();
-    let main_worker_lanes: Vec<AgentLane> =
-        worker_lanes.iter().filter(|l| l.session_id.is_none()).cloned().collect();
+    let session_lanes: Vec<AgentLane> = worker_lanes
+        .iter()
+        .filter(|l| l.session_id.is_some())
+        .cloned()
+        .collect();
+    let main_worker_lanes: Vec<AgentLane> = worker_lanes
+        .iter()
+        .filter(|l| l.session_id.is_none())
+        .cloned()
+        .collect();
     let mut grouped: Vec<AgentLane> = Vec::new();
     for lane in &main_worker_lanes {
         grouped.push(lane.clone());
@@ -559,14 +576,24 @@ pub fn derive_agent_lanes(
     }
     let orphan_sessions: Vec<AgentLane> = session_lanes
         .iter()
-        .filter(|s| !main_worker_lanes.iter().any(|l| l.agent_id == s.parent_agent_id))
+        .filter(|s| {
+            !main_worker_lanes
+                .iter()
+                .any(|l| l.agent_id == s.parent_agent_id)
+        })
         .cloned()
         .collect();
 
-    let agent_tiers: Vec<AgentLane> =
-        tier_lanes.iter().filter(|l| !l.role.is_function()).cloned().collect();
-    let function_tiers: Vec<AgentLane> =
-        tier_lanes.iter().filter(|l| l.role.is_function()).cloned().collect();
+    let agent_tiers: Vec<AgentLane> = tier_lanes
+        .iter()
+        .filter(|l| !l.role.is_function())
+        .cloned()
+        .collect();
+    let function_tiers: Vec<AgentLane> = tier_lanes
+        .iter()
+        .filter(|l| l.role.is_function())
+        .cloned()
+        .collect();
 
     let mut out = agent_tiers;
     out.extend(grouped);
@@ -585,7 +612,10 @@ fn ensure_lane(
     if !workers.contains(key) {
         let mut lane = new_worker_lane(
             key.to_string(),
-            task_agent.get(task_id).cloned().unwrap_or_else(|| task_id.to_string()),
+            task_agent
+                .get(task_id)
+                .cloned()
+                .unwrap_or_else(|| task_id.to_string()),
         );
         lane.last_at = at;
         if let Some(a) = task_agent.get(task_id) {
@@ -595,13 +625,7 @@ fn ensure_lane(
     }
 }
 
-fn ensure_session_lane(
-    workers: &mut Lanes,
-    key: &str,
-    agent_id: &str,
-    session_id: &str,
-    at: i64,
-) {
+fn ensure_session_lane(workers: &mut Lanes, key: &str, agent_id: &str, session_id: &str, at: i64) {
     if !workers.contains(key) {
         let mut lane = new_worker_lane(key.to_string(), format!("↳ {session_id}"));
         lane.last_at = at;
@@ -615,7 +639,13 @@ fn ensure_session_lane(
 pub fn ordered_tasks(tasks: &[TaskState]) -> Vec<TaskState> {
     let mut v = tasks.to_vec();
     v.sort_by(|a, b| {
-        let rank = |t: &TaskState| if t.status == TaskStatus::Running { 0 } else { 1 };
+        let rank = |t: &TaskState| {
+            if t.status == TaskStatus::Running {
+                0
+            } else {
+                1
+            }
+        };
         rank(a).cmp(&rank(b)).then(b.last_at.cmp(&a.last_at))
     });
     v
@@ -625,9 +655,18 @@ pub fn ordered_tasks(tasks: &[TaskState]) -> Vec<TaskState> {
 #[derive(Debug, Clone)]
 pub enum AgentRow {
     Separator,
-    Lane { lane_index: usize },
-    Sub { lane_index: usize, task: TaskState, last: bool },
-    More { lane_index: usize, hidden: usize },
+    Lane {
+        lane_index: usize,
+    },
+    Sub {
+        lane_index: usize,
+        task: TaskState,
+        last: bool,
+    },
+    More {
+        lane_index: usize,
+        hidden: usize,
+    },
 }
 
 impl AgentRow {
@@ -654,7 +693,10 @@ pub fn agent_row_model(lanes: &[AgentLane], max_subtasks: usize) -> Vec<AgentRow
             rows.push(AgentRow::Separator);
         }
         rows.push(AgentRow::Lane { lane_index });
-        if lane.role == AgentRole::Worker && lane.key.starts_with("agent:") && !lane.tasks.is_empty() {
+        if lane.role == AgentRole::Worker
+            && lane.key.starts_with("agent:")
+            && !lane.tasks.is_empty()
+        {
             let ordered = ordered_tasks(&lane.tasks);
             let shown = ordered.len().min(max_subtasks);
             let hidden = ordered.len() - shown;
@@ -676,7 +718,7 @@ pub fn agent_row_model(lanes: &[AgentLane], max_subtasks: usize) -> Vec<AgentRow
 fn blocks_to_lines(turns: &[TurnBlock], cols: usize) -> Vec<Line> {
     let mut lines = Vec::new();
     for turn in turns {
-        let header = format!("{}  {}", crate::util::clock(turn.at), turn.header);
+        let header = format!("{}  {}", crate::ui::util::clock(turn.at), turn.header);
         let header = if header.chars().count() > cols {
             let mut s: String = header.chars().take(cols.saturating_sub(1)).collect();
             s.push('…');
@@ -690,22 +732,45 @@ fn blocks_to_lines(turns: &[TurnBlock], cols: usize) -> Vec<Line> {
             dim: false,
         });
         if let Some(reasoning) = &turn.reasoning {
-            lines.push(Line { text: "  · thinking".into(), color: Some("yellow".into()), dim: true });
+            lines.push(Line {
+                text: "  · thinking".into(),
+                color: Some("yellow".into()),
+                dim: true,
+            });
             for row in wrap(reasoning, cols.saturating_sub(2)) {
-                lines.push(Line { text: format!("  {row}"), color: Some("yellow".into()), dim: true });
+                lines.push(Line {
+                    text: format!("  {row}"),
+                    color: Some("yellow".into()),
+                    dim: true,
+                });
             }
         }
         if let Some(content) = &turn.content {
-            lines.push(Line { text: "  › output".into(), color: Some("green".into()), dim: true });
+            lines.push(Line {
+                text: "  › output".into(),
+                color: Some("green".into()),
+                dim: true,
+            });
             for row in wrap(content, cols) {
-                lines.push(Line { text: row, ..Default::default() });
+                lines.push(Line {
+                    text: row,
+                    ..Default::default()
+                });
             }
         }
         if !turn.tools.is_empty() {
-            lines.push(Line { text: "  → tools".into(), color: Some("blue".into()), dim: true });
+            lines.push(Line {
+                text: "  → tools".into(),
+                color: Some("blue".into()),
+                dim: true,
+            });
             for tool in &turn.tools {
                 for row in wrap(tool, cols) {
-                    lines.push(Line { text: row, color: Some("blue".into()), dim: false });
+                    lines.push(Line {
+                        text: row,
+                        color: Some("blue".into()),
+                        dim: false,
+                    });
                 }
             }
         }
@@ -723,13 +788,22 @@ pub fn lane_lines(lane: Option<&AgentLane>, width: usize) -> Vec<Line> {
         let mut lines = Vec::new();
         for task in ordered_tasks(&lane.tasks) {
             lines.push(Line {
-                text: format!("── {} · {} · {} turn(s) ──", task.task_id, task.status.label(), task.turns),
+                text: format!(
+                    "── {} · {} · {} turn(s) ──",
+                    task.task_id,
+                    task.status.label(),
+                    task.turns
+                ),
                 color: Some(task.status.color().into()),
                 dim: false,
             });
             let body = blocks_to_lines(&task.turn_blocks, cols);
             if body.is_empty() {
-                lines.push(Line { text: "  (no turns yet)".into(), dim: true, ..Default::default() });
+                lines.push(Line {
+                    text: "  (no turns yet)".into(),
+                    dim: true,
+                    ..Default::default()
+                });
             } else {
                 lines.extend(body);
             }
@@ -737,7 +811,11 @@ pub fn lane_lines(lane: Option<&AgentLane>, width: usize) -> Vec<Line> {
         return lines;
     }
     if lane.turns.is_empty() {
-        return vec![Line { text: "No turns yet.".into(), dim: true, ..Default::default() }];
+        return vec![Line {
+            text: "No turns yet.".into(),
+            dim: true,
+            ..Default::default()
+        }];
     }
     blocks_to_lines(&lane.turns, cols)
 }
@@ -746,7 +824,11 @@ pub fn lane_lines(lane: Option<&AgentLane>, width: usize) -> Vec<Line> {
 pub fn task_lines(task: &TaskState, width: usize) -> Vec<Line> {
     let cols = width.max(20);
     if task.turn_blocks.is_empty() {
-        return vec![Line { text: "No turns yet.".into(), dim: true, ..Default::default() }];
+        return vec![Line {
+            text: "No turns yet.".into(),
+            dim: true,
+            ..Default::default()
+        }];
     }
     blocks_to_lines(&task.turn_blocks, cols)
 }
@@ -754,10 +836,14 @@ pub fn task_lines(task: &TaskState, width: usize) -> Vec<Line> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::TaskDigest;
+    use crate::ui::events::TaskDigest;
 
     fn env(seq: u64, event: TuiEvent) -> EventEnvelope {
-        EventEnvelope { seq, at: seq as i64 * 1000, event }
+        EventEnvelope {
+            seq,
+            at: seq as i64 * 1000,
+            event,
+        }
     }
 
     #[test]
@@ -780,7 +866,10 @@ mod tests {
                 op: "execute_step".into(),
                 model: Some("gpt".into()),
                 duration_ms: 42,
-                usage: Some(Usage { input_tokens: 100, output_tokens: 20 }),
+                usage: Some(Usage {
+                    input_tokens: 100,
+                    output_tokens: 20,
+                }),
                 content: Some("hi".into()),
                 reasoning: None,
                 tool_calls: None,
@@ -789,35 +878,49 @@ mod tests {
         let lanes = derive_agent_lanes(&events, "", &[]);
         let reasoning = &lanes[1];
         assert_eq!(reasoning.turns.len(), 1);
-        assert!(reasoning.turns[0].header.contains("execute_step · gpt · 42ms"));
+        assert!(reasoning.turns[0]
+            .header
+            .contains("execute_step · gpt · 42ms"));
         assert_eq!(reasoning.context_tokens, Some(100));
     }
 
     #[test]
     fn anonymous_task_lane_and_completion() {
         let events = vec![
-            env(1, TuiEvent::TaskStart {
-                task_id: "t1".into(),
-                instruction: "do the thing".into(),
-                depth: 2,
-                agent_id: None,
-            }),
-            env(2, TuiEvent::TaskEvent {
-                task_id: "t1".into(),
-                event_kind: "text".into(),
-                content: "progress".into(),
-                harness: None,
-            }),
-            env(3, TuiEvent::TaskComplete {
-                digest: TaskDigest {
+            env(
+                1,
+                TuiEvent::TaskStart {
                     task_id: "t1".into(),
-                    status: "done".into(),
-                    digest: "result".into(),
-                    result_ref: None,
-                    usage: Some(Usage { input_tokens: 500, output_tokens: 50 }),
+                    instruction: "do the thing".into(),
                     depth: 2,
+                    agent_id: None,
                 },
-            }),
+            ),
+            env(
+                2,
+                TuiEvent::TaskEvent {
+                    task_id: "t1".into(),
+                    event_kind: "text".into(),
+                    content: "progress".into(),
+                    harness: None,
+                },
+            ),
+            env(
+                3,
+                TuiEvent::TaskComplete {
+                    digest: TaskDigest {
+                        task_id: "t1".into(),
+                        status: "done".into(),
+                        digest: "result".into(),
+                        result_ref: None,
+                        usage: Some(Usage {
+                            input_tokens: 500,
+                            output_tokens: 50,
+                        }),
+                        depth: 2,
+                    },
+                },
+            ),
         ];
         let lanes = derive_agent_lanes(&events, "OPENCODE", &[]);
         // orchestrator, reasoning, worker(t1), summarizer.
@@ -840,20 +943,29 @@ mod tests {
         }];
         let mut events = Vec::new();
         for i in 0..10 {
-            events.push(env(i, TuiEvent::TaskStart {
-                task_id: format!("t{i}"),
-                instruction: "x".into(),
-                depth: 2,
-                agent_id: Some("dev".into()),
-            }));
+            events.push(env(
+                i,
+                TuiEvent::TaskStart {
+                    task_id: format!("t{i}"),
+                    instruction: "x".into(),
+                    depth: 2,
+                    agent_id: Some("dev".into()),
+                },
+            ));
         }
         let lanes = derive_agent_lanes(&events, "TINYPLACE", &roster);
         let dev = lanes.iter().find(|l| l.key == "agent:dev").unwrap();
         assert_eq!(dev.tasks.len(), 10);
         let rows = agent_row_model(&lanes, 8);
         // Cap at 8 sublanes + a "+2 more" row for the dev lane.
-        let subs = rows.iter().filter(|r| matches!(r, AgentRow::Sub { .. })).count();
-        let more = rows.iter().filter(|r| matches!(r, AgentRow::More { .. })).count();
+        let subs = rows
+            .iter()
+            .filter(|r| matches!(r, AgentRow::Sub { .. }))
+            .count();
+        let more = rows
+            .iter()
+            .filter(|r| matches!(r, AgentRow::More { .. }))
+            .count();
         assert_eq!(subs, 8);
         assert_eq!(more, 1);
         // The functions divider precedes the summarizer.
@@ -862,16 +974,20 @@ mod tests {
 
     #[test]
     fn session_lanes_group_under_machine() {
-        let events = vec![
-            env(1, TuiEvent::PeerSession {
+        let events = vec![env(
+            1,
+            TuiEvent::PeerSession {
                 agent_id: "m1".into(),
                 session_id: "s1".into(),
                 state: "working".into(),
                 harness: Some("codex".into()),
-            }),
-        ];
+            },
+        )];
         let lanes = derive_agent_lanes(&events, "TINYPLACE", &[]);
-        let session = lanes.iter().find(|l| l.session_id.as_deref() == Some("s1")).unwrap();
+        let session = lanes
+            .iter()
+            .find(|l| l.session_id.as_deref() == Some("s1"))
+            .unwrap();
         assert_eq!(session.parent_agent_id.as_deref(), Some("m1"));
         // A session lane is tagged only with a harness it learned itself (CODEX),
         // never the global default (TINYPLACE).

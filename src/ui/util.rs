@@ -3,7 +3,12 @@
 /// 24h clock `HH:MM:SS` for an epoch-ms timestamp (UTC — no tz database here).
 pub fn clock(millis: i64) -> String {
     let secs = millis.div_euclid(1000).rem_euclid(86_400);
-    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 /// Collapse internal whitespace, trim, and ellipsize to `width` chars.

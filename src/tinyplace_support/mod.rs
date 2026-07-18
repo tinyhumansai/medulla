@@ -22,6 +22,7 @@ pub mod consumer;
 pub mod control;
 pub mod frames;
 pub mod runtime;
+pub mod service;
 pub mod status;
 
 /// The published tinyplace Rust SDK, re-exported so downstream code depends on a

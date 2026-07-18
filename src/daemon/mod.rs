@@ -28,11 +28,11 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, Mutex as TokioMutex, Notify, Semaphore};
 
-use tinyplace::auth::timestamp;
 use crate::tinyplace_support::{
     encode_task_frame, AgentCapabilities, EncodeFrameInput, HarnessEvent, HarnessEventKind,
     HarnessProvider, TaskFrame, TaskFrameKind,
 };
+use tinyplace::auth::timestamp;
 
 use capabilities::{probe_capabilities, ProbeOptions};
 use providers::{Abort, RunTaskFn, RunTaskOptions};
@@ -251,7 +251,12 @@ impl DaemonRuntime {
         let abort = Abort::new();
         let controller_id = self.register_controller(abort.clone());
         // Compete for the concurrency budget like a task.
-        let permit = self.inner.slots.acquire().await.expect("semaphore is never closed");
+        let permit = self
+            .inner
+            .slots
+            .acquire()
+            .await
+            .expect("semaphore is never closed");
         let capabilities = probe_capabilities(ProbeOptions {
             provider,
             run_task: self.inner.run_task.clone(),
@@ -411,7 +416,12 @@ impl DaemonRuntime {
         self.log(&format!("task {} → {}", frame.task_id, provider.as_str()));
 
         // Slot-limited execution (FIFO via the semaphore).
-        let permit = self.inner.slots.acquire().await.expect("semaphore is never closed");
+        let permit = self
+            .inner
+            .slots
+            .acquire()
+            .await
+            .expect("semaphore is never closed");
 
         // Status frames: onEvent (sync) throttles + forwards details over a
         // channel; a consumer sends them in order before the final reply.
@@ -546,7 +556,12 @@ impl DaemonRuntime {
         let controller_id = self.register_controller(abort.clone());
         self.inner.admitted.fetch_add(1, Ordering::SeqCst);
 
-        let permit = self.inner.slots.acquire().await.expect("semaphore is never closed");
+        let permit = self
+            .inner
+            .slots
+            .acquire()
+            .await
+            .expect("semaphore is never closed");
         self.log(&format!("plaintext DM → {}", provider.as_str()));
         let options = RunTaskOptions {
             provider,
@@ -565,7 +580,10 @@ impl DaemonRuntime {
         let result = (self.inner.run_task)(options).await;
         match result {
             Ok(run) => self.send_raw(&from, &run.reply).await,
-            Err(message) => self.send_raw(&from, &format!("Task failed: {message}")).await,
+            Err(message) => {
+                self.send_raw(&from, &format!("Task failed: {message}"))
+                    .await
+            }
         }
         drop(permit);
         self.unregister_controller(controller_id);
@@ -617,9 +635,10 @@ impl DaemonRuntime {
 /// TS `statusDetail`.
 pub fn status_detail(event: &HarnessEvent) -> Option<String> {
     match event.decoded() {
-        HarnessEventKind::ToolCall(payload) => {
-            Some(cap(&format!("running {}: {}", payload.tool_name, payload.display), 200))
-        }
+        HarnessEventKind::ToolCall(payload) => Some(cap(
+            &format!("running {}: {}", payload.tool_name, payload.display),
+            200,
+        )),
         HarnessEventKind::ToolResult(payload) => Some(
             if payload.is_error {
                 "tool failed"
@@ -666,17 +685,17 @@ mod entry {
     use super::*;
     use std::path::PathBuf;
 
-    use tinyplace::api::directory::DirectoryApi;
-    use tinyplace::api::registry::RegisterRequest;
-    use tinyplace::types::AgentCard;
-    use tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
     use crate::tinyplace_support::{
         config_path, decode_task_frame, load_or_create_identity, resolve_endpoint,
         spawn_contact_auto_accepter, spawn_presence_heartbeat,
     };
+    use tinyplace::api::directory::DirectoryApi;
+    use tinyplace::api::registry::RegisterRequest;
+    use tinyplace::types::AgentCard;
+    use tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
-    use super::providers::{detect_providers, provider_bin, run_provider_task, DAEMON_PROVIDERS};
     use super::capabilities::read_git_facts;
+    use super::providers::{detect_providers, provider_bin, run_provider_task, DAEMON_PROVIDERS};
     use super::transport::SignalTransport;
 
     const BOOL_FLAGS: &[&str] = &["dangerously-skip-permissions", "once", "no-onboard"];
@@ -707,7 +726,11 @@ mod entry {
                         .get(index + 1)
                         .cloned()
                         .ok_or_else(|| format!("--{name} needs a value"))?;
-                    flags.values.entry(name.to_string()).or_default().push(value);
+                    flags
+                        .values
+                        .entry(name.to_string())
+                        .or_default()
+                        .push(value);
                     index += 2;
                 }
             }
@@ -757,7 +780,11 @@ mod entry {
         HarnessProvider::from_wire(value).ok_or_else(|| {
             format!(
                 "unknown provider \"{value}\" (expected: {})",
-                DAEMON_PROVIDERS.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+                DAEMON_PROVIDERS
+                    .iter()
+                    .map(|p| p.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
         })
     }
@@ -799,7 +826,11 @@ mod entry {
                 if !providers.contains(&provider) {
                     anyhow::bail!(
                         "--default-provider \"{requested}\" is not available; detected: {}",
-                        providers.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+                        providers
+                            .iter()
+                            .map(|p| p.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     );
                 }
                 provider
@@ -815,10 +846,18 @@ mod entry {
             .unwrap_or(workspace)
             .to_string_lossy()
             .into_owned();
-        let concurrency = flags.positive("concurrency", DEFAULT_CONCURRENCY as u64).map_err(|e| anyhow::anyhow!(e))? as usize;
-        let task_timeout_ms = flags.positive("task-timeout-ms", DEFAULT_TASK_TIMEOUT_MS).map_err(|e| anyhow::anyhow!(e))?;
-        let poll_ms = flags.positive("poll-ms", DEFAULT_POLL_MS).map_err(|e| anyhow::anyhow!(e))?;
-        let max_pending = flags.positive("max-pending", DEFAULT_MAX_PENDING as u64).map_err(|e| anyhow::anyhow!(e))? as usize;
+        let concurrency = flags
+            .positive("concurrency", DEFAULT_CONCURRENCY as u64)
+            .map_err(|e| anyhow::anyhow!(e))? as usize;
+        let task_timeout_ms = flags
+            .positive("task-timeout-ms", DEFAULT_TASK_TIMEOUT_MS)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let poll_ms = flags
+            .positive("poll-ms", DEFAULT_POLL_MS)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let max_pending = flags
+            .positive("max-pending", DEFAULT_MAX_PENDING as u64)
+            .map_err(|e| anyhow::anyhow!(e))? as usize;
         let status_throttle_ms = flags
             .number("status-throttle-ms")
             .map_err(|e| anyhow::anyhow!(e))?
@@ -835,8 +874,8 @@ mod entry {
         // Identity + client.
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let config_file = config_path(&env, &home);
-        let (signer, config) =
-            load_or_create_identity(&config_file, &env).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let (signer, config) = load_or_create_identity(&config_file, &env)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         let base_url = resolve_endpoint(&env, &config);
         let signer = Arc::new(signer);
         let client = TinyPlaceClient::new(TinyPlaceClientOptions {
@@ -858,8 +897,15 @@ mod entry {
             let git = read_git_facts(&workspace).await;
             let bio = format!(
                 "Headless coding-agent daemon serving {} over tiny.place.{} cwd:{workspace}",
-                providers.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", "),
-                git.project.as_ref().map(|p| format!(" project:{p}")).unwrap_or_default(),
+                providers
+                    .iter()
+                    .map(|p| p.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                git.project
+                    .as_ref()
+                    .map(|p| format!(" project:{p}"))
+                    .unwrap_or_default(),
             );
             let mut skills: Vec<String> = std::iter::once("coding-agent".to_string())
                 .chain(providers.iter().map(|p| p.as_str().to_string()))
@@ -879,7 +925,10 @@ mod entry {
                 log,
             )
             .await;
-            log(&format!("onboarded {agent_id} (skills: {})", skills.join(", ")));
+            log(&format!(
+                "onboarded {agent_id} (skills: {})",
+                skills.join(", ")
+            ));
         }
 
         // Runtime + transport-backed send.
@@ -909,7 +958,8 @@ mod entry {
             extra_args: Vec::new(),
             skip_permissions,
         };
-        let run_task: RunTaskFn = Arc::new(|options: RunTaskOptions| Box::pin(run_provider_task(options)));
+        let run_task: RunTaskFn =
+            Arc::new(|options: RunTaskOptions| Box::pin(run_provider_task(options)));
         let runtime = DaemonRuntime::new(config, run_task, send)
             .with_log(Arc::new(|line: &str| eprintln!("medulla daemon: {line}")));
 
@@ -935,7 +985,11 @@ mod entry {
 
         log(&format!(
             "serving providers [{}] as {agent_id} on {base_url} (workspace: {workspace})",
-            providers.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+            providers
+                .iter()
+                .map(|p| p.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
 
         // Serve loop: poll → decode → dispatch, until a signal.

@@ -98,7 +98,11 @@ fn set_owner_only(_path: &Path) -> io::Result<()> {
 /// Resolve the API endpoint. Order: `TINYPLACE_ENDPOINT` > `TINYPLACE_API_URL` >
 /// `NEXT_PUBLIC_API_URL` > `config.endpoint` > [`DEFAULT_ENDPOINT`].
 pub fn resolve_endpoint(env: &HashMap<String, String>, config: &TinyPlaceConfig) -> String {
-    for key in ["TINYPLACE_ENDPOINT", "TINYPLACE_API_URL", "NEXT_PUBLIC_API_URL"] {
+    for key in [
+        "TINYPLACE_ENDPOINT",
+        "TINYPLACE_API_URL",
+        "NEXT_PUBLIC_API_URL",
+    ] {
         if let Some(value) = env.get(key) {
             if !value.is_empty() {
                 return value.clone();
@@ -114,146 +118,150 @@ pub fn resolve_endpoint(env: &HashMap<String, String>, config: &TinyPlaceConfig)
 
 #[cfg(test)]
 mod tests {
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
 
-use crate::tinyplace_support::{
-    config_path, load_config, parse_config, resolve_endpoint, TinyPlaceConfig, DEFAULT_ENDPOINT,
-};
+    use crate::tinyplace_support::{
+        config_path, load_config, parse_config, resolve_endpoint, TinyPlaceConfig, DEFAULT_ENDPOINT,
+    };
 
-fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-    pairs
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect()
-}
+    fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
 
-#[test]
-fn config_path_prefers_env_override() {
-    let e = env(&[("TINYPLACE_CONFIG", "/custom/config.json")]);
-    assert_eq!(
-        config_path(&e, Path::new("/home/me")),
-        PathBuf::from("/custom/config.json")
-    );
-}
+    #[test]
+    fn config_path_prefers_env_override() {
+        let e = env(&[("TINYPLACE_CONFIG", "/custom/config.json")]);
+        assert_eq!(
+            config_path(&e, Path::new("/home/me")),
+            PathBuf::from("/custom/config.json")
+        );
+    }
 
-#[test]
-fn config_path_defaults_to_home() {
-    let e = env(&[]);
-    assert_eq!(
-        config_path(&e, Path::new("/home/me")),
-        PathBuf::from("/home/me/.tinyplace/config.json")
-    );
-    // Empty override is ignored.
-    let e2 = env(&[("TINYPLACE_CONFIG", "")]);
-    assert_eq!(
-        config_path(&e2, Path::new("/home/me")),
-        PathBuf::from("/home/me/.tinyplace/config.json")
-    );
-}
+    #[test]
+    fn config_path_defaults_to_home() {
+        let e = env(&[]);
+        assert_eq!(
+            config_path(&e, Path::new("/home/me")),
+            PathBuf::from("/home/me/.tinyplace/config.json")
+        );
+        // Empty override is ignored.
+        let e2 = env(&[("TINYPLACE_CONFIG", "")]);
+        assert_eq!(
+            config_path(&e2, Path::new("/home/me")),
+            PathBuf::from("/home/me/.tinyplace/config.json")
+        );
+    }
 
-#[test]
-fn parses_a_full_config() {
-    let contents = r#"{
+    #[test]
+    fn parses_a_full_config() {
+        let contents = r#"{
         "endpoint": "https://staging-api.tiny.place",
         "secretKey": "deadbeef",
         "siwsToken": "siws:abc",
         "openHumanOwner": "owner-addr",
         "ignored": true
     }"#;
-    let config = parse_config(contents);
-    assert_eq!(
-        config.endpoint.as_deref(),
-        Some("https://staging-api.tiny.place")
-    );
-    assert_eq!(config.secret_key.as_deref(), Some("deadbeef"));
-    assert_eq!(config.siws_token.as_deref(), Some("siws:abc"));
-    assert_eq!(config.open_human_owner.as_deref(), Some("owner-addr"));
-}
+        let config = parse_config(contents);
+        assert_eq!(
+            config.endpoint.as_deref(),
+            Some("https://staging-api.tiny.place")
+        );
+        assert_eq!(config.secret_key.as_deref(), Some("deadbeef"));
+        assert_eq!(config.siws_token.as_deref(), Some("siws:abc"));
+        assert_eq!(config.open_human_owner.as_deref(), Some("owner-addr"));
+    }
 
-#[test]
-fn parse_config_tolerates_junk() {
-    assert_eq!(parse_config("not json"), TinyPlaceConfig::default());
-    assert_eq!(parse_config("[1,2,3]"), TinyPlaceConfig::default());
-    assert_eq!(parse_config("42"), TinyPlaceConfig::default());
-    assert_eq!(parse_config("{}"), TinyPlaceConfig::default());
-}
+    #[test]
+    fn parse_config_tolerates_junk() {
+        assert_eq!(parse_config("not json"), TinyPlaceConfig::default());
+        assert_eq!(parse_config("[1,2,3]"), TinyPlaceConfig::default());
+        assert_eq!(parse_config("42"), TinyPlaceConfig::default());
+        assert_eq!(parse_config("{}"), TinyPlaceConfig::default());
+    }
 
-#[test]
-fn load_config_missing_file_is_empty() {
-    let config = load_config(Path::new("/no/such/tinyplace/config.json"));
-    assert_eq!(config, TinyPlaceConfig::default());
-}
+    #[test]
+    fn load_config_missing_file_is_empty() {
+        let config = load_config(Path::new("/no/such/tinyplace/config.json"));
+        assert_eq!(config, TinyPlaceConfig::default());
+    }
 
-#[test]
-fn load_config_reads_a_real_file() {
-    let dir = std::env::temp_dir().join(format!("tinyplace-proto-test-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("config.json");
-    std::fs::write(&path, r#"{"endpoint":"https://x.example","secretKey":"ab"}"#).unwrap();
-    let config = load_config(&path);
-    assert_eq!(config.endpoint.as_deref(), Some("https://x.example"));
-    assert_eq!(config.secret_key.as_deref(), Some("ab"));
-    std::fs::remove_dir_all(&dir).ok();
-}
+    #[test]
+    fn load_config_reads_a_real_file() {
+        let dir = std::env::temp_dir().join(format!("tinyplace-proto-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"endpoint":"https://x.example","secretKey":"ab"}"#,
+        )
+        .unwrap();
+        let config = load_config(&path);
+        assert_eq!(config.endpoint.as_deref(), Some("https://x.example"));
+        assert_eq!(config.secret_key.as_deref(), Some("ab"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
-#[test]
-fn round_trips_config_omitting_empty_fields() {
-    let config = TinyPlaceConfig {
-        endpoint: Some("https://x".to_string()),
-        secret_key: None,
-        siws_token: None,
-        open_human_owner: None,
-    };
-    let json = serde_json::to_string(&config).unwrap();
-    assert_eq!(json, r#"{"endpoint":"https://x"}"#);
-    assert_eq!(parse_config(&json), config);
-}
+    #[test]
+    fn round_trips_config_omitting_empty_fields() {
+        let config = TinyPlaceConfig {
+            endpoint: Some("https://x".to_string()),
+            secret_key: None,
+            siws_token: None,
+            open_human_owner: None,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert_eq!(json, r#"{"endpoint":"https://x"}"#);
+        assert_eq!(parse_config(&json), config);
+    }
 
-#[test]
-fn endpoint_resolution_order() {
-    let config = TinyPlaceConfig {
-        endpoint: Some("https://config-endpoint".to_string()),
-        ..Default::default()
-    };
+    #[test]
+    fn endpoint_resolution_order() {
+        let config = TinyPlaceConfig {
+            endpoint: Some("https://config-endpoint".to_string()),
+            ..Default::default()
+        };
 
-    // TINYPLACE_ENDPOINT wins over everything.
-    let e = env(&[
-        ("TINYPLACE_ENDPOINT", "https://one"),
-        ("TINYPLACE_API_URL", "https://two"),
-        ("NEXT_PUBLIC_API_URL", "https://three"),
-    ]);
-    assert_eq!(resolve_endpoint(&e, &config), "https://one");
+        // TINYPLACE_ENDPOINT wins over everything.
+        let e = env(&[
+            ("TINYPLACE_ENDPOINT", "https://one"),
+            ("TINYPLACE_API_URL", "https://two"),
+            ("NEXT_PUBLIC_API_URL", "https://three"),
+        ]);
+        assert_eq!(resolve_endpoint(&e, &config), "https://one");
 
-    // Then TINYPLACE_API_URL.
-    let e = env(&[
-        ("TINYPLACE_API_URL", "https://two"),
-        ("NEXT_PUBLIC_API_URL", "https://three"),
-    ]);
-    assert_eq!(resolve_endpoint(&e, &config), "https://two");
+        // Then TINYPLACE_API_URL.
+        let e = env(&[
+            ("TINYPLACE_API_URL", "https://two"),
+            ("NEXT_PUBLIC_API_URL", "https://three"),
+        ]);
+        assert_eq!(resolve_endpoint(&e, &config), "https://two");
 
-    // Then NEXT_PUBLIC_API_URL.
-    let e = env(&[("NEXT_PUBLIC_API_URL", "https://three")]);
-    assert_eq!(resolve_endpoint(&e, &config), "https://three");
+        // Then NEXT_PUBLIC_API_URL.
+        let e = env(&[("NEXT_PUBLIC_API_URL", "https://three")]);
+        assert_eq!(resolve_endpoint(&e, &config), "https://three");
 
-    // Then config.endpoint.
-    let e = env(&[]);
-    assert_eq!(resolve_endpoint(&e, &config), "https://config-endpoint");
+        // Then config.endpoint.
+        let e = env(&[]);
+        assert_eq!(resolve_endpoint(&e, &config), "https://config-endpoint");
 
-    // Finally the default.
-    assert_eq!(
-        resolve_endpoint(&e, &TinyPlaceConfig::default()),
-        DEFAULT_ENDPOINT
-    );
-}
+        // Finally the default.
+        assert_eq!(
+            resolve_endpoint(&e, &TinyPlaceConfig::default()),
+            DEFAULT_ENDPOINT
+        );
+    }
 
-#[test]
-fn empty_env_values_are_skipped() {
-    let config = TinyPlaceConfig::default();
-    let e = env(&[
-        ("TINYPLACE_ENDPOINT", ""),
-        ("TINYPLACE_API_URL", "https://real"),
-    ]);
-    assert_eq!(resolve_endpoint(&e, &config), "https://real");
-}
+    #[test]
+    fn empty_env_values_are_skipped() {
+        let config = TinyPlaceConfig::default();
+        let e = env(&[
+            ("TINYPLACE_ENDPOINT", ""),
+            ("TINYPLACE_API_URL", "https://real"),
+        ]);
+        assert_eq!(resolve_endpoint(&e, &config), "https://real");
+    }
 }

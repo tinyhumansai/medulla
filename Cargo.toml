@@ -15,7 +15,7 @@ name = "medulla"
 path = "src/main.rs"
 
 [dependencies]
-tinyplace = "2"
+tinyplace = { path = "vendor/tinyplace/sdk/rust" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

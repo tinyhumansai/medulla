@@ -226,7 +226,10 @@ pub struct LangfuseConfig {
 
 impl Default for LangfuseConfig {
     fn default() -> Self {
-        LangfuseConfig { enabled: true, environment: d_lf_env() }
+        LangfuseConfig {
+            enabled: true,
+            environment: d_lf_env(),
+        }
     }
 }
 
@@ -324,7 +327,10 @@ pub struct LoadedConfig {
 impl LoadedConfig {
     /// A defaults-only config, for a `--config` path that does not exist yet.
     pub fn defaults(path: String) -> Self {
-        LoadedConfig { config: TuiConfig::default(), path }
+        LoadedConfig {
+            config: TuiConfig::default(),
+            path,
+        }
     }
 
     /// The harness label for the Agents view: `TINYPLACE` when tinyplace is
@@ -376,11 +382,18 @@ pub fn load_config(path: &str) -> anyhow::Result<LoadedConfig> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(LoadedConfig::defaults(absolute));
         }
-        Err(err) => return Err(anyhow::anyhow!("Cannot read TUI config at {absolute}: {err}")),
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "Cannot read TUI config at {absolute}: {err}"
+            ))
+        }
     };
     let config: TuiConfig = serde_json::from_str(&text)
         .map_err(|err| anyhow::anyhow!("Invalid JSON in {absolute}: {err}"))?;
-    Ok(LoadedConfig { config, path: absolute })
+    Ok(LoadedConfig {
+        config,
+        path: absolute,
+    })
 }
 
 #[cfg(test)]

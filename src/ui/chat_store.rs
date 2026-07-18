@@ -76,9 +76,7 @@ fn is_marker_line(line: &str) -> Option<&str> {
 }
 
 fn is_escaped_marker_line(line: &str) -> bool {
-    line.strip_prefix('\\')
-        .and_then(is_marker_line)
-        .is_some()
+    line.strip_prefix('\\').and_then(is_marker_line).is_some()
 }
 
 /// Backslash-escape any own-line marker inside content so archived text can't
@@ -116,7 +114,11 @@ fn unescape_turns(content: &str) -> String {
 pub fn serialize_md(messages: &[ChatMessage]) -> String {
     let mut out = String::new();
     for m in messages {
-        out.push_str(&format!("<!-- turn:{} -->\n{}\n", m.role, escape_turns(&m.content)));
+        out.push_str(&format!(
+            "<!-- turn:{} -->\n{}\n",
+            m.role,
+            escape_turns(&m.content)
+        ));
     }
     out
 }
@@ -264,7 +266,11 @@ fn load_node(chat_dir: &Path, node: &StoredNode) -> ChatNode {
         name: node.name.clone(),
         fork_point: node.fork_point,
         messages,
-        children: node.children.iter().map(|c| load_node(chat_dir, c)).collect(),
+        children: node
+            .children
+            .iter()
+            .map(|c| load_node(chat_dir, c))
+            .collect(),
     }
 }
 
@@ -306,7 +312,10 @@ mod tests {
     use super::*;
 
     fn msg(role: &str, content: &str) -> ChatMessage {
-        ChatMessage { role: role.into(), content: content.into() }
+        ChatMessage {
+            role: role.into(),
+            content: content.into(),
+        }
     }
 
     #[test]

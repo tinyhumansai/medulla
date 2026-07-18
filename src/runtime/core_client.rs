@@ -61,7 +61,11 @@ pub struct RpcError {
 
 impl std::fmt::Display for RpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {} (retryable={})", self.code, self.message, self.retryable)
+        write!(
+            f,
+            "[{}] {} (retryable={})",
+            self.code, self.message, self.retryable
+        )
     }
 }
 
@@ -155,21 +159,30 @@ impl CoreClient {
         self.pending.lock().await.insert(id, tx);
 
         let frame = json!({ "id": id, "method": method, "params": params });
-        let mut line = serde_json::to_vec(&frame).map_err(|e| CallError::Transport(e.to_string()))?;
+        let mut line =
+            serde_json::to_vec(&frame).map_err(|e| CallError::Transport(e.to_string()))?;
         line.push(b'\n');
         if line.len() > MAX_FRAME_BYTES {
             self.pending.lock().await.remove(&id);
-            return Err(CallError::Transport("outbound frame exceeds 1 MiB cap".into()));
+            return Err(CallError::Transport(
+                "outbound frame exceeds 1 MiB cap".into(),
+            ));
         }
         {
             let mut w = self.write.lock().await;
-            w.write_all(&line).await.map_err(|e| CallError::Transport(e.to_string()))?;
-            w.flush().await.map_err(|e| CallError::Transport(e.to_string()))?;
+            w.write_all(&line)
+                .await
+                .map_err(|e| CallError::Transport(e.to_string()))?;
+            w.flush()
+                .await
+                .map_err(|e| CallError::Transport(e.to_string()))?;
         }
         match rx.await {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => Err(CallError::Rpc(e)),
-            Err(_) => Err(CallError::Transport("core closed the connection before responding".into())),
+            Err(_) => Err(CallError::Transport(
+                "core closed the connection before responding".into(),
+            )),
         }
     }
 
@@ -208,10 +221,15 @@ impl CoreClient {
     }
 
     pub async fn thread_resume(&self, thread_id: &str) -> Result<Value, CallError> {
-        self.request("thread.resume", json!({ "threadId": thread_id })).await
+        self.request("thread.resume", json!({ "threadId": thread_id }))
+            .await
     }
 
-    pub async fn thread_fork(&self, thread_id: &str, at_seq: Option<u64>) -> Result<String, CallError> {
+    pub async fn thread_fork(
+        &self,
+        thread_id: &str,
+        at_seq: Option<u64>,
+    ) -> Result<String, CallError> {
         let mut params = serde_json::Map::new();
         params.insert("threadId".into(), json!(thread_id));
         if let Some(s) = at_seq {
@@ -236,7 +254,8 @@ impl CoreClient {
         if let Some(s) = since_seq {
             params.insert("sinceSeq".into(), json!(s));
         }
-        self.request("thread.subscribe", Value::Object(params)).await
+        self.request("thread.subscribe", Value::Object(params))
+            .await
     }
 
     /// `cycle.submit` — returns the `cycleId` receipt (§2.1), not the reply.
@@ -260,11 +279,16 @@ impl CoreClient {
     }
 
     pub async fn cycle_abort(&self, cycle_id: &str) -> Result<Value, CallError> {
-        self.request("cycle.abort", json!({ "cycleId": cycle_id })).await
+        self.request("cycle.abort", json!({ "cycleId": cycle_id }))
+            .await
     }
 
     pub async fn task_cancel(&self, cycle_id: &str, task_id: &str) -> Result<Value, CallError> {
-        self.request("task.cancel", json!({ "cycleId": cycle_id, "taskId": task_id })).await
+        self.request(
+            "task.cancel",
+            json!({ "cycleId": cycle_id, "taskId": task_id }),
+        )
+        .await
     }
 
     pub async fn question_answer(
@@ -310,11 +334,16 @@ impl CoreClient {
     }
 
     pub async fn context_inspect(&self, cycle_id: &str) -> Result<Value, CallError> {
-        self.request("context.inspect", json!({ "cycleId": cycle_id })).await
+        self.request("context.inspect", json!({ "cycleId": cycle_id }))
+            .await
     }
 
     pub async fn config_set(&self, thread_id: &str, patch: Value) -> Result<Value, CallError> {
-        self.request("config.set", json!({ "threadId": thread_id, "patch": patch })).await
+        self.request(
+            "config.set",
+            json!({ "threadId": thread_id, "patch": patch }),
+        )
+        .await
     }
 
     // --- worker.* (managed remote peers) ----------------------------------------
@@ -347,7 +376,8 @@ impl CoreClient {
     }
 
     pub async fn worker_update(&self, id: &str, patch: Value) -> Result<Value, CallError> {
-        self.request("worker.update", json!({ "id": id, "patch": patch })).await
+        self.request("worker.update", json!({ "id": id, "patch": patch }))
+            .await
     }
 
     pub async fn worker_remove(&self, id: &str) -> Result<Value, CallError> {
@@ -425,9 +455,20 @@ fn trim_newline(buf: &[u8]) -> &[u8] {
 fn decode_response(value: &Value) -> Result<Value, RpcError> {
     if let Some(err) = value.get("error") {
         return Err(RpcError {
-            code: err.get("code").and_then(Value::as_str).unwrap_or("").to_string(),
-            message: err.get("message").and_then(Value::as_str).unwrap_or("").to_string(),
-            retryable: err.get("retryable").and_then(Value::as_bool).unwrap_or(false),
+            code: err
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            message: err
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            retryable: err
+                .get("retryable")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             data: err.get("data").cloned(),
         });
     }
@@ -438,8 +479,16 @@ fn decode_event(value: &Value) -> Option<CoreEvent> {
     Some(CoreEvent {
         seq: value.get("seq").and_then(Value::as_u64)?,
         at: value.get("at").and_then(Value::as_i64).unwrap_or(0),
-        thread_id: value.get("threadId").and_then(Value::as_str).unwrap_or("").to_string(),
-        cycle_id: value.get("cycleId").and_then(Value::as_str).unwrap_or("").to_string(),
+        thread_id: value
+            .get("threadId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        cycle_id: value
+            .get("cycleId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         event: value.get("event").cloned()?,
     })
 }
@@ -454,7 +503,9 @@ pub struct SeqTracker {
 impl SeqTracker {
     /// Start from a subscribe `baselineSeq`.
     pub fn new(baseline_seq: u64) -> Self {
-        SeqTracker { last_seq: baseline_seq }
+        SeqTracker {
+            last_seq: baseline_seq,
+        }
     }
 
     pub fn last_seq(&self) -> u64 {
@@ -483,7 +534,10 @@ mod tests {
         assert_eq!(over.unwrap(), PathBuf::from("/tmp/x.sock"));
 
         let xdg = resolve_socket_path(None, Some("/run/user/1000"), Some("/state"));
-        assert_eq!(xdg.unwrap(), PathBuf::from("/run/user/1000/medulla/core.sock"));
+        assert_eq!(
+            xdg.unwrap(),
+            PathBuf::from("/run/user/1000/medulla/core.sock")
+        );
 
         let state = resolve_socket_path(None, None, Some("/state"));
         assert_eq!(state.unwrap(), PathBuf::from("/state/core.sock"));
@@ -520,7 +574,10 @@ mod tests {
     fn decode_response_splits_ok_and_error() {
         let ok = json!({ "id": 1, "ok": { "threadId": "th_x" } });
         assert_eq!(
-            decode_response(&ok).unwrap().get("threadId").and_then(Value::as_str),
+            decode_response(&ok)
+                .unwrap()
+                .get("threadId")
+                .and_then(Value::as_str),
             Some("th_x")
         );
         let err = json!({ "id": 2, "error": { "code": "thread.not-found", "message": "no", "retryable": false } });

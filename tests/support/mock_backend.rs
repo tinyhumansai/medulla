@@ -141,7 +141,11 @@ impl MockBackend {
 
     /// Append a heartbeat comment frame.
     pub fn emit_ping(&self) {
-        self.state.sse_log.lock().unwrap().push(": ping\n\n".to_string());
+        self.state
+            .sse_log
+            .lock()
+            .unwrap()
+            .push(": ping\n\n".to_string());
         let _ = self.state.append.send(());
     }
 
@@ -204,14 +208,22 @@ async fn handle_conn(mut sock: TcpStream, state: Arc<MockState>) -> std::io::Res
     let config = state.config.lock().unwrap().clone();
     let (status, data): (&str, Value) = if route_path == "/medulla/v1/sessions" && method == "POST"
     {
-        ("201 Created", json!({ "sessionId": config.created_session_id }))
+        (
+            "201 Created",
+            json!({ "sessionId": config.created_session_id }),
+        )
     } else if route_path == "/medulla/v1/sessions" && method == "GET" {
         ("200 OK", config.sessions_list.clone())
     } else if route_path.ends_with("/messages") && method == "POST" {
         if config.messages_ok {
             ("202 Accepted", json!({ "cycleId": "cycle-1", "seq": 1 }))
         } else {
-            return respond_raw(&mut sock, "500 Internal Server Error", r#"{"success":false,"error":"boom","errorCode":"SERVER_ERROR"}"#).await;
+            return respond_raw(
+                &mut sock,
+                "500 Internal Server Error",
+                r#"{"success":false,"error":"boom","errorCode":"SERVER_ERROR"}"#,
+            )
+            .await;
         }
     } else if route_path.ends_with("/messages") && method == "GET" {
         ("200 OK", config.messages_replay.clone())
@@ -345,8 +357,9 @@ async fn read_request(
         }
         buf.extend_from_slice(&tmp[..n]);
     }
-    let body = String::from_utf8_lossy(&buf[header_end..(header_end + content_length).min(buf.len())])
-        .to_string();
+    let body =
+        String::from_utf8_lossy(&buf[header_end..(header_end + content_length).min(buf.len())])
+            .to_string();
 
     Ok(Some((method, path, headers, body)))
 }

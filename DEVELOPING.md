@@ -43,7 +43,7 @@ TUI flags:
 On startup the TUI picks one of three runtimes, in this order:
 
 1. **Core socket** — if `--core` is passed or the config has a `core` section, and the socket is reachable.
-2. **Backend HTTP/SSE** — if a backend token is available.
+2. **Backend HTTP/SSE** — if a backend token is available (an inline `backend.token`, the `backend.tokenEnv` variable, or credentials saved by `medulla login`).
 3. **Mock** — otherwise. A scripted demo runtime: no credentials, no network. If a preferred runtime fails, the TUI falls back down this chain and shows why in the status line.
 
 ### Mock (zero setup)
@@ -74,6 +74,21 @@ The base URL defaults to `http://localhost:5000`; override it (and the token env
 ```
 
 An inline `"token"` field is also accepted but keep secrets out of committed files — prefer the env var.
+
+### Logging in (`medulla login`)
+
+Instead of managing a JWT by hand, log in through the browser:
+
+```sh
+medulla login                       # google by default; opens the browser
+medulla login --provider github     # google | github | twitter | discord
+medulla login --no-browser          # just print the URL to open yourself
+medulla login --token <64-hex>      # headless: redeem a one-time login token
+```
+
+`login` runs an RFC 8252 loopback flow: it binds a local `127.0.0.1:<port>` listener, sends you to the backend's OAuth page, and captures the JWT the backend redirects back with. It then verifies the token via `/auth/me`, prints who you are, and saves credentials to `<config-dir>/medulla/credentials.json` (mode `0600` on unix) — for example `~/Library/Application Support/medulla/credentials.json` on macOS or `~/.config/medulla/credentials.json` on Linux. The base URL comes from `backend.baseUrl` in the config (`--config <path>` to point at a different config).
+
+On the next `medulla` run the TUI uses those stored credentials automatically, provided their `baseUrl` matches the configured backend. `medulla logout` clears the file. Precedence for the backend token stays: inline `backend.token` > `backend.tokenEnv` > stored credentials.
 
 ### Core socket
 

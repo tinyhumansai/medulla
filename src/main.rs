@@ -19,9 +19,10 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
+use medulla::auth::{open_browser, run_login_flow, CredentialStore, Credentials, LoopbackConfig};
 use medulla::cli::{
-    core_socket_plan, missing_token_note, parse_command, parse_tui_args, resolve_backend_token,
-    sessions_json, Command, CorePlan,
+    core_socket_plan, missing_token_note, parse_command, parse_login_args, parse_tui_args,
+    resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs,
 };
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
@@ -117,9 +118,70 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Command::Login => run_login(&raw[1..]).await,
+        Command::Logout => run_logout(),
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.
         Command::Tui => run_tui(&raw).await,
     }
+}
+
+/// `medulla login`: obtain a JWT (loopback OAuth or a one-time token), verify it
+/// with `/auth/me`, and persist it to the credential store.
+async fn run_login(args: &[String]) -> anyhow::Result<()> {
+    let parsed: LoginArgs = match parse_login_args(args) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("medulla login: {msg}");
+            std::process::exit(2);
+        }
+    };
+    let loaded = load_config(&parsed.config)?;
+    let base_url = loaded.config.backend.base_url.clone();
+
+    let jwt = match parsed.token {
+        Some(token) => {
+            // Headless fallback: redeem a one-time token, no listener.
+            let client = MedullaClient::new(base_url.clone(), String::new());
+            client
+                .consume_login_token(token)
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to redeem login token: {e}"))?
+        }
+        None => {
+            let cfg = LoopbackConfig {
+                no_browser: parsed.no_browser,
+                ..Default::default()
+            };
+            run_login_flow(&base_url, parsed.provider, cfg, open_browser)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+        }
+    };
+
+    // Verify the token and greet the user.
+    let client = MedullaClient::new(base_url.clone(), jwt.clone());
+    match client.me().await {
+        Ok(me) => println!("{}", medulla::auth::describe_me(&me)),
+        Err(e) => return Err(anyhow::anyhow!("token verification failed: {e}")),
+    }
+
+    let store = CredentialStore::at_default_location()
+        .ok_or_else(|| anyhow::anyhow!("could not resolve a config directory for credentials"))?;
+    store.save(&Credentials { base_url, jwt })?;
+    println!("Credentials saved to {}", store.path().display());
+    Ok(())
+}
+
+/// `medulla logout`: clear stored credentials.
+fn run_logout() -> anyhow::Result<()> {
+    match CredentialStore::at_default_location() {
+        Some(store) => {
+            store.clear()?;
+            println!("Logged out ({} cleared).", store.path().display());
+        }
+        None => println!("No credential store location resolved; nothing to clear."),
+    }
+    Ok(())
 }
 
 async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
@@ -181,8 +243,9 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     if runtime.is_none() {
         let backend = &loaded.config.backend;
         let core_note = startup_status.take();
+        let stored = CredentialStore::at_default_location().and_then(|s| s.load());
         let (rt, note): (Arc<dyn Runtime>, Option<String>) =
-            match resolve_backend_token(&env, backend) {
+            match resolve_backend_token(&env, backend, stored.as_ref()) {
                 Some(tok) => {
                     let client = MedullaClient::new(backend.base_url.clone(), tok);
                     match BackendRuntime::connect(client).await {

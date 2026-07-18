@@ -68,10 +68,11 @@ Build and run:
 
 ```sh
 cargo install --path .        # installs the `medulla` binary
-MEDULLA_TOKEN=<jwt> medulla   # bare invocation starts the TUI
+medulla login                 # browser login; stores credentials
+medulla                       # bare invocation starts the TUI
 ```
 
-Without a token the TUI starts against a scripted mock runtime, useful for exploring the interface. Other subcommands:
+`medulla login` runs a browser-based OAuth loopback flow (`--provider google|github|twitter|discord`, `--no-browser` to copy the URL, or `--token <64-hex>` for headless one-time tokens) and saves a verified JWT to `<config-dir>/medulla/credentials.json`; the TUI picks it up automatically. `medulla logout` clears it. You can also pass a token directly with `MEDULLA_TOKEN=<jwt> medulla`. Without any credentials the TUI starts against a scripted mock runtime, useful for exploring the interface. Other subcommands:
 
 - `medulla daemon` — headless coding-agent daemon serving claude/codex/opencode over encrypted tiny.place DMs.
 - `medulla sessions` — list recent claude/codex sessions as JSON.

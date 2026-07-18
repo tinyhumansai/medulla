@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::auth::{Credentials, Provider};
 use crate::config::BackendConfig;
 use crate::runtime::core_client::resolve_socket_path;
 use crate::session_history::list_recent_sessions;
@@ -21,6 +22,10 @@ pub enum Command {
     Version,
     Help,
     Sessions,
+    /// Log in to the backend (loopback OAuth or a one-time token).
+    Login,
+    /// Clear stored credentials.
+    Logout,
 }
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -30,8 +35,62 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("version") | Some("--version") | Some("-v") => Command::Version,
         Some("help") | Some("--help") | Some("-h") => Command::Help,
         Some("sessions") => Command::Sessions,
+        Some("login") => Command::Login,
+        Some("logout") => Command::Logout,
         _ => Command::Tui,
     }
+}
+
+/// Parsed `medulla login` flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginArgs {
+    /// TUI config path used only to resolve `backend.baseUrl`.
+    pub config: String,
+    pub provider: Provider,
+    pub no_browser: bool,
+    /// A 64-hex one-time login token (headless fallback); skips the listener.
+    pub token: Option<String>,
+}
+
+impl Default for LoginArgs {
+    fn default() -> Self {
+        LoginArgs {
+            config: "medulla.tui.json".to_string(),
+            provider: Provider::default(),
+            no_browser: false,
+            token: None,
+        }
+    }
+}
+
+/// Parse `medulla login` flags out of the args following `login`. Returns the
+/// offending flag name on an unknown `--provider` value.
+pub fn parse_login_args(args: &[String]) -> Result<LoginArgs, String> {
+    let mut out = LoginArgs::default();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                if let Some(v) = it.next() {
+                    out.config = v.clone();
+                }
+            }
+            "--provider" => {
+                if let Some(v) = it.next() {
+                    out.provider =
+                        Provider::parse(v).ok_or_else(|| format!("unknown provider '{v}'"))?;
+                }
+            }
+            "--token" => {
+                if let Some(v) = it.next() {
+                    out.token = Some(v.clone());
+                }
+            }
+            "--no-browser" => out.no_browser = true,
+            _ => {}
+        }
+    }
+    Ok(out)
 }
 
 /// Parsed TUI flags.
@@ -79,8 +138,15 @@ Usage:\n  \
 medulla                 Start the interactive chat TUI (default)\n  \
 medulla daemon [flags]  Run the headless coding-agent daemon (serves tasks over tiny.place)\n  \
 medulla sessions        List recent claude/codex sessions as JSON\n  \
+medulla login [flags]   Log in to the backend and store credentials\n  \
+medulla logout          Clear stored credentials\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
+Login flags:\n  \
+--provider <name>       OAuth provider: google (default), github, twitter, discord\n  \
+--no-browser            Print the login URL without launching a browser\n  \
+--token <64-hex>        Redeem a one-time login token instead (headless)\n  \
+--config <path>         Config file to read backend.baseUrl from\n\n\
 TUI flags:\n  \
 --config <path>         Path to medulla.tui.json (default: medulla.tui.json)\n  \
 --core                  Drive the core-js orchestration core over its Unix socket\n  \
@@ -130,23 +196,35 @@ pub fn core_socket_plan(
     }
 }
 
-/// Resolve the backend token: an inline `backend.token` wins, else the
-/// `backend.tokenEnv` variable (ignoring an empty value).
+/// Resolve the backend token from, in order: an inline `backend.token`, the
+/// `backend.tokenEnv` variable (ignoring an empty value), then `stored`
+/// credentials saved by `medulla login` — but only when their `baseUrl` matches
+/// the configured backend (a mismatch is ignored).
 pub fn resolve_backend_token(
     env: &HashMap<String, String>,
     backend: &BackendConfig,
+    stored: Option<&Credentials>,
 ) -> Option<String> {
-    backend.token.clone().or_else(|| {
-        env.get(&backend.token_env)
-            .cloned()
-            .filter(|s| !s.is_empty())
-    })
+    if let Some(tok) = backend.token.clone() {
+        return Some(tok);
+    }
+    if let Some(tok) = env
+        .get(&backend.token_env)
+        .cloned()
+        .filter(|s| !s.is_empty())
+    {
+        return Some(tok);
+    }
+    let want = backend.base_url.trim_end_matches('/');
+    stored
+        .filter(|c| c.base_url.trim_end_matches('/') == want)
+        .map(|c| c.jwt.clone())
 }
 
 /// The status note shown when no backend token is available and the mock runs.
 pub fn missing_token_note(backend: &BackendConfig) -> String {
     format!(
-        "backend token missing (set ${}) — running with mock runtime",
+        "backend token missing (set ${} or run `medulla login`) — running with mock runtime",
         backend.token_env
     )
 }
@@ -168,6 +246,8 @@ mod tests {
         assert_eq!(parse_command(&argv(&["help"])), Command::Help);
         assert_eq!(parse_command(&argv(&["-h"])), Command::Help);
         assert_eq!(parse_command(&argv(&["sessions"])), Command::Sessions);
+        assert_eq!(parse_command(&argv(&["login"])), Command::Login);
+        assert_eq!(parse_command(&argv(&["logout"])), Command::Logout);
         assert_eq!(parse_command(&argv(&["--config", "x.json"])), Command::Tui);
     }
 
@@ -229,18 +309,18 @@ mod tests {
         env.insert("MEDULLA_TOKEN".to_string(), "from-env".to_string());
         let mut backend = BackendConfig::default();
         assert_eq!(
-            resolve_backend_token(&env, &backend).as_deref(),
+            resolve_backend_token(&env, &backend, None).as_deref(),
             Some("from-env")
         );
         backend.token = Some("inline".into());
         assert_eq!(
-            resolve_backend_token(&env, &backend).as_deref(),
+            resolve_backend_token(&env, &backend, None).as_deref(),
             Some("inline")
         );
 
         let empty = HashMap::new();
         let backend = BackendConfig::default();
-        assert_eq!(resolve_backend_token(&empty, &backend), None);
+        assert_eq!(resolve_backend_token(&empty, &backend, None), None);
     }
 
     #[test]
@@ -249,7 +329,61 @@ mod tests {
         env.insert("MEDULLA_TOKEN".to_string(), String::new());
         let backend = BackendConfig::default();
         // An empty env value is treated as absent.
-        assert_eq!(resolve_backend_token(&env, &backend), None);
+        assert_eq!(resolve_backend_token(&env, &backend, None), None);
+    }
+
+    #[test]
+    fn backend_token_uses_stored_credentials_when_baseurl_matches() {
+        let empty = HashMap::new();
+        let backend = BackendConfig::default();
+        let matching = Credentials {
+            base_url: backend.base_url.clone(),
+            jwt: "stored-jwt".into(),
+        };
+        // Config token and env absent → stored credentials are used.
+        assert_eq!(
+            resolve_backend_token(&empty, &backend, Some(&matching)).as_deref(),
+            Some("stored-jwt")
+        );
+
+        // A mismatched baseUrl is ignored.
+        let mismatched = Credentials {
+            base_url: "http://other:9999".into(),
+            jwt: "stored-jwt".into(),
+        };
+        assert_eq!(
+            resolve_backend_token(&empty, &backend, Some(&mismatched)),
+            None
+        );
+
+        // Config token and env still win over stored credentials.
+        let mut env = HashMap::new();
+        env.insert("MEDULLA_TOKEN".to_string(), "from-env".to_string());
+        assert_eq!(
+            resolve_backend_token(&env, &backend, Some(&matching)).as_deref(),
+            Some("from-env")
+        );
+    }
+
+    #[test]
+    fn login_args_parse() {
+        assert_eq!(parse_login_args(&argv(&[])).unwrap(), LoginArgs::default());
+        let a = parse_login_args(&argv(&[
+            "--provider",
+            "github",
+            "--no-browser",
+            "--token",
+            "deadbeef",
+            "--config",
+            "c.json",
+        ]))
+        .unwrap();
+        assert_eq!(a.provider, Provider::Github);
+        assert!(a.no_browser);
+        assert_eq!(a.token.as_deref(), Some("deadbeef"));
+        assert_eq!(a.config, "c.json");
+        // Unknown provider is a friendly error.
+        assert!(parse_login_args(&argv(&["--provider", "myspace"])).is_err());
     }
 
     #[test]
@@ -258,6 +392,7 @@ mod tests {
         let note = missing_token_note(&backend);
         assert!(note.contains("MEDULLA_TOKEN"));
         assert!(note.contains("mock runtime"));
+        assert!(note.contains("medulla login"));
     }
 
     #[test]
@@ -265,6 +400,8 @@ mod tests {
         let text = help_text();
         assert!(text.contains(env!("CARGO_PKG_VERSION")));
         assert!(text.contains("medulla daemon"));
+        assert!(text.contains("medulla login"));
+        assert!(text.contains("--provider"));
         assert!(text.contains("--core"));
     }
 

@@ -2,6 +2,7 @@
 //! through a `Runtime` trait; concrete runtimes (backend HTTP/SSE, core
 //! socket, mock) are wired in `main`. The HTTP/SSE client lives in [`client`].
 
+pub mod auth;
 pub mod cli;
 pub mod client;
 pub mod config;

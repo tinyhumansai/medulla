@@ -555,6 +555,7 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         loaded,
         startup_status.or(tinyplace_status),
         tinyplace_obs,
+        home.join("config.toml"),
     )
     .await;
 
@@ -725,8 +726,10 @@ async fn run(
     tinyplace_obs: Option<
         Arc<std::sync::Mutex<medulla::tinyplace_support::service::TinyplaceObservation>>,
     >,
+    config_path: std::path::PathBuf,
 ) -> anyhow::Result<()> {
     let mut app = App::new(runtime.clone(), loaded);
+    app.set_config_path(config_path);
     if let Some(obs) = tinyplace_obs {
         app.set_tinyplace_observation(obs);
     }

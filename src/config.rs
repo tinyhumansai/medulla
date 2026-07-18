@@ -318,6 +318,22 @@ impl Default for BackendConfig {
     }
 }
 
+/// The optional `[theme]` config section: named ratatui colors (case-insensitive)
+/// or `#rrggbb` hex strings. Missing fields fall back to the default theme. The
+/// Appearance settings subpage persists these keys.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ThemeConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_fg: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dim_border: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TuiConfig {
@@ -335,6 +351,8 @@ pub struct TuiConfig {
     pub memory: Option<MemoryConfigSection>,
     #[serde(default)]
     pub update: UpdateConfig,
+    #[serde(default)]
+    pub theme: ThemeConfig,
 }
 
 impl Default for TuiConfig {
@@ -348,6 +366,7 @@ impl Default for TuiConfig {
             core: None,
             memory: None,
             update: UpdateConfig::default(),
+            theme: ThemeConfig::default(),
         }
     }
 }

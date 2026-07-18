@@ -113,3 +113,15 @@ tokenEnv = "MEDULLA_TOKEN"
 # maxTasksPerDelegate = 8
 # maxTokens = 4096
 # contextWindowTokens = 32000
+
+# ---------------------------------------------------------------------------
+# theme — TUI colors (optional). Values are ratatui color names
+# (case-insensitive: cyan, lightblue, magenta, darkgray, …) or #rrggbb hex.
+# Any missing field falls back to the default. The Settings › Appearance
+# subpage edits these live and writes them back here.
+# ---------------------------------------------------------------------------
+# [theme]
+# primary = "cyan"        # selection highlight + brand/panel titles/accents
+# accent = "magenta"      # inline overlay borders (prompt / resume picker)
+# selectionFg = "black"   # text drawn on top of the primary selection background
+# dimBorder = "darkgray"  # panel borders

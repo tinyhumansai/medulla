@@ -14,4 +14,5 @@ pub mod composer;
 pub mod events;
 pub mod login;
 pub mod onboarding;
+pub mod theme;
 pub mod util;

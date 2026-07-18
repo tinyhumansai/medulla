@@ -167,16 +167,22 @@ fn multiline_caret_walks_rows_before_history() {
 fn slash_help_and_config_switch_tabs() {
     let (mut app, _rt) = empty_app();
     let _ = submit_line(&mut app, "/help");
-    assert_eq!(app.tab(), "Help");
+    assert_eq!(app.tab(), "Settings");
+    assert_eq!(app.settings_subpage(), "Help");
     let _ = submit_line(&mut app, "/config");
-    assert_eq!(app.tab(), "Usage");
-    // /config lands on the Usage tab showing the effective config.
+    assert_eq!(app.tab(), "Settings");
+    assert_eq!(app.settings_subpage(), "Config");
+    // /config lands on the Settings·Config subpage showing the effective config.
     let out = render(&mut app, 200, 50);
     assert!(out.contains("Configuration ·"), "config view: {out}");
-    // /usage flips back to the usage view.
+    // /usage flips to the Settings·Usage subpage.
     let _ = submit_line(&mut app, "/usage");
+    assert_eq!(app.settings_subpage(), "Usage");
     let out = render(&mut app, 200, 50);
     assert!(out.contains("This session"), "usage view: {out}");
+    // /theme lands on the Appearance editor.
+    let _ = submit_line(&mut app, "/theme");
+    assert_eq!(app.settings_subpage(), "Appearance");
 }
 
 #[test]
@@ -239,10 +245,10 @@ fn tab_and_backtab_cycle_tabs() {
     assert_eq!(app.tab(), "Agents");
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
     assert_eq!(app.tab(), "Chat");
-    // Wrap backwards from Overview to Help.
+    // Wrap backwards from Overview to the last tab (Settings).
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert_eq!(app.tab(), "Help");
+    assert_eq!(app.tab(), "Settings");
 }
 
 #[test]
@@ -261,7 +267,7 @@ fn each_tab_renders_its_signature() {
         ("Agents", "Agents ·"),
         ("Trace", "Trace ·"),
         ("Context", "Environment ·"),
-        ("Usage", "Usage"),
+        ("Settings", "Settings"),
     ];
     for (name, sig) in signatures {
         let (mut app, _rt) = demo_app();

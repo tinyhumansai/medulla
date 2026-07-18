@@ -22,12 +22,21 @@ use crate::ui::agents::{
 use crate::ui::clipboard::{copy_text, copy_to_clipboard, current_platform, CopyScope, OSC_52};
 use crate::ui::composer::{caret_row_col, delete_before, insert_at, move_caret_row, Draft};
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
+use crate::ui::theme::{color_to_string, Theme, THEME_ROLES};
 use crate::ui::util::{clip, clock, fmt_tokens, wrap};
 
-pub const TABS: [&str; 9] = [
-    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Memory", "Usage", "Help",
+pub const TABS: [&str; 8] = [
+    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Memory", "Settings",
 ];
+/// The Settings tab's left-nav subpages, in order (number keys 1-4 jump to them).
+pub const SETTINGS_SUBPAGES: [&str; 4] = ["Usage", "Appearance", "Config", "Help"];
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+// Settings subpage indices.
+const SP_USAGE: usize = 0;
+const SP_APPEARANCE: usize = 1;
+const SP_CONFIG: usize = 2;
+const SP_HELP: usize = 3;
 
 /// The index of a tab by name, or 0 if unknown. Keeps tab jumps robust as the tab
 /// list grows.
@@ -138,8 +147,16 @@ pub struct App {
     pub mouse_capture: bool,
     /// Account-level usage payload (`/teams/me/usage` data), when fetched.
     pub account_usage: Option<serde_json::Value>,
-    /// When true the Usage tab renders the effective config instead ("/config").
-    pub usage_config_view: bool,
+    /// The active Settings subpage (index into [`SETTINGS_SUBPAGES`]).
+    settings_index: usize,
+    /// The selected theme role on the Appearance subpage.
+    appearance_index: usize,
+    /// The resolved color theme; selection highlighting + chrome draw from it.
+    theme: Theme,
+    /// Where appearance changes are persisted (the user-global `config.toml`).
+    /// Injectable so feature tests never touch the real home. `None` disables
+    /// persistence (changes still apply live).
+    config_path: Option<std::path::PathBuf>,
     resume_picker: Option<ResumePicker>,
     pub should_quit: bool,
 
@@ -264,6 +281,7 @@ fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLine> {
 impl App {
     pub fn new(runtime: Arc<dyn Runtime>, loaded: LoadedConfig) -> Self {
         let snapshot = runtime.snapshot();
+        let theme = Theme::from_config(&loaded.config.theme);
         App {
             runtime,
             loaded,
@@ -290,7 +308,10 @@ impl App {
             frame: 0,
             mouse_capture: true,
             account_usage: None,
-            usage_config_view: false,
+            settings_index: 0,
+            appearance_index: 0,
+            theme,
+            config_path: None,
             resume_picker: None,
             should_quit: false,
             area: Rect::new(0, 0, 80, 24),
@@ -308,6 +329,22 @@ impl App {
     /// Current status-line text (observable in the header). Test/inspection seam.
     pub fn status(&self) -> &str {
         &self.status
+    }
+
+    /// Point appearance persistence at a config file (the user-global
+    /// `config.toml`). Wiring seam so feature tests avoid the real home.
+    pub fn set_config_path(&mut self, path: std::path::PathBuf) {
+        self.config_path = Some(path);
+    }
+
+    /// The active Settings subpage name. Test/inspection seam.
+    pub fn settings_subpage(&self) -> &'static str {
+        SETTINGS_SUBPAGES[self.settings_index.min(SETTINGS_SUBPAGES.len() - 1)]
+    }
+
+    /// The current primary theme color. Test/inspection seam.
+    pub fn theme_primary(&self) -> ratatui::style::Color {
+        self.theme.primary
     }
 
     /// Set the persistent "update available" banner shown in the header. Called
@@ -449,7 +486,7 @@ impl App {
         match self.tab() {
             "Context" => Some(Cmd::InspectContext),
             "Memory" => Some(Cmd::LoadMemory),
-            "Usage" => Some(Cmd::LoadUsage),
+            "Settings" if self.settings_index == SP_USAGE => Some(Cmd::LoadUsage),
             _ => None,
         }
     }
@@ -718,12 +755,50 @@ impl App {
                 self.selected = 0;
                 return self.tab_enter_cmd();
             }
-            KeyCode::Char('r') if tab == "Usage" && !self.usage_config_view => {
+            // Settings tab: subpage navigation + the Appearance theme editor.
+            KeyCode::Char(d @ '1'..='4') if tab == "Settings" => {
+                return self.set_settings_subpage(d as usize - '1' as usize);
+            }
+            KeyCode::Char('r') if tab == "Settings" && self.settings_index == SP_USAGE => {
                 self.set_status("Usage · refreshing…");
                 return Some(Cmd::LoadUsage);
             }
-            KeyCode::Char('c') if tab == "Usage" => {
-                self.usage_config_view = !self.usage_config_view;
+            KeyCode::Char('c') if tab == "Settings" && self.settings_index == SP_USAGE => {
+                self.settings_index = SP_CONFIG;
+            }
+            KeyCode::Up | KeyCode::Down if tab == "Settings" => {
+                let up = matches!(k.code, KeyCode::Up);
+                self.settings_index = if up {
+                    self.settings_index.saturating_sub(1)
+                } else {
+                    (self.settings_index + 1).min(SETTINGS_SUBPAGES.len() - 1)
+                };
+                return self.tab_enter_cmd();
+            }
+            KeyCode::Char('j') | KeyCode::Char('k')
+                if tab == "Settings" && self.settings_index == SP_APPEARANCE =>
+            {
+                let up = matches!(k.code, KeyCode::Char('k'));
+                self.appearance_index = if up {
+                    self.appearance_index.saturating_sub(1)
+                } else {
+                    (self.appearance_index + 1).min(THEME_ROLES.len() - 1)
+                };
+            }
+            KeyCode::Char('j') | KeyCode::Char('k') if tab == "Settings" => {
+                let up = matches!(k.code, KeyCode::Char('k'));
+                self.settings_index = if up {
+                    self.settings_index.saturating_sub(1)
+                } else {
+                    (self.settings_index + 1).min(SETTINGS_SUBPAGES.len() - 1)
+                };
+                return self.tab_enter_cmd();
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Enter
+                if tab == "Settings" && self.settings_index == SP_APPEARANCE =>
+            {
+                let forward = !matches!(k.code, KeyCode::Left);
+                self.cycle_appearance_role(forward);
             }
             KeyCode::PageUp if tab == "Chat" => {
                 self.chat_scroll += self.visible_count().saturating_sub(1).max(1);
@@ -1136,16 +1211,16 @@ impl App {
                     self.selected = 0;
                     self.set_status("View reset (runtime history is retained)");
                 }
-                "help" => self.tab_index = tab_pos("Help"),
+                "help" => {
+                    self.set_settings_subpage(SP_HELP);
+                }
                 "config" => {
-                    self.tab_index = tab_pos("Usage");
-                    self.usage_config_view = true;
+                    self.set_settings_subpage(SP_CONFIG);
                 }
-                "usage" => {
-                    self.tab_index = tab_pos("Usage");
-                    self.usage_config_view = false;
-                    return Some(Cmd::LoadUsage);
+                "settings" | "theme" => {
+                    self.set_settings_subpage(SP_APPEARANCE);
                 }
+                "usage" => return self.set_settings_subpage(SP_USAGE),
                 "memory" | "mem" => {
                     self.tab_index = tab_pos("Memory");
                     // Preserve original case for the query.
@@ -1194,6 +1269,37 @@ impl App {
 
         self.set_status("Cycle running…");
         Some(Cmd::Submit(clean))
+    }
+
+    // --- settings -----------------------------------------------------------
+
+    /// Land on the Settings tab at subpage `index`, returning its lazy-load
+    /// command (Usage fetches account usage on entry).
+    fn set_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
+        self.tab_index = tab_pos("Settings");
+        self.settings_index = index.min(SETTINGS_SUBPAGES.len() - 1);
+        self.tab_enter_cmd()
+    }
+
+    /// Cycle the selected Appearance role's color, apply it to the live theme,
+    /// and persist the `[theme]` section.
+    fn cycle_appearance_role(&mut self, forward: bool) {
+        let role = self.appearance_index.min(THEME_ROLES.len() - 1);
+        self.theme.cycle_role(role, forward);
+        self.persist_theme_now(THEME_ROLES[role]);
+    }
+
+    /// Write the current theme to the injected config path, surfacing a status
+    /// note on success or failure. A `None` path applies live but does not save.
+    fn persist_theme_now(&mut self, role: &str) {
+        let value = color_to_string(self.theme.role(self.appearance_index));
+        match &self.config_path {
+            Some(path) => match crate::ui::theme::persist_theme(path, &self.theme) {
+                Ok(()) => self.set_status(format!("Appearance · {role} → {value} (saved)")),
+                Err(e) => self.set_status(format!("Appearance · save failed: {e}")),
+            },
+            None => self.set_status(format!("Appearance · {role} → {value} (not persisted)")),
+        }
     }
 
     // --- render -------------------------------------------------------------
@@ -1254,7 +1360,7 @@ impl App {
             Span::styled(
                 "MEDULLA",
                 Style::default()
-                    .fg(Color::LightCyan)
+                    .fg(self.theme.primary)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
@@ -1319,7 +1425,7 @@ impl App {
             self.hit_tabs.push((col, col + w - 1));
             let mut style = Style::default();
             if i == self.tab_index {
-                style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
+                style = self.theme.selection();
             }
             spans.push(Span::styled(label, style));
             spans.push(Span::raw(" "));
@@ -1348,11 +1454,11 @@ impl App {
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::DarkGray))
+            .border_style(Style::default().fg(self.theme.dim_border))
             .title(Span::styled(
                 title.into(),
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(self.theme.primary)
                     .add_modifier(Modifier::BOLD),
             ))
     }
@@ -1366,9 +1472,82 @@ impl App {
             "Trace" => self.draw_trace(f, area),
             "Context" => self.draw_context(f, area),
             "Memory" => self.draw_memory(f, area),
-            "Usage" => self.draw_usage(f, area),
-            _ => self.draw_help(f, area),
+            "Settings" => self.draw_settings(f, area),
+            _ => self.draw_overview(f, area),
         }
+    }
+
+    fn draw_settings(&mut self, f: &mut Frame, area: Rect) {
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(16), Constraint::Min(0)])
+            .split(area);
+
+        // Left nav: subpage list.
+        let block = self.panel("Settings");
+        let inner = block.inner(cols[0]);
+        f.render_widget(block, cols[0]);
+        let mut lines: Vec<TLine> = Vec::new();
+        for (i, name) in SETTINGS_SUBPAGES.iter().enumerate() {
+            let style = if i == self.settings_index {
+                self.theme.selection()
+            } else {
+                Style::default()
+            };
+            lines.push(TLine::from(Span::styled(
+                format!(" {} {name} ", i + 1),
+                style,
+            )));
+        }
+        lines.push(TLine::from(Span::styled(
+            "↑↓ nav · 1-4 jump",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+        f.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+        // Right content: the active subpage.
+        match self.settings_index {
+            SP_USAGE => self.draw_usage(f, cols[1]),
+            SP_APPEARANCE => self.draw_appearance(f, cols[1]),
+            SP_CONFIG => self.draw_config(f, cols[1]),
+            _ => self.draw_help(f, cols[1]),
+        }
+    }
+
+    fn draw_appearance(&mut self, f: &mut Frame, area: Rect) {
+        let block = self.panel("Appearance");
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let sel = self.appearance_index.min(THEME_ROLES.len() - 1);
+        let mut lines: Vec<TLine> = Vec::new();
+        for (i, role) in THEME_ROLES.iter().enumerate() {
+            let c = self.theme.role(i);
+            let text_style = if i == sel {
+                self.theme.selection()
+            } else {
+                Style::default()
+            };
+            let marker = if i == sel { "▸ " } else { "  " };
+            lines.push(TLine::from(vec![
+                Span::styled(marker, text_style),
+                Span::styled("███ ", Style::default().fg(c)),
+                Span::styled(format!("{role:<13} {}", color_to_string(c)), text_style),
+            ]));
+        }
+        lines.push(TLine::from(""));
+        lines.push(TLine::from(Span::styled(
+            "j/k select role · ←/→ or Enter cycle color · applies live",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+        let where_saved = match &self.config_path {
+            Some(p) => format!("saved to {}", p.display()),
+            None => "changes apply live (no config path set)".into(),
+        };
+        lines.push(TLine::from(Span::styled(
+            where_saved,
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+        f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 
     fn draw_overview(&mut self, f: &mut Frame, area: Rect) {
@@ -1387,7 +1566,7 @@ impl App {
                 TLine::from(Span::styled(
                     *row,
                     Style::default()
-                        .fg(Color::LightCyan)
+                        .fg(self.theme.primary)
                         .add_modifier(Modifier::BOLD),
                 ))
             })
@@ -1490,7 +1669,7 @@ impl App {
                 .unwrap_or_default()
         };
         let mut routing = vec![TLine::from(vec![
-            Span::styled("runtime ", Style::default().fg(Color::Cyan)),
+            Span::styled("runtime ", Style::default().fg(self.theme.primary)),
             Span::raw(self.runtime.describe()),
         ])];
         for (label, tier, color) in [
@@ -1634,7 +1813,7 @@ impl App {
     fn event_line(&self, env: &EventEnvelope, width: usize, selected: bool) -> TLine<'static> {
         let mut style = Style::default().fg(color(event_color(env).unwrap_or("white")));
         if selected {
-            style = style.add_modifier(Modifier::REVERSED);
+            style = self.theme.selection();
         }
         let text = format!(
             "{} {}",
@@ -1688,7 +1867,7 @@ impl App {
                 style = style.fg(Color::Yellow);
             }
             if t.id == self.snapshot.active_thread_id {
-                style = style.add_modifier(Modifier::REVERSED);
+                style = self.theme.selection();
             }
             lines.push(TLine::from(Span::styled(text, style)));
         }
@@ -1908,14 +2087,16 @@ impl App {
                 let branch = if *last { "└" } else { "├" };
                 let mut style = Style::default();
                 if active {
-                    style = style.add_modifier(Modifier::REVERSED);
+                    style = self.theme.selection();
                 }
+                let status_style = if active {
+                    style
+                } else {
+                    style.fg(color(task.status.color()))
+                };
                 TLine::from(vec![
                     Span::styled(format!("   {branch} {} · ", task.task_id), style),
-                    Span::styled(
-                        task.status.label().to_string(),
-                        style.fg(color(task.status.color())),
-                    ),
+                    Span::styled(task.status.label().to_string(), status_style),
                     Span::styled(format!(" · {} turns", task.turns), style),
                 ])
             }
@@ -1955,7 +2136,7 @@ impl App {
                     style = style.add_modifier(Modifier::DIM);
                 }
                 if active {
-                    style = style.add_modifier(Modifier::REVERSED);
+                    style = self.theme.selection();
                 }
                 let text = format!(
                     "{marker} {} · {}{ctx}{state}{sessions_note}",
@@ -2076,7 +2257,7 @@ impl App {
                     style = style.fg(Color::Green);
                 }
                 if i == selected {
-                    style = style.add_modifier(Modifier::REVERSED);
+                    style = self.theme.selection();
                 }
                 lines.push(TLine::from(Span::styled(text, style)));
             }
@@ -2093,11 +2274,11 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Magenta))
+            .border_style(Style::default().fg(self.theme.accent))
             .title(Span::styled(
                 prompt.title.clone(),
                 Style::default()
-                    .fg(Color::Magenta)
+                    .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD),
             ));
         let inner = block.inner(area);
@@ -2169,7 +2350,7 @@ impl App {
         for (i, item) in self.contexts.iter().take(vis).enumerate() {
             let mut style = Style::default();
             if i == idx {
-                style = style.add_modifier(Modifier::REVERSED);
+                style = self.theme.selection();
             }
             lines.push(TLine::from(Span::styled(
                 format!("{} · {}b · {}", item.kind, item.bytes, item.ref_),
@@ -2309,7 +2490,7 @@ impl App {
         };
         header.push(TLine::from(Span::styled(
             facets,
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(self.theme.primary),
         )));
         f.render_widget(
             Paragraph::new(Text::from(header))
@@ -2356,7 +2537,7 @@ impl App {
             };
             let mut style = base;
             if i == idx {
-                style = style.add_modifier(Modifier::REVERSED);
+                style = self.theme.selection();
             }
             lines.push(TLine::from(Span::styled(label, style)));
         }
@@ -2459,10 +2640,6 @@ impl App {
     }
 
     fn draw_usage(&mut self, f: &mut Frame, area: Rect) {
-        if self.usage_config_view {
-            self.draw_config(f, area);
-            return;
-        }
         let fold = self.usage_fold();
         let dim = Style::default().add_modifier(Modifier::DIM);
         let bold = Style::default().add_modifier(Modifier::BOLD);
@@ -2544,7 +2721,7 @@ impl App {
         }
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
-            "r refresh · c effective config (/config)",
+            "r refresh · c effective config · 1-4 switch settings pages",
             dim,
         )));
         f.render_widget(
@@ -2585,6 +2762,8 @@ impl App {
             TLine::from("Workers: a add peer · Enter/s select · e edit label · d/x remove"),
             TLine::from("Context: j / k select chunks · Esc clear input · Ctrl-X abort cycle"),
             TLine::from("Memory: ↑↓ / j k browse directives, facets & hits · /memory <query> to search"),
+            TLine::from("Settings: ↑↓ nav subpages · 1-4 jump · Usage/Appearance/Config/Help live here"),
+            TLine::from("Appearance: j / k pick a theme role · ←/→ or Enter cycle its color (saved live)"),
             TLine::from("Ctrl-N new session · Ctrl-C quit (nav keys act only when the input is empty)"),
             TLine::from(" "),
             TLine::from(Span::styled("Copy", bold)),
@@ -2596,7 +2775,7 @@ impl App {
             TLine::from(" "),
             TLine::from(Span::styled("Commands", bold)),
             TLine::from("/new · /fork [name] · /resume · /abort · /clear · /config · /copy [all|last]"),
-            TLine::from("/memory [query] · /mouse · /async [on|off] · /help · /quit"),
+            TLine::from("/usage · /settings · /theme · /memory [query] · /mouse · /async [on|off] · /help · /quit"),
         ];
         f.render_widget(
             Paragraph::new(Text::from(lines))
@@ -2613,7 +2792,7 @@ impl App {
             .border_style(Style::default().fg(if self.snapshot.running {
                 Color::Yellow
             } else {
-                Color::Cyan
+                self.theme.primary
             }));
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -2621,7 +2800,10 @@ impl App {
         let mut lines: Vec<TLine> = Vec::new();
         for (index, row) in self.draft.text.split('\n').enumerate() {
             let prefix = if index == 0 { "❯ " } else { "  " };
-            let mut spans = vec![Span::styled(prefix, Style::default().fg(Color::Cyan))];
+            let mut spans = vec![Span::styled(
+                prefix,
+                Style::default().fg(self.theme.primary),
+            )];
             if index == caret.row {
                 let chars: Vec<char> = row.chars().collect();
                 let before: String = chars.iter().take(caret.col).collect();
@@ -2651,14 +2833,14 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Magenta))
+            .border_style(Style::default().fg(self.theme.accent))
             .title(Span::styled(
                 format!(
                     "Resume a chat — ↑/↓ select · Enter load · Esc cancel ({})",
                     picker.chats.len()
                 ),
                 Style::default()
-                    .fg(Color::Magenta)
+                    .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD),
             ));
         let inner = block.inner(area);
@@ -2673,7 +2855,7 @@ impl App {
             let marker = if i == picker.index { "❯ " } else { "  " };
             let mut style = Style::default();
             if i == picker.index {
-                style = style.add_modifier(Modifier::REVERSED);
+                style = self.theme.selection();
             }
             let text = format!(
                 "{marker}{} · {}t · {} thread{} · {}",
@@ -2738,7 +2920,8 @@ mod tests {
         let mut a = app();
         a.tab_index = 1;
         let _ = a.execute("/help".into());
-        assert_eq!(a.tab(), "Help");
+        assert_eq!(a.tab(), "Settings");
+        assert_eq!(a.settings_subpage(), "Help");
     }
 
     #[test]

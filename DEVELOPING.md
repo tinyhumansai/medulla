@@ -115,7 +115,7 @@ On startup the TUI picks one of three runtimes, in this order:
 cargo run
 ```
 
-With no token and no core socket you land in the mock runtime — the fastest way to explore the interface. Press `?` or open the Help tab for keybindings.
+With no token and no core socket you land in the mock runtime — the fastest way to explore the interface. Open the Settings tab (its Help subpage) or run `/help` for keybindings. Usage, effective config, and the color-theme editor live under Settings as well (`/usage`, `/config`, `/theme`).
 
 ### Backend HTTP/SSE
 
@@ -234,7 +234,7 @@ Config is layered. From lowest to highest precedence (highest wins):
 
 Files are merged field-by-field (a recursive table merge), so a project-local file can override just `backend.baseUrl` without discarding the rest of a global file. TOML is the primary format; `--config <path>` still accepts either `.toml` or `.json` (parser chosen by extension) and bypasses file discovery, but env vars and CLI flags still override it. The Config tab shows the merged effective config and lists the source files that contributed.
 
-Every section is optional; with no file anywhere all defaults apply. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored. See `config.example.toml` for a commented reference and `src/config.rs` for the full schema — fields are camelCase.
+Every section is optional; with no file anywhere all defaults apply. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), `theme` (TUI colors — `primary`/`accent`/`selectionFg`/`dimBorder` as ratatui color names or `#rrggbb`; the Settings › Appearance subpage edits and persists these), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored. See `config.example.toml` for a commented reference and `src/config.rs` for the full schema — fields are camelCase.
 
 ## Validation
 

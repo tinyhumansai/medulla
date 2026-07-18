@@ -22,7 +22,8 @@ fn loaded() -> LoadedConfig {
 fn usage_app() -> (App, Arc<MockRuntime>) {
     let rt = Arc::new(MockRuntime::empty());
     let mut app = App::new(rt.clone(), loaded());
-    app.tab_index = TABS.iter().position(|t| *t == "Usage").unwrap();
+    // Usage now lives as the default subpage of the Settings tab.
+    app.tab_index = TABS.iter().position(|t| *t == "Settings").unwrap();
     (app, rt)
 }
 
@@ -136,10 +137,14 @@ fn refresh_key_requests_usage_and_c_toggles_config() {
         matches!(cmd, Some(medulla::ui::app::Cmd::LoadUsage)),
         "r requests a usage refresh"
     );
+    // c jumps to the Config subpage (the effective-config view).
     let _ = key(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.settings_subpage(), "Config");
     let out = render(&mut app, 200, 50);
     assert!(out.contains("Configuration ·"), "config view: {out}");
-    let _ = key(&mut app, KeyCode::Char('c'));
+    // Number key 1 jumps back to the Usage subpage.
+    let _ = key(&mut app, KeyCode::Char('1'));
+    assert_eq!(app.settings_subpage(), "Usage");
     let out = render(&mut app, 200, 50);
     assert!(out.contains("This session"), "back to usage: {out}");
 }

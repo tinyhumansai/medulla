@@ -13,6 +13,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::config::LoadedConfig;
+use crate::memory::{MemoryHit, MemoryStatus};
 use crate::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerInfo, WorkerOp};
 use crate::ui::agents::{
     agent_row_model, derive_agent_lanes, lane_lines, task_lines, AgentLane, AgentRole, AgentRow,
@@ -23,8 +24,8 @@ use crate::ui::composer::{caret_row_col, delete_before, insert_at, move_caret_ro
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::util::{clip, clock, fmt_tokens, wrap};
 
-pub const TABS: [&str; 8] = [
-    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Config", "Help",
+pub const TABS: [&str; 9] = [
+    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Memory", "Config", "Help",
 ];
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -43,11 +44,23 @@ pub enum Cmd {
     ListChats,
     InspectContext,
     WorkerOp(WorkerOp),
+    /// Load the persona-memory status + directives for the Memory tab.
+    LoadMemory,
+    /// Run a persona-memory search and land on the Memory tab.
+    SearchMemory(String),
 }
 
 struct ResumePicker {
     chats: Vec<crate::ui::chat_store::MainChatSummary>,
     index: usize,
+}
+
+/// One selectable row in the Memory tab's left pane: either the directive/facet
+/// overview (no active search) or a ranked search hit.
+enum MemoryEntry {
+    Directive(String),
+    Facet { name: String, count: usize },
+    Hit(MemoryHit),
 }
 
 /// The action a small inline prompt (Workers add/edit, Agents answer) submits.
@@ -84,6 +97,12 @@ pub struct App {
     agent_scroll: usize,
     chat_scroll: usize,
     worker_index: usize,
+    // Persona-memory tab state (lazily loaded on tab entry / search).
+    memory_status: Option<MemoryStatus>,
+    memory_hits: Vec<MemoryHit>,
+    memory_directives: Vec<String>,
+    memory_index: usize,
+    memory_query: Option<String>,
     prompt: Option<Prompt>,
     pub frame: usize,
     pub mouse_capture: bool,
@@ -227,6 +246,11 @@ impl App {
             agent_scroll: 0,
             chat_scroll: 0,
             worker_index: 0,
+            memory_status: None,
+            memory_hits: Vec::new(),
+            memory_directives: Vec::new(),
+            memory_index: 0,
+            memory_query: None,
             prompt: None,
             frame: 0,
             mouse_capture: true,
@@ -333,6 +357,27 @@ impl App {
         self.contexts = c;
     }
 
+    /// Store the loaded persona-memory status + directives and drop back to the
+    /// directive/facet overview (no active search).
+    pub fn set_memory_loaded(&mut self, status: Option<MemoryStatus>, directives: Vec<String>) {
+        self.memory_status = status;
+        self.memory_directives = directives;
+        self.memory_query = None;
+        self.memory_index = 0;
+    }
+
+    /// Store persona-memory search results for `query` and select the first hit.
+    pub fn set_memory_results(&mut self, hits: Vec<MemoryHit>, query: String) {
+        self.memory_hits = hits;
+        self.memory_query = Some(query);
+        self.memory_index = 0;
+    }
+
+    /// The active persona-memory selection index. Test/inspection seam.
+    pub fn memory_index(&self) -> usize {
+        self.memory_index
+    }
+
     pub fn open_resume(&mut self, chats: Vec<crate::ui::chat_store::MainChatSummary>) {
         if chats.is_empty() {
             self.set_status("No saved chats to resume.");
@@ -344,6 +389,15 @@ impl App {
 
     pub fn tab(&self) -> &'static str {
         TABS[self.tab_index]
+    }
+
+    /// The lazy-load command a freshly entered tab needs, if any.
+    fn tab_enter_cmd(&self) -> Option<Cmd> {
+        match self.tab() {
+            "Context" => Some(Cmd::InspectContext),
+            "Memory" => Some(Cmd::LoadMemory),
+            _ => None,
+        }
     }
 
     fn lanes(&self) -> Vec<AgentLane> {
@@ -393,6 +447,7 @@ impl App {
                 "Agents" => self.agent_scroll += 3,
                 "Trace" => self.selected = self.selected.saturating_sub(3),
                 "Context" => self.context_index = self.context_index.saturating_sub(1),
+                "Memory" => self.memory_index = self.memory_index.saturating_sub(1),
                 _ => {}
             },
             MouseEventKind::ScrollDown => match tab {
@@ -402,6 +457,10 @@ impl App {
                 "Context" => {
                     let max = self.contexts.len().saturating_sub(1);
                     self.context_index = (self.context_index + 1).min(max);
+                }
+                "Memory" => {
+                    let max = self.memory_entry_count().saturating_sub(1);
+                    self.memory_index = (self.memory_index + 1).min(max);
                 }
                 _ => {}
             },
@@ -418,10 +477,7 @@ impl App {
                 if x >= start && x <= end {
                     self.tab_index = i;
                     self.selected = 0;
-                    if TABS[i] == "Context" {
-                        return Some(Cmd::InspectContext);
-                    }
-                    return None;
+                    return self.tab_enter_cmd();
                 }
             }
             return None;
@@ -601,16 +657,12 @@ impl App {
             KeyCode::Tab => {
                 self.tab_index = (self.tab_index + 1) % TABS.len();
                 self.selected = 0;
-                if self.tab() == "Context" {
-                    return Some(Cmd::InspectContext);
-                }
+                return self.tab_enter_cmd();
             }
             KeyCode::BackTab => {
                 self.tab_index = (self.tab_index + TABS.len() - 1) % TABS.len();
                 self.selected = 0;
-                if self.tab() == "Context" {
-                    return Some(Cmd::InspectContext);
-                }
+                return self.tab_enter_cmd();
             }
             KeyCode::PageUp if tab == "Chat" => {
                 self.chat_scroll += self.visible_count().saturating_sub(1).max(1);
@@ -704,6 +756,21 @@ impl App {
                     });
                     self.set_status("Edit label · Enter save · Esc cancel");
                 }
+            }
+            // Memory browse.
+            KeyCode::Up if tab == "Memory" => {
+                self.memory_index = self.memory_index.saturating_sub(1);
+            }
+            KeyCode::Down if tab == "Memory" => {
+                let max = self.memory_entry_count().saturating_sub(1);
+                self.memory_index = (self.memory_index + 1).min(max);
+            }
+            KeyCode::Char('j') if tab == "Memory" && self.draft.text.is_empty() => {
+                let max = self.memory_entry_count().saturating_sub(1);
+                self.memory_index = (self.memory_index + 1).min(max);
+            }
+            KeyCode::Char('k') if tab == "Memory" && self.draft.text.is_empty() => {
+                self.memory_index = self.memory_index.saturating_sub(1);
             }
             KeyCode::Up => {
                 if tab == "Chat" {
@@ -1010,6 +1077,17 @@ impl App {
                 }
                 "help" => self.tab_index = tab_pos("Help"),
                 "config" => self.tab_index = tab_pos("Config"),
+                "memory" | "mem" => {
+                    self.tab_index = tab_pos("Memory");
+                    // Preserve original case for the query.
+                    let query = clean[1..].trim()[cmd.len()..].trim().to_string();
+                    if query.is_empty() {
+                        self.set_status("Memory · loading persona…");
+                        return Some(Cmd::LoadMemory);
+                    }
+                    self.set_status(format!("Memory · searching “{query}”…"));
+                    return Some(Cmd::SearchMemory(query));
+                }
                 "mouse" => self.toggle_mouse(),
                 "copy" => {
                     if !arg.is_empty() && arg != "all" && arg != "last" {
@@ -1209,6 +1287,7 @@ impl App {
             "Workers" => self.draw_workers(f, area),
             "Trace" => self.draw_trace(f, area),
             "Context" => self.draw_context(f, area),
+            "Memory" => self.draw_memory(f, area),
             "Config" => self.draw_config(f, area),
             _ => self.draw_help(f, area),
         }
@@ -2028,6 +2107,233 @@ impl App {
         );
     }
 
+    /// The current Memory-tab left-pane rows: directives + facet overview with no
+    /// active search, or the ranked hits after a `/memory <query>` search.
+    fn memory_entries(&self) -> Vec<MemoryEntry> {
+        if self.memory_query.is_some() {
+            return self
+                .memory_hits
+                .iter()
+                .cloned()
+                .map(MemoryEntry::Hit)
+                .collect();
+        }
+        let mut out: Vec<MemoryEntry> = self
+            .memory_directives
+            .iter()
+            .cloned()
+            .map(MemoryEntry::Directive)
+            .collect();
+        if let Some(st) = &self.memory_status {
+            for (name, count) in &st.facet_counts {
+                out.push(MemoryEntry::Facet {
+                    name: name.clone(),
+                    count: *count,
+                });
+            }
+        }
+        out
+    }
+
+    fn memory_entry_count(&self) -> usize {
+        self.memory_entries().len()
+    }
+
+    fn draw_memory(&mut self, f: &mut Frame, area: Rect) {
+        // Disabled / not wired: a single helpful hint panel.
+        let enabled = self
+            .memory_status
+            .as_ref()
+            .map(|s| s.enabled)
+            .unwrap_or(false);
+        if !enabled {
+            let mut lines = vec![TLine::from(Span::styled(
+                "Persona memory is not enabled.",
+                Style::default().fg(Color::Yellow),
+            ))];
+            lines.push(TLine::from(Span::styled(
+                "Enable it in config (memory.enabled = true) with an OpenRouter key,",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+            lines.push(TLine::from(Span::styled(
+                "then run `medulla memory backfill` to distil your persona pack.",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+            f.render_widget(
+                Paragraph::new(Text::from(lines))
+                    .wrap(Wrap { trim: true })
+                    .block(self.panel("Persona memory")),
+                area,
+            );
+            return;
+        }
+
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(6), Constraint::Min(0)])
+            .split(area);
+
+        // Status header.
+        let st = self.memory_status.clone().unwrap_or(MemoryStatus {
+            enabled: true,
+            workspace: String::new(),
+            pack_exists: false,
+            pack_path: String::new(),
+            entry_count: 0,
+            directives_count: 0,
+            facet_counts: Default::default(),
+        });
+        let mut header = vec![
+            TLine::from(vec![
+                Span::styled("● enabled", Style::default().fg(Color::Green)),
+                Span::raw(format!(" · {}", clip(&st.workspace, 48))),
+            ]),
+            if st.pack_exists {
+                TLine::from(Span::styled(
+                    format!("pack ● present · {}", clip(&st.pack_path, 52)),
+                    Style::default().fg(Color::Green),
+                ))
+            } else {
+                TLine::from(Span::styled(
+                    "pack ○ absent · run `medulla memory backfill`",
+                    Style::default().add_modifier(Modifier::DIM),
+                ))
+            },
+            TLine::from(format!(
+                "{} observation(s) · {} directive(s)",
+                st.entry_count, st.directives_count
+            )),
+        ];
+        let facets = if st.facet_counts.is_empty() {
+            "facets: (none)".to_string()
+        } else {
+            let joined = st
+                .facet_counts
+                .iter()
+                .map(|(f, n)| format!("{f}={n}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("facets: {joined}")
+        };
+        header.push(TLine::from(Span::styled(
+            facets,
+            Style::default().fg(Color::Cyan),
+        )));
+        f.render_widget(
+            Paragraph::new(Text::from(header))
+                .wrap(Wrap { trim: true })
+                .block(self.panel("Persona memory")),
+            rows[0],
+        );
+
+        // Left list + right detail.
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+            .split(rows[1]);
+
+        let entries = self.memory_entries();
+        let idx = self.memory_index.min(entries.len().saturating_sub(1));
+        let searching = self.memory_query.is_some();
+        let left_title = match &self.memory_query {
+            Some(q) => format!("Search “{}” · {} hit(s)", clip(q, 18), entries.len()),
+            None => "Directives & facets".to_string(),
+        };
+        let block = self.panel(left_title);
+        let inner = block.inner(cols[0]);
+        f.render_widget(block, cols[0]);
+        let vis = (inner.height as usize).max(1);
+        let start = idx
+            .saturating_sub(vis / 2)
+            .min(entries.len().saturating_sub(vis));
+        let mut lines: Vec<TLine> = Vec::new();
+        for (i, entry) in entries.iter().enumerate().skip(start).take(vis) {
+            let (label, base) = match entry {
+                MemoryEntry::Directive(text) => (
+                    format!("◆ {}", clip(text, 30)),
+                    Style::default().fg(Color::Yellow),
+                ),
+                MemoryEntry::Facet { name, count } => (
+                    format!("▪ {name} · {count}"),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                MemoryEntry::Hit(hit) => (
+                    format!("{} · {} · {:.2}", hit.facet, hit.tier, hit.score),
+                    Style::default().fg(Color::Magenta),
+                ),
+            };
+            let mut style = base;
+            if i == idx {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
+            lines.push(TLine::from(Span::styled(label, style)));
+        }
+        if entries.is_empty() {
+            let hint = if searching {
+                "No hits for that query."
+            } else {
+                "No directives or observations yet. Run `medulla memory backfill`."
+            };
+            lines.push(TLine::from(Span::styled(
+                hint,
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
+        f.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+        // Detail pane.
+        let (title, body) = self.memory_detail(entries.get(idx));
+        f.render_widget(
+            Paragraph::new(Text::from(body))
+                .wrap(Wrap { trim: false })
+                .block(self.panel(title)),
+            cols[1],
+        );
+    }
+
+    /// The detail title + wrapped body for the selected Memory entry.
+    fn memory_detail(&self, entry: Option<&MemoryEntry>) -> (String, Vec<TLine<'static>>) {
+        let dim = Style::default().add_modifier(Modifier::DIM);
+        match entry {
+            None => (
+                "Detail".into(),
+                vec![TLine::from(Span::styled(
+                    "Select an entry with ↑/↓ (or search with /memory <query>).",
+                    dim,
+                ))],
+            ),
+            Some(MemoryEntry::Directive(text)) => {
+                ("Directive".into(), vec![TLine::from(text.clone())])
+            }
+            Some(MemoryEntry::Facet { name, count }) => (
+                name.clone(),
+                vec![
+                    TLine::from(format!("{count} observation(s) in this facet.")),
+                    TLine::from(Span::styled(
+                        "Run /memory <query> to rank observations across facets.",
+                        dim,
+                    )),
+                ],
+            ),
+            Some(MemoryEntry::Hit(hit)) => {
+                let mut body = vec![TLine::from(hit.text.clone()), TLine::from("")];
+                if let Some(q) = &hit.quote {
+                    body.push(TLine::from(Span::styled(format!("“{q}”"), dim)));
+                    body.push(TLine::from(""));
+                }
+                body.push(TLine::from(Span::styled(
+                    format!(
+                        "facet {} · tier {} · score {:.3}",
+                        hit.facet, hit.tier, hit.score
+                    ),
+                    dim,
+                )));
+                body.push(TLine::from(Span::styled(hit.timestamp.clone(), dim)));
+                (format!("{} · {}", hit.facet, hit.tier), body)
+            }
+        }
+    }
+
     fn draw_config(&mut self, f: &mut Frame, area: Rect) {
         let sources = if self.loaded.sources.is_empty() {
             "built-in defaults".to_string()
@@ -2057,6 +2363,7 @@ impl App {
             TLine::from("Agents: ↑↓ pick an agent · j / k scroll · X cancel task · A answer a question"),
             TLine::from("Workers: a add peer · Enter/s select · e edit label · d/x remove"),
             TLine::from("Context: j / k select chunks · Esc clear input · Ctrl-X abort cycle"),
+            TLine::from("Memory: ↑↓ / j k browse directives, facets & hits · /memory <query> to search"),
             TLine::from("Ctrl-N new session · Ctrl-C quit (nav keys act only when the input is empty)"),
             TLine::from(" "),
             TLine::from(Span::styled("Copy", bold)),
@@ -2068,7 +2375,7 @@ impl App {
             TLine::from(" "),
             TLine::from(Span::styled("Commands", bold)),
             TLine::from("/new · /fork [name] · /resume · /abort · /clear · /config · /copy [all|last]"),
-            TLine::from("/mouse · /async [on|off] · /help · /quit"),
+            TLine::from("/memory [query] · /mouse · /async [on|off] · /help · /quit"),
         ];
         f.render_widget(
             Paragraph::new(Text::from(lines))

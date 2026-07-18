@@ -243,7 +243,7 @@ Memory flags:\n  \
 --json                  Emit JSON instead of human-readable output\n  \
 --facet <name>          Restrict a search to one facet\n  \
 --k <n>                 Max search results (default 5)\n  \
---config <path>         Explicit config file (.toml or .json)\n\n\
+--config <path>         Explicit config file (.toml or .json) for the memory section\n\n\
 TUI flags:\n  \
 --config <path>         Explicit config file (.toml or .json); bypasses layered discovery\n  \
 --core                  Drive the core-js orchestration core over its Unix socket\n  \

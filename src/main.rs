@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, EventStream, KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
@@ -19,11 +19,15 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use medulla::auth::{open_browser, run_login_flow, CredentialStore, Credentials, LoopbackConfig};
+use medulla::auth::{
+    describe_me, open_browser, run_login_flow, start_loopback, CredentialStore, Credentials,
+    LoopbackConfig, DEFAULT_LOGIN_TIMEOUT,
+};
 use medulla::cli::{
     core_socket_plan, missing_token_note, parse_command, parse_login_args, parse_tui_args,
     resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs,
 };
+use medulla::client::error::ClientError;
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
 use medulla::runtime::backend::BackendRuntime;
@@ -32,6 +36,7 @@ use medulla::runtime::core_client::CoreClient;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{ContextItem, Runtime};
 use medulla::ui::app::{App, Cmd, TABS};
+use medulla::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
 
 /// Messages sent from spawned async tasks back to the event loop.
 enum AppMsg {
@@ -240,32 +245,112 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         }
     }
 
+    // When core is not the runtime, decide between a backend runtime, the
+    // interactive login screen, or the mock. `--core` (or a `[core]` config) is
+    // left on its existing backend→mock fallback so an explicit core request is
+    // never hijacked by the login UX.
+    let mut need_login: Option<String> = None;
     if runtime.is_none() {
         let backend = &loaded.config.backend;
         let core_note = startup_status.take();
         let stored = CredentialStore::at_default_location().and_then(|s| s.load());
-        let (rt, note): (Arc<dyn Runtime>, Option<String>) =
-            match resolve_backend_token(&env, backend, stored.as_ref()) {
-                Some(tok) => {
-                    let client = MedullaClient::new(backend.base_url.clone(), tok);
-                    match BackendRuntime::connect(client).await {
-                        Ok(rt) => (Arc::new(rt), None),
+        let token = resolve_backend_token(&env, backend, stored.as_ref());
+
+        let (rt, note): (Option<Arc<dyn Runtime>>, Option<String>) = match (want_core, token) {
+            // Explicit core that fell back: preserve the old backend→mock path.
+            (true, Some(tok)) => {
+                let client = MedullaClient::new(backend.base_url.clone(), tok);
+                match BackendRuntime::connect(client).await {
+                    Ok(rt) => (Some(Arc::new(rt)), None),
+                    Err(e) => (
+                        Some(Arc::new(MockRuntime::demo())),
+                        Some(format!(
+                            "backend connect failed ({e}) — running with mock runtime"
+                        )),
+                    ),
+                }
+            }
+            (true, None) => (
+                Some(Arc::new(MockRuntime::demo())),
+                Some(missing_token_note(backend)),
+            ),
+            // Default path: no token → login screen.
+            (false, None) => {
+                need_login = Some(backend.base_url.clone());
+                (None, None)
+            }
+            // Default path with a token: preflight `me()` so an expired/rejected
+            // token routes to the login screen instead of silently dropping to
+            // mock; a network failure keeps the old mock fallback.
+            (false, Some(tok)) => {
+                let client = MedullaClient::new(backend.base_url.clone(), tok);
+                match client.me().await {
+                    Ok(_) => match BackendRuntime::connect(client).await {
+                        Ok(rt) => (Some(Arc::new(rt)), None),
                         Err(e) => (
-                            Arc::new(MockRuntime::demo()),
+                            Some(Arc::new(MockRuntime::demo())),
                             Some(format!(
                                 "backend connect failed ({e}) — running with mock runtime"
                             )),
                         ),
+                    },
+                    Err(e) if is_auth_error(&e) => {
+                        need_login = Some(backend.base_url.clone());
+                        (None, None)
                     }
+                    Err(e) => (
+                        Some(Arc::new(MockRuntime::demo())),
+                        Some(format!(
+                            "backend unreachable ({e}) — running with mock runtime"
+                        )),
+                    ),
                 }
-                None => (
-                    Arc::new(MockRuntime::demo()),
-                    Some(missing_token_note(backend)),
-                ),
-            };
-        runtime = Some(rt);
+            }
+        };
+        runtime = rt;
         // Prefer the more specific fallback note (core → backend → mock).
         startup_status = core_note.or(note);
+    }
+
+    // Restore the terminal on panic before the default hook prints the message.
+    let alt = args.alt_screen;
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore(alt, true);
+        default_hook(info);
+    }));
+
+    let guard = TermGuard::setup(args.alt_screen)?;
+    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+
+    // Pre-app login screen: runs inside the same alt-screen session and resolves
+    // to a token (→ backend runtime), the mock, or a clean quit.
+    if let Some(base_url) = need_login {
+        match run_login_screen(&mut terminal, base_url.clone()).await? {
+            LoginOutcome::Quit => {
+                drop(guard);
+                return Ok(());
+            }
+            LoginOutcome::Mock => {
+                runtime = Some(Arc::new(MockRuntime::demo()));
+                startup_status = Some("continuing offline with the mock runtime".to_string());
+            }
+            LoginOutcome::Token(jwt) => {
+                let client = MedullaClient::new(base_url.clone(), jwt.clone());
+                match BackendRuntime::connect(client).await {
+                    Ok(rt) => {
+                        runtime = Some(Arc::new(rt));
+                        startup_status = save_credentials(&base_url, &jwt);
+                    }
+                    Err(e) => {
+                        runtime = Some(Arc::new(MockRuntime::demo()));
+                        startup_status = Some(format!(
+                            "backend connect failed ({e}) — running with mock runtime"
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     let runtime = runtime.expect("a runtime is always selected");
@@ -286,17 +371,6 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     };
     let tinyplace_obs = tinyplace_service.as_ref().map(|s| s.observation());
 
-    // Restore the terminal on panic before the default hook prints the message.
-    let alt = args.alt_screen;
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        restore(alt, true);
-        default_hook(info);
-    }));
-
-    let guard = TermGuard::setup(args.alt_screen)?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-
     let result = run(
         &mut terminal,
         runtime.clone(),
@@ -311,6 +385,160 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     drop(tinyplace_service); // aborts the background loops.
     runtime.shutdown().await.ok();
     result
+}
+
+/// Whether a client error should route to the login screen (expired or rejected
+/// credentials) rather than a silent mock fallback.
+fn is_auth_error(err: &ClientError) -> bool {
+    err.is_token_expired() || matches!(err.status(), Some(401) | Some(403))
+}
+
+/// Persist a freshly-obtained JWT. Returns `None` on success or a non-fatal
+/// notice string on failure (the app still proceeds).
+fn save_credentials(base_url: &str, jwt: &str) -> Option<String> {
+    match CredentialStore::at_default_location() {
+        Some(store) => match store.save(&Credentials {
+            base_url: base_url.to_string(),
+            jwt: jwt.to_string(),
+        }) {
+            Ok(()) => None,
+            Err(e) => Some(format!("logged in, but saving credentials failed ({e})")),
+        },
+        None => Some("logged in, but no credential store location resolved".to_string()),
+    }
+}
+
+/// The pre-app login loop: draw the [`LoginScreen`], route keys to async tasks,
+/// and fold their events back in until the screen reaches an outcome.
+async fn run_login_screen(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    base_url: String,
+) -> anyhow::Result<LoginOutcome> {
+    let mut screen = LoginScreen::new(base_url.clone());
+    let mut reader = EventStream::new();
+    let mut tick = tokio::time::interval(Duration::from_millis(90));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoginEvent>();
+    let mut loopback_task: Option<tokio::task::JoinHandle<()>> = None;
+
+    loop {
+        terminal.draw(|f| screen.draw(f))?;
+        if let Some(outcome) = screen.outcome() {
+            if let Some(h) = loopback_task.take() {
+                h.abort();
+            }
+            return Ok(outcome);
+        }
+
+        tokio::select! {
+            maybe_event = reader.next() => {
+                if let Some(Ok(Event::Key(key))) = maybe_event {
+                    if key.kind != KeyEventKind::Release {
+                        if let Some(cmd) = screen.handle_key(key) {
+                            dispatch_login_cmd(cmd, &base_url, &tx, &mut loopback_task);
+                        }
+                    }
+                }
+            }
+            Some(ev) = rx.recv() => screen.apply(ev),
+            _ = tick.tick() => screen.tick(),
+        }
+    }
+}
+
+/// Spawn the async work a [`LoginCmd`] requires and stream results back as
+/// [`LoginEvent`]s.
+fn dispatch_login_cmd(
+    cmd: LoginCmd,
+    base_url: &str,
+    tx: &tokio::sync::mpsc::UnboundedSender<LoginEvent>,
+    loopback_task: &mut Option<tokio::task::JoinHandle<()>>,
+) {
+    match cmd {
+        LoginCmd::StartLoopback { base_url, provider } => {
+            let tx = tx.clone();
+            let handle = tokio::spawn(async move {
+                match start_loopback(&base_url, provider).await {
+                    Ok(lb) => {
+                        let _ = tx.send(LoginEvent::LoopbackStarted {
+                            url: lb.login_url().to_string(),
+                            port: lb.port(),
+                        });
+                        open_browser(lb.login_url());
+                        match lb.await_callback(DEFAULT_LOGIN_TIMEOUT).await {
+                            Ok(jwt) => {
+                                let _ = tx.send(LoginEvent::CallbackToken(jwt.clone()));
+                                verify_and_emit(&base_url, jwt, &tx).await;
+                            }
+                            Err(e) => {
+                                let _ = tx.send(LoginEvent::CallbackError(e.to_string()));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(LoginEvent::CallbackError(e.to_string()));
+                    }
+                }
+            });
+            if let Some(old) = loopback_task.replace(handle) {
+                old.abort();
+            }
+        }
+        LoginCmd::CancelLoopback => {
+            if let Some(h) = loopback_task.take() {
+                h.abort();
+            }
+        }
+        LoginCmd::SubmitToken(token) => {
+            let base = base_url.to_string();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let jwt = if is_64_lower_hex(&token) {
+                    let client = MedullaClient::new(base.clone(), String::new());
+                    match client.consume_login_token(token).await {
+                        Ok(j) => j,
+                        Err(e) => {
+                            let _ = tx.send(LoginEvent::VerifyFailed(format!(
+                                "login token redemption failed: {e}"
+                            )));
+                            return;
+                        }
+                    }
+                } else {
+                    token
+                };
+                verify_and_emit(&base, jwt, &tx).await;
+            });
+        }
+    }
+}
+
+/// Verify a JWT via `me()` and emit the matching [`LoginEvent`].
+async fn verify_and_emit(
+    base_url: &str,
+    jwt: String,
+    tx: &tokio::sync::mpsc::UnboundedSender<LoginEvent>,
+) {
+    let client = MedullaClient::new(base_url.to_string(), jwt.clone());
+    match client.me().await {
+        Ok(me) => {
+            let _ = tx.send(LoginEvent::Verified {
+                who: describe_me(&me),
+                jwt,
+            });
+        }
+        Err(e) => {
+            let _ = tx.send(LoginEvent::VerifyFailed(format!(
+                "verification failed: {e}"
+            )));
+        }
+    }
+}
+
+/// A 64-char lowercase-hex one-time login token.
+fn is_64_lower_hex(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 async fn run(

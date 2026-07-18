@@ -72,7 +72,7 @@ medulla login                 # browser login; stores credentials
 medulla                       # bare invocation starts the TUI
 ```
 
-`medulla login` runs a browser-based OAuth loopback flow (`--provider google|github|twitter|discord`, `--no-browser` to copy the URL, or `--token <64-hex>` for headless one-time tokens) and saves a verified JWT to `<config-dir>/medulla/credentials.json`; the TUI picks it up automatically. `medulla logout` clears it. You can also pass a token directly with `MEDULLA_TOKEN=<jwt> medulla`. Without any credentials the TUI starts against a scripted mock runtime, useful for exploring the interface. Other subcommands:
+`medulla login` runs a browser-based OAuth loopback flow (`--provider google|github|twitter|discord`, `--no-browser` to copy the URL, or `--token <64-hex>` for headless one-time tokens) and saves a verified JWT to `<config-dir>/medulla/credentials.json`; the TUI picks it up automatically. The loopback callback is guarded by a random state nonce so a page sharing the loopback origin can't forge it. `medulla logout` clears it. You can also pass a token directly with `MEDULLA_TOKEN=<jwt> medulla`. If you start `medulla` with no working credentials, the TUI shows an in-terminal login screen (browser flow, paste-a-token, or `m` to continue against the scripted mock runtime). Other subcommands:
 
 - `medulla daemon` — headless coding-agent daemon serving claude/codex/opencode over encrypted tiny.place DMs.
 - `medulla sessions` — list recent claude/codex sessions as JSON.

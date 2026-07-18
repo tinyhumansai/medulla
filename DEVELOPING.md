@@ -90,6 +90,19 @@ medulla login --token <64-hex>      # headless: redeem a one-time login token
 
 On the next `medulla` run the TUI uses those stored credentials automatically, provided their `baseUrl` matches the configured backend. `medulla logout` clears the file. Precedence for the backend token stays: inline `backend.token` > `backend.tokenEnv` > stored credentials.
 
+The loopback listener hardens the callback against a hostile page sharing the same `127.0.0.1` origin: a random 32-hex state nonce is appended to the `redirectUri` before it reaches the backend, and the listener rejects any `/auth` callback whose `state` is missing or mismatched (HTTP 400) while continuing to wait. It also drops non-loopback peers, replies 405 to non-GET and 404 to non-`/auth` requests, and bounds each connection with a 5s read timeout and an 8 KiB buffer.
+
+### Logging in from the TUI
+
+When you start `medulla` without `--core` and no token resolves — or the stored/env token is expired or rejected (`me()` preflight fails with an auth error) — the TUI opens a login screen before the main app instead of silently dropping to the mock:
+
+- **Enter / `o`** — start the browser loopback flow. The screen shows the login URL and waits for the callback on `127.0.0.1:<port>`; **Esc** cancels.
+- **←/→** or **`p`** — cycle the provider (google / github / twitter / discord).
+- **`t`** — paste a JWT or a 64-hex one-time login token (64 lowercase hex is redeemed via `/auth/login-token/consume`, anything else is treated as a JWT). **Enter** submits, **Esc** cancels.
+- **`m`** — continue offline with the mock runtime. **`q`** / **Ctrl-C** — quit.
+
+On a token from either path the TUI verifies it via `/auth/me`, flashes who you are, saves the credentials (a save failure is a non-fatal notice), and proceeds into the app with a backend runtime. Explicit `--core` runs are never redirected to this screen.
+
 ### Core socket
 
 For driving a locally running core orchestration server over its NDJSON Unix-socket protocol:

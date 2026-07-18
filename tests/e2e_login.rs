@@ -25,6 +25,18 @@ fn port_from_login_url(url: &str) -> u16 {
     digits.parse().expect("port digits")
 }
 
+/// Extract the state nonce embedded in the login URL's encoded `redirectUri`
+/// (`...%2Fauth%3Fstate%3D<nonce>`). The backend preserves this verbatim and the
+/// browser must echo it back on the callback for the listener to accept it.
+fn state_from_login_url(url: &str) -> String {
+    let marker = "state%3D";
+    let start = url.find(marker).expect("state present") + marker.len();
+    url[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit())
+        .collect()
+}
+
 /// Blocking GET against the loopback listener; returns the raw HTTP response.
 fn blocking_get(port: u16, target: &str) -> String {
     let mut sock = TcpStream::connect(("127.0.0.1", port)).expect("connect loopback");
@@ -42,14 +54,18 @@ async fn loopback_flow_captures_token_and_serves_html() {
     let resp_slot = response.clone();
 
     // The "browser" first pokes /favicon.ico (must be ignored), then hits the
-    // real redirect URI carrying the token. It runs on a background thread so
-    // the flow can proceed to accept the connections.
+    // real redirect URI carrying the state nonce and the token. It runs on a
+    // background thread so the flow can proceed to accept the connections.
     let open = move |url: &str| {
         let port = port_from_login_url(url);
+        let state = state_from_login_url(url);
         let slot = resp_slot.clone();
         std::thread::spawn(move || {
             let _ignored = blocking_get(port, "/favicon.ico");
-            let ok = blocking_get(port, "/auth?token=jwt-abc.def&key=auth");
+            let ok = blocking_get(
+                port,
+                &format!("/auth?state={state}&token=jwt-abc.def&key=auth"),
+            );
             *slot.lock().unwrap() = ok;
         });
     };
@@ -80,8 +96,12 @@ async fn loopback_flow_captures_token_and_serves_html() {
 async fn loopback_flow_surfaces_error_param() {
     let open = move |url: &str| {
         let port = port_from_login_url(url);
+        let state = state_from_login_url(url);
         std::thread::spawn(move || {
-            let _ = blocking_get(port, "/auth?error=access%20denied&key=auth");
+            let _ = blocking_get(
+                port,
+                &format!("/auth?state={state}&error=access%20denied&key=auth"),
+            );
         });
     };
 
@@ -96,6 +116,49 @@ async fn loopback_flow_surfaces_error_param() {
     assert!(
         err.to_string().contains("access denied"),
         "error message: {err}"
+    );
+}
+
+#[tokio::test]
+async fn loopback_flow_rejects_wrong_state_then_completes() {
+    // A hostile page on the same loopback origin fakes a callback with the wrong
+    // state (rejected with 400 "state mismatch"), then the real browser completes
+    // with the correct state — the flow must ignore the first and finish on the
+    // second.
+    let wrong: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let wrong_slot = wrong.clone();
+
+    let open = move |url: &str| {
+        let port = port_from_login_url(url);
+        let state = state_from_login_url(url);
+        let slot = wrong_slot.clone();
+        std::thread::spawn(move || {
+            // Forged callback with a bogus state → 400, flow keeps waiting.
+            let bad = blocking_get(port, "/auth?state=deadbeefdeadbeef&token=forged");
+            *slot.lock().unwrap() = bad;
+            // Real callback with the correct state → completes.
+            let _ = blocking_get(
+                port,
+                &format!("/auth?state={state}&token=real-jwt&key=auth"),
+            );
+        });
+    };
+
+    let jwt = run_login_flow(
+        "http://localhost:5000",
+        Provider::Google,
+        LoopbackConfig::default(),
+        open,
+    )
+    .await
+    .expect("flow completes after the correct state");
+    assert_eq!(jwt, "real-jwt");
+
+    let bad = wrong.lock().unwrap().clone();
+    assert!(bad.contains("400"), "forged callback rejected: {bad}");
+    assert!(
+        bad.contains("state mismatch"),
+        "forged callback body: {bad}"
     );
 }
 

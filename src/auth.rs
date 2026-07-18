@@ -130,19 +130,118 @@ impl Provider {
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-/// The loopback redirect URI the backend sends the browser back to.
-pub fn redirect_uri(port: u16) -> String {
-    format!("http://127.0.0.1:{port}/auth")
+/// The loopback redirect URI the backend sends the browser back to. The `state`
+/// nonce is appended to the URI (`?state=<nonce>`) *before* it reaches the
+/// backend, which preserves the loopback `redirectUri` verbatim and appends
+/// `&token=`/`&error=` — so the callback query carries both the token and the
+/// nonce we can validate against.
+pub fn redirect_uri(port: u16, state: &str) -> String {
+    format!("http://127.0.0.1:{port}/auth?state={state}")
 }
 
-/// Build the backend login URL for a provider and loopback port.
-pub fn login_url(base_url: &str, provider: Provider, port: u16) -> String {
+/// Build the backend login URL for a provider, loopback port, and state nonce.
+pub fn login_url(base_url: &str, provider: Provider, port: u16, state: &str) -> String {
     let base = base_url.trim_end_matches('/');
     format!(
         "{base}/auth/{}/login?redirect=app&redirectUri={}",
         provider.as_str(),
-        percent_encode(&redirect_uri(port)),
+        percent_encode(&redirect_uri(port, state)),
     )
+}
+
+/// A random 32-hex-char (128-bit) state nonce derived from OS-seeded std
+/// entropy — no `rand` dependency. `RandomState::new()` reseeds its SipHash keys
+/// from the OS on every call, so the finished hashes vary across calls; we mix in
+/// the process id, a monotonically-changing timestamp, and a stack address for
+/// good measure.
+pub fn random_state_nonce() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+
+    let mut bytes = [0u8; 16];
+    for chunk in bytes.chunks_mut(8) {
+        let mut h = RandomState::new().build_hasher();
+        h.write_u64(std::process::id() as u64);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        h.write_u128(nanos);
+        let stack_probe = 0u8;
+        h.write_usize(&stack_probe as *const u8 as usize);
+        let v = h.finish().to_le_bytes();
+        chunk.copy_from_slice(&v[..chunk.len()]);
+    }
+    hex_encode(&bytes)
+}
+
+/// Lowercase hex-encode a byte slice.
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Outcome of classifying one HTTP request received by the loopback accept loop.
+/// Extracted as a pure function so routing can be unit-tested without a socket.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RequestOutcome {
+    /// `GET /auth` with a matching `state=` nonce. The caller extracts the
+    /// `token`/`error` params from `callback_url` and finishes.
+    AuthCallback { callback_url: String },
+    /// `/auth` matched but `state=` was missing or wrong. Caller sends 400 and
+    /// keeps waiting.
+    StateMismatch,
+    /// Path is not `/auth`. Caller sends 404 and keeps waiting.
+    NotFound,
+    /// Method is not GET. Caller sends 405 and keeps waiting.
+    MethodNotAllowed,
+}
+
+/// Parse the request target (path + query) out of an HTTP/1.x request head,
+/// returning `None` for a non-GET method.
+fn parse_get_target(head: &str) -> Option<&str> {
+    let first_line = head.split("\r\n").next()?;
+    let mut parts = first_line.split_whitespace();
+    let method = parts.next()?;
+    let target = parts.next()?;
+    method.eq_ignore_ascii_case("GET").then_some(target)
+}
+
+/// Return the raw (un-decoded) value of a query key, if present.
+fn raw_query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(k, _)| *k == key)
+        .map(|(_, v)| v)
+}
+
+/// Classify one HTTP/1.x request against the loopback accept loop. Pure: mirrors
+/// the reference `loopback_oauth::classify_request`.
+pub(crate) fn classify_request(
+    head: &str,
+    expected_state: &str,
+    bound_port: u16,
+) -> RequestOutcome {
+    let target = match parse_get_target(head) {
+        Some(t) => t,
+        None => return RequestOutcome::MethodNotAllowed,
+    };
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    if path != "/auth" {
+        return RequestOutcome::NotFound;
+    }
+    match raw_query_value(query, "state") {
+        Some(s) if s == expected_state => RequestOutcome::AuthCallback {
+            callback_url: format!("http://127.0.0.1:{bound_port}{target}"),
+        },
+        _ => RequestOutcome::StateMismatch,
+    }
 }
 
 /// Summarize an `/auth/me` response for the "who am I" line.
@@ -272,6 +371,77 @@ impl Default for LoopbackConfig {
     }
 }
 
+/// Bounded per-connection read buffer, and the per-connection read timeout —
+/// mirrors the reference listener so a hung or oversized connection can't stall
+/// or exhaust the accept loop.
+const READ_BUFFER_BYTES: usize = 8 * 1024;
+const PER_CONNECTION_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A bound loopback listener with its state nonce and the login URL to open.
+/// Splitting "start" (immediate: port/url/state) from "await the callback" lets
+/// the TUI open the browser and render the waiting screen before blocking, while
+/// the CLI drives both back-to-back via [`run_login_flow`].
+pub struct LoopbackListener {
+    listener: TcpListener,
+    port: u16,
+    state: String,
+    login_url: String,
+}
+
+impl LoopbackListener {
+    /// The loopback port the browser callback lands on.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// The state nonce echoed back as `?state=` and validated on the callback.
+    pub fn state(&self) -> &str {
+        &self.state
+    }
+
+    /// The backend login URL to open in the browser (carries the loopback
+    /// `redirectUri` with the state nonce already embedded).
+    pub fn login_url(&self) -> &str {
+        &self.login_url
+    }
+
+    /// Wait up to `timeout` for the browser to complete the round-trip and
+    /// return the captured JWT. `/auth` requests with a missing or mismatched
+    /// `state` are rejected (400) and the wait continues.
+    pub async fn await_callback(
+        &self,
+        timeout: Duration,
+    ) -> std::result::Result<String, LoginError> {
+        match tokio::time::timeout(
+            timeout,
+            accept_token(&self.listener, &self.state, self.port),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(_) => Err(LoginError::Timeout),
+        }
+    }
+}
+
+/// Bind an ephemeral loopback port and build the state nonce + login URL. The
+/// nonce is appended to the `redirectUri` before it reaches the backend.
+pub async fn start_loopback(
+    base_url: &str,
+    provider: Provider,
+) -> std::result::Result<LoopbackListener, LoginError> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    let state = random_state_nonce();
+    let login_url = login_url(base_url, provider, port, &state);
+    Ok(LoopbackListener {
+        listener,
+        port,
+        state,
+        login_url,
+    })
+}
+
 /// Run the loopback login flow: bind an ephemeral port, open the browser (via
 /// the injected `open` closure), and wait for the backend's redirect carrying a
 /// JWT. Returns the captured JWT.
@@ -281,57 +451,79 @@ pub async fn run_login_flow(
     cfg: LoopbackConfig,
     open: impl Fn(&str),
 ) -> std::result::Result<String, LoginError> {
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
-    let url = login_url(base_url, provider, port);
+    let lb = start_loopback(base_url, provider).await?;
 
-    eprintln!("Open this URL in your browser to log in:\n  {url}");
+    eprintln!(
+        "Open this URL in your browser to log in:\n  {}",
+        lb.login_url()
+    );
     if !cfg.no_browser {
-        open(&url);
+        open(lb.login_url());
     }
 
-    match tokio::time::timeout(cfg.timeout, accept_token(&listener)).await {
-        Ok(res) => res,
-        Err(_) => Err(LoginError::Timeout),
-    }
+    lb.await_callback(cfg.timeout).await
 }
 
-/// Accept loopback connections until one carries a `token` or `error` parameter
-/// on `/auth`. Favicon / stray requests get a 404 and the wait continues.
-async fn accept_token(listener: &TcpListener) -> std::result::Result<String, LoginError> {
+/// Accept loopback connections until one is a valid `GET /auth` callback with a
+/// matching `state` nonce carrying a `token` or `error`. Non-loopback peers are
+/// dropped; non-GET → 405; non-`/auth` → 404; missing/wrong state → 400; each
+/// keeps the wait alive.
+async fn accept_token(
+    listener: &TcpListener,
+    expected_state: &str,
+    bound_port: u16,
+) -> std::result::Result<String, LoginError> {
     loop {
-        let (mut sock, _) = listener.accept().await?;
-        let target = match read_request_target(&mut sock).await {
-            Ok(Some(t)) => t,
-            Ok(None) => continue,
-            Err(_) => continue,
-        };
-        let (path, params) = parse_target(&target);
-        if path != "/auth" {
-            let _ = write_response(&mut sock, "404 Not Found", NOT_FOUND_HTML).await;
+        let (mut sock, peer) = listener.accept().await?;
+        if !peer.ip().is_loopback() {
+            let _ = sock.shutdown().await;
             continue;
         }
-        if let Some(err) = params.get("error") {
-            let _ = write_response(&mut sock, "200 OK", &error_html(err)).await;
-            return Err(LoginError::Backend(err.clone()));
-        }
-        if let Some(token) = params.get("token") {
-            if !token.is_empty() {
-                let _ = write_response(&mut sock, "200 OK", SUCCESS_HTML).await;
-                return Ok(token.clone());
+        let head = match read_request_head(&mut sock).await {
+            Ok(Some(h)) => h,
+            _ => continue,
+        };
+        match classify_request(&head, expected_state, bound_port) {
+            RequestOutcome::MethodNotAllowed => {
+                let _ = write_response(&mut sock, "405 Method Not Allowed", NOT_FOUND_HTML).await;
+            }
+            RequestOutcome::NotFound => {
+                let _ = write_response(&mut sock, "404 Not Found", NOT_FOUND_HTML).await;
+            }
+            RequestOutcome::StateMismatch => {
+                let _ = write_response(&mut sock, "400 Bad Request", "state mismatch").await;
+            }
+            RequestOutcome::AuthCallback { callback_url } => {
+                let (_, params) = parse_target(&callback_url);
+                if let Some(err) = params.get("error") {
+                    let _ = write_response(&mut sock, "200 OK", &error_html(err)).await;
+                    return Err(LoginError::Backend(err.clone()));
+                }
+                if let Some(token) = params.get("token") {
+                    if !token.is_empty() {
+                        let _ = write_response(&mut sock, "200 OK", SUCCESS_HTML).await;
+                        return Ok(token.clone());
+                    }
+                }
+                // Valid state but neither token nor error: ignore, keep waiting.
+                let _ = write_response(&mut sock, "404 Not Found", NOT_FOUND_HTML).await;
             }
         }
-        // `/auth` with neither a token nor an error: ignore and keep waiting.
-        let _ = write_response(&mut sock, "404 Not Found", NOT_FOUND_HTML).await;
     }
 }
 
-/// Read one HTTP request and return its request-target (the path+query).
-async fn read_request_target(sock: &mut tokio::net::TcpStream) -> io::Result<Option<String>> {
+/// Read one HTTP request head (bounded to [`READ_BUFFER_BYTES`], with a
+/// [`PER_CONNECTION_READ_TIMEOUT`]) and return the raw head string. A read
+/// timeout or transport error yields `None` so the accept loop skips it.
+async fn read_request_head(sock: &mut tokio::net::TcpStream) -> io::Result<Option<String>> {
     let mut buf: Vec<u8> = Vec::new();
-    let mut tmp = [0u8; 2048];
+    let mut tmp = [0u8; 1024];
     loop {
-        let n = sock.read(&mut tmp).await?;
+        let n = match tokio::time::timeout(PER_CONNECTION_READ_TIMEOUT, sock.read(&mut tmp)).await {
+            Ok(Ok(n)) => n,
+            Ok(Err(err)) => return Err(err),
+            Err(_) => return Ok(None),
+        };
         if n == 0 {
             break;
         }
@@ -339,16 +531,11 @@ async fn read_request_target(sock: &mut tokio::net::TcpStream) -> io::Result<Opt
         if buf.windows(4).any(|w| w == b"\r\n\r\n") || buf.contains(&b'\n') {
             break;
         }
-        if buf.len() > 16_384 {
+        if buf.len() >= READ_BUFFER_BYTES {
             break;
         }
     }
-    let head = String::from_utf8_lossy(&buf);
-    let request_line = head.lines().next().unwrap_or("");
-    Ok(request_line
-        .split_whitespace()
-        .nth(1)
-        .map(|s| s.to_string()))
+    Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
 }
 
 /// Write a tiny `Connection: close` HTML response.
@@ -367,7 +554,7 @@ async fn write_response(
     Ok(())
 }
 
-const SUCCESS_HTML: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Medulla</title></head><body style=\"font-family:system-ui;text-align:center;padding-top:4rem\"><h1>Logged in</h1><p>Return to your terminal.</p></body></html>";
+const SUCCESS_HTML: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Medulla</title></head><body style=\"font-family:system-ui;text-align:center;padding-top:4rem\"><h1>Logged in</h1><p>Return to your terminal. You can close this tab.</p><script>setTimeout(function(){window.close()},250)</script></body></html>";
 
 const NOT_FOUND_HTML: &str =
     "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
@@ -417,10 +604,77 @@ mod tests {
 
     #[test]
     fn login_url_shape() {
-        let url = login_url("http://localhost:5000/", Provider::Google, 54321);
+        let url = login_url("http://localhost:5000/", Provider::Google, 54321, "abc123");
         assert_eq!(
             url,
-            "http://localhost:5000/auth/google/login?redirect=app&redirectUri=http%3A%2F%2F127.0.0.1%3A54321%2Fauth"
+            "http://localhost:5000/auth/google/login?redirect=app&redirectUri=http%3A%2F%2F127.0.0.1%3A54321%2Fauth%3Fstate%3Dabc123"
+        );
+    }
+
+    #[test]
+    fn random_state_nonce_is_32_hex_and_varies() {
+        let a = random_state_nonce();
+        let b = random_state_nonce();
+        assert_eq!(a.len(), 32);
+        assert!(a
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_ne!(a, b, "nonce must vary across calls");
+    }
+
+    fn auth_head(query: &str) -> String {
+        format!("GET /auth{query} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+    }
+
+    #[test]
+    fn classify_valid_auth_request_returns_callback_with_bound_port() {
+        let head = auth_head("?state=deadbeef&token=jwt");
+        assert_eq!(
+            classify_request(&head, "deadbeef", 53824),
+            RequestOutcome::AuthCallback {
+                callback_url: "http://127.0.0.1:53824/auth?state=deadbeef&token=jwt".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn classify_wrong_state_is_mismatch() {
+        let head = auth_head("?state=wrong&token=jwt");
+        assert_eq!(
+            classify_request(&head, "correct", 53824),
+            RequestOutcome::StateMismatch
+        );
+    }
+
+    #[test]
+    fn classify_missing_state_is_mismatch() {
+        let head = auth_head("?token=jwt");
+        assert_eq!(
+            classify_request(&head, "expected", 53824),
+            RequestOutcome::StateMismatch
+        );
+        let head_no_query = "GET /auth HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        assert_eq!(
+            classify_request(head_no_query, "nonce", 53824),
+            RequestOutcome::StateMismatch
+        );
+    }
+
+    #[test]
+    fn classify_favicon_is_not_found() {
+        let head = "GET /favicon.ico HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        assert_eq!(
+            classify_request(head, "state", 53824),
+            RequestOutcome::NotFound
+        );
+    }
+
+    #[test]
+    fn classify_post_is_method_not_allowed() {
+        let head = "POST /auth?state=abc HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        assert_eq!(
+            classify_request(head, "abc", 53824),
+            RequestOutcome::MethodNotAllowed
         );
     }
 

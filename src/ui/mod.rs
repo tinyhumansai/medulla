@@ -9,4 +9,5 @@ pub mod chat_store;
 pub mod clipboard;
 pub mod composer;
 pub mod events;
+pub mod login;
 pub mod util;

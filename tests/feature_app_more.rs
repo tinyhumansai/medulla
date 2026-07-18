@@ -262,8 +262,8 @@ fn tab_into_context_requests_inspect() {
     let cmd = app.on_event(key(KeyCode::Tab)); // Trace -> Context
     assert_eq!(app.tab(), "Context");
     assert!(matches!(cmd, Some(Cmd::InspectContext)));
-    // BackTab back into Context from Config too.
-    app.tab_index = TABS.iter().position(|t| *t == "Config").unwrap();
+    // BackTab back into Context from the tab that now follows it (Memory).
+    app.tab_index = TABS.iter().position(|t| *t == "Memory").unwrap();
     let cmd = app.on_event(Event::Key(KeyEvent::new(
         KeyCode::BackTab,
         KeyModifiers::SHIFT,

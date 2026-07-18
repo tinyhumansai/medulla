@@ -132,6 +132,20 @@ pub async fn run_wrapper(provider: HarnessProvider, args: &[String]) -> anyhow::
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
+
+    // First-run worker registration (naming + owner). Skipped when running a plain
+    // passthrough (no bridge). On a TTY this walks the operator through onboarding;
+    // headless it auto-registers. Aborting exits cleanly before launching the CLI.
+    if !no_bridge {
+        let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        if crate::onboarding::ensure_registered(&env, is_tty, false)
+            .await?
+            .is_none()
+        {
+            return Ok(0);
+        }
+    }
+
     run_wrapper_with(WrapperConfig {
         provider,
         child_args,
@@ -155,6 +169,17 @@ fn agent_kind(provider: HarnessProvider) -> Option<SessionAgentKind> {
 /// The `TINYPLACE_<P>_BIN` env key, for the missing-binary error hint.
 fn provider_bin_env_key(provider: HarnessProvider) -> String {
     format!("TINYPLACE_{}_BIN", provider.as_str().to_uppercase())
+}
+
+/// The owner this session forwards envelopes to: the central env chain, with the
+/// persisted worker profile's owner as the final fallback (env always wins).
+fn resolve_recipient(
+    provider: HarnessProvider,
+    env: &HashMap<String, String>,
+    profile_owner: Option<&str>,
+) -> Option<String> {
+    crate::tinyplace_support::env::dm_recipient(provider, env)
+        .or_else(|| profile_owner.map(str::to_string).filter(|s| !s.is_empty()))
 }
 
 /// Mint a wrapper session id: `tp-<provider>-<iso>-<rand>`, id-safe.
@@ -287,7 +312,13 @@ async fn build_bridge(
         return None;
     }
     use crate::tinyplace_support::env as tp_env;
-    let recipient = tp_env::dm_recipient(config.provider, &config.env);
+    // The persisted worker profile's owner is the recipient fallback when no env
+    // owner is set (env still wins).
+    let profile = crate::worker_profile::WorkerProfile::load(&crate::worker_profile::profile_path(
+        &config.env,
+    ));
+    let profile_owner = profile.as_ref().and_then(|p| p.owner.as_deref());
+    let recipient = resolve_recipient(config.provider, &config.env, profile_owner);
     let receive_from = tp_env::receive_from(config.provider, &config.env, recipient.as_deref());
     if recipient.is_none() && receive_from.is_none() {
         eprintln!(
@@ -645,6 +676,33 @@ mod tests {
             Some(SessionAgentKind::Codex)
         );
         assert_eq!(agent_kind(HarnessProvider::Opencode), None);
+    }
+
+    #[test]
+    fn profile_owner_is_the_last_recipient_fallback() {
+        // No env owner → the profile owner is used.
+        let env = HashMap::new();
+        assert_eq!(
+            resolve_recipient(HarnessProvider::Codex, &env, Some("@profile-owner")).as_deref(),
+            Some("@profile-owner")
+        );
+        // An env owner beats the profile owner.
+        let mut env = HashMap::new();
+        env.insert(
+            "TINYPLACE_OPENHUMAN_OWNER".to_string(),
+            "@env-owner".to_string(),
+        );
+        assert_eq!(
+            resolve_recipient(HarnessProvider::Codex, &env, Some("@profile-owner")).as_deref(),
+            Some("@env-owner")
+        );
+        // An empty profile owner is treated as absent.
+        let env = HashMap::new();
+        assert_eq!(
+            resolve_recipient(HarnessProvider::Codex, &env, Some("")),
+            None
+        );
+        assert_eq!(resolve_recipient(HarnessProvider::Codex, &env, None), None);
     }
 
     #[test]

@@ -683,6 +683,7 @@ pub use entry::run_daemon;
 
 mod entry {
     use super::*;
+    use std::io::IsTerminal;
     use std::path::PathBuf;
 
     use crate::tinyplace_support::{
@@ -698,7 +699,12 @@ mod entry {
     use super::providers::{detect_providers, provider_bin, run_provider_task, DAEMON_PROVIDERS};
     use super::transport::SignalTransport;
 
-    const BOOL_FLAGS: &[&str] = &["dangerously-skip-permissions", "once", "no-onboard"];
+    const BOOL_FLAGS: &[&str] = &[
+        "dangerously-skip-permissions",
+        "once",
+        "no-onboard",
+        "reonboard",
+    ];
     const DEFAULT_CONCURRENCY: usize = 2;
     const DEFAULT_TASK_TIMEOUT_MS: u64 = 600_000;
     const DEFAULT_POLL_MS: u64 = 2_000;
@@ -867,9 +873,28 @@ mod entry {
         let opencode_agent = flags.string("opencode-agent");
         let skip_permissions = flags.is_set("dangerously-skip-permissions");
         let handle = flags.string("handle");
-        let display_name = flags.string("name");
         let extra_skills = flags.list("skills").unwrap_or_default();
         let once = flags.is_set("once");
+        let reonboard = flags.is_set("reonboard");
+
+        // First-run worker registration (naming + owner setup). On a TTY this
+        // walks the operator through onboarding; headless it auto-registers with
+        // defaults + an env owner so the daemon stays scriptable. Aborting the
+        // interactive flow (q / Ctrl-C) exits cleanly without serving.
+        let is_tty = std::io::stdout().is_terminal();
+        let worker_profile =
+            match crate::onboarding::ensure_registered(&env, is_tty, reonboard).await? {
+                Some(reg) => reg.profile,
+                None => {
+                    log("onboarding aborted; not starting daemon");
+                    return Ok(());
+                }
+            };
+        // The profile's name is the daemon's advertised label unless --name overrides it.
+        let display_name = flags.string("name").or_else(|| {
+            let name = worker_profile.name.trim();
+            (!name.is_empty()).then(|| name.to_string())
+        });
 
         // Identity + client.
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));

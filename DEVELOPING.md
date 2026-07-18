@@ -69,6 +69,30 @@ pipes stdin as a best-effort byte pump. `medulla opencode` runs as a passthrough
 with input injection but no transcript tailing (its session log is not a flat
 JSONL the mappers read).
 
+## First-run worker registration
+
+The first time a worker starts — `medulla daemon`, or a bridged `medulla
+codex|claude|opencode` — it runs a one-time onboarding flow that names the worker
+and connects it to an owner, then persists a small profile at
+`<medulla-home>/worker.json` (`MEDULLA_HOME`, else `~/.medulla`). "Registered"
+means both that profile and a tiny.place identity exist; subsequent launches skip
+the flow.
+
+- **On a TTY** an onboarding screen (mirroring the login pre-app screen) walks
+  three steps: **name** (prefilled with `<username>@<hostname>/<ip>`), **connection**
+  (creates/loads the tiny.place identity, shows the address + `@handle`, prompts
+  for the OpenHuman owner — `Enter` saves, `Esc` skips), and **confirm** (a summary
+  panel; `Enter` finishes, `q`/`Ctrl-C` aborts without writing). On completion, if
+  an owner is set, a one-time introduction DM is sent (best-effort).
+- **Headless / non-TTY** it auto-registers with the default name and the env owner
+  (if any), warning when no owner is set, so the daemon stays scriptable.
+- `medulla daemon --reonboard` forces the flow again.
+
+The profile threads through the rest of the worker: the daemon advertises the
+profile name as its directory-card label (unless `--name` overrides it), and the
+wrapper uses the profile owner as the final fallback in the `dmRecipient` chain
+(any `TINYPLACE_*` env owner still wins).
+
 TUI flags:
 
 | Flag | Effect |

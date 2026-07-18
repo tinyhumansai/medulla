@@ -409,7 +409,7 @@ async fn run_provider_attempt(
 
     // stderr tail collector.
     let stderr_tail = Arc::new(Mutex::new(String::new()));
-    {
+    let stderr_task = {
         let stderr_tail = stderr_tail.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
@@ -427,8 +427,8 @@ async fn run_provider_attempt(
                     Err(_) => break,
                 }
             }
-        });
-    }
+        })
+    };
 
     let mut reader = BufReader::new(stdout);
     let mut mapper = HarnessLineMapper::new(provider_name(spec.provider));
@@ -496,6 +496,10 @@ async fn run_provider_attempt(
     }
 
     let status = child.wait().await;
+    // Join the stderr reader before snapshotting the tail: on a fast-exiting
+    // child the pipe may not be drained yet, and a lost stderr tail hides the
+    // transient-lock marker the retry loop keys on.
+    let _ = tokio::time::timeout(Duration::from_millis(500), stderr_task).await;
     if spec.abort.is_aborted() {
         return Err(format!("{} task aborted", provider_name(spec.provider)));
     }

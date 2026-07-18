@@ -43,6 +43,7 @@ fn settings(workspace: std::path::PathBuf, enabled: bool) -> MemorySettings {
         llm_model: None,
         max_cost_usd: 5.0,
         openrouter_api_key: None,
+        backend: None,
     }
 }
 

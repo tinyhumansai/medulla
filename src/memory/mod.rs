@@ -272,18 +272,30 @@ impl MemoryService {
         persona
     }
 
-    /// Build the OpenRouter provider (used as both `ChatProvider` and
-    /// `Summariser`). Errors clearly when no API key is configured.
+    /// Build the inference provider (used as both `ChatProvider` and
+    /// `Summariser`). An explicit `OPENROUTER_API_KEY` wins (back-compat);
+    /// otherwise the tinyhumans backend's OpenAI-compatible surface is used
+    /// with the resolved JWT and the summarization model. With neither, memory
+    /// runs local-only (status/search/compile) and ingest errors clearly.
     fn provider(&self) -> Result<OpenRouterProvider> {
-        let key = self
-            .settings
-            .openrouter_api_key
-            .as_ref()
-            .ok_or_else(|| anyhow!("ingest requires OPENROUTER_API_KEY to be set"))?;
-        let mut cfg = OpenRouterConfig {
-            api_key: SecretString::new(key.clone()),
-            run_cost_limit_usd: Some(self.settings.max_cost_usd),
-            ..OpenRouterConfig::default()
+        let mut cfg = if let Some(key) = self.settings.openrouter_api_key.as_ref() {
+            OpenRouterConfig {
+                api_key: SecretString::new(key.clone()),
+                run_cost_limit_usd: Some(self.settings.max_cost_usd),
+                ..OpenRouterConfig::default()
+            }
+        } else if let Some(backend) = self.settings.backend.as_ref() {
+            OpenRouterConfig {
+                base_url: format!("{}/openai/v1", backend.base_url.trim_end_matches('/')),
+                api_key: SecretString::new(backend.jwt.clone()),
+                chat_model: env::DEFAULT_BACKEND_MODEL.to_string(),
+                run_cost_limit_usd: Some(self.settings.max_cost_usd),
+                ..OpenRouterConfig::default()
+            }
+        } else {
+            return Err(anyhow!(
+                "memory sync needs the backend (run `medulla login`) or OPENROUTER_API_KEY"
+            ));
         };
         if let Some(model) = &self.settings.llm_model {
             cfg.chat_model = model.clone();
@@ -291,7 +303,8 @@ impl MemoryService {
         OpenRouterProvider::new(cfg)
     }
 
-    /// Run a live ingest pass (LLM-backed). Requires an OpenRouter API key.
+    /// Run a live ingest pass (LLM-backed). Uses the backend summarizer (or an
+    /// explicit OpenRouter key).
     pub async fn ingest(&self, mode: IngestMode) -> Result<IngestReport> {
         let home = home_dir();
         let persona = self.persona_config(&home);
@@ -369,6 +382,7 @@ mod tests {
             llm_model: None,
             max_cost_usd: 5.0,
             openrouter_api_key: None,
+            backend: None,
         }
     }
 
@@ -387,11 +401,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ingest_without_api_key_errors_clearly() {
+    async fn ingest_without_credentials_errors_clearly() {
         let tmp = tempfile::TempDir::new().unwrap();
         let svc = MemoryService::open(settings(tmp.path().to_path_buf())).unwrap();
         let err = svc.ingest(IngestMode::Incremental).await.unwrap_err();
-        assert!(err.to_string().contains("OPENROUTER_API_KEY"));
+        assert!(err.to_string().contains("medulla login"));
+    }
+
+    #[test]
+    fn provider_prefers_openrouter_key_then_backend() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // No key, no backend → clear error.
+        let svc = MemoryService::open(settings(tmp.path().to_path_buf())).unwrap();
+        assert!(svc.provider().is_err());
+        // Backend only → ok (summarization model via the backend surface).
+        let svc = MemoryService::open(
+            settings(tmp.path().to_path_buf()).with_backend("http://b:1/", "jwt"),
+        )
+        .unwrap();
+        assert!(svc.provider().is_ok());
+        // Explicit key also ok.
+        let mut s = settings(tmp.path().to_path_buf());
+        s.openrouter_api_key = Some("sk-x".into());
+        let svc = MemoryService::open(s).unwrap();
+        assert!(svc.provider().is_ok());
     }
 
     #[test]

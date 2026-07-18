@@ -17,6 +17,21 @@ use crate::config::MemoryConfigSection;
 /// `PersonaRunBudget` default.
 pub const DEFAULT_MAX_COST_USD: f64 = 5.0;
 
+/// The backend catalog's summarization model, used when memory syncs through
+/// the tinyhumans backend instead of OpenRouter ("Summarizer V1").
+pub const DEFAULT_BACKEND_MODEL: &str = "summarization-v1";
+
+/// An inference target reachable through the tinyhumans backend's
+/// OpenAI-compatible surface (`<baseUrl>/openai/v1`), authorized by the same
+/// JWT the TUI resolves for the backend runtime.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackendInference {
+    /// The backend base URL (no `/openai/v1` suffix).
+    pub base_url: String,
+    /// Bearer JWT.
+    pub jwt: String,
+}
+
 /// The resolved, medulla-owned memory settings (no vendor types leak here).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemorySettings {
@@ -36,8 +51,22 @@ pub struct MemorySettings {
     pub llm_model: Option<String>,
     /// Per-run provider spend ceiling, USD.
     pub max_cost_usd: f64,
-    /// The OpenRouter API key, when present (ingest requires it).
+    /// The OpenRouter API key, when present (explicit override for ingest).
     pub openrouter_api_key: Option<String>,
+    /// Backend inference target: used for summarization when no OpenRouter key
+    /// is set. `None` + no key → ingest is unavailable (local-only mode).
+    pub backend: Option<BackendInference>,
+}
+
+impl MemorySettings {
+    /// Attach the backend inference target (base URL + JWT).
+    pub fn with_backend(mut self, base_url: impl Into<String>, jwt: impl Into<String>) -> Self {
+        self.backend = Some(BackendInference {
+            base_url: base_url.into(),
+            jwt: jwt.into(),
+        });
+        self
+    }
 }
 
 fn non_empty<'a>(env: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
@@ -53,12 +82,12 @@ fn truthy(value: &str) -> bool {
 
 /// Whether the memory surface is enabled. `MEDULLA_MEMORY` (when set to any
 /// non-empty value) wins in both directions; otherwise the config `enabled`
-/// flag; otherwise off.
+/// flag; otherwise ON by default.
 pub fn enabled(section: Option<&MemoryConfigSection>, env: &HashMap<String, String>) -> bool {
     if let Some(value) = non_empty(env, "MEDULLA_MEMORY") {
         return truthy(value);
     }
-    section.and_then(|s| s.enabled).unwrap_or(false)
+    section.and_then(|s| s.enabled).unwrap_or(true)
 }
 
 /// Resolve the workspace root. Order: `TINYCORTEX_WORKSPACE` > config
@@ -219,6 +248,7 @@ pub fn resolve(
         llm_model: llm_model(section, env),
         max_cost_usd: max_cost_usd(section, env),
         openrouter_api_key: openrouter_api_key(env),
+        backend: None,
     }
 }
 
@@ -254,8 +284,12 @@ mod tests {
         assert!(enabled(None, &env(&[("MEDULLA_MEMORY", "true")])));
         // Config on, no env → on.
         assert!(enabled(Some(&section()), &env(&[])));
-        // Nothing → off.
-        assert!(!enabled(None, &env(&[])));
+        // Nothing → ON by default.
+        assert!(enabled(None, &env(&[])));
+        // Config off, no env → off.
+        let mut off = section();
+        off.enabled = Some(false);
+        assert!(!enabled(Some(&off), &env(&[])));
     }
 
     #[test]
@@ -370,5 +404,10 @@ mod tests {
         assert_eq!(s.openrouter_api_key.as_deref(), Some("sk-x"));
         assert_eq!(s.max_cost_usd, 2.5);
         assert_eq!(s.project_roots.len(), 2);
+        assert_eq!(s.backend, None);
+        let s = s.with_backend("http://b:1", "jwt-x");
+        let backend = s.backend.unwrap();
+        assert_eq!(backend.base_url, "http://b:1");
+        assert_eq!(backend.jwt, "jwt-x");
     }
 }

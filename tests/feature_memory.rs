@@ -27,6 +27,7 @@ fn settings(workspace: PathBuf) -> MemorySettings {
         llm_model: None,
         max_cost_usd: 5.0,
         openrouter_api_key: None,
+        backend: None,
     }
 }
 

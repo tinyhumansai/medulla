@@ -225,6 +225,32 @@ pub trait Runtime: Send + Sync {
     fn stream_state(&self) -> Option<StreamState> {
         None
     }
+
+    // --- persona memory (additive; core runtime with an attached service) --------
+    // Default: no memory surface. The core runtime overrides these from its
+    // attached `MemoryService`; the mock runtime serves scripted values.
+
+    /// The persona-memory health snapshot, when a memory service is attached.
+    /// `None` when memory is disabled / not wired.
+    fn memory_status(&self) -> Option<crate::memory::MemoryStatus> {
+        None
+    }
+
+    /// Rank the persona corpus against `query`. Empty when no memory service is
+    /// attached. `facet` is a loose facet name; unrecognized facets are ignored.
+    fn memory_search(
+        &self,
+        _query: String,
+        _facet: Option<String>,
+        _k: usize,
+    ) -> Vec<crate::memory::MemoryHit> {
+        Vec::new()
+    }
+
+    /// The verbatim persona directives, when a memory service is attached.
+    fn memory_directives(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

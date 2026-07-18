@@ -413,6 +413,284 @@ async fn plaintext_dm_runs_default_provider() {
     assert!(decode_task_frame(&raw[0].1).is_none());
 }
 
+/// A runner that returns Err once its abort is signalled (models a real run
+/// terminating on shutdown).
+fn abortable_runner(ready: mpsc::UnboundedSender<()>) -> RunTaskFn {
+    Arc::new(move |opts: RunTaskOptions| {
+        let ready = ready.clone();
+        Box::pin(async move {
+            let _ = ready.send(());
+            opts.abort.cancelled().await;
+            Err::<RunTaskResult, String>("claude task aborted".to_string())
+        })
+    })
+}
+
+/// A runner that echoes a fixed capability JSON reply and counts invocations.
+fn counting_capability_runner(count: Arc<AtomicUsize>) -> RunTaskFn {
+    Arc::new(move |opts: RunTaskOptions| {
+        let count = count.clone();
+        Box::pin(async move {
+            count.fetch_add(1, Ordering::SeqCst);
+            Ok(RunTaskResult {
+                provider: opts.provider,
+                reply:
+                    r#"{"tools":["Bash"],"mcpServers":[],"accessibleDirs":[],"summary":"probe"}"#
+                        .to_string(),
+                events: 0,
+            })
+        })
+    })
+}
+
+fn capabilities_frame(task_id: &str, correlation: Option<&str>) -> TaskFrame {
+    TaskFrame {
+        kind: TaskFrameKind::Capabilities,
+        ..task_frame(task_id, "", correlation)
+    }
+}
+
+#[tokio::test]
+async fn capabilities_probe_is_cached_across_askers() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let run_task = counting_capability_runner(count.clone());
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(capabilities_frame("c1", None)),
+    );
+    runtime.idle().await;
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(capabilities_frame("c2", None)),
+    );
+    runtime.idle().await;
+
+    // Two result frames, but the underlying probe ran exactly once (cached).
+    let frames = decoded_frames(&recorded);
+    let results = frames
+        .iter()
+        .filter(|f| f.kind == TaskFrameKind::CapabilitiesResult)
+        .count();
+    assert_eq!(results, 2, "each asker gets a capabilities_result");
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "probe cached after first run"
+    );
+}
+
+#[tokio::test]
+async fn plaintext_without_available_provider_is_refused() {
+    let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
+        Box::pin(async move {
+            Ok(RunTaskResult {
+                provider: opts.provider,
+                reply: "unreachable".to_string(),
+                events: 0,
+            })
+        })
+    });
+    let (send, recorded) = recording_send();
+    let mut config = base_config();
+    config.providers = Vec::new(); // nothing offered
+    let runtime = DaemonRuntime::new(config, run_task, send);
+
+    runtime.handle_message("peer".into(), "hello".into(), None);
+    runtime.idle().await;
+
+    let bodies: Vec<String> = recorded
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, b)| b.clone())
+        .collect();
+    assert!(bodies
+        .iter()
+        .any(|b| b.contains("No coding agent is available")));
+}
+
+#[tokio::test]
+async fn plaintext_at_capacity_is_refused() {
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+    let gate = Arc::new(Notify::new());
+    let run_task = blocking_runner(ready_tx, gate.clone());
+    let (send, recorded) = recording_send();
+    let mut config = base_config();
+    config.concurrency = 1;
+    config.max_pending = 1;
+    let runtime = DaemonRuntime::new(config, run_task, send);
+
+    runtime.handle_message("peer".into(), "first".into(), None);
+    wait_ready(&mut ready_rx).await;
+    runtime.handle_message("peer".into(), "second".into(), None);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let bodies: Vec<String> = recorded
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, b)| b.clone())
+        .collect();
+    assert!(bodies.iter().any(|b| b.contains("Daemon at capacity")));
+
+    gate.notify_waiters();
+    runtime.idle().await;
+}
+
+#[tokio::test]
+async fn shutdown_aborts_in_flight_task() {
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+    let run_task = abortable_runner(ready_tx);
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
+    wait_ready(&mut ready_rx).await;
+    assert_eq!(runtime.active_count(), 1, "one task in flight");
+
+    runtime.shutdown();
+    runtime.idle().await;
+
+    let frames = decoded_frames(&recorded);
+    assert!(frames
+        .iter()
+        .any(|f| f.kind == TaskFrameKind::Error && f.text.contains("aborted")));
+    assert_eq!(runtime.active_count(), 0, "no tasks after shutdown");
+}
+
+#[tokio::test]
+async fn select_provider_falls_back_to_first_when_default_absent() {
+    let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
+        Box::pin(async move {
+            Ok(RunTaskResult {
+                provider: opts.provider,
+                reply: "ok".to_string(),
+                events: 0,
+            })
+        })
+    });
+    let (send, recorded) = recording_send();
+    let mut config = base_config();
+    // Only codex is offered but claude is (wrongly) the default → first wins.
+    config.providers = vec![HarnessProvider::Codex];
+    config.default_provider = HarnessProvider::Claude;
+    let runtime = DaemonRuntime::new(config, run_task, send);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
+    runtime.idle().await;
+
+    let frames = decoded_frames(&recorded);
+    let ack = frames
+        .iter()
+        .find(|f| f.kind == TaskFrameKind::Ack)
+        .expect("ack");
+    assert_eq!(ack.harness, Some(HarnessProvider::Codex));
+}
+
+#[tokio::test]
+async fn input_for_unknown_task_is_not_matched() {
+    let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
+        Box::pin(async move {
+            Ok(RunTaskResult {
+                provider: opts.provider,
+                reply: "ok".to_string(),
+                events: 0,
+            })
+        })
+    });
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(input_frame("ghost", "hi", None)),
+    );
+    runtime.idle().await;
+
+    let frames = decoded_frames(&recorded);
+    assert!(frames
+        .iter()
+        .any(|f| f.kind == TaskFrameKind::Ack && f.text == "no matching running task for input"));
+}
+
+#[tokio::test]
+async fn input_buffered_before_stdin_registration_is_drained() {
+    // A runner that starts (ready) but registers its stdin sink only after a gate
+    // is released — so an `input` arriving in between must buffer in pending_input
+    // and flush when the sink registers.
+    let ready = Arc::new(Notify::new());
+    let gate = Arc::new(Notify::new());
+    let received = Arc::new(StdMutex::new(Vec::new()));
+    let run_task: RunTaskFn = {
+        let ready = ready.clone();
+        let gate = gate.clone();
+        let received = received.clone();
+        Arc::new(move |mut opts: RunTaskOptions| {
+            let ready = ready.clone();
+            let gate = gate.clone();
+            let received = received.clone();
+            Box::pin(async move {
+                ready.notify_waiters();
+                gate.notified().await; // hold off registration until released
+                let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+                if let Some(register) = opts.on_stdin.take() {
+                    register(tx); // drains any buffered pending_input into tx
+                }
+                let sink = received.clone();
+                let reader = tokio::spawn(async move {
+                    while let Some(line) = rx.recv().await {
+                        sink.lock().unwrap().push(line);
+                    }
+                });
+                tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                reader.abort();
+                Ok(RunTaskResult {
+                    provider: opts.provider,
+                    reply: "done".to_string(),
+                    events: 0,
+                })
+            })
+        })
+    };
+    let (send, _recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
+    ready.notified().await;
+    // Input arrives before the stdin sink exists → buffered as pending_input.
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(input_frame("t1", "buffered guidance", None)),
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    gate.notify_waiters(); // now registration drains the buffer
+    runtime.idle().await;
+
+    assert_eq!(
+        received.lock().unwrap().as_slice(),
+        &["buffered guidance".to_string()]
+    );
+}
+
 #[tokio::test]
 async fn status_detail_maps_event_kinds() {
     let tool_call = tool_call_event().event;

@@ -1042,6 +1042,121 @@ mod tests {
     }
 
     #[test]
+    fn malformed_and_empty_lines_yield_nothing() {
+        assert!(map_all("claude", &["not json"]).is_empty());
+        assert!(map_all("claude", &["[1,2,3]"]).is_empty()); // not an object
+        assert!(map_all("codex", &[r#"{"type":"event_msg"}"#]).is_empty()); // no payload
+        assert!(map_all("opencode", &[r#"{"type":"text"}"#]).is_empty()); // no part
+                                                                          // An unknown provider maps to opencode semantics but unknown records drop.
+        assert!(map_all("mystery", &[r#"{"type":"other","part":{}}"#]).is_empty());
+    }
+
+    #[test]
+    fn claude_empty_text_and_thinking_fallback() {
+        // Empty assistant text produces no event.
+        let empty = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":""}]}}"#;
+        assert!(map_all("claude", &[empty]).is_empty());
+
+        // A thinking block falling back to the `text` field.
+        let thinking = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","text":"pondering"}]}}"#;
+        let events = map_all("claude", &[thinking]);
+        assert_eq!(kind_of(&events[0]), "agent_thinking");
+        assert_eq!(events[0].event.payload["text"], "pondering");
+
+        // A user string prompt (non-array content) and the empty-string case.
+        let empty_prompt = r#"{"type":"user","message":{"role":"user","content":""}}"#;
+        assert!(map_all("claude", &[empty_prompt]).is_empty());
+
+        // A tool_result with structured array content is flattened + joined.
+        let result = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t9","is_error":true,"content":[{"type":"text","text":"line1"},{"type":"text","text":"line2"}]}]}}"#;
+        let events = map_all("claude", &[result]);
+        assert_eq!(kind_of(&events[0]), "tool_result");
+        assert_eq!(events[0].event.payload["is_error"], true);
+        assert_eq!(events[0].event.payload["output"], "line1\nline2");
+    }
+
+    #[test]
+    fn codex_reasoning_mcp_and_search_variants() {
+        // Reasoning falling back from summary to content.
+        let reasoning = r#"{"type":"response_item","payload":{"type":"reasoning","content":[{"type":"reasoning_text","text":"deep thought"}]}}"#;
+        let events = map_all("codex", &[reasoning]);
+        assert_eq!(kind_of(&events[0]), "agent_thinking");
+        assert_eq!(events[0].event.payload["text"], "deep thought");
+
+        // MCP tool begin overrides tool_kind to "mcp".
+        let mcp_begin = r#"{"type":"response_item","payload":{"type":"mcp_tool_call_begin","tool":"lookup","call_id":"m1","arguments":"{\"q\":\"x\"}"}}"#;
+        let events = map_all("codex", &[mcp_begin]);
+        assert_eq!(kind_of(&events[0]), "tool_call");
+        assert_eq!(events[0].event.payload["tool_kind"], "mcp");
+
+        // MCP tool end with a nested error output.
+        let mcp_end = r#"{"type":"response_item","payload":{"type":"mcp_tool_call_end","call_id":"m1","output":{"is_error":true,"content":"boom"}}}"#;
+        let events = map_all("codex", &[mcp_end]);
+        assert_eq!(kind_of(&events[0]), "tool_result");
+        assert_eq!(events[0].event.payload["is_error"], true);
+        assert_eq!(events[0].event.payload["output"], "boom");
+
+        // A tool_search_call driven off the `query` field.
+        let search = r#"{"type":"response_item","payload":{"type":"tool_search_call","query":"ripgrep foo"}}"#;
+        let events = map_all("codex", &[search]);
+        assert_eq!(kind_of(&events[0]), "tool_call");
+        assert_eq!(events[0].event.payload["tool_name"], "ripgrep foo");
+
+        // task_complete → idle status.
+        let complete = r#"{"type":"event_msg","payload":{"type":"task_complete"}}"#;
+        let events = map_all("codex", &[complete]);
+        assert_eq!(kind_of(&events[0]), "status");
+        assert_eq!(events[0].event.payload["state"], "idle");
+    }
+
+    #[test]
+    fn opencode_reasoning_error_ref_and_running_tool() {
+        let reasoning = r#"{"type":"reasoning","part":{"type":"reasoning","text":"  thinking  "}}"#;
+        let events = map_all("opencode", &[reasoning]);
+        assert_eq!(kind_of(&events[0]), "agent_thinking");
+        assert_eq!(events[0].event.payload["text"], "thinking");
+
+        // An error with a name + ref suffix.
+        let error = r#"{"type":"error","error":{"name":"AuthError","data":{"message":"denied","ref":"E42"}}}"#;
+        let events = map_all("opencode", &[error]);
+        assert_eq!(
+            events[0].event.payload["message"],
+            "AuthError: denied (E42)"
+        );
+
+        // A running (non-terminal) tool with no output → a tool_call, not result.
+        let running = r#"{"type":"tool","part":{"type":"tool","tool":"bash","callID":"b1","state":{"status":"running","input":{"command":"ls"}}}}"#;
+        let events = map_all("opencode", &[running]);
+        assert_eq!(kind_of(&events[0]), "tool_call");
+        assert_eq!(events[0].event.payload["tool_kind"], "shell");
+    }
+
+    #[test]
+    fn tool_display_and_bound_input_helpers() {
+        // Falls back to the tool name when no known key is present.
+        assert_eq!(tool_display("Weird", &serde_json::json!({})), "Weird");
+        // A bare string input is used directly.
+        assert_eq!(
+            tool_display("X", &serde_json::json!("just a string")),
+            "just a string"
+        );
+        // Oversized structured input collapses to a byte-capped string.
+        let big = "y".repeat(INPUT_CAP + 50);
+        let bounded = bound_tool_input(&serde_json::json!({ "blob": big }));
+        assert!(bounded.is_string());
+        assert!(bounded.as_str().unwrap().ends_with(ELISION));
+    }
+
+    #[test]
+    fn parse_iso_rejects_garbage() {
+        assert!(parse_iso_to_ms("nope").is_none());
+        assert!(parse_iso_to_ms("2026/07/05").is_none());
+        // A receive-time fallback is used when the field is absent (non-panicking).
+        let ts = parse_timestamp_ms(None);
+        assert!(ts > 0);
+    }
+
+    #[test]
     fn parses_iso_timestamp() {
         // 2026-07-05T00:00:00Z is 1_783_209_600 s since the Unix epoch.
         let ms = parse_iso_to_ms("2026-07-05T00:00:00Z").unwrap();

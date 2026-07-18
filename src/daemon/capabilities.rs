@@ -269,6 +269,65 @@ mod tests {
         assert_eq!(reported.summary.as_deref(), Some("has a } brace"));
     }
 
+    use std::sync::Arc;
+
+    use super::super::providers::{RunTaskFn, RunTaskResult};
+
+    fn probe_options(run_task: RunTaskFn) -> ProbeOptions {
+        ProbeOptions {
+            provider: HarnessProvider::Claude,
+            run_task,
+            workspace: ".".to_string(),
+            env: HashMap::new(),
+            providers: vec![HarnessProvider::Claude],
+            timeout_ms: Some(1_000),
+            model: None,
+            agent: None,
+            skip_permissions: false,
+            abort: Abort::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_merges_agent_report_over_facts() {
+        let run_task: RunTaskFn = Arc::new(|opts| {
+            Box::pin(async move {
+                Ok(RunTaskResult {
+                    provider: opts.provider,
+                    reply: r#"{"tools":["Edit"],"mcpServers":["gh"],"accessibleDirs":["/x"],"summary":"can code"}"#
+                        .to_string(),
+                    events: 0,
+                })
+            })
+        });
+        let caps = probe_capabilities(probe_options(run_task)).await;
+        assert_eq!(caps.tools, vec!["Edit"]);
+        assert_eq!(caps.mcp_servers, vec!["gh"]);
+        assert_eq!(caps.summary.as_deref(), Some("can code"));
+        // cwd is always the first accessible dir; the reported dir is unioned in.
+        assert!(caps.accessible_dirs.iter().any(|d| d == "/x"));
+        assert!(caps.cwd.is_some());
+        assert_eq!(caps.providers, vec![HarnessProvider::Claude]);
+    }
+
+    #[tokio::test]
+    async fn probe_degrades_to_facts_when_provider_fails() {
+        let run_task: RunTaskFn =
+            Arc::new(|_opts| Box::pin(async move { Err("provider wedged".to_string()) }));
+        let caps = probe_capabilities(probe_options(run_task)).await;
+        assert!(caps.tools.is_empty(), "no tools without a working probe");
+        assert!(caps.mcp_servers.is_empty());
+        assert!(caps.summary.is_none());
+        assert!(caps.cwd.is_some(), "cheap facts survive a failed probe");
+    }
+
+    #[tokio::test]
+    async fn read_git_facts_on_bogus_path_is_empty() {
+        let facts = read_git_facts("/no/such/workspace/anywhere").await;
+        assert!(facts.project.is_none());
+        assert!(facts.branch.is_none());
+    }
+
     #[test]
     fn repo_name_strips_suffixes_and_tokens() {
         assert_eq!(

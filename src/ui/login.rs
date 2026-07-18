@@ -267,7 +267,7 @@ impl LoginScreen {
 
     /// Render the centered login panel.
     pub fn draw(&mut self, f: &mut Frame) {
-        let area = centered_rect(64, 15, f.area());
+        let area = centered_rect(64, 17, f.area());
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -280,12 +280,14 @@ impl LoginScreen {
         f.render_widget(block, area);
 
         let mut lines: Vec<Line> = Vec::new();
-        lines.push(Line::from(Span::styled(
-            "MEDULLA",
-            Style::default()
-                .fg(Color::LightCyan)
-                .add_modifier(Modifier::BOLD),
-        )));
+        for row in crate::ui::LOGO {
+            lines.push(Line::from(Span::styled(
+                row,
+                Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+        }
         lines.push(Line::from(Span::styled(
             format!("backend {}", self.base_url),
             Style::default().add_modifier(Modifier::DIM),

@@ -1297,11 +1297,25 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(4),
                 Constraint::Length(7),
                 Constraint::Length(5),
                 Constraint::Min(0),
             ])
             .split(area);
+        let logo: Vec<TLine> = crate::ui::LOGO
+            .iter()
+            .map(|row| {
+                TLine::from(Span::styled(
+                    *row,
+                    Style::default()
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::BOLD),
+                ))
+            })
+            .collect();
+        f.render_widget(Paragraph::new(Text::from(logo)), rows[0]);
+        let rows = &rows[1..];
         let top = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([

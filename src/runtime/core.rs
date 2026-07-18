@@ -1154,6 +1154,61 @@ mod tests {
     }
 
     #[test]
+    fn compose_task_id_without_cycle_returns_bare_id() {
+        // §3.3(2): an empty cycle id leaves the bare task id unqualified.
+        assert_eq!(compose_task_id("", "t1"), "t1");
+        assert_eq!(compose_task_id("cyc", "t1"), "cyc/t:t1");
+    }
+
+    #[test]
+    fn task_complete_empty_status_defaults_to_done() {
+        // §3.3(1): a completion with no status on the wire folds to "done".
+        let e = ev(
+            "cyc:app:th:1",
+            json!({"kind":"task_complete","taskId":"t1","digest":"ok"}),
+        );
+        match e {
+            TuiEvent::TaskComplete { digest } => assert_eq!(digest.status, "done"),
+            other => panic!("expected task_complete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_kind_rides_through_as_unknown() {
+        // An unrecognized kind is preserved rather than dropped.
+        let e = ev("cyc", json!({"kind":"totally_novel","foo":"bar"}));
+        match e {
+            TuiEvent::Unknown { kind, data } => {
+                assert_eq!(kind, "totally_novel");
+                assert_eq!(data.get("foo").and_then(Value::as_str), Some("bar"));
+            }
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn synth_skips_non_chat_roles_and_folds_last_event() {
+        // A `system` chat row is skipped (§3.4); a running task with a `lastEvent`
+        // synthesizes task_start + task_event but no task_complete.
+        let snapshot = json!({
+            "at": 5,
+            "chat": [
+                {"role":"system","body":"noise"},
+                {"role":"user","body":"hi"}
+            ],
+            "tasks": [{
+                "taskId":"t1","cycleId":"cyc:app:th:1","status":"running",
+                "instruction":"go","depth":2,"agentId":"dev-1","harness":"codex",
+                "lastEvent": {"eventKind":"text","content":"reading…"}
+            }],
+        });
+        let mut seq = 0;
+        let synth = synth_from_snapshot(&snapshot, &mut seq);
+        let kinds: Vec<&str> = synth.iter().map(|e| e.event.kind()).collect();
+        assert_eq!(kinds, vec!["user", "task_start", "task_event"]);
+    }
+
+    #[test]
     fn workers_payload_parses_rows() {
         let payload = json!({
             "workers": [

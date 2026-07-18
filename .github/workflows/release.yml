@@ -69,8 +69,10 @@ jobs:
           tag="v${new_version}"
           git add Cargo.toml Cargo.lock
           git commit -m "chore(release): ${tag}"
-          git tag "${tag}"
-          git push origin HEAD:main --follow-tags
+          # Annotated + explicit ref push: --follow-tags skips lightweight tags,
+          # which left the tag unpushed and broke the build jobs' checkout.
+          git tag -a "${tag}" -m "${tag}"
+          git push origin HEAD:main "refs/tags/${tag}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${new_version}" >> "$GITHUB_OUTPUT"
 

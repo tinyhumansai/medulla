@@ -45,6 +45,14 @@ enum AppMsg {
     Contexts(Vec<ContextItem>),
     OpenResume(Vec<medulla::ui::chat_store::MainChatSummary>),
     Resumed(String),
+    MemoryLoaded {
+        status: Option<medulla::memory::MemoryStatus>,
+        directives: Vec<String>,
+    },
+    MemoryResults {
+        hits: Vec<medulla::memory::MemoryHit>,
+        query: String,
+    },
 }
 
 struct TermGuard {
@@ -710,6 +718,14 @@ async fn run(
                         app.refresh_snapshot();
                         app.set_status(s);
                     }
+                    AppMsg::MemoryLoaded { status, directives } => {
+                        app.set_memory_loaded(status, directives);
+                    }
+                    AppMsg::MemoryResults { hits, query } => {
+                        let n = hits.len();
+                        app.set_memory_results(hits, query);
+                        app.set_status(format!("Memory · {n} hit(s)"));
+                    }
                 }
             }
             _ = tick.tick() => {
@@ -791,6 +807,28 @@ fn run_cmd(
                     Err(e) => e.to_string(),
                 };
                 let _ = tx.send(AppMsg::Status(status));
+            });
+        }
+        // Memory queries are synchronous but touch SQLite, so run them off the UI
+        // thread via `spawn_blocking` and report back over `AppMsg`.
+        Cmd::LoadMemory => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let status = rt.memory_status();
+                let directives = rt.memory_directives();
+                let _ = tx.send(AppMsg::MemoryLoaded { status, directives });
+            });
+        }
+        Cmd::SearchMemory(query) => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let status = rt.memory_status();
+                let directives = rt.memory_directives();
+                let hits = rt.memory_search(query.clone(), None, 20);
+                let _ = tx.send(AppMsg::MemoryLoaded { status, directives });
+                let _ = tx.send(AppMsg::MemoryResults { hits, query });
             });
         }
     }

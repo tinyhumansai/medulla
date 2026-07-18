@@ -23,16 +23,19 @@ use medulla::auth::{
     describe_me, open_browser, run_login_flow, start_loopback, CredentialStore, Credentials,
     LoopbackConfig, DEFAULT_LOGIN_TIMEOUT,
 };
+#[cfg(unix)]
+use medulla::cli::core_socket_plan;
 use medulla::cli::{
-    core_socket_plan, missing_token_note, parse_command, parse_login_args, parse_memory_args,
-    parse_tui_args, resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs,
-    MemoryAction,
+    missing_token_note, parse_command, parse_login_args, parse_memory_args, parse_tui_args,
+    resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs, MemoryAction,
 };
 use medulla::client::error::ClientError;
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
 use medulla::runtime::backend::BackendRuntime;
+#[cfg(unix)]
 use medulla::runtime::core::CoreRuntime;
+#[cfg(unix)]
 use medulla::runtime::core_client::CoreClient;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{ContextItem, Runtime};
@@ -54,6 +57,8 @@ enum AppMsg {
         hits: Vec<medulla::memory::MemoryHit>,
         query: String,
     },
+    /// A newer release was detected by the background update checker.
+    UpdateAvailable(String),
 }
 
 struct TermGuard {
@@ -140,6 +145,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout(),
         Command::Memory => run_memory(&raw[1..]).await,
+        Command::Update => {
+            let args = medulla::cli::parse_update_args(&raw[1..]);
+            medulla::update::run_update(args.check).await
+        }
         Command::Wrapper(provider) => {
             let code = medulla::wrapper::run_wrapper(provider, &raw[1..]).await?;
             std::process::exit(code);
@@ -312,6 +321,9 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     //   2. a backend token (inline or via `backend.tokenEnv`)             → BackendRuntime
     //   3. otherwise                                                       → MockRuntime
     let want_core = args.core || loaded.config.core.is_some();
+    // The core runtime rides a Unix domain socket, so on Windows a core request
+    // resolves to a clear note and falls through to the backend→mock chain.
+    #[cfg(unix)]
     let plan = core_socket_plan(
         want_core,
         loaded
@@ -324,6 +336,14 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         Some(loaded.config.state_dir.as_str()),
         |p| p.exists(),
     );
+    #[cfg(not(unix))]
+    let plan = if want_core {
+        CorePlan::Fallback(
+            "core runtime requires unix sockets — unavailable on Windows; falling back".into(),
+        )
+    } else {
+        CorePlan::Skip
+    };
 
     let mut runtime: Option<Arc<dyn Runtime>> = None;
     let mut startup_status: Option<String> = None;
@@ -354,30 +374,51 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     } else {
         None
     };
+    // The memory service is only consumed by the unix-only core runtime; keep it
+    // built (for its side effects / startup note) without an unused warning on
+    // platforms where core is unavailable.
+    #[cfg(not(unix))]
+    let _ = &memory_service;
 
     match plan {
         CorePlan::Skip => {}
         CorePlan::Fallback(note) => startup_status = Some(note),
-        CorePlan::Connect(path) => {
-            let version = env!("CARGO_PKG_VERSION");
-            match CoreClient::connect(&path).await {
-                Ok((client, events_rx)) => {
-                    match CoreRuntime::connect(client, events_rx, version, memory_service.clone())
+        CorePlan::Connect(_path) => {
+            #[cfg(unix)]
+            {
+                let path = _path;
+                let version = env!("CARGO_PKG_VERSION");
+                match CoreClient::connect(&path).await {
+                    Ok((client, events_rx)) => {
+                        match CoreRuntime::connect(
+                            client,
+                            events_rx,
+                            version,
+                            memory_service.clone(),
+                        )
                         .await
-                    {
-                        Ok(rt) => runtime = Some(Arc::new(rt)),
-                        Err(e) => {
-                            startup_status =
-                                Some(format!("core handshake failed ({e}) — falling back"));
+                        {
+                            Ok(rt) => runtime = Some(Arc::new(rt)),
+                            Err(e) => {
+                                startup_status =
+                                    Some(format!("core handshake failed ({e}) — falling back"));
+                            }
                         }
                     }
+                    Err(e) => {
+                        startup_status = Some(format!(
+                            "core socket {} unreachable ({e}) — falling back",
+                            path.display()
+                        ));
+                    }
                 }
-                Err(e) => {
-                    startup_status = Some(format!(
-                        "core socket {} unreachable ({e}) — falling back",
-                        path.display()
-                    ));
-                }
+            }
+            #[cfg(not(unix))]
+            {
+                startup_status = Some(
+                    "core runtime requires unix sockets — unavailable on Windows; falling back"
+                        .into(),
+                );
             }
         }
     }
@@ -698,6 +739,12 @@ async fn run(
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
     let mut mouse_on = true;
 
+    // Background release-update checker ("automated cron"): first probe ~10s
+    // after startup, then every 6h. A newer version surfaces as a persistent
+    // header banner. Disabled via `[update] check = false` or
+    // `MEDULLA_NO_UPDATE_CHECK`.
+    spawn_update_checker(&app.loaded, &msg_tx);
+
     loop {
         terminal.draw(|f| app.draw(f))?;
         if app.should_quit {
@@ -743,6 +790,11 @@ async fn run(
                         app.set_memory_results(hits, query);
                         app.set_status(format!("Memory · {n} hit(s)"));
                     }
+                    AppMsg::UpdateAvailable(notice) => {
+                        app.set_update_notice(notice.clone());
+                        app.set_status(notice);
+                        app.refresh_snapshot();
+                    }
                 }
             }
             _ = tick.tick() => {
@@ -753,6 +805,40 @@ async fn run(
         }
     }
     Ok(())
+}
+
+/// Spawn the periodic release-update checker unless disabled by config/env. It
+/// waits ~10s, checks once, then rechecks every 6h, sending [`AppMsg::UpdateAvailable`]
+/// on a newer release.
+fn spawn_update_checker(
+    loaded: &medulla::config::LoadedConfig,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    if !loaded.config.update.enabled(&env) {
+        return;
+    }
+    let tx = msg_tx.clone();
+    tokio::spawn(async move {
+        let url = medulla::update::update_url();
+        let current = env!("CARGO_PKG_VERSION");
+        let mut first = true;
+        loop {
+            let delay = if first {
+                Duration::from_secs(10)
+            } else {
+                Duration::from_secs(6 * 60 * 60)
+            };
+            first = false;
+            tokio::time::sleep(delay).await;
+            if let Ok(Some(info)) = medulla::update::check_for_update(&url, current).await {
+                let notice = format!("update v{} available — run `medulla update`", info.version);
+                if tx.send(AppMsg::UpdateAvailable(notice)).is_err() {
+                    break; // app exited
+                }
+            }
+        }
+    });
 }
 
 fn run_cmd(

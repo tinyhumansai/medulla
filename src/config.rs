@@ -235,6 +235,35 @@ pub struct CoreConfig {
     pub socket_path: Option<String>,
 }
 
+/// The `update` section: the periodic release-update check. Disabled entirely
+/// by `check = false` here, or by the `MEDULLA_NO_UPDATE_CHECK=1` environment
+/// variable (see [`UpdateConfig::enabled`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct UpdateConfig {
+    /// Whether the background TUI update check runs. Defaults to `true`.
+    #[serde(default = "d_true")]
+    pub check: bool,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        UpdateConfig { check: true }
+    }
+}
+
+impl UpdateConfig {
+    /// The effective on/off state: config `check` gated by the env kill-switch
+    /// `MEDULLA_NO_UPDATE_CHECK` (any non-empty, non-`0` value disables it).
+    pub fn enabled(&self, env: &HashMap<String, String>) -> bool {
+        let killed = env
+            .get("MEDULLA_NO_UPDATE_CHECK")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false);
+        self.check && !killed
+    }
+}
+
 /// The optional `memory` section: tinycortex persona memory integration. All
 /// fields are optional overrides; the effective settings are resolved against
 /// the environment in [`crate::memory::env`].
@@ -304,6 +333,8 @@ pub struct TuiConfig {
     pub core: Option<CoreConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryConfigSection>,
+    #[serde(default)]
+    pub update: UpdateConfig,
 }
 
 impl Default for TuiConfig {
@@ -316,6 +347,7 @@ impl Default for TuiConfig {
             backend: BackendConfig::default(),
             core: None,
             memory: None,
+            update: UpdateConfig::default(),
         }
     }
 }
@@ -553,6 +585,21 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn update_config_enabled_honors_config_and_env() {
+        // Default: on.
+        let cfg = UpdateConfig::default();
+        assert!(cfg.enabled(&env(&[])));
+        // Config kill-switch.
+        let off = UpdateConfig { check: false };
+        assert!(!off.enabled(&env(&[])));
+        // Env kill-switch overrides an on config.
+        assert!(!cfg.enabled(&env(&[("MEDULLA_NO_UPDATE_CHECK", "1")])));
+        // "0" / empty are treated as unset.
+        assert!(cfg.enabled(&env(&[("MEDULLA_NO_UPDATE_CHECK", "0")])));
+        assert!(cfg.enabled(&env(&[("MEDULLA_NO_UPDATE_CHECK", "")])));
     }
 
     /// A unique temp dir for a test, used as an injected `MEDULLA_HOME` and/or cwd.

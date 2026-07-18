@@ -1,3 +1,6 @@
+//! (Unix-only: exercises Unix-domain-socket cores and/or spawned `/bin/sh` mock scripts.)
+#![cfg(unix)]
+
 //! End-to-end coverage for the transparent harness wrapper
 //! ([`medulla::wrapper`]) with no network and no real provider CLI.
 //!

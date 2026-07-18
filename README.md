@@ -77,6 +77,9 @@ medulla                       # bare invocation starts the TUI
 - `medulla daemon` — headless coding-agent daemon serving claude/codex/opencode over encrypted tiny.place DMs.
 - `medulla codex` / `medulla claude` / `medulla opencode` — launch the real coding-agent CLI in your terminal exactly as if run directly (inherited stdio; unrecognized flags pass through verbatim), while bridging the session to tiny.place underneath: the wrapper tails the harness transcript, forwards it as encrypted `SessionEnvelopeV2` DMs to the configured owner, and injects owner control-frame input into the child. `--no-bridge` runs a plain passthrough. Configured by `TINYPLACE_HARNESS_DM_TO` / `TINYPLACE_OPENHUMAN_OWNER` (and the `TINYPLACE_<P>_*` overrides); see `DEVELOPING.md`.
 - `medulla sessions` — list recent claude/codex sessions as JSON.
+- `medulla update` — download, verify (sha256), and install the latest release over the running binary (`--check` only reports). The TUI also checks in the background and shows an "update available" banner; disable with `[update] check = false` or `MEDULLA_NO_UPDATE_CHECK=1`.
+
+Prebuilt binaries ship for Linux (x86_64, aarch64), macOS (Apple Silicon), and Windows (x86_64). The core-socket runtime, the headless daemon's provider spawn paths, and the wrappers are unix-only; the TUI over the backend/mock runtimes and `medulla update` run on all three.
 
 The backend base URL defaults to production (`https://api.tinyhumans.ai`), and tiny.place to `https://api.tiny.place`. Set `MEDULLA_STAGING=1` to switch both to staging (`https://staging-api.tinyhumans.ai` / `https://staging-api.tiny.place`). Precedence for the backend URL is `MEDULLA_API_URL` > config-file `backend.baseUrl` > staging/prod default.
 

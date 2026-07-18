@@ -92,6 +92,8 @@ jobs:
           # retiring Intel runners; Apple Silicon covers supported Macs.
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v7
         with:
@@ -110,7 +112,9 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      - name: Package
+      # Unix packaging: a `.tar.gz` + a `<hex>  <name>` `.sha256` (shasum format).
+      - name: Package (unix)
+        if: runner.os != 'Windows'
         run: |
           set -euo pipefail
           pkg="medulla-${{ needs.tag.outputs.tag }}-${{ matrix.target }}"
@@ -120,12 +124,29 @@ jobs:
           tar -czf "${pkg}.tar.gz" "${pkg}"
           shasum -a 256 "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
 
+      # Windows packaging: a `.zip` (Compress-Archive) + a `.sha256` normalized
+      # to the same lowercase `<hex>  <name>` shape the unix files use.
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $pkg = "medulla-${{ needs.tag.outputs.tag }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $pkg | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/medulla.exe" "$pkg/"
+          Copy-Item README.md,DEVELOPING.md,config.example.toml "$pkg/"
+          Compress-Archive -Path $pkg -DestinationPath "$pkg.zip"
+          $hash = (Get-FileHash "$pkg.zip" -Algorithm SHA256).Hash.ToLower()
+          # Single LF-terminated `<hex>  <name>` line, matching shasum's format.
+          [System.IO.File]::WriteAllText("$pkg.zip.sha256", "$hash  $pkg.zip`n")
+
       - uses: actions/upload-artifact@v4
         with:
           name: medulla-${{ matrix.target }}
           path: |
             medulla-*.tar.gz
             medulla-*.tar.gz.sha256
+            medulla-*.zip
+            medulla-*.zip.sha256
           if-no-files-found: error
 
   release:
@@ -137,6 +158,47 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # Build the update manifest from the packaged assets' `.sha256` files.
+      # Attached to the release so `releases/latest/download/latest.json` always
+      # serves the newest version's manifest (consumed by `medulla update`).
+      - name: Generate latest.json
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: |
+          python3 - <<'EOF'
+          import datetime, glob, json, os
+
+          tag = os.environ["TAG"]
+          version = os.environ["VERSION"]
+          base = f"https://github.com/tinyhumansai/medulla/releases/download/{tag}"
+          prefix = f"medulla-{tag}-"
+
+          platforms = {}
+          for sha_path in sorted(glob.glob("dist/*.sha256")):
+              asset = os.path.basename(sha_path)[: -len(".sha256")]
+              digest = open(sha_path).read().split()[0]
+              stem = asset
+              for ext in (".tar.gz", ".zip"):
+                  if stem.endswith(ext):
+                      stem = stem[: -len(ext)]
+                      break
+              triple = stem[len(prefix):] if stem.startswith(prefix) else stem
+              platforms[triple] = {"url": f"{base}/{asset}", "sha256": digest}
+
+          manifest = {
+              "version": version,
+              "tag": tag,
+              "pubDate": datetime.datetime.now(datetime.timezone.utc)
+              .strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "notes": f"https://github.com/tinyhumansai/medulla/releases/tag/{tag}",
+              "platforms": platforms,
+          }
+          with open("dist/latest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          print(json.dumps(manifest, indent=2))
+          EOF
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -146,3 +208,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+            dist/latest.json

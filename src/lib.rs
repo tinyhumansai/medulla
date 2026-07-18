@@ -14,5 +14,6 @@ pub mod runtime;
 pub mod session_history;
 pub mod tinyplace_support;
 pub mod ui;
+pub mod update;
 pub mod worker_profile;
 pub mod wrapper;

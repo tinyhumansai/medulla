@@ -14,7 +14,6 @@
 //! hand-rolled JSON, unlike the std-only scaffold this replaces.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -105,26 +104,6 @@ pub struct CoreClient {
     write: Arc<Mutex<OwnedWriteHalf>>,
     next_id: AtomicU64,
     pending: PendingMap,
-}
-
-/// Resolve the core socket path (§1.1). An explicit `override_path` (the `--core`
-/// flag or `[core].socketPath` config) wins; otherwise `$XDG_RUNTIME_DIR/medulla/
-/// core.sock`, then `<state_dir>/core.sock`. `None` when nothing is available.
-pub fn resolve_socket_path(
-    override_path: Option<&str>,
-    runtime_dir: Option<&str>,
-    state_dir: Option<&str>,
-) -> Option<PathBuf> {
-    if let Some(p) = override_path.filter(|s| !s.is_empty()) {
-        return Some(PathBuf::from(p));
-    }
-    if let Some(dir) = runtime_dir.filter(|s| !s.is_empty()) {
-        return Some(PathBuf::from(dir).join("medulla").join("core.sock"));
-    }
-    if let Some(dir) = state_dir.filter(|s| !s.is_empty()) {
-        return Some(PathBuf::from(dir).join("core.sock"));
-    }
-    None
 }
 
 impl CoreClient {
@@ -562,25 +541,6 @@ impl SeqTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn resolve_prefers_override_then_xdg_then_state() {
-        let over = resolve_socket_path(Some("/tmp/x.sock"), Some("/run/user/1000"), Some("/state"));
-        assert_eq!(over.unwrap(), PathBuf::from("/tmp/x.sock"));
-
-        let xdg = resolve_socket_path(None, Some("/run/user/1000"), Some("/state"));
-        assert_eq!(
-            xdg.unwrap(),
-            PathBuf::from("/run/user/1000/medulla/core.sock")
-        );
-
-        let state = resolve_socket_path(None, None, Some("/state"));
-        assert_eq!(state.unwrap(), PathBuf::from("/state/core.sock"));
-
-        assert!(resolve_socket_path(None, None, None).is_none());
-        // Empty strings are treated as unset.
-        assert!(resolve_socket_path(Some(""), None, None).is_none());
-    }
 
     #[test]
     fn seq_tracker_detects_a_gap() {

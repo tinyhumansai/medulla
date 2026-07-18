@@ -4,7 +4,14 @@
 //! The UI depends only on the trait and its types.
 
 pub mod backend;
+// The core-js runtime speaks over a Unix domain socket, so it and its NDJSON
+// RPC client are unix-only. On Windows a `--core`/`[core]` request resolves to a
+// clear startup note and falls through the normal backend→mock chain (see
+// `main.rs`). The pure socket-path logic lives in `cli::resolve_socket_path`, so
+// `cli::core_socket_plan` still compiles on every platform.
+#[cfg(unix)]
 pub mod core;
+#[cfg(unix)]
 pub mod core_client;
 pub mod mock;
 

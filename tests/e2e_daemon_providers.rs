@@ -1,3 +1,6 @@
+//! (Unix-only: exercises Unix-domain-socket cores and/or spawned `/bin/sh` mock scripts.)
+#![cfg(unix)]
+
 //! End-to-end coverage for the daemon's provider spawn path
 //! ([`medulla::daemon::providers::run_provider_task`]) driven by the mock
 //! coding-agent CLIs in [`mock_harness`]. Each test installs a scripted mock as

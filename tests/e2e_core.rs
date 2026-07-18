@@ -1,3 +1,6 @@
+//! (Unix-only: exercises Unix-domain-socket cores and/or spawned `/bin/sh` mock scripts.)
+#![cfg(unix)]
+
 //! End-to-end tests for the core-js runtime path: a mock core server on a tempdir
 //! Unix socket scripts the NDJSON RPC + event wire (§1–§3 of the protocol contract),
 //! and drives [`CoreRuntime`] through a real cycle, a seq-gap resync, and a worker

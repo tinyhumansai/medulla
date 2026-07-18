@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use crate::auth::{Credentials, Provider};
 use crate::config::BackendConfig;
-use crate::runtime::core_client::resolve_socket_path;
 use crate::session_history::list_recent_sessions;
 use crate::tinyplace_support::HarnessProvider;
 
@@ -31,6 +30,8 @@ pub enum Command {
     Memory,
     /// Launch a coding-agent CLI as a transparent tiny.place-bridged wrapper.
     Wrapper(HarnessProvider),
+    /// Check for / install a newer release (`update [--check]`).
+    Update,
 }
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -43,6 +44,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("login") => Command::Login,
         Some("logout") => Command::Logout,
         Some("memory") => Command::Memory,
+        Some("update") => Command::Update,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),
@@ -176,6 +178,25 @@ pub fn parse_memory_args(args: &[String]) -> Result<MemoryArgs, String> {
     })
 }
 
+/// Parsed `medulla update` flags.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UpdateArgs {
+    /// `--check`: report whether an update is available and exit without
+    /// installing anything.
+    pub check: bool,
+}
+
+/// Parse the flags following `medulla update`.
+pub fn parse_update_args(args: &[String]) -> UpdateArgs {
+    let mut out = UpdateArgs::default();
+    for arg in args {
+        if arg == "--check" {
+            out.check = true;
+        }
+    }
+    out
+}
+
 /// Parsed TUI flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TuiArgs {
@@ -229,6 +250,7 @@ medulla opencode [args] Run OpenCode in your terminal, bridged to tiny.place\n  
 medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
 medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
+medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
 Wrapper flags:\n  \
@@ -267,6 +289,30 @@ pub enum CorePlan {
     Connect(PathBuf),
     /// Core was requested but is unavailable; carry the fallback note.
     Fallback(String),
+}
+
+/// Resolve the core socket path (§1.1). An explicit `override_path` (the `--core`
+/// flag or `[core].socketPath` config) wins; otherwise `$XDG_RUNTIME_DIR/medulla/
+/// core.sock`, then `<state_dir>/core.sock`. `None` when nothing is available.
+///
+/// Pure path logic with no socket API, so it lives here (a cross-platform module)
+/// rather than in the unix-only `runtime::core_client`; that keeps
+/// [`core_socket_plan`] compiling on Windows.
+pub fn resolve_socket_path(
+    override_path: Option<&str>,
+    runtime_dir: Option<&str>,
+    state_dir: Option<&str>,
+) -> Option<PathBuf> {
+    if let Some(p) = override_path.filter(|s| !s.is_empty()) {
+        return Some(PathBuf::from(p));
+    }
+    if let Some(dir) = runtime_dir.filter(|s| !s.is_empty()) {
+        return Some(PathBuf::from(dir).join("medulla").join("core.sock"));
+    }
+    if let Some(dir) = state_dir.filter(|s| !s.is_empty()) {
+        return Some(PathBuf::from(dir).join("core.sock"));
+    }
+    None
 }
 
 /// Decide whether to attempt the core runtime, resolving and probing its socket.
@@ -358,7 +404,26 @@ mod tests {
             Command::Wrapper(HarnessProvider::Opencode)
         );
         assert_eq!(parse_command(&argv(&["memory", "status"])), Command::Memory);
+        assert_eq!(parse_command(&argv(&["update"])), Command::Update);
+        assert_eq!(
+            parse_command(&argv(&["update", "--check"])),
+            Command::Update
+        );
         assert_eq!(parse_command(&argv(&["--config", "x.json"])), Command::Tui);
+    }
+
+    #[test]
+    fn update_args_parse() {
+        assert_eq!(parse_update_args(&argv(&[])), UpdateArgs { check: false });
+        assert_eq!(
+            parse_update_args(&argv(&["--check"])),
+            UpdateArgs { check: true }
+        );
+        // Unknown flags are ignored.
+        assert_eq!(
+            parse_update_args(&argv(&["--check", "--force"])),
+            UpdateArgs { check: true }
+        );
     }
 
     #[test]
@@ -411,6 +476,25 @@ mod tests {
         let text = help_text();
         assert!(text.starts_with("medulla "));
         assert!(text.contains("--no-alt-screen"));
+    }
+
+    #[test]
+    fn resolve_prefers_override_then_xdg_then_state() {
+        let over = resolve_socket_path(Some("/tmp/x.sock"), Some("/run/user/1000"), Some("/state"));
+        assert_eq!(over.unwrap(), PathBuf::from("/tmp/x.sock"));
+
+        let xdg = resolve_socket_path(None, Some("/run/user/1000"), Some("/state"));
+        assert_eq!(
+            xdg.unwrap(),
+            PathBuf::from("/run/user/1000/medulla/core.sock")
+        );
+
+        let state = resolve_socket_path(None, None, Some("/state"));
+        assert_eq!(state.unwrap(), PathBuf::from("/state/core.sock"));
+
+        assert!(resolve_socket_path(None, None, None).is_none());
+        // Empty strings are treated as unset.
+        assert!(resolve_socket_path(Some(""), None, None).is_none());
     }
 
     #[test]

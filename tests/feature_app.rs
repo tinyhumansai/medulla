@@ -83,6 +83,26 @@ fn render(app: &mut App, w: u16, h: u16) -> String {
     buf.content().iter().map(|c| c.symbol()).collect()
 }
 
+#[test]
+fn update_notice_renders_in_header_once_set() {
+    let (mut app, _rt) = empty_app();
+    // Not shown until the background checker sets it.
+    assert!(app.update_notice().is_none());
+    let before = render(&mut app, 120, 20);
+    assert!(!before.contains("update v9.9.9"));
+
+    app.set_update_notice("update v9.9.9 available — run `medulla update`");
+    assert_eq!(
+        app.update_notice(),
+        Some("update v9.9.9 available — run `medulla update`")
+    );
+    let after = render(&mut app, 120, 20);
+    assert!(
+        after.contains("update v9.9.9 available"),
+        "header should show the update banner"
+    );
+}
+
 // --- 1. typing + submit flow ------------------------------------------------
 
 #[test]

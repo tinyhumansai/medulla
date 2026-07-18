@@ -57,7 +57,20 @@ tokenEnv = "MEDULLA_TOKEN"
 # [core]
 # Explicit NDJSON Unix socket path. When unset the socket is resolved from
 # $XDG_RUNTIME_DIR/medulla/core.sock, then <stateDir>/core.sock.
+# The core runtime is unix-only; on Windows a --core / [core] request logs a
+# note and falls through to the backend→mock chain.
 # socketPath = "/run/user/1000/medulla/core.sock"
+
+# ---------------------------------------------------------------------------
+# update — background release-update check (optional)
+# ---------------------------------------------------------------------------
+# The TUI checks GitHub for a newer release ~10s after startup, then every 6h,
+# and shows an "update vX.Y.Z available" banner. Run `medulla update` to install
+# (or `medulla update --check` to only report). Disable with `check = false`
+# here, or the MEDULLA_NO_UPDATE_CHECK=1 env var. Override the manifest URL with
+# MEDULLA_UPDATE_URL.
+# [update]
+# check = true
 
 # ---------------------------------------------------------------------------
 # stateDir — TUI state (chats, resolved core socket). Default: <home>/state

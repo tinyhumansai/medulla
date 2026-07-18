@@ -1,3 +1,6 @@
+//! (Unix-only: exercises Unix-domain-socket cores and/or spawned `/bin/sh` mock scripts.)
+#![cfg(unix)]
+
 //! End-to-end tests for the daemon [`DaemonRuntime`] with fake providers and an
 //! in-memory transport (an injected recording `send` closure).
 //!

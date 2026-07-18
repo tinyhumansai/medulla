@@ -57,3 +57,27 @@ jobs:
 
       - name: Build
         run: cargo build --locked --all-targets
+
+  rust-sdk-windows:
+    name: Rust SDK (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      # No bun/opencode leg here: the core-socket runtime and the `/bin/sh`
+      # e2e suites are unix-only (gated `#[cfg(unix)]`), so Windows just needs
+      # the crate to compile and its cross-platform lib tests to pass.
+      - name: Check
+        run: cargo check --locked --all-targets
+
+      - name: Test (lib)
+        run: cargo test --locked --lib

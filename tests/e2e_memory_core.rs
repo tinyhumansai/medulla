@@ -1,3 +1,6 @@
+//! (Unix-only: exercises Unix-domain-socket cores and/or spawned `/bin/sh` mock scripts.)
+#![cfg(unix)]
+
 //! End-to-end tests for the persona-memory ↔ core-js wire: the [`CoreRuntime`]
 //! advertises the memory toolset at `initialize`, then serves core-issued
 //! `memory_query` events from an attached [`MemoryService`], replying via the

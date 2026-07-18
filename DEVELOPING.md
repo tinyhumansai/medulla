@@ -191,6 +191,25 @@ The socket path resolves as: `core.socketPath` from the config if set, else `$XD
 
 The core runtime unlocks the Workers tab (fleet peer management) and task steering (`X` cancel task, `A` answer a pending question).
 
+The core runtime is **unix-only** (it rides a Unix domain socket). On Windows a `--core` flag or `[core]` config section resolves to a startup note ("core runtime requires unix sockets — unavailable on Windows") and falls through to the normal backend→mock chain.
+
+### Updating (`medulla update`)
+
+Prebuilt releases self-update from GitHub:
+
+```sh
+medulla update           # download, verify (sha256), and install the latest release
+medulla update --check   # only report whether a newer version is available
+```
+
+`update` downloads the platform asset named in the release's `latest.json` manifest, verifies its SHA-256, extracts the binary, and atomically replaces the running executable (the previous binary is kept as `<exe>.old` for rollback). It refuses when the executable path isn't writable (e.g. a system-managed install) — use your package manager there.
+
+The TUI also runs a background check ~10s after startup and every 6h, surfacing an "update vX.Y.Z available" banner in the header. Disable it with `[update] check = false`, the `MEDULLA_NO_UPDATE_CHECK=1` env var; point the checker at a different manifest with `MEDULLA_UPDATE_URL`.
+
+## Platform support
+
+Linux (x86_64, aarch64), macOS (Apple Silicon), and Windows (x86_64) all build and ship prebuilt binaries. The core-socket runtime, the headless daemon's `/bin/sh`-spawning provider paths, and the transparent wrappers are unix-only; the interactive TUI over the backend/mock runtimes and `medulla update` work everywhere.
+
 ## Medulla home
 
 Everything Medulla persists lives under a single home directory:
@@ -215,7 +234,7 @@ Config is layered. From lowest to highest precedence (highest wins):
 
 Files are merged field-by-field (a recursive table merge), so a project-local file can override just `backend.baseUrl` without discarding the rest of a global file. TOML is the primary format; `--config <path>` still accepts either `.toml` or `.json` (parser chosen by extension) and bypasses file discovery, but env vars and CLI flags still override it. The Config tab shows the merged effective config and lists the source files that contributed.
 
-Every section is optional; with no file anywhere all defaults apply. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored. See `config.example.toml` for a commented reference and `src/config.rs` for the full schema — fields are camelCase.
+Every section is optional; with no file anywhere all defaults apply. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored. See `config.example.toml` for a commented reference and `src/config.rs` for the full schema — fields are camelCase.
 
 ## Validation
 

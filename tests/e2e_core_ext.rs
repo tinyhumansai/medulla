@@ -1,3 +1,6 @@
+//! (Unix-only: exercises Unix-domain-socket cores and/or spawned `/bin/sh` mock scripts.)
+#![cfg(unix)]
+
 //! Additional end-to-end tests for the core-js runtime path, complementing
 //! `e2e_core.rs`. Uses the configurable [`mock_core`] stub to reach the branches
 //! the base scenarios skip: existing-thread adoption, snapshot seeding, the full

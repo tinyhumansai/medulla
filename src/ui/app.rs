@@ -118,6 +118,9 @@ pub struct App {
     history_index: i64,
     selected: usize,
     status: String,
+    /// A persistent "update vX.Y.Z available" banner, set by the background
+    /// update checker; shown in the header until the app exits.
+    update_notice: Option<String>,
     contexts: Vec<ContextItem>,
     context_index: usize,
     agent_index: usize,
@@ -271,6 +274,7 @@ impl App {
             history_index: -1,
             selected: 0,
             status: "Ready".into(),
+            update_notice: None,
             contexts: Vec::new(),
             context_index: 0,
             agent_index: 0,
@@ -304,6 +308,17 @@ impl App {
     /// Current status-line text (observable in the header). Test/inspection seam.
     pub fn status(&self) -> &str {
         &self.status
+    }
+
+    /// Set the persistent "update available" banner shown in the header. Called
+    /// by the background update checker when a newer release is detected.
+    pub fn set_update_notice(&mut self, notice: impl Into<String>) {
+        self.update_notice = Some(notice.into());
+    }
+
+    /// The current update banner text, if any. Test/inspection seam.
+    pub fn update_notice(&self) -> Option<&str> {
+        self.update_notice.as_deref()
     }
 
     /// The current composer draft text. Test/inspection seam.
@@ -1255,6 +1270,15 @@ impl App {
             spans.push(Span::styled(
                 "async off",
                 Style::default().add_modifier(Modifier::DIM),
+            ));
+        }
+        if let Some(notice) = &self.update_notice {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                notice.clone(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
         f.render_widget(Paragraph::new(TLine::from(spans)), halves[0]);

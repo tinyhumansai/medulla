@@ -10,6 +10,8 @@
 #   E2E_SMOKE=0   skip the interactive opencode TUI smoke leg
 #   IMAGE=<tag>   override image tag (default: medulla-e2e)
 #   NO_CACHE=1    build with --no-cache
+#   NET=<mode>    docker run --network mode (default: none — fully isolated;
+#                 set NET=host/bridge to opt out of network isolation)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,6 +33,14 @@ docker "${build_args[@]}" >&2
 
 log "running harness in container '$CONTAINER'…"
 run_args=(run --name "$CONTAINER" --platform "$PLATFORM")
+# Everything the harness does is loopback, and opencode 1.17.18 bundles its
+# provider SDK into the binary (no runtime npm fetch), so the run needs no
+# network at all. Fully isolate by default; NET=host (or any value) opts out.
+if [ -z "${NET:-}" ]; then
+  run_args+=(--network none)
+else
+  run_args+=(--network "$NET")
+fi
 # tmux needs a writable /tmp and enough shared memory; defaults are fine.
 run_args+=(-e "E2E_KEEP=${E2E_KEEP:-0}")
 [ -n "${E2E_SMOKE:-}" ] && run_args+=(-e "E2E_SMOKE=$E2E_SMOKE")

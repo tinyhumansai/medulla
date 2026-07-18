@@ -125,6 +125,10 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout(),
+        Command::Wrapper(provider) => {
+            let code = medulla::wrapper::run_wrapper(provider, &raw[1..]).await?;
+            std::process::exit(code);
+        }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.
         Command::Tui => run_tui(&raw).await,
     }

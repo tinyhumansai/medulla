@@ -835,6 +835,13 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Parse an RFC3339 UTC-ish instant to epoch ms, or `None` if unreadable.
+/// Public wrapper over the internal parser so the wrapper's envelope builder can
+/// reuse one RFC3339 implementation.
+pub fn parse_iso_ms(text: &str) -> Option<i64> {
+    parse_iso_to_ms(text)
+}
+
 /// Minimal RFC3339 parser (`YYYY-MM-DDTHH:MM:SS(.fff)?(Z|±HH:MM)?`) → epoch ms.
 /// Dependency-free; returns `None` for anything it cannot read.
 fn parse_iso_to_ms(text: &str) -> Option<i64> {

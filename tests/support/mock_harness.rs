@@ -97,12 +97,29 @@ enum Terminal {
     FlakyLock(String),
 }
 
+/// How a mock writes a session-log transcript (for the wrapper tailer), instead
+/// of streaming records to stdout. The wrapper discovers this file, tails it, and
+/// forwards each record as a v2 envelope.
+#[derive(Debug, Clone)]
+pub struct SessionLogSpec {
+    /// Absolute path of the JSONL transcript to write.
+    pub path: PathBuf,
+    /// The harness session id recorded in the transcript head.
+    pub session_id: String,
+    /// The cwd recorded in the head (must match the wrapper's cwd for discovery).
+    pub cwd: String,
+    /// After emitting steps, read one stdin line and append a `got: <line>`
+    /// record to the transcript — proving injected input reached the child.
+    pub echo_stdin: bool,
+}
+
 /// A composable mock coding-agent CLI.
 #[derive(Debug, Clone)]
 pub struct MockCli {
     provider: MockProvider,
     steps: Vec<Step>,
     terminal: Terminal,
+    session_log: Option<SessionLogSpec>,
 }
 
 impl MockCli {
@@ -111,7 +128,30 @@ impl MockCli {
             provider,
             steps: Vec::new(),
             terminal: Terminal::Exit,
+            session_log: None,
         }
+    }
+
+    /// Write the transcript to a session-log file (for the wrapper tailer) rather
+    /// than streaming to stdout. A `session_meta`/head record carrying `id`+`cwd`
+    /// is written first so the wrapper's discovery can anchor it.
+    pub fn write_session_log(mut self, path: impl Into<PathBuf>, id: &str, cwd: &str) -> Self {
+        self.session_log = Some(SessionLogSpec {
+            path: path.into(),
+            session_id: id.to_string(),
+            cwd: cwd.to_string(),
+            echo_stdin: false,
+        });
+        self
+    }
+
+    /// Read one stdin line after the steps and append a `got: <line>` record to
+    /// the session log (requires [`Self::write_session_log`]).
+    pub fn echo_stdin_to_log(mut self) -> Self {
+        if let Some(spec) = self.session_log.as_mut() {
+            spec.echo_stdin = true;
+        }
+        self
     }
 
     pub fn step(mut self, step: Step) -> Self {
@@ -194,6 +234,9 @@ impl MockCli {
 
     /// Render the executable `/bin/sh` script body.
     pub fn script(&self) -> String {
+        if let Some(spec) = &self.session_log {
+            return self.session_log_script(spec);
+        }
         let mut out = String::from("#!/bin/sh\n");
         for step in &self.steps {
             for line in self.lower(step) {
@@ -238,6 +281,54 @@ impl MockCli {
                 );
                 out.push_str(&emit_line(&self.reply_line(reply)));
             }
+        }
+        out
+    }
+
+    /// Render a `/bin/sh` script that writes its transcript to a session-log file
+    /// (for the wrapper tailer) rather than streaming to stdout.
+    fn session_log_script(&self, spec: &SessionLogSpec) -> String {
+        let mut out = String::from("#!/bin/sh\n");
+        out.push_str(&format!("LOG={}\n", sh_quote(&spec.path.to_string_lossy())));
+        out.push_str("mkdir -p \"$(dirname \"$LOG\")\"\n");
+        // Head record carrying the session id + cwd so the wrapper can anchor it.
+        let head = match self.provider {
+            MockProvider::Codex | MockProvider::Opencode => json!({
+                "type": "session_meta",
+                "timestamp": "2026-07-05T00:00:00.000Z",
+                "payload": { "session_id": spec.session_id, "cwd": spec.cwd },
+            })
+            .to_string(),
+            MockProvider::Claude => json!({
+                "type": "summary",
+                "timestamp": "2026-07-05T00:00:00.000Z",
+                "sessionId": spec.session_id,
+                "cwd": spec.cwd,
+            })
+            .to_string(),
+        };
+        out.push_str(&emit_log_line(&head));
+        for step in &self.steps {
+            for line in self.lower(step) {
+                out.push_str(&emit_log_line(&line));
+            }
+        }
+        if spec.echo_stdin {
+            out.push_str("read line\n");
+            let record = match self.provider {
+                MockProvider::Claude => {
+                    r#"printf '{"type":"assistant","timestamp":"2026-07-05T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"got: %s"}]}}\n' "$line" >> "$LOG""#
+                }
+                _ => {
+                    r#"printf '{"type":"event_msg","timestamp":"2026-07-05T00:00:00.000Z","payload":{"type":"agent_message","message":"got: %s"}}\n' "$line" >> "$LOG""#
+                }
+            };
+            out.push_str(record);
+            out.push('\n');
+        }
+        if let Terminal::Fail { code, stderr } = &self.terminal {
+            out.push_str(&format!("printf '%s\\n' {} >&2\n", sh_quote(stderr)));
+            out.push_str(&format!("exit {code}\n"));
         }
         out
     }
@@ -494,6 +585,11 @@ fn next_call_id() -> String {
 /// (JSON, so `%`-free of format directives) is single-quote shell-escaped.
 fn emit_line(line: &str) -> String {
     format!("printf '%s\\n' {}\n", sh_quote(line))
+}
+
+/// Emit a `printf` appending `line` (plus newline) to the `$LOG` session file.
+fn emit_log_line(line: &str) -> String {
+    format!("printf '%s\\n' {} >> \"$LOG\"\n", sh_quote(line))
 }
 
 /// Single-quote a string for POSIX sh, escaping embedded single quotes.

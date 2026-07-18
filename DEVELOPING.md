@@ -28,7 +28,46 @@ cargo install --path .    # installs the `medulla` binary onto your PATH
 medulla                   # bare invocation starts the TUI
 ```
 
-Other subcommands: `medulla daemon` (headless coding-agent daemon over tiny.place), `medulla sessions` (recent claude/codex sessions as JSON), `medulla version`, `medulla help`.
+Other subcommands: `medulla daemon` (headless coding-agent daemon over tiny.place), `medulla codex` / `medulla claude` / `medulla opencode` (run the coding-agent CLI in your terminal, bridged to tiny.place — see below), `medulla sessions` (recent claude/codex sessions as JSON), `medulla version`, `medulla help`.
+
+## Wrapper commands (`medulla codex` / `claude` / `opencode`)
+
+These launch the real coding-agent CLI in your terminal exactly as if you had run
+it directly — inherited stdio, unrecognized flags passed through verbatim — while
+bridging the session to tiny.place underneath. The wrapper tails the harness's own
+JSONL transcript, normalizes each record into a typed `SessionEnvelopeV2` event,
+and forwards the stream as encrypted Signal DMs to the configured owner; with
+inbound input enabled it also polls for owner→session control frames and types
+their text into the child.
+
+```sh
+medulla codex resume            # any args after the provider go to the CLI verbatim
+medulla claude --model opus-4   # unrecognized flags pass straight through
+medulla codex --no-bridge       # pure passthrough: run the CLI with no tiny.place bridge
+medulla codex -- --no-bridge    # `--` forces everything after it to the child
+```
+
+Configuration is by environment variable (mirrors the tinyplace CLI):
+
+| Variable | Effect |
+| --- | --- |
+| `TINYPLACE_HARNESS_DM_TO` / `TINYPLACE_<P>_DM_TO` / `TINYPLACE_OPENHUMAN_OWNER` | tiny.place owner to forward the session envelopes to |
+| `TINYPLACE_HARNESS_RECEIVE_FROM` / `TINYPLACE_<P>_RECEIVE_FROM` | peer whose input control frames / plain DMs are injected (defaults to the owner) |
+| `TINYPLACE_HARNESS_RECEIVE=0` / `TINYPLACE_<P>_RECEIVE=0` | disable inbound input injection |
+| `TINYPLACE_<P>_BIN` (`TINYPLACE_CODEX_BIN`, `TINYVERSE_CLAUDE_BIN`/`TINYPLACE_CLAUDE_BIN`, `TINYPLACE_OPENCODE_BIN`) | override the provider binary |
+| `TINYPLACE_<P>_SESSIONS_DIR` | override the transcript directory the tailer watches |
+
+If no owner is configured (and `--no-bridge` was not passed), the wrapper prints a
+single warning and runs as a plain passthrough.
+
+Scope notes: this is the single-terminal `--raw` wrapper. It does not build the
+tinyplace TUI chrome, the `--agent` plugin mode, the machine-bus multi-terminal
+coordination, the opencode SSE server, or the terminal-envelope writer. stdio is
+inherited (no PTY): for a pristine full-screen TUI, run without inbound input (or
+`--no-bridge`) so stdin stays attached to the terminal — enabling input injection
+pipes stdin as a best-effort byte pump. `medulla opencode` runs as a passthrough
+with input injection but no transcript tailing (its session log is not a flat
+JSONL the mappers read).
 
 TUI flags:
 

@@ -7,7 +7,7 @@
 //! `claude --resume <id>` / `codex resume <id>` in the session's original cwd.
 //! Exposed to the CLI via `medulla sessions` (JSON); a TUI picker lands later.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -211,6 +211,78 @@ fn is_session_file(agent: SessionAgentKind, path: &Path, name: &str) -> bool {
             name.ends_with(".jsonl") && !path.to_string_lossy().contains(&subagents)
         }
     }
+}
+
+/// The session directory for a given agent kind, honoring env overrides.
+/// Used by the wrapper's tailer to locate live transcripts. (opencode is
+/// intentionally not covered — its wrapper uses an SSE bridge, a scope cut.)
+pub(crate) fn sessions_dir_for(env: &HashMap<String, String>, agent: SessionAgentKind) -> PathBuf {
+    match agent {
+        SessionAgentKind::Claude => claude_sessions_dir(env),
+        SessionAgentKind::Codex => codex_sessions_dir(env),
+    }
+}
+
+/// The set of session files that already exist for `agent` (canonicalized paths).
+/// The wrapper records this at start so it can ignore pre-existing transcripts and
+/// only latch onto the session its own child creates.
+pub(crate) fn preexisting_session_files(
+    env: &HashMap<String, String>,
+    agent: SessionAgentKind,
+) -> HashSet<PathBuf> {
+    collect_session_files(agent, &sessions_dir_for(env, agent))
+        .into_iter()
+        .filter_map(|file| std::fs::canonicalize(&file.path).ok())
+        .collect()
+}
+
+/// One discovered session file: its canonical path plus the harness session id and
+/// cwd read from its head records.
+pub(crate) struct DiscoveredSession {
+    pub path: PathBuf,
+    pub id: String,
+    pub cwd: Option<String>,
+}
+
+/// Find the newest session file for `agent` anchored at `cwd`, ignoring any file
+/// in `ignored` and any older than `min_mtime_ms`. Mirrors the TS wrapper's
+/// `locateSession`: newest-first, `meta.cwd == cwd`, skipping pre-existing files.
+pub(crate) fn discover_newest_session_file(
+    env: &HashMap<String, String>,
+    agent: SessionAgentKind,
+    cwd: &str,
+    min_mtime_ms: i64,
+    ignored: &HashSet<PathBuf>,
+) -> Option<DiscoveredSession> {
+    let here = safe_resolve(cwd);
+    let mut files = collect_session_files(agent, &sessions_dir_for(env, agent));
+    files.sort_by_key(|file| std::cmp::Reverse(file.mtime_ms));
+    for file in files {
+        if file.mtime_ms < min_mtime_ms {
+            continue;
+        }
+        let canonical = std::fs::canonicalize(&file.path).unwrap_or_else(|_| file.path.clone());
+        if ignored.contains(&canonical) {
+            continue;
+        }
+        let summary = match read_session_summary(agent, &file.path) {
+            Some(summary) => summary,
+            None => continue,
+        };
+        // A session with a recorded cwd must match; one with no cwd is accepted
+        // (some transcripts omit it in their head window).
+        if let Some(session_cwd) = &summary.cwd {
+            if safe_resolve(session_cwd) != here {
+                continue;
+            }
+        }
+        return Some(DiscoveredSession {
+            path: canonical,
+            id: summary.id,
+            cwd: summary.cwd,
+        });
+    }
+    None
 }
 
 fn read_session_summary(agent: SessionAgentKind, path: &Path) -> Option<SessionSummary> {

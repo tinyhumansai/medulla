@@ -11,6 +11,7 @@ use crate::auth::{Credentials, Provider};
 use crate::config::BackendConfig;
 use crate::runtime::core_client::resolve_socket_path;
 use crate::session_history::list_recent_sessions;
+use crate::tinyplace_support::HarnessProvider;
 
 /// The top-level subcommand selected from `argv[1..]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +27,8 @@ pub enum Command {
     Login,
     /// Clear stored credentials.
     Logout,
+    /// Launch a coding-agent CLI as a transparent tiny.place-bridged wrapper.
+    Wrapper(HarnessProvider),
 }
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -37,6 +40,9 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("sessions") => Command::Sessions,
         Some("login") => Command::Login,
         Some("logout") => Command::Logout,
+        Some("codex") => Command::Wrapper(HarnessProvider::Codex),
+        Some("claude") => Command::Wrapper(HarnessProvider::Claude),
+        Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),
         _ => Command::Tui,
     }
 }
@@ -138,10 +144,16 @@ Usage:\n  \
 medulla                 Start the interactive chat TUI (default)\n  \
 medulla daemon [flags]  Run the headless coding-agent daemon (serves tasks over tiny.place)\n  \
 medulla sessions        List recent claude/codex sessions as JSON\n  \
+medulla codex [args]    Run Codex in your terminal, bridged to tiny.place\n  \
+medulla claude [args]   Run Claude Code in your terminal, bridged to tiny.place\n  \
+medulla opencode [args] Run OpenCode in your terminal, bridged to tiny.place\n  \
 medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
+Wrapper flags:\n  \
+--no-bridge             Run the CLI as a plain passthrough (no tiny.place bridge)\n  \
+--                      Pass all following arguments to the CLI verbatim\n\n\
 Login flags:\n  \
 --provider <name>       OAuth provider: google (default), github, twitter, discord\n  \
 --no-browser            Print the login URL without launching a browser\n  \
@@ -248,6 +260,18 @@ mod tests {
         assert_eq!(parse_command(&argv(&["sessions"])), Command::Sessions);
         assert_eq!(parse_command(&argv(&["login"])), Command::Login);
         assert_eq!(parse_command(&argv(&["logout"])), Command::Logout);
+        assert_eq!(
+            parse_command(&argv(&["codex", "resume"])),
+            Command::Wrapper(HarnessProvider::Codex)
+        );
+        assert_eq!(
+            parse_command(&argv(&["claude"])),
+            Command::Wrapper(HarnessProvider::Claude)
+        );
+        assert_eq!(
+            parse_command(&argv(&["opencode", "--foo"])),
+            Command::Wrapper(HarnessProvider::Opencode)
+        );
         assert_eq!(parse_command(&argv(&["--config", "x.json"])), Command::Tui);
     }
 
@@ -401,6 +425,8 @@ mod tests {
         assert!(text.contains(env!("CARGO_PKG_VERSION")));
         assert!(text.contains("medulla daemon"));
         assert!(text.contains("medulla login"));
+        assert!(text.contains("medulla codex"));
+        assert!(text.contains("--no-bridge"));
         assert!(text.contains("--provider"));
         assert!(text.contains("--core"));
     }

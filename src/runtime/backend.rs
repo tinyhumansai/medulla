@@ -408,6 +408,10 @@ impl BackendRuntime {
 }
 
 impl Runtime for BackendRuntime {
+    fn describe(&self) -> String {
+        format!("backend {}", self.client.base_url())
+    }
+
     fn snapshot(&self) -> RuntimeSnapshot {
         let s = self.state.lock().unwrap();
         let threads = s.thread_summaries();

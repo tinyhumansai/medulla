@@ -177,6 +177,10 @@ pub struct RuntimeSnapshot {
 /// The runtime the TUI drives. Snapshot/subscribe are synchronous; the rest is
 /// async where it may touch the backend.
 pub trait Runtime: Send + Sync {
+    /// Human-readable description of what backs this runtime, for the Overview.
+    fn describe(&self) -> String {
+        "mock (scripted)".into()
+    }
     fn snapshot(&self) -> RuntimeSnapshot;
     /// A change notification channel — a ping fires after every event/mutation.
     fn subscribe(&self) -> broadcast::Receiver<()>;

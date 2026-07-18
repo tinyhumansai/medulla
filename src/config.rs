@@ -7,18 +7,6 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-fn d_openai_key() -> String {
-    "OPENAI_API_KEY".into()
-}
-fn d_default_model() -> String {
-    "gpt-4o-mini".into()
-}
-fn d_temperature() -> f64 {
-    0.2
-}
-fn d_max_retries() -> u32 {
-    5
-}
 fn d_state_dir() -> String {
     ".medulla-state/tui".into()
 }
@@ -46,66 +34,11 @@ fn d_concurrency() -> u32 {
 fn d_true() -> bool {
     true
 }
-fn d_lf_env() -> String {
-    "tui".into()
-}
 fn d_backend_base() -> String {
     "http://localhost:5000".into()
 }
 fn d_token_env() -> String {
     "MEDULLA_TOKEN".into()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TierModels {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compress: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub orchestrator: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct InferenceConfig {
-    #[serde(default = "d_openai_key")]
-    pub api_key_env: String,
-    #[serde(rename = "baseURL", skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    #[serde(default = "d_default_model")]
-    pub default_model: String,
-    pub models: TierModels,
-    #[serde(default = "d_temperature")]
-    pub temperature: f64,
-    #[serde(default = "d_max_retries")]
-    pub max_retries: u32,
-}
-
-impl Default for InferenceConfig {
-    fn default() -> Self {
-        InferenceConfig {
-            api_key_env: d_openai_key(),
-            base_url: None,
-            default_model: d_default_model(),
-            models: TierModels::default(),
-            temperature: d_temperature(),
-            max_retries: d_max_retries(),
-        }
-    }
-}
-
-impl InferenceConfig {
-    /// The model routed to a tier, falling back to `defaultModel`.
-    pub fn tier_model(&self, tier: &str) -> &str {
-        let picked = match tier {
-            "orchestrator" => self.models.orchestrator.as_deref(),
-            "reasoning" => self.models.reasoning.as_deref(),
-            "compress" => self.models.compress.as_deref(),
-            _ => None,
-        };
-        picked.unwrap_or(&self.default_model)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -215,40 +148,6 @@ impl Default for OpencodeConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct LangfuseConfig {
-    #[serde(default = "d_true")]
-    pub enabled: bool,
-    #[serde(default = "d_lf_env")]
-    pub environment: String,
-}
-
-impl Default for LangfuseConfig {
-    fn default() -> Self {
-        LangfuseConfig {
-            enabled: true,
-            environment: d_lf_env(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-pub struct PromptsConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub orchestrator: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-pub struct DebugConfig {
-    pub save_transcripts: bool,
-    pub raw_worker_io: bool,
-}
-
 /// Where the TUI reaches the core-js orchestration core (its NDJSON Unix socket).
 /// An explicit `socketPath` overrides the env-based resolution
 /// (`$XDG_RUNTIME_DIR/medulla/core.sock` → `<stateDir>/core.sock`).
@@ -284,17 +183,13 @@ impl Default for BackendConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TuiConfig {
-    pub inference: InferenceConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opencode: Option<OpencodeConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tinyplace: Option<TinyplaceConfig>,
-    pub langfuse: LangfuseConfig,
     pub medulla: MedullaConfig,
     #[serde(default = "d_state_dir")]
     pub state_dir: String,
-    pub prompts: PromptsConfig,
-    pub debug: DebugConfig,
     pub backend: BackendConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub core: Option<CoreConfig>,
@@ -303,14 +198,10 @@ pub struct TuiConfig {
 impl Default for TuiConfig {
     fn default() -> Self {
         TuiConfig {
-            inference: InferenceConfig::default(),
             opencode: None,
             tinyplace: None,
-            langfuse: LangfuseConfig::default(),
             medulla: MedullaConfig::default(),
             state_dir: d_state_dir(),
-            prompts: PromptsConfig::default(),
-            debug: DebugConfig::default(),
             backend: BackendConfig::default(),
             core: None,
         }
@@ -350,15 +241,15 @@ impl LoadedConfig {
         }
     }
 
-    /// Pretty-printed config JSON for the Config tab, with `inference.apiKeyEnv`
+    /// Pretty-printed config JSON for the Config tab, with `backend.tokenEnv`
     /// annotated `<env> (set|missing)`.
     pub fn pretty_json(&self) -> String {
         let mut value = serde_json::to_value(&self.config).unwrap_or(Value::Null);
-        let env = &self.config.inference.api_key_env;
-        let set = std::env::var(env).is_ok();
-        if let Some(inf) = value.get_mut("inference").and_then(|v| v.as_object_mut()) {
-            inf.insert(
-                "apiKeyEnv".into(),
+        let env = &self.config.backend.token_env;
+        let set = std::env::var(env).ok().filter(|s| !s.is_empty()).is_some();
+        if let Some(be) = value.get_mut("backend").and_then(|v| v.as_object_mut()) {
+            be.insert(
+                "tokenEnv".into(),
                 Value::String(format!("{env} ({})", if set { "set" } else { "missing" })),
             );
         }
@@ -403,22 +294,10 @@ mod tests {
     #[test]
     fn defaults_are_applied() {
         let cfg: TuiConfig = serde_json::from_str("{}").unwrap();
-        assert_eq!(cfg.inference.api_key_env, "OPENAI_API_KEY");
-        assert_eq!(cfg.inference.default_model, "gpt-4o-mini");
         assert_eq!(cfg.state_dir, ".medulla-state/tui");
         assert_eq!(cfg.backend.base_url, "http://localhost:5000");
         assert_eq!(cfg.backend.token_env, "MEDULLA_TOKEN");
         assert_eq!(cfg.medulla.context_window(), 32_000);
-    }
-
-    #[test]
-    fn tier_model_falls_back() {
-        let cfg: TuiConfig = serde_json::from_str(
-            r#"{"inference":{"defaultModel":"base","models":{"reasoning":"r"}}}"#,
-        )
-        .unwrap();
-        assert_eq!(cfg.inference.tier_model("reasoning"), "r");
-        assert_eq!(cfg.inference.tier_model("orchestrator"), "base");
     }
 
     #[test]
@@ -448,18 +327,18 @@ mod tests {
     }
 
     #[test]
-    fn pretty_json_annotates_key() {
+    fn pretty_json_annotates_token_env() {
         let loaded = LoadedConfig::defaults("x".into());
         let json = loaded.pretty_json();
-        assert!(json.contains("OPENAI_API_KEY ("));
+        assert!(json.contains("MEDULLA_TOKEN ("));
     }
 
     #[test]
-    fn pretty_json_marks_key_set_when_env_present() {
-        let var = "MEDULLA_CONFIG_TEST_KEY";
+    fn pretty_json_marks_token_set_when_env_present() {
+        let var = "MEDULLA_CONFIG_TEST_TOKEN";
         std::env::set_var(var, "value");
         let mut loaded = LoadedConfig::defaults("x".into());
-        loaded.config.inference.api_key_env = var.into();
+        loaded.config.backend.token_env = var.into();
         assert!(loaded.pretty_json().contains(&format!("{var} (set)")));
         std::env::remove_var(var);
         assert!(loaded.pretty_json().contains(&format!("{var} (missing)")));
@@ -497,11 +376,13 @@ mod tests {
 
     #[test]
     fn unknown_fields_are_ignored() {
-        // Permissive parsing: extra keys must not fail the load.
-        let cfg: TuiConfig =
-            serde_json::from_str(r#"{"totallyUnknown":true,"inference":{"temperature":0.9}}"#)
-                .unwrap();
-        assert_eq!(cfg.inference.temperature, 0.9);
+        // Permissive parsing: extra keys (including retired sections like
+        // `inference`/`langfuse`) must not fail the load.
+        let cfg: TuiConfig = serde_json::from_str(
+            r#"{"totallyUnknown":true,"inference":{"temperature":0.9},"langfuse":{"enabled":true},"medulla":{"maxPasses":3}}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.medulla.max_passes, Some(3));
     }
 
     #[test]
@@ -512,7 +393,7 @@ mod tests {
             .into_owned();
         let loaded = load_config(&path).unwrap();
         // Defaults applied; the absolute-ish path is preserved.
-        assert_eq!(loaded.config.inference.default_model, "gpt-4o-mini");
+        assert_eq!(loaded.config.state_dir, ".medulla-state/tui");
         assert!(loaded.path.contains("medulla-nope-"));
     }
 

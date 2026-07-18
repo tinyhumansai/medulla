@@ -240,7 +240,7 @@ fn each_tab_renders_its_signature() {
         let (mut app, _rt) = demo_app();
         app.tab_index = TABS.iter().position(|t| *t == name).unwrap();
         let out = render(&mut app, 120, 40);
-        assert!(out.contains("MEDULLA LAB"), "{name}: missing header");
+        assert!(out.contains("MEDULLA"), "{name}: missing header");
         assert!(out.contains(sig), "{name}: missing signature {sig:?}");
     }
 }
@@ -442,22 +442,22 @@ fn ctrl_y_copies_transcript_via_captured_clipboard() {
 // --- 10. config rendering ---------------------------------------------------
 
 #[test]
-fn config_tab_annotates_api_key_env_presence() {
+fn config_tab_annotates_token_env_presence() {
     // Present env → "(set)".
-    let set_var = "MEDULLA_FEATURE_TEST_KEY_SET";
+    let set_var = "MEDULLA_FEATURE_TEST_TOKEN_SET";
     std::env::set_var(set_var, "x");
     let (mut app, _rt) = empty_app();
-    app.loaded.config.inference.api_key_env = set_var.into();
+    app.loaded.config.backend.token_env = set_var.into();
     app.tab_index = TABS.iter().position(|t| *t == "Config").unwrap();
     let out = render(&mut app, 200, 50);
     assert!(out.contains("(set)"), "expected (set) annotation");
     std::env::remove_var(set_var);
 
     // Absent env → "(missing)".
-    let missing_var = "MEDULLA_FEATURE_TEST_KEY_MISSING";
+    let missing_var = "MEDULLA_FEATURE_TEST_TOKEN_MISSING";
     std::env::remove_var(missing_var);
     let (mut app, _rt) = empty_app();
-    app.loaded.config.inference.api_key_env = missing_var.into();
+    app.loaded.config.backend.token_env = missing_var.into();
     app.tab_index = TABS.iter().position(|t| *t == "Config").unwrap();
     let out = render(&mut app, 200, 50);
     assert!(out.contains("(missing)"), "expected (missing) annotation");

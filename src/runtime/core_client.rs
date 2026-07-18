@@ -101,6 +101,7 @@ type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, RpcError>
 
 /// A connected core client.
 pub struct CoreClient {
+    socket_path: std::path::PathBuf,
     write: Arc<Mutex<OwnedWriteHalf>>,
     next_id: AtomicU64,
     pending: PendingMap,
@@ -143,11 +144,17 @@ impl CoreClient {
         });
 
         let client = CoreClient {
+            socket_path: socket_path.to_path_buf(),
             write: Arc::new(Mutex::new(write_half)),
             next_id: AtomicU64::new(1),
             pending,
         };
         Ok((client, events_rx))
+    }
+
+    /// The Unix socket path this client is connected to.
+    pub fn socket_path(&self) -> &std::path::Path {
+        &self.socket_path
     }
 
     /// Send a request and await its correlated response (§2). RPC errors surface as

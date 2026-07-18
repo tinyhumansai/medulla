@@ -83,7 +83,7 @@ The core runtime unlocks the Workers tab (fleet peer management) and task steeri
 
 ## Configuration
 
-The TUI reads `medulla.tui.json` from the current directory (or `--config <path>`). Every section is optional; an absent file just means all defaults. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `.medulla-state/`, holds chat history under `chats/`), plus inference/opencode/langfuse settings used by daemon-side features. See `src/config.rs` for the full schema — fields are camelCase.
+The TUI reads `medulla.tui.json` from the current directory (or `--config <path>`). Every section is optional; an absent file just means all defaults. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `.medulla-state/`, holds chat history under `chats/`), `opencode` (worker display), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections in existing config files are ignored. See `src/config.rs` for the full schema — fields are camelCase.
 
 ## Validation
 

@@ -203,7 +203,7 @@ impl MockRuntime {
             s.tinyplace = Some(TinyplaceIdentity {
                 agent_id: "cid-abc123".into(),
                 public_key: "pk".into(),
-                handle: Some("@medulla-lab".into()),
+                handle: Some("@medulla".into()),
             });
             s.tracing = true;
 

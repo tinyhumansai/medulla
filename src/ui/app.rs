@@ -1105,7 +1105,7 @@ impl App {
             .split(area);
         let mut spans = vec![
             Span::styled(
-                "MEDULLA LAB",
+                "MEDULLA",
                 Style::default()
                     .fg(Color::LightCyan)
                     .add_modifier(Modifier::BOLD),
@@ -1306,8 +1306,8 @@ impl App {
         // Third panel: tinyplace or opencode.
         self.draw_overview_third(f, top[2]);
 
-        // Model routing.
-        let cfg = &self.loaded.config.inference;
+        // Model routing: inference is server-managed, so show the runtime we
+        // are attached to plus the models actually observed on the stream.
         let workers_val = if let Some(tp) = &self.loaded.config.tinyplace {
             format!("tiny.place · {} peer(s)", tp.peers.len())
         } else {
@@ -1318,24 +1318,24 @@ impl App {
                 .map(|o| o.model.clone())
                 .unwrap_or_default()
         };
-        let routing = vec![
-            TLine::from(vec![
-                Span::styled("orchestrator ", Style::default().fg(Color::Yellow)),
-                Span::raw(cfg.tier_model("orchestrator").to_string()),
-            ]),
-            TLine::from(vec![
-                Span::styled("reasoning ", Style::default().fg(Color::Yellow)),
-                Span::raw(cfg.tier_model("reasoning").to_string()),
-            ]),
-            TLine::from(vec![
-                Span::styled("summarizer ", Style::default().fg(Color::Blue)),
-                Span::raw(cfg.tier_model("compress").to_string()),
-            ]),
-            TLine::from(vec![
-                Span::styled("workers ", Style::default().fg(Color::Magenta)),
-                Span::raw(workers_val),
-            ]),
-        ];
+        let mut routing = vec![TLine::from(vec![
+            Span::styled("runtime ", Style::default().fg(Color::Cyan)),
+            Span::raw(self.runtime.describe()),
+        ])];
+        for (label, tier, color) in [
+            ("orchestrator ", "orchestrator", Color::Yellow),
+            ("reasoning ", "reasoning", Color::Yellow),
+            ("summarizer ", "compress", Color::Blue),
+        ] {
+            routing.push(TLine::from(vec![
+                Span::styled(label, Style::default().fg(color)),
+                Span::raw(self.observed_model(tier).unwrap_or("—").to_string()),
+            ]));
+        }
+        routing.push(TLine::from(vec![
+            Span::styled("workers ", Style::default().fg(Color::Magenta)),
+            Span::raw(workers_val),
+        ]));
         f.render_widget(
             Paragraph::new(Text::from(routing)).block(self.panel("Model routing")),
             rows[1],
@@ -1441,6 +1441,23 @@ impl App {
             }
         }
         n
+    }
+
+    /// The most recent model observed on the stream for a tier, if any.
+    fn observed_model(&self, wanted: &str) -> Option<&str> {
+        self.snapshot
+            .events
+            .iter()
+            .rev()
+            .find_map(|e| match &e.event {
+                TuiEvent::InferenceStart { tier, model, .. }
+                | TuiEvent::InferenceEnd { tier, model, .. }
+                    if tier == wanted =>
+                {
+                    model.as_deref()
+                }
+                _ => None,
+            })
     }
 
     fn event_line(&self, env: &EventEnvelope, width: usize, selected: bool) -> TLine<'static> {
@@ -2170,7 +2187,7 @@ mod tests {
             let mut a = app();
             a.tab_index = i;
             let out = render(&mut a);
-            assert!(out.contains("MEDULLA LAB"), "tab {name} missing header");
+            assert!(out.contains("MEDULLA"), "tab {name} missing header");
         }
     }
 

@@ -621,6 +621,10 @@ impl CoreRuntime {
 }
 
 impl Runtime for CoreRuntime {
+    fn describe(&self) -> String {
+        format!("core {}", self.client.socket_path().display())
+    }
+
     fn snapshot(&self) -> RuntimeSnapshot {
         let s = self.state.lock().unwrap();
         let threads = s.thread_summaries();

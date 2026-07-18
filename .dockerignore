@@ -1,0 +1,40 @@
+# Keep the Docker build context small. Context is the sdk/ crate root.
+# The Rust build only needs Cargo manifests, src/, examples/, and the
+# path/vendored crates' sources — not their docs/websites/generated output.
+
+# Rust build output (25G+ locally)
+target/
+**/target/
+
+# VCS + editor + OS cruft
+.git/
+.gitmodules
+.githooks/
+.github/
+.DS_Store
+
+# Node / JS tooling anywhere in the tree
+node_modules/
+**/node_modules/
+
+# Local runtime state
+.medulla-state/
+.medulla/
+.env
+.claude/
+
+# Heavy, build-irrelevant vendor content (docs, books, website, papers).
+# The rust path deps live in vendor/*/{src,Cargo.toml,sdk,vendor}; these are not
+# compiled and only bloat the context.
+vendor/tinyplace/gitbooks/
+vendor/tinyplace/website/
+vendor/tinyplace/docs/
+vendor/tinycortex/gitbooks/
+vendor/tinycortex/docs/
+vendor/tinycortex/paper/
+vendor/tinycortex/viewer/
+vendor/tinycortex/benchmarks/
+
+# Repo docs / books not needed to compile
+gitbooks/
+docs/

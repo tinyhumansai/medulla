@@ -944,8 +944,10 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 /// Depth-bounded scan for a token-usage object: any JSON object carrying both
-/// input and output token counts (snake_case or camelCase), wherever the
-/// provider nests it (claude `result.usage`, codex `token_count` payloads).
+/// input and output token counts, wherever the provider nests it (claude
+/// `result.usage` and codex `token_count` payloads use `input_tokens`/
+/// `output_tokens`; opencode nests a `tokens: { input, output, … }` object on
+/// its step/message parts).
 pub(crate) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
     if depth > 4 {
         return None;
@@ -964,6 +966,21 @@ pub(crate) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
                 input_tokens: input,
                 output_tokens: output,
             });
+        }
+        // opencode reports a nested `tokens: { input, output, reasoning, cache }`
+        // object rather than the *_tokens naming the other harnesses use.
+        if let Some(tokens) = obj.get("tokens").and_then(|v| v.as_object()) {
+            let tnum = |key: &str| {
+                tokens
+                    .get(key)
+                    .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+            };
+            if let (Some(input), Some(output)) = (tnum("input"), tnum("output")) {
+                return Some(TokenUsage {
+                    input_tokens: input,
+                    output_tokens: output,
+                });
+            }
         }
         return obj.values().find_map(|v| scan_usage(v, depth + 1));
     }
@@ -1010,8 +1027,22 @@ mod tests {
                 output_tokens: 9
             })
         );
+        // opencode: nested `tokens: { input, output, … }` on a message part.
+        let v: Value = serde_json::from_str(
+            r#"{"type":"part","part":{"tokens":{"input":12,"output":4,"reasoning":0,"cache":{"write":0,"read":0}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            scan_usage(&v, 0),
+            Some(TokenUsage {
+                input_tokens: 12,
+                output_tokens: 4
+            })
+        );
         // No counts → None; one-sided → None.
         let v: Value = serde_json::from_str(r#"{"usage":{"input_tokens":1}}"#).unwrap();
+        assert_eq!(scan_usage(&v, 0), None);
+        let v: Value = serde_json::from_str(r#"{"tokens":{"input":1}}"#).unwrap();
         assert_eq!(scan_usage(&v, 0), None);
     }
 

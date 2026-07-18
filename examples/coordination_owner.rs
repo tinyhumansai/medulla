@@ -15,6 +15,10 @@
 //!                        unless `--publish-only`).
 //!   --task <text>        the task prompt (default: "print the coordination marker").
 //!   --task-id <id>       the task/cycle id (default: "coord-1").
+//!   --kind <k>           frame kind to send: `task` (default) or `capabilities`
+//!                        (probe the worker; terminates on `capabilities_result`).
+//!   --provider <p>       requested provider hint on the frame (`opencode`, `claude`,
+//!                        `codex`); used to drive the no-available-provider error path.
 //!   --timeout-ms <n>     how long to wait for a terminal frame (default 60000).
 //!   --seed <64hex>       a fixed 32-byte identity seed so the owner id is stable
 //!                        across invocations (default: a fresh random identity).
@@ -32,7 +36,8 @@ use medulla::tinyplace_support::tinyplace::{
     LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions,
 };
 use medulla::tinyplace_support::{
-    decode_task_frame, encode_task_frame, EncodeFrameInput, TaskFrame, TaskFrameKind,
+    decode_task_frame, encode_task_frame, EncodeFrameInput, HarnessProvider, TaskFrame,
+    TaskFrameKind,
 };
 
 struct Args {
@@ -43,6 +48,8 @@ struct Args {
     timeout_ms: u64,
     seed: Option<String>,
     publish_only: bool,
+    kind: TaskFrameKind,
+    provider: Option<HarnessProvider>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -53,6 +60,8 @@ fn parse_args() -> Result<Args, String> {
     let mut timeout_ms = 60_000u64;
     let mut seed = None;
     let mut publish_only = false;
+    let mut kind = TaskFrameKind::Task;
+    let mut provider = None;
 
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -63,6 +72,18 @@ fn parse_args() -> Result<Args, String> {
             "--task-id" => task_id = it.next().ok_or("--task-id needs a value")?,
             "--seed" => seed = it.next(),
             "--publish-only" => publish_only = true,
+            "--kind" => {
+                let raw = it.next().ok_or("--kind needs a value")?;
+                kind = TaskFrameKind::from_wire(&raw)
+                    .ok_or_else(|| format!("unknown --kind: {raw}"))?;
+            }
+            "--provider" => {
+                let raw = it.next().ok_or("--provider needs a value")?;
+                provider = Some(
+                    HarnessProvider::from_wire(&raw)
+                        .ok_or_else(|| format!("unknown --provider: {raw}"))?,
+                );
+            }
             "--timeout-ms" => {
                 timeout_ms = it
                     .next()
@@ -82,6 +103,8 @@ fn parse_args() -> Result<Args, String> {
         timeout_ms,
         seed,
         publish_only,
+        kind,
+        provider,
     })
 }
 
@@ -141,21 +164,19 @@ async fn run() -> Result<(), String> {
         return Ok(());
     }
 
-    let to = args
-        .to
-        .clone()
-        .ok_or("missing --to <worker agent id>")?;
+    let to = args.to.clone().ok_or("missing --to <worker agent id>")?;
     eprintln!("coordination_owner: owner={owner_id} → worker={to}");
 
-    // Send the task frame (encrypted; opens the X3DH session to the worker).
+    // Send the request frame (encrypted; opens the X3DH session to the worker).
+    // `--kind capabilities` probes the worker instead of delegating a task.
     let frame = encode_task_frame(EncodeFrameInput {
-        kind: TaskFrameKind::Task,
+        kind: args.kind,
         task_id: args.task_id.clone(),
         text: args.task.clone(),
         ts: "2026-07-18T00:00:00.000Z".to_string(),
         correlation_id: Some(format!("{}-corr", args.task_id)),
         harness: None,
-        provider: None,
+        provider: args.provider,
     });
     transport
         .send(&to, &frame)
@@ -170,8 +191,12 @@ async fn run() -> Result<(), String> {
     while Instant::now() < deadline && terminal.is_none() {
         for message in transport.drain_inbox(50).await {
             if let Some(frame) = decode_task_frame(&message.text) {
-                let is_terminal =
-                    matches!(frame.kind, TaskFrameKind::Reply | TaskFrameKind::Error);
+                // Reply/Error terminate a task; CapabilitiesResult terminates a
+                // capabilities probe.
+                let is_terminal = matches!(
+                    frame.kind,
+                    TaskFrameKind::Reply | TaskFrameKind::Error | TaskFrameKind::CapabilitiesResult
+                );
                 eprintln!(
                     "coordination_owner: frame kind={:?} text={:?}",
                     frame.kind, frame.text
@@ -201,16 +226,31 @@ async fn run() -> Result<(), String> {
                 "harness": frame.harness.map(|h| h.as_str().to_string()),
                 "ownerId": owner_id,
                 "frames": collected.len(),
+                "frameKinds": collected
+                    .iter()
+                    .map(|f| f.kind.as_str().to_string())
+                    .collect::<Vec<_>>(),
+                "usage": frame.usage.map(|u| serde_json::json!({
+                    "inputTokens": u.input_tokens,
+                    "outputTokens": u.output_tokens,
+                })),
             });
             println!("{out}");
-            if frame.kind == TaskFrameKind::Reply {
+            // Reply / CapabilitiesResult are success; Error is failure.
+            if matches!(
+                frame.kind,
+                TaskFrameKind::Reply | TaskFrameKind::CapabilitiesResult
+            ) {
                 Ok(())
             } else {
                 std::process::exit(1);
             }
         }
         None => {
-            eprintln!("coordination_owner: timed out with no terminal frame ({} frames seen)", collected.len());
+            eprintln!(
+                "coordination_owner: timed out with no terminal frame ({} frames seen)",
+                collected.len()
+            );
             std::process::exit(1);
         }
     }

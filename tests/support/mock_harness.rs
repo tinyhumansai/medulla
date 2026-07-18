@@ -254,9 +254,10 @@ impl MockCli {
                 out.push_str(&format!("exit {code}\n"));
             }
             Terminal::Hang => {
-                // No sleep (PATH-independent): block reading stdin that never comes.
-                out.push_str("while read _line; do :; done\n");
-                out.push_str("cat >/dev/null\n");
+                // Sleep-loop rather than blocking on stdin: the daemon's waiter
+                // closes the child's stdin, which would EOF a `read`-based hang
+                // and let the script exit instead of idling until killed.
+                out.push_str("while :; do sleep 1; done\n");
             }
             Terminal::StdinEcho { provider_reply } => {
                 out.push_str("read line\n");

@@ -181,6 +181,11 @@ pub trait Runtime: Send + Sync {
     fn describe(&self) -> String {
         "mock (scripted)".into()
     }
+    /// Account-level usage from the backend, when this runtime has one.
+    /// `Ok(None)` = not supported by this runtime.
+    fn team_usage(&self) -> BoxFuture<'static, anyhow::Result<Option<serde_json::Value>>> {
+        Box::pin(std::future::ready(Ok(None)))
+    }
     fn snapshot(&self) -> RuntimeSnapshot;
     /// A change notification channel — a ping fires after every event/mutation.
     fn subscribe(&self) -> broadcast::Receiver<()>;

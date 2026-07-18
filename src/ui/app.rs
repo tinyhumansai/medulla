@@ -25,7 +25,7 @@ use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::util::{clip, clock, fmt_tokens, wrap};
 
 pub const TABS: [&str; 9] = [
-    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Memory", "Config", "Help",
+    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Memory", "Usage", "Help",
 ];
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -46,8 +46,35 @@ pub enum Cmd {
     WorkerOp(WorkerOp),
     /// Load the persona-memory status + directives for the Memory tab.
     LoadMemory,
+    /// Fetch account-level usage from the backend for the Usage tab.
+    LoadUsage,
     /// Run a persona-memory search and land on the Memory tab.
     SearchMemory(String),
+}
+
+/// Token totals for one inference tier (Usage tab).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct TierUsage {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub calls: i64,
+}
+
+/// The Usage tab's fold over the live event stream.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct UsageFold {
+    /// Per-tier totals (orchestrator / reasoning / compress / ...).
+    pub tiers: std::collections::BTreeMap<String, TierUsage>,
+    /// Aggregate sub-agent (delegated task) usage.
+    pub subagent: TierUsage,
+    /// Per-task (task id, input, output) rows, in arrival order.
+    pub tasks: Vec<(String, i64, i64)>,
+}
+
+impl UsageFold {
+    fn tier_mut(&mut self, tier: &str) -> &mut TierUsage {
+        self.tiers.entry(tier.to_string()).or_default()
+    }
 }
 
 struct ResumePicker {
@@ -106,6 +133,10 @@ pub struct App {
     prompt: Option<Prompt>,
     pub frame: usize,
     pub mouse_capture: bool,
+    /// Account-level usage payload (`/teams/me/usage` data), when fetched.
+    pub account_usage: Option<serde_json::Value>,
+    /// When true the Usage tab renders the effective config instead ("/config").
+    pub usage_config_view: bool,
     resume_picker: Option<ResumePicker>,
     pub should_quit: bool,
 
@@ -254,6 +285,8 @@ impl App {
             prompt: None,
             frame: 0,
             mouse_capture: true,
+            account_usage: None,
+            usage_config_view: false,
             resume_picker: None,
             should_quit: false,
             area: Rect::new(0, 0, 80, 24),
@@ -349,6 +382,11 @@ impl App {
         }
     }
 
+    /// Deliver the fetched account usage payload (None = backend unavailable).
+    pub fn set_account_usage(&mut self, data: Option<serde_json::Value>) {
+        self.account_usage = data;
+    }
+
     pub fn set_status(&mut self, s: impl Into<String>) {
         self.status = s.into();
     }
@@ -396,6 +434,7 @@ impl App {
         match self.tab() {
             "Context" => Some(Cmd::InspectContext),
             "Memory" => Some(Cmd::LoadMemory),
+            "Usage" => Some(Cmd::LoadUsage),
             _ => None,
         }
     }
@@ -663,6 +702,13 @@ impl App {
                 self.tab_index = (self.tab_index + TABS.len() - 1) % TABS.len();
                 self.selected = 0;
                 return self.tab_enter_cmd();
+            }
+            KeyCode::Char('r') if tab == "Usage" && !self.usage_config_view => {
+                self.set_status("Usage · refreshing…");
+                return Some(Cmd::LoadUsage);
+            }
+            KeyCode::Char('c') if tab == "Usage" => {
+                self.usage_config_view = !self.usage_config_view;
             }
             KeyCode::PageUp if tab == "Chat" => {
                 self.chat_scroll += self.visible_count().saturating_sub(1).max(1);
@@ -1076,7 +1122,15 @@ impl App {
                     self.set_status("View reset (runtime history is retained)");
                 }
                 "help" => self.tab_index = tab_pos("Help"),
-                "config" => self.tab_index = tab_pos("Config"),
+                "config" => {
+                    self.tab_index = tab_pos("Usage");
+                    self.usage_config_view = true;
+                }
+                "usage" => {
+                    self.tab_index = tab_pos("Usage");
+                    self.usage_config_view = false;
+                    return Some(Cmd::LoadUsage);
+                }
                 "memory" | "mem" => {
                     self.tab_index = tab_pos("Memory");
                     // Preserve original case for the query.
@@ -1288,7 +1342,7 @@ impl App {
             "Trace" => self.draw_trace(f, area),
             "Context" => self.draw_context(f, area),
             "Memory" => self.draw_memory(f, area),
-            "Config" => self.draw_config(f, area),
+            "Usage" => self.draw_usage(f, area),
             _ => self.draw_help(f, area),
         }
     }
@@ -2346,6 +2400,133 @@ impl App {
                 (format!("{} · {}", hit.facet, hit.tier), body)
             }
         }
+    }
+
+    /// Per-tier and per-task token totals folded from the live event stream.
+    fn usage_fold(&self) -> UsageFold {
+        let mut fold = UsageFold::default();
+        for env in &self.snapshot.events {
+            match &env.event {
+                TuiEvent::InferenceStart { tier, .. } => {
+                    fold.tier_mut(tier).calls += 1;
+                }
+                TuiEvent::InferenceEnd { tier, usage, .. } => {
+                    if let Some(u) = usage {
+                        let t = fold.tier_mut(tier);
+                        t.input_tokens += u.input_tokens;
+                        t.output_tokens += u.output_tokens;
+                    }
+                }
+                TuiEvent::TaskComplete { digest } => {
+                    if let Some(u) = &digest.usage {
+                        fold.subagent.input_tokens += u.input_tokens;
+                        fold.subagent.output_tokens += u.output_tokens;
+                        fold.subagent.calls += 1;
+                        fold.tasks
+                            .push((digest.task_id.clone(), u.input_tokens, u.output_tokens));
+                    }
+                }
+                _ => {}
+            }
+        }
+        fold
+    }
+
+    fn draw_usage(&mut self, f: &mut Frame, area: Rect) {
+        if self.usage_config_view {
+            self.draw_config(f, area);
+            return;
+        }
+        let fold = self.usage_fold();
+        let dim = Style::default().add_modifier(Modifier::DIM);
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let mut lines: Vec<TLine> = Vec::new();
+        lines.push(TLine::from(Span::styled("This session", bold)));
+        let mut tiers: Vec<(&String, &TierUsage)> = fold.tiers.iter().collect();
+        tiers.sort_by(|a, b| a.0.cmp(b.0));
+        if tiers.is_empty() && fold.subagent.calls == 0 {
+            lines.push(TLine::from(Span::styled("no model calls yet", dim)));
+        }
+        for (tier, t) in tiers {
+            lines.push(TLine::from(format!(
+                "{tier:<14} in {:<10} out {:<10} calls {}",
+                t.input_tokens, t.output_tokens, t.calls
+            )));
+        }
+        if fold.subagent.calls > 0 {
+            lines.push(TLine::from(format!(
+                "{:<14} in {:<10} out {:<10} tasks {}",
+                "sub-agents",
+                fold.subagent.input_tokens,
+                fold.subagent.output_tokens,
+                fold.subagent.calls
+            )));
+            for (task, input, output) in fold.tasks.iter().take(12) {
+                lines.push(TLine::from(Span::styled(
+                    format!("  {} in {input} out {output}", clip(task, 28)),
+                    dim,
+                )));
+            }
+        }
+        lines.push(TLine::from(""));
+        lines.push(TLine::from(Span::styled("Account", bold)));
+        match &self.account_usage {
+            None => lines.push(TLine::from(Span::styled(
+                "account usage requires backend login (medulla login) · r to refresh",
+                dim,
+            ))),
+            Some(data) => {
+                let g = |path: &[&str]| -> Option<serde_json::Value> {
+                    let mut cur = data;
+                    for key in path {
+                        cur = cur.get(key)?;
+                    }
+                    Some(cur.clone())
+                };
+                if let Some(plan) = g(&["plan"]).and_then(|v| v.as_str().map(str::to_string)) {
+                    lines.push(TLine::from(format!("plan       {plan}")));
+                }
+                if let Some(spent) = g(&["inferenceTotals", "spent"]).and_then(|v| v.as_f64()) {
+                    let calls = g(&["inferenceTotals", "calls"])
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    lines.push(TLine::from(format!(
+                        "cycle      ${spent:.4} spent · {calls} calls"
+                    )));
+                }
+                if let Some(remaining) = g(&["remainingUsd"]).and_then(|v| v.as_f64()) {
+                    lines.push(TLine::from(format!("remaining  ${remaining:.4}")));
+                }
+                if let Some(models) = g(&["inferenceByModel"]).and_then(|v| match v {
+                    serde_json::Value::Array(rows) => Some(rows),
+                    _ => None,
+                }) {
+                    for row in models.iter().take(8) {
+                        let model = row
+                            .get("model")
+                            .or_else(|| row.get("_id"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?");
+                        let spent = row.get("spent").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        lines.push(TLine::from(Span::styled(
+                            format!("  {model:<24} ${spent:.4}"),
+                            dim,
+                        )));
+                    }
+                }
+            }
+        }
+        lines.push(TLine::from(""));
+        lines.push(TLine::from(Span::styled(
+            "r refresh · c effective config (/config)",
+            dim,
+        )));
+        f.render_widget(
+            Paragraph::new(Text::from(lines))
+                .wrap(Wrap { trim: false })
+                .block(self.panel("Usage")),
+            area,
+        );
     }
 
     fn draw_config(&mut self, f: &mut Frame, area: Rect) {

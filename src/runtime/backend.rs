@@ -412,6 +412,11 @@ impl Runtime for BackendRuntime {
         format!("backend {}", self.client.base_url())
     }
 
+    fn team_usage(&self) -> BoxFuture<'static, anyhow::Result<Option<serde_json::Value>>> {
+        let client = self.client.clone();
+        Box::pin(async move { Ok(Some(client.team_usage().await?)) })
+    }
+
     fn snapshot(&self) -> RuntimeSnapshot {
         let s = self.state.lock().unwrap();
         let threads = s.thread_summaries();

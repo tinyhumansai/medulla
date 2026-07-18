@@ -469,6 +469,23 @@ async fn me_carries_bearer_and_unwraps() {
 }
 
 #[tokio::test]
+async fn team_usage_fetches_and_unwraps() {
+    let data = json!({
+        "plan": "pro",
+        "inferenceTotals": { "spent": 1.5, "calls": 3 },
+        "remainingUsd": 4.5,
+    });
+    let (base, req) = spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", data)).await;
+    let client = MedullaClient::new(base, "jwt-abc");
+    let usage = client.team_usage().await.unwrap();
+    assert_eq!(usage["plan"], json!("pro"));
+    assert_eq!(usage["inferenceTotals"]["calls"], json!(3));
+    let sent = req.await.unwrap();
+    assert!(sent.starts_with("GET /teams/me/usage"), "{sent}");
+    assert!(sent.contains("authorization: Bearer jwt-abc"), "{sent}");
+}
+
+#[tokio::test]
 async fn list_sessions_decodes_rows() {
     let data = json!([
         { "sessionId": "s1", "title": "One", "status": "active", "lastSeq": 4 },

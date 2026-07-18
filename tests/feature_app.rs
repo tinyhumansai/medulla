@@ -149,7 +149,14 @@ fn slash_help_and_config_switch_tabs() {
     let _ = submit_line(&mut app, "/help");
     assert_eq!(app.tab(), "Help");
     let _ = submit_line(&mut app, "/config");
-    assert_eq!(app.tab(), "Config");
+    assert_eq!(app.tab(), "Usage");
+    // /config lands on the Usage tab showing the effective config.
+    let out = render(&mut app, 200, 50);
+    assert!(out.contains("Configuration ·"), "config view: {out}");
+    // /usage flips back to the usage view.
+    let _ = submit_line(&mut app, "/usage");
+    let out = render(&mut app, 200, 50);
+    assert!(out.contains("This session"), "usage view: {out}");
 }
 
 #[test]
@@ -234,7 +241,7 @@ fn each_tab_renders_its_signature() {
         ("Agents", "Agents ·"),
         ("Trace", "Trace ·"),
         ("Context", "Environment ·"),
-        ("Config", "Configuration ·"),
+        ("Usage", "Usage"),
     ];
     for (name, sig) in signatures {
         let (mut app, _rt) = demo_app();
@@ -443,12 +450,12 @@ fn ctrl_y_copies_transcript_via_captured_clipboard() {
 
 #[test]
 fn config_tab_annotates_token_env_presence() {
-    // Present env → "(set)".
+    // Present env → "(set)". The config view lives behind /config on Usage.
     let set_var = "MEDULLA_FEATURE_TEST_TOKEN_SET";
     std::env::set_var(set_var, "x");
     let (mut app, _rt) = empty_app();
     app.loaded.config.backend.token_env = set_var.into();
-    app.tab_index = TABS.iter().position(|t| *t == "Config").unwrap();
+    let _ = submit_line(&mut app, "/config");
     let out = render(&mut app, 200, 50);
     assert!(out.contains("(set)"), "expected (set) annotation");
     std::env::remove_var(set_var);
@@ -458,7 +465,7 @@ fn config_tab_annotates_token_env_presence() {
     std::env::remove_var(missing_var);
     let (mut app, _rt) = empty_app();
     app.loaded.config.backend.token_env = missing_var.into();
-    app.tab_index = TABS.iter().position(|t| *t == "Config").unwrap();
+    let _ = submit_line(&mut app, "/config");
     let out = render(&mut app, 200, 50);
     assert!(out.contains("(missing)"), "expected (missing) annotation");
 }

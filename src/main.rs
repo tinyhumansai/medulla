@@ -49,6 +49,7 @@ enum AppMsg {
         status: Option<medulla::memory::MemoryStatus>,
         directives: Vec<String>,
     },
+    UsageLoaded(Option<serde_json::Value>),
     MemoryResults {
         hits: Vec<medulla::memory::MemoryHit>,
         query: String,
@@ -727,6 +728,7 @@ async fn run(
                 match msg {
                     AppMsg::Status(s) => { app.set_status(s); app.refresh_snapshot(); }
                     AppMsg::Contexts(c) => app.set_contexts(c),
+                    AppMsg::UsageLoaded(data) => app.set_account_usage(data),
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
                     AppMsg::Resumed(s) => {
                         app.tab_index = TABS.iter().position(|t| *t == "Chat").unwrap_or(1);
@@ -822,6 +824,20 @@ fn run_cmd(
                     Err(e) => e.to_string(),
                 };
                 let _ = tx.send(AppMsg::Status(status));
+            });
+        }
+        Cmd::LoadUsage => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                match rt.team_usage().await {
+                    Ok(data) => {
+                        let _ = tx.send(AppMsg::UsageLoaded(data));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppMsg::Status(format!("usage fetch failed: {e}")));
+                    }
+                }
             });
         }
         // Memory queries are synchronous but touch SQLite, so run them off the UI

@@ -142,6 +142,15 @@ impl MedullaClient {
         self.send(req).await
     }
 
+    /// Account-level token usage for the active team/user
+    /// (`GET /teams/me/usage`): cycle window, spend, per-model breakdown,
+    /// remaining budget, plan. Returned as raw JSON — the shape is rendered
+    /// defensively by the UI.
+    pub async fn team_usage(&self) -> Result<Value> {
+        let req = self.authed(self.http.get(self.url("/teams/me/usage")));
+        self.send(req).await
+    }
+
     // --- Sessions --------------------------------------------------------
 
     /// Create a durable session (`POST /medulla/v1/sessions`).

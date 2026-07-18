@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+echo "Checking Rust formatting..."
+cargo fmt --all -- --check
+
+echo "Running Clippy..."
+cargo clippy --locked --all-targets -- -D warnings

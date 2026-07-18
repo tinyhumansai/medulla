@@ -2,6 +2,18 @@
 
 How to build and run the `medulla` TUI locally from this repo.
 
+## Initialize the repository
+
+Run the initialization target once after cloning:
+
+```sh
+make init
+```
+
+This initializes vendored submodules, installs the Rustfmt and Clippy components,
+fetches locked dependencies, and enables the repository's pre-push hook. The hook
+checks Rust formatting and runs Clippy with warnings denied.
+
 ## Prerequisites
 
 - Rust stable (edition 2021) via [rustup](https://rustup.rs/)

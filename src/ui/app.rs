@@ -2410,12 +2410,14 @@ impl App {
                 TuiEvent::InferenceStart { tier, .. } => {
                     fold.tier_mut(tier).calls += 1;
                 }
-                TuiEvent::InferenceEnd { tier, usage, .. } => {
-                    if let Some(u) = usage {
-                        let t = fold.tier_mut(tier);
-                        t.input_tokens += u.input_tokens;
-                        t.output_tokens += u.output_tokens;
-                    }
+                TuiEvent::InferenceEnd {
+                    tier,
+                    usage: Some(u),
+                    ..
+                } => {
+                    let t = fold.tier_mut(tier);
+                    t.input_tokens += u.input_tokens;
+                    t.output_tokens += u.output_tokens;
                 }
                 TuiEvent::TaskComplete { digest } => {
                     if let Some(u) = &digest.usage {

@@ -44,6 +44,10 @@ pub struct MockConfig {
     pub sessions_list: Value,
     pub messages_replay: Value,
     pub session_event_seq: i64,
+    /// When true, every `POST /sessions` returns a distinct id
+    /// (`<created_session_id>-<n>`) so forked/new threads don't collide on one
+    /// session id (which would make the SSE fold route ambiguously).
+    pub unique_sessions: bool,
 }
 
 impl Default for MockConfig {
@@ -54,6 +58,7 @@ impl Default for MockConfig {
             sessions_list: json!([]),
             messages_replay: json!([]),
             session_event_seq: 0,
+            unique_sessions: false,
         }
     }
 }
@@ -61,10 +66,14 @@ impl Default for MockConfig {
 struct MockState {
     requests: Mutex<Vec<RecordedRequest>>,
     config: Mutex<MockConfig>,
-    sse_log: Mutex<Vec<String>>,
+    /// Each entry is `(target_session, chunk)`. `None` targets every open stream
+    /// (comment/heartbeat frames); `Some(id)` only the stream for that session, so
+    /// multi-session tests don't see cross-session replay.
+    sse_log: Mutex<Vec<(Option<String>, String)>>,
     append: broadcast::Sender<()>,
     close: broadcast::Sender<()>,
     stream_conns: AtomicUsize,
+    session_counter: AtomicUsize,
 }
 
 /// A running mock backend. Drop it to stop the acceptor.
@@ -99,6 +108,7 @@ impl MockBackend {
             append,
             close,
             stream_conns: AtomicUsize::new(0),
+            session_counter: AtomicUsize::new(0),
         });
         let accept_state = state.clone();
         let accept = tokio::spawn(async move {
@@ -135,17 +145,21 @@ impl MockBackend {
             "event": event,
         });
         let chunk = format!("id: {seq}\ndata: {envelope}\n\n");
-        self.state.sse_log.lock().unwrap().push(chunk);
+        self.state
+            .sse_log
+            .lock()
+            .unwrap()
+            .push((Some(session.to_string()), chunk));
         let _ = self.state.append.send(());
     }
 
-    /// Append a heartbeat comment frame.
+    /// Append a heartbeat comment frame (delivered to every open stream).
     pub fn emit_ping(&self) {
         self.state
             .sse_log
             .lock()
             .unwrap()
-            .push(": ping\n\n".to_string());
+            .push((None, ": ping\n\n".to_string()));
         let _ = self.state.append.send(());
     }
 
@@ -201,17 +215,21 @@ async fn handle_conn(mut sock: TcpStream, state: Arc<MockState>) -> std::io::Res
     let route_path = path.split('?').next().unwrap_or(&path).to_string();
 
     if method == "GET" && route_path.ends_with("/stream") {
-        serve_stream(sock, state).await;
+        let session = session_id_from(&route_path);
+        serve_stream(sock, state, session).await;
         return Ok(());
     }
 
     let config = state.config.lock().unwrap().clone();
     let (status, data): (&str, Value) = if route_path == "/medulla/v1/sessions" && method == "POST"
     {
-        (
-            "201 Created",
-            json!({ "sessionId": config.created_session_id }),
-        )
+        let id = if config.unique_sessions {
+            let n = state.session_counter.fetch_add(1, Ordering::SeqCst) + 1;
+            format!("{}-{}", config.created_session_id, n)
+        } else {
+            config.created_session_id.clone()
+        };
+        ("201 Created", json!({ "sessionId": id }))
     } else if route_path == "/medulla/v1/sessions" && method == "GET" {
         ("200 OK", config.sessions_list.clone())
     } else if route_path.ends_with("/messages") && method == "POST" {
@@ -268,7 +286,7 @@ async fn respond_raw(sock: &mut TcpStream, status: &str, body: &str) -> std::io:
     Ok(())
 }
 
-async fn serve_stream(mut sock: TcpStream, state: Arc<MockState>) {
+async fn serve_stream(mut sock: TcpStream, state: Arc<MockState>, session: String) {
     state.stream_conns.fetch_add(1, Ordering::SeqCst);
     let mut append_rx = state.append.subscribe();
     let mut close_rx = state.close.subscribe();
@@ -280,16 +298,23 @@ async fn serve_stream(mut sock: TcpStream, state: Arc<MockState>) {
 
     let mut sent = 0usize;
     loop {
-        let chunks: Vec<String> = {
+        // Walk the whole log so per-session cursors stay independent, emitting only
+        // the frames addressed to this stream (or broadcast to all).
+        let (chunks, len): (Vec<String>, usize) = {
             let log = state.sse_log.lock().unwrap();
-            log[sent.min(log.len())..].to_vec()
+            let chunks = log[sent.min(log.len())..]
+                .iter()
+                .filter(|(target, _)| target.as_deref().is_none_or(|t| t == session))
+                .map(|(_, chunk)| chunk.clone())
+                .collect();
+            (chunks, log.len())
         };
         for chunk in &chunks {
             if sock.write_all(chunk.as_bytes()).await.is_err() {
                 return;
             }
         }
-        sent += chunks.len();
+        sent = len;
         let _ = sock.flush().await;
 
         tokio::select! {

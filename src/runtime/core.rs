@@ -265,6 +265,9 @@ struct State {
     resyncing: bool,
     /// Wall-clock of the last folded event, for the stall guard.
     last_event_at: i64,
+    /// Silence threshold (ms) before a running cycle reads as stalled. Defaults to
+    /// [`STALL_MS`]; a test seam ([`CoreRuntime::set_stall_ms`]) can shorten it.
+    stall_ms: i64,
     async_mode: bool,
 }
 
@@ -405,6 +408,7 @@ impl CoreRuntime {
             workers: Vec::new(),
             resyncing: false,
             last_event_at: now_millis(),
+            stall_ms: STALL_MS,
             async_mode: false,
         };
 
@@ -454,6 +458,14 @@ impl CoreRuntime {
 
     fn ping(&self) {
         let _ = self.tx.send(());
+    }
+
+    /// Test seam: shorten the stall-detection threshold (ms). No behavior change at
+    /// the [`STALL_MS`] default; exists so tests can exercise the `Stalled` state
+    /// without waiting out the production silence window.
+    #[doc(hidden)]
+    pub fn set_stall_ms(&self, ms: i64) {
+        self.state.lock().unwrap().stall_ms = ms;
     }
 
     /// The connection-wide fold loop: route each event to its thread, detect `seq`
@@ -1008,7 +1020,7 @@ impl Runtime for CoreRuntime {
         if s.resyncing {
             return Some(StreamState::Resyncing);
         }
-        if s.active().running && now_millis() - s.last_event_at > STALL_MS {
+        if s.active().running && now_millis() - s.last_event_at > s.stall_ms {
             return Some(StreamState::Stalled);
         }
         Some(StreamState::Live)

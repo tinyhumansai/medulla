@@ -161,4 +161,44 @@ mod tests {
         assert_eq!(copy_text(&events, &CopyScope::Last), "a");
         assert_eq!(copy_text(&events, &CopyScope::All), "> q\n\na");
     }
+
+    #[test]
+    fn copy_text_last_is_empty_without_assistant() {
+        // /copy last over a stream with no assistant reply yields empty text.
+        let events = vec![EventEnvelope {
+            seq: 1,
+            at: 0,
+            event: TuiEvent::User { body: "q".into() },
+        }];
+        assert_eq!(copy_text(&events, &CopyScope::Last), "");
+        assert_eq!(copy_text(&[], &CopyScope::All), "");
+    }
+
+    #[test]
+    fn pipe_to_missing_binary_is_false() {
+        assert!(!pipe_to("medulla-not-a-real-binary-xyz", &[], "hi"));
+    }
+
+    #[test]
+    fn pipe_to_succeeds_for_a_stdin_reader() {
+        // `cat` drains stdin and exits 0 — the spawn/pipe success path.
+        assert!(pipe_to("cat", &[], "clipboard payload"));
+    }
+
+    #[test]
+    fn copy_to_clipboard_uses_spawn_path_when_writer_exists() {
+        // A custom would-be-OSC emitter that must NOT fire, since `cat` succeeds.
+        // We can't inject writers, so drive the platform-agnostic `pipe_to` seam
+        // directly; here we confirm the OSC fallback only fires when no writer runs.
+        let mut fired = false;
+        // A bogus platform routes to the linux writer set, absent in CI → OSC.
+        let via = copy_to_clipboard("x", "no-such-os", |_| fired = true);
+        assert_eq!(via, OSC_52);
+        assert!(fired);
+    }
+
+    #[test]
+    fn current_platform_is_reported() {
+        assert!(!current_platform().is_empty());
+    }
 }

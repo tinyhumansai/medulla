@@ -242,4 +242,74 @@ mod tests {
         let backend = BackendConfig::default();
         assert_eq!(resolve_backend_token(&empty, &backend), None);
     }
+
+    #[test]
+    fn backend_token_ignores_empty_env_value() {
+        let mut env = HashMap::new();
+        env.insert("MEDULLA_TOKEN".to_string(), String::new());
+        let backend = BackendConfig::default();
+        // An empty env value is treated as absent.
+        assert_eq!(resolve_backend_token(&env, &backend), None);
+    }
+
+    #[test]
+    fn missing_token_note_names_the_env_var() {
+        let backend = BackendConfig::default();
+        let note = missing_token_note(&backend);
+        assert!(note.contains("MEDULLA_TOKEN"));
+        assert!(note.contains("mock runtime"));
+    }
+
+    #[test]
+    fn help_text_carries_crate_version() {
+        let text = help_text();
+        assert!(text.contains(env!("CARGO_PKG_VERSION")));
+        assert!(text.contains("medulla daemon"));
+        assert!(text.contains("--core"));
+    }
+
+    #[test]
+    fn sessions_json_is_valid_json_array() {
+        // Point the scan dirs at an empty temp path so the result is deterministic
+        // ([]), independent of the developer's real ~/.claude / ~/.codex history.
+        let tmp = std::env::temp_dir().join(format!("medulla-cli-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut env = HashMap::new();
+        env.insert(
+            "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+            tmp.join("claude").to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+            tmp.join("codex").to_string_lossy().into_owned(),
+        );
+        let json = sessions_json(&env, tmp.to_str().unwrap()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_array());
+        assert_eq!(parsed.as_array().unwrap().len(), 0);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn tui_args_default_and_debug() {
+        let d = TuiArgs::default();
+        assert_eq!(d.config, "medulla.tui.json");
+        assert!(d.alt_screen);
+        assert!(!d.core);
+        // Command derives Debug/Eq for assertions.
+        assert!(format!("{:?}", Command::Tui).contains("Tui"));
+        assert_ne!(Command::Tui, Command::Daemon);
+    }
+
+    #[test]
+    fn core_plan_connects_via_state_dir_when_no_config_socket() {
+        // resolve_socket_path falls back to <stateDir>/core.sock.
+        let plan = core_socket_plan(true, None, None, Some("/var/lib/medulla"), |_| true);
+        match plan {
+            CorePlan::Connect(path) => {
+                assert!(path.ends_with("core.sock"));
+            }
+            other => panic!("expected connect, got {other:?}"),
+        }
+    }
 }

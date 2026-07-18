@@ -994,4 +994,341 @@ mod tests {
         assert_eq!(session.harness_label.as_deref(), Some("CODEX"));
         assert_eq!(session.label, "[CODEX] ↳ s1");
     }
+
+    #[test]
+    fn task_status_from_wire_maps_all_states() {
+        assert_eq!(TaskStatus::from_wire("done"), TaskStatus::Done);
+        assert_eq!(TaskStatus::from_wire("cancelled"), TaskStatus::Cancelled);
+        assert_eq!(TaskStatus::from_wire("failed"), TaskStatus::Failed);
+        // Any unrecognized status is failed, never silently "done".
+        assert_eq!(TaskStatus::from_wire("weird"), TaskStatus::Failed);
+    }
+
+    #[test]
+    fn task_status_labels_and_colors() {
+        for (s, label, color) in [
+            (TaskStatus::Running, "running", "yellow"),
+            (TaskStatus::Done, "done", "green"),
+            (TaskStatus::Failed, "failed", "red"),
+            (TaskStatus::Cancelled, "cancelled", "gray"),
+        ] {
+            assert_eq!(s.label(), label);
+            assert_eq!(s.color(), color);
+        }
+    }
+
+    #[test]
+    fn agent_role_color_and_function() {
+        assert_eq!(AgentRole::Orchestrator.color(), "yellow");
+        assert_eq!(AgentRole::Reasoning.color(), "yellow");
+        assert_eq!(AgentRole::Compress.color(), "blue");
+        assert_eq!(AgentRole::Worker.color(), "magenta");
+        assert!(AgentRole::Compress.is_function());
+        assert!(!AgentRole::Worker.is_function());
+        assert!(!AgentRole::Orchestrator.is_function());
+    }
+
+    #[test]
+    fn parse_task_key_splits_cycle_and_bare() {
+        assert_eq!(parse_task_key("cyc-1/t:task-9"), (Some("cyc-1"), "task-9"));
+        assert_eq!(parse_task_key("task-9"), (None, "task-9"));
+    }
+
+    #[test]
+    fn ordered_tasks_puts_running_first_then_recency() {
+        let mk = |id: &str, status: TaskStatus, at: i64| TaskState {
+            task_id: id.into(),
+            status,
+            turns: 0,
+            last_at: at,
+            turn_blocks: Vec::new(),
+            attention: None,
+            question_id: None,
+        };
+        let tasks = vec![
+            mk("done-old", TaskStatus::Done, 10),
+            mk("run-old", TaskStatus::Running, 20),
+            mk("done-new", TaskStatus::Done, 30),
+            mk("run-new", TaskStatus::Running, 40),
+        ];
+        let ordered = ordered_tasks(&tasks);
+        let ids: Vec<&str> = ordered.iter().map(|t| t.task_id.as_str()).collect();
+        // Running first (newest→oldest), then non-running (newest→oldest).
+        assert_eq!(ids, vec!["run-new", "run-old", "done-new", "done-old"]);
+    }
+
+    #[test]
+    fn task_attention_sets_question_and_completion_clears_it() {
+        let events = vec![
+            env(
+                1,
+                TuiEvent::TaskStart {
+                    task_id: "t1".into(),
+                    instruction: "work".into(),
+                    depth: 2,
+                    agent_id: None,
+                },
+            ),
+            env(
+                2,
+                TuiEvent::TaskAttention {
+                    task_id: "t1".into(),
+                    reason: "confirm".into(),
+                    content: "proceed?".into(),
+                    question_id: Some("q9".into()),
+                },
+            ),
+        ];
+        let lanes = derive_agent_lanes(&events, "OPENCODE", &[]);
+        let worker = lanes.iter().find(|l| l.key == "worker:t1").unwrap();
+        assert_eq!(
+            worker.tasks[0].attention.as_deref(),
+            Some("confirm: proceed?")
+        );
+        assert_eq!(worker.tasks[0].question_id.as_deref(), Some("q9"));
+
+        // Completing the task clears the pending question and attention.
+        let mut events = events;
+        events.push(env(
+            3,
+            TuiEvent::TaskComplete {
+                digest: TaskDigest {
+                    task_id: "t1".into(),
+                    status: "cancelled".into(),
+                    digest: String::new(),
+                    result_ref: None,
+                    usage: None,
+                    depth: 2,
+                },
+            },
+        ));
+        let lanes = derive_agent_lanes(&events, "OPENCODE", &[]);
+        let worker = lanes.iter().find(|l| l.key == "worker:t1").unwrap();
+        assert_eq!(worker.tasks[0].status, TaskStatus::Cancelled);
+        assert!(worker.tasks[0].attention.is_none());
+        assert!(worker.tasks[0].question_id.is_none());
+    }
+
+    #[test]
+    fn task_complete_without_start_still_builds_a_lane() {
+        // §3.3(4): a completion whose start was evicted must not be dropped.
+        let events = vec![env(
+            5,
+            TuiEvent::TaskComplete {
+                digest: TaskDigest {
+                    task_id: "orphan".into(),
+                    status: "done".into(),
+                    digest: "ok".into(),
+                    result_ref: None,
+                    usage: None,
+                    depth: 2,
+                },
+            },
+        )];
+        let lanes = derive_agent_lanes(&events, "OPENCODE", &[]);
+        let worker = lanes.iter().find(|l| l.key == "worker:orphan").unwrap();
+        assert_eq!(worker.tasks.len(), 1);
+        assert_eq!(worker.tasks[0].status, TaskStatus::Done);
+    }
+
+    #[test]
+    fn session_event_folds_into_grouped_session_lane() {
+        let roster = vec![AgentDescriptor {
+            id: "m1".into(),
+            name: "Machine".into(),
+            description: String::new(),
+            availability: "online".into(),
+            tags: vec![],
+            metadata: serde_json::Map::new(),
+        }];
+        let events = vec![env(
+            1,
+            TuiEvent::SessionEvent {
+                agent_id: "m1".into(),
+                session_id: "s1".into(),
+                event_kind: "stdout".into(),
+                content: "building".into(),
+            },
+        )];
+        let lanes = derive_agent_lanes(&events, "TINYPLACE", &roster);
+        // The machine lane comes first, its session lane grouped immediately after.
+        let machine_pos = lanes.iter().position(|l| l.key == "agent:m1").unwrap();
+        let session_pos = lanes
+            .iter()
+            .position(|l| l.session_id.as_deref() == Some("s1"))
+            .unwrap();
+        assert_eq!(
+            session_pos,
+            machine_pos + 1,
+            "session groups under its machine"
+        );
+        let session = &lanes[session_pos];
+        assert_eq!(session.turns.len(), 1);
+        assert_eq!(session.turns[0].header, "stdout");
+    }
+
+    #[test]
+    fn roster_harness_metadata_tags_lane_label() {
+        let mut meta = serde_json::Map::new();
+        meta.insert("harness".into(), serde_json::json!("codex"));
+        let roster = vec![AgentDescriptor {
+            id: "dev".into(),
+            name: "Dev".into(),
+            description: String::new(),
+            availability: "online".into(),
+            tags: vec![],
+            metadata: meta,
+        }];
+        let lanes = derive_agent_lanes(&[], "TINYPLACE", &roster);
+        let dev = lanes.iter().find(|l| l.key == "agent:dev").unwrap();
+        // Its own harness (CODEX) wins over the global default.
+        assert_eq!(dev.label, "[CODEX] Dev");
+    }
+
+    #[test]
+    fn lane_lines_none_and_empty_and_flat() {
+        assert!(lane_lines(None, 40).is_empty());
+        // A tier lane with no turns renders the "No turns yet." placeholder.
+        let lanes = derive_agent_lanes(&[], "", &[]);
+        let lines = lane_lines(Some(&lanes[0]), 40);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].text.contains("No turns yet"));
+    }
+
+    #[test]
+    fn lane_lines_groups_agent_tasks_with_headers() {
+        let roster = vec![AgentDescriptor {
+            id: "dev".into(),
+            name: "Dev".into(),
+            description: String::new(),
+            availability: "online".into(),
+            tags: vec![],
+            metadata: serde_json::Map::new(),
+        }];
+        let events = vec![env(
+            1,
+            TuiEvent::TaskStart {
+                task_id: "t1".into(),
+                instruction: "do the thing".into(),
+                depth: 2,
+                agent_id: Some("dev".into()),
+            },
+        )];
+        let lanes = derive_agent_lanes(&events, "TINYPLACE", &roster);
+        let dev = lanes.iter().find(|l| l.key == "agent:dev").unwrap();
+        let lines = lane_lines(Some(dev), 60);
+        // A per-task header divider precedes the turn body.
+        assert!(lines.iter().any(|l| l.text.contains("── t1 · running")));
+    }
+
+    #[test]
+    fn task_lines_empty_and_populated() {
+        let empty = TaskState {
+            task_id: "t1".into(),
+            status: TaskStatus::Running,
+            turns: 0,
+            last_at: 0,
+            turn_blocks: Vec::new(),
+            attention: None,
+            question_id: None,
+        };
+        let lines = task_lines(&empty, 40);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].text.contains("No turns yet"));
+
+        let mut task = empty;
+        task.turn_blocks.push(TurnBlock {
+            at: 1000,
+            header: "text".into(),
+            header_color: Some("green".into()),
+            reasoning: Some("thinking hard".into()),
+            content: Some("the output".into()),
+            tools: vec!["→ grep({})".into()],
+        });
+        let lines = task_lines(&task, 60);
+        // Header, thinking, output, and tools sections all render.
+        let joined: String = lines
+            .iter()
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+            .join("|");
+        assert!(joined.contains("thinking"));
+        assert!(joined.contains("output"));
+        assert!(joined.contains("tools"));
+    }
+
+    #[test]
+    fn tool_line_truncates_long_args() {
+        let big = serde_json::json!({ "blob": "x".repeat(500) });
+        let line = tool_line("write", &big);
+        assert!(line.starts_with("→ write("));
+        assert!(line.ends_with(')'));
+        assert!(line.contains('…'), "long args should be ellipsized");
+        assert!(line.chars().count() <= 220);
+    }
+
+    #[test]
+    fn event_kind_color_maps_known_kinds() {
+        assert_eq!(event_kind_color("tool"), Some("blue"));
+        assert_eq!(event_kind_color("prompt"), Some("cyan"));
+        assert_eq!(event_kind_color("stdout"), Some("gray"));
+        assert_eq!(event_kind_color("stderr"), Some("red"));
+        assert_eq!(event_kind_color("error"), Some("red"));
+        assert_eq!(event_kind_color("text"), Some("green"));
+        assert_eq!(event_kind_color("thinking"), Some("yellow"));
+        assert_eq!(event_kind_color("mystery"), None);
+    }
+
+    #[test]
+    fn agent_row_helpers_lane_index_and_selectable() {
+        assert_eq!(AgentRow::Separator.lane_index(), None);
+        assert!(!AgentRow::Separator.selectable());
+        assert_eq!(AgentRow::Lane { lane_index: 3 }.lane_index(), Some(3));
+        assert!(AgentRow::Lane { lane_index: 3 }.selectable());
+        assert_eq!(
+            AgentRow::More {
+                lane_index: 2,
+                hidden: 4
+            }
+            .lane_index(),
+            Some(2)
+        );
+        assert!(!AgentRow::More {
+            lane_index: 2,
+            hidden: 4
+        }
+        .selectable());
+    }
+
+    #[test]
+    fn peer_session_state_colors_and_ended_marker() {
+        let events = vec![
+            env(
+                1,
+                TuiEvent::PeerSession {
+                    agent_id: "m1".into(),
+                    session_id: "s1".into(),
+                    state: "idle".into(),
+                    harness: None,
+                },
+            ),
+            env(
+                2,
+                TuiEvent::PeerSession {
+                    agent_id: "m1".into(),
+                    session_id: "s1".into(),
+                    state: "ended".into(),
+                    harness: None,
+                },
+            ),
+        ];
+        let lanes = derive_agent_lanes(&events, "TINYPLACE", &[]);
+        let session = lanes
+            .iter()
+            .find(|l| l.session_id.as_deref() == Some("s1"))
+            .unwrap();
+        assert_eq!(session.turns.len(), 2);
+        assert_eq!(session.turns[0].header_color.as_deref(), Some("green"));
+        assert_eq!(session.turns[1].header_color.as_deref(), Some("red"));
+    }
 }

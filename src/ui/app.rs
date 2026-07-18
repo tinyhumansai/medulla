@@ -269,6 +269,25 @@ impl App {
         self.resume_picker.is_some()
     }
 
+    /// Whether an inline prompt overlay (Workers add/edit, Agents answer) is open,
+    /// and its current draft text. Test/inspection seam.
+    pub fn prompt_state(&self) -> Option<(String, String)> {
+        self.prompt
+            .as_ref()
+            .map(|p| (p.title.clone(), p.draft.text.clone()))
+    }
+
+    /// The `task_id` of the currently selected Agents-list task row, if any.
+    /// Test/inspection seam for the X/A steering flows.
+    pub fn selected_task_id(&self) -> Option<String> {
+        self.selected_agent_task().map(|t| t.task_id)
+    }
+
+    /// The active worker-selection index. Test/inspection seam.
+    pub fn worker_index(&self) -> usize {
+        self.worker_index
+    }
+
     /// Route `copy_chat` into a captured sink instead of the OS clipboard, and
     /// return that sink. Test-only: keeps `pbcopy`/OSC 52 out of the test run.
     pub fn capture_clipboard(&mut self) -> Arc<std::sync::Mutex<Vec<String>>> {

@@ -625,4 +625,507 @@ mod tests {
         let back: TuiEvent = serde_json::from_str(&s).unwrap();
         assert_eq!(ev, back);
     }
+
+    /// One representative JSON per kind, exercising every deserialize arm.
+    fn one_of_each() -> Vec<(&'static str, TuiEvent)> {
+        vec![
+            (
+                "inference_start",
+                TuiEvent::InferenceStart {
+                    tier: "orchestrator".into(),
+                    op: "orchestrate".into(),
+                    model: Some("m".into()),
+                },
+            ),
+            (
+                "inference_end",
+                TuiEvent::InferenceEnd {
+                    tier: "reasoning".into(),
+                    op: "step".into(),
+                    model: None,
+                    duration_ms: 5,
+                    usage: None,
+                    content: Some("c".into()),
+                    reasoning: Some("r".into()),
+                    tool_calls: Some(vec![ToolCall {
+                        name: "grep".into(),
+                        args: json!({"q": 1}),
+                    }]),
+                },
+            ),
+            (
+                "tool_call_start",
+                TuiEvent::ToolCallStart {
+                    index: 2,
+                    name: "read".into(),
+                },
+            ),
+            (
+                "tool_call_delta",
+                TuiEvent::ToolCallDelta {
+                    index: 2,
+                    args_delta: "{\"a\":".into(),
+                },
+            ),
+            (
+                "assistant_delta",
+                TuiEvent::AssistantDelta { delta: "x".into() },
+            ),
+            (
+                "reasoning_delta",
+                TuiEvent::ReasoningDelta { delta: "y".into() },
+            ),
+            (
+                "task_start",
+                TuiEvent::TaskStart {
+                    task_id: "t1".into(),
+                    instruction: "do".into(),
+                    depth: 2,
+                    agent_id: Some("dev".into()),
+                },
+            ),
+            (
+                "task_event",
+                TuiEvent::TaskEvent {
+                    task_id: "t1".into(),
+                    event_kind: "text".into(),
+                    content: "hi".into(),
+                    harness: Some("codex".into()),
+                },
+            ),
+            (
+                "task_attention",
+                TuiEvent::TaskAttention {
+                    task_id: "t1".into(),
+                    reason: "confirm".into(),
+                    content: "proceed?".into(),
+                    question_id: Some("q1".into()),
+                },
+            ),
+            (
+                "task_complete",
+                TuiEvent::TaskComplete {
+                    digest: TaskDigest {
+                        task_id: "t1".into(),
+                        status: "done".into(),
+                        digest: "d".into(),
+                        result_ref: Some(json!({"ref": 1})),
+                        usage: Some(Usage {
+                            input_tokens: 1,
+                            output_tokens: 2,
+                        }),
+                        depth: 2,
+                    },
+                },
+            ),
+            (
+                "trace",
+                TuiEvent::Trace {
+                    entry: NodeTrace {
+                        node: "orchestrate".into(),
+                        ms: 12,
+                        tool: Some("grep".into()),
+                        op: None,
+                    },
+                },
+            ),
+            (
+                "error",
+                TuiEvent::Error {
+                    source: "cycle".into(),
+                    message: "boom".into(),
+                },
+            ),
+            (
+                "cycle_start",
+                TuiEvent::CycleStart {
+                    cycle_id: "c1".into(),
+                },
+            ),
+            (
+                "cycle_end",
+                TuiEvent::CycleEnd {
+                    cycle_id: "c1".into(),
+                    pass_count: 3,
+                    duration_ms: 99,
+                },
+            ),
+            (
+                "agent_status",
+                TuiEvent::AgentStatus {
+                    agent_id: "dev".into(),
+                    availability: "online".into(),
+                    detail: Some("idle".into()),
+                },
+            ),
+            (
+                "session_event",
+                TuiEvent::SessionEvent {
+                    agent_id: "m1".into(),
+                    session_id: "s1".into(),
+                    event_kind: "stdout".into(),
+                    content: "log".into(),
+                },
+            ),
+            (
+                "peer_session",
+                TuiEvent::PeerSession {
+                    agent_id: "m1".into(),
+                    session_id: "s1".into(),
+                    state: "working".into(),
+                    harness: Some("codex".into()),
+                },
+            ),
+            ("user", TuiEvent::User { body: "hey".into() }),
+            ("assistant", TuiEvent::Assistant { body: "yo".into() }),
+            (
+                "effect",
+                TuiEvent::Effect {
+                    effect: json!({"kind": "send"}),
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_kind_round_trips_and_reports_kind() {
+        for (kind, ev) in one_of_each() {
+            assert_eq!(ev.kind(), kind, "kind() mismatch for {kind}");
+            let s = serde_json::to_string(&ev).unwrap();
+            let back: TuiEvent = serde_json::from_str(&s).unwrap();
+            assert_eq!(ev, back, "round-trip mismatch for {kind}");
+            // describe_event never panics and is non-empty.
+            assert!(!describe_event(&ev).is_empty(), "empty describe for {kind}");
+        }
+    }
+
+    #[test]
+    fn describe_event_snapshots() {
+        let cases: Vec<(TuiEvent, &str)> = vec![
+            (
+                TuiEvent::CycleStart {
+                    cycle_id: "c1".into(),
+                },
+                "cycle started c1",
+            ),
+            (
+                TuiEvent::CycleEnd {
+                    cycle_id: "c1".into(),
+                    pass_count: 2,
+                    duration_ms: 40,
+                },
+                "cycle finished · 2 passes · 40ms",
+            ),
+            (
+                TuiEvent::InferenceStart {
+                    tier: "reasoning".into(),
+                    op: "step".into(),
+                    model: Some("gpt".into()),
+                },
+                "reasoning/step → gpt",
+            ),
+            (
+                // model None → falls back to tier name.
+                TuiEvent::InferenceStart {
+                    tier: "reasoning".into(),
+                    op: "step".into(),
+                    model: None,
+                },
+                "reasoning/step → reasoning",
+            ),
+            (
+                TuiEvent::InferenceEnd {
+                    tier: "reasoning".into(),
+                    op: "step".into(),
+                    model: None,
+                    duration_ms: 7,
+                    usage: None,
+                    content: None,
+                    reasoning: None,
+                    tool_calls: None,
+                },
+                "reasoning/step ← 7ms",
+            ),
+            (
+                TuiEvent::ToolCallStart {
+                    index: 3,
+                    name: "grep".into(),
+                },
+                "tool grep (call 3)",
+            ),
+            (
+                TuiEvent::ToolCallDelta {
+                    index: 3,
+                    args_delta: "abcd".into(),
+                },
+                "tool args +4b (call 3)",
+            ),
+            (
+                TuiEvent::AssistantDelta {
+                    delta: "hey".into(),
+                },
+                "assistant +3b",
+            ),
+            (
+                TuiEvent::ReasoningDelta { delta: "yo".into() },
+                "reasoning +2b",
+            ),
+            (
+                TuiEvent::TaskStart {
+                    task_id: "t1".into(),
+                    instruction: "x".into(),
+                    depth: 2,
+                    agent_id: None,
+                },
+                "t1 started · depth 2",
+            ),
+            (
+                TuiEvent::TaskEvent {
+                    task_id: "t1".into(),
+                    event_kind: "text".into(),
+                    content: "go".into(),
+                    harness: None,
+                },
+                "t1 · text: go",
+            ),
+            (
+                TuiEvent::TaskAttention {
+                    task_id: "t1".into(),
+                    reason: "confirm".into(),
+                    content: "ok?".into(),
+                    question_id: None,
+                },
+                "t1 needs attention · confirm: ok?",
+            ),
+            (
+                TuiEvent::AgentStatus {
+                    agent_id: "dev".into(),
+                    availability: "online".into(),
+                    detail: Some("idle".into()),
+                },
+                "agent dev · online · idle",
+            ),
+            (
+                // no detail → no trailing segment.
+                TuiEvent::AgentStatus {
+                    agent_id: "dev".into(),
+                    availability: "offline".into(),
+                    detail: None,
+                },
+                "agent dev · offline",
+            ),
+            (
+                TuiEvent::PeerSession {
+                    agent_id: "m1".into(),
+                    session_id: "s1".into(),
+                    state: "working".into(),
+                    harness: Some("codex".into()),
+                },
+                "session s1 on m1 · working · codex",
+            ),
+            (
+                TuiEvent::PeerSession {
+                    agent_id: "m1".into(),
+                    session_id: "s1".into(),
+                    state: "idle".into(),
+                    harness: None,
+                },
+                "session s1 on m1 · idle",
+            ),
+            (
+                TuiEvent::SessionEvent {
+                    agent_id: "m1".into(),
+                    session_id: "s1".into(),
+                    event_kind: "stdout".into(),
+                    content: "log".into(),
+                },
+                "s1 · stdout: log",
+            ),
+            (
+                TuiEvent::TaskComplete {
+                    digest: TaskDigest {
+                        task_id: "t1".into(),
+                        status: "done".into(),
+                        digest: String::new(),
+                        result_ref: None,
+                        usage: None,
+                        depth: 2,
+                    },
+                },
+                "t1 done",
+            ),
+            (
+                // trace with op fallback (no tool).
+                TuiEvent::Trace {
+                    entry: NodeTrace {
+                        node: "orchestrate".into(),
+                        ms: 5,
+                        tool: None,
+                        op: Some("delegate".into()),
+                    },
+                },
+                "orchestrate/delegate · 5ms",
+            ),
+            (
+                // trace with neither tool nor op.
+                TuiEvent::Trace {
+                    entry: NodeTrace {
+                        node: "compress".into(),
+                        ms: 8,
+                        tool: None,
+                        op: None,
+                    },
+                },
+                "compress · 8ms",
+            ),
+            (
+                TuiEvent::Effect {
+                    effect: json!({"kind": "send_message"}),
+                },
+                "effect send_message",
+            ),
+            (
+                // effect without a kind field → literal "effect".
+                TuiEvent::Effect {
+                    effect: json!({"target": "x"}),
+                },
+                "effect effect",
+            ),
+            (TuiEvent::User { body: "hi".into() }, "you: hi"),
+            (TuiEvent::Assistant { body: "ok".into() }, "assistant: ok"),
+            (
+                TuiEvent::Error {
+                    source: "cycle".into(),
+                    message: "boom".into(),
+                },
+                "cycle: boom",
+            ),
+            (
+                TuiEvent::Unknown {
+                    kind: "weird".into(),
+                    data: Map::new(),
+                },
+                "event weird",
+            ),
+        ];
+        for (ev, expected) in cases {
+            assert_eq!(describe_event(&ev), expected);
+        }
+    }
+
+    #[test]
+    fn trace_with_tool_prefers_tool_over_op() {
+        let ev = TuiEvent::Trace {
+            entry: NodeTrace {
+                node: "orchestrate".into(),
+                ms: 3,
+                tool: Some("grep".into()),
+                op: Some("ignored".into()),
+            },
+        };
+        assert_eq!(describe_event(&ev), "orchestrate/grep · 3ms");
+    }
+
+    #[test]
+    fn empty_object_is_unknown_with_empty_kind() {
+        let ev: TuiEvent = serde_json::from_str("{}").unwrap();
+        assert!(matches!(&ev, TuiEvent::Unknown { kind, .. } if kind.is_empty()));
+        assert_eq!(ev.kind(), "");
+    }
+
+    #[test]
+    fn non_object_json_is_a_deserialize_error() {
+        assert!(serde_json::from_str::<TuiEvent>("[1,2,3]").is_err());
+        assert!(serde_json::from_str::<TuiEvent>("42").is_err());
+    }
+
+    #[test]
+    fn task_complete_without_digest_errors() {
+        assert!(serde_json::from_str::<TuiEvent>(r#"{"kind":"task_complete"}"#).is_err());
+    }
+
+    #[test]
+    fn trace_without_entry_errors() {
+        assert!(serde_json::from_str::<TuiEvent>(r#"{"kind":"trace"}"#).is_err());
+    }
+
+    #[test]
+    fn opt_str_filters_empty_to_none() {
+        // An empty `model` string decodes to `None`, not `Some("")`.
+        let ev: TuiEvent =
+            serde_json::from_str(r#"{"kind":"inference_start","tier":"r","op":"o","model":""}"#)
+                .unwrap();
+        assert!(matches!(ev, TuiEvent::InferenceStart { model: None, .. }));
+    }
+
+    #[test]
+    fn serialize_drops_null_fields() {
+        // A model-less inference_start must not carry a `"model":null` key.
+        let ev = TuiEvent::InferenceStart {
+            tier: "r".into(),
+            op: "o".into(),
+            model: None,
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert!(v.get("model").is_none(), "null model should be dropped");
+        assert_eq!(v.get("kind").unwrap(), &json!("inference_start"));
+    }
+
+    #[test]
+    fn effect_decode_defaults_to_null_when_missing() {
+        let ev: TuiEvent = serde_json::from_str(r#"{"kind":"effect"}"#).unwrap();
+        assert!(matches!(ev, TuiEvent::Effect { effect } if effect.is_null()));
+    }
+
+    #[test]
+    fn transcript_skips_non_chat_events_and_joins_blocks() {
+        let events = vec![
+            env(
+                1,
+                TuiEvent::CycleStart {
+                    cycle_id: "c".into(),
+                },
+            ),
+            env(2, TuiEvent::User { body: "q".into() }),
+            env(
+                3,
+                TuiEvent::InferenceStart {
+                    tier: "r".into(),
+                    op: "o".into(),
+                    model: None,
+                },
+            ),
+            env(4, TuiEvent::Assistant { body: "a".into() }),
+        ];
+        // Only the User and Assistant turns survive; the framing events are dropped.
+        assert_eq!(chat_transcript(&events), "> q\n\na");
+    }
+
+    #[test]
+    fn transcript_and_last_empty_when_no_chat() {
+        assert_eq!(chat_transcript(&[]), "");
+        assert_eq!(last_assistant_message(&[]), None);
+        // A stream with no assistant turn yields None for /copy last.
+        let events = vec![env(1, TuiEvent::User { body: "q".into() })];
+        assert_eq!(last_assistant_message(&events), None);
+    }
+
+    #[test]
+    fn envelope_round_trips() {
+        let e = EventEnvelope {
+            seq: 7,
+            at: 123,
+            event: TuiEvent::User { body: "hi".into() },
+        };
+        let s = serde_json::to_string(&e).unwrap();
+        let back: EventEnvelope = serde_json::from_str(&s).unwrap();
+        assert_eq!(e, back);
+    }
+
+    #[test]
+    fn tool_call_defaults_args_to_null() {
+        let tc: ToolCall = serde_json::from_str(r#"{"name":"grep"}"#).unwrap();
+        assert_eq!(tc.name, "grep");
+        assert!(tc.args.is_null());
+    }
 }

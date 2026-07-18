@@ -453,4 +453,94 @@ mod tests {
         let json = loaded.pretty_json();
         assert!(json.contains("OPENAI_API_KEY ("));
     }
+
+    #[test]
+    fn pretty_json_marks_key_set_when_env_present() {
+        let var = "MEDULLA_CONFIG_TEST_KEY";
+        std::env::set_var(var, "value");
+        let mut loaded = LoadedConfig::defaults("x".into());
+        loaded.config.inference.api_key_env = var.into();
+        assert!(loaded.pretty_json().contains(&format!("{var} (set)")));
+        std::env::remove_var(var);
+        assert!(loaded.pretty_json().contains(&format!("{var} (missing)")));
+    }
+
+    #[test]
+    fn harness_defaults_to_worker_without_backends() {
+        // No tinyplace and no opencode → the generic WORKER label.
+        let loaded = LoadedConfig::defaults("x".into());
+        assert_eq!(loaded.harness(), "WORKER");
+    }
+
+    #[test]
+    fn harness_opencode_bare_command_and_empty() {
+        let mut loaded = LoadedConfig::defaults("x".into());
+        loaded.config.opencode = Some(OpencodeConfig {
+            command: "codex".into(),
+            ..Default::default()
+        });
+        assert_eq!(loaded.harness(), "CODEX");
+        // A trailing-slash / empty basename falls back to WORKER.
+        loaded.config.opencode = Some(OpencodeConfig {
+            command: "bin/".into(),
+            ..Default::default()
+        });
+        assert_eq!(loaded.harness(), "WORKER");
+    }
+
+    #[test]
+    fn context_window_honors_override() {
+        let cfg: TuiConfig =
+            serde_json::from_str(r#"{"medulla":{"contextWindowTokens":128000}}"#).unwrap();
+        assert_eq!(cfg.medulla.context_window(), 128_000);
+    }
+
+    #[test]
+    fn unknown_fields_are_ignored() {
+        // Permissive parsing: extra keys must not fail the load.
+        let cfg: TuiConfig =
+            serde_json::from_str(r#"{"totallyUnknown":true,"inference":{"temperature":0.9}}"#)
+                .unwrap();
+        assert_eq!(cfg.inference.temperature, 0.9);
+    }
+
+    #[test]
+    fn load_config_missing_file_yields_defaults() {
+        let path = std::env::temp_dir()
+            .join(format!("medulla-nope-{}.json", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        let loaded = load_config(&path).unwrap();
+        // Defaults applied; the absolute-ish path is preserved.
+        assert_eq!(loaded.config.inference.default_model, "gpt-4o-mini");
+        assert!(loaded.path.contains("medulla-nope-"));
+    }
+
+    #[test]
+    fn load_config_reads_and_parses_a_file() {
+        let dir = std::env::temp_dir().join(format!("medulla-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("medulla.tui.json");
+        std::fs::write(&path, r#"{"stateDir":"/custom/state"}"#).unwrap();
+        let loaded = load_config(path.to_str().unwrap()).unwrap();
+        assert_eq!(loaded.config.state_dir, "/custom/state");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_config_invalid_json_errors() {
+        let dir = std::env::temp_dir().join(format!("medulla-cfg-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.json");
+        std::fs::write(&path, "{ this is not json").unwrap();
+        let err = load_config(path.to_str().unwrap()).unwrap_err();
+        assert!(err.to_string().contains("Invalid JSON"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn peer_protocol_defaults_to_task() {
+        let peer: Peer = serde_json::from_str(r#"{"id":"p1"}"#).unwrap();
+        assert_eq!(peer.protocol, "task");
+    }
 }

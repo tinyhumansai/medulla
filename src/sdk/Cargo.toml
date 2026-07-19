@@ -20,8 +20,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
-ratatui = { workspace = true }
-crossterm = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }

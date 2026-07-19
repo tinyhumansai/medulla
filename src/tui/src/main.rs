@@ -41,6 +41,7 @@ use medulla_tui::cli::{
 };
 use medulla_tui::ui::app::{App, Cmd, TABS};
 use medulla_tui::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
+use medulla_tui::ui::onboarding::run_onboarding_ui;
 
 /// Messages sent from spawned async tasks back to the event loop.
 enum AppMsg {
@@ -122,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
     match parse_command(&raw) {
-        Command::Daemon => medulla::daemon::run_daemon(&raw[1..]).await,
+        Command::Daemon => medulla::daemon::run_daemon(&raw[1..], onboarding_ui()).await,
         Command::Version => {
             println!("medulla {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -150,11 +151,22 @@ async fn main() -> anyhow::Result<()> {
             medulla::update::run_update(args.check).await
         }
         Command::Wrapper(provider) => {
-            let code = medulla::wrapper::run_wrapper(provider, &raw[1..]).await?;
+            let code = medulla::wrapper::run_wrapper(provider, &raw[1..], onboarding_ui()).await?;
             std::process::exit(code);
         }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.
         Command::Tui => run_tui(&raw).await,
+    }
+}
+
+/// Build the interactive onboarding callback when stdout is a TTY, else `None`
+/// so the daemon/wrapper first-run flow auto-registers headlessly. This is the
+/// app-side seam that keeps the SDK free of any terminal dependency.
+fn onboarding_ui() -> Option<medulla::onboarding::OnboardingUi> {
+    if io::stdout().is_terminal() {
+        Some(Box::new(|ctx| Box::pin(run_onboarding_ui(ctx))))
+    } else {
+        None
     }
 }
 

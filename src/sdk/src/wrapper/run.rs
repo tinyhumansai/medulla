@@ -11,6 +11,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
+use crate::onboarding::OnboardingUi;
 use crate::tinyplace::HarnessProvider;
 
 use super::args::parse_wrapper_args;
@@ -22,7 +23,13 @@ use super::types::{WrapperConfig, WrapperTimings};
 
 /// The `medulla codex|claude|opencode` entry: build a [`WrapperConfig`] from the
 /// process environment and run the wrapper, returning the child's exit code.
-pub async fn run_wrapper(provider: HarnessProvider, args: &[String]) -> anyhow::Result<i32> {
+/// `onboarding_ui` is the interactive first-run screen the app injects on a TTY;
+/// pass `None` to onboard headlessly.
+pub async fn run_wrapper(
+    provider: HarnessProvider,
+    args: &[String],
+    onboarding_ui: Option<OnboardingUi>,
+) -> anyhow::Result<i32> {
     let (no_bridge, child_args) = parse_wrapper_args(args);
     let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir()
@@ -30,16 +37,15 @@ pub async fn run_wrapper(provider: HarnessProvider, args: &[String]) -> anyhow::
         .unwrap_or_else(|_| ".".to_string());
 
     // First-run worker registration (naming + owner). Skipped when running a plain
-    // passthrough (no bridge). On a TTY this walks the operator through onboarding;
-    // headless it auto-registers. Aborting exits cleanly before launching the CLI.
-    if !no_bridge {
-        let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
-        if crate::onboarding::ensure_registered(&env, is_tty, false)
+    // passthrough (no bridge). With an injected `onboarding_ui` this walks the
+    // operator through onboarding; without one it auto-registers headlessly.
+    // Aborting exits cleanly before launching the CLI.
+    if !no_bridge
+        && crate::onboarding::ensure_registered(&env, false, onboarding_ui)
             .await?
             .is_none()
-        {
-            return Ok(0);
-        }
+    {
+        return Ok(0);
     }
 
     run_wrapper_with(WrapperConfig {

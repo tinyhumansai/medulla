@@ -6,10 +6,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
+
+use crate::onboarding::OnboardingUi;
 
 use crate::tinyplace::{
     config_path, decode_task_frame, load_or_create_identity, resolve_endpoint,
@@ -35,8 +36,12 @@ const DEFAULT_TASK_TIMEOUT_MS: u64 = 600_000;
 const DEFAULT_POLL_MS: u64 = 2_000;
 
 /// Run `medulla daemon` until a shutdown signal. `args` are the tokens after
-/// the `daemon` subcommand.
-pub async fn run_daemon(args: &[String]) -> anyhow::Result<()> {
+/// the `daemon` subcommand. `onboarding_ui` is the interactive first-run screen
+/// the app injects on a TTY; pass `None` to onboard headlessly (scriptable).
+pub async fn run_daemon(
+    args: &[String],
+    onboarding_ui: Option<OnboardingUi>,
+) -> anyhow::Result<()> {
     let flags = Flags::parse(args).map_err(|e| anyhow::anyhow!(e))?;
     let env: HashMap<String, String> = std::env::vars().collect();
     let log = |line: &str| eprintln!("medulla daemon: {line}");
@@ -116,19 +121,18 @@ pub async fn run_daemon(args: &[String]) -> anyhow::Result<()> {
     let once = flags.is_set("once");
     let reonboard = flags.is_set("reonboard");
 
-    // First-run worker registration (naming + owner setup). On a TTY this
-    // walks the operator through onboarding; headless it auto-registers with
-    // defaults + an env owner so the daemon stays scriptable. Aborting the
-    // interactive flow (q / Ctrl-C) exits cleanly without serving.
-    let is_tty = std::io::stdout().is_terminal();
-    let worker_profile = match crate::onboarding::ensure_registered(&env, is_tty, reonboard).await?
-    {
-        Some(reg) => reg.profile,
-        None => {
-            log("onboarding aborted; not starting daemon");
-            return Ok(());
-        }
-    };
+    // First-run worker registration (naming + owner setup). With an injected
+    // `onboarding_ui` this walks the operator through onboarding; without one it
+    // auto-registers with defaults + an env owner so the daemon stays scriptable.
+    // Aborting the interactive flow (q / Ctrl-C) exits cleanly without serving.
+    let worker_profile =
+        match crate::onboarding::ensure_registered(&env, reonboard, onboarding_ui).await? {
+            Some(reg) => reg.profile,
+            None => {
+                log("onboarding aborted; not starting daemon");
+                return Ok(());
+            }
+        };
     // The profile's name is the daemon's advertised label unless --name overrides it.
     let display_name = flags.string("name").or_else(|| {
         let name = worker_profile.name.trim();

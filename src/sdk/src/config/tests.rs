@@ -531,9 +531,11 @@ fn persisting_under_a_file_masquerading_as_a_directory_errors() {
     let blocker = dir.path().join("blocker");
     std::fs::write(&blocker, "i am a file").expect("seed");
 
-    // `blocker` is a file, so treating it as a parent directory fails. The read
-    // reports ENOTDIR rather than NotFound, so this surfaces as a read error —
-    // either way it must be a clean error naming the path, not a panic.
+    // `blocker` is a file, so treating it as a parent directory fails. Which
+    // syscall reports it is platform-dependent: unix surfaces ENOTDIR from the
+    // read (naming the full path), Windows fails at create_dir_all (naming the
+    // parent). Assert only what must hold everywhere — a clean error naming the
+    // offending path, never a panic.
     let target = blocker.join("config.toml");
     let err =
         super::persist_welcome_completed(&target, true).expect_err("cannot write under a file");
@@ -544,8 +546,8 @@ fn persisting_under_a_file_masquerading_as_a_directory_errors() {
         "got: {message}"
     );
     assert!(
-        message.contains("config.toml"),
-        "should name the path: {message}"
+        message.contains("blocker"),
+        "should name the offending path: {message}"
     );
 }
 

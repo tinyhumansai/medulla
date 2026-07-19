@@ -1,14 +1,19 @@
 //! Rendering a drafted profile into `MEDULLA.md` text.
 //!
-//! The scaffold ships in `docs/templates/MEDULLA.md.tmpl` and is compiled in
-//! with `include_str!`, so the shape an operator sees lives in one editable
-//! place rather than being spelled out in Rust string literals. Substitution is
-//! deliberately dumb (`{{key}}` → value): the template is ours, not user input.
+//! The scaffold is a sibling file compiled in with `include_str!`, so the shape
+//! an operator sees lives in one editable place rather than being spelled out in
+//! Rust string literals. Substitution is deliberately dumb (`{{key}}` → value):
+//! the template is ours, not user input.
+//!
+//! It lives *inside* the crate rather than under repo-root `docs/` so the crate
+//! stays self-contained — the release Docker image only copies `src/` and
+//! `vendor/`, and a template outside the crate root breaks that build (and any
+//! packaging/vendoring). `docs/workspace-profiles.md` documents the format.
 
 use super::types::DraftedProfile;
 
-/// The scaffold, compiled in from `docs/templates/`.
-const TEMPLATE: &str = include_str!("../../../../docs/templates/MEDULLA.md.tmpl");
+/// The scaffold, compiled in from the sibling `MEDULLA.md.tmpl`.
+const TEMPLATE: &str = include_str!("MEDULLA.md.tmpl");
 
 /// Render a YAML flow-sequence body (`a, b`) from a list, quoting nothing —
 /// harness and model ids are bare tokens by convention.
@@ -52,7 +57,11 @@ pub fn render_medulla_md(draft: &DraftedProfile) -> String {
     } else {
         draft.summary.trim()
     };
+    // Normalize CRLF: a Windows checkout can embed the template with \r\n, and
+    // the rendered document is parsed (and sent over the wire) elsewhere, so it
+    // must be byte-stable regardless of the platform it was generated on.
     TEMPLATE
+        .replace("\r\n", "\n")
         .replace("{{harnesses}}", &flow_list(&draft.harnesses))
         .replace("{{models_reasoning}}", &flow_list(&draft.models_reasoning))
         .replace("{{routing}}", &routing_block(&draft.routing))

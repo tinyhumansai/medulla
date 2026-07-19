@@ -137,6 +137,18 @@ fn render_produces_frontmatter_and_body() {
 }
 
 #[test]
+fn render_never_emits_carriage_returns() {
+    // A Windows checkout can embed the template with CRLF. The rendered file is
+    // parsed and shipped over the wire, so it must be LF on every platform —
+    // this is what broke the Windows CI job.
+    for draft in [parse_draft(GOOD_JSON).unwrap(), DraftedProfile::stub()] {
+        let rendered = render_medulla_md(&draft);
+        assert!(!rendered.contains('\r'), "rendered document contained CR");
+        assert!(rendered.starts_with("---\n"));
+    }
+}
+
+#[test]
 fn render_of_a_stub_is_still_a_valid_editable_document() {
     let rendered = render_medulla_md(&DraftedProfile::stub());
     assert!(rendered.starts_with("---\n"));

@@ -41,6 +41,11 @@ Drafts a profile for `dir` (default: the current directory) and writes
 The draft is a starting point, not the final word — the summary is what the
 orchestrator actually reads, so it is worth a pass by hand.
 
+The scaffold `init` fills in lives at `src/sdk/src/init/MEDULLA.md.tmpl`. It sits
+inside the crate (rather than here under `docs/`) because it is embedded with
+`include_str!` and the release image only copies `src/` and `vendor/` — a
+template outside the crate root fails that build.
+
 **Flags**
 
 | Flag | Effect |

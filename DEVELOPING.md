@@ -264,8 +264,10 @@ tags on `main`, builds all targets, and publishes the GitHub Release with the
 
 `main` is branch-protected (the four CI checks are required), and the workflow's
 default `GITHUB_TOKEN` cannot bypass that — the version-bump push would be
-rejected. The workflow therefore needs a **`RELEASE_TOKEN`** Actions secret: a
-fine-grained PAT from a repo admin with **Contents: read and write** on this
-repository. Admin enforcement is off on the protection rule, so the admin token
-may push the release commit directly; every other path to `main` still goes
+rejected. The `tag` job therefore runs against the **`Production`** environment
+and authenticates as the org's GitHub App: it mints a short-lived installation
+token from the `XGITHUB_APP_ID` / `XGITHUB_APP_PRIVATE_KEY` environment secrets
+and pushes the bump commit + tag with it. The app needs **Contents: read and
+write** and must be able to bypass the protection rule (admin permission on the
+repo, or an explicit bypass entry); every other path to `main` still goes
 through a PR with green checks.

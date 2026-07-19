@@ -732,4 +732,56 @@ async fn status_detail_maps_event_kinds() {
         ..Default::default()
     };
     assert_eq!(status_detail(&failed_tool).as_deref(), Some("tool failed"));
+
+    let ok_tool = HarnessEvent {
+        kind: "tool_result".to_string(),
+        payload: json!({ "call_id": "c", "ok": true, "is_error": false, "output": "", "output_bytes": 0 }),
+        ..Default::default()
+    };
+    assert_eq!(status_detail(&ok_tool).as_deref(), Some("tool completed"));
+
+    // Status: a non-empty detail wins over the state.
+    let status_detailed = HarnessEvent {
+        kind: "status".to_string(),
+        payload: json!({ "state": "running", "detail": "compiling" }),
+        ..Default::default()
+    };
+    assert_eq!(
+        status_detail(&status_detailed).as_deref(),
+        Some("compiling")
+    );
+
+    // Status: an empty detail falls back to the state string.
+    let status_state = HarnessEvent {
+        kind: "status".to_string(),
+        payload: json!({ "state": "running", "detail": "" }),
+        ..Default::default()
+    };
+    assert_eq!(status_detail(&status_state).as_deref(), Some("running"));
+
+    // Status: both empty yields nothing.
+    let status_blank = HarnessEvent {
+        kind: "status".to_string(),
+        payload: json!({ "state": "", "detail": "" }),
+        ..Default::default()
+    };
+    assert_eq!(status_detail(&status_blank), None);
+
+    // Error: capped and prefixed. 300 chars exceeds the 200-char cap.
+    let error = HarnessEvent {
+        kind: "error".to_string(),
+        payload: json!({ "message": "x".repeat(300) }),
+        ..Default::default()
+    };
+    let detail = status_detail(&error).expect("error maps to a detail");
+    assert!(detail.starts_with("error: x"));
+    assert_eq!(detail.chars().count(), 200);
+
+    // An event kind with no status projection returns None.
+    let lifecycle = HarnessEvent {
+        kind: "lifecycle".to_string(),
+        payload: json!({ "phase": "session_start" }),
+        ..Default::default()
+    };
+    assert_eq!(status_detail(&lifecycle), None);
 }

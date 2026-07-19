@@ -7,7 +7,15 @@ name: Release
 #
 # Always releases from main (checks out and pushes back to main regardless of
 # where it is dispatched). The release is created in this same workflow, so the
-# GITHUB_TOKEN tag-push not firing other workflows is fine.
+# tag-push not firing other workflows is fine.
+#
+# main is branch-protected (required CI checks), which the default GITHUB_TOKEN
+# cannot bypass — the version-bump push would be rejected. The tag job instead
+# authenticates as the org's GitHub App: it binds to the `Production`
+# environment (home of the XGITHUB_APP_ID / XGITHUB_APP_PRIVATE_KEY secrets),
+# mints a short-lived installation token, and pushes with that. The app must be
+# allowed to bypass the protection rule (admin permission on the repo, or an
+# explicit bypass entry).
 
 on:
   workflow_dispatch:
@@ -28,14 +36,26 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    # Grants access to the environment-scoped GitHub App secrets.
+    environment: Production
     outputs:
       tag: ${{ steps.bump.outputs.tag }}
       version: ${{ steps.bump.outputs.version }}
     steps:
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.XGITHUB_APP_ID }}
+          private-key: ${{ secrets.XGITHUB_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
+          # Persisted into the git credential config; the version-bump
+          # commit/tag push below authenticates as the app installation.
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Configure git identity
         run: |

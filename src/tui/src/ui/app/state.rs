@@ -1,0 +1,287 @@
+//! Construction, state accessors/setters, snapshot refresh, and the small
+//! tab/lane helpers for [`App`]. This is the observable-state surface: the
+//! test/inspection seams and the mutators the event loop calls between ticks.
+
+use std::sync::Arc;
+
+use ratatui::layout::Rect;
+
+use crate::ui::agents::{derive_agent_lanes, AgentLane};
+use crate::ui::composer::Draft;
+use crate::ui::theme::Theme;
+use medulla::config::LoadedConfig;
+use medulla::memory::{MemoryHit, MemoryStatus};
+use medulla::runtime::{ContextItem, Runtime};
+
+use super::types::{App, Cmd, MemoryEntry, ResumePicker, SETTINGS_SUBPAGES, SP_USAGE, TABS};
+
+impl App {
+    /// Build a fresh screen bound to `runtime` and `loaded`, starting on the
+    /// Overview tab with an empty composer and the config-derived theme.
+    pub fn new(runtime: Arc<dyn Runtime>, loaded: LoadedConfig) -> Self {
+        let snapshot = runtime.snapshot();
+        let theme = Theme::from_config(&loaded.config.theme);
+        App {
+            runtime,
+            loaded,
+            snapshot,
+            tab_index: 0,
+            draft: Draft::new(),
+            history: Vec::new(),
+            history_index: -1,
+            selected: 0,
+            status: "Ready".into(),
+            update_notice: None,
+            contexts: Vec::new(),
+            context_index: 0,
+            agent_index: 0,
+            agent_scroll: 0,
+            chat_scroll: 0,
+            worker_index: 0,
+            memory_status: None,
+            memory_hits: Vec::new(),
+            memory_directives: Vec::new(),
+            memory_index: 0,
+            memory_query: None,
+            prompt: None,
+            frame: 0,
+            mouse_capture: true,
+            account_usage: None,
+            settings_index: 0,
+            appearance_index: 0,
+            theme,
+            config_path: None,
+            resume_picker: None,
+            should_quit: false,
+            area: Rect::new(0, 0, 80, 24),
+            hit_tabs: Vec::new(),
+            hit_tabs_row: 0,
+            hit_agents: None,
+            hit_context: None,
+            hit_threads: None,
+            last_events_len: 0,
+            tinyplace_obs: None,
+            copy_capture: None,
+        }
+    }
+
+    /// Current status-line text (observable in the header). Test/inspection seam.
+    pub fn status(&self) -> &str {
+        &self.status
+    }
+
+    /// Point appearance persistence at a config file (the user-global
+    /// `config.toml`). Wiring seam so feature tests avoid the real home.
+    pub fn set_config_path(&mut self, path: std::path::PathBuf) {
+        self.config_path = Some(path);
+    }
+
+    /// The active Settings subpage name. Test/inspection seam.
+    pub fn settings_subpage(&self) -> &'static str {
+        SETTINGS_SUBPAGES[self.settings_index.min(SETTINGS_SUBPAGES.len() - 1)]
+    }
+
+    /// The current primary theme color. Test/inspection seam.
+    pub fn theme_primary(&self) -> ratatui::style::Color {
+        self.theme.primary
+    }
+
+    /// Set the persistent "update available" banner shown in the header. Called
+    /// by the background update checker when a newer release is detected.
+    pub fn set_update_notice(&mut self, notice: impl Into<String>) {
+        self.update_notice = Some(notice.into());
+    }
+
+    /// The current update banner text, if any. Test/inspection seam.
+    pub fn update_notice(&self) -> Option<&str> {
+        self.update_notice.as_deref()
+    }
+
+    /// The current composer draft text. Test/inspection seam.
+    pub fn draft_text(&self) -> &str {
+        &self.draft.text
+    }
+
+    /// The current composer caret offset (chars). Test/inspection seam.
+    pub fn draft_cursor(&self) -> usize {
+        self.draft.cursor
+    }
+
+    /// The chat transcript scroll offset from the bottom. Test/inspection seam.
+    pub fn chat_scroll(&self) -> usize {
+        self.chat_scroll
+    }
+
+    /// Whether the resume-picker modal is open. Test/inspection seam.
+    pub fn resume_open(&self) -> bool {
+        self.resume_picker.is_some()
+    }
+
+    /// Whether an inline prompt overlay (Workers add/edit, Agents answer) is open,
+    /// and its current draft text. Test/inspection seam.
+    pub fn prompt_state(&self) -> Option<(String, String)> {
+        self.prompt
+            .as_ref()
+            .map(|p| (p.title.clone(), p.draft.text.clone()))
+    }
+
+    /// The `task_id` of the currently selected Agents-list task row, if any.
+    /// Test/inspection seam for the X/A steering flows.
+    pub fn selected_task_id(&self) -> Option<String> {
+        self.selected_agent_task().map(|t| t.task_id)
+    }
+
+    /// The active worker-selection index. Test/inspection seam.
+    pub fn worker_index(&self) -> usize {
+        self.worker_index
+    }
+
+    /// Route `copy_chat` into a captured sink instead of the OS clipboard, and
+    /// return that sink. Test-only: keeps `pbcopy`/OSC 52 out of the test run.
+    pub fn capture_clipboard(&mut self) -> Arc<std::sync::Mutex<Vec<String>>> {
+        let sink = Arc::new(std::sync::Mutex::new(Vec::new()));
+        self.copy_capture = Some(sink.clone());
+        sink
+    }
+
+    /// Attach the background tinyplace service's shared observation. Its identity,
+    /// roster, and presence are merged into every snapshot refresh.
+    pub fn set_tinyplace_observation(
+        &mut self,
+        obs: Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>,
+    ) {
+        self.tinyplace_obs = Some(obs);
+        self.refresh_snapshot();
+    }
+
+    /// Re-read the runtime snapshot and merge in the tiny.place observation.
+    pub fn refresh_snapshot(&mut self) {
+        self.snapshot = self.runtime.snapshot();
+        if let Some(obs) = &self.tinyplace_obs {
+            if let Ok(obs) = obs.lock() {
+                obs.merge_into(&mut self.snapshot);
+            }
+        }
+    }
+
+    /// Deliver the fetched account usage payload (None = backend unavailable).
+    pub fn set_account_usage(&mut self, data: Option<serde_json::Value>) {
+        self.account_usage = data;
+    }
+
+    /// Set the status-line text.
+    pub fn set_status(&mut self, s: impl Into<String>) {
+        self.status = s.into();
+    }
+
+    /// Replace the Context-tab chunks.
+    pub fn set_contexts(&mut self, c: Vec<ContextItem>) {
+        self.contexts = c;
+    }
+
+    /// Store the loaded persona-memory status + directives and drop back to the
+    /// directive/facet overview (no active search).
+    pub fn set_memory_loaded(&mut self, status: Option<MemoryStatus>, directives: Vec<String>) {
+        self.memory_status = status;
+        self.memory_directives = directives;
+        self.memory_query = None;
+        self.memory_index = 0;
+    }
+
+    /// Store persona-memory search results for `query` and select the first hit.
+    pub fn set_memory_results(&mut self, hits: Vec<MemoryHit>, query: String) {
+        self.memory_hits = hits;
+        self.memory_query = Some(query);
+        self.memory_index = 0;
+    }
+
+    /// The active persona-memory selection index. Test/inspection seam.
+    pub fn memory_index(&self) -> usize {
+        self.memory_index
+    }
+
+    /// Open the resume picker with `chats`, or report that there is nothing to
+    /// resume.
+    pub fn open_resume(&mut self, chats: Vec<crate::ui::chat_store::MainChatSummary>) {
+        if chats.is_empty() {
+            self.set_status("No saved chats to resume.");
+        } else {
+            self.resume_picker = Some(ResumePicker { chats, index: 0 });
+            self.set_status("Resume: ↑/↓ select · Enter load · Esc cancel");
+        }
+    }
+
+    /// The active tab name.
+    pub fn tab(&self) -> &'static str {
+        TABS[self.tab_index]
+    }
+
+    /// The lazy-load command a freshly entered tab needs, if any.
+    pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
+        match self.tab() {
+            "Context" => Some(Cmd::InspectContext),
+            "Memory" => Some(Cmd::LoadMemory),
+            "Settings" if self.settings_index == SP_USAGE => Some(Cmd::LoadUsage),
+            _ => None,
+        }
+    }
+
+    /// Derive the current agent lanes from the snapshot, harness, and roster.
+    pub(super) fn lanes(&self) -> Vec<AgentLane> {
+        derive_agent_lanes(
+            &self.snapshot.events,
+            &self.loaded.harness(),
+            &self.snapshot.roster,
+        )
+    }
+
+    /// The index of the active thread in the snapshot's thread list.
+    pub(super) fn active_thread_idx(&self) -> usize {
+        self.snapshot
+            .threads
+            .iter()
+            .position(|t| t.id == self.snapshot.active_thread_id)
+            .unwrap_or(0)
+    }
+
+    /// Events-length change signal, so the loop can re-inspect context.
+    pub fn events_changed(&mut self) -> bool {
+        let n = self.snapshot.events.len();
+        let changed = n != self.last_events_len;
+        self.last_events_len = n;
+        changed
+    }
+
+    /// The current Memory-tab left-pane rows: directives + facet overview with no
+    /// active search, or the ranked hits after a `/memory <query>` search.
+    pub(super) fn memory_entries(&self) -> Vec<MemoryEntry> {
+        if self.memory_query.is_some() {
+            return self
+                .memory_hits
+                .iter()
+                .cloned()
+                .map(MemoryEntry::Hit)
+                .collect();
+        }
+        let mut out: Vec<MemoryEntry> = self
+            .memory_directives
+            .iter()
+            .cloned()
+            .map(MemoryEntry::Directive)
+            .collect();
+        if let Some(st) = &self.memory_status {
+            for (name, count) in &st.facet_counts {
+                out.push(MemoryEntry::Facet {
+                    name: name.clone(),
+                    count: *count,
+                });
+            }
+        }
+        out
+    }
+
+    /// The number of selectable Memory-tab rows.
+    pub(super) fn memory_entry_count(&self) -> usize {
+        self.memory_entries().len()
+    }
+}

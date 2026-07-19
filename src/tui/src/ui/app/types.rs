@@ -1,0 +1,184 @@
+//! The data model for the interactive TUI screen: the tab list and Settings
+//! subpage constants, the [`Cmd`] the event loop runs on the app's behalf, the
+//! small overlay/state types ([`ResumePicker`], [`Prompt`], [`PromptKind`],
+//! [`MemoryEntry`]), and the central [`App`] struct itself.
+//!
+//! Behaviour lives in the sibling modules ([`super::state`], [`super::input`],
+//! [`super::keys`], [`super::commands`], and [`super::render`]), each of which
+//! adds its own `impl App` block. Because those blocks share `App`'s private
+//! fields, the fields (and the private helper types/consts here) are
+//! `pub(super)` so every sibling submodule can reach them.
+
+use std::sync::Arc;
+
+use ratatui::layout::Rect;
+
+use crate::ui::composer::Draft;
+use crate::ui::theme::Theme;
+use medulla::config::LoadedConfig;
+use medulla::memory::{MemoryHit, MemoryStatus};
+use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
+
+/// The ordered top-level tab names. The tab index selects into this array.
+pub const TABS: [&str; 8] = [
+    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Memory", "Settings",
+];
+/// The Settings tab's left-nav subpages, in order (number keys 1-4 jump to them).
+pub const SETTINGS_SUBPAGES: [&str; 4] = ["Usage", "Appearance", "Config", "Help"];
+
+// Settings subpage indices.
+pub(super) const SP_USAGE: usize = 0;
+pub(super) const SP_APPEARANCE: usize = 1;
+pub(super) const SP_CONFIG: usize = 2;
+pub(super) const SP_HELP: usize = 3;
+
+/// The index of a tab by name, or 0 if unknown. Keeps tab jumps robust as the tab
+/// list grows.
+pub(super) fn tab_pos(name: &str) -> usize {
+    TABS.iter().position(|t| *t == name).unwrap_or(0)
+}
+
+/// An async action the event loop must run on the app's behalf.
+#[derive(Debug)]
+pub enum Cmd {
+    /// Exit the application.
+    Quit,
+    /// Submit a composer line as a new conversational turn.
+    Submit(String),
+    /// Resume a previously saved chat by session id.
+    Resume(String),
+    /// Fetch the list of resumable chats for the resume picker.
+    ListChats,
+    /// Re-inspect the runtime's context chunks for the Context tab.
+    InspectContext,
+    /// Apply a worker fleet mutation.
+    WorkerOp(WorkerOp),
+    /// Load the persona-memory status + directives for the Memory tab.
+    LoadMemory,
+    /// Fetch account-level usage from the backend for the Usage tab.
+    LoadUsage,
+    /// Run a persona-memory search and land on the Memory tab.
+    SearchMemory(String),
+}
+
+/// The modal state for the "resume a chat" picker overlay.
+pub(super) struct ResumePicker {
+    /// The resumable chats to choose from.
+    pub(super) chats: Vec<crate::ui::chat_store::MainChatSummary>,
+    /// The highlighted row.
+    pub(super) index: usize,
+}
+
+/// One selectable row in the Memory tab's left pane: either the directive/facet
+/// overview (no active search) or a ranked search hit.
+pub(super) enum MemoryEntry {
+    /// A persona directive line.
+    Directive(String),
+    /// A facet name with its observation count.
+    Facet {
+        /// The facet name.
+        name: String,
+        /// The number of observations in the facet.
+        count: usize,
+    },
+    /// A ranked search hit.
+    Hit(MemoryHit),
+}
+
+/// The action a small inline prompt (Workers add/edit, Agents answer) submits.
+pub(super) enum PromptKind {
+    /// Add a worker from an address/@handle line.
+    WorkerAdd,
+    /// Edit the label of the worker with the given id.
+    WorkerEditLabel(String),
+    /// Answer a pending sub-agent question.
+    AnswerQuestion {
+        /// The cycle the question belongs to.
+        cycle_id: String,
+        /// The pending question's id.
+        question_id: String,
+    },
+}
+
+/// A single-line inline input overlay, composer-styled, reused for the fleet and
+/// steering prompts.
+pub(super) struct Prompt {
+    /// What the prompt submits.
+    pub(super) kind: PromptKind,
+    /// The overlay title.
+    pub(super) title: String,
+    /// The editable draft buffer.
+    pub(super) draft: Draft,
+}
+
+/// The interactive TUI screen: all tab state, input focus, and render geometry.
+pub struct App {
+    /// The runtime this screen drives.
+    pub runtime: Arc<dyn Runtime>,
+    /// The loaded configuration (for the Config/Overview surfaces).
+    pub loaded: LoadedConfig,
+    /// The most recent runtime snapshot, refreshed each loop tick.
+    pub snapshot: RuntimeSnapshot,
+    /// The active top-level tab index (into [`TABS`]).
+    pub tab_index: usize,
+    pub(super) draft: Draft,
+    pub(super) history: Vec<String>,
+    pub(super) history_index: i64,
+    pub(super) selected: usize,
+    pub(super) status: String,
+    /// A persistent "update vX.Y.Z available" banner, set by the background
+    /// update checker; shown in the header until the app exits.
+    pub(super) update_notice: Option<String>,
+    pub(super) contexts: Vec<ContextItem>,
+    pub(super) context_index: usize,
+    pub(super) agent_index: usize,
+    pub(super) agent_scroll: usize,
+    pub(super) chat_scroll: usize,
+    pub(super) worker_index: usize,
+    // Persona-memory tab state (lazily loaded on tab entry / search).
+    pub(super) memory_status: Option<MemoryStatus>,
+    pub(super) memory_hits: Vec<MemoryHit>,
+    pub(super) memory_directives: Vec<String>,
+    pub(super) memory_index: usize,
+    pub(super) memory_query: Option<String>,
+    pub(super) prompt: Option<Prompt>,
+    /// The animation frame counter (drives the spinner).
+    pub frame: usize,
+    /// Whether the app currently captures the mouse.
+    pub mouse_capture: bool,
+    /// Account-level usage payload (`/teams/me/usage` data), when fetched.
+    pub account_usage: Option<serde_json::Value>,
+    /// The active Settings subpage (index into [`SETTINGS_SUBPAGES`]).
+    pub(super) settings_index: usize,
+    /// The selected theme role on the Appearance subpage.
+    pub(super) appearance_index: usize,
+    /// The resolved color theme; selection highlighting + chrome draw from it.
+    pub(super) theme: Theme,
+    /// Where appearance changes are persisted (the user-global `config.toml`).
+    /// Injectable so feature tests never touch the real home. `None` disables
+    /// persistence (changes still apply live).
+    pub(super) config_path: Option<std::path::PathBuf>,
+    pub(super) resume_picker: Option<ResumePicker>,
+    /// Whether the event loop should exit after this tick.
+    pub should_quit: bool,
+
+    // Render geometry, recorded each draw for click hit-testing.
+    pub(super) area: Rect,
+    pub(super) hit_tabs: Vec<(u16, u16)>,
+    pub(super) hit_tabs_row: u16,
+    pub(super) hit_agents: Option<(Rect, usize)>,
+    pub(super) hit_context: Option<Rect>,
+    pub(super) hit_threads: Option<(Rect, usize)>,
+    pub(super) last_events_len: usize,
+
+    // Test-only clipboard capture: when set, `copy_chat` records the copied text
+    // here and skips the platform writers (no `pbcopy`/OSC subprocess in tests).
+    pub(super) copy_capture: Option<Arc<std::sync::Mutex<Vec<String>>>>,
+
+    // Optional observational overlay from the background tinyplace service:
+    // this TUI's own identity, its peer roster, and peer presence. Merged into
+    // the snapshot on every refresh so the Overview panel and Agents lanes light
+    // up without the runtime having to know about tiny.place.
+    pub(super) tinyplace_obs:
+        Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
+}

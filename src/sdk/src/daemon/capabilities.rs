@@ -7,6 +7,10 @@
 //! establish authoritatively (cwd, git project/branch, detected providers), which
 //! win. The probe never fails: a missing/wedged provider degrades to the facts
 //! plus empty arrays.
+//!
+//! The probe prompt is grounded in the workspace's CLAUDE.md/AGENTS.md/README.md
+//! (see [`super::dir_context`]) so `summary` carries a ≤100-token project digest;
+//! a deterministic digest of those files backs it up when the probe fails.
 
 use std::collections::HashMap;
 
@@ -14,10 +18,11 @@ use tokio::process::Command;
 
 use crate::tinyplace_support::{AgentCapabilities, HarnessProvider};
 
+use super::dir_context::{read_dir_context, truncate_chars, MAX_SUMMARY_CHARS};
 use super::providers::{Abort, RunTaskFn, RunTaskOptions};
 
 /// The strict-JSON self-report prompt.
-pub const CAPABILITY_PROMPT: &str = "Report your own capabilities for an orchestrator. Respond with ONLY a JSON object, no prose or markdown, matching {\"tools\":string[],\"mcpServers\":string[],\"accessibleDirs\":string[],\"summary\":string}: tools=tool/command names you can invoke; mcpServers=MCP servers/connectors available to you; accessibleDirs=absolute dirs you can read/write; summary=1-2 sentences on what you can do here.";
+pub const CAPABILITY_PROMPT: &str = "Report your own capabilities for an orchestrator. Respond with ONLY a JSON object, no prose or markdown, matching {\"tools\":string[],\"mcpServers\":string[],\"accessibleDirs\":string[],\"summary\":string}: tools=tool/command names you can invoke; mcpServers=MCP servers/connectors available to you; accessibleDirs=absolute dirs you can read/write; summary=at most 100 tokens: what this project/directory is (drawn from the project files below when present), its key conventions, and what you can do here.";
 
 /// A capability probe should answer in seconds; a slow one must not stall a query.
 pub const DEFAULT_PROBE_TIMEOUT_MS: u64 = 60_000;
@@ -41,6 +46,7 @@ pub struct ProbeOptions {
 pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
     let cwd = resolve_path(&options.workspace);
     let git = read_git_facts(&cwd).await;
+    let dir = read_dir_context(&cwd).await;
 
     let base = AgentCapabilities {
         cwd: Some(cwd.clone()),
@@ -50,12 +56,18 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         providers: options.providers.clone(),
         tools: Vec::new(),
         mcp_servers: Vec::new(),
-        summary: None,
+        // Deterministic digest of CLAUDE.md/AGENTS.md/README.md — the summary
+        // of last resort so a failed probe still carries project context.
+        summary: dir.fallback_summary.clone(),
     };
 
+    let prompt = match &dir.prompt_block {
+        Some(block) => format!("{CAPABILITY_PROMPT}\n\n{block}"),
+        None => CAPABILITY_PROMPT.to_string(),
+    };
     let run_options = RunTaskOptions {
         provider: options.provider,
-        prompt: CAPABILITY_PROMPT.to_string(),
+        prompt,
         cwd: cwd.clone(),
         env: options.env.clone(),
         timeout_ms: options.timeout_ms.unwrap_or(DEFAULT_PROBE_TIMEOUT_MS),
@@ -78,7 +90,7 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
     merged.accessible_dirs = unique(std::iter::once(cwd).chain(reported.accessible_dirs));
     merged.tools = reported.tools;
     merged.mcp_servers = reported.mcp_servers;
-    merged.summary = reported.summary;
+    merged.summary = reported.summary.or(dir.fallback_summary);
     merged
 }
 
@@ -99,7 +111,7 @@ fn parse_capability_reply(reply: &str) -> ReportedCapabilities {
                 .and_then(|v| v.as_str())
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .map(str::to_string);
+                .map(|s| truncate_chars(s, MAX_SUMMARY_CHARS));
             return ReportedCapabilities {
                 tools: string_array(parsed.get("tools")),
                 mcp_servers: string_array(parsed.get("mcpServers")),
@@ -113,7 +125,7 @@ fn parse_capability_reply(reply: &str) -> ReportedCapabilities {
         tools: Vec::new(),
         mcp_servers: Vec::new(),
         accessible_dirs: Vec::new(),
-        summary: (!raw.is_empty()).then(|| raw.to_string()),
+        summary: (!raw.is_empty()).then(|| truncate_chars(raw, MAX_SUMMARY_CHARS)),
     }
 }
 
@@ -274,10 +286,14 @@ mod tests {
     use super::super::providers::{RunTaskFn, RunTaskResult};
 
     fn probe_options(run_task: RunTaskFn) -> ProbeOptions {
+        probe_options_in(run_task, ".")
+    }
+
+    fn probe_options_in(run_task: RunTaskFn, workspace: &str) -> ProbeOptions {
         ProbeOptions {
             provider: HarnessProvider::Claude,
             run_task,
-            workspace: ".".to_string(),
+            workspace: workspace.to_string(),
             env: HashMap::new(),
             providers: vec![HarnessProvider::Claude],
             timeout_ms: Some(1_000),
@@ -319,6 +335,92 @@ mod tests {
         assert!(caps.mcp_servers.is_empty());
         assert!(caps.summary.is_none());
         assert!(caps.cwd.is_some(), "cheap facts survive a failed probe");
+    }
+
+    #[tokio::test]
+    async fn probe_prompt_is_grounded_in_workspace_files() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(
+            dir.path().join("README.md"),
+            "# Widget\n\nA widget library.",
+        )
+        .await
+        .unwrap();
+        let seen_prompt: Arc<std::sync::Mutex<String>> = Arc::default();
+        let captured = seen_prompt.clone();
+        let run_task: RunTaskFn = Arc::new(move |opts| {
+            *captured.lock().unwrap() = opts.prompt.clone();
+            Box::pin(async move {
+                Ok(RunTaskResult {
+                    usage: None,
+                    provider: opts.provider,
+                    reply: r#"{"tools":[],"summary":"widget dev agent"}"#.to_string(),
+                    events: 0,
+                })
+            })
+        });
+        let caps =
+            probe_capabilities(probe_options_in(run_task, dir.path().to_str().unwrap())).await;
+        let prompt = seen_prompt.lock().unwrap().clone();
+        assert!(prompt.starts_with(CAPABILITY_PROMPT));
+        assert!(prompt.contains("--- README.md (excerpt) ---"));
+        assert!(prompt.contains("A widget library."));
+        // The agent's grounded summary wins over the deterministic digest.
+        assert_eq!(caps.summary.as_deref(), Some("widget dev agent"));
+    }
+
+    #[tokio::test]
+    async fn failed_probe_falls_back_to_dir_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(
+            dir.path().join("README.md"),
+            "# Widget\n\nA widget library.",
+        )
+        .await
+        .unwrap();
+        let run_task: RunTaskFn =
+            Arc::new(|_opts| Box::pin(async move { Err("provider wedged".to_string()) }));
+        let caps =
+            probe_capabilities(probe_options_in(run_task, dir.path().to_str().unwrap())).await;
+        assert_eq!(
+            caps.summary.as_deref(),
+            Some("README.md: Widget — A widget library.")
+        );
+    }
+
+    #[tokio::test]
+    async fn reply_without_summary_falls_back_to_dir_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("AGENTS.md"), "# Agents\n\nRun cargo test.")
+            .await
+            .unwrap();
+        let run_task: RunTaskFn = Arc::new(|opts| {
+            Box::pin(async move {
+                Ok(RunTaskResult {
+                    usage: None,
+                    provider: opts.provider,
+                    reply: r#"{"tools":["Edit"]}"#.to_string(),
+                    events: 0,
+                })
+            })
+        });
+        let caps =
+            probe_capabilities(probe_options_in(run_task, dir.path().to_str().unwrap())).await;
+        assert_eq!(caps.tools, vec!["Edit"]);
+        assert_eq!(
+            caps.summary.as_deref(),
+            Some("AGENTS.md: Agents — Run cargo test.")
+        );
+    }
+
+    #[test]
+    fn overlong_reported_summary_is_capped() {
+        let long = "x".repeat(2_000);
+        let reply = format!(r#"{{"summary":"{long}"}}"#);
+        let reported = parse_capability_reply(&reply);
+        let summary = reported.summary.unwrap();
+        assert!(summary.chars().count() <= MAX_SUMMARY_CHARS);
+        assert!(summary.ends_with('…'));
     }
 
     #[tokio::test]

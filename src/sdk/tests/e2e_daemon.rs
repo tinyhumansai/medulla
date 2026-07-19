@@ -29,8 +29,8 @@ use medulla::tinyplace_support::{
 };
 
 use support::fake_provider::{
-    claude_capabilities_script, claude_script, claude_stdin_echo_script, hanging_script,
-    opencode_script, provider_env, TempDir,
+    claude_capabilities_script, claude_capabilities_script_without_summary, claude_script,
+    claude_stdin_echo_script, hanging_script, opencode_script, provider_env, TempDir,
 };
 use support::wait_until;
 
@@ -457,6 +457,50 @@ async fn capabilities_result_merges_daemon_and_report() {
     assert!(caps.accessible_dirs.contains(&expected_cwd));
     assert!(caps.accessible_dirs.iter().any(|d| d == "/opt/extra"));
     assert_eq!(caps.summary.as_deref(), Some("fake claude"));
+}
+
+// 5b. Capabilities: when the agent's report has no `summary`, the workspace's
+//     README.md digest back-fills it in the capabilities_result frame.
+#[tokio::test]
+async fn capabilities_summary_falls_back_to_workspace_digest() {
+    let tmp = TempDir::new();
+    std::fs::write(
+        tmp.path().join("README.md"),
+        "# Widget\n\nA widget library.",
+    )
+    .unwrap();
+    let script = tmp.write_script("claude", &claude_capabilities_script_without_summary());
+    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(
+        config(HarnessProvider::Claude, tmp.path_str(), env),
+        real_run_task(),
+        send,
+    );
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(
+            TaskFrameKind::Capabilities,
+            "cap-2",
+            "",
+            Some("corr-10"),
+        )),
+    );
+    runtime.idle().await;
+
+    let frames = decoded_frames(&recorded);
+    let result = frames
+        .iter()
+        .find(|f| f.kind == TaskFrameKind::CapabilitiesResult)
+        .expect("capabilities_result frame");
+    let caps = parse_agent_capabilities(&result.text).expect("parseable capabilities");
+    assert_eq!(caps.tools, vec!["Bash"]);
+    assert_eq!(
+        caps.summary.as_deref(),
+        Some("README.md: Widget — A widget library.")
+    );
 }
 
 // 6. Plaintext DM: a non-frame body → raw text reply (no frame) via real spawn.

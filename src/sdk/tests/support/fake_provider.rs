@@ -116,6 +116,13 @@ pub fn claude_capabilities_script() -> String {
     format!("#!/bin/sh\nprintf '%s\\n' '{{\"type\":\"result\",\"result\":\"{report}\"}}'\n")
 }
 
+/// A claude capabilities script whose self-report has no `summary`, so the
+/// daemon's workspace-file digest must back-fill it.
+pub fn claude_capabilities_script_without_summary() -> String {
+    let report = r#"{\"tools\":[\"Bash\"],\"mcpServers\":[],\"accessibleDirs\":[]}"#;
+    format!("#!/bin/sh\nprintf '%s\\n' '{{\"type\":\"result\",\"result\":\"{report}\"}}'\n")
+}
+
 /// A claude script that waits for one stdin line, then emits it back in the
 /// result (used to prove `input` forwarding reached the child).
 pub fn claude_stdin_echo_script() -> String {

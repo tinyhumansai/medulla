@@ -270,3 +270,173 @@ async fn the_full_share_sequence_runs_status_uploads_then_claim() {
 
     assert_eq!(backend.requests().len(), 4);
 }
+
+// --- share_history: the full consented sequence ----------------------------
+
+use medulla::history_upload::{share_history, HistorySessionFile, ShareProgress};
+use medulla::session_history::SessionAgentKind;
+
+/// Write `count` transcripts into `dir` and describe them as scan results.
+fn staged_files(dir: &std::path::Path, count: usize) -> Vec<HistorySessionFile> {
+    (0..count)
+        .map(|index| {
+            let path = dir.join(format!("session-{index}.jsonl"));
+            std::fs::write(
+                &path,
+                format!("{{\"i\":{index},\"t\":\"sk-abcdefghijklmnop0123456789\"}}\n"),
+            )
+            .unwrap();
+            HistorySessionFile {
+                agent: if index % 2 == 0 {
+                    SessionAgentKind::Claude
+                } else {
+                    SessionAgentKind::Codex
+                },
+                path,
+                size_bytes: 48,
+                mtime_ms: index as i64,
+            }
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn share_history_uploads_every_transcript_then_claims() {
+    let backend = MockBackend::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let files = staged_files(dir.path(), 3);
+
+    let mut progress: Vec<ShareProgress> = Vec::new();
+    let claim = share_history(&client(&backend), &files, |p| progress.push(p))
+        .await
+        .unwrap();
+
+    assert_eq!(claim.status.awarded_usd, 5.0);
+
+    // One progress report per transcript, counting up.
+    assert_eq!(progress.len(), 3);
+    assert_eq!(progress[2].uploaded, 3);
+    assert_eq!(progress[2].total, 3);
+    // Each staged transcript carries one secret, scrubbed before sending.
+    assert_eq!(progress[2].redactions, 3);
+
+    // Three uploads then exactly one claim.
+    let paths: Vec<String> = backend.requests().iter().map(|r| r.path.clone()).collect();
+    assert_eq!(paths.iter().filter(|p| p.ends_with("/uploads")).count(), 3);
+    assert_eq!(paths.iter().filter(|p| p.ends_with("/claim")).count(), 1);
+}
+
+#[tokio::test]
+async fn share_history_sends_redacted_content_never_the_original() {
+    let backend = MockBackend::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let files = staged_files(dir.path(), 1);
+
+    share_history(&client(&backend), &files, |_| {})
+        .await
+        .unwrap();
+
+    let requests = backend.requests();
+    let upload = requests
+        .iter()
+        .find(|r| r.path.ends_with("/uploads"))
+        .unwrap();
+    assert!(
+        !upload.body.contains("sk-abcdefghijklmnop"),
+        "the raw secret must never reach the wire: {}",
+        upload.body
+    );
+    assert!(upload.body.contains("[REDACTED]"));
+}
+
+#[tokio::test]
+async fn share_history_labels_each_transcript_with_its_own_agent() {
+    let backend = MockBackend::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let files = staged_files(dir.path(), 2); // one claude, one codex
+
+    share_history(&client(&backend), &files, |_| {})
+        .await
+        .unwrap();
+
+    let requests = backend.requests();
+    let bodies: Vec<&str> = requests
+        .iter()
+        .filter(|r| r.path.ends_with("/uploads"))
+        .map(|r| r.body.as_str())
+        .collect();
+    assert_eq!(bodies.len(), 2);
+    assert!(bodies[0].contains("claude"));
+    assert!(bodies[1].contains("codex"));
+}
+
+#[tokio::test]
+async fn share_history_still_claims_when_every_upload_is_rejected() {
+    // The backend refuses uploads once a claim has settled; the sequence must
+    // still claim so the user is told the real state rather than stalling.
+    let backend = MockBackend::start().await;
+    backend.configure(|config| config.history_upload_ok = false);
+    let dir = tempfile::tempdir().unwrap();
+    let files = staged_files(dir.path(), 2);
+
+    let mut progress: Vec<ShareProgress> = Vec::new();
+    let claim = share_history(&client(&backend), &files, |p| progress.push(p))
+        .await
+        .unwrap();
+
+    // Progress still advances (so the bar moves) but nothing counted as uploaded.
+    assert_eq!(progress.len(), 2);
+    assert_eq!(progress[1].uploaded, 0);
+    assert_eq!(progress[1].total, 2);
+    assert_eq!(progress[1].redactions, 0);
+    assert_eq!(claim.status.awarded_usd, 5.0);
+}
+
+#[tokio::test]
+async fn share_history_skips_unreadable_transcripts_without_aborting() {
+    let backend = MockBackend::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut files = staged_files(dir.path(), 1);
+    files.push(HistorySessionFile {
+        agent: SessionAgentKind::Claude,
+        path: dir.path().join("does-not-exist.jsonl"),
+        size_bytes: 10,
+        mtime_ms: 99,
+    });
+
+    let mut progress: Vec<ShareProgress> = Vec::new();
+    let claim = share_history(&client(&backend), &files, |p| progress.push(p))
+        .await
+        .unwrap();
+
+    assert_eq!(progress.len(), 2, "both files reported");
+    assert_eq!(progress[1].uploaded, 1, "only the readable one uploaded");
+    assert_eq!(claim.status.awarded_usd, 5.0);
+}
+
+#[tokio::test]
+async fn share_history_with_no_files_claims_immediately() {
+    let backend = MockBackend::start().await;
+
+    let mut called = 0;
+    let claim = share_history(&client(&backend), &[], |_| called += 1)
+        .await
+        .unwrap();
+
+    assert_eq!(called, 0);
+    assert_eq!(claim.status.awarded_usd, 5.0);
+    let requests = backend.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].path.ends_with("/claim"));
+}
+
+#[tokio::test]
+async fn share_history_surfaces_a_failing_claim() {
+    let backend = MockBackend::start().await;
+    drop(backend); // nothing is listening any more
+    let dead = MedullaClient::new("http://127.0.0.1:1", "test-jwt");
+
+    let result = share_history(&dead, &[], |_| {}).await;
+
+    assert!(result.is_err(), "a failed claim must surface");
+}

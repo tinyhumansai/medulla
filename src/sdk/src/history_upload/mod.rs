@@ -8,8 +8,9 @@
 //! so the client cannot inflate its own payout.
 //!
 //! Split by responsibility: [`types`] holds the data model, [`scan`] locates and
-//! reads transcripts, and [`redact`] removes secrets before anything leaves the
-//! machine. Public items are re-exported so callers use
+//! reads transcripts, [`redact`] removes secrets before anything leaves the
+//! machine, and [`share`] orchestrates the upload-then-claim sequence once the
+//! user has consented. Public items are re-exported so callers use
 //! `medulla::history_upload::*`.
 //!
 //! ```no_run
@@ -27,6 +28,7 @@
 
 mod redact;
 mod scan;
+mod share;
 mod types;
 
 #[cfg(test)]
@@ -34,4 +36,5 @@ mod tests;
 
 pub use redact::{redact_text, REDACTED};
 pub use scan::{read_redacted_session, scan_local_history, MAX_SESSION_BYTES, MAX_UPLOAD_SESSIONS};
+pub use share::{share_history, ShareProgress};
 pub use types::{AgentTally, HistoryScan, HistorySessionFile, RedactedSession};

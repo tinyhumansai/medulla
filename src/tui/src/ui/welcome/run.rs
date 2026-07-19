@@ -9,20 +9,26 @@
 //!
 //! The driver owns the scanned [`HistoryScan`] — the screen only ever holds
 //! display numbers — so transcript contents never enter the pure state machine.
+//!
+//! The loop itself lives in [`drive_welcome_ui`], which is generic over the
+//! ratatui backend and takes its key events as a stream. [`run_welcome_ui`] is
+//! the thin production wrapper that supplies the real terminal and crossterm's
+//! event stream; tests drive the same loop with a test backend and a scripted
+//! stream, so the flow is exercised end to end without a TTY.
 
 use std::collections::HashMap;
 use std::io::Stdout;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{Event, EventStream, KeyEventKind};
-use futures::StreamExt;
-use ratatui::backend::CrosstermBackend;
+use crossterm::event::{Event, EventStream, KeyEvent, KeyEventKind};
+use futures::{Stream, StreamExt};
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedSender;
 
 use medulla::client::MedullaClient;
-use medulla::history_upload::{read_redacted_session, scan_local_history, HistoryScan};
+use medulla::history_upload::{scan_local_history, share_history, HistoryScan};
 
 use super::types::{
     ScanSummary, WelcomeCmd, WelcomeEvent, WelcomeOutcome, WelcomeScreen, DEFAULT_MAX_REWARD_USD,
@@ -41,6 +47,40 @@ pub async fn run_welcome_ui(
     client: &MedullaClient,
     env: HashMap<String, String>,
 ) -> anyhow::Result<WelcomeOutcome> {
+    // Crossterm's raw event stream, narrowed to the key presses the screen cares
+    // about, so the loop itself never touches terminal types.
+    let keys = EventStream::new().filter_map(|event| async move {
+        match event {
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => Some(key),
+            _ => None,
+        }
+    });
+    futures::pin_mut!(keys);
+    drive_welcome_ui(terminal, client, env, keys).await
+}
+
+/// The welcome loop, generic over the backend and its key source.
+///
+/// Split out from [`run_welcome_ui`] so the whole flow — scanning, consent,
+/// uploading, claiming, and every render — can be driven headlessly in tests.
+/// Production code should call [`run_welcome_ui`].
+///
+/// Returns immediately with [`WelcomeOutcome::Skipped`] when the backend says the
+/// reward was already granted — the backend, not the local config flag, is the
+/// authority on that. Any transport failure while checking is also treated as
+/// "skip": a new user must never be blocked from the app by this optional flow.
+///
+/// Nothing is uploaded before the user explicitly approves the consent step.
+pub async fn drive_welcome_ui<B, K>(
+    terminal: &mut Terminal<B>,
+    client: &MedullaClient,
+    env: HashMap<String, String>,
+    mut keys: K,
+) -> anyhow::Result<WelcomeOutcome>
+where
+    B: Backend,
+    K: Stream<Item = KeyEvent> + Unpin,
+{
     let max_reward_usd = match client.history_reward_status().await {
         Ok(status) if status.claimed => return Ok(WelcomeOutcome::Skipped),
         Ok(status) => status.max_reward_usd,
@@ -52,7 +92,6 @@ pub async fn run_welcome_ui(
     } else {
         DEFAULT_MAX_REWARD_USD
     });
-    let mut reader = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(90));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WelcomeEvent>();
 
@@ -67,13 +106,9 @@ pub async fn run_welcome_ui(
         }
 
         tokio::select! {
-            maybe_event = reader.next() => {
-                if let Some(Ok(Event::Key(key))) = maybe_event {
-                    if key.kind != KeyEventKind::Release {
-                        if let Some(cmd) = screen.handle_key(key) {
-                            dispatch(cmd, client, &env, &scan, &tx);
-                        }
-                    }
+            Some(key) = keys.next() => {
+                if let Some(cmd) = screen.handle_key(key) {
+                    dispatch(cmd, client, &env, &scan, &tx);
                 }
             }
             Some(ev) = rx.recv() => screen.apply(ev),
@@ -118,77 +153,44 @@ fn dispatch(
     }
 }
 
-/// Redact and upload each transcript, then claim the reward.
+/// Redact, upload, and claim, forwarding the SDK's progress as screen events.
 ///
-/// A single transcript that fails to read or upload is skipped rather than
-/// aborting: a partial share still earns credit for what did land, which is
-/// strictly better for the user than failing the whole flow.
+/// The orchestration itself lives in [`medulla::history_upload::share_history`] —
+/// it is UI-free logic and is tested there against a mock backend. This wrapper
+/// only translates progress and the final claim into [`WelcomeEvent`]s.
 async fn upload_and_claim(
     client: MedullaClient,
     scan: Arc<tokio::sync::Mutex<HistoryScan>>,
     tx: UnboundedSender<WelcomeEvent>,
 ) {
     let files = scan.lock().await.files.clone();
-    let total = files.len();
-    let mut uploaded = 0usize;
-    let mut redactions = 0usize;
 
-    for file in files {
-        // Reading and redacting is CPU/IO bound; keep it off the reactor.
-        let session = tokio::task::spawn_blocking(move || read_redacted_session(&file))
-            .await
-            .ok()
-            .flatten();
-        let Some(session) = session else { continue };
+    let progress_tx = tx.clone();
+    let claimed = share_history(&client, &files, move |progress| {
+        let _ = progress_tx.send(WelcomeEvent::UploadProgress {
+            uploaded: progress.uploaded,
+            total: progress.total,
+            redactions: progress.redactions,
+        });
+    })
+    .await;
 
-        let agent = session.agent.as_str();
-        match client
-            .upload_history_session(agent, session.content.clone())
-            .await
-        {
-            Ok(_) => {
-                uploaded += 1;
-                redactions += session.redactions;
-                let _ = tx.send(WelcomeEvent::UploadProgress {
-                    uploaded,
-                    total,
-                    redactions,
-                });
-            }
-            Err(_) => {
-                // One transcript failing is not fatal: the claim below reports
-                // the real server-side state, including the "already settled"
-                // case where the backend refuses further uploads outright.
-                let _ = tx.send(WelcomeEvent::UploadProgress {
-                    uploaded,
-                    total,
-                    redactions,
-                });
-            }
-        }
-    }
-
-    match client.claim_history_reward().await {
-        Ok(claim) => {
-            let _ = tx.send(WelcomeEvent::Claimed {
-                awarded_usd: claim.status.awarded_usd,
-                tier: claim.status.tier.clone(),
-                breakdown: vec![
-                    ("token volume".into(), claim.breakdown.tokens_usd),
-                    ("active days".into(), claim.breakdown.active_days_usd),
-                    ("sessions".into(), claim.breakdown.sessions_usd),
-                    ("multi-agent".into(), claim.breakdown.multi_agent_usd),
-                ],
-                max_reward_usd: claim.status.max_reward_usd,
-                already_claimed: claim.already_claimed,
-            });
-        }
-        Err(err) => {
-            let _ = tx.send(WelcomeEvent::Failed(format!(
-                "could not claim reward: {err}"
-            )));
-        }
-    }
+    let event = match claimed {
+        Ok(claim) => WelcomeEvent::Claimed {
+            awarded_usd: claim.status.awarded_usd,
+            tier: claim.status.tier.clone(),
+            breakdown: vec![
+                ("token volume".into(), claim.breakdown.tokens_usd),
+                ("active days".into(), claim.breakdown.active_days_usd),
+                ("sessions".into(), claim.breakdown.sessions_usd),
+                ("multi-agent".into(), claim.breakdown.multi_agent_usd),
+            ],
+            max_reward_usd: claim.status.max_reward_usd,
+            already_claimed: claim.already_claimed,
+        },
+        Err(err) => WelcomeEvent::Failed(format!("could not claim reward: {err}")),
+    };
+    let _ = tx.send(event);
 }
 
 /// Project a scan into the display-only summary the screen holds.

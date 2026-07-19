@@ -32,7 +32,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use run::run_welcome_ui;
+pub use run::{drive_welcome_ui, run_welcome_ui};
 pub use types::{
     format_usd, ScanSummary, WelcomeCmd, WelcomeEvent, WelcomeOutcome, WelcomeScreen,
     DEFAULT_MAX_REWARD_USD,

@@ -395,17 +395,7 @@ impl App {
         self.snapshot = self.runtime.snapshot();
         if let Some(obs) = &self.tinyplace_obs {
             if let Ok(obs) = obs.lock() {
-                if obs.identity.is_some() {
-                    self.snapshot.tinyplace = obs.identity.clone();
-                }
-                for descriptor in &obs.roster {
-                    if !self.snapshot.roster.iter().any(|a| a.id == descriptor.id) {
-                        self.snapshot.roster.push(descriptor.clone());
-                    }
-                }
-                for (id, presence) in &obs.presence {
-                    self.snapshot.presence.insert(id.clone(), presence.clone());
-                }
+                obs.merge_into(&mut self.snapshot);
             }
         }
     }

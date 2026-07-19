@@ -26,7 +26,7 @@ use crate::ui::chat_store::{ChatMessage, MainChatSummary};
 use crate::ui::events::{EventEnvelope, TaskDigest};
 
 /// A connected agent medulla can delegate to.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AgentDescriptor {
     pub id: String,
     #[serde(default)]
@@ -42,7 +42,7 @@ pub struct AgentDescriptor {
 }
 
 /// Latest liveness reading for one roster agent (tinyplace backend only).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct AgentPresence {
     pub online: bool,
     pub detail: Option<String>,
@@ -195,7 +195,7 @@ pub struct ContextItem {
 }
 
 /// The full render snapshot (see spec 01 appendix).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RuntimeSnapshot {
     pub session_id: String,
     pub running: bool,

@@ -42,6 +42,28 @@ pub struct TinyplaceObservation {
     pub presence: HashMap<String, AgentPresence>,
 }
 
+impl TinyplaceObservation {
+    /// Merge this observation into a runtime snapshot in place.
+    ///
+    /// Overlays the tiny.place identity (when known), appends roster descriptors
+    /// not already present by `id` (deduping so a peer configured statically and
+    /// discovered live appears once), and upserts presence readings. Leaves the
+    /// snapshot untouched for any field this observation has not populated.
+    pub fn merge_into(&self, snapshot: &mut crate::runtime::RuntimeSnapshot) {
+        if self.identity.is_some() {
+            snapshot.tinyplace = self.identity.clone();
+        }
+        for descriptor in &self.roster {
+            if !snapshot.roster.iter().any(|a| a.id == descriptor.id) {
+                snapshot.roster.push(descriptor.clone());
+            }
+        }
+        for (id, presence) in &self.presence {
+            snapshot.presence.insert(id.clone(), presence.clone());
+        }
+    }
+}
+
 /// A running tiny.place background service. Dropping it aborts its loops.
 pub struct TinyplaceService {
     observation: Arc<Mutex<TinyplaceObservation>>,
@@ -206,6 +228,40 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn merge_into_overlays_identity_dedups_roster_and_upserts_presence() {
+        use crate::runtime::{AgentDescriptor, AgentPresence, RuntimeSnapshot};
+
+        let mut snapshot = RuntimeSnapshot {
+            roster: vec![AgentDescriptor {
+                id: "peer-1".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let mut obs = TinyplaceObservation::default();
+        // A duplicate id (peer-1) must not be appended twice; peer-2 is new.
+        obs.roster = vec![
+            AgentDescriptor {
+                id: "peer-1".into(),
+                ..Default::default()
+            },
+            AgentDescriptor {
+                id: "peer-2".into(),
+                ..Default::default()
+            },
+        ];
+        obs.presence
+            .insert("peer-1".into(), AgentPresence::default());
+
+        obs.merge_into(&mut snapshot);
+
+        let ids: Vec<&str> = snapshot.roster.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["peer-1", "peer-2"]);
+        assert!(snapshot.presence.contains_key("peer-1"));
     }
 
     #[test]

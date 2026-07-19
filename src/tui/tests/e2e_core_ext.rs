@@ -7,9 +7,10 @@
 //! steering / fleet RPC matrix, error surfacing, the `resync.required` snapshot
 //! carry, the stall / connection-drop transitions, and malformed / oversize frames.
 
+#[path = "../../sdk/tests/support/mod.rs"]
 mod support;
 
-#[path = "support/mock_core.rs"]
+#[path = "../../sdk/tests/support/mock_core.rs"]
 mod mock_core;
 
 use std::path::Path;
@@ -20,7 +21,7 @@ use serde_json::json;
 use medulla::runtime::core::CoreRuntime;
 use medulla::runtime::core_client::{CallError, CoreClient};
 use medulla::runtime::{Runtime, StreamState, WorkerOp};
-use medulla::ui::agents::derive_agent_lanes;
+use medulla_tui::ui::agents::derive_agent_lanes;
 
 use mock_core::{MockCore, MockCoreConfig};
 use support::wait_until;

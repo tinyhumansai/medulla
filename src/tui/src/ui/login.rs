@@ -15,8 +15,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::auth::Provider;
 use crate::ui::app::SPINNER;
+use medulla::auth::Provider;
 
 /// The four providers, in the order the panel cycles through them.
 const PROVIDERS: [Provider; 4] = [

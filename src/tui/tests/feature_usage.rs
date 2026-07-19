@@ -10,8 +10,8 @@ use serde_json::json;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
-use medulla::ui::app::{App, TABS};
-use medulla::ui::events::{TaskDigest, TuiEvent, Usage};
+use medulla_tui::ui::app::{App, TABS};
+use medulla_tui::ui::events::{TaskDigest, TuiEvent, Usage};
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
@@ -34,7 +34,7 @@ fn render(app: &mut App, w: u16, h: u16) -> String {
     buf.content().iter().map(|c| c.symbol()).collect()
 }
 
-fn key(app: &mut App, code: KeyCode) -> Option<medulla::ui::app::Cmd> {
+fn key(app: &mut App, code: KeyCode) -> Option<medulla_tui::ui::app::Cmd> {
     app.on_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
 }
 
@@ -134,7 +134,7 @@ fn refresh_key_requests_usage_and_c_toggles_config() {
     let (mut app, _rt) = usage_app();
     let cmd = key(&mut app, KeyCode::Char('r'));
     assert!(
-        matches!(cmd, Some(medulla::ui::app::Cmd::LoadUsage)),
+        matches!(cmd, Some(medulla_tui::ui::app::Cmd::LoadUsage)),
         "r requests a usage refresh"
     );
     // c jumps to the Config subpage (the effective-config view).
@@ -156,7 +156,7 @@ fn tab_cycle_into_usage_requests_load() {
     app.tab_index = 0;
     let mut saw_load = false;
     for _ in 0..TABS.len() {
-        if let Some(medulla::ui::app::Cmd::LoadUsage) = key(&mut app, KeyCode::Tab) {
+        if let Some(medulla_tui::ui::app::Cmd::LoadUsage) = key(&mut app, KeyCode::Tab) {
             saw_load = true;
         }
     }

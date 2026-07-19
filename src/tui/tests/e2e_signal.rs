@@ -6,11 +6,12 @@
 //! See `tests/support/mock_signal_server.rs` for the endpoint spec, state model,
 //! fault-injection controls, and the scenario matrix these tests realize.
 
+#[path = "../../sdk/tests/support/mod.rs"]
 mod support;
 
-#[path = "support/mock_harness.rs"]
+#[path = "../../sdk/tests/support/mock_harness.rs"]
 mod mock_harness;
-#[path = "support/mock_signal_server.rs"]
+#[path = "../../sdk/tests/support/mock_signal_server.rs"]
 mod mock_signal_server;
 
 use std::collections::HashMap;
@@ -982,8 +983,8 @@ async fn fault_duplicate_task_frame_no_double_run() {
 // ─── medulla-API fold leg ───────────────────────────────────────────────────
 
 use medulla::runtime::AgentDescriptor;
-use medulla::ui::agents::{derive_agent_lanes, TaskStatus};
-use medulla::ui::events::{EventEnvelope, TaskDigest, TuiEvent};
+use medulla_tui::ui::agents::{derive_agent_lanes, TaskStatus};
+use medulla_tui::ui::events::{EventEnvelope, TaskDigest, TuiEvent};
 
 /// Fold the frames the owner decrypted off the wire into the TUI event stream
 /// the way the owner's UI would surface a delegated task: dispatch → TaskStart,
@@ -1040,7 +1041,7 @@ fn frames_to_events(worker_id: &str, task_id: &str, frames: &[TaskFrame]) -> Vec
 
 // Scenario 6 (medulla-API leg): drive the encrypted owner → daemon chain, then
 // fold the decrypted frames into TuiEvents and assert they fold, via
-// `medulla::ui::agents`, into the expected agents-lane/task state — a worker lane
+// `medulla_tui::ui::agents`, into the expected agents-lane/task state — a worker lane
 // for the delegated agent whose task lands Done carrying the reply digest.
 #[tokio::test]
 async fn decrypted_frames_fold_into_agent_lane_states() {

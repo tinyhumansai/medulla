@@ -1,0 +1,19 @@
+//! medulla: client SDK for Medulla. The UI-facing surface is driven through a
+//! `Runtime` trait; concrete runtimes (backend HTTP/SSE, core socket, mock)
+//! live in [`runtime`]. The HTTP/SSE client lives in [`client`]. The terminal
+//! app that consumes this crate is the sibling `medulla-tui` crate.
+
+pub mod auth;
+pub mod client;
+pub mod config;
+pub mod daemon;
+pub mod home;
+pub mod memory;
+pub mod onboarding;
+pub mod runtime;
+pub mod session_history;
+pub mod tinyplace_support;
+pub mod ui;
+pub mod update;
+pub mod worker_profile;
+pub mod wrapper;

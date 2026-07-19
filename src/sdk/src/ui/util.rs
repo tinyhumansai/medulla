@@ -77,6 +77,9 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
     out
 }
 
+/// Braille spinner frames shared by the app, login, and onboarding screens.
+pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 #[cfg(test)]
 mod tests {
     use super::*;

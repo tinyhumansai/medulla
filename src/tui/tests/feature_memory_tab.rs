@@ -14,7 +14,7 @@ use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::memory::{MemoryHit, MemoryStatus};
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
-use medulla::ui::app::{App, Cmd, TABS};
+use medulla_tui::ui::app::{App, Cmd, TABS};
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());

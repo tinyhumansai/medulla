@@ -14,9 +14,9 @@ use ratatui::Terminal;
 
 use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
-use medulla::ui::app::{App, Cmd, TABS};
-use medulla::ui::chat_store::MainChatSummary;
-use medulla::ui::events::TuiEvent;
+use medulla_tui::ui::app::{App, Cmd, TABS};
+use medulla_tui::ui::chat_store::MainChatSummary;
+use medulla_tui::ui::events::TuiEvent;
 
 // --- harness helpers --------------------------------------------------------
 

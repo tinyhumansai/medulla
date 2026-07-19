@@ -7,10 +7,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::auth::{Credentials, Provider};
-use crate::config::BackendConfig;
-use crate::session_history::list_recent_sessions;
-use crate::tinyplace_support::HarnessProvider;
+use medulla::auth::{Credentials, Provider};
+use medulla::config::BackendConfig;
+use medulla::session_history::list_recent_sessions;
+use medulla::tinyplace_support::HarnessProvider;
 
 /// The top-level subcommand selected from `argv[1..]`.
 #[derive(Debug, Clone, PartialEq, Eq)]

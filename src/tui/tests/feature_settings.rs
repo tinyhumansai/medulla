@@ -12,7 +12,7 @@ use ratatui::Terminal;
 
 use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
-use medulla::ui::app::{App, Cmd, TABS};
+use medulla_tui::ui::app::{App, Cmd, TABS};
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());

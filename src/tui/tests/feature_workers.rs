@@ -14,8 +14,8 @@ use tokio::sync::broadcast;
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, StreamState, WorkerInfo, WorkerOp};
-use medulla::ui::app::{App, Cmd, TABS};
-use medulla::ui::chat_store::MainChatSummary;
+use medulla_tui::ui::app::{App, Cmd, TABS};
+use medulla_tui::ui::chat_store::MainChatSummary;
 
 /// A `Runtime` with a populated worker registry and a fixed stream state, built on
 /// top of a `MockRuntime` for everything else.

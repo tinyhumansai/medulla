@@ -1,5 +1,5 @@
 //! Feature tests for the first-run worker onboarding screen
-//! ([`medulla::ui::onboarding`]) and the profile model
+//! ([`medulla_tui::ui::onboarding`]) and the profile model
 //! ([`medulla::worker_profile`]): pure rendering and key/event transitions plus
 //! profile round-tripping, driven entirely through the public API (no async, no
 //! TTY, no network).
@@ -8,11 +8,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-use medulla::ui::onboarding::{
-    OnboardingCmd, OnboardingEvent, OnboardingOutcome, OnboardingScreen,
-};
 use medulla::worker_profile::{
     compose_worker_name, default_worker_name, is_registered, WorkerProfile,
+};
+use medulla_tui::ui::onboarding::{
+    OnboardingCmd, OnboardingEvent, OnboardingOutcome, OnboardingScreen,
 };
 
 fn key(code: KeyCode) -> KeyEvent {

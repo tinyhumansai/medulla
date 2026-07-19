@@ -1,20 +1,15 @@
-[package]
-name = "medulla"
-description = "Medulla client SDK and terminal UI: chat with the orchestrator, watch agent lanes, run the coding-agent daemon"
-version = "0.2.0"
+[workspace]
+resolver = "2"
+members = ["src/sdk", "src/tui"]
+
+[workspace.package]
+version = "0.3.0"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/medulla"
 
-[lib]
-name = "medulla"
-path = "src/lib.rs"
-
-[[bin]]
-name = "medulla"
-path = "src/main.rs"
-
-[dependencies]
+[workspace.dependencies]
+medulla = { path = "src/sdk", version = "0.3.0" }
 tinyplace = { path = "vendor/tinyplace/sdk/rust" }
 tinycortex = { path = "vendor/tinycortex", features = ["persona", "providers-http"] }
 serde = { version = "1", features = ["derive"] }
@@ -32,6 +27,4 @@ base64 = "0.22"
 async-trait = "0.1"
 dirs = "6"
 sha2 = "0.10"
-
-[dev-dependencies]
 tempfile = "3"

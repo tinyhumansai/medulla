@@ -15,8 +15,8 @@ use ratatui::Terminal;
 use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
-use medulla::ui::app::{App, Cmd, TABS};
-use medulla::ui::events::{TaskDigest, TuiEvent, Usage};
+use medulla_tui::ui::app::{App, Cmd, TABS};
+use medulla_tui::ui::events::{TaskDigest, TuiEvent, Usage};
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
@@ -70,7 +70,7 @@ impl medulla::runtime::Runtime for FleetRuntime {
         &self,
     ) -> futures::future::BoxFuture<
         'static,
-        anyhow::Result<Vec<medulla::ui::chat_store::MainChatSummary>>,
+        anyhow::Result<Vec<medulla_tui::ui::chat_store::MainChatSummary>>,
     > {
         self.inner.list_main_chats()
     }
@@ -619,7 +619,7 @@ fn overview_renders_opencode_panel_without_tinyplace() {
 #[test]
 fn resume_modal_swallows_mouse_and_ctrl_c_quits() {
     let (mut app, _rt) = demo_app();
-    app.open_resume(vec![medulla::ui::chat_store::MainChatSummary {
+    app.open_resume(vec![medulla_tui::ui::chat_store::MainChatSummary {
         session_id: "s".into(),
         name: "Chat".into(),
         turns: 1,
@@ -848,14 +848,14 @@ fn click_chat_thread_switches_active() {
 fn resume_picker_navigates_and_loads() {
     let (mut app, _rt) = demo_app();
     app.open_resume(vec![
-        medulla::ui::chat_store::MainChatSummary {
+        medulla_tui::ui::chat_store::MainChatSummary {
             session_id: "s1".into(),
             name: "First".into(),
             turns: 1,
             thread_count: 1,
             updated_at: "2026-01-01".into(),
         },
-        medulla::ui::chat_store::MainChatSummary {
+        medulla_tui::ui::chat_store::MainChatSummary {
             session_id: "s2".into(),
             name: "Second".into(),
             turns: 2,
@@ -1021,7 +1021,7 @@ fn cancel_task_without_cycle_prefix_reports_no_cycle() {
 
 #[test]
 fn trace_tab_renders_event_and_json() {
-    use medulla::ui::events::NodeTrace;
+    use medulla_tui::ui::events::NodeTrace;
     let (mut app, rt) = empty_app();
     rt.script_event(TuiEvent::Trace {
         entry: NodeTrace {

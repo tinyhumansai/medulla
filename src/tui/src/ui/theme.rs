@@ -10,7 +10,7 @@ use std::path::Path;
 
 use ratatui::style::{Color, Modifier, Style};
 
-use crate::config::ThemeConfig;
+use medulla::config::ThemeConfig;
 
 /// The editable theme roles, in Appearance-editor order.
 pub const THEME_ROLES: [&str; 4] = ["primary", "accent", "selection_fg", "dim_border"];

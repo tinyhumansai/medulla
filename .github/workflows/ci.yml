@@ -59,6 +59,34 @@ jobs:
       - name: Build
         run: cargo build --locked --all-targets
 
+  coverage:
+    name: Coverage (>= 90% lines)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # Line-coverage gate over the offline suite (no opencode leg needed —
+      # live-CLI tests skip when the binary is absent). main.rs (real-TTY event
+      # loop) is the documented uncovered remainder and is NOT excluded; the
+      # suite must clear 90% with it counted.
+      - name: Coverage gate
+        run: cargo llvm-cov --locked --fail-under-lines 90 --summary-only
+
   e2e-docker:
     name: E2E (docker + tmux + opencode)
     runs-on: ubuntu-latest

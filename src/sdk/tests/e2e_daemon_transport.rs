@@ -14,9 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use medulla::daemon::transport::{is_session_error, SignalTransport};
-use medulla::tinyplace_support::tinyplace::{
-    LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions,
-};
+use medulla::tinyplace::tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
 use mock_harness_relay::MockRelay;
 

@@ -1,5 +1,5 @@
 //! Feature tests for the first-run worker onboarding screen
-//! ([`medulla_tui::ui::onboarding`]) and the profile model
+//! ([`medulla_tui::ui::onboarding`], now app-owned) and the profile model
 //! ([`medulla::worker_profile`]): pure rendering and key/event transitions plus
 //! profile round-tripping, driven entirely through the public API (no async, no
 //! TTY, no network).

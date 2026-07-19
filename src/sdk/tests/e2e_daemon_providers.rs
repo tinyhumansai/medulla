@@ -22,7 +22,7 @@ use serde_json::json;
 use medulla::daemon::providers::{
     provider_bin, run_provider_task, Abort, RunTaskOptions, RunTaskResult,
 };
-use medulla::tinyplace_support::HarnessProvider;
+use medulla::tinyplace::HarnessProvider;
 
 use mock_harness::{
     auth_failure, garbage_then_reply, hang, success, tool_workflow, MockCli, MockDir, MockProvider,

@@ -252,6 +252,30 @@ pub fn resolve(
     }
 }
 
+/// Resolve [`MemorySettings`] and attach the backend inference target when a
+/// backend token is available.
+///
+/// Extends [`resolve`] by loading stored credentials from the credential store
+/// under `medulla_home` and applying the same precedence as
+/// [`crate::auth::resolve_backend_token`] (inline config token → `tokenEnv` →
+/// matching stored credentials). When a token resolves, summarization syncs
+/// through the backend; otherwise the settings are returned unchanged (an
+/// explicit `OPENROUTER_API_KEY` still wins inside the service). Reads the
+/// credential file from disk.
+pub fn resolve_with_backend(
+    section: Option<&MemoryConfigSection>,
+    backend: &crate::config::BackendConfig,
+    env: &HashMap<String, String>,
+    medulla_home: &Path,
+) -> MemorySettings {
+    let settings = resolve(section, env, medulla_home);
+    let stored = crate::auth::CredentialStore::at_home(medulla_home).load_or_legacy();
+    match crate::auth::resolve_backend_token(env, backend, stored.as_ref()) {
+        Some(jwt) => settings.with_backend(backend.base_url.clone(), jwt),
+        None => settings,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,6 +412,32 @@ mod tests {
             openrouter_api_key(&env(&[("OPENROUTER_API_KEY", "sk-x")])).as_deref(),
             Some("sk-x")
         );
+    }
+
+    #[test]
+    fn resolve_with_backend_attaches_token_from_env() {
+        use crate::config::BackendConfig;
+        let home = PathBuf::from("/home/u/.medulla");
+        let backend = BackendConfig::default();
+        // Token from the env var → backend inference target is attached.
+        let s = resolve_with_backend(
+            None,
+            &backend,
+            &env(&[(&backend.token_env, "jwt-from-env")]),
+            &home,
+        );
+        let attached = s.backend.expect("backend attached");
+        assert_eq!(attached.base_url, backend.base_url);
+        assert_eq!(attached.jwt, "jwt-from-env");
+    }
+
+    #[test]
+    fn resolve_with_backend_leaves_backend_none_without_token() {
+        use crate::config::BackendConfig;
+        // A temp home with no credentials file and no env token → no backend.
+        let home = tempfile::tempdir().unwrap();
+        let s = resolve_with_backend(None, &BackendConfig::default(), &env(&[]), home.path());
+        assert_eq!(s.backend, None);
     }
 
     #[test]

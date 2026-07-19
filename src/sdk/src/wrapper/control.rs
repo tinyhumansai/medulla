@@ -7,7 +7,7 @@
 //! (the machine-bus multi-terminal router is a scope cut), matching is a direct
 //! id comparison rather than a spool lookup.
 
-use crate::tinyplace_support::HarnessControlFrame;
+use crate::tinyplace::HarnessControlFrame;
 
 /// Whether `frame` addresses this wrapper's session. A frame with no `session_id`
 /// always matches (there is only one session here); a frame naming an id matches
@@ -26,11 +26,11 @@ pub fn frame_targets_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tinyplace_support::parse_harness_control_frame;
+    use crate::tinyplace::parse_harness_control_frame;
 
     fn frame(session_id: Option<&str>) -> HarnessControlFrame {
         HarnessControlFrame {
-            control_version: crate::tinyplace_support::HARNESS_CONTROL_VERSION.to_string(),
+            control_version: crate::tinyplace::HARNESS_CONTROL_VERSION.to_string(),
             kind: "input".to_string(),
             session_id: session_id.map(str::to_string),
             text: "run tests".to_string(),
@@ -56,7 +56,7 @@ mod tests {
     #[test]
     fn parses_and_targets_a_wire_frame() {
         let body = serde_json::json!({
-            "control_version": crate::tinyplace_support::HARNESS_CONTROL_VERSION,
+            "control_version": crate::tinyplace::HARNESS_CONTROL_VERSION,
             "kind": "input",
             "text": "hello",
         })

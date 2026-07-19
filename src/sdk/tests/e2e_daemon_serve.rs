@@ -21,7 +21,7 @@ mod mock_signal_server;
 use tokio::sync::{Mutex, MutexGuard};
 
 use medulla::daemon::run_daemon;
-use medulla::tinyplace_support::tinyplace::{LocalSigner, Signer};
+use medulla::tinyplace::tinyplace::{LocalSigner, Signer};
 
 use mock_signal_server::MockSignalServer;
 
@@ -118,7 +118,9 @@ async fn once_mode_serves_a_drain_cycle_and_exits() {
     .map(|s| s.to_string())
     .collect();
 
-    run_daemon(&args).await.expect("--once run should succeed");
+    run_daemon(&args, None)
+        .await
+        .expect("--once run should succeed");
 
     // The daemon wrote a worker profile during headless onboarding.
     assert!(home.path.join("worker.json").exists());
@@ -162,7 +164,7 @@ async fn once_mode_onboards_handle_and_owner() {
     .map(|s| s.to_string())
     .collect();
 
-    run_daemon(&args)
+    run_daemon(&args, None)
         .await
         .expect("--once with onboarding should succeed");
 
@@ -180,7 +182,7 @@ async fn unknown_provider_flag_is_rejected() {
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let err = run_daemon(&args).await.unwrap_err();
+    let err = run_daemon(&args, None).await.unwrap_err();
     assert!(err.to_string().contains("unknown provider"), "got: {err}");
     clear_touched();
 }
@@ -192,7 +194,7 @@ async fn no_detected_providers_bails() {
     std::env::set_var("TINYPLACE_CLAUDE_BIN", "/no/such/claude");
     std::env::set_var("TINYPLACE_CODEX_BIN", "/no/such/codex");
     std::env::set_var("TINYPLACE_OPENCODE_BIN", "/no/such/opencode");
-    let err = run_daemon(&[]).await.unwrap_err();
+    let err = run_daemon(&[], None).await.unwrap_err();
     assert!(
         err.to_string().contains("no coding-agent CLI found"),
         "got: {err}"
@@ -209,7 +211,7 @@ async fn default_provider_must_be_detected() {
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let err = run_daemon(&args).await.unwrap_err();
+    let err = run_daemon(&args, None).await.unwrap_err();
     assert!(err.to_string().contains("is not available"), "got: {err}");
     clear_touched();
 }

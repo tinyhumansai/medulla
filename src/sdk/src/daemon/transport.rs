@@ -20,14 +20,14 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use tokio::sync::Mutex;
 
-use crate::tinyplace_support::FileSessionStore;
-use tinyplace::crypto::decode_base58;
-use tinyplace::signal::crypto::{ed25519_pub_to_x25519_pub, ed25519_seed_to_x25519_keypair};
-use tinyplace::signal::keys::{generate_pre_keys, generate_signed_pre_key, serialize_pre_key};
-use tinyplace::signal::session::SignalSession;
-use tinyplace::signal::store::SessionStore;
-use tinyplace::types::{MessageEnvelope, PreKeysRequest, SignedPreKeyRequest};
-use tinyplace::{LocalSigner, Signer, TinyPlaceClient};
+use crate::tinyplace::FileSessionStore;
+use ::tinyplace::crypto::decode_base58;
+use ::tinyplace::signal::crypto::{ed25519_pub_to_x25519_pub, ed25519_seed_to_x25519_keypair};
+use ::tinyplace::signal::keys::{generate_pre_keys, generate_signed_pre_key, serialize_pre_key};
+use ::tinyplace::signal::session::SignalSession;
+use ::tinyplace::signal::store::SessionStore;
+use ::tinyplace::types::{MessageEnvelope, PreKeysRequest, SignedPreKeyRequest};
+use ::tinyplace::{LocalSigner, Signer, TinyPlaceClient};
 
 /// How many one-time pre-keys to publish on onboard.
 const ONE_TIME_PRE_KEY_COUNT: usize = 20;

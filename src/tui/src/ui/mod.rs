@@ -7,7 +7,7 @@
 /// The medulla wordmark, rendered on the login screen and the Overview tab.
 pub const LOGO: [&str; 3] = ["      ▌  ▜ ▜   ", "▛▛▌█▌▛▌▌▌▐ ▐ ▀▌", "▌▌▌▙▖▙▌▙▌▐▖▐▖█▌"];
 
-pub use medulla::ui::{agents, chat_store, events, onboarding, util};
+pub use medulla::ui::{agents, chat_store, events, onboarding, stream, util};
 
 pub mod app;
 pub mod clipboard;

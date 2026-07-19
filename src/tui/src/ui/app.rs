@@ -19,6 +19,7 @@ use crate::ui::agents::{
 use crate::ui::clipboard::{copy_text, copy_to_clipboard, current_platform, CopyScope, OSC_52};
 use crate::ui::composer::{caret_row_col, delete_before, insert_at, move_caret_row, Draft};
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
+use crate::ui::stream;
 use crate::ui::theme::{color_to_string, Theme, THEME_ROLES};
 use crate::ui::util::{clip, clock, fmt_tokens, wrap};
 use medulla::config::LoadedConfig;
@@ -59,31 +60,6 @@ pub enum Cmd {
     LoadUsage,
     /// Run a persona-memory search and land on the Memory tab.
     SearchMemory(String),
-}
-
-/// Token totals for one inference tier (Usage tab).
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct TierUsage {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub calls: i64,
-}
-
-/// The Usage tab's fold over the live event stream.
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct UsageFold {
-    /// Per-tier totals (orchestrator / reasoning / compress / ...).
-    pub tiers: std::collections::BTreeMap<String, TierUsage>,
-    /// Aggregate sub-agent (delegated task) usage.
-    pub subagent: TierUsage,
-    /// Per-task (task id, input, output) rows, in arrival order.
-    pub tasks: Vec<(String, i64, i64)>,
-}
-
-impl UsageFold {
-    fn tier_mut(&mut self, tier: &str) -> &mut TierUsage {
-        self.tiers.entry(tier.to_string()).or_default()
-    }
 }
 
 struct ResumePicker {
@@ -1617,7 +1593,7 @@ impl App {
         );
 
         // Orchestration panel.
-        let running_calls = self.running_calls();
+        let running_calls = stream::running_calls(&self.snapshot.events);
         let completed = self
             .snapshot
             .last_result
@@ -1666,7 +1642,11 @@ impl App {
         ] {
             routing.push(TLine::from(vec![
                 Span::styled(label, Style::default().fg(color)),
-                Span::raw(self.observed_model(tier).unwrap_or("—").to_string()),
+                Span::raw(
+                    stream::observed_model(&self.snapshot.events, tier)
+                        .unwrap_or("—")
+                        .to_string(),
+                ),
             ]));
         }
         routing.push(TLine::from(vec![
@@ -1768,35 +1748,6 @@ impl App {
         }
     }
 
-    fn running_calls(&self) -> i64 {
-        let mut n = 0i64;
-        for e in &self.snapshot.events {
-            match e.event {
-                TuiEvent::InferenceStart { .. } => n += 1,
-                TuiEvent::InferenceEnd { .. } => n = (n - 1).max(0),
-                _ => {}
-            }
-        }
-        n
-    }
-
-    /// The most recent model observed on the stream for a tier, if any.
-    fn observed_model(&self, wanted: &str) -> Option<&str> {
-        self.snapshot
-            .events
-            .iter()
-            .rev()
-            .find_map(|e| match &e.event {
-                TuiEvent::InferenceStart { tier, model, .. }
-                | TuiEvent::InferenceEnd { tier, model, .. }
-                    if tier == wanted =>
-                {
-                    model.as_deref()
-                }
-                _ => None,
-            })
-    }
-
     fn event_line(&self, env: &EventEnvelope, width: usize, selected: bool) -> TLine<'static> {
         let mut style = Style::default().fg(color(event_color(env).unwrap_or("white")));
         if selected {
@@ -1826,7 +1777,7 @@ impl App {
             .saturating_sub(cap / 2)
             .min(self.snapshot.threads.len().saturating_sub(cap));
         self.hit_threads = Some((inner, window_start));
-        let depth = self.thread_depths();
+        let depth = stream::thread_depths(&self.snapshot.threads);
         let mut lines: Vec<TLine> = Vec::new();
         for t in self.snapshot.threads.iter().skip(window_start).take(cap) {
             let d = *depth.get(&t.id).unwrap_or(&0);
@@ -1901,7 +1852,7 @@ impl App {
                 Style::default().add_modifier(Modifier::DIM),
             )));
         } else if self.snapshot.running {
-            let rc = self.running_calls();
+            let rc = stream::running_calls(&self.snapshot.events);
             let msg = if rc > 0 {
                 format!(
                     "thinking · {rc} model call{} in flight",
@@ -1916,32 +1867,6 @@ impl App {
             )));
         }
         f.render_widget(Paragraph::new(Text::from(out)), inner);
-    }
-
-    fn thread_depths(&self) -> std::collections::HashMap<String, usize> {
-        use std::collections::HashMap;
-        let by_id: HashMap<&str, Option<&str>> = self
-            .snapshot
-            .threads
-            .iter()
-            .map(|t| (t.id.as_str(), t.parent_id.as_deref()))
-            .collect();
-        let mut out = HashMap::new();
-        for t in &self.snapshot.threads {
-            let mut d = 0;
-            let mut cur = t.parent_id.as_deref();
-            let mut guard = 0;
-            while let Some(p) = cur {
-                if guard >= 32 {
-                    break;
-                }
-                d += 1;
-                cur = by_id.get(p).copied().flatten();
-                guard += 1;
-            }
-            out.insert(t.id.clone(), d);
-        }
-        out
     }
 
     fn draw_agents(&mut self, f: &mut Frame, area: Rect) {
@@ -2594,45 +2519,13 @@ impl App {
         }
     }
 
-    /// Per-tier and per-task token totals folded from the live event stream.
-    fn usage_fold(&self) -> UsageFold {
-        let mut fold = UsageFold::default();
-        for env in &self.snapshot.events {
-            match &env.event {
-                TuiEvent::InferenceStart { tier, .. } => {
-                    fold.tier_mut(tier).calls += 1;
-                }
-                TuiEvent::InferenceEnd {
-                    tier,
-                    usage: Some(u),
-                    ..
-                } => {
-                    let t = fold.tier_mut(tier);
-                    t.input_tokens += u.input_tokens;
-                    t.output_tokens += u.output_tokens;
-                }
-                TuiEvent::TaskComplete { digest } => {
-                    if let Some(u) = &digest.usage {
-                        fold.subagent.input_tokens += u.input_tokens;
-                        fold.subagent.output_tokens += u.output_tokens;
-                        fold.subagent.calls += 1;
-                        fold.tasks
-                            .push((digest.task_id.clone(), u.input_tokens, u.output_tokens));
-                    }
-                }
-                _ => {}
-            }
-        }
-        fold
-    }
-
     fn draw_usage(&mut self, f: &mut Frame, area: Rect) {
-        let fold = self.usage_fold();
+        let fold = stream::usage_fold(&self.snapshot.events);
         let dim = Style::default().add_modifier(Modifier::DIM);
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let mut lines: Vec<TLine> = Vec::new();
         lines.push(TLine::from(Span::styled("This session", bold)));
-        let mut tiers: Vec<(&String, &TierUsage)> = fold.tiers.iter().collect();
+        let mut tiers: Vec<(&String, &stream::TierUsage)> = fold.tiers.iter().collect();
         tiers.sort_by(|a, b| a.0.cmp(b.0));
         if tiers.is_empty() && fold.subagent.calls == 0 {
             lines.push(TLine::from(Span::styled("no model calls yet", dim)));

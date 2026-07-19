@@ -20,10 +20,10 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use medulla::auth::{
-    describe_me, open_browser, run_login_flow, start_loopback, CredentialStore, Credentials,
-    LoopbackConfig, DEFAULT_LOGIN_TIMEOUT,
+    describe_me, is_one_time_login_token, missing_token_note, open_browser, resolve_backend_token,
+    run_login_flow, start_loopback, CredentialStore, Credentials, LoopbackConfig,
+    DEFAULT_LOGIN_TIMEOUT,
 };
-use medulla::client::error::ClientError;
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
 use medulla::runtime::backend::BackendRuntime;
@@ -36,8 +36,8 @@ use medulla::runtime::{ContextItem, Runtime};
 #[cfg(unix)]
 use medulla_tui::cli::core_socket_plan;
 use medulla_tui::cli::{
-    missing_token_note, parse_command, parse_login_args, parse_memory_args, parse_tui_args,
-    resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs, MemoryAction,
+    parse_command, parse_login_args, parse_memory_args, parse_tui_args, sessions_json, Command,
+    CorePlan, LoginArgs, MemoryAction,
 };
 use medulla_tui::ui::app::{App, Cmd, TABS};
 use medulla_tui::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
@@ -472,7 +472,7 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                             )),
                         ),
                     },
-                    Err(e) if is_auth_error(&e) => {
+                    Err(e) if e.is_auth_error() => {
                         need_login = Some(backend.base_url.clone());
                         (None, None)
                     }
@@ -564,12 +564,6 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     drop(tinyplace_service); // aborts the background loops.
     runtime.shutdown().await.ok();
     result
-}
-
-/// Whether a client error should route to the login screen (expired or rejected
-/// credentials) rather than a silent mock fallback.
-fn is_auth_error(err: &ClientError) -> bool {
-    err.is_token_expired() || matches!(err.status(), Some(401) | Some(403))
 }
 
 /// Persist a freshly-obtained JWT under the Medulla home. Returns `None` on
@@ -669,7 +663,7 @@ fn dispatch_login_cmd(
             let base = base_url.to_string();
             let tx = tx.clone();
             tokio::spawn(async move {
-                let jwt = if is_64_lower_hex(&token) {
+                let jwt = if is_one_time_login_token(&token) {
                     let client = MedullaClient::new(base.clone(), String::new());
                     match client.consume_login_token(token).await {
                         Ok(j) => j,
@@ -709,13 +703,6 @@ async fn verify_and_emit(
             )));
         }
     }
-}
-
-/// A 64-char lowercase-hex one-time login token.
-fn is_64_lower_hex(s: &str) -> bool {
-    s.len() == 64
-        && s.bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 async fn run(

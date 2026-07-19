@@ -55,6 +55,16 @@ impl ClientError {
     pub fn is_token_expired(&self) -> bool {
         self.error_code() == Some("TOKEN_EXPIRED")
     }
+
+    /// Whether this error should route a front end to the login screen rather
+    /// than falling back silently.
+    ///
+    /// True for an expired token or an HTTP 401/403 (rejected credentials). Every
+    /// front end should branch on this so authentication failures are handled
+    /// identically.
+    pub fn is_auth_error(&self) -> bool {
+        self.is_token_expired() || matches!(self.status(), Some(401) | Some(403))
+    }
 }
 
 /// Convenience result alias.

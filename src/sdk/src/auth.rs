@@ -280,6 +280,65 @@ pub fn describe_me(me: &serde_json::Value) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Backend token resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve the backend bearer token from, in precedence order:
+///
+/// 1. an inline `backend.token` in the loaded config,
+/// 2. the `backend.tokenEnv` environment variable (an empty value is ignored),
+/// 3. `stored` credentials saved by `medulla login` — but only when their
+///    `baseUrl` matches the configured backend after trailing-slash
+///    normalization (a mismatch is ignored so credentials for one backend never
+///    leak to another).
+///
+/// Returns `None` when no source yields a token. Pure over its inputs; the caller
+/// supplies the process environment and any stored credentials.
+pub fn resolve_backend_token(
+    env: &HashMap<String, String>,
+    backend: &crate::config::BackendConfig,
+    stored: Option<&Credentials>,
+) -> Option<String> {
+    if let Some(tok) = backend.token.clone() {
+        return Some(tok);
+    }
+    if let Some(tok) = env
+        .get(&backend.token_env)
+        .cloned()
+        .filter(|s| !s.is_empty())
+    {
+        return Some(tok);
+    }
+    let want = backend.base_url.trim_end_matches('/');
+    stored
+        .filter(|c| c.base_url.trim_end_matches('/') == want)
+        .map(|c| c.jwt.clone())
+}
+
+/// The status note shown when no backend token is available and the mock runs.
+///
+/// Names the environment variable the operator can set to supply a token.
+pub fn missing_token_note(backend: &crate::config::BackendConfig) -> String {
+    format!(
+        "backend token missing (set ${} or run `medulla login`) — running with mock runtime",
+        backend.token_env
+    )
+}
+
+/// Whether `s` looks like a one-time login token (64 lowercase hex characters)
+/// rather than a JWT.
+///
+/// The backend issues these short-lived tokens from the login page; a caller
+/// redeems one via [`crate::client::MedullaClient::consume_login_token`], whereas
+/// a value that fails this check is treated as a ready-to-use JWT. Centralizes
+/// the format contract so every front end classifies login input identically.
+pub fn is_one_time_login_token(s: &str) -> bool {
+    s.len() == 64
+        && s.chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
 /// Percent-encode a string, escaping everything outside the unreserved set.
 fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -621,6 +680,91 @@ pub fn open_browser(url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::BackendConfig;
+
+    #[test]
+    fn backend_token_prefers_inline_then_env() {
+        let mut env = HashMap::new();
+        env.insert("MEDULLA_TOKEN".to_string(), "from-env".to_string());
+        let mut backend = BackendConfig::default();
+        assert_eq!(
+            resolve_backend_token(&env, &backend, None).as_deref(),
+            Some("from-env")
+        );
+        backend.token = Some("inline".into());
+        assert_eq!(
+            resolve_backend_token(&env, &backend, None).as_deref(),
+            Some("inline")
+        );
+
+        let empty = HashMap::new();
+        let backend = BackendConfig::default();
+        assert_eq!(resolve_backend_token(&empty, &backend, None), None);
+    }
+
+    #[test]
+    fn backend_token_ignores_empty_env_value() {
+        let mut env = HashMap::new();
+        env.insert("MEDULLA_TOKEN".to_string(), String::new());
+        let backend = BackendConfig::default();
+        // An empty env value is treated as absent.
+        assert_eq!(resolve_backend_token(&env, &backend, None), None);
+    }
+
+    #[test]
+    fn backend_token_uses_stored_credentials_when_baseurl_matches() {
+        let empty = HashMap::new();
+        let backend = BackendConfig::default();
+        let matching = Credentials {
+            base_url: backend.base_url.clone(),
+            jwt: "stored-jwt".into(),
+        };
+        // Config token and env absent → stored credentials are used.
+        assert_eq!(
+            resolve_backend_token(&empty, &backend, Some(&matching)).as_deref(),
+            Some("stored-jwt")
+        );
+
+        // A mismatched baseUrl is ignored.
+        let mismatched = Credentials {
+            base_url: "http://other:9999".into(),
+            jwt: "stored-jwt".into(),
+        };
+        assert_eq!(
+            resolve_backend_token(&empty, &backend, Some(&mismatched)),
+            None
+        );
+
+        // Config token and env still win over stored credentials.
+        let mut env = HashMap::new();
+        env.insert("MEDULLA_TOKEN".to_string(), "from-env".to_string());
+        assert_eq!(
+            resolve_backend_token(&env, &backend, Some(&matching)).as_deref(),
+            Some("from-env")
+        );
+    }
+
+    #[test]
+    fn missing_token_note_names_the_env_var() {
+        let backend = BackendConfig::default();
+        let note = missing_token_note(&backend);
+        assert!(note.contains("MEDULLA_TOKEN"));
+        assert!(note.contains("mock runtime"));
+        assert!(note.contains("medulla login"));
+    }
+
+    #[test]
+    fn one_time_login_token_recognizes_64_lower_hex() {
+        assert!(is_one_time_login_token(&"a".repeat(64)));
+        assert!(is_one_time_login_token(&"0123456789abcdef".repeat(4)));
+        // Wrong length, uppercase, and non-hex are all rejected.
+        assert!(!is_one_time_login_token(&"a".repeat(63)));
+        assert!(!is_one_time_login_token(&"A".repeat(64)));
+        assert!(!is_one_time_login_token(&"g".repeat(64)));
+        assert!(!is_one_time_login_token(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+        ));
+    }
 
     #[test]
     fn login_url_shape() {

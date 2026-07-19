@@ -7,8 +7,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use medulla::auth::{Credentials, Provider};
-use medulla::config::BackendConfig;
+use medulla::auth::Provider;
 use medulla::session_history::list_recent_sessions;
 use medulla::tinyplace_support::HarnessProvider;
 
@@ -339,39 +338,6 @@ pub fn core_socket_plan(
     }
 }
 
-/// Resolve the backend token from, in order: an inline `backend.token`, the
-/// `backend.tokenEnv` variable (ignoring an empty value), then `stored`
-/// credentials saved by `medulla login` — but only when their `baseUrl` matches
-/// the configured backend (a mismatch is ignored).
-pub fn resolve_backend_token(
-    env: &HashMap<String, String>,
-    backend: &BackendConfig,
-    stored: Option<&Credentials>,
-) -> Option<String> {
-    if let Some(tok) = backend.token.clone() {
-        return Some(tok);
-    }
-    if let Some(tok) = env
-        .get(&backend.token_env)
-        .cloned()
-        .filter(|s| !s.is_empty())
-    {
-        return Some(tok);
-    }
-    let want = backend.base_url.trim_end_matches('/');
-    stored
-        .filter(|c| c.base_url.trim_end_matches('/') == want)
-        .map(|c| c.jwt.clone())
-}
-
-/// The status note shown when no backend token is available and the mock runs.
-pub fn missing_token_note(backend: &BackendConfig) -> String {
-    format!(
-        "backend token missing (set ${} or run `medulla login`) — running with mock runtime",
-        backend.token_env
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,68 +490,6 @@ mod tests {
     }
 
     #[test]
-    fn backend_token_prefers_inline_then_env() {
-        let mut env = HashMap::new();
-        env.insert("MEDULLA_TOKEN".to_string(), "from-env".to_string());
-        let mut backend = BackendConfig::default();
-        assert_eq!(
-            resolve_backend_token(&env, &backend, None).as_deref(),
-            Some("from-env")
-        );
-        backend.token = Some("inline".into());
-        assert_eq!(
-            resolve_backend_token(&env, &backend, None).as_deref(),
-            Some("inline")
-        );
-
-        let empty = HashMap::new();
-        let backend = BackendConfig::default();
-        assert_eq!(resolve_backend_token(&empty, &backend, None), None);
-    }
-
-    #[test]
-    fn backend_token_ignores_empty_env_value() {
-        let mut env = HashMap::new();
-        env.insert("MEDULLA_TOKEN".to_string(), String::new());
-        let backend = BackendConfig::default();
-        // An empty env value is treated as absent.
-        assert_eq!(resolve_backend_token(&env, &backend, None), None);
-    }
-
-    #[test]
-    fn backend_token_uses_stored_credentials_when_baseurl_matches() {
-        let empty = HashMap::new();
-        let backend = BackendConfig::default();
-        let matching = Credentials {
-            base_url: backend.base_url.clone(),
-            jwt: "stored-jwt".into(),
-        };
-        // Config token and env absent → stored credentials are used.
-        assert_eq!(
-            resolve_backend_token(&empty, &backend, Some(&matching)).as_deref(),
-            Some("stored-jwt")
-        );
-
-        // A mismatched baseUrl is ignored.
-        let mismatched = Credentials {
-            base_url: "http://other:9999".into(),
-            jwt: "stored-jwt".into(),
-        };
-        assert_eq!(
-            resolve_backend_token(&empty, &backend, Some(&mismatched)),
-            None
-        );
-
-        // Config token and env still win over stored credentials.
-        let mut env = HashMap::new();
-        env.insert("MEDULLA_TOKEN".to_string(), "from-env".to_string());
-        assert_eq!(
-            resolve_backend_token(&env, &backend, Some(&matching)).as_deref(),
-            Some("from-env")
-        );
-    }
-
-    #[test]
     fn login_args_parse() {
         assert_eq!(parse_login_args(&argv(&[])).unwrap(), LoginArgs::default());
         let a = parse_login_args(&argv(&[
@@ -604,15 +508,6 @@ mod tests {
         assert_eq!(a.config.as_deref(), Some("c.json"));
         // Unknown provider is a friendly error.
         assert!(parse_login_args(&argv(&["--provider", "myspace"])).is_err());
-    }
-
-    #[test]
-    fn missing_token_note_names_the_env_var() {
-        let backend = BackendConfig::default();
-        let note = missing_token_note(&backend);
-        assert!(note.contains("MEDULLA_TOKEN"));
-        assert!(note.contains("mock runtime"));
-        assert!(note.contains("medulla login"));
     }
 
     #[test]

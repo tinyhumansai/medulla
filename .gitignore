@@ -14,3 +14,7 @@ node_modules/
 
 # Claude worktrees (concurrent sessions)
 .claude/worktrees/
+
+# Feature worktrees (keep the dir, ignore its checkouts)
+worktrees/*
+!worktrees/.gitkeep

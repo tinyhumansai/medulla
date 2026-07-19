@@ -1,6 +1,6 @@
 [submodule "vendor/tinyplace"]
 	path = vendor/tinyplace
-	url = git@github.com:tinyhumansai/tiny.place.git
+	url = https://github.com/tinyhumansai/tiny.place.git
 [submodule "vendor/tinycortex"]
 	path = vendor/tinycortex
-	url = git@github.com:tinyhumansai/tinycortex.git
+	url = https://github.com/tinyhumansai/tinycortex.git

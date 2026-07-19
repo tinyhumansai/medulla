@@ -6,6 +6,7 @@
 //! and drives [`CoreRuntime`] through a real cycle, a seq-gap resync, and a worker
 //! round trip.
 
+#[path = "../../sdk/tests/support/mod.rs"]
 mod support;
 
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use tokio::sync::mpsc;
 use medulla::runtime::core::CoreRuntime;
 use medulla::runtime::core_client::CoreClient;
 use medulla::runtime::{Runtime, WorkerOp};
-use medulla::ui::agents::{derive_agent_lanes, TaskStatus};
+use medulla_tui::ui::agents::{derive_agent_lanes, TaskStatus};
 
 use support::wait_until;
 

@@ -23,12 +23,6 @@ use medulla::auth::{
     describe_me, open_browser, run_login_flow, start_loopback, CredentialStore, Credentials,
     LoopbackConfig, DEFAULT_LOGIN_TIMEOUT,
 };
-#[cfg(unix)]
-use medulla::cli::core_socket_plan;
-use medulla::cli::{
-    missing_token_note, parse_command, parse_login_args, parse_memory_args, parse_tui_args,
-    resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs, MemoryAction,
-};
 use medulla::client::error::ClientError;
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
@@ -39,8 +33,14 @@ use medulla::runtime::core::CoreRuntime;
 use medulla::runtime::core_client::CoreClient;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{ContextItem, Runtime};
-use medulla::ui::app::{App, Cmd, TABS};
-use medulla::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
+#[cfg(unix)]
+use medulla_tui::cli::core_socket_plan;
+use medulla_tui::cli::{
+    missing_token_note, parse_command, parse_login_args, parse_memory_args, parse_tui_args,
+    resolve_backend_token, sessions_json, Command, CorePlan, LoginArgs, MemoryAction,
+};
+use medulla_tui::ui::app::{App, Cmd, TABS};
+use medulla_tui::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
 
 /// Messages sent from spawned async tasks back to the event loop.
 enum AppMsg {
@@ -128,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Help => {
-            print!("{}", medulla::cli::help_text());
+            print!("{}", medulla_tui::cli::help_text());
             Ok(())
         }
         Command::Sessions => {
@@ -146,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Logout => run_logout(),
         Command::Memory => run_memory(&raw[1..]).await,
         Command::Update => {
-            let args = medulla::cli::parse_update_args(&raw[1..]);
+            let args = medulla_tui::cli::parse_update_args(&raw[1..]);
             medulla::update::run_update(args.check).await
         }
         Command::Wrapper(provider) => {

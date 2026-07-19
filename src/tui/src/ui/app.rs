@@ -12,9 +12,6 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::config::LoadedConfig;
-use crate::memory::{MemoryHit, MemoryStatus};
-use crate::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerInfo, WorkerOp};
 use crate::ui::agents::{
     agent_row_model, derive_agent_lanes, lane_lines, task_lines, AgentLane, AgentRole, AgentRow,
     Line as StyledLine, TaskState, TaskStatus,
@@ -24,13 +21,16 @@ use crate::ui::composer::{caret_row_col, delete_before, insert_at, move_caret_ro
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::theme::{color_to_string, Theme, THEME_ROLES};
 use crate::ui::util::{clip, clock, fmt_tokens, wrap};
+use medulla::config::LoadedConfig;
+use medulla::memory::{MemoryHit, MemoryStatus};
+use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerInfo, WorkerOp};
 
 pub const TABS: [&str; 8] = [
     "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Memory", "Settings",
 ];
 /// The Settings tab's left-nav subpages, in order (number keys 1-4 jump to them).
 pub const SETTINGS_SUBPAGES: [&str; 4] = ["Usage", "Appearance", "Config", "Help"];
-pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+pub use crate::ui::util::SPINNER;
 
 // Settings subpage indices.
 const SP_USAGE: usize = 0;
@@ -178,7 +178,7 @@ pub struct App {
     // the snapshot on every refresh so the Overview panel and Agents lanes light
     // up without the runtime having to know about tiny.place.
     tinyplace_obs:
-        Option<Arc<std::sync::Mutex<crate::tinyplace_support::service::TinyplaceObservation>>>,
+        Option<Arc<std::sync::Mutex<medulla::tinyplace_support::service::TinyplaceObservation>>>,
 }
 
 fn color(name: &str) -> Color {
@@ -409,7 +409,7 @@ impl App {
     /// roster, and presence are merged into every snapshot refresh.
     pub fn set_tinyplace_observation(
         &mut self,
-        obs: Arc<std::sync::Mutex<crate::tinyplace_support::service::TinyplaceObservation>>,
+        obs: Arc<std::sync::Mutex<medulla::tinyplace_support::service::TinyplaceObservation>>,
     ) {
         self.tinyplace_obs = Some(obs);
         self.refresh_snapshot();
@@ -1394,9 +1394,9 @@ impl App {
         if self.snapshot.running {
             if let Some(st) = self.runtime.stream_state() {
                 let c = match st {
-                    crate::runtime::StreamState::Live => Color::Green,
-                    crate::runtime::StreamState::Resyncing => Color::Yellow,
-                    crate::runtime::StreamState::Stalled => Color::Red,
+                    medulla::runtime::StreamState::Live => Color::Green,
+                    medulla::runtime::StreamState::Resyncing => Color::Yellow,
+                    medulla::runtime::StreamState::Stalled => Color::Red,
                 };
                 right.push(Span::styled(
                     format!("{} {}  ", st.glyph(), st.label()),
@@ -2874,7 +2874,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::mock::MockRuntime;
+    use medulla::runtime::mock::MockRuntime;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -2882,7 +2882,7 @@ mod tests {
         let rt: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
         let loaded = {
             let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-            l.config.tinyplace = Some(crate::config::TinyplaceConfig::default());
+            l.config.tinyplace = Some(medulla::config::TinyplaceConfig::default());
             l
         };
         App::new(rt, loaded)

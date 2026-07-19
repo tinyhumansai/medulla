@@ -3,6 +3,7 @@
 //! `new_session`, async-mode toggle, context inspection, thread summaries, and
 //! shutdown. Same in-test [`support::mock_backend`] stub, no real network.
 
+#[path = "../../sdk/tests/support/mod.rs"]
 mod support;
 
 use std::time::Duration;

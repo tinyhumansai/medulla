@@ -1,4 +1,4 @@
-//! Feature tests for the pre-app login screen ([`medulla::ui::login`]): pure
+//! Feature tests for the pre-app login screen ([`medulla_tui::ui::login`]): pure
 //! rendering and key/event transitions, driven entirely through the public
 //! `LoginScreen` API (no async, no real browser, no network).
 
@@ -7,7 +7,7 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use medulla::auth::Provider;
-use medulla::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
+use medulla_tui::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)

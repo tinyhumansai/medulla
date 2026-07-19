@@ -24,7 +24,7 @@ checks Rust formatting and runs Clippy with warnings denied.
 ```sh
 cargo run                 # debug build, starts the TUI
 cargo run --release       # optimized build
-cargo install --path .    # installs the `medulla` binary onto your PATH
+cargo install --path src/tui   # installs the `medulla` binary onto your PATH
 medulla                   # bare invocation starts the TUI
 ```
 
@@ -234,7 +234,7 @@ Config is layered. From lowest to highest precedence (highest wins):
 
 Files are merged field-by-field (a recursive table merge), so a project-local file can override just `backend.baseUrl` without discarding the rest of a global file. TOML is the primary format; `--config <path>` still accepts either `.toml` or `.json` (parser chosen by extension) and bypasses file discovery, but env vars and CLI flags still override it. The Config tab shows the merged effective config and lists the source files that contributed.
 
-Every section is optional; with no file anywhere all defaults apply. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), `theme` (TUI colors — `primary`/`accent`/`selectionFg`/`dimBorder` as ratatui color names or `#rrggbb`; the Settings › Appearance subpage edits and persists these), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored. See `config.example.toml` for a commented reference and `src/config.rs` for the full schema — fields are camelCase.
+Every section is optional; with no file anywhere all defaults apply. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), `theme` (TUI colors — `primary`/`accent`/`selectionFg`/`dimBorder` as ratatui color names or `#rrggbb`; the Settings › Appearance subpage edits and persists these), and `medulla.contextWindowTokens` (Context tab usage hint). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored. See `config.example.toml` for a commented reference and `src/sdk/src/config.rs` for the full schema — fields are camelCase.
 
 ## Validation
 
@@ -244,7 +244,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-Run tests and clippy before pushing. The e2e suites spin up in-process stand-ins so they are safe anywhere: a mock HTTP/SSE backend (`tests/support/mock_backend.rs`), a mock core Unix-socket server (`mock_core.rs`), a mock tiny.place API server (`mock_tinyplace.rs`), and mock `claude`/`codex`/`opencode` CLIs that emit realistic provider stream-JSONL (`mock_harness.rs`, selected via the `TINYPLACE_*_BIN` overrides).
+Run tests and clippy before pushing. The e2e suites spin up in-process stand-ins so they are safe anywhere: a mock HTTP/SSE backend (`src/sdk/tests/support/mock_backend.rs`), a mock core Unix-socket server (`mock_core.rs`), a mock tiny.place API server (`mock_tinyplace.rs`), and mock `claude`/`codex`/`opencode` CLIs that emit realistic provider stream-JSONL (`mock_harness.rs`, selected via the `TINYPLACE_*_BIN` overrides).
 
 Coverage (requires `cargo install cargo-llvm-cov` + `rustup component add llvm-tools-preview`):
 
@@ -253,7 +253,7 @@ cargo llvm-cov                    # run suite with coverage, print summary
 cargo llvm-cov report --show-missing-lines
 ```
 
-CI gates line coverage at 90% (`cargo llvm-cov --fail-under-lines 90`); keep new code covered. `src/main.rs` (the terminal event loop, needs a real TTY) and the daemon's live-network entry points are the known uncovered remainder.
+CI gates line coverage at 90% (`cargo llvm-cov --fail-under-lines 90`); keep new code covered. `src/tui/src/main.rs` (the terminal event loop, needs a real TTY) and the daemon's live-network entry points are the known uncovered remainder.
 
 ## Releasing
 

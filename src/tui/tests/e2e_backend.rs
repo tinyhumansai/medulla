@@ -2,6 +2,7 @@
 //! (HTTP + SSE). No real network, no real Medulla server: [`support::mock_backend`]
 //! stands in, scripting the SSE body per scenario.
 
+#[path = "../../sdk/tests/support/mod.rs"]
 mod support;
 
 use std::time::Duration;
@@ -11,7 +12,7 @@ use serde_json::json;
 use medulla::client::MedullaClient;
 use medulla::runtime::backend::BackendRuntime;
 use medulla::runtime::{Runtime, RuntimeSnapshot};
-use medulla::ui::events::TuiEvent;
+use medulla_tui::ui::events::TuiEvent;
 
 use support::mock_backend::{MockBackend, MockConfig};
 use support::wait_until;

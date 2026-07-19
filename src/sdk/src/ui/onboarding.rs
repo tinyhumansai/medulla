@@ -20,7 +20,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::ui::app::SPINNER;
+use crate::ui::util::SPINNER;
 
 /// The terminal outcome of the onboarding screen.
 #[derive(Debug, Clone, PartialEq, Eq)]

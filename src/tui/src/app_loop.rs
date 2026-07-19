@@ -27,7 +27,7 @@ use medulla::runtime::Runtime;
 use medulla_tui::cli::core_socket_plan;
 use medulla_tui::cli::{parse_tui_args, CorePlan};
 use medulla_tui::ui::login::LoginOutcome;
-use medulla_tui::ui::welcome::{format_usd, run_welcome_ui, WelcomeOutcome};
+use medulla_tui::ui::welcome::{format_usd, run_welcome_ui};
 
 use crate::commands::{run_login_screen, save_credentials};
 use crate::event_loop::run;
@@ -286,30 +286,23 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         .unwrap_or_else(|| config_path.clone());
     if !loaded.config.onboarding.welcome_completed {
         if let Some(client) = &backend_client {
-            match run_welcome_ui(&mut terminal, client, env.clone()).await {
-                // Completing *or* declining settles onboarding: a user who said
-                // no should not be asked again on every launch.
-                Ok(outcome @ (WelcomeOutcome::Completed { .. } | WelcomeOutcome::Skipped)) => {
+            if let Ok(outcome) = run_welcome_ui(&mut terminal, client, env.clone()).await {
+                // Which outcomes settle onboarding is decided by the outcome
+                // itself (and unit-tested there) — getting it wrong either nags
+                // a user who declined or silently burns an unclaimed offer.
+                if outcome.settles_onboarding() {
                     if let Err(e) =
                         medulla::config::persist_welcome_completed(&onboarding_path, true)
                     {
                         startup_status = Some(format!("could not save onboarding state ({e})"));
                     }
-                    if let WelcomeOutcome::Completed { awarded_usd, .. } = outcome {
-                        if awarded_usd > 0.0 {
-                            startup_status = Some(format!(
-                                "{} in free credits added to your balance",
-                                format_usd(awarded_usd)
-                            ));
-                        }
-                    }
                 }
-                // Nothing was found to share, or the flow never settled (status
-                // check or claim failed). Leaving the flag unset keeps the offer
-                // available rather than burning it on an empty scan or a
-                // transient backend error.
-                Ok(WelcomeOutcome::NothingToShare | WelcomeOutcome::Unavailable) => {}
-                Err(_) => {}
+                if let Some(awarded) = outcome.granted_usd() {
+                    startup_status = Some(format!(
+                        "{} in free credits added to your balance",
+                        format_usd(awarded)
+                    ));
+                }
             }
         }
     }

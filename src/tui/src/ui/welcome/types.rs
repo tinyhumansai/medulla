@@ -55,6 +55,40 @@ pub enum WelcomeOutcome {
     Unavailable,
 }
 
+impl WelcomeOutcome {
+    /// Whether this outcome should record onboarding as done, so the welcome
+    /// screen never appears again.
+    ///
+    /// Only a real answer from the user settles it — they either claimed the
+    /// reward or declined it. Every other outcome means the offer was never
+    /// actually made (no history yet) or never resolved (backend unreachable,
+    /// claim failed), and recording those would silently take away credit the
+    /// user never had the chance to earn.
+    ///
+    /// This lives here, on the outcome itself, rather than in the startup
+    /// wiring: it is the single decision that determines whether a user keeps
+    /// or loses the offer, so it belongs somewhere it can be tested directly.
+    pub fn settles_onboarding(&self) -> bool {
+        matches!(
+            self,
+            WelcomeOutcome::Completed { .. } | WelcomeOutcome::Skipped
+        )
+    }
+
+    /// The credit granted, when the flow completed and actually awarded some.
+    ///
+    /// `None` for a completed-but-zero award, so callers do not announce
+    /// "$0 in free credits added".
+    pub fn granted_usd(&self) -> Option<f64> {
+        match self {
+            WelcomeOutcome::Completed { awarded_usd, .. } if *awarded_usd > 0.0 => {
+                Some(*awarded_usd)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// An async action the driver must run on the screen's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WelcomeCmd {

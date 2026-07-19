@@ -308,3 +308,58 @@ fn a_successful_claim_still_completes() {
         })
     );
 }
+
+// --- The onboarding gate ----------------------------------------------------
+//
+// Which outcomes settle onboarding is the single decision that determines
+// whether a user keeps or loses the offer. Two review findings landed here, so
+// every variant is pinned explicitly.
+
+#[test]
+fn only_a_real_answer_from_the_user_settles_onboarding() {
+    // Claimed or declined — the user answered, so stop asking.
+    assert!(WelcomeOutcome::Completed {
+        awarded_usd: 7.0,
+        tier: Some("Rising".into()),
+    }
+    .settles_onboarding());
+    assert!(WelcomeOutcome::Completed {
+        awarded_usd: 0.0,
+        tier: None,
+    }
+    .settles_onboarding());
+    assert!(WelcomeOutcome::Skipped.settles_onboarding());
+}
+
+#[test]
+fn an_unmade_or_unresolved_offer_never_settles_onboarding() {
+    // No history yet — the empty screen promises the offer will be waiting.
+    assert!(!WelcomeOutcome::NothingToShare.settles_onboarding());
+    // Backend unreachable or the claim failed — not the user's choice, and the
+    // reward may not have been granted at all.
+    assert!(!WelcomeOutcome::Unavailable.settles_onboarding());
+}
+
+#[test]
+fn only_a_positive_completed_award_is_announced() {
+    assert_eq!(
+        WelcomeOutcome::Completed {
+            awarded_usd: 7.5,
+            tier: None,
+        }
+        .granted_usd(),
+        Some(7.5)
+    );
+    // A zero award must not announce "$0 in free credits added".
+    assert_eq!(
+        WelcomeOutcome::Completed {
+            awarded_usd: 0.0,
+            tier: None,
+        }
+        .granted_usd(),
+        None
+    );
+    assert_eq!(WelcomeOutcome::Skipped.granted_usd(), None);
+    assert_eq!(WelcomeOutcome::NothingToShare.granted_usd(), None);
+    assert_eq!(WelcomeOutcome::Unavailable.granted_usd(), None);
+}

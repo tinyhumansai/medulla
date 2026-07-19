@@ -19,6 +19,8 @@
 //!                        (probe the worker; terminates on `capabilities_result`).
 //!   --provider <p>       requested provider hint on the frame (`opencode`, `claude`,
 //!                        `codex`); used to drive the no-available-provider error path.
+//!   --model <id>         requested model hint on the frame; the worker runs the
+//!                        harness with it, falling back to its configured model.
 //!   --timeout-ms <n>     how long to wait for a terminal frame (default 60000).
 //!   --seed <64hex>       a fixed 32-byte identity seed so the owner id is stable
 //!                        across invocations (default: a fresh random identity).
@@ -50,6 +52,7 @@ struct Args {
     publish_only: bool,
     kind: TaskFrameKind,
     provider: Option<HarnessProvider>,
+    model: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -62,6 +65,7 @@ fn parse_args() -> Result<Args, String> {
     let mut publish_only = false;
     let mut kind = TaskFrameKind::Task;
     let mut provider = None;
+    let mut model = None;
 
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -84,6 +88,7 @@ fn parse_args() -> Result<Args, String> {
                         .ok_or_else(|| format!("unknown --provider: {raw}"))?,
                 );
             }
+            "--model" => model = it.next(),
             "--timeout-ms" => {
                 timeout_ms = it
                     .next()
@@ -105,6 +110,7 @@ fn parse_args() -> Result<Args, String> {
         publish_only,
         kind,
         provider,
+        model,
     })
 }
 
@@ -177,6 +183,7 @@ async fn run() -> Result<(), String> {
         correlation_id: Some(format!("{}-corr", args.task_id)),
         harness: None,
         provider: args.provider,
+        model: args.model.clone(),
     });
     transport
         .send(&to, &frame)

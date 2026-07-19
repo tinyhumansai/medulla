@@ -298,6 +298,7 @@ fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str, correlation: Optio
         correlation_id: correlation.map(str::to_string),
         harness: None,
         provider: None,
+        model: None,
     })
 }
 

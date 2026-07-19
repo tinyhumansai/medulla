@@ -16,3 +16,4 @@ pub mod composer;
 pub mod login;
 pub mod onboarding;
 pub mod theme;
+pub mod welcome;

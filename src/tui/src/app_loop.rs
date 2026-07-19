@@ -27,6 +27,7 @@ use medulla::runtime::Runtime;
 use medulla_tui::cli::core_socket_plan;
 use medulla_tui::cli::{parse_tui_args, CorePlan};
 use medulla_tui::ui::login::LoginOutcome;
+use medulla_tui::ui::welcome::{format_usd, run_welcome_ui, WelcomeOutcome};
 
 use crate::commands::{run_login_screen, save_credentials};
 use crate::event_loop::run;
@@ -78,6 +79,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
 
     let mut runtime: Option<Arc<dyn Runtime>> = None;
     let mut startup_status: Option<String> = None;
+    // Kept alongside the runtime so the first-run welcome flow can talk to the
+    // backend directly. `None` whenever we end up on core or the mock, which is
+    // exactly when the welcome flow must not run.
+    let mut backend_client: Option<MedullaClient> = None;
 
     // Optional persona-memory service (tinycortex). Built once here and attached
     // to the core runtime so it can advertise + serve the memory toolset; also
@@ -163,8 +168,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             // Explicit core that fell back: preserve the old backend→mock path.
             (true, Some(tok)) => {
                 let client = MedullaClient::new(backend.base_url.clone(), tok);
-                match BackendRuntime::connect(client).await {
-                    Ok(rt) => (Some(Arc::new(rt)), None),
+                match BackendRuntime::connect(client.clone()).await {
+                    Ok(rt) => {
+                        backend_client = Some(client);
+                        (Some(Arc::new(rt)), None)
+                    }
                     Err(e) => (
                         Some(Arc::new(MockRuntime::demo())),
                         Some(format!(
@@ -188,8 +196,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             (false, Some(tok)) => {
                 let client = MedullaClient::new(backend.base_url.clone(), tok);
                 match client.me().await {
-                    Ok(_) => match BackendRuntime::connect(client).await {
-                        Ok(rt) => (Some(Arc::new(rt)), None),
+                    Ok(_) => match BackendRuntime::connect(client.clone()).await {
+                        Ok(rt) => {
+                            backend_client = Some(client);
+                            (Some(Arc::new(rt)), None)
+                        }
                         Err(e) => (
                             Some(Arc::new(MockRuntime::demo())),
                             Some(format!(
@@ -240,9 +251,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             }
             LoginOutcome::Token(jwt) => {
                 let client = MedullaClient::new(base_url.clone(), jwt.clone());
-                match BackendRuntime::connect(client).await {
+                match BackendRuntime::connect(client.clone()).await {
                     Ok(rt) => {
                         runtime = Some(Arc::new(rt));
+                        backend_client = Some(client);
                         startup_status = save_credentials(&home, &base_url, &jwt);
                     }
                     Err(e) => {
@@ -257,6 +269,32 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     }
 
     let runtime = runtime.expect("a runtime is always selected");
+
+    // First-run welcome: offer promotional credit for sharing coding-agent
+    // history. Gated locally by `[onboarding] welcomeCompleted` so a returning
+    // user is never re-prompted; the backend independently refuses a second
+    // grant. Only runs against a real authenticated backend — never on the mock.
+    let config_path = home.join("config.toml");
+    if !loaded.config.onboarding.welcome_completed {
+        if let Some(client) = &backend_client {
+            let welcome = run_welcome_ui(&mut terminal, client, env.clone()).await;
+            // Completing *or* skipping records the flag: a user who declined
+            // should not be asked again on every launch.
+            if welcome.is_ok() {
+                if let Err(e) = medulla::config::persist_welcome_completed(&config_path, true) {
+                    startup_status = Some(format!("could not save onboarding state ({e})"));
+                }
+            }
+            if let Ok(WelcomeOutcome::Completed { awarded_usd, .. }) = welcome {
+                if awarded_usd > 0.0 {
+                    startup_status = Some(format!(
+                        "{} in free credits added to your balance",
+                        format_usd(awarded_usd)
+                    ));
+                }
+            }
+        }
+    }
 
     // Optional background tiny.place presence service (observational only): keep
     // the identity online, auto-accept peer contacts, and poll peer presence,
@@ -280,7 +318,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         loaded,
         startup_status.or(tinyplace_status),
         tinyplace_obs,
-        home.join("config.toml"),
+        config_path,
     )
     .await;
 

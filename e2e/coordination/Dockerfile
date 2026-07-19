@@ -17,14 +17,12 @@ FROM rust:1.96-bookworm AS build
 
 WORKDIR /build
 
-# The crate has path deps: vendor/tinyplace/sdk/rust, vendor/tinycortex, and
-# tinycortex's own vendor/tinyagents. Copy everything the compile needs.
+# The workspace has path deps: vendor/tinyplace/sdk/rust, vendor/tinycortex,
+# and tinycortex's own vendor/tinyagents. src/ carries both member crates
+# (src/sdk, src/tui) including their tests/ and examples/ trees — the examples
+# pull src/sdk/tests/support/ via #[path], so it must be present.
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-COPY examples ./examples
-# examples/mock_signal_server.rs pulls tests/support/mock_signal_server.rs via
-# #[path = "../tests/support/..."], so the test-support tree must be present.
-COPY tests ./tests
 COPY vendor ./vendor
 
 # One shot; path-dep crates make the dummy-main cache trick brittle, so just

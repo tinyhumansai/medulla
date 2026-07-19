@@ -73,17 +73,20 @@ jobs:
             minor) new_version="${major}.$((minor + 1)).0" ;;
             patch) new_version="${major}.${minor}.$((patch + 1))" ;;
           esac
-          # First `version =` line is the [package] version; mirror it into the
-          # lockfile's own `medulla` entry so --locked builds stay consistent.
+          # First `version =` line is the shared [workspace.package] version
+          # (both member crates inherit it); mirror it into the lockfile's own
+          # `medulla` and `medulla-tui` entries so --locked builds stay
+          # consistent.
           sed -i "0,/^version = \"${current}\"$/s//version = \"${new_version}\"/" Cargo.toml
           python3 - "$current" "$new_version" <<'EOF'
           import re, sys
           current, new = sys.argv[1], sys.argv[2]
           lock = open("Cargo.lock").read()
-          lock = lock.replace(
-              f'name = "medulla"\nversion = "{current}"',
-              f'name = "medulla"\nversion = "{new}"',
-          )
+          for name in ("medulla", "medulla-tui"):
+              lock = lock.replace(
+                  f'name = "{name}"\nversion = "{current}"',
+                  f'name = "{name}"\nversion = "{new}"',
+              )
           open("Cargo.lock", "w").write(lock)
           EOF
           tag="v${new_version}"

@@ -43,6 +43,7 @@ impl App {
             memory_directives: Vec::new(),
             memory_index: 0,
             memory_query: None,
+            feedback: Default::default(),
             prompt: None,
             frame: 0,
             mouse_capture: true,
@@ -221,6 +222,7 @@ impl App {
         match self.tab() {
             "Context" => Some(Cmd::InspectContext),
             "Memory" => Some(Cmd::LoadMemory),
+            "Feedback" => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
             "Settings" if self.settings_index == SP_USAGE => Some(Cmd::LoadUsage),
             _ => None,
         }

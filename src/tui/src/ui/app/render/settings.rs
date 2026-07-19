@@ -216,6 +216,7 @@ impl App {
             TLine::from("Workers: a add peer · Enter/s select · e edit label · d/x remove"),
             TLine::from("Context: j / k select chunks · Esc clear input · Ctrl-X abort cycle"),
             TLine::from("Memory: ↑↓ / j k browse directives, facets & hits · /memory <query> to search"),
+            TLine::from("Feedback: ↑↓ browse · u/d vote · c comment · n feature · b bug · s sort · f filter"),
             TLine::from("Settings: ↑↓ nav subpages · 1-4 jump · Usage/Appearance/Config/Help live here"),
             TLine::from("Appearance: j / k pick a theme role · ←/→ or Enter cycle its color (saved live)"),
             TLine::from("Ctrl-N new session · Ctrl-C quit (nav keys act only when the input is empty)"),
@@ -229,7 +230,8 @@ impl App {
             TLine::from(" "),
             TLine::from(Span::styled("Commands", bold)),
             TLine::from("/new · /fork [name] · /resume · /abort · /clear · /config · /copy [all|last]"),
-            TLine::from("/usage · /settings · /theme · /memory [query] · /mouse · /async [on|off] · /help · /quit"),
+            TLine::from("/usage · /settings · /theme · /memory [query] · /feedback · /mouse · /async [on|off]"),
+            TLine::from("/help · /quit"),
         ];
         f.render_widget(
             Paragraph::new(Text::from(lines))

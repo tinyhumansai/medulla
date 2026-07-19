@@ -194,3 +194,110 @@ fn subscribe_receives_a_ping_on_mutation() {
     rt.set_async_mode(true);
     assert!(rx.try_recv().is_ok());
 }
+
+// --- scripted feedback board ------------------------------------------------
+
+#[tokio::test]
+async fn mock_board_lists_and_filters_by_type() {
+    let rt = MockRuntime::demo();
+    let all = rt
+        .list_feedback(crate::client::FeedbackQuery::default())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(all.total, 3);
+    // `hot` orders by score, so the 24-upvote item leads.
+    assert_eq!(all.items[0].id, "fb-1");
+
+    let bugs = rt
+        .list_feedback(crate::client::FeedbackQuery {
+            kind: Some(crate::client::FeedbackType::Bug),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(bugs.total, 1);
+    assert_eq!(bugs.items[0].id, "fb-2");
+}
+
+#[tokio::test]
+async fn mock_vote_retallies_without_double_counting() {
+    let rt = MockRuntime::demo();
+    // fb-2 starts at 11/0 with no vote from us.
+    let up = rt.vote_feedback("fb-2".into(), 1).await.unwrap();
+    assert_eq!((up.upvote_count, up.downvote_count, up.score), (12, 0, 12));
+
+    // Voting up again must not stack.
+    let again = rt.vote_feedback("fb-2".into(), 1).await.unwrap();
+    assert_eq!(again.upvote_count, 12);
+
+    // Switching to a downvote moves the tally across, not just adds.
+    let down = rt.vote_feedback("fb-2".into(), -1).await.unwrap();
+    assert_eq!(
+        (down.upvote_count, down.downvote_count, down.score),
+        (11, 1, 10)
+    );
+
+    // Retracting restores the original tallies.
+    let none = rt.vote_feedback("fb-2".into(), 0).await.unwrap();
+    assert_eq!(
+        (none.upvote_count, none.downvote_count, none.my_vote),
+        (11, 0, 0)
+    );
+}
+
+#[tokio::test]
+async fn mock_comment_appends_and_bumps_count() {
+    let rt = MockRuntime::demo();
+    let before = rt.feedback_detail("fb-2".into()).await.unwrap();
+    assert_eq!(before.comments.len(), 1);
+
+    rt.comment_feedback("fb-2".into(), "me too".into())
+        .await
+        .unwrap();
+
+    let after = rt.feedback_detail("fb-2".into()).await.unwrap();
+    assert_eq!(after.comments.len(), 2);
+    assert_eq!(after.comments[1].body, "me too");
+    assert_eq!(
+        after.feedback.comment_count,
+        before.feedback.comment_count + 1
+    );
+}
+
+#[tokio::test]
+async fn mock_submit_prepends_an_accepted_item() {
+    let rt = MockRuntime::demo();
+    let result = rt
+        .submit_feedback(
+            crate::client::FeedbackType::Bug,
+            "Tab bar overflows".into(),
+            "At 80 columns the tab bar wraps.".into(),
+        )
+        .await
+        .unwrap();
+    assert!(result.accepted);
+
+    let page = rt
+        .list_feedback(crate::client::FeedbackQuery {
+            sort: crate::client::FeedbackSort::New,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(page.total, 4);
+    assert_eq!(page.items[0].title, "Tab bar overflows");
+}
+
+#[tokio::test]
+async fn mock_board_reports_missing_items() {
+    let rt = MockRuntime::demo();
+    assert!(rt.feedback_detail("nope".into()).await.is_err());
+    assert!(rt.vote_feedback("nope".into(), 1).await.is_err());
+    assert!(rt
+        .comment_feedback("nope".into(), "hi".into())
+        .await
+        .is_err());
+}

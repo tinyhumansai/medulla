@@ -8,6 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::ui::command::CopyScope;
 use crate::ui::composer::{delete_before, insert_at, move_caret_row, Draft};
 use crate::ui::theme::THEME_ROLES;
+use medulla::client::FeedbackType;
 use medulla::runtime::WorkerOp;
 
 use super::types::{
@@ -296,6 +297,47 @@ impl App {
             KeyCode::Down if tab == "Memory" => {
                 let max = self.memory_entry_count().saturating_sub(1);
                 self.memory_index = (self.memory_index + 1).min(max);
+            }
+            // Feedback board: browse, vote, comment, submit.
+            KeyCode::Up if tab == "Feedback" => {
+                return self.move_feedback_index(true);
+            }
+            KeyCode::Down if tab == "Feedback" => {
+                return self.move_feedback_index(false);
+            }
+            KeyCode::Char('k') if tab == "Feedback" => {
+                return self.move_feedback_index(true);
+            }
+            KeyCode::Char('j') if tab == "Feedback" => {
+                return self.move_feedback_index(false);
+            }
+            KeyCode::Char('u') if tab == "Feedback" => {
+                return self.vote_selected_feedback(1);
+            }
+            KeyCode::Char('d') if tab == "Feedback" => {
+                return self.vote_selected_feedback(-1);
+            }
+            KeyCode::Char('c') if tab == "Feedback" => {
+                self.open_feedback_comment();
+                return None;
+            }
+            KeyCode::Char('n') if tab == "Feedback" => {
+                self.open_feedback_submit(FeedbackType::Feature);
+                return None;
+            }
+            KeyCode::Char('b') if tab == "Feedback" => {
+                self.open_feedback_submit(FeedbackType::Bug);
+                return None;
+            }
+            KeyCode::Char('s') if tab == "Feedback" => {
+                return self.cycle_feedback_sort();
+            }
+            KeyCode::Char('f') if tab == "Feedback" => {
+                return self.cycle_feedback_filter();
+            }
+            KeyCode::Char('r') | KeyCode::Enter if tab == "Feedback" => {
+                self.set_status("Feedback · refreshing…");
+                return self.reload_feedback();
             }
             KeyCode::Char('j') if tab == "Memory" && self.draft.text.is_empty() => {
                 let max = self.memory_entry_count().saturating_sub(1);

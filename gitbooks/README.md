@@ -34,8 +34,8 @@ layout:
 
 Medulla v1 brings three capabilities together for the first time:
 
-1. **A 10-million-token effective context**, handled efficiently through RLM (Recursive Language Model) techniques, so accuracy holds at a scale where single-context models collapse.
-2. **Live streaming input from every running harness**, so fleet awareness is continuous rather than post-hoc.
+1. **A 10-million-token effective context**, handled efficiently through [RLM (Recursive Language Model)](https://arxiv.org/abs/2512.24601) techniques, so accuracy holds at a scale where single-context models collapse.
+2. **Live streaming input from every running harness** — [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/sst/opencode), and their peers — so fleet awareness is continuous rather than post-hoc.
 3. **Concurrency of up to 1,000 agent harnesses running at the same time**, governed end to end so every operation completes with an answer.
 
 Medulla is currently the only model to bring all three together.
@@ -52,6 +52,8 @@ Medulla is built around one principle: get the right answer. When a worker fails
 * [Real-World Fleets](real-world-fleets.md) — the runs behind the numbers.
 * [Open Benchmarks, Open SDKs](open-benchmarks-open-sdks.md) — reproduce every number yourself.
 * [Pricing and Availability](pricing-and-availability.md) — pricing, early alpha, and how to request access.
+
+Building on Medulla? The [Developers](developers/README.md) section covers installing the [TUI](developers/getting-started.md), embedding the [SDK](developers/architecture.md), and wiring your own fleet to the orchestrator.
 
 ## What Comes Next
 

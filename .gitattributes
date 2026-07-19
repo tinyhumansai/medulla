@@ -1,0 +1,3 @@
+# The init scaffold is embedded with include_str! and rendered verbatim —
+# keep it LF on every platform so the generated MEDULLA.md is byte-stable.
+*.tmpl text eol=lf

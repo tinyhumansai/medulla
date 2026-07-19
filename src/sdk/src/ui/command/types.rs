@@ -40,6 +40,8 @@ pub enum SlashCommand {
     /// `/memory [query]`, `/mem [query]` — load persona memory, or search it when
     /// a query is given (original case preserved).
     Memory(Option<String>),
+    /// `/feedback` — open the feedback board tab.
+    Feedback,
     /// `/mouse` — toggle mouse capture.
     ToggleMouse,
     /// `/copy [all|last]` — copy the transcript at the given scope.

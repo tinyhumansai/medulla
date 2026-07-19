@@ -21,7 +21,9 @@ use medulla::auth::{
 };
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
-use medulla_tui::cli::{parse_login_args, parse_memory_args, LoginArgs, MemoryAction};
+use medulla_tui::cli::{
+    parse_init_args, parse_login_args, parse_memory_args, LoginArgs, MemoryAction,
+};
 use medulla_tui::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
 
 /// `medulla login`: obtain a JWT (loopback OAuth or a one-time token), verify it
@@ -138,6 +140,56 @@ pub(crate) async fn run_memory(args: &[String]) -> anyhow::Result<()> {
             let report = service.ingest(mode).await?;
             print_ingest_report(&report, parsed.json)?;
         }
+    }
+    Ok(())
+}
+
+/// `medulla init [dir]` — author a `MEDULLA.md` workspace profile.
+///
+/// Reads the directory's `AGENTS.md` / `CLAUDE.md` / `README.md` and asks the
+/// configured model to distil them into a short, routing-oriented profile, then
+/// writes it for the operator to review. Falls back to an editable stub when
+/// `--offline` is set or no model is reachable, so `init` always leaves a valid
+/// file behind.
+pub(crate) async fn run_init(args: &[String]) -> anyhow::Result<()> {
+    let parsed = parse_init_args(args);
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = parsed
+        .dir
+        .as_ref()
+        .map_or_else(|| cwd.clone(), |d| cwd.join(d));
+
+    // Resolve the same backend/model settings memory ingest uses, so one login
+    // (or one OPENROUTER_API_KEY) serves both surfaces.
+    let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
+    let settings = medulla::memory::env::resolve_with_backend(
+        loaded.config.memory.as_ref(),
+        &loaded.config.backend,
+        &env,
+        &medulla::home::medulla_home(&env),
+    );
+
+    if !parsed.offline && !medulla::init::model_available(&settings) {
+        eprintln!(
+            "medulla init: no model available (run `medulla login` or set OPENROUTER_API_KEY) — writing an editable stub"
+        );
+    }
+
+    let outcome =
+        medulla::init::init_workspace_with_settings(&dir, &settings, parsed.offline, parsed.force)
+            .await?;
+
+    if outcome.drafted {
+        println!(
+            "Wrote {} (drafted from {})",
+            outcome.path.display(),
+            outcome.sources.join(", ")
+        );
+        println!("Review it — the summary is what the orchestrator reads.");
+    } else {
+        println!("Wrote {} (stub)", outcome.path.display());
+        println!("Fill in the summary and routing hints, then it is ready to use.");
     }
     Ok(())
 }

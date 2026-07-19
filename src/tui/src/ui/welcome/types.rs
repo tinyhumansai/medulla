@@ -37,9 +37,15 @@ pub enum WelcomeOutcome {
         /// Human-facing power-level label, when the backend supplied one.
         tier: Option<String>,
     },
-    /// The user declined, or had nothing to share. Onboarding is still marked
-    /// done so the screen does not reappear on every launch.
+    /// The user declined. Onboarding is marked done so the screen does not
+    /// reappear on every launch.
     Skipped,
+    /// There was no local history to share, so the offer was never really made.
+    ///
+    /// Distinct from [`WelcomeOutcome::Skipped`] on purpose: the empty state
+    /// tells the user the offer will be waiting once they have sessions, so the
+    /// caller must *not* record onboarding as done, or that promise is broken.
+    NothingToShare,
 }
 
 /// An async action the driver must run on the screen's behalf.

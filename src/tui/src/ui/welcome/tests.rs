@@ -107,9 +107,9 @@ fn a_scan_that_finds_nothing_lands_on_the_empty_step() {
     screen.apply(WelcomeEvent::ScanReady(ScanSummary::default()));
 
     assert_eq!(screen.step, Step::Empty);
-    // And leaving from there is a skip, not a claim.
+    // Leaving from there is neither a claim nor a skip: the offer stays open.
     assert_eq!(screen.handle_key(key(KeyCode::Enter)), None);
-    assert_eq!(screen.outcome(), Some(WelcomeOutcome::Skipped));
+    assert_eq!(screen.outcome(), Some(WelcomeOutcome::NothingToShare));
 }
 
 #[test]

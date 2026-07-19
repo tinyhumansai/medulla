@@ -220,7 +220,9 @@ async fn no_local_history_reaches_the_empty_state_and_skips() {
     .expect("flow should not hang")
     .unwrap();
 
-    assert_eq!(outcome, WelcomeOutcome::Skipped);
+    // Not Skipped: the offer stays open so it can be made once this user has
+    // sessions, matching what the empty-state screen tells them.
+    assert_eq!(outcome, WelcomeOutcome::NothingToShare);
     let paths: Vec<String> = backend.requests().iter().map(|r| r.path.clone()).collect();
     assert_eq!(
         paths.iter().filter(|p| p.ends_with("/uploads")).count(),
@@ -279,5 +281,90 @@ async fn the_flow_renders_every_step_it_passes_through() {
     assert!(
         rendered.contains("$5 of $25 earned"),
         "final frame: {rendered}"
+    );
+}
+
+/// Stage `count` transcripts so an upload run is long enough to interrupt.
+fn many_sessions(dir: &std::path::Path, count: usize) -> HashMap<String, String> {
+    let claude = dir.join("claude");
+    std::fs::create_dir_all(&claude).unwrap();
+    for index in 0..count {
+        std::fs::write(
+            claude.join(format!("s{index}.jsonl")),
+            format!("{{\"timestamp\":\"2026-01-05T10:00:00Z\",\"i\":{index}}}\n"),
+        )
+        .unwrap();
+    }
+
+    let mut env = HashMap::new();
+    env.insert(
+        "TINYPLACE_CLAUDE_SESSIONS_DIR".into(),
+        claude.to_string_lossy().into_owned(),
+    );
+    env.insert(
+        "TINYPLACE_CODEX_SESSIONS_DIR".into(),
+        dir.join("none").to_string_lossy().into_owned(),
+    );
+    env
+}
+
+#[tokio::test]
+async fn skipping_mid_upload_cancels_the_share_and_never_claims() {
+    // Withdrawing consent has to actually stop the work. The share runs as a
+    // spawned task, so without an abort the flow would return "skipped" while
+    // that task kept uploading and went on to claim the reward.
+    let backend = std::sync::Arc::new(MockBackend::start().await);
+    let dir = tempfile::tempdir().unwrap();
+    let env = many_sessions(dir.path(), 60);
+    let mut term = terminal();
+
+    // Keys react to observed state rather than a timer: press Enter until an
+    // upload is actually in flight, then press Esc.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<KeyEvent>();
+    let probe = backend.clone();
+    tokio::spawn(async move {
+        loop {
+            let uploads = probe
+                .requests()
+                .iter()
+                .filter(|r| r.path.ends_with("/uploads"))
+                .count();
+            let code = if uploads > 0 {
+                KeyCode::Esc
+            } else {
+                KeyCode::Enter
+            };
+            if tx.send(KeyEvent::new(code, KeyModifiers::NONE)).is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    });
+    let keys = Box::pin(stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|key| (key, rx))
+    }));
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(20),
+        drive_welcome_ui(&mut term, &client(&backend), env, keys),
+    )
+    .await
+    .expect("flow should not hang")
+    .unwrap();
+
+    assert_eq!(outcome, WelcomeOutcome::Skipped);
+
+    // Give any un-aborted task a chance to finish and claim, so this fails loudly
+    // if the abort regresses.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let paths: Vec<String> = backend.requests().iter().map(|r| r.path.clone()).collect();
+    let uploads = paths.iter().filter(|p| p.ends_with("/uploads")).count();
+    let claims = paths.iter().filter(|p| p.ends_with("/claim")).count();
+
+    assert_eq!(claims, 0, "a cancelled share must never claim the reward");
+    assert!(
+        uploads < 60,
+        "upload should have been cut short, got {uploads}"
     );
 }

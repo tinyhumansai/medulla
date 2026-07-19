@@ -98,6 +98,10 @@ where
     // Owned by the driver, populated by the scan command, consumed by the upload.
     let scan: Arc<tokio::sync::Mutex<HistoryScan>> =
         Arc::new(tokio::sync::Mutex::new(HistoryScan::default()));
+    // The task servicing the current command. Held so that leaving the flow can
+    // abort it — without this, skipping mid-upload would return while a detached
+    // task kept uploading transcripts and went on to claim the reward.
+    let mut inflight: Option<tokio::task::JoinHandle<()>> = None;
 
     let outcome = loop {
         terminal.draw(|f| screen.draw(f))?;
@@ -108,7 +112,7 @@ where
         tokio::select! {
             Some(key) = keys.next() => {
                 if let Some(cmd) = screen.handle_key(key) {
-                    dispatch(cmd, client, &env, &scan, &tx);
+                    inflight = Some(dispatch(cmd, client, &env, &scan, &tx));
                 }
             }
             Some(ev) = rx.recv() => screen.apply(ev),
@@ -116,17 +120,24 @@ where
         }
     };
 
+    // Withdrawing consent must actually stop the work: anything still uploading
+    // is cancelled here, and with it the claim that would have followed.
+    if let Some(handle) = inflight {
+        handle.abort();
+    }
+
     Ok(outcome)
 }
 
-/// Spawn the async work a [`WelcomeCmd`] requires.
+/// Spawn the async work a [`WelcomeCmd`] requires, returning its handle so the
+/// caller can cancel it when the flow ends.
 fn dispatch(
     cmd: WelcomeCmd,
     client: &MedullaClient,
     env: &HashMap<String, String>,
     scan: &Arc<tokio::sync::Mutex<HistoryScan>>,
     tx: &UnboundedSender<WelcomeEvent>,
-) {
+) -> tokio::task::JoinHandle<()> {
     match cmd {
         WelcomeCmd::Scan => {
             let env = env.clone();
@@ -140,7 +151,7 @@ fn dispatch(
                 let summary = summarize(&found);
                 *scan.lock().await = found;
                 let _ = tx.send(WelcomeEvent::ScanReady(summary));
-            });
+            })
         }
         WelcomeCmd::UploadAndClaim => {
             let client = client.clone();
@@ -148,7 +159,7 @@ fn dispatch(
             let tx = tx.clone();
             tokio::spawn(async move {
                 upload_and_claim(client, scan, tx).await;
-            });
+            })
         }
     }
 }

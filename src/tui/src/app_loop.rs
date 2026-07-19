@@ -277,21 +277,27 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let config_path = home.join("config.toml");
     if !loaded.config.onboarding.welcome_completed {
         if let Some(client) = &backend_client {
-            let welcome = run_welcome_ui(&mut terminal, client, env.clone()).await;
-            // Completing *or* skipping records the flag: a user who declined
-            // should not be asked again on every launch.
-            if welcome.is_ok() {
-                if let Err(e) = medulla::config::persist_welcome_completed(&config_path, true) {
-                    startup_status = Some(format!("could not save onboarding state ({e})"));
+            match run_welcome_ui(&mut terminal, client, env.clone()).await {
+                // Completing *or* declining settles onboarding: a user who said
+                // no should not be asked again on every launch.
+                Ok(outcome @ (WelcomeOutcome::Completed { .. } | WelcomeOutcome::Skipped)) => {
+                    if let Err(e) = medulla::config::persist_welcome_completed(&config_path, true) {
+                        startup_status = Some(format!("could not save onboarding state ({e})"));
+                    }
+                    if let WelcomeOutcome::Completed { awarded_usd, .. } = outcome {
+                        if awarded_usd > 0.0 {
+                            startup_status = Some(format!(
+                                "{} in free credits added to your balance",
+                                format_usd(awarded_usd)
+                            ));
+                        }
+                    }
                 }
-            }
-            if let Ok(WelcomeOutcome::Completed { awarded_usd, .. }) = welcome {
-                if awarded_usd > 0.0 {
-                    startup_status = Some(format!(
-                        "{} in free credits added to your balance",
-                        format_usd(awarded_usd)
-                    ));
-                }
+                // Nothing was found to share, so the offer was never really made.
+                // Leaving the flag unset keeps it available once this user has
+                // sessions — which is what the empty-state screen promises.
+                Ok(WelcomeOutcome::NothingToShare) => {}
+                Err(_) => {}
             }
         }
     }

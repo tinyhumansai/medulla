@@ -66,7 +66,9 @@ impl WelcomeScreen {
             },
             Step::Empty => match key.code {
                 KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
-                    self.outcome = Some(WelcomeOutcome::Skipped);
+                    // Not a skip: nothing was ever offered, so the caller keeps
+                    // the offer open for once this user has sessions.
+                    self.outcome = Some(WelcomeOutcome::NothingToShare);
                     None
                 }
                 _ => None,

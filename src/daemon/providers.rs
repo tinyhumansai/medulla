@@ -391,13 +391,27 @@ async fn run_provider_attempt(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(err) => {
-            return Err(format!(
-                "failed to start {bin}: {}",
-                with_auth_hint(&err.to_string())
-            ));
+    // ETXTBSY (26) is a transient unix race: a concurrently forked process can
+    // briefly hold a freshly written executable's fd open when we exec it.
+    // Retry briefly, like the transient-lock retry above.
+    let mut spawn_tries = 0u32;
+    let mut child = loop {
+        match command.spawn() {
+            Ok(child) => break child,
+            Err(err)
+                if err.raw_os_error() == Some(26)
+                    && spawn_tries < 50
+                    && !spec.abort.is_aborted() =>
+            {
+                spawn_tries += 1;
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(err) => {
+                return Err(format!(
+                    "failed to start {bin}: {}",
+                    with_auth_hint(&err.to_string())
+                ));
+            }
         }
     };
 

@@ -253,4 +253,19 @@ cargo llvm-cov                    # run suite with coverage, print summary
 cargo llvm-cov report --show-missing-lines
 ```
 
-The suite holds ~92% line coverage; keep new code covered. `src/main.rs` (the terminal event loop, needs a real TTY) and the daemon's live-network entry points are the known uncovered remainder.
+CI gates line coverage at 90% (`cargo llvm-cov --fail-under-lines 90`); keep new code covered. `src/main.rs` (the terminal event loop, needs a real TTY) and the daemon's live-network entry points are the known uncovered remainder.
+
+## Releasing
+
+Releases are one-click: run the **Release** workflow (Actions → Release → Run
+workflow) and pick a semver bump. It bumps `Cargo.toml`/`Cargo.lock`, commits and
+tags on `main`, builds all targets, and publishes the GitHub Release with the
+`latest.json` update manifest.
+
+`main` is branch-protected (the four CI checks are required), and the workflow's
+default `GITHUB_TOKEN` cannot bypass that — the version-bump push would be
+rejected. The workflow therefore needs a **`RELEASE_TOKEN`** Actions secret: a
+fine-grained PAT from a repo admin with **Contents: read and write** on this
+repository. Admin enforcement is off on the protection rule, so the admin token
+may push the release commit directly; every other path to `main` still goes
+through a PR with green checks.

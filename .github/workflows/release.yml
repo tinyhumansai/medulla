@@ -7,7 +7,15 @@ name: Release
 #
 # Always releases from main (checks out and pushes back to main regardless of
 # where it is dispatched). The release is created in this same workflow, so the
-# GITHUB_TOKEN tag-push not firing other workflows is fine.
+# tag-push not firing other workflows is fine.
+#
+# main is branch-protected (required CI checks), which the default GITHUB_TOKEN
+# cannot bypass — the version-bump push would be rejected. The workflow
+# therefore pushes with RELEASE_TOKEN: a (fine-grained) PAT from an admin,
+# stored as a repo Actions secret with contents read/write. enforce_admins is
+# off on the protection rule, so an admin token may push directly. Falls back
+# to GITHUB_TOKEN when the secret is unset (works only if protection is
+# lifted).
 
 on:
   workflow_dispatch:
@@ -36,6 +44,9 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # Persisted into the git credential config; the version-bump
+          # commit/tag push below authenticates with this token.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       - name: Configure git identity
         run: |

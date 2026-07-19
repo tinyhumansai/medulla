@@ -3,11 +3,13 @@
 //! defaults, unknown fields are ignored.
 //!
 //! The module is split by responsibility: [`urls`] holds the endpoint base-URL
-//! constants and their env-aware resolvers, [`types`] the config data model, and
-//! [`load`] the layered discovery/parse/merge that produces a [`LoadedConfig`].
+//! constants and their env-aware resolvers, [`types`] the config data model,
+//! [`load`] the layered discovery/parse/merge that produces a [`LoadedConfig`],
+//! and [`persist`] writes back the few sections the app owns as state.
 //! All public items are re-exported here so callers use `medulla::config::*`.
 
 mod load;
+mod persist;
 mod types;
 mod urls;
 
@@ -15,9 +17,10 @@ mod urls;
 mod tests;
 
 pub use load::load_config;
+pub use persist::persist_welcome_completed;
 pub use types::{
-    BackendConfig, CoreConfig, LoadedConfig, MedullaConfig, MemoryConfigSection, OpencodeConfig,
-    Peer, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
+    BackendConfig, CoreConfig, LoadedConfig, MedullaConfig, MemoryConfigSection, OnboardingConfig,
+    OpencodeConfig, Peer, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, is_staging, resolve_backend_base_url,

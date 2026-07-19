@@ -456,3 +456,55 @@ fn peer_protocol_defaults_to_task() {
     let peer: Peer = serde_json::from_str(r#"{"id":"p1"}"#).unwrap();
     assert_eq!(peer.protocol, "task");
 }
+
+// --- Onboarding persistence -------------------------------------------------
+
+#[test]
+fn persists_the_welcome_flag_to_a_new_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("nested").join("config.toml");
+
+    super::persist_welcome_completed(&path, true).expect("persist should succeed");
+
+    let text = std::fs::read_to_string(&path).expect("file should exist");
+    let parsed: TuiConfig = toml::from_str(&text).expect("should reparse");
+    assert!(parsed.onboarding.welcome_completed);
+}
+
+#[test]
+fn persisting_the_welcome_flag_preserves_unrelated_config() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "stateDir = \"/tmp/keep-me\"\n\n[theme]\nprimary = \"#ff0000\"\n",
+    )
+    .expect("seed config");
+
+    super::persist_welcome_completed(&path, true).expect("persist should succeed");
+
+    let text = std::fs::read_to_string(&path).expect("read back");
+    let parsed: TuiConfig = toml::from_str(&text).expect("should reparse");
+    assert!(parsed.onboarding.welcome_completed);
+    assert_eq!(parsed.state_dir, "/tmp/keep-me");
+    assert_eq!(parsed.theme.primary.as_deref(), Some("#ff0000"));
+}
+
+#[test]
+fn the_welcome_flag_can_be_cleared_to_replay_onboarding() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+
+    super::persist_welcome_completed(&path, true).expect("persist true");
+    super::persist_welcome_completed(&path, false).expect("persist false");
+
+    let text = std::fs::read_to_string(&path).expect("read back");
+    let parsed: TuiConfig = toml::from_str(&text).expect("should reparse");
+    assert!(!parsed.onboarding.welcome_completed);
+}
+
+#[test]
+fn welcome_flag_defaults_to_false_when_absent() {
+    let parsed: TuiConfig = toml::from_str("stateDir = \"/tmp/x\"\n").expect("parse");
+    assert!(!parsed.onboarding.welcome_completed);
+}

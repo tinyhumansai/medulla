@@ -275,6 +275,19 @@ pub struct ThemeConfig {
     pub dim_border: Option<String>,
 }
 
+/// Onboarding state: what the welcome flow has already shown this user.
+///
+/// Purely a display gate. Whether the user actually *earned* the history reward
+/// is the backend's answer (`GET /agent-integrations/history-rewards/status`);
+/// this flag only stops the welcome screen reappearing every launch, including
+/// for a user who deliberately skipped it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct OnboardingConfig {
+    /// True once the user has completed or skipped the welcome flow.
+    pub welcome_completed: bool,
+}
+
 /// The whole parsed config document (`medulla.tui.json` / `medulla.toml`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -295,6 +308,8 @@ pub struct TuiConfig {
     pub update: UpdateConfig,
     #[serde(default)]
     pub theme: ThemeConfig,
+    #[serde(default)]
+    pub onboarding: OnboardingConfig,
 }
 
 impl Default for TuiConfig {
@@ -309,6 +324,7 @@ impl Default for TuiConfig {
             memory: None,
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),
+            onboarding: OnboardingConfig::default(),
         }
     }
 }

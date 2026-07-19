@@ -21,7 +21,7 @@ toml = "0.8"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "process", "fs", "signal", "net"] }
 futures = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 anyhow = "1"

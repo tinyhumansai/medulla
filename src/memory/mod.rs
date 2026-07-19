@@ -428,6 +428,27 @@ mod tests {
     }
 
     #[test]
+    fn compile_offline_writes_a_pack_and_reloads() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Exercise every optional persona_config branch (roots + model) too.
+        let mut s = settings(tmp.path().to_path_buf());
+        s.claude_root = Some(tmp.path().join("claude"));
+        s.codex_root = Some(tmp.path().join("codex"));
+        s.project_roots = vec![tmp.path().join("proj")];
+        s.llm_model = Some("test/model".into());
+        let svc = MemoryService::open(s).unwrap();
+        // No LLM is called on the compile-only path, so this runs fully offline.
+        let report = svc.compile().unwrap();
+        assert_eq!(report.mode, "compile");
+        assert!(report.pack_path.is_some());
+        // The provider builder honors the explicit llm_model override.
+        let mut s2 = settings(tmp.path().to_path_buf());
+        s2.llm_model = Some("custom/model".into());
+        s2.openrouter_api_key = Some("sk-x".into());
+        assert!(MemoryService::open(s2).unwrap().provider().is_ok());
+    }
+
+    #[test]
     fn overview_renders_disabled_and_facets() {
         let tmp = tempfile::TempDir::new().unwrap();
         let mut s = settings(tmp.path().to_path_buf());

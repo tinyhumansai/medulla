@@ -209,6 +209,17 @@ pub fn build_run_args(
     args
 }
 
+/// Whether a provider accepts mid-run stdin input (`input` frames).
+///
+/// `opencode run` treats a non-TTY stdin as prompt content and blocks at
+/// startup reading it until EOF; it has no interactive mid-run stdin channel.
+/// Piping (and holding) its stdin open therefore deadlocks the run, so it gets
+/// an immediate-EOF null stdin and `input` frames must be rejected up front.
+/// Claude/Codex accept forwarded `input` frames over a live stdin pipe.
+pub fn supports_stdin(provider: HarnessProvider) -> bool {
+    provider != HarnessProvider::Opencode
+}
+
 /// opencode's SQLite session store throws this when runs start too close
 /// together; transient, clears on a short retry.
 pub fn is_transient_lock(message: &str) -> bool {
@@ -364,13 +375,18 @@ async fn run_provider_attempt(
     );
     let bin = provider_bin(spec.provider, &spec.env);
 
+    let stdin_mode = if supports_stdin(spec.provider) {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    };
     let mut command = Command::new(&bin);
     command
         .args(&args)
         .current_dir(&spec.cwd)
         .env_clear()
         .envs(&spec.env)
-        .stdin(Stdio::piped())
+        .stdin(stdin_mode)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);

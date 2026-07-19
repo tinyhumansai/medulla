@@ -121,6 +121,7 @@ async fn check_returns_none_when_no_asset_for_platform() {
     assert!(info.is_none(), "no asset for this platform → no update");
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn check_honors_medulla_update_url_env() {
     let body = manifest_json(
@@ -131,7 +132,7 @@ async fn check_honors_medulla_update_url_env() {
     );
     let server = StubServer::serve(body.into_bytes()).await;
 
-    // SAFETY: no other test reads/writes MEDULLA_UPDATE_URL, so this is race-free.
+    let _guard = UPDATE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("MEDULLA_UPDATE_URL", server.url("/latest.json"));
     let resolved = update_url();
     assert_eq!(resolved, server.url("/latest.json"));
@@ -211,6 +212,77 @@ async fn self_update_rejects_sha_mismatch() {
     assert!(
         err.to_string().contains("sha256 mismatch"),
         "expected sha256 mismatch, got: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// Serializes the process-env mutation the `run_update` tests share with
+/// `check_honors_medulla_update_url_env`.
+static UPDATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+// The lock is intentionally held across awaits to serialize process-env access
+// against other tests in this binary.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn run_update_reports_up_to_date() {
+    use medulla::update::run_update;
+    // Serve a manifest whose version equals the running binary's version.
+    let current = env!("CARGO_PKG_VERSION");
+    let body = manifest_json(current, platform_key(), "https://example/a.tar.gz", "aa");
+    let server = StubServer::serve(body.into_bytes()).await;
+
+    let _guard = UPDATE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("MEDULLA_UPDATE_URL", server.url("/latest.json"));
+    // Both check-only and full run take the "up to date" branch (no install).
+    run_update(true).await.unwrap();
+    run_update(false).await.unwrap();
+    std::env::remove_var("MEDULLA_UPDATE_URL");
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn run_update_check_only_reports_available() {
+    use medulla::update::run_update;
+    let body = manifest_json("999.0.0", platform_key(), "https://example/a.tar.gz", "aa");
+    let server = StubServer::serve(body.into_bytes()).await;
+
+    let _guard = UPDATE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("MEDULLA_UPDATE_URL", server.url("/latest.json"));
+    // check_only path: prints the available update + notes without installing.
+    run_update(true).await.unwrap();
+    std::env::remove_var("MEDULLA_UPDATE_URL");
+}
+
+#[test]
+fn exe_is_writable_reflects_directory_permissions() {
+    use medulla::update::exe_is_writable;
+    let dir = temp_dir("writable");
+    // A file inside a writable temp dir → we can install alongside it.
+    let exe = dir.join("medulla");
+    std::fs::write(&exe, b"bin").unwrap();
+    assert!(exe_is_writable(&exe));
+
+    // A path whose parent does not exist → not writable.
+    let missing = dir.join("no-such-dir").join("medulla");
+    assert!(!exe_is_writable(&missing));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn download_and_stage_rejects_corrupt_archive() {
+    // Correct sha, but the bytes are not a valid tar.gz → extraction fails.
+    use medulla::update::sha256_hex;
+    let bytes = b"this is not a tarball".to_vec();
+    let sha = sha256_hex(&bytes);
+    let server = StubServer::serve(bytes).await;
+    let stage = temp_dir("corrupt");
+    let err = download_and_stage(&server.url("/asset.tar.gz"), &sha, &stage)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("extraction failed"),
+        "expected extraction failure, got: {err}"
     );
     let _ = std::fs::remove_dir_all(&stage);
 }

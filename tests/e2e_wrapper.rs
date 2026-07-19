@@ -206,11 +206,12 @@ async fn bridges_transcript_and_injects_owner_input() {
 
     let code = wrapper.await.unwrap().unwrap();
     assert_eq!(code, 0, "wrapper should propagate the child's clean exit");
-    assert!(
-        view.phases.iter().any(|p| p == "session_end"),
-        "missing session_end lifecycle: {:?}",
-        view.phases
-    );
+    // The session_end envelope races the wrapper's exit; keep draining for it.
+    let saw_end = drain_until(&owner, &mut view, Duration::from_secs(15), |v| {
+        v.phases.iter().any(|p| p == "session_end")
+    })
+    .await;
+    assert!(saw_end, "missing session_end lifecycle: {:?}", view.phases);
 }
 
 /// A per-provider `TINYPLACE_CODEX_DM_TO` beats the generic `TINYPLACE_HARNESS_DM_TO`

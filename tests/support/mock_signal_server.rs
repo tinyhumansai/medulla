@@ -286,7 +286,13 @@ impl Drop for MockSignalServer {
 impl MockSignalServer {
     /// Bind on an ephemeral loopback port and start accepting.
     pub async fn start() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        Self::start_on_addr("127.0.0.1:0").await
+    }
+
+    /// Bind on a specific address (e.g. `"127.0.0.1:8787"` for a runnable server)
+    /// and start accepting. `start()` calls this with an ephemeral loopback port.
+    pub async fn start_on_addr(addr: &str) -> Self {
+        let listener = TcpListener::bind(addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let state = Arc::new(ServerState {
             bundles: Mutex::new(HashMap::new()),
@@ -465,6 +471,21 @@ fn route(
             return ("200 OK", envelope.to_string());
         }
         return ("400 Bad Request", r#"{"error":"bad envelope"}"#.to_string());
+    }
+    // GET /debug/stored?to=..  (introspection-only, not part of the tiny.place
+    // API): the append-only count of envelopes ever addressed to a recipient, so
+    // a runnable e2e can assert delivery without decrypting. Never affects the
+    // live queue or any counter the scenario tests observe.
+    if method == "GET" && route == "/debug/stored" {
+        let to = query_param(query, "to");
+        let count = state
+            .stored
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.get("to").and_then(Value::as_str) == Some(to.as_str()))
+            .count();
+        return ("200 OK", json!({ "to": to, "count": count }).to_string());
     }
     // GET /messages?agentId=..
     if method == "GET" && route == "/messages" {

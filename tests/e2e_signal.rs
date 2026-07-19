@@ -697,11 +697,12 @@ async fn wrapper_leg_bridges_session_and_injects_control() {
 
     let code = wrapper.await.unwrap().unwrap();
     assert_eq!(code, 0, "wrapper propagates the child's clean exit");
-    assert!(
-        view.phases.iter().any(|p| p == "session_end"),
-        "missing session_end lifecycle: {:?}",
-        view.phases
-    );
+    // The session_end envelope races the wrapper's exit; keep draining for it.
+    let saw_end = drain_owner_until(&owner_transport, &mut view, Duration::from_secs(15), |v| {
+        v.phases.iter().any(|p| p == "session_end")
+    })
+    .await;
+    assert!(saw_end, "missing session_end lifecycle: {:?}", view.phases);
 
     // The bridged session content was encrypted on the wire.
     server.assert_ciphertext_only(&["hello from codex", "got: run the suite", "session_start"]);

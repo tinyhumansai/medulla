@@ -74,7 +74,7 @@ pub fn parse_harness_control_frame(body: &str) -> Option<HarnessControlFrame> {
 
 #[cfg(test)]
 mod tests {
-    use crate::tinyplace_support::{
+    use crate::tinyplace::{
         encode_harness_control_frame, parse_harness_control_frame, HARNESS_CONTROL_VERSION,
     };
 

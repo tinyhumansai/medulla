@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, Mutex as TokioMutex, Notify, Semaphore};
 
-use crate::tinyplace_support::{AgentCapabilities, HarnessProvider};
+use crate::tinyplace::{AgentCapabilities, HarnessProvider};
 
 use super::providers::{Abort, RunTaskFn};
 

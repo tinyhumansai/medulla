@@ -23,10 +23,8 @@ use std::time::{Duration, Instant};
 use medulla::daemon::providers::{run_provider_task, RunTaskFn, RunTaskOptions};
 use medulla::daemon::transport::SignalTransport;
 use medulla::daemon::{DaemonConfig, DaemonRuntime, SendFn};
-use medulla::tinyplace_support::tinyplace::{
-    LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions,
-};
-use medulla::tinyplace_support::{
+use medulla::tinyplace::tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use medulla::tinyplace::{
     decode_task_frame, encode_task_frame, EncodeFrameInput, HarnessProvider, TaskFrame,
     TaskFrameKind, TINYPLACE_PROTO,
 };
@@ -189,7 +187,7 @@ async fn two_identities_register_and_roundtrip_encrypted_dms() {
 // contact-accept handshake — against the same mock Signal server.
 #[tokio::test]
 async fn presence_and_contacts_rest_surface() {
-    use medulla::tinyplace_support::{spawn_contact_auto_accepter, spawn_presence_heartbeat};
+    use medulla::tinyplace::{spawn_contact_auto_accepter, spawn_presence_heartbeat};
 
     let server = MockSignalServer::start().await;
     let owner = make_identity("owner-rest", &server.base_url);
@@ -549,7 +547,7 @@ async fn task_chain_real_opencode_when_present() {
 
 // ─── wrapper leg ────────────────────────────────────────────────────────────
 
-use medulla::tinyplace_support::{
+use medulla::tinyplace::{
     encode_harness_control_frame, parse_session_envelope, AnySessionEnvelope, HarnessEventKind,
 };
 use medulla::wrapper::{run_wrapper_with, WrapperConfig};

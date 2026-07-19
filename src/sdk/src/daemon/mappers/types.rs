@@ -2,7 +2,7 @@
 //! the stateful per-stream mapper's fields. The mapper's fold behavior lives in
 //! [`mapper`](super::mapper); the fields are `pub(super)` so it can drive them.
 
-use crate::tinyplace_support::{HarnessEvent, TokenUsage};
+use crate::tinyplace::{HarnessEvent, TokenUsage};
 
 /// One typed event parsed from a single transcript line, pre-envelope. Mirrors
 /// the TS `HarnessSemanticEvent`; `timestamp_ms` is epoch milliseconds (receive

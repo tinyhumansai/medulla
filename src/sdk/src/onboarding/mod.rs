@@ -26,13 +26,13 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::tinyplace_support::{
+use crate::tinyplace::{
     config_path, load_config, load_or_create_identity, resolve_endpoint, TinyPlaceConfig,
 };
 use crate::ui::onboarding::{OnboardingCmd, OnboardingEvent, OnboardingOutcome, OnboardingScreen};
 use crate::worker_profile::{default_worker_name, is_registered, profile_path, WorkerProfile};
-use tinyplace::auth::timestamp;
-use tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use ::tinyplace::auth::timestamp;
+use ::tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
 /// The result of an onboarding check.
 pub struct Registration {

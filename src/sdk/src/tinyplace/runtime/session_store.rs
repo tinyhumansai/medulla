@@ -12,10 +12,10 @@ use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 
-use tinyplace::error::{Error as SdkError, Result as SdkResult};
-use tinyplace::signal::crypto::X25519KeyPair;
-use tinyplace::signal::keys::{PreKeyPair, SignedPreKeyPair};
-use tinyplace::signal::store::{SessionState, SessionStore};
+use ::tinyplace::error::{Error as SdkError, Result as SdkResult};
+use ::tinyplace::signal::crypto::X25519KeyPair;
+use ::tinyplace::signal::keys::{PreKeyPair, SignedPreKeyPair};
+use ::tinyplace::signal::store::{SessionState, SessionStore};
 
 use super::types::{
     PersistShape, RuntimeError, RuntimeResult, SerializedKeyPair, SerializedPreKey,

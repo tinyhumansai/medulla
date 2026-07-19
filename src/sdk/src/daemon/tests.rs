@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use serde_json::json;
 use tokio::sync::{mpsc, Notify};
 
-use crate::tinyplace_support::{
+use crate::tinyplace::{
     decode_task_frame, HarnessEvent, HarnessProvider, TaskFrame, TaskFrameKind, TINYPLACE_PROTO,
 };
 

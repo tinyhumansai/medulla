@@ -2,7 +2,7 @@
 //!
 //! Session envelopes and harness event types are **not** hand-rolled here — they
 //! are re-exported from the published `tinyplace` Rust SDK
-//! (the SDK `tinyplace::types` module), so this module and the SDK share one wire
+//! (the SDK `::tinyplace::types` module), so this module and the SDK share one wire
 //! model. What lives here is the medulla-specific protocol the SDK does not
 //! carry, plus thin async helpers over the SDK client:
 //!
@@ -63,7 +63,7 @@ pub use status::{
 // `HarnessProvider` is intentionally NOT re-exported from the SDK (there it is a
 // bare `String`); [`frames::HarnessProvider`] is this module's typed provider for
 // the task-frame protocol.
-pub use tinyplace::types::{
+pub use ::tinyplace::types::{
     AnySessionEnvelope, ApprovalRequestPayload, ErrorPayload, HarnessBucket, HarnessBucketUnit,
     HarnessEnvelopeScope, HarnessEvent, HarnessEventKind, HarnessEventRole, HarnessInfo,
     HarnessMessage, HarnessMessageRole, HarnessScope, HarnessSessionState, HarnessSource,

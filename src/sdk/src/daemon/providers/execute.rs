@@ -12,7 +12,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::tinyplace_support::HarnessProvider;
+use crate::tinyplace::HarnessProvider;
 
 use super::super::mappers::HarnessLineMapper;
 use super::detect::{build_run_args, provider_bin, provider_name, supports_stdin};
@@ -118,7 +118,7 @@ async fn run_provider_attempt(
     // `TINYPLACE_<P>_ARGS` (whitespace-split) is prepended to any configured
     // extra args, so a per-provider env override applies to headless daemon runs
     // too — matching the wrapper's child-argv prefix.
-    let mut extra_args = crate::tinyplace_support::env::provider_args(spec.provider, &spec.env);
+    let mut extra_args = crate::tinyplace::env::provider_args(spec.provider, &spec.env);
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_run_args(
         spec.provider,

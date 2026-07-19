@@ -123,7 +123,7 @@ mod tests {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
-    use crate::tinyplace_support::{
+    use crate::tinyplace::{
         config_path, load_config, parse_config, resolve_endpoint, TinyPlaceConfig, DEFAULT_ENDPOINT,
     };
 

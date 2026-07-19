@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use tokio::process::Command;
 
-use crate::tinyplace_support::{AgentCapabilities, HarnessProvider};
+use crate::tinyplace::{AgentCapabilities, HarnessProvider};
 
 use super::dir_context::{read_dir_context, truncate_chars, MAX_SUMMARY_CHARS};
 use super::providers::{Abort, RunTaskFn, RunTaskOptions};

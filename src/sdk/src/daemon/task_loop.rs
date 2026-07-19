@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 
 use tokio::sync::mpsc;
 
-use crate::tinyplace_support::{AgentCapabilities, HarnessProvider, TaskFrame, TaskFrameKind};
+use crate::tinyplace::{AgentCapabilities, HarnessProvider, TaskFrame, TaskFrameKind};
 
 use super::capabilities::{probe_capabilities, ProbeOptions};
 use super::mappers;

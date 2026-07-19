@@ -66,7 +66,7 @@ pub fn resolve_backend_base_url(env: &HashMap<String, String>, config_url: Optio
 /// Resolve the tiny.place base URL for the `[tinyplace]` section. Order:
 /// explicitly-configured `tinyplace.baseUrl` > staging/prod default. (The
 /// `TINYPLACE_*`/`NEXT_PUBLIC_API_URL` env chain is applied later, at endpoint
-/// resolution in [`crate::tinyplace_support::config`].)
+/// resolution in [`crate::tinyplace::config`].)
 pub fn resolve_tinyplace_base_url(
     env: &HashMap<String, String>,
     config_url: Option<&str>,

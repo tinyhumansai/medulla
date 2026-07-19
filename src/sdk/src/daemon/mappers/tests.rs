@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::tinyplace_support::TokenUsage;
+use crate::tinyplace::TokenUsage;
 
 use super::shared::{
     bound_tool_input, normalize_tool_kind, tool_display, truncate, ELISION, INPUT_CAP, OUTPUT_CAP,

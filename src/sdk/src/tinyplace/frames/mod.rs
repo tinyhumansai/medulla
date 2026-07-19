@@ -12,7 +12,7 @@
 //! Split by responsibility: [`types`] holds the frame data model and its serde
 //! helpers, [`encode`] builds and serializes frames, and [`decode`] parses
 //! decrypted bodies and capabilities payloads. All public items are re-exported
-//! here so callers use `medulla::tinyplace_support::frames::*`.
+//! here so callers use `medulla::tinyplace::frames::*`.
 
 mod decode;
 mod encode;

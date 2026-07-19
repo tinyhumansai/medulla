@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, Notify};
 
 use medulla::daemon::providers::{run_provider_task, RunTaskFn, RunTaskOptions, RunTaskResult};
 use medulla::daemon::{DaemonConfig, DaemonRuntime, SendFn};
-use medulla::tinyplace_support::{
+use medulla::tinyplace::{
     decode_task_frame, parse_agent_capabilities, HarnessProvider, TaskFrame, TaskFrameKind,
     TINYPLACE_PROTO,
 };

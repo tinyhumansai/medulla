@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::tinyplace_support::HarnessProvider;
+use crate::tinyplace::HarnessProvider;
 
 use super::detect::{
     build_run_args, detect_providers, make_path_lookup, provider_bin, provider_name,

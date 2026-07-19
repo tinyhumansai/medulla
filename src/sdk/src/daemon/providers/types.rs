@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, Notify};
 
-use crate::tinyplace_support::HarnessProvider;
+use crate::tinyplace::HarnessProvider;
 use std::collections::HashMap;
 
 use super::super::mappers::HarnessSemanticEvent;
@@ -103,7 +103,7 @@ pub struct RunTaskResult {
     /// Count of semantic events observed.
     pub events: usize,
     /// Latest token usage the child reported on its stream, if any.
-    pub usage: Option<crate::tinyplace_support::TokenUsage>,
+    pub usage: Option<crate::tinyplace::TokenUsage>,
 }
 
 /// The injectable executor signature (the daemon runtime defaults to

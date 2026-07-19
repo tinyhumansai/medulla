@@ -19,11 +19,11 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::task::JoinHandle;
 
-use crate::tinyplace_support::{
+use crate::tinyplace::{
     load_or_create_identity, resolve_endpoint, spawn_contact_auto_accepter,
     spawn_presence_heartbeat, TinyPlaceConfig,
 };
-use tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use ::tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
 use crate::config::TinyplaceConfig;
 use crate::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity};
@@ -290,7 +290,7 @@ mod tests {
         // Empty TUI base_url → the DEFAULT_ENDPOINT stands.
         assert_eq!(
             resolve_endpoint_with_config(&HashMap::new(), &tp, ""),
-            crate::tinyplace_support::DEFAULT_ENDPOINT
+            crate::tinyplace::DEFAULT_ENDPOINT
         );
     }
 

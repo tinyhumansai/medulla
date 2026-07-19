@@ -34,10 +34,8 @@
 use std::time::{Duration, Instant};
 
 use medulla::daemon::transport::SignalTransport;
-use medulla::tinyplace_support::tinyplace::{
-    LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions,
-};
-use medulla::tinyplace_support::{
+use medulla::tinyplace::tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use medulla::tinyplace::{
     decode_task_frame, encode_task_frame, EncodeFrameInput, HarnessProvider, TaskFrame,
     TaskFrameKind,
 };

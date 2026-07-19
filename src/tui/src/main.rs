@@ -529,7 +529,7 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // surfacing all of it into the Overview panel and Agents lanes.
     let mut tinyplace_status: Option<String> = None;
     let tinyplace_service = match &loaded.config.tinyplace {
-        Some(tp) => match medulla::tinyplace_support::service::TinyplaceService::start(tp) {
+        Some(tp) => match medulla::tinyplace::service::TinyplaceService::start(tp) {
             Ok(service) => Some(service),
             Err(e) => {
                 tinyplace_status = Some(format!("tinyplace service failed to start ({e})"));
@@ -701,9 +701,7 @@ async fn run(
     runtime: Arc<dyn Runtime>,
     loaded: medulla::config::LoadedConfig,
     startup_status: Option<String>,
-    tinyplace_obs: Option<
-        Arc<std::sync::Mutex<medulla::tinyplace_support::service::TinyplaceObservation>>,
-    >,
+    tinyplace_obs: Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
     config_path: std::path::PathBuf,
 ) -> anyhow::Result<()> {
     let mut app = App::new(runtime.clone(), loaded);

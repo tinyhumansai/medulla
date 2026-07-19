@@ -11,7 +11,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
-use crate::tinyplace_support::HarnessProvider;
+use crate::tinyplace::HarnessProvider;
 
 use super::args::parse_wrapper_args;
 use super::bridge::{
@@ -55,7 +55,7 @@ pub async fn run_wrapper(provider: HarnessProvider, args: &[String]) -> anyhow::
 
 /// Run the wrapper described by `config`, returning the child's exit code.
 pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
-    use crate::tinyplace_support::env as tp_env;
+    use crate::tinyplace::env as tp_env;
     let bin = tp_env::provider_bin(config.provider, &config.env);
     let lookup = crate::daemon::providers::make_path_lookup(&config.env);
     if !lookup(&bin) {

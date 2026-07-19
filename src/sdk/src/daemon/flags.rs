@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::tinyplace_support::HarnessProvider;
+use crate::tinyplace::HarnessProvider;
 
 use super::providers::DAEMON_PROVIDERS;
 

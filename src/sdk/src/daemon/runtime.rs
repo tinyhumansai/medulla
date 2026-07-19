@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{Mutex as TokioMutex, Notify, Semaphore};
 
-use tinyplace::auth::timestamp;
+use ::tinyplace::auth::timestamp;
 
-use crate::tinyplace_support::{EncodeFrameInput, HarnessProvider, TaskFrame, TaskFrameKind};
+use crate::tinyplace::{EncodeFrameInput, HarnessProvider, TaskFrame, TaskFrameKind};
 
 use super::providers::{Abort, RunTaskFn};
 use super::types::{DaemonConfig, DaemonRuntime, Inner, LogFn, NowFn, SendFn};
@@ -157,9 +157,9 @@ impl DaemonRuntime {
         text: &str,
         correlation: Option<&str>,
         harness: Option<HarnessProvider>,
-        usage: Option<crate::tinyplace_support::TokenUsage>,
+        usage: Option<crate::tinyplace::TokenUsage>,
     ) {
-        let body = crate::tinyplace_support::encode_task_frame_with_usage(
+        let body = crate::tinyplace::encode_task_frame_with_usage(
             EncodeFrameInput {
                 kind,
                 task_id: task_id.to_string(),

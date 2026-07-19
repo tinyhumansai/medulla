@@ -5,7 +5,7 @@
 //! as if it were run directly (inherited stdio — no PTY re-implementation), while
 //! bridging the session to tiny.place underneath: it tails the harness's own
 //! JSONL transcript, normalizes each record into a typed
-//! [`SessionEnvelopeV2`](crate::tinyplace_support::SessionEnvelopeV2) event, and
+//! [`SessionEnvelopeV2`](crate::tinyplace::SessionEnvelopeV2) event, and
 //! forwards the stream as encrypted Signal DMs to the configured owner. When
 //! inbound input is enabled it also polls the mailbox for owner→session control
 //! frames and types their text into the child.
@@ -14,9 +14,9 @@
 //! command, ported to Rust. It reuses the existing medulla pieces rather than
 //! duplicating them: transcript discovery ([`crate::session_history`]), record →
 //! event mapping ([`crate::daemon::mappers`]), the derived status machine
-//! ([`crate::tinyplace_support::status`]), encrypted transport
+//! ([`crate::tinyplace::status`]), encrypted transport
 //! ([`crate::daemon::transport::SignalTransport`]), and identity/config bootstrap
-//! ([`crate::tinyplace_support`]).
+//! ([`crate::tinyplace`]).
 //!
 //! ## Scope cuts (deliberately not built here)
 //!

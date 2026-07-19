@@ -12,7 +12,7 @@ pub mod memory;
 pub mod onboarding;
 pub mod runtime;
 pub mod session_history;
-pub mod tinyplace_support;
+pub mod tinyplace;
 pub mod ui;
 pub mod update;
 pub mod worker_profile;

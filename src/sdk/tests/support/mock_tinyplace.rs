@@ -2,7 +2,7 @@
 //!
 //! Speaks just enough HTTP/1.1 (one request per connection, `Connection: close`)
 //! to satisfy the endpoints the vendored `tinyplace` SDK client calls from the
-//! medulla runtime helpers and [`TinyplaceService`](medulla::tinyplace_support::service):
+//! medulla runtime helpers and [`TinyplaceService`](medulla::tinyplace::service):
 //!
 //! - `POST /presence/heartbeat`   → `PresenceStatus` (or a scripted 5xx)
 //! - `POST /presence/query`       → `PresenceQueryResponse`

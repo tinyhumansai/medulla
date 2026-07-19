@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use medulla::auth::Provider;
 use medulla::session_history::list_recent_sessions;
-use medulla::tinyplace_support::HarnessProvider;
+use medulla::tinyplace::HarnessProvider;
 
 /// The top-level subcommand selected from `argv[1..]`.
 #[derive(Debug, Clone, PartialEq, Eq)]

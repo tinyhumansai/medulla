@@ -4,7 +4,7 @@
 //! Each provider's coding-agent CLI streams a different JSONL transcript shape;
 //! these three mappers fold a single raw line into zero or more
 //! [`HarnessSemanticEvent`]s over the shared SDK event model
-//! ([`HarnessEvent`](crate::tinyplace_support::HarnessEvent), re-exported by
+//! ([`HarnessEvent`](crate::tinyplace::HarnessEvent), re-exported by
 //! `tinyplace-proto`). Only the flat run formats are ported here (`claude -p
 //! --output-format stream-json`, `codex exec --json`, `opencode run --format
 //! json`); the interactive opencode SSE bus mapper belongs to the PTY wrapper,

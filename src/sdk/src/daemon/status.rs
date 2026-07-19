@@ -2,7 +2,7 @@
 //! human-facing detail string the daemon forwards as a `status` frame. Ported
 //! from the TypeScript `statusDetail`.
 
-use crate::tinyplace_support::{HarnessEvent, HarnessEventKind};
+use crate::tinyplace::{HarnessEvent, HarnessEventKind};
 
 /// Derive a short status string from a semantic event (or none). Ported from the
 /// TS `statusDetail`.

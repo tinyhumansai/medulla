@@ -8,9 +8,9 @@
 //! that should be emitted only when present (change-gated).
 //!
 //! State strings are the SDK's `HarnessSessionState` wire values, exposed as the
-//! `STATE_*` constants so the fold ([`crate::tinyplace_support::consumer`]) and this machine agree.
+//! `STATE_*` constants so the fold ([`crate::tinyplace::consumer`]) and this machine agree.
 
-use tinyplace::types::{HarnessEventKind, StatusPayload};
+use ::tinyplace::types::{HarnessEventKind, StatusPayload};
 
 /// Default idle horizon: age a silent active session after 30s.
 pub const DEFAULT_IDLE_AFTER_MS: i64 = 30_000;
@@ -258,10 +258,10 @@ fn time_to_ms(timestamp_ms: Option<i64>, fallback: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::tinyplace_support::status::{
+    use crate::tinyplace::status::{
         initial_status, reduce_status, tick_status, SemanticEvent, DEFAULT_IDLE_AFTER_MS,
     };
-    use crate::tinyplace_support::{
+    use crate::tinyplace::{
         ApprovalRequestPayload, ErrorPayload, HarnessEventKind, LifecyclePayload, StatusPayload,
         ToolCallPayload, ToolResultPayload, UnknownPayload, UserPromptPayload, STATE_ERRORED,
         STATE_IDLE, STATE_RUNNING, STATE_RUNNING_TOOL, STATE_STOPPED, STATE_WAITING_APPROVAL,

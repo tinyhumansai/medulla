@@ -9,7 +9,7 @@
 //!
 //! "Registered" means both a profile file *and* a tiny.place identity exist. This
 //! module only models and persists the profile; identity bootstrap lives in
-//! [`crate::tinyplace_support::runtime`].
+//! [`crate::tinyplace::runtime`].
 
 use std::collections::HashMap;
 use std::io;

@@ -21,7 +21,7 @@ mod mock_signal_server;
 use tokio::sync::{Mutex, MutexGuard};
 
 use medulla::daemon::run_daemon;
-use medulla::tinyplace_support::tinyplace::{LocalSigner, Signer};
+use medulla::tinyplace::tinyplace::{LocalSigner, Signer};
 
 use mock_signal_server::MockSignalServer;
 

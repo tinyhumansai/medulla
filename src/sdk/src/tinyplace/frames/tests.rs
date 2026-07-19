@@ -1,7 +1,7 @@
 //! Unit tests for the `medulla-tinyplace/1` frame codec: encode/decode
 //! round-trips, optional-field handling, and tolerant capabilities parsing.
 
-use crate::tinyplace_support::{
+use crate::tinyplace::{
     decode_task_frame, encode_task_frame, parse_agent_capabilities, EncodeFrameInput,
     HarnessProvider, TaskFrameKind, TINYPLACE_PROTO,
 };

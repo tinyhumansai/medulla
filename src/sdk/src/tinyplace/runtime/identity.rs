@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use tinyplace::LocalSigner;
+use ::tinyplace::LocalSigner;
 
 use super::super::config::{load_config, write_config, TinyPlaceConfig};
 use super::types::{RuntimeError, RuntimeResult};

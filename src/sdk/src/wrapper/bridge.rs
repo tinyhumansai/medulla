@@ -16,14 +16,14 @@ use tokio::sync::mpsc;
 use crate::daemon::mappers::HarnessLineMapper;
 use crate::daemon::transport::SignalTransport;
 use crate::session_history::SessionAgentKind;
-use crate::tinyplace_support::{
+use crate::tinyplace::{
     config_path, decode_task_frame, load_or_create_identity, parse_harness_control_frame,
     parse_session_envelope, reduce_status, tick_status, HarnessEvent, HarnessProvider,
     SemanticEvent, SessionStatusState,
 };
-use tinyplace::auth::timestamp;
-use tinyplace::crypto::sha256_hex;
-use tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use ::tinyplace::auth::timestamp;
+use ::tinyplace::crypto::sha256_hex;
+use ::tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
 use super::control::frame_targets_session;
 use super::envelope::EnvelopeBuilder;
@@ -54,14 +54,14 @@ pub(super) fn resolve_recipient(
     env: &HashMap<String, String>,
     profile_owner: Option<&str>,
 ) -> Option<String> {
-    crate::tinyplace_support::env::dm_recipient(provider, env)
+    crate::tinyplace::env::dm_recipient(provider, env)
         .or_else(|| profile_owner.map(str::to_string).filter(|s| !s.is_empty()))
 }
 
 /// Mint a wrapper session id: `tp-<provider>-<iso>-<rand>`, id-safe.
 pub(super) fn mint_session_id(provider: HarnessProvider) -> String {
     let iso = timestamp().replace([':', '.'], "-");
-    let short: String = sha256_hex(tinyplace::auth::generate_nonce().as_bytes())
+    let short: String = sha256_hex(::tinyplace::auth::generate_nonce().as_bytes())
         .chars()
         .take(12)
         .collect();
@@ -97,7 +97,7 @@ pub(super) struct Bridge {
 impl Bridge {
     /// Serialize and send `envelope` to the configured recipient (no-op when the
     /// bridge has no recipient or serialization fails).
-    pub(super) async fn publish(&self, envelope: &crate::tinyplace_support::SessionEnvelopeV2) {
+    pub(super) async fn publish(&self, envelope: &crate::tinyplace::SessionEnvelopeV2) {
         let recipient = match &self.recipient {
             Some(recipient) => recipient,
             None => return,
@@ -165,7 +165,7 @@ impl Bridge {
     }
 
     /// Publish a status envelope unless the throttle window is still open.
-    async fn maybe_publish_status(&mut self, payload: crate::tinyplace_support::StatusPayload) {
+    async fn maybe_publish_status(&mut self, payload: crate::tinyplace::StatusPayload) {
         let now = now_ms();
         if now.saturating_sub(self.last_status_ms) < self.status_throttle_ms {
             return;
@@ -194,7 +194,7 @@ pub(super) async fn build_bridge(
     if config.no_bridge {
         return None;
     }
-    use crate::tinyplace_support::env as tp_env;
+    use crate::tinyplace::env as tp_env;
     // The persisted worker profile's owner is the recipient fallback when no env
     // owner is set (env still wins).
     let profile = crate::worker_profile::WorkerProfile::load(&crate::worker_profile::profile_path(
@@ -221,7 +221,7 @@ pub(super) async fn build_bridge(
             return None;
         }
     };
-    let base_url = crate::tinyplace_support::resolve_endpoint(&config.env, &tp_config);
+    let base_url = crate::tinyplace::resolve_endpoint(&config.env, &tp_config);
     let signer = Arc::new(signer);
     let client = TinyPlaceClient::new(TinyPlaceClientOptions {
         base_url,
@@ -262,7 +262,7 @@ pub(super) async fn build_bridge(
         receive_from,
         receive_active,
         builder,
-        status: crate::tinyplace_support::initial_status(start_ms),
+        status: crate::tinyplace::initial_status(start_ms),
         last_status_ms: i64::MIN,
         mapper: HarnessLineMapper::new(config.provider.as_str()),
         tailer,

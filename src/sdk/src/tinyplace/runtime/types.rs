@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use tinyplace::error::Error as SdkError;
-use tinyplace::types::MessageEnvelope;
+use ::tinyplace::error::Error as SdkError;
+use ::tinyplace::types::MessageEnvelope;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 

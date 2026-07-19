@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::tinyplace_support::HarnessProvider;
+use crate::tinyplace::HarnessProvider;
 
 use super::types::ExistsOnPath;
 
@@ -16,10 +16,10 @@ pub const DAEMON_PROVIDERS: [HarnessProvider; 3] = [
 ];
 
 /// Resolve the binary name/path for a provider (env override wins). Delegates to
-/// the central resolver ([`crate::tinyplace_support::env::provider_bin`]) so the
+/// the central resolver ([`crate::tinyplace::env::provider_bin`]) so the
 /// daemon and wrapper share one bin-override contract.
 pub fn provider_bin(provider: HarnessProvider, env: &HashMap<String, String>) -> String {
-    crate::tinyplace_support::env::provider_bin(provider, env)
+    crate::tinyplace::env::provider_bin(provider, env)
 }
 
 /// Default lookup: a path-ish name is probed directly for `X_OK`, a bare name is

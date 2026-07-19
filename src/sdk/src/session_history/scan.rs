@@ -3,7 +3,7 @@
 //! belongs to a just-launched session.
 //!
 //! Directory resolution defers to the central env resolver in
-//! [`crate::tinyplace_support`]; the rest walks the tree, matches session-file
+//! [`crate::tinyplace`]; the rest walks the tree, matches session-file
 //! names, and reads mtimes. Path helpers ([`safe_resolve`], [`is_here`]) are
 //! shared with the ranking logic in [`super::list`].
 
@@ -15,18 +15,12 @@ use super::types::{DiscoveredSession, RawSessionFile, SessionAgentKind};
 
 /// Resolve the Claude session directory via the central env resolver.
 pub fn claude_sessions_dir(env: &HashMap<String, String>) -> PathBuf {
-    crate::tinyplace_support::env::sessions_dir(
-        crate::tinyplace_support::HarnessProvider::Claude,
-        env,
-    )
+    crate::tinyplace::env::sessions_dir(crate::tinyplace::HarnessProvider::Claude, env)
 }
 
 /// Resolve the Codex session directory via the central env resolver.
 pub fn codex_sessions_dir(env: &HashMap<String, String>) -> PathBuf {
-    crate::tinyplace_support::env::sessions_dir(
-        crate::tinyplace_support::HarnessProvider::Codex,
-        env,
-    )
+    crate::tinyplace::env::sessions_dir(crate::tinyplace::HarnessProvider::Codex, env)
 }
 
 /// Enumerate every session file under `dir` for `agent`, recursing into

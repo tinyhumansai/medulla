@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::tinyplace_support::HarnessProvider;
+use crate::tinyplace::HarnessProvider;
 
 /// Default wrapper session-file poll interval (ms).
 pub const DEFAULT_SESSION_POLL_MS: u64 = 500;

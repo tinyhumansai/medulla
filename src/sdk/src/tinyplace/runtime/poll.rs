@@ -7,8 +7,8 @@
 
 use std::time::Duration;
 
-use tinyplace::types::MessageEnvelope;
-use tinyplace::TinyPlaceClient;
+use ::tinyplace::types::MessageEnvelope;
+use ::tinyplace::TinyPlaceClient;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 

@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::tinyplace_support::TokenUsage;
+use crate::tinyplace::TokenUsage;
 
 use super::claude::claude_events_from_line;
 use super::codex::codex_events_from_line;

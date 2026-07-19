@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{load_or_create_identity, FileSessionStore};
-use tinyplace::signal::crypto::generate_x25519_keypair;
-use tinyplace::signal::keys::PreKeyPair;
-use tinyplace::signal::store::{SessionState, SessionStore};
-use tinyplace::Signer;
+use ::tinyplace::signal::crypto::generate_x25519_keypair;
+use ::tinyplace::signal::keys::PreKeyPair;
+use ::tinyplace::signal::store::{SessionState, SessionStore};
+use ::tinyplace::Signer;
 
 /// A process/time-unique temp directory, created on demand.
 fn unique_temp_dir(tag: &str) -> PathBuf {
@@ -258,7 +258,7 @@ fn load_or_create_identity_ignores_blank_env_and_reads_config_seed() {
 
 #[test]
 fn runtime_error_maps_into_sdk_error() {
-    use tinyplace::error::Error as SdkError;
+    use ::tinyplace::error::Error as SdkError;
     let invalid = super::RuntimeError::Invalid("boom".to_string());
     let sdk: SdkError = invalid.into();
     assert!(matches!(sdk, SdkError::InvalidArgument(_)));
@@ -288,7 +288,7 @@ fn load_or_create_identity_is_deterministic_across_calls() {
     assert_eq!(config2.secret_key.as_deref(), Some(key.as_str()));
 
     // An env-provided key overrides the file.
-    let other = tinyplace::LocalSigner::generate();
+    let other = ::tinyplace::LocalSigner::generate();
     let other_hex: String = other.seed().iter().map(|b| format!("{b:02x}")).collect();
     let mut env2 = HashMap::new();
     env2.insert("TINYPLACE_SECRET_KEY".to_string(), other_hex.clone());

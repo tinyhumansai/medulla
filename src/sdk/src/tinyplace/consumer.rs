@@ -6,11 +6,11 @@
 //! v1 envelopes carry no typed events and are ignored here.
 //!
 //! The envelope/event types come from the published SDK
-//! (the SDK `tinyplace::types` module); this module only derives view state from
+//! (the SDK `::tinyplace::types` module); this module only derives view state from
 //! them. State strings match the SDK's `HarnessSessionState` wire values (see
-//! [`crate::tinyplace_support::status`] for the shared constants).
+//! [`crate::tinyplace::status`] for the shared constants).
 
-use tinyplace::types::{AnySessionEnvelope, HarnessEventKind, SessionEnvelopeV2};
+use ::tinyplace::types::{AnySessionEnvelope, HarnessEventKind, SessionEnvelopeV2};
 
 use super::status::{
     STATE_ERRORED, STATE_IDLE, STATE_RUNNING_TOOL, STATE_STOPPED, STATE_WAITING_APPROVAL,
@@ -257,7 +257,7 @@ fn cap_end<T>(items: &mut Vec<T>, cap: usize) {
 
 #[cfg(test)]
 mod tests {
-    use crate::tinyplace_support::{
+    use crate::tinyplace::{
         apply_session_envelope, fold_session_envelopes, initial_session_view,
         parse_session_envelope, AnySessionEnvelope, SessionViewLimits, DEFAULT_LIMITS,
         SESSION_ENVELOPE_VERSION_V2, STATE_ERRORED, STATE_IDLE, STATE_RUNNING, STATE_RUNNING_TOOL,

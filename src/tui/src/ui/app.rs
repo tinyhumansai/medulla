@@ -154,8 +154,7 @@ pub struct App {
     // this TUI's own identity, its peer roster, and peer presence. Merged into
     // the snapshot on every refresh so the Overview panel and Agents lanes light
     // up without the runtime having to know about tiny.place.
-    tinyplace_obs:
-        Option<Arc<std::sync::Mutex<medulla::tinyplace_support::service::TinyplaceObservation>>>,
+    tinyplace_obs: Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
 }
 
 fn color(name: &str) -> Color {
@@ -386,7 +385,7 @@ impl App {
     /// roster, and presence are merged into every snapshot refresh.
     pub fn set_tinyplace_observation(
         &mut self,
-        obs: Arc<std::sync::Mutex<medulla::tinyplace_support::service::TinyplaceObservation>>,
+        obs: Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>,
     ) {
         self.tinyplace_obs = Some(obs);
         self.refresh_snapshot();

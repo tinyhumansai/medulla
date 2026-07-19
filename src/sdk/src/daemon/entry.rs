@@ -11,14 +11,14 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::tinyplace_support::{
+use crate::tinyplace::{
     config_path, decode_task_frame, load_or_create_identity, resolve_endpoint,
     spawn_contact_auto_accepter, spawn_presence_heartbeat,
 };
-use tinyplace::api::directory::DirectoryApi;
-use tinyplace::api::registry::RegisterRequest;
-use tinyplace::types::AgentCard;
-use tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use ::tinyplace::api::directory::DirectoryApi;
+use ::tinyplace::api::registry::RegisterRequest;
+use ::tinyplace::types::AgentCard;
+use ::tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
 use super::capabilities::read_git_facts;
 use super::flags::{parse_provider, Flags};
@@ -283,7 +283,7 @@ pub async fn run_daemon(args: &[String]) -> anyhow::Result<()> {
 /// Accept pending contacts and dispatch one inbox drain (the `--once` probe path).
 async fn drain_once(transport: &SignalTransport, runtime: &DaemonRuntime) {
     for message in transport.drain_inbox(50).await {
-        let frame = crate::tinyplace_support::decode_task_frame(&message.text);
+        let frame = crate::tinyplace::decode_task_frame(&message.text);
         runtime.handle_message(message.from, message.text, frame);
     }
 }
@@ -378,7 +378,7 @@ mod flag_tests {
     use super::*;
     // `Flags`/`parse_provider`/`dedupe` come from `super::*`; the provider enum
     // is only needed by these tests, so import it explicitly here.
-    use crate::tinyplace_support::HarnessProvider;
+    use crate::tinyplace::HarnessProvider;
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()

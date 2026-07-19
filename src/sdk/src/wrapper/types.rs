@@ -5,10 +5,10 @@
 
 use std::collections::HashMap;
 
-use crate::tinyplace_support::HarnessProvider;
+use crate::tinyplace::HarnessProvider;
 
 /// Poll intervals and status timings for one wrapped session, resolved from the
-/// environment (see [`crate::tinyplace_support::env`]).
+/// environment (see [`crate::tinyplace::env`]).
 pub(super) struct WrapperTimings {
     /// How often the transcript tailer polls for new lines, in milliseconds.
     pub(super) tail_poll_ms: u64,
@@ -22,9 +22,9 @@ pub(super) struct WrapperTimings {
 
 impl WrapperTimings {
     /// Resolve all timings for `provider` from `env`, falling back to the
-    /// per-provider defaults in [`crate::tinyplace_support::env`].
+    /// per-provider defaults in [`crate::tinyplace::env`].
     pub(super) fn resolve(provider: HarnessProvider, env: &HashMap<String, String>) -> Self {
-        use crate::tinyplace_support::env as tp_env;
+        use crate::tinyplace::env as tp_env;
         WrapperTimings {
             tail_poll_ms: tp_env::session_poll_ms(provider, env),
             receive_poll_ms: tp_env::receive_poll_ms(provider, env),

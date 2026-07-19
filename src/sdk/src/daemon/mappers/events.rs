@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::tinyplace_support::HarnessEvent;
+use crate::tinyplace::HarnessEvent;
 
 use super::shared::{bound_tool_input, byte_length, normalize_tool_kind, tool_display, truncate};
 use super::types::HarnessSemanticEvent;

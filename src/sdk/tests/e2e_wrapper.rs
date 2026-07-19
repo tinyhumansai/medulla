@@ -27,10 +27,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use medulla::daemon::transport::SignalTransport;
-use medulla::tinyplace_support::tinyplace::{
-    LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions,
-};
-use medulla::tinyplace_support::{
+use medulla::tinyplace::tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use medulla::tinyplace::{
     encode_harness_control_frame, parse_session_envelope, AnySessionEnvelope, HarnessEventKind,
     HarnessProvider,
 };

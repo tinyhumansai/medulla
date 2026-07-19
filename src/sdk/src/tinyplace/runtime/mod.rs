@@ -4,7 +4,7 @@
 //! no rendering. They give the TUI/daemon the pieces it needs to stay live on
 //! tiny.place:
 //!
-//! - [`FileSessionStore`] — a filesystem [`SessionStore`](tinyplace::signal::store::SessionStore)
+//! - [`FileSessionStore`] — a filesystem [`SessionStore`](::tinyplace::signal::store::SessionStore)
 //!   persisting Signal ratchet/pre-key state as JSON, laid out to coexist with
 //!   the TS SDK's `FileSessionStore`.
 //! - [`load_or_create_identity`] — load-or-mint a 32-byte Ed25519 seed via the
@@ -17,9 +17,9 @@
 //!
 //! Split by responsibility: [`types`] holds the error/mailbox surface and the
 //! on-disk JSON shapes, [`identity`] the seed bootstrap, [`session_store`] the
-//! file-backed [`SessionStore`](tinyplace::signal::store::SessionStore) adapter,
+//! file-backed [`SessionStore`](::tinyplace::signal::store::SessionStore) adapter,
 //! and [`poll`] the background poll loops. All public items are re-exported here
-//! so callers use `medulla::tinyplace_support::runtime::*`.
+//! so callers use `medulla::tinyplace::runtime::*`.
 
 mod identity;
 mod poll;

@@ -103,7 +103,10 @@ async fn list_feedback_sends_filters_and_decodes_rows() {
 
 #[tokio::test]
 async fn list_feedback_omits_absent_filters_and_clamps_limit() {
-    let (base, req) = stub(ok(json!({ "items": [], "total": 0, "page": 1, "limit": 100 }))).await;
+    let (base, req) = stub(ok(
+        json!({ "items": [], "total": 0, "page": 1, "limit": 100 }),
+    ))
+    .await;
     let client = MedullaClient::new(base, "jwt-abc");
     client
         .list_feedback(&FeedbackQuery {

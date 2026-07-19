@@ -234,11 +234,17 @@ async fn mock_vote_retallies_without_double_counting() {
 
     // Switching to a downvote moves the tally across, not just adds.
     let down = rt.vote_feedback("fb-2".into(), -1).await.unwrap();
-    assert_eq!((down.upvote_count, down.downvote_count, down.score), (11, 1, 10));
+    assert_eq!(
+        (down.upvote_count, down.downvote_count, down.score),
+        (11, 1, 10)
+    );
 
     // Retracting restores the original tallies.
     let none = rt.vote_feedback("fb-2".into(), 0).await.unwrap();
-    assert_eq!((none.upvote_count, none.downvote_count, none.my_vote), (11, 0, 0));
+    assert_eq!(
+        (none.upvote_count, none.downvote_count, none.my_vote),
+        (11, 0, 0)
+    );
 }
 
 #[tokio::test]
@@ -254,7 +260,10 @@ async fn mock_comment_appends_and_bumps_count() {
     let after = rt.feedback_detail("fb-2".into()).await.unwrap();
     assert_eq!(after.comments.len(), 2);
     assert_eq!(after.comments[1].body, "me too");
-    assert_eq!(after.feedback.comment_count, before.feedback.comment_count + 1);
+    assert_eq!(
+        after.feedback.comment_count,
+        before.feedback.comment_count + 1
+    );
 }
 
 #[tokio::test]
@@ -287,5 +296,8 @@ async fn mock_board_reports_missing_items() {
     let rt = MockRuntime::demo();
     assert!(rt.feedback_detail("nope".into()).await.is_err());
     assert!(rt.vote_feedback("nope".into(), 1).await.is_err());
-    assert!(rt.comment_feedback("nope".into(), "hi".into()).await.is_err());
+    assert!(rt
+        .comment_feedback("nope".into(), "hi".into())
+        .await
+        .is_err());
 }

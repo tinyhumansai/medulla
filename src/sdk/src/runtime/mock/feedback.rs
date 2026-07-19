@@ -23,35 +23,68 @@ pub(super) struct MockBoard {
     pub(super) comments: Vec<(String, Vec<FeedbackComment>)>,
 }
 
-/// Build one scripted board row.
-fn row(
-    id: &str,
+/// The scripted description of one board row, before it is expanded into a
+/// [`FeedbackItem`]. Grouping these keeps [`row`] to a single argument.
+struct Seed<'a> {
+    /// The item id.
+    id: &'a str,
+    /// Feature request or bug report.
     kind: FeedbackType,
+    /// Triage status.
     status: FeedbackStatus,
-    title: &str,
-    body: &str,
+    /// The item title.
+    title: &'a str,
+    /// The item body.
+    body: &'a str,
+    /// Upvotes.
     up: i64,
+    /// Downvotes.
     down: i64,
+    /// The demo user's own vote.
     my_vote: i8,
+    /// How many comments the item has.
     comment_count: i64,
+    /// The filed GitHub issue number, when the item has been filed.
     issue: Option<i64>,
-) -> FeedbackItem {
+}
+
+impl Default for Seed<'_> {
+    fn default() -> Self {
+        Seed {
+            id: "",
+            kind: FeedbackType::Feature,
+            status: FeedbackStatus::Open,
+            title: "",
+            body: "",
+            up: 0,
+            down: 0,
+            my_vote: 0,
+            comment_count: 0,
+            issue: None,
+        }
+    }
+}
+
+/// Expand a [`Seed`] into a scripted board row.
+fn row(seed: Seed<'_>) -> FeedbackItem {
     FeedbackItem {
-        id: id.into(),
-        kind,
-        title: title.into(),
-        body: body.into(),
-        status,
+        id: seed.id.into(),
+        kind: seed.kind,
+        title: seed.title.into(),
+        body: seed.body.into(),
+        status: seed.status,
         created_by_name: Some("demo user".into()),
-        upvote_count: up,
-        downvote_count: down,
-        score: up - down,
-        comment_count,
-        github: issue.map(|n| FeedbackGithub {
+        upvote_count: seed.up,
+        downvote_count: seed.down,
+        score: seed.up - seed.down,
+        comment_count: seed.comment_count,
+        github: seed.issue.map(|n| FeedbackGithub {
             issue_number: Some(n),
-            issue_url: Some(format!("https://github.com/tinyhumansai/medulla/issues/{n}")),
+            issue_url: Some(format!(
+                "https://github.com/tinyhumansai/medulla/issues/{n}"
+            )),
         }),
-        my_vote,
+        my_vote: seed.my_vote,
         created_at: crate::ui::chat_store::iso8601_utc(now_millis()),
     }
 }
@@ -70,52 +103,54 @@ impl MockBoard {
     /// The board the offline demo starts with.
     pub(super) fn demo() -> Self {
         let items = vec![
-            row(
-                "fb-1",
-                FeedbackType::Feature,
-                FeedbackStatus::Planned,
-                "Split the Trace tab by agent lane",
-                "Long cycles are hard to follow when every agent writes into one \
-                 stream. Filtering the trace by lane would make debugging fan-out \
-                 far easier.",
-                24,
-                1,
-                1,
-                2,
-                Some(412),
-            ),
-            row(
-                "fb-2",
-                FeedbackType::Bug,
-                FeedbackStatus::Open,
-                "Resume picker forgets the active thread",
-                "After resuming a chat the app lands on thread 1 instead of the \
-                 thread that was active when the chat was saved.",
-                11,
-                0,
-                0,
-                1,
-                None,
-            ),
-            row(
-                "fb-3",
-                FeedbackType::Feature,
-                FeedbackStatus::Completed,
-                "Persist theme choice across restarts",
-                "Appearance changes should survive a restart.",
-                8,
-                2,
-                -1,
-                0,
-                Some(377),
-            ),
+            row(Seed {
+                id: "fb-1",
+                kind: FeedbackType::Feature,
+                status: FeedbackStatus::Planned,
+                title: "Split the Trace tab by agent lane",
+                body: "Long cycles are hard to follow when every agent writes into one \
+                       stream. Filtering the trace by lane would make debugging fan-out \
+                       far easier.",
+                up: 24,
+                down: 1,
+                my_vote: 1,
+                comment_count: 2,
+                issue: Some(412),
+            }),
+            row(Seed {
+                id: "fb-2",
+                kind: FeedbackType::Bug,
+                status: FeedbackStatus::Open,
+                title: "Resume picker forgets the active thread",
+                body: "After resuming a chat the app lands on thread 1 instead of the \
+                       thread that was active when the chat was saved.",
+                up: 11,
+                comment_count: 1,
+                ..Default::default()
+            }),
+            row(Seed {
+                id: "fb-3",
+                kind: FeedbackType::Feature,
+                status: FeedbackStatus::Completed,
+                title: "Persist theme choice across restarts",
+                body: "Appearance changes should survive a restart.",
+                up: 8,
+                down: 2,
+                my_vote: -1,
+                issue: Some(377),
+                ..Default::default()
+            }),
         ];
         let comments = vec![
             (
                 "fb-1".to_string(),
                 vec![
                     comment("c1", "avery", "Would pair well with per-lane token counts."),
-                    comment("c2", "demo user", "Agreed — the Agents tab already has lanes."),
+                    comment(
+                        "c2",
+                        "demo user",
+                        "Agreed — the Agents tab already has lanes.",
+                    ),
                 ],
             ),
             (
@@ -188,18 +223,13 @@ impl MockRuntime {
         title: &str,
         body: &str,
     ) -> FeedbackSubmission {
-        let item = row(
-            &gen_id("fb"),
+        let item = row(Seed {
+            id: &gen_id("fb"),
             kind,
-            FeedbackStatus::Open,
             title,
             body,
-            0,
-            0,
-            0,
-            0,
-            None,
-        );
+            ..Default::default()
+        });
         self.board.lock().unwrap().items.insert(0, item.clone());
         FeedbackSubmission {
             accepted: true,
@@ -221,7 +251,7 @@ impl MockRuntime {
         // `hot` and `top` both order by score here; the mock has no time decay.
         match query.sort {
             crate::client::FeedbackSort::New => {}
-            _ => items.sort_by(|a, b| b.score.cmp(&a.score)),
+            _ => items.sort_by_key(|i| std::cmp::Reverse(i.score)),
         }
         let total = items.len() as i64;
         let skip = ((query.page.max(1) - 1) * query.limit.max(1)) as usize;

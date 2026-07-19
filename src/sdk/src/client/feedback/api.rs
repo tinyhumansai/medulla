@@ -39,14 +39,18 @@ impl MedullaClient {
         if let Some(status) = query.status {
             params.push(("status", status.label().to_string()));
         }
-        let req = self.authed(self.http.get(self.url("/feedback"))).query(&params);
+        let req = self
+            .authed(self.http.get(self.url("/feedback")))
+            .query(&params);
         self.send(req).await
     }
 
     /// Fetch one board item with its comments (`GET /feedback/{id}`).
     pub async fn get_feedback(&self, id: &str) -> Result<FeedbackDetail> {
-        let req = self
-            .authed(self.http.get(self.url(&format!("/feedback/{}", urlencode(id)))));
+        let req = self.authed(
+            self.http
+                .get(self.url(&format!("/feedback/{}", urlencode(id)))),
+        );
         self.send(req).await
     }
 

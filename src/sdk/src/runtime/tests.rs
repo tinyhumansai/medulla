@@ -102,8 +102,7 @@ fn agent_descriptor_serde_defaults() {
     assert!(a.name.is_empty());
     assert!(a.tags.is_empty());
     assert!(a.metadata.is_empty());
-    let round: AgentDescriptor =
-        serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();
+    let round: AgentDescriptor = serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();
     assert_eq!(a, round);
 }
 

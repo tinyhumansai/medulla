@@ -36,6 +36,19 @@ pub(crate) enum AppMsg {
     },
     /// A newer release was detected by the background update checker.
     UpdateAvailable(String),
+    /// A page of the feedback board. `None` = this runtime has no board.
+    FeedbackLoaded(Option<medulla::client::FeedbackPage>),
+    /// Comments for one board item.
+    FeedbackComments {
+        /// The item the comments belong to.
+        id: String,
+        /// The item's comments, oldest first.
+        comments: Vec<medulla::client::FeedbackComment>,
+    },
+    /// A board item the server re-tallied after a vote.
+    FeedbackItemUpdated(medulla::client::FeedbackItem),
+    /// A feedback action finished; reload the board and report `status`.
+    FeedbackChanged(String),
 }
 
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
@@ -113,6 +126,26 @@ pub(crate) async fn run(
                         let n = hits.len();
                         app.set_memory_results(hits, query);
                         app.set_status(format!("Memory · {n} hit(s)"));
+                    }
+                    AppMsg::FeedbackLoaded(page) => {
+                        app.set_feedback_page(page);
+                        // Pull the newly selected row's comments in the same beat.
+                        if let Some(cmd) = app.feedback_detail_cmd() {
+                            run_cmd(cmd, &runtime, &msg_tx);
+                        }
+                    }
+                    AppMsg::FeedbackComments { id, comments } => {
+                        app.set_feedback_comments(id, comments);
+                    }
+                    AppMsg::FeedbackItemUpdated(item) => {
+                        app.apply_feedback_item(item);
+                        app.set_status("Feedback · vote recorded");
+                    }
+                    AppMsg::FeedbackChanged(status) => {
+                        app.set_status(status);
+                        // A comment or submission changes the board, so re-pull
+                        // it rather than patching state locally.
+                        run_cmd(Cmd::LoadFeedback(app.feedback_query()), &runtime, &msg_tx);
                     }
                     AppMsg::UpdateAvailable(notice) => {
                         app.set_update_notice(notice.clone());
@@ -226,6 +259,87 @@ fn run_cmd(
                         let _ = tx.send(AppMsg::Status(e.to_string()));
                     }
                 }
+            });
+        }
+        // --- feedback board ---------------------------------------------
+        Cmd::LoadFeedback(query) => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                match rt.list_feedback(query).await {
+                    Ok(page) => {
+                        let _ = tx.send(AppMsg::FeedbackLoaded(page));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppMsg::Status(e.to_string()));
+                    }
+                }
+            });
+        }
+        Cmd::LoadFeedbackDetail(id) => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                match rt.feedback_detail(id.clone()).await {
+                    Ok(detail) => {
+                        let _ = tx.send(AppMsg::FeedbackComments {
+                            id,
+                            comments: detail.comments,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppMsg::Status(e.to_string()));
+                    }
+                }
+            });
+        }
+        Cmd::VoteFeedback { id, value } => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                match rt.vote_feedback(id, value).await {
+                    Ok(item) => {
+                        let _ = tx.send(AppMsg::FeedbackItemUpdated(item));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppMsg::Status(e.to_string()));
+                    }
+                }
+            });
+        }
+        Cmd::CommentFeedback { id, body } => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                let msg = match rt.comment_feedback(id, body).await {
+                    Ok(_) => AppMsg::FeedbackChanged("Feedback · comment posted".into()),
+                    Err(e) => AppMsg::Status(e.to_string()),
+                };
+                let _ = tx.send(msg);
+            });
+        }
+        Cmd::SubmitFeedback { kind, title, body } => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                let msg = match rt.submit_feedback(kind, title, body).await {
+                    // A moderation rejection is a successful call, not an error,
+                    // so it must be surfaced explicitly — otherwise the
+                    // submission looks like it silently vanished.
+                    Ok(result) if result.accepted => {
+                        AppMsg::FeedbackChanged("Feedback · submitted, thank you!".into())
+                    }
+                    Ok(result) => AppMsg::Status(format!(
+                        "Feedback not published: {}",
+                        if result.reason.is_empty() {
+                            "rejected by moderation".into()
+                        } else {
+                            result.reason
+                        }
+                    )),
+                    Err(e) => AppMsg::Status(e.to_string()),
+                };
+                let _ = tx.send(msg);
             });
         }
         Cmd::WorkerOp(op) => {

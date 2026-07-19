@@ -5,10 +5,12 @@
 //! submodules that each add an `impl App` block: [`types`] holds the data model,
 //! [`state`] construction and accessors, [`input`] event/mouse routing, [`keys`]
 //! the keyboard dispatcher, [`commands`] slash-command and steering execution,
-//! and [`render`] the ratatui draw for each tab. Public items are re-exported here
+//! [`feedback`] the feedback-board tab's actions and setters, and [`render`] the
+//! ratatui draw for each tab. Public items are re-exported here
 //! so callers use `crate::ui::app::*`.
 
 mod commands;
+mod feedback;
 mod input;
 mod keys;
 mod render;

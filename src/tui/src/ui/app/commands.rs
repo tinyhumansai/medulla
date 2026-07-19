@@ -113,6 +113,36 @@ impl App {
                 self.set_status("Answer sent");
                 None
             }
+            PromptKind::FeedbackComment { id } => {
+                if text.is_empty() {
+                    self.set_status("Comment cancelled (empty)");
+                    return None;
+                }
+                self.set_status("Posting comment…");
+                Some(Cmd::CommentFeedback { id, body: text })
+            }
+            // Step one captures the title and re-opens the prompt for the body;
+            // nothing is sent until step two.
+            PromptKind::FeedbackTitle { kind } => {
+                if text.is_empty() {
+                    self.set_status("New feedback cancelled (empty title)");
+                    return None;
+                }
+                self.open_feedback_body(kind, text);
+                None
+            }
+            PromptKind::FeedbackBody { kind, title } => {
+                if text.is_empty() {
+                    self.set_status("New feedback cancelled (empty description)");
+                    return None;
+                }
+                self.set_status("Submitting feedback…");
+                Some(Cmd::SubmitFeedback {
+                    kind,
+                    title,
+                    body: text,
+                })
+            }
         }
     }
 

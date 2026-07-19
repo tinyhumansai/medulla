@@ -474,7 +474,12 @@ impl DaemonRuntime {
             cwd: self.inner.config.workspace.clone(),
             env: self.inner.config.env.clone(),
             timeout_ms: self.inner.config.task_timeout_ms,
-            model: self.inner.config.model.clone(),
+            // Per-task model hint (parallels the per-task `provider`): honor the
+            // orchestrator's requested model, falling back to the daemon default.
+            model: frame
+                .model
+                .clone()
+                .or_else(|| self.inner.config.model.clone()),
             agent: self.inner.config.agent.clone(),
             extra_args: self.inner.config.extra_args.clone(),
             skip_permissions: self.inner.config.skip_permissions,
@@ -647,6 +652,7 @@ impl DaemonRuntime {
                 correlation_id: correlation.map(str::to_string),
                 harness,
                 provider: None,
+                model: None,
             },
             usage,
         );

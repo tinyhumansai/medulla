@@ -125,6 +125,12 @@ pub struct TaskFrame {
     pub harness: Option<HarnessProvider>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only advisory hint naming the model the orchestrator wants this
+    /// task run on (parallels `provider`). The worker daemon may honor it as the
+    /// harness `--model`/`-m` or fall back to its configured model; never echoed
+    /// on responses.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<String>,
     /// Reported on `reply` frames when the child harness surfaced token counts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TokenUsage>,
@@ -148,6 +154,9 @@ pub struct EncodeFrameInput {
     pub correlation_id: Option<String>,
     pub harness: Option<HarnessProvider>,
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only advisory model hint (parallels `provider`); `None` on the
+    /// responses a worker daemon emits.
+    pub model: Option<String>,
 }
 
 /// Build and serialize a task frame body.
@@ -166,6 +175,7 @@ pub fn encode_task_frame_with_usage(input: EncodeFrameInput, usage: Option<Token
         correlation_id: input.correlation_id,
         harness: input.harness,
         provider: input.provider,
+        model: input.model,
         usage,
     }
     .encode()
@@ -202,6 +212,11 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .get("provider")
         .and_then(|v| v.as_str())
         .and_then(HarnessProvider::from_wire);
+    let model = obj
+        .get("model")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string);
 
     let usage = obj
         .get("usage")
@@ -216,6 +231,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         correlation_id,
         harness,
         provider,
+        model,
         usage,
     })
 }
@@ -319,6 +335,7 @@ mod tests {
             correlation_id: None,
             harness: None,
             provider: None,
+            model: None,
         });
         let value: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(value["proto"], TINYPLACE_PROTO);
@@ -330,6 +347,7 @@ mod tests {
         assert!(value.get("correlationId").is_none());
         assert!(value.get("harness").is_none());
         assert!(value.get("provider").is_none());
+        assert!(value.get("model").is_none());
     }
 
     #[test]
@@ -342,12 +360,14 @@ mod tests {
             correlation_id: Some("corr-9".to_string()),
             harness: Some(HarnessProvider::Codex),
             provider: Some(HarnessProvider::Claude),
+            model: Some("anthropic/claude-opus-4.8".to_string()),
         });
         let value: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(value["kind"], "capabilities_result");
         assert_eq!(value["correlationId"], "corr-9");
         assert_eq!(value["harness"], "codex");
         assert_eq!(value["provider"], "claude");
+        assert_eq!(value["model"], "anthropic/claude-opus-4.8");
     }
 
     #[test]
@@ -370,6 +390,7 @@ mod tests {
                 correlation_id: None,
                 harness: None,
                 provider: None,
+                model: None,
             });
             let decoded = decode_task_frame(&body).expect("valid frame decodes");
             assert_eq!(decoded.kind, kind);
@@ -396,6 +417,39 @@ mod tests {
         assert_eq!(frame.correlation_id.as_deref(), Some("corr-1"));
         assert_eq!(frame.harness, Some(HarnessProvider::Opencode));
         assert_eq!(frame.provider, Some(HarnessProvider::Claude));
+    }
+
+    #[test]
+    fn carries_a_model_hint_through_encode_and_decode() {
+        let body = encode_task_frame(EncodeFrameInput {
+            kind: TaskFrameKind::Task,
+            task_id: "t".to_string(),
+            text: "x".to_string(),
+            ts: "ts".to_string(),
+            correlation_id: None,
+            harness: None,
+            provider: None,
+            model: Some("openrouter/some-model".to_string()),
+        });
+        let decoded = decode_task_frame(&body).unwrap();
+        assert_eq!(decoded.model.as_deref(), Some("openrouter/some-model"));
+    }
+
+    #[test]
+    fn decode_treats_absent_or_blank_model_as_none() {
+        // Absent entirely.
+        let absent = json!({
+            "proto": TINYPLACE_PROTO, "kind": "task", "taskId": "t", "text": "x", "ts": "ts",
+        })
+        .to_string();
+        assert_eq!(decode_task_frame(&absent).unwrap().model, None);
+        // Present but blank — treated as no hint so the daemon keeps its default.
+        let blank = json!({
+            "proto": TINYPLACE_PROTO, "kind": "task", "taskId": "t", "text": "x", "ts": "ts",
+            "model": "   ",
+        })
+        .to_string();
+        assert_eq!(decode_task_frame(&blank).unwrap().model, None);
     }
 
     #[test]

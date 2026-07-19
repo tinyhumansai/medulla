@@ -179,6 +179,12 @@ pub fn build_run_args(
             if skip_permissions {
                 args.push("--dangerously-skip-permissions".to_string());
             }
+            // Claude Code takes the session model via the long `--model` flag
+            // (codex/opencode use `-m`).
+            if let Some(model) = model {
+                args.push("--model".to_string());
+                args.push(model.to_string());
+            }
             args.extend(extra_args.iter().cloned());
             args.push(prompt);
         }
@@ -745,6 +751,33 @@ mod tests {
                 "--format",
                 "json",
                 "--foo",
+                "task",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_run_args_claude_with_model() {
+        // Claude wires the model via the long `--model` flag (not `-m`), after the
+        // base flags and before extra args / prompt.
+        let args = build_run_args(
+            HarnessProvider::Claude,
+            "task",
+            Some("anthropic/claude-opus-4.8"),
+            None,
+            &["--mcp".to_string()],
+            false,
+        );
+        assert_eq!(
+            args,
+            vec![
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--model",
+                "anthropic/claude-opus-4.8",
+                "--mcp",
                 "task",
             ]
         );

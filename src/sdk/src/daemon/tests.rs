@@ -66,6 +66,7 @@ fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -> TaskFrame
         correlation_id: correlation.map(str::to_string),
         harness: None,
         provider: None,
+        model: None,
     }
 }
 

@@ -38,6 +38,8 @@ fn dispatches_subcommands() {
     );
     assert_eq!(parse_command(&argv(&["memory", "status"])), Command::Memory);
     assert_eq!(parse_command(&argv(&["update"])), Command::Update);
+    assert_eq!(parse_command(&argv(&["init"])), Command::Init);
+    assert_eq!(parse_command(&argv(&["init", "some/dir"])), Command::Init);
     assert_eq!(
         parse_command(&argv(&["update", "--check"])),
         Command::Update
@@ -232,4 +234,49 @@ fn core_plan_connects_via_state_dir_when_no_config_socket() {
         }
         other => panic!("expected connect, got {other:?}"),
     }
+}
+
+#[test]
+fn parses_init_args() {
+    // A bare `init` targets the cwd with every flag off.
+    let bare = parse_init_args(&argv(&[]));
+    assert_eq!(bare, InitArgs::default());
+
+    let with_dir = parse_init_args(&argv(&["packages/api"]));
+    assert_eq!(with_dir.dir.as_deref(), Some("packages/api"));
+    assert!(!with_dir.force);
+    assert!(!with_dir.offline);
+
+    let full = parse_init_args(&argv(&[
+        "packages/api",
+        "--force",
+        "--offline",
+        "--config",
+        "/tmp/medulla.toml",
+    ]));
+    assert_eq!(full.dir.as_deref(), Some("packages/api"));
+    assert!(full.force);
+    assert!(full.offline);
+    assert_eq!(full.config.as_deref(), Some("/tmp/medulla.toml"));
+
+    // Short form, and flags before the directory.
+    let short = parse_init_args(&argv(&["-f", "docs"]));
+    assert!(short.force);
+    assert_eq!(short.dir.as_deref(), Some("docs"));
+
+    // The config VALUE must not be mistaken for the directory.
+    let cfg_only = parse_init_args(&argv(&["--config", "/tmp/c.toml"]));
+    assert_eq!(cfg_only.dir, None);
+    assert_eq!(cfg_only.config.as_deref(), Some("/tmp/c.toml"));
+
+    // Only the first bare word is taken as the directory.
+    let two = parse_init_args(&argv(&["first", "second"]));
+    assert_eq!(two.dir.as_deref(), Some("first"));
+}
+
+#[test]
+fn help_lists_init() {
+    let help = help_text();
+    assert!(help.contains("medulla init"));
+    assert!(help.contains("--offline"));
 }

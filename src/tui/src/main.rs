@@ -9,7 +9,7 @@ use std::io::{self, IsTerminal};
 use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
-use crate::commands::{run_login, run_logout, run_memory};
+use crate::commands::{run_init, run_login, run_logout, run_memory};
 
 mod app_loop;
 mod commands;
@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout(),
         Command::Memory => run_memory(&raw[1..]).await,
+        Command::Init => run_init(&raw[1..]).await,
         Command::Update => {
             let args = medulla_tui::cli::parse_update_args(&raw[1..]);
             medulla::update::run_update(args.check).await

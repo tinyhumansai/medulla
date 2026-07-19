@@ -29,6 +29,22 @@ pub enum Command {
     Wrapper(HarnessProvider),
     /// Check for / install a newer release (`update [--check]`).
     Update,
+    /// Author a `MEDULLA.md` workspace profile for a directory.
+    Init,
+}
+
+/// Parsed `medulla init` flags.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InitArgs {
+    /// Directory to initialise. `None` means the current working directory.
+    pub dir: Option<String>,
+    /// Explicit `--config` path used to resolve the backend/model settings.
+    /// `None` selects the layered config discovery.
+    pub config: Option<String>,
+    /// `--force`: overwrite an existing `MEDULLA.md`.
+    pub force: bool,
+    /// `--offline`: skip the model call and write the editable stub.
+    pub offline: bool,
 }
 
 /// Parsed `medulla login` flags.

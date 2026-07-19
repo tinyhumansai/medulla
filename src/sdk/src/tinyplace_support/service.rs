@@ -242,18 +242,20 @@ mod tests {
             ..Default::default()
         };
 
-        let mut obs = TinyplaceObservation::default();
         // A duplicate id (peer-1) must not be appended twice; peer-2 is new.
-        obs.roster = vec![
-            AgentDescriptor {
-                id: "peer-1".into(),
-                ..Default::default()
-            },
-            AgentDescriptor {
-                id: "peer-2".into(),
-                ..Default::default()
-            },
-        ];
+        let mut obs = TinyplaceObservation {
+            roster: vec![
+                AgentDescriptor {
+                    id: "peer-1".into(),
+                    ..Default::default()
+                },
+                AgentDescriptor {
+                    id: "peer-2".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
         obs.presence
             .insert("peer-1".into(), AgentPresence::default());
 

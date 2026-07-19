@@ -27,11 +27,29 @@ Run tests, Clippy, and formatting before handoff.
 
 ## Coding Style & Naming Conventions
 
-Use standard `rustfmt` output (four-space indentation). Name modules, functions, and files in `snake_case`; types and traits in `PascalCase`; constants in `SCREAMING_SNAKE_CASE`. Prefer explicit error types at library boundaries and `anyhow` for binary orchestration. Keep imports grouped at the top and comments sparse, direct, and focused on non-obvious behavior.
+Use standard `rustfmt` output (four-space indentation). Name modules, functions, and files in `snake_case`; types and traits in `PascalCase`; constants in `SCREAMING_SNAKE_CASE`. Prefer explicit error types at library boundaries and `anyhow` for binary orchestration. Keep imports grouped at the top.
+
+## File Organization & Size
+
+These rules are mandatory for all new and edited Rust source. Split proactively rather than letting a file grow past the limit.
+
+- **500-line ceiling.** No `.rs` file should exceed 500 lines. When a file approaches the limit, split it into a directory module (`foo.rs` → `foo/mod.rs` plus focused submodules). `mod.rs` stays thin: module docs, `mod`/`pub use` wiring, and only glue that fits no more specific submodule.
+- **Types in `types.rs`.** A module's data types (structs, enums, type aliases) and their trivial `impl`s live in a `types.rs` submodule, re-exported from `mod.rs`. Behaviour-heavy `impl`s may live beside the logic that uses them when that reads more clearly.
+- **Tests in `tests.rs`.** Unit tests for a module live in a sibling `tests.rs` (declared `#[cfg(test)] mod tests;`), not inline at the bottom of the logic file. Cross-module and end-to-end tests stay in the crate's `tests/` directory.
+- **Split by responsibility.** Group submodules by cohesive purpose (parsing, resolution, rendering, persistence), not arbitrary line count. Each submodule states its single purpose in its module doc.
+
+## Documentation
+
+Document generously — explain intent and non-obvious behaviour rather than restating code.
+
+- **Every module** gets a `//!` doc comment stating its responsibility and how it fits the crate.
+- **Every public item** (functions, types, traits, fields, variants) gets a `///` doc comment. Public functions note important preconditions, side effects, and error conditions.
+- **Non-trivial private functions** get a `///` or `//` comment describing what they do and why.
+- Keep prose direct; document the *why*, not the mechanically obvious.
 
 ## Testing Guidelines
 
-Place focused unit tests beside their module and cross-module behavior in the owning crate's `tests/` directory (`src/sdk/tests/` or `src/tui/tests/`). Name integration files by behavior, such as `e2e_core.rs` or `feature_workers.rs`. Use the mock backend, core socket, tiny.place server, and harness CLIs in `src/sdk/tests/support/`; tests must remain deterministic and offline. Maintain coverage near the documented 92% line baseline and cover new branches.
+Place focused unit tests in a module's sibling `tests.rs` and cross-module behavior in the owning crate's `tests/` directory (`src/sdk/tests/` or `src/tui/tests/`). Name integration files by behavior, such as `e2e_core.rs` or `feature_workers.rs`. Use the mock backend, core socket, tiny.place server, and harness CLIs in `src/sdk/tests/support/`; tests must remain deterministic and offline. Maintain coverage near the documented 92% line baseline and cover new branches.
 
 ## Commit & Pull Request Guidelines
 

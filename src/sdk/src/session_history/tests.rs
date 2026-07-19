@@ -1,7 +1,7 @@
 //! Unit tests for recent-session scanning, summary parsing, label extraction,
 //! and current-folder-first ranking.
 
-use super::scan::{is_here, is_session_file};
+use super::scan::{collect_session_files, is_here, is_session_file, sessions_dir_for};
 use super::summary::{
     as_message_content, extract_text, first_prompt_text, read_claude_summary, read_codex_summary,
     truncate_label, LABEL_MAX,
@@ -122,6 +122,97 @@ fn extract_text_from_string_and_blocks() {
 fn first_prompt_text_rejects_empty_and_whitespace() {
     assert_eq!(first_prompt_text(Some(Value::String("   ".into()))), None);
     assert_eq!(first_prompt_text(None), None);
+}
+
+#[test]
+fn collect_session_files_recurses_and_filters() {
+    let dir = tempfile::tempdir().unwrap();
+    // A matching top-level file, a non-matching one, and a nested match.
+    fs::write(dir.path().join("a.jsonl"), "{}").unwrap();
+    fs::write(dir.path().join("notes.txt"), "x").unwrap();
+    let nested = dir.path().join("deep").join("er");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("b.jsonl"), "{}").unwrap();
+    // A subagents dir is excluded for claude transcripts.
+    let subagents = dir.path().join("subagents");
+    fs::create_dir_all(&subagents).unwrap();
+    fs::write(subagents.join("c.jsonl"), "{}").unwrap();
+
+    let files = collect_session_files(SessionAgentKind::Claude, dir.path());
+    let names: Vec<String> = files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.contains(&"a.jsonl".to_string()));
+    assert!(names.contains(&"b.jsonl".to_string()));
+    assert!(!names.contains(&"c.jsonl".to_string()));
+    assert!(!names.contains(&"notes.txt".to_string()));
+
+    // An absent directory yields nothing.
+    assert!(collect_session_files(SessionAgentKind::Claude, &dir.path().join("nope")).is_empty());
+}
+
+#[test]
+fn sessions_dir_for_honors_env_override() {
+    let mut env = HashMap::new();
+    env.insert(
+        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "/tmp/custom-claude".to_string(),
+    );
+    assert_eq!(
+        sessions_dir_for(&env, SessionAgentKind::Claude),
+        PathBuf::from("/tmp/custom-claude")
+    );
+}
+
+#[test]
+fn discover_newest_session_file_matches_cwd_and_skips_old_and_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    );
+
+    // A session recorded in a different cwd is skipped; one with no cwd matches.
+    write_session(
+        dir.path(),
+        "wrong.jsonl",
+        &serde_json::json!({"sessionId":"wrong","cwd":"/somewhere/else","type":"user","message":{"role":"user","content":"x"}}).to_string(),
+    );
+    let matching = write_session(
+        dir.path(),
+        "match.jsonl",
+        &serde_json::json!({"sessionId":"match-1","type":"user","message":{"role":"user","content":"hi"}}).to_string(),
+    );
+
+    let ignored = std::collections::HashSet::new();
+    let found = discover_newest_session_file(
+        &env,
+        SessionAgentKind::Claude,
+        "/does/not/matter",
+        0,
+        &ignored,
+    )
+    .expect("a cwd-less session should be discovered");
+    assert_eq!(found.id, "match-1");
+
+    // Ignoring the matching file leaves nothing to discover.
+    let mut ignored = std::collections::HashSet::new();
+    ignored.insert(std::fs::canonicalize(&matching).unwrap());
+    assert!(
+        discover_newest_session_file(&env, SessionAgentKind::Claude, "/x", 0, &ignored).is_none()
+    );
+
+    // A min_mtime far in the future skips every file.
+    assert!(discover_newest_session_file(
+        &env,
+        SessionAgentKind::Claude,
+        "/x",
+        i64::MAX,
+        &std::collections::HashSet::new()
+    )
+    .is_none());
 }
 
 #[test]

@@ -30,6 +30,8 @@ mod usage;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_ext;
 
 pub use shared::{normalize_tool_kind, tool_display};
 pub use timestamp::parse_iso_ms;

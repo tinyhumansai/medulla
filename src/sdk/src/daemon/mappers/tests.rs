@@ -323,7 +323,6 @@ fn parse_iso_rejects_garbage() {
     let ts = parse_timestamp_ms(None);
     assert!(ts > 0);
 }
-
 #[test]
 fn parses_iso_timestamp() {
     // 2026-07-05T00:00:00Z is 1_783_209_600 s since the Unix epoch.

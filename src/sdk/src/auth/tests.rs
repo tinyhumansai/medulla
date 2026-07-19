@@ -203,6 +203,27 @@ fn percent_roundtrip() {
 }
 
 #[test]
+fn percent_decode_handles_plus_lowercase_hex_and_bad_escapes() {
+    // `+` decodes to a space.
+    assert_eq!(percent_decode("a+b"), "a b");
+    // Lowercase hex escape decodes.
+    assert_eq!(percent_decode("%2f"), "/");
+    // An invalid escape (non-hex) is passed through as a literal `%`.
+    assert_eq!(percent_decode("x%zzy"), "x%zzy");
+}
+
+#[test]
+fn parse_target_skips_empty_and_keyless_pairs() {
+    // A leading `?=v` pair has an empty key and is dropped; a bare `&&` is
+    // skipped without panicking.
+    let (path, params) = parse_target("/p?=v&&a=b&c");
+    assert_eq!(path, "/p");
+    assert_eq!(params.get("a").map(String::as_str), Some("b"));
+    assert_eq!(params.get("c").map(String::as_str), Some(""));
+    assert!(!params.contains_key(""));
+}
+
+#[test]
 fn describe_me_variants() {
     let both = serde_json::json!({"email":"a@b.c","id":"u1"});
     assert_eq!(describe_me(&both), "Logged in as a@b.c (u1)");
@@ -246,6 +267,136 @@ fn credential_store_roundtrip_corrupt_and_clear() {
     store.clear().unwrap();
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- loopback listener: drive the real accept loop over 127.0.0.1 ------------
+
+async fn send_request(port: u16, request: &str) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    sock.write_all(request.as_bytes()).await.unwrap();
+    // Drain the server's response so it finishes handling this connection before
+    // we open the next one (the accept loop is serial).
+    let mut buf = Vec::new();
+    let _ = sock.read_to_end(&mut buf).await;
+}
+
+#[tokio::test]
+async fn start_loopback_exposes_port_state_and_login_url() {
+    let lb = start_loopback("http://localhost:5000/", Provider::Google)
+        .await
+        .unwrap();
+    assert!(lb.port() > 0);
+    assert_eq!(lb.state().len(), 32);
+    assert!(lb.login_url().contains(lb.state()));
+    assert!(lb.login_url().contains("/auth/google/login"));
+}
+
+#[tokio::test]
+async fn await_callback_walks_every_reject_branch_then_captures_token() {
+    let lb = start_loopback("http://localhost:5000/", Provider::Github)
+        .await
+        .unwrap();
+    let port = lb.port();
+    let state = lb.state().to_string();
+    let awaiter =
+        tokio::spawn(async move { lb.await_callback(std::time::Duration::from_secs(10)).await });
+
+    // Non-GET → 405, non-/auth → 404, wrong state → 400, valid state but no
+    // token/error → ignored, all keep the wait alive.
+    send_request(port, "POST /auth HTTP/1.1\r\nHost: x\r\n\r\n").await;
+    send_request(port, "GET /favicon.ico HTTP/1.1\r\nHost: x\r\n\r\n").await;
+    send_request(port, "GET /auth?state=nope HTTP/1.1\r\nHost: x\r\n\r\n").await;
+    send_request(
+        port,
+        &format!("GET /auth?state={state} HTTP/1.1\r\nHost: x\r\n\r\n"),
+    )
+    .await;
+    // Finally, a valid callback carrying a token completes the flow.
+    send_request(
+        port,
+        &format!("GET /auth?state={state}&token=jwt-xyz HTTP/1.1\r\nHost: x\r\n\r\n"),
+    )
+    .await;
+
+    let token = awaiter.await.unwrap().unwrap();
+    assert_eq!(token, "jwt-xyz");
+}
+
+#[tokio::test]
+async fn await_callback_surfaces_backend_error_param() {
+    let lb = start_loopback("http://localhost:5000/", Provider::Google)
+        .await
+        .unwrap();
+    let port = lb.port();
+    let state = lb.state().to_string();
+    let awaiter =
+        tokio::spawn(async move { lb.await_callback(std::time::Duration::from_secs(10)).await });
+
+    send_request(
+        port,
+        &format!("GET /auth?state={state}&error=access_denied HTTP/1.1\r\nHost: x\r\n\r\n"),
+    )
+    .await;
+
+    match awaiter.await.unwrap() {
+        Err(LoginError::Backend(msg)) => assert_eq!(msg, "access_denied"),
+        other => panic!("expected a backend error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn run_login_flow_opens_the_url_and_returns_the_token() {
+    let cfg = LoopbackConfig {
+        timeout: std::time::Duration::from_secs(10),
+        no_browser: false,
+    };
+    // run_login_flow binds its own loopback; recover the port + state nonce from
+    // the URL handed to the (browser-stand-in) opener.
+    let (tx, rx) = tokio::sync::oneshot::channel::<(u16, String)>();
+    let tx = std::sync::Mutex::new(Some(tx));
+    let opened = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let opened_flag = opened.clone();
+    let flow = tokio::spawn(async move {
+        run_login_flow(
+            "http://localhost:5000/",
+            Provider::Discord,
+            cfg,
+            move |url: &str| {
+                opened_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                // redirectUri is percent-encoded: ...127.0.0.1%3A<port>%2Fauth%3Fstate%3D<state>
+                let port = url
+                    .split_once("127.0.0.1%3A")
+                    .map(|(_, rest)| rest.chars().take_while(|c| c.is_ascii_digit()).collect())
+                    .and_then(|d: String| d.parse::<u16>().ok())
+                    .unwrap();
+                let state: String = url
+                    .split_once("state%3D")
+                    .map(|(_, rest)| {
+                        rest.chars()
+                            .take_while(|c| c.is_ascii_alphanumeric())
+                            .collect()
+                    })
+                    .unwrap();
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send((port, state));
+                }
+            },
+        )
+        .await
+    });
+
+    let (port, state) = rx.await.unwrap();
+    send_request(
+        port,
+        &format!("GET /auth?state={state}&token=flow-jwt HTTP/1.1\r\nHost: x\r\n\r\n"),
+    )
+    .await;
+    let token = flow.await.unwrap().unwrap();
+    assert_eq!(token, "flow-jwt");
+    assert!(opened.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 #[test]

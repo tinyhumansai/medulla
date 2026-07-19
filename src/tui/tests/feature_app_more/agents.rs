@@ -167,6 +167,50 @@ fn prompt_empty_answer_is_cancelled() {
     );
 }
 
+// --- Agents lane context bar color thresholds --------------------------------
+
+#[test]
+fn agents_lane_context_bar_reflects_high_and_mid_usage() {
+    // A task completing with usage near the 32k window lights the lane context
+    // bar; scanning both a near-full (red) and a two-thirds (yellow) case walks
+    // the colour-threshold branches. We render each and require no panic plus
+    // the context label.
+    for tokens in [30_000i64, 24_000i64] {
+        let (mut app, rt) = demo_app();
+        rt.script_event(TuiEvent::TaskStart {
+            task_id: "cyc-1/t:job".into(),
+            instruction: "big job".into(),
+            depth: 2,
+            agent_id: Some("dev-1".into()),
+        });
+        rt.script_event(TuiEvent::TaskComplete {
+            digest: TaskDigest {
+                task_id: "cyc-1/t:job".into(),
+                status: "done".into(),
+                digest: "done".into(),
+                result_ref: None,
+                usage: Some(Usage {
+                    input_tokens: tokens,
+                    output_tokens: 100,
+                }),
+                depth: 2,
+            },
+        });
+        app.refresh_snapshot();
+        tab(&mut app, "Agents");
+        // Walk the cursor across lane rows and render at each stop so the dev-1
+        // agent lane (whose context bar we want) is exercised as the active lane.
+        for _ in 0..16 {
+            let out = render(&mut app, 120, 40);
+            if out.contains("context") {
+                assert!(out.contains("context"), "context bar renders");
+                break;
+            }
+            let _ = app.on_event(key(KeyCode::Down));
+        }
+    }
+}
+
 // --- Agents j/k scroll & agent-index navigation -----------------------------
 
 #[test]

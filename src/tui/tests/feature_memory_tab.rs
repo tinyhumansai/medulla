@@ -161,6 +161,61 @@ fn slash_memory_with_query_triggers_search() {
 }
 
 #[test]
+fn memory_tab_enabled_but_pack_absent_and_no_facets() {
+    // Enabled, but nothing compiled yet: the "pack absent" line, the "(none)"
+    // facet summary, and the empty detail placeholder all render.
+    let rt = Arc::new(MockRuntime::empty());
+    rt.set_memory_status(MemoryStatus {
+        enabled: true,
+        workspace: "/ws".into(),
+        pack_exists: false,
+        pack_path: "/ws/persona/PERSONA.md".into(),
+        entry_count: 0,
+        directives_count: 0,
+        facet_counts: BTreeMap::new(),
+    });
+    let mut app = App::new(rt.clone(), loaded());
+    app.tab_index = memory_tab();
+    apply_load(&mut app, &rt);
+    let out = render(&mut app, 110, 32);
+    assert!(out.contains("absent"), "pack absent line: {out}");
+    assert!(out.contains("(none)"), "facets none: {out}");
+    assert!(out.contains("Select an entry"), "empty detail hint: {out}");
+}
+
+#[test]
+fn memory_tab_facet_detail_renders_on_selection() {
+    let rt = Arc::new(MockRuntime::empty());
+    rt.set_memory_status(scripted_status());
+    rt.set_memory_directives(vec!["Rule one".into()]);
+    let mut app = App::new(rt.clone(), loaded());
+    app.tab_index = memory_tab();
+    apply_load(&mut app, &rt);
+    // Entries = 1 directive + 2 facets. Move onto the first facet row.
+    app.on_event(key(KeyCode::Down));
+    let out = render(&mut app, 110, 32);
+    // The facet detail pane reports the observation count for the selected facet.
+    assert!(
+        out.contains("observation(s) in this facet"),
+        "facet detail: {out}"
+    );
+}
+
+#[test]
+fn memory_search_with_no_hits_shows_empty_state() {
+    let rt = Arc::new(MockRuntime::empty());
+    rt.set_memory_status(scripted_status());
+    let mut app = App::new(rt.clone(), loaded());
+    app.tab_index = memory_tab();
+    apply_load(&mut app, &rt);
+    // A search that returns nothing renders the "no hits" hint and Search title.
+    app.set_memory_results(Vec::new(), "nonexistent".into());
+    let out = render(&mut app, 110, 32);
+    assert!(out.contains("No hits"), "empty search hint: {out}");
+    assert!(out.contains("Search"), "search title: {out}");
+}
+
+#[test]
 fn slash_memory_bare_requests_load() {
     let rt = Arc::new(MockRuntime::empty());
     rt.set_memory_status(scripted_status());

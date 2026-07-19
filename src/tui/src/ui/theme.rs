@@ -311,6 +311,45 @@ mod tests {
     }
 
     #[test]
+    fn color_to_string_covers_every_named_variant() {
+        for (color, name) in [
+            (Color::Black, "black"),
+            (Color::Gray, "gray"),
+            (Color::DarkGray, "darkgray"),
+            (Color::White, "white"),
+            (Color::LightRed, "lightred"),
+            (Color::LightGreen, "lightgreen"),
+            (Color::LightYellow, "lightyellow"),
+            (Color::LightBlue, "lightblue"),
+            (Color::LightMagenta, "lightmagenta"),
+            (Color::LightCyan, "lightcyan"),
+            (Color::Reset, "reset"),
+        ] {
+            assert_eq!(color_to_string(color), name);
+        }
+        // Indexed colours fall through to the `indexed<N>` form.
+        assert_eq!(color_to_string(Color::Indexed(42)), "indexed42");
+    }
+
+    #[test]
+    fn cycle_role_covers_all_roles_and_custom_backward() {
+        let mut t = Theme::default();
+        // Every role index round-trips through set_role.
+        for idx in 0..4 {
+            let before = t.role(idx);
+            t.cycle_role(idx, true);
+            assert_ne!(t.role(idx), before, "role {idx} advanced");
+        }
+        // A custom value stepped backward lands on the last palette entry.
+        let mut custom = Theme {
+            selection_fg: Color::Rgb(9, 9, 9),
+            ..Theme::default()
+        };
+        custom.cycle_role(2, false);
+        assert_eq!(custom.role(2), PALETTE[PALETTE.len() - 1]);
+    }
+
+    #[test]
     fn persist_theme_writes_and_reloads() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("config.toml");

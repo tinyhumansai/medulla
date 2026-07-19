@@ -281,6 +281,23 @@ mod tests {
         assert_eq!(reported.summary.as_deref(), Some("has a } brace"));
     }
 
+    #[test]
+    fn handles_escaped_quotes_inside_strings() {
+        // A backslash-escaped quote must not end the string, so the following
+        // brace stays inside it and the object scanner keeps going.
+        let reply = r#"noise {"summary":"a \" and a } brace","tools":[]} tail"#;
+        let reported = parse_capability_reply(reply);
+        assert_eq!(reported.summary.as_deref(), Some("a \" and a } brace"));
+    }
+
+    #[test]
+    fn resolve_path_falls_back_for_missing_paths() {
+        // A non-existent path can't be canonicalized, so it resolves lexically
+        // against the current directory rather than erroring.
+        let out = resolve_path("definitely-not-a-real-path-xyz");
+        assert!(out.ends_with("definitely-not-a-real-path-xyz"));
+    }
+
     use std::sync::Arc;
 
     use super::super::providers::{RunTaskFn, RunTaskResult};

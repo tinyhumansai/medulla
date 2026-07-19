@@ -145,6 +145,69 @@ fn task_lines_empty_and_populated() {
 }
 
 #[test]
+fn lane_lines_agent_task_with_no_turns_shows_placeholder() {
+    // A worker agent lane whose task has folded no turns renders a per-task
+    // header followed by the "(no turns yet)" placeholder.
+    let lane = AgentLane {
+        key: "agent:dev".into(),
+        label: "Dev".into(),
+        role: AgentRole::Worker,
+        turns: Vec::new(),
+        last_at: 0,
+        tasks: vec![TaskState {
+            task_id: "t1".into(),
+            status: TaskStatus::Running,
+            turns: 0,
+            last_at: 0,
+            turn_blocks: Vec::new(),
+            attention: None,
+            question_id: None,
+        }],
+        context_tokens: None,
+        harness_label: None,
+        agent_id: Some("dev".into()),
+        session_id: None,
+        parent_agent_id: None,
+        descriptor: None,
+        active_tasks: 1,
+    };
+    let lines = lane_lines(Some(&lane), 60);
+    let joined: String = lines
+        .iter()
+        .map(|l| l.text.clone())
+        .collect::<Vec<_>>()
+        .join("|");
+    assert!(joined.contains("── t1 · running"));
+    assert!(joined.contains("(no turns yet)"));
+}
+
+#[test]
+fn task_lines_truncate_long_header_and_default_color() {
+    // An over-wide header is truncated with an ellipsis; a colour-less header
+    // falls back to cyan.
+    let task = TaskState {
+        task_id: "t".into(),
+        status: TaskStatus::Running,
+        turns: 1,
+        last_at: 0,
+        turn_blocks: vec![TurnBlock {
+            at: 1000,
+            header: "H".repeat(200),
+            header_color: None,
+            reasoning: None,
+            content: None,
+            tools: Vec::new(),
+        }],
+        attention: None,
+        question_id: None,
+    };
+    let lines = task_lines(&task, 30);
+    assert!(lines[0].text.ends_with('…'));
+    assert!(lines[0].text.chars().count() <= 30);
+    assert_eq!(lines[0].color.as_deref(), Some("cyan"));
+}
+
+#[test]
 fn tool_line_truncates_long_args() {
     let big = serde_json::json!({ "blob": "x".repeat(500) });
     let line = tool_line("write", &big);

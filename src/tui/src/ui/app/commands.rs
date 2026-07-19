@@ -247,6 +247,11 @@ impl App {
                 self.set_settings_subpage(SP_APPEARANCE);
             }
             SlashCommand::Usage => return self.set_settings_subpage(SP_USAGE),
+            SlashCommand::Feedback => {
+                self.tab_index = tab_pos("Feedback");
+                self.set_status("Feedback · loading the board…");
+                return self.reload_feedback();
+            }
             SlashCommand::Memory(query) => {
                 self.tab_index = tab_pos("Memory");
                 match query {

@@ -61,17 +61,24 @@ Fleets with everyone.
 
 ## Rust SDK & TUI
 
-This repo also hosts the `medulla` Rust crate — the client SDK and terminal UI in one package:
+This repo also hosts the Medulla Rust workspace — an SDK library and a terminal app:
 
-- `src/client/` — HTTP/SSE client for the Medulla backend API (auth, durable sessions, streaming events, the orchestration tool loop).
-- `src/` — a ratatui terminal UI over that API: chat with the orchestrator, watch agent lanes, traces, and context live, plus the tinyplace integration that brings agent channels together (`src/tinyplace_support/`, `src/daemon/`).
+- `src/sdk/` — the `medulla` SDK crate: the HTTP/SSE client for the Medulla backend API (auth, durable sessions, streaming events, the orchestration tool loop), the runtime adapters, persona memory, and the tinyplace integration that brings agent channels together (`tinyplace_support/`, `daemon/`).
+- `src/tui/` — the `medulla-tui` crate, shipping the `medulla` binary: a ratatui terminal UI over the SDK to chat with the orchestrator and watch agent lanes, traces, and context live.
 
 Build and run:
 
 ```sh
-cargo install --path .        # installs the `medulla` binary
+cargo install --path src/tui  # installs the `medulla` binary
 medulla login                 # browser login; stores credentials
 medulla                       # bare invocation starts the TUI
+```
+
+Use the SDK from your own crate as a git dependency (the repo vendors its path deps, so no extra setup):
+
+```toml
+[dependencies]
+medulla = { git = "https://github.com/tinyhumansai/medulla", tag = "v0.3.0" }
 ```
 
 `medulla login` runs a browser-based OAuth loopback flow (`--provider google|github|twitter|discord`, `--no-browser` to copy the URL, or `--token <64-hex>` for headless one-time tokens) and saves a verified JWT to `<medulla-home>/credentials.json` (default `~/.medulla/credentials.json`); the TUI picks it up automatically. The loopback callback is guarded by a random state nonce so a page sharing the loopback origin can't forge it. `medulla logout` clears it. You can also pass a token directly with `MEDULLA_TOKEN=<jwt> medulla`. If you start `medulla` with no working credentials, the TUI shows an in-terminal login screen (browser flow, paste-a-token, or `m` to continue against the scripted mock runtime). Other subcommands:

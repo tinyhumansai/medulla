@@ -2,22 +2,23 @@
 
 ## Project Structure & Module Organization
 
-This single Rust crate provides the `medulla` library and CLI/TUI. Keep reusable APIs in `src/lib.rs` modules and process wiring in `src/main.rs`.
+This repository is a two-crate Cargo workspace: the `medulla` SDK library at `src/sdk/` and the `medulla-tui` app crate at `src/tui/` (which ships the `medulla` binary). Keep reusable APIs in the SDK; keep rendering and process wiring in the app crate.
 
-- `src/client/` implements the backend HTTP/SSE client and protocol types.
-- `src/runtime/` contains backend, core-socket, and scripted mock runtime adapters.
-- `src/ui/` owns ratatui state, rendering, input, and chat persistence.
-- `src/daemon/` and `src/tinyplace_support/` implement provider and tiny.place integration.
-- `tests/` contains feature and mocked end-to-end suites; reusable stand-ins live in `tests/support/`.
-- `vendor/tinyplace/` is vendored upstream code. Avoid unrelated edits there.
+- `src/sdk/src/client/` implements the backend HTTP/SSE client and protocol types.
+- `src/sdk/src/runtime/` contains backend, core-socket, and scripted mock runtime adapters.
+- `src/sdk/src/daemon/` and `src/sdk/src/tinyplace_support/` implement provider and tiny.place integration.
+- `src/sdk/src/ui/` holds the UI-facing data surface (events, agent lanes, chat store, onboarding screen, util); the app crate re-exports it under `crate::ui`.
+- `src/tui/src/ui/` owns ratatui state, rendering, input, and theming; `src/tui/src/cli.rs` owns argument parsing; `src/tui/src/main.rs` owns process wiring.
+- `src/sdk/tests/` and `src/tui/tests/` contain feature and mocked end-to-end suites; reusable stand-ins live in `src/sdk/tests/support/` (the app crate's tests reach them via `#[path]`).
+- `vendor/tinyplace/` is vendored upstream code, excluded from the workspace. Avoid unrelated edits there.
 - `target/` and `.medulla-state/` are generated or local runtime data; never commit them.
 
 ## Build, Test, and Development Commands
 
 - `cargo run` starts the TUI with the mock runtime when no credentials are set.
 - `cargo run --release` runs an optimized build.
-- `cargo install --path .` installs the `medulla` binary.
-- `cargo test` runs unit, feature, and mocked end-to-end tests without live network access.
+- `cargo install --path src/tui` installs the `medulla` binary.
+- `cargo test` runs unit, feature, and mocked end-to-end tests for both crates without live network access.
 - `cargo clippy --all-targets -- -D warnings` treats all lint warnings as failures.
 - `cargo fmt --check` verifies formatting; run `cargo fmt` to apply it.
 - `cargo llvm-cov` reports coverage when `cargo-llvm-cov` and `llvm-tools-preview` are installed.
@@ -30,7 +31,7 @@ Use standard `rustfmt` output (four-space indentation). Name modules, functions,
 
 ## Testing Guidelines
 
-Place focused unit tests beside their module and cross-module behavior in `tests/`. Name integration files by behavior, such as `e2e_core.rs` or `feature_workers.rs`. Use the mock backend, core socket, tiny.place server, and harness CLIs in `tests/support/`; tests must remain deterministic and offline. Maintain coverage near the documented 92% line baseline and cover new branches.
+Place focused unit tests beside their module and cross-module behavior in the owning crate's `tests/` directory (`src/sdk/tests/` or `src/tui/tests/`). Name integration files by behavior, such as `e2e_core.rs` or `feature_workers.rs`. Use the mock backend, core socket, tiny.place server, and harness CLIs in `src/sdk/tests/support/`; tests must remain deterministic and offline. Maintain coverage near the documented 92% line baseline and cover new branches.
 
 ## Commit & Pull Request Guidelines
 

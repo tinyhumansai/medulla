@@ -171,9 +171,10 @@ source of truth for the test logic; docker is only an environment.
 - Pin the third-party CLI version in the Dockerfile; download with
   `curl --http1.1 --retry 5 --retry-all-errors -C -` (large release tarballs hit
   HTTP/2 protocol errors surprisingly often).
-- Mind `#[path]` includes: `examples/mock_signal_server.rs` pulls a module from
-  `tests/support/`, so the build stage must `COPY tests ./tests` too. Copy every
-  tree rustc will read, not just `src/`.
+- Mind `#[path]` includes: `src/sdk/examples/mock_signal_server.rs` pulls a
+  module from `src/sdk/tests/support/`. Copy every tree rustc will read (the
+  workspace keeps examples and tests under `src/`, so `COPY src ./src` covers
+  them).
 - `.dockerignore` aggressively (25 GB `target/`, `.git`, unused vendor trees) but
   keep path-dependency sources from `Cargo.toml`.
 

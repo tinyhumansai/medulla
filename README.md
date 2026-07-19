@@ -66,7 +66,15 @@ This repo also hosts the Medulla Rust workspace — an SDK library and a termina
 - `src/sdk/` — the `medulla` SDK crate: the HTTP/SSE client for the Medulla backend API (auth, durable sessions, streaming events, the orchestration tool loop), the runtime adapters, persona memory, and the tinyplace integration that brings agent channels together (`tinyplace_support/`, `daemon/`).
 - `src/tui/` — the `medulla-tui` crate, shipping the `medulla` binary: a ratatui terminal UI over the SDK to chat with the orchestrator and watch agent lanes, traces, and context live.
 
-Build and run:
+Install the prebuilt binary (downloads the release asset for your platform and verifies its sha256 against the release manifest, then installs to `~/.medulla/bin`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
+```
+
+Pass a specific version with `| sh -s -- X.Y.Z`; set `MEDULLA_HOME` to change the install prefix. On a platform without a prebuilt asset the script falls back to `cargo install`.
+
+Or build from source:
 
 ```sh
 cargo install --path src/tui  # installs the `medulla` binary

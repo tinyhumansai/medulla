@@ -43,19 +43,22 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM debian:bookworm-slim
 
 # Pinned opencode CLI version (sst/opencode, published under anomalyco/opencode).
-# glibc tarball to match the debian runtime; TARGETARCH picks arm64/amd64.
+# glibc tarball to match the debian runtime. BuildKit sets TARGETARCH only when
+# --platform is passed; otherwise fall back to the native dpkg architecture
+# (never default it — a wrong-arch opencode binary is an Exec format error).
 ARG OPENCODE_VERSION=1.17.18
-ARG TARGETARCH=arm64
+ARG TARGETARCH
 
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         tmux python3 curl bash ca-certificates; \
     rm -rf /var/lib/apt/lists/*; \
-    case "$TARGETARCH" in \
+    ARCH="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$ARCH" in \
         arm64) OC_ARCH=arm64 ;; \
         amd64) OC_ARCH=x64 ;; \
-        *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+        *) echo "unsupported arch=$ARCH" >&2; exit 1 ;; \
     esac; \
     curl -fsSL --http1.1 --retry 5 --retry-delay 3 --retry-all-errors \
         -C - -o /tmp/opencode.tar.gz \

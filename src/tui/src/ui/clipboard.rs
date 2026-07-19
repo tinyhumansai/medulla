@@ -8,8 +8,6 @@ use std::process::{Command, Stdio};
 
 use base64::Engine;
 
-use crate::ui::events::{chat_transcript, last_assistant_message, EventEnvelope};
-
 /// Sentinel returned when the copy fell through to the OSC 52 backstop. Unlike a
 /// writer exiting 0 this is "handed to the terminal", NOT "copied" — callers must
 /// not report it as a completed copy.
@@ -98,23 +96,9 @@ pub fn current_platform() -> &'static str {
     std::env::consts::OS
 }
 
-pub enum CopyScope {
-    All,
-    Last,
-}
-
-/// The text for a `/copy` scope from the chat event buffer.
-pub fn copy_text(events: &[EventEnvelope], scope: &CopyScope) -> String {
-    match scope {
-        CopyScope::Last => last_assistant_message(events).unwrap_or_default(),
-        CopyScope::All => chat_transcript(events),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::events::TuiEvent;
 
     #[test]
     fn osc52_wraps_base64() {
@@ -142,36 +126,6 @@ mod tests {
         });
         assert_eq!(via, OSC_52);
         assert!(captured.contains("]52;c;"));
-    }
-
-    #[test]
-    fn copy_text_scopes() {
-        let events = vec![
-            EventEnvelope {
-                seq: 1,
-                at: 0,
-                event: TuiEvent::User { body: "q".into() },
-            },
-            EventEnvelope {
-                seq: 2,
-                at: 0,
-                event: TuiEvent::Assistant { body: "a".into() },
-            },
-        ];
-        assert_eq!(copy_text(&events, &CopyScope::Last), "a");
-        assert_eq!(copy_text(&events, &CopyScope::All), "> q\n\na");
-    }
-
-    #[test]
-    fn copy_text_last_is_empty_without_assistant() {
-        // /copy last over a stream with no assistant reply yields empty text.
-        let events = vec![EventEnvelope {
-            seq: 1,
-            at: 0,
-            event: TuiEvent::User { body: "q".into() },
-        }];
-        assert_eq!(copy_text(&events, &CopyScope::Last), "");
-        assert_eq!(copy_text(&[], &CopyScope::All), "");
     }
 
     #[test]

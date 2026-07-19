@@ -16,7 +16,8 @@ use crate::ui::agents::{
     agent_row_model, derive_agent_lanes, lane_lines, task_lines, AgentLane, AgentRole, AgentRow,
     Line as StyledLine, TaskState, TaskStatus,
 };
-use crate::ui::clipboard::{copy_text, copy_to_clipboard, current_platform, CopyScope, OSC_52};
+use crate::ui::clipboard::{copy_to_clipboard, current_platform, OSC_52};
+use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::{caret_row_col, delete_before, insert_at, move_caret_row, Draft};
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::stream;
@@ -1081,7 +1082,7 @@ impl App {
     }
 
     fn copy_chat(&mut self, scope: CopyScope) {
-        let text = copy_text(&self.snapshot.chat_events, &scope);
+        let text = command::copy_text(&self.snapshot.chat_events, scope);
         if text.trim().is_empty() {
             self.set_status(match scope {
                 CopyScope::Last => "No assistant reply to copy yet.",
@@ -1136,92 +1137,78 @@ impl App {
         self.draft = Draft::new();
         self.chat_scroll = 0;
 
-        if let Some(rest) = clean.strip_prefix('/') {
-            let lower = rest.trim().to_lowercase();
-            let (cmd, arg) = match lower.split_once(' ') {
-                Some((c, a)) => (c.to_string(), a.trim().to_string()),
-                None => (lower.clone(), String::new()),
-            };
-            match cmd.as_str() {
-                "quit" | "q" => self.should_quit = true,
-                "new" => {
-                    self.runtime.new_session();
-                    self.refresh_snapshot();
-                    self.set_status("Started a fresh conversation session");
-                }
-                "fork" => {
-                    // Preserve original case for the name.
-                    let name = clean[1..].trim()["fork".len()..].trim().to_string();
-                    self.fork_thread(if name.is_empty() { None } else { Some(name) });
-                    self.tab_index = tab_pos("Chat");
-                }
-                "resume" => return Some(Cmd::ListChats),
-                "abort" => {
-                    self.runtime.abort();
-                    self.set_status("Abort requested");
-                }
-                "clear" => {
-                    self.selected = 0;
-                    self.set_status("View reset (runtime history is retained)");
-                }
-                "help" => {
-                    self.set_settings_subpage(SP_HELP);
-                }
-                "config" => {
-                    self.set_settings_subpage(SP_CONFIG);
-                }
-                "settings" | "theme" => {
-                    self.set_settings_subpage(SP_APPEARANCE);
-                }
-                "usage" => return self.set_settings_subpage(SP_USAGE),
-                "memory" | "mem" => {
-                    self.tab_index = tab_pos("Memory");
-                    // Preserve original case for the query.
-                    let query = clean[1..].trim()[cmd.len()..].trim().to_string();
-                    if query.is_empty() {
-                        self.set_status("Memory · loading persona…");
-                        return Some(Cmd::LoadMemory);
-                    }
-                    self.set_status(format!("Memory · searching “{query}”…"));
-                    return Some(Cmd::SearchMemory(query));
-                }
-                "mouse" => self.toggle_mouse(),
-                "copy" => {
-                    if !arg.is_empty() && arg != "all" && arg != "last" {
-                        self.set_status("Usage: /copy [all|last]");
-                    } else {
-                        self.copy_chat(if arg == "last" {
-                            CopyScope::Last
-                        } else {
-                            CopyScope::All
-                        });
-                    }
-                }
-                "async" => {
-                    if !arg.is_empty() && arg != "on" && arg != "off" {
-                        self.set_status("Usage: /async [on|off]");
-                    } else {
-                        let on = if arg.is_empty() {
-                            !self.snapshot.async_mode
-                        } else {
-                            arg == "on"
-                        };
-                        self.runtime.set_async_mode(on);
-                        self.refresh_snapshot();
-                        self.set_status(if on {
-                            "async ON — delegations detach; chat stays free while sub-agents work"
-                        } else {
-                            "async OFF — delegations await their results before the reply"
-                        });
-                    }
-                }
-                _ => self.set_status(format!("Unknown command: {clean}")),
-            }
-            return None;
+        if let Some(command) = SlashCommand::parse(&clean) {
+            return self.dispatch_slash(command);
         }
 
         self.set_status("Cycle running…");
         Some(Cmd::Submit(clean))
+    }
+
+    /// Perform the side effect for a parsed [`SlashCommand`], returning any
+    /// follow-up [`Cmd`] the event loop must run (e.g. a lazy load). Parsing lives
+    /// in the SDK ([`crate::ui::command::parse`]); this method owns only the
+    /// UI-state mutations and runtime calls.
+    fn dispatch_slash(&mut self, command: SlashCommand) -> Option<Cmd> {
+        match command {
+            SlashCommand::Quit => self.should_quit = true,
+            SlashCommand::NewSession => {
+                self.runtime.new_session();
+                self.refresh_snapshot();
+                self.set_status("Started a fresh conversation session");
+            }
+            SlashCommand::Fork(name) => {
+                self.fork_thread(name);
+                self.tab_index = tab_pos("Chat");
+            }
+            SlashCommand::Resume => return Some(Cmd::ListChats),
+            SlashCommand::Abort => {
+                self.runtime.abort();
+                self.set_status("Abort requested");
+            }
+            SlashCommand::ClearView => {
+                self.selected = 0;
+                self.set_status("View reset (runtime history is retained)");
+            }
+            SlashCommand::Help => {
+                self.set_settings_subpage(SP_HELP);
+            }
+            SlashCommand::Config => {
+                self.set_settings_subpage(SP_CONFIG);
+            }
+            SlashCommand::Settings => {
+                self.set_settings_subpage(SP_APPEARANCE);
+            }
+            SlashCommand::Usage => return self.set_settings_subpage(SP_USAGE),
+            SlashCommand::Memory(query) => {
+                self.tab_index = tab_pos("Memory");
+                match query {
+                    None => {
+                        self.set_status("Memory · loading persona…");
+                        return Some(Cmd::LoadMemory);
+                    }
+                    Some(query) => {
+                        self.set_status(format!("Memory · searching “{query}”…"));
+                        return Some(Cmd::SearchMemory(query));
+                    }
+                }
+            }
+            SlashCommand::ToggleMouse => self.toggle_mouse(),
+            SlashCommand::Copy(scope) => self.copy_chat(scope),
+            SlashCommand::Async(setting) => {
+                let on = setting.unwrap_or(!self.snapshot.async_mode);
+                self.runtime.set_async_mode(on);
+                self.refresh_snapshot();
+                self.set_status(if on {
+                    "async ON — delegations detach; chat stays free while sub-agents work"
+                } else {
+                    "async OFF — delegations await their results before the reply"
+                });
+            }
+            SlashCommand::BadUsage(usage) => self.set_status(usage),
+            SlashCommand::Unknown(input) => self.set_status(format!("Unknown command: {input}")),
+        }
+        None
     }
 
     // --- settings -----------------------------------------------------------

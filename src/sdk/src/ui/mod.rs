@@ -7,6 +7,7 @@
 
 pub mod agents;
 pub mod chat_store;
+pub mod command;
 pub mod events;
 pub mod onboarding;
 pub mod stream;

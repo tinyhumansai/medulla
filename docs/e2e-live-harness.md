@@ -143,10 +143,10 @@ drift is visible in failures.
 `coordination_owner` prints its terminal frame as one JSON line
 (kind/text/usage/frameKinds/ownerId); assertions are tiny `python3 -c` / heredoc
 scripts over that JSON, not brittle greps over prose logs. It also supports
-`--kind capabilities`, `--provider`, and per-run `--task-id`/`--timeout-ms`, and it
-*never* exits nonzero for protocol-level errors — error-path scenarios read the
-Error frame from the JSON instead (see `run_owner`, which captures rc + JSON without
-failing the suite).
+`--kind capabilities`, `--provider`, and per-run `--task-id`/`--timeout-ms`. The
+binary itself exits 1 on a terminal Error frame or timeout; it is the `run_owner`
+shell helper that captures the rc + JSON without failing the suite, so error-path
+scenarios can assert on the Error frame instead of dying on the nonzero exit.
 
 ### 8. Scenario suites share one booted stack when isolation allows
 

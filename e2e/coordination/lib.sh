@@ -202,8 +202,12 @@ assert_bidirectional_delivery() {
   owner_id="$(grep -Eo '"ownerId"[[:space:]]*:[[:space:]]*"[^"]+"' "$json" \
     | sed -E 's/.*"ownerId"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$owner_id" ] || fail "could not read ownerId from $json"
-  to_worker="$(curl -s "$SIGNAL_URL/debug/stored?to=$WORKER_ID" | "$PYTHON_BIN" -c 'import sys,json;print(json.load(sys.stdin)["count"])')"
-  to_owner="$(curl -s "$SIGNAL_URL/debug/stored?to=$owner_id"  | "$PYTHON_BIN" -c 'import sys,json;print(json.load(sys.stdin)["count"])')"
+  # `|| fail` so a dead server / malformed JSON goes through dump_diagnostics
+  # instead of dying on a raw errexit pipeline failure.
+  to_worker="$(curl -s "$SIGNAL_URL/debug/stored?to=$WORKER_ID" | "$PYTHON_BIN" -c 'import sys,json;print(json.load(sys.stdin)["count"])')" \
+    || fail "could not read stored-envelope count for the worker from $SIGNAL_URL"
+  to_owner="$(curl -s "$SIGNAL_URL/debug/stored?to=$owner_id" | "$PYTHON_BIN" -c 'import sys,json;print(json.load(sys.stdin)["count"])')" \
+    || fail "could not read stored-envelope count for the owner from $SIGNAL_URL"
   [ "${to_worker:-0}" -ge 1 ] || fail "no envelopes stored for the worker (owner→worker leg)"
   [ "${to_owner:-0}" -ge 1 ]  || fail "no envelopes stored for the owner (worker→owner leg)"
   log "  envelopes: owner→worker=$to_worker  worker→owner=$to_owner"

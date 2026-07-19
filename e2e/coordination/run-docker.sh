@@ -64,8 +64,8 @@ if [ "$rc" -eq 0 ]; then
   fi
 else
   log "FAIL (container exited $rc)"
-  log "full logs:   docker logs $CONTAINER"
   if [ "${E2E_KEEP:-0}" = "1" ]; then
+    log "full logs:   docker logs $CONTAINER"
     log "container '$CONTAINER' kept (E2E_KEEP=1). Re-run with a shell:"
     log "  docker run --rm -it --entrypoint bash $IMAGE"
   else

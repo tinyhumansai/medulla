@@ -23,7 +23,7 @@ pub enum SessionAgentKind {
 impl SessionAgentKind {
     /// The lowercase agent name used as the resume-command binary and in the
     /// dedupe key.
-    pub(super) fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             SessionAgentKind::Claude => "claude",
             SessionAgentKind::Codex => "codex",
@@ -50,13 +50,13 @@ pub struct RecentSession {
 }
 
 /// A session transcript file discovered on disk, before its head is parsed.
-pub(super) struct RawSessionFile {
+pub(crate) struct RawSessionFile {
     /// The agent that owns the file.
-    pub(super) agent: SessionAgentKind,
+    pub(crate) agent: SessionAgentKind,
     /// Absolute path to the JSONL file.
-    pub(super) path: PathBuf,
+    pub(crate) path: PathBuf,
     /// File modification time in epoch ms, used for recency ranking.
-    pub(super) mtime_ms: i64,
+    pub(crate) mtime_ms: i64,
 }
 
 /// The head-window summary of a session file: its id, recorded cwd, and label.

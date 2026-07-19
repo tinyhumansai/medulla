@@ -48,6 +48,20 @@ pub struct MockConfig {
     /// (`<created_session_id>-<n>`) so forked/new threads don't collide on one
     /// session id (which would make the SSE fold route ambiguously).
     pub unique_sessions: bool,
+    /// Response body for `GET /agent-integrations/history-rewards/status`.
+    pub history_status: Value,
+    /// Response body for `POST /agent-integrations/history-rewards/claim`.
+    pub history_claim: Value,
+    /// When false, history uploads answer 400 (e.g. the reward already settled).
+    pub history_upload_ok: bool,
+    /// Response body for the feedback board endpoints (`/feedback...`).
+    pub feedback_page: Value,
+    /// Response body for a single feedback item and its comments.
+    pub feedback_detail: Value,
+    /// Response body for vote mutations.
+    pub feedback_mutation: Value,
+    /// Response body for `POST /feedback/ingest` (moderated submission).
+    pub feedback_submission: Value,
 }
 
 impl Default for MockConfig {
@@ -59,6 +73,89 @@ impl Default for MockConfig {
             messages_replay: json!([]),
             session_event_seq: 0,
             unique_sessions: false,
+            history_status: json!({
+                "claimed": false,
+                "hasUploads": false,
+                "awardedUsd": 0,
+                "sessionCount": 0,
+                "cumulativeTokens": 0,
+                "activeDays": 0,
+                "agents": [],
+                "maxRewardUsd": 25,
+            }),
+            history_claim: json!({
+                "claimed": true,
+                "hasUploads": true,
+                "awardedUsd": 5,
+                "tier": "Rising",
+                "sessionCount": 2,
+                "cumulativeTokens": 209_226,
+                "activeDays": 5,
+                "agents": ["claude", "codex"],
+                "maxRewardUsd": 25,
+                "breakdown": {
+                    "tokensUsd": 2,
+                    "activeDaysUsd": 0,
+                    "sessionsUsd": 0,
+                    "multiAgentUsd": 3,
+                },
+                "alreadyClaimed": false,
+            }),
+            history_upload_ok: true,
+            feedback_page: json!({
+                "items": [{
+                    "id": "f1",
+                    "type": "feature",
+                    "title": "Dark mode",
+                    "body": "please",
+                    "status": "open",
+                    "createdByName": "ada",
+                    "upvoteCount": 3,
+                    "downvoteCount": 1,
+                    "score": 2,
+                    "commentCount": 0,
+                    "myVote": 0,
+                    "createdAt": "2026-01-05T10:00:00Z",
+                }],
+                "total": 1,
+            }),
+            feedback_detail: json!({
+                "feedback": {
+                    "id": "f1",
+                    "type": "feature",
+                    "title": "Dark mode",
+                    "body": "please",
+                    "status": "open",
+                    "createdByName": "ada",
+                    "upvoteCount": 3,
+                    "downvoteCount": 1,
+                    "score": 2,
+                    "commentCount": 1,
+                    "myVote": 0,
+                    "createdAt": "2026-01-05T10:00:00Z",
+                },
+                "comments": [{
+                    "id": "c1",
+                    "userName": "bob",
+                    "body": "yes please",
+                    "createdAt": "2026-01-05T11:00:00Z",
+                }],
+            }),
+            feedback_mutation: json!({
+                "id": "f1",
+                "type": "feature",
+                "title": "Dark mode",
+                "body": "please",
+                "status": "open",
+                "createdByName": "ada",
+                "upvoteCount": 4,
+                "downvoteCount": 1,
+                "score": 3,
+                "commentCount": 0,
+                "myVote": 1,
+                "createdAt": "2026-01-05T10:00:00Z",
+            }),
+            feedback_submission: json!({ "accepted": true, "reason": "" }),
         }
     }
 }
@@ -259,6 +356,47 @@ async fn handle_conn(mut sock: TcpStream, state: Arc<MockState>) -> std::io::Res
                 "eventSeq": config.session_event_seq,
             }),
         )
+    } else if route_path == "/agent-integrations/history-rewards/uploads" && method == "POST" {
+        if config.history_upload_ok {
+            (
+                "200 OK",
+                json!({
+                    "sessionCount": 1,
+                    "cumulativeTokens": 187_126,
+                    "activeDays": 3,
+                    "agents": ["claude"],
+                }),
+            )
+        } else {
+            return respond_raw(
+                &mut sock,
+                "400 Bad Request",
+                r#"{"success":false,"error":"History reward has already been claimed","errorCode":"BAD_REQUEST"}"#,
+            )
+            .await;
+        }
+    } else if route_path == "/agent-integrations/history-rewards/claim" && method == "POST" {
+        ("200 OK", config.history_claim.clone())
+    } else if route_path == "/agent-integrations/history-rewards/status" && method == "GET" {
+        ("200 OK", config.history_status.clone())
+    } else if route_path == "/feedback" && method == "GET" {
+        ("200 OK", config.feedback_page.clone())
+    } else if route_path == "/feedback/ingest" && method == "POST" {
+        ("200 OK", config.feedback_submission.clone())
+    } else if route_path.ends_with("/vote") && method == "POST" {
+        ("200 OK", config.feedback_mutation.clone())
+    } else if route_path.ends_with("/comments") && method == "POST" {
+        (
+            "200 OK",
+            json!({
+                "id": "c2",
+                "userName": "ada",
+                "body": "posted",
+                "createdAt": "2026-01-05T12:00:00Z",
+            }),
+        )
+    } else if route_path.starts_with("/feedback/") && method == "GET" {
+        ("200 OK", config.feedback_detail.clone())
     } else {
         ("404 Not Found", json!({ "error": "not found" }))
     };

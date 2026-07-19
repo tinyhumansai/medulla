@@ -25,7 +25,7 @@ pub fn codex_sessions_dir(env: &HashMap<String, String>) -> PathBuf {
 
 /// Enumerate every session file under `dir` for `agent`, recursing into
 /// subdirectories. An absent directory yields an empty list.
-pub(super) fn collect_session_files(agent: SessionAgentKind, dir: &Path) -> Vec<RawSessionFile> {
+pub(crate) fn collect_session_files(agent: SessionAgentKind, dir: &Path) -> Vec<RawSessionFile> {
     if !dir.exists() {
         return Vec::new();
     }

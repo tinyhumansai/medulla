@@ -8,6 +8,7 @@ pub mod client;
 pub mod clock;
 pub mod config;
 pub mod daemon;
+pub mod history_upload;
 pub mod home;
 pub mod init;
 pub mod memory;

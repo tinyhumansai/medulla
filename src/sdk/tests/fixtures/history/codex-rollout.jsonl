@@ -1,0 +1,5 @@
+{"timestamp":"2026-01-08T14:00:00.000Z","type":"session_meta","payload":{"id":"019abc","timestamp":"2026-01-08T14:00:00.000Z","cwd":"/Users/dev/work/parser","originator":"codex_cli_rs","cli_version":"0.20.0","instructions":null}}
+{"timestamp":"2026-01-08T14:00:01.000Z","type":"turn_context","payload":{"cwd":"/Users/dev/work/parser","approval_policy":"on-request","model":"gpt-5","effort":"medium"}}
+{"timestamp":"2026-01-08T14:05:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":9000,"cached_input_tokens":6000,"output_tokens":400,"reasoning_output_tokens":250,"total_tokens":9400},"model_context_window":272000}}}
+{"timestamp":"2026-01-09T09:14:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"deploying with Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345"}}
+{"timestamp":"2026-01-09T09:15:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":21000,"cached_input_tokens":15000,"output_tokens":1100,"reasoning_output_tokens":600,"total_tokens":22100},"model_context_window":272000}}}

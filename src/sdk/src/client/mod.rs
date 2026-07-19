@@ -1,17 +1,23 @@
 //! HTTP/SSE client for the Medulla orchestration backend.
 //!
 //! Surfaces: auth (`/auth`), durable sessions (`/medulla/v1`), SSE event
-//! streaming, and one-shot orchestration (`/orchestration/v1`).
+//! streaming, one-shot orchestration (`/orchestration/v1`), and the public
+//! feedback board (`/feedback`, in [`feedback`]).
 //!
 //! Every response is wrapped in a `{ "success": true, "data": ... }` envelope;
 //! errors arrive as `{ "success": false, "error": ..., "errorCode": ... }` and
 //! are surfaced as [`ClientError::Api`], preserving the `errorCode`.
 
 pub mod error;
+pub mod feedback;
 pub mod sse;
 pub mod types;
 
 pub use error::{ClientError, Result};
+pub use feedback::{
+    FeedbackComment, FeedbackDetail, FeedbackGithub, FeedbackItem, FeedbackPage, FeedbackQuery,
+    FeedbackSort, FeedbackStatus, FeedbackSubmission, FeedbackType,
+};
 pub use types::*;
 
 use futures::stream::Stream;
@@ -385,8 +391,10 @@ pub(crate) fn unwrap_envelope<T: DeserializeOwned>(status: u16, body: &[u8]) -> 
     }
 }
 
-/// Minimal percent-encoding for the JWT query parameter.
-fn urlencode(s: &str) -> String {
+/// Minimal percent-encoding for the JWT query parameter and for untrusted path
+/// segments (ids interpolated into a URL). Encodes everything outside the
+/// unreserved set, so a `/` in an id cannot escape its segment.
+pub(crate) fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {

@@ -1,6 +1,38 @@
-# Medulla v1: The First Orchestrator Model
+---
+description: >-
+  Medulla is the first model of its kind: not a chat model, not another agent
+  harness, but an orchestrator model, purpose-built to command fleets of agent
+  harnesses like Claude Code, Codex, etc.
+cover: .gitbook/assets/screen.png
+coverY: 356.141681768695
+coverHeight: 417
+layout:
+  width: default
+  cover:
+    visible: true
+    size: full
+    mask: none
+  title:
+    visible: true
+  description:
+    visible: true
+  tableOfContents:
+    visible: true
+  outline:
+    visible: true
+  pagination:
+    visible: true
+  metadata:
+    visible: true
+  tags:
+    visible: true
+  actions:
+    visible: true
+---
 
-Medulla v1 is officially announced today. It is the first model of its kind: not a chat model, not another agent harness, but an **orchestrator model**, purpose-built to command fleets of agent harnesses like Claude Code, Codex, and their peers. Medulla v1 brings three capabilities together for the first time:
+# Medulla - The First Orchestrator Model
+
+Medulla v1 brings three capabilities together for the first time:
 
 1. **A 10-million-token effective context**, handled efficiently through RLM (Recursive Language Model) techniques, so accuracy holds at a scale where single-context models collapse.
 2. **Live streaming input from every running harness**, so fleet awareness is continuous rather than post-hoc.
@@ -14,12 +46,12 @@ Medulla is built around one principle: get the right answer. When a worker fails
 
 ## Where to Go Next
 
-- [Why an Orchestrator Model](why-an-orchestrator-model.md) — the failure mode of chat-first orchestration, and what an orchestrator model does differently.
-- [RLM: Context Scaling Without Collapse](rlm-context-scaling.md) — how Medulla handles 10 million tokens without losing accuracy.
-- [Benchmarks](benchmarks.md) — head-to-head results with full tables.
-- [Real-World Fleets](real-world-fleets.md) — the runs behind the numbers.
-- [Open Benchmarks, Open SDKs](open-benchmarks-open-sdks.md) — reproduce every number yourself.
-- [Pricing and Availability](pricing-and-availability.md) — pricing, early alpha, and how to request access.
+* [Why an Orchestrator Model](why-an-orchestrator-model.md) — the failure mode of chat-first orchestration, and what an orchestrator model does differently.
+* [RLM: Context Scaling Without Collapse](rlm-context-scaling.md) — how Medulla handles 10 million tokens without losing accuracy.
+* [Benchmarks](benchmarks.md) — head-to-head results with full tables.
+* [Real-World Fleets](real-world-fleets.md) — the runs behind the numbers.
+* [Open Benchmarks, Open SDKs](open-benchmarks-open-sdks.md) — reproduce every number yourself.
+* [Pricing and Availability](pricing-and-availability.md) — pricing, early alpha, and how to request access.
 
 ## What Comes Next
 

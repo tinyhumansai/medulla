@@ -150,6 +150,9 @@ pub struct MockRuntime {
     calls: Arc<Mutex<Vec<String>>>,
     /// Scripted persona-memory surface (test seam). `None` = no memory service.
     pub(super) memory: Arc<Mutex<Option<ScriptedMemory>>>,
+    /// Scripted feedback board, mutated in place by votes and comments so the
+    /// offline demo's controls behave like the real thing.
+    pub(super) board: Arc<Mutex<super::feedback::MockBoard>>,
 }
 
 /// A scripted stand-in for a `MemoryService`, driven by tests via the
@@ -173,6 +176,7 @@ impl MockRuntime {
             tx,
             calls: Arc::new(Mutex::new(Vec::new())),
             memory: Arc::new(Mutex::new(None)),
+            board: super::feedback::demo_board(),
         }
     }
 

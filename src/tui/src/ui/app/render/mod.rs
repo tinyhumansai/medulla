@@ -18,6 +18,7 @@ use super::types::{App, TABS};
 
 mod agents;
 mod chat;
+mod feedback;
 mod memory;
 mod overview;
 mod prompt;
@@ -302,6 +303,7 @@ impl App {
             "Trace" => self.draw_trace(f, area),
             "Context" => self.draw_context(f, area),
             "Memory" => self.draw_memory(f, area),
+            "Feedback" => self.draw_feedback(f, area),
             "Settings" => self.draw_settings(f, area),
             _ => self.draw_overview(f, area),
         }

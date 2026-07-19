@@ -10,7 +10,10 @@ use anyhow::anyhow;
 use futures::future::BoxFuture;
 use tokio::sync::broadcast;
 
-use crate::client::{MedullaClient, Role};
+use crate::client::{
+    FeedbackComment, FeedbackDetail, FeedbackItem, FeedbackPage, FeedbackQuery, FeedbackSubmission,
+    FeedbackType, MedullaClient, Role,
+};
 use crate::runtime::{
     AgentDescriptor, AgentPresence, ContextItem, PeerSession, Runtime, RuntimeSnapshot,
     TinyplaceIdentity,
@@ -59,6 +62,51 @@ impl Runtime for BackendRuntime {
     fn team_usage(&self) -> BoxFuture<'static, anyhow::Result<Option<serde_json::Value>>> {
         let client = self.client.clone();
         Box::pin(async move { Ok(Some(client.team_usage().await?)) })
+    }
+
+    // --- feedback board ---------------------------------------------------
+    // Straight pass-through to the client; the board is entirely server-state,
+    // so nothing is cached in `State`.
+
+    fn list_feedback(
+        &self,
+        query: FeedbackQuery,
+    ) -> BoxFuture<'static, anyhow::Result<Option<FeedbackPage>>> {
+        let client = self.client.clone();
+        Box::pin(async move { Ok(Some(client.list_feedback(&query).await?)) })
+    }
+
+    fn feedback_detail(&self, id: String) -> BoxFuture<'static, anyhow::Result<FeedbackDetail>> {
+        let client = self.client.clone();
+        Box::pin(async move { Ok(client.get_feedback(&id).await?) })
+    }
+
+    fn vote_feedback(
+        &self,
+        id: String,
+        value: i8,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackItem>> {
+        let client = self.client.clone();
+        Box::pin(async move { Ok(client.vote_feedback(&id, value).await?) })
+    }
+
+    fn comment_feedback(
+        &self,
+        id: String,
+        body: String,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackComment>> {
+        let client = self.client.clone();
+        Box::pin(async move { Ok(client.comment_feedback(&id, &body).await?) })
+    }
+
+    fn submit_feedback(
+        &self,
+        kind: FeedbackType,
+        title: String,
+        body: String,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackSubmission>> {
+        let client = self.client.clone();
+        Box::pin(async move { Ok(client.submit_feedback(kind, &title, &body).await?) })
     }
 
     fn snapshot(&self) -> RuntimeSnapshot {

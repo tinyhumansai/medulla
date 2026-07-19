@@ -31,7 +31,7 @@ pub mod status;
 pub use tinyplace;
 
 pub use config::{
-    config_path, load_config, parse_config, resolve_endpoint, write_config, TinyPlaceConfig,
+    config_path, load_config, parse_config, resolve_endpoint, write_config, TinyplaceFileConfig,
     DEFAULT_ENDPOINT,
 };
 pub use consumer::{

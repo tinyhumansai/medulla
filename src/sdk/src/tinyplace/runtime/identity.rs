@@ -6,7 +6,7 @@ use std::path::Path;
 
 use ::tinyplace::LocalSigner;
 
-use super::super::config::{load_config, write_config, TinyPlaceConfig};
+use super::super::config::{load_config, write_config, TinyplaceFileConfig};
 use super::types::{RuntimeError, RuntimeResult};
 
 /// Load or create the agent identity.
@@ -19,7 +19,7 @@ use super::types::{RuntimeError, RuntimeResult};
 pub fn load_or_create_identity(
     config_path: &Path,
     env: &HashMap<String, String>,
-) -> RuntimeResult<(LocalSigner, TinyPlaceConfig)> {
+) -> RuntimeResult<(LocalSigner, TinyplaceFileConfig)> {
     let mut config = load_config(config_path);
 
     let from_env = env

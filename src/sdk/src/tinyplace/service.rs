@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 
 use crate::tinyplace::{
     load_or_create_identity, resolve_endpoint, spawn_contact_auto_accepter,
-    spawn_presence_heartbeat, TinyPlaceConfig,
+    spawn_presence_heartbeat, TinyplaceFileConfig,
 };
 use ::tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
@@ -197,7 +197,7 @@ fn roster_from_peers(config: &TinyplaceConfig) -> Vec<AgentDescriptor> {
 /// section as the final default rather than the hard-coded endpoint).
 fn resolve_endpoint_with_config(
     env: &HashMap<String, String>,
-    tp_config: &TinyPlaceConfig,
+    tp_config: &TinyplaceFileConfig,
     tui_base_url: &str,
 ) -> String {
     // Env + config-file endpoint take precedence via the shared resolver; when
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn endpoint_prefers_env_override_over_tui_base_url() {
-        let tp = TinyPlaceConfig::default();
+        let tp = TinyplaceFileConfig::default();
         // An env override resolves to something other than the DEFAULT_ENDPOINT,
         // so it wins over the TUI base_url.
         let e = env(&[("TINYPLACE_ENDPOINT", "https://override")]);
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn endpoint_falls_back_to_tui_base_url_then_default() {
-        let tp = TinyPlaceConfig::default();
+        let tp = TinyplaceFileConfig::default();
         // No env/config endpoint → resolver returns DEFAULT_ENDPOINT, so the
         // explicit TUI base_url is used.
         assert_eq!(

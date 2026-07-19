@@ -11,13 +11,15 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Fallback API endpoint when none is configured.
-pub const DEFAULT_ENDPOINT: &str = "https://api.tiny.place";
+/// Fallback API endpoint when none is configured. Aliases the single
+/// source of truth in [`crate::config`] so the prod tiny.place URL is not
+/// duplicated here.
+pub const DEFAULT_ENDPOINT: &str = crate::config::PROD_TINYPLACE_BASE_URL;
 
 /// The persisted CLI config. JSON field names match the TypeScript SDK
 /// (camelCase for the multi-word keys).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct TinyPlaceConfig {
+pub struct TinyplaceFileConfig {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub endpoint: Option<String>,
     #[serde(rename = "secretKey", skip_serializing_if = "Option::is_none", default)]
@@ -41,26 +43,26 @@ pub fn config_path(env: &HashMap<String, String>, home_dir: &Path) -> PathBuf {
     }
 }
 
-/// Parse config JSON into a [`TinyPlaceConfig`]. A non-object or a malformed
+/// Parse config JSON into a [`TinyplaceFileConfig`]. A non-object or a malformed
 /// document yields an empty config rather than an error, keeping only the keys
 /// this crate recognizes.
-pub fn parse_config(contents: &str) -> TinyPlaceConfig {
+pub fn parse_config(contents: &str) -> TinyplaceFileConfig {
     let value: serde_json::Value = match serde_json::from_str(contents) {
         Ok(value) => value,
-        Err(_) => return TinyPlaceConfig::default(),
+        Err(_) => return TinyplaceFileConfig::default(),
     };
     if !value.is_object() {
-        return TinyPlaceConfig::default();
+        return TinyplaceFileConfig::default();
     }
     serde_json::from_value(value).unwrap_or_default()
 }
 
 /// Load and parse the config at `path`. A missing file (or any read error) is
 /// treated as an empty config; this never panics.
-pub fn load_config(path: &Path) -> TinyPlaceConfig {
+pub fn load_config(path: &Path) -> TinyplaceFileConfig {
     match std::fs::read_to_string(path) {
         Ok(contents) => parse_config(&contents),
-        Err(_) => TinyPlaceConfig::default(),
+        Err(_) => TinyplaceFileConfig::default(),
     }
 }
 
@@ -68,7 +70,7 @@ pub fn load_config(path: &Path) -> TinyPlaceConfig {
 /// file, then rename over the target) and with `0600` permissions on Unix. The
 /// parent directory is created if missing. Mirrors the tinyplace CLI config
 /// model so the file stays interoperable with the SDK/CLI.
-pub fn write_config(path: &Path, config: &TinyPlaceConfig) -> io::Result<()> {
+pub fn write_config(path: &Path, config: &TinyplaceFileConfig) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -99,23 +101,20 @@ fn set_owner_only(_path: &Path) -> io::Result<()> {
 /// `NEXT_PUBLIC_API_URL` > `config.endpoint` > the staging/prod default. The
 /// default is [`DEFAULT_ENDPOINT`] (prod), or the staging tiny.place URL when
 /// `MEDULLA_STAGING` is truthy.
-pub fn resolve_endpoint(env: &HashMap<String, String>, config: &TinyPlaceConfig) -> String {
+pub fn resolve_endpoint(env: &HashMap<String, String>, config: &TinyplaceFileConfig) -> String {
     for key in [
         "TINYPLACE_ENDPOINT",
         "TINYPLACE_API_URL",
         "NEXT_PUBLIC_API_URL",
     ] {
-        if let Some(value) = env.get(key) {
-            if !value.is_empty() {
-                return value.clone();
-            }
+        if let Some(value) = env.get(key).map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            return value.to_string();
         }
     }
-    config
-        .endpoint
-        .clone()
-        .filter(|e| !e.is_empty())
-        .unwrap_or_else(|| crate::config::default_tinyplace_base_url(env))
+    // Delegate the `config.endpoint` → staging/prod-default tail to the shared
+    // resolver so the "explicit value else default" logic (and its trim policy)
+    // lives in exactly one place.
+    crate::config::resolve_tinyplace_base_url(env, config.endpoint.as_deref())
 }
 
 #[cfg(test)]
@@ -124,7 +123,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use crate::tinyplace::{
-        config_path, load_config, parse_config, resolve_endpoint, TinyPlaceConfig, DEFAULT_ENDPOINT,
+        config_path, load_config, parse_config, resolve_endpoint, TinyplaceFileConfig,
+        DEFAULT_ENDPOINT,
     };
 
     fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -179,16 +179,16 @@ mod tests {
 
     #[test]
     fn parse_config_tolerates_junk() {
-        assert_eq!(parse_config("not json"), TinyPlaceConfig::default());
-        assert_eq!(parse_config("[1,2,3]"), TinyPlaceConfig::default());
-        assert_eq!(parse_config("42"), TinyPlaceConfig::default());
-        assert_eq!(parse_config("{}"), TinyPlaceConfig::default());
+        assert_eq!(parse_config("not json"), TinyplaceFileConfig::default());
+        assert_eq!(parse_config("[1,2,3]"), TinyplaceFileConfig::default());
+        assert_eq!(parse_config("42"), TinyplaceFileConfig::default());
+        assert_eq!(parse_config("{}"), TinyplaceFileConfig::default());
     }
 
     #[test]
     fn load_config_missing_file_is_empty() {
         let config = load_config(Path::new("/no/such/tinyplace/config.json"));
-        assert_eq!(config, TinyPlaceConfig::default());
+        assert_eq!(config, TinyplaceFileConfig::default());
     }
 
     #[test]
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn round_trips_config_omitting_empty_fields() {
-        let config = TinyPlaceConfig {
+        let config = TinyplaceFileConfig {
             endpoint: Some("https://x".to_string()),
             secret_key: None,
             siws_token: None,
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn endpoint_resolution_order() {
-        let config = TinyPlaceConfig {
+        let config = TinyplaceFileConfig {
             endpoint: Some("https://config-endpoint".to_string()),
             ..Default::default()
         };
@@ -252,14 +252,14 @@ mod tests {
 
         // Finally the default.
         assert_eq!(
-            resolve_endpoint(&e, &TinyPlaceConfig::default()),
+            resolve_endpoint(&e, &TinyplaceFileConfig::default()),
             DEFAULT_ENDPOINT
         );
     }
 
     #[test]
     fn empty_env_values_are_skipped() {
-        let config = TinyPlaceConfig::default();
+        let config = TinyplaceFileConfig::default();
         let e = env(&[
             ("TINYPLACE_ENDPOINT", ""),
             ("TINYPLACE_API_URL", "https://real"),

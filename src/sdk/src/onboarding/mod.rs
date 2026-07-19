@@ -27,7 +27,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::tinyplace::{
-    config_path, load_config, load_or_create_identity, resolve_endpoint, TinyPlaceConfig,
+    config_path, load_config, load_or_create_identity, resolve_endpoint, TinyplaceFileConfig,
 };
 use crate::ui::onboarding::{OnboardingCmd, OnboardingEvent, OnboardingOutcome, OnboardingScreen};
 use crate::worker_profile::{default_worker_name, is_registered, profile_path, WorkerProfile};
@@ -260,7 +260,7 @@ async fn announce(
     config_file: &Path,
     home: &Path,
     signer: &Arc<LocalSigner>,
-    tp_config: &TinyPlaceConfig,
+    tp_config: &TinyplaceFileConfig,
     profile: &WorkerProfile,
 ) {
     let Some(owner) = profile.owner.as_deref() else {

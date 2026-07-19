@@ -19,12 +19,9 @@ pub const STAGING_TINYPLACE_BASE_URL: &str = "https://staging-api.tiny.place";
 /// Whether `MEDULLA_STAGING` selects the staging defaults. Truthy is `"1"` or
 /// `"true"` (case-insensitive, trimmed).
 pub fn is_staging(env: &HashMap<String, String>) -> bool {
-    matches!(
-        env.get("MEDULLA_STAGING")
-            .map(|v| v.trim().to_ascii_lowercase())
-            .as_deref(),
-        Some("1") | Some("true")
-    )
+    env.get("MEDULLA_STAGING")
+        .map(|v| crate::home::is_truthy(v))
+        .unwrap_or(false)
 }
 
 /// The default backend base URL for this environment (staging vs prod).

@@ -106,6 +106,7 @@ fn frame(kind: TaskFrameKind, task_id: &str, text: &str, correlation: Option<&st
         correlation_id: correlation.map(str::to_string),
         harness: None,
         provider: None,
+        model: None,
     }
 }
 
@@ -605,4 +606,56 @@ async fn idle_drains_all_dispatched_messages() {
             "reply for msg{i}"
         );
     }
+}
+
+/// A `run_task` that records each dispatch's requested model and returns at once
+/// (no real spawn), so a test can assert which model the daemon resolved.
+fn recording_model_run_task() -> (RunTaskFn, Arc<StdMutex<Vec<Option<String>>>>) {
+    let seen: Arc<StdMutex<Vec<Option<String>>>> = Arc::new(StdMutex::new(Vec::new()));
+    let sink = seen.clone();
+    let run: RunTaskFn = Arc::new(move |opts: RunTaskOptions| {
+        sink.lock().unwrap().push(opts.model.clone());
+        Box::pin(async move {
+            Ok(RunTaskResult {
+                provider: opts.provider,
+                reply: "ok".to_string(),
+                events: 0,
+                usage: None,
+            })
+        })
+    });
+    (run, seen)
+}
+
+// A per-task `model` hint on the frame overrides the daemon's configured default;
+// a task frame without one falls back to the config model.
+#[tokio::test]
+async fn per_task_model_overrides_config_default() {
+    let (send, _recorded) = recording_send();
+    let (run_task, seen) = recording_model_run_task();
+    let mut cfg = config(HarnessProvider::Claude, ".".into(), HashMap::new());
+    cfg.model = Some("config/default".to_string());
+    let runtime = DaemonRuntime::new(cfg, run_task, send);
+
+    let mut override_frame = frame(TaskFrameKind::Task, "m-1", "do it", None);
+    override_frame.model = Some("task/override".to_string());
+    runtime.handle_message("peer".into(), String::new(), Some(override_frame));
+    runtime.idle().await;
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(TaskFrameKind::Task, "m-2", "do it too", None)),
+    );
+    runtime.idle().await;
+
+    let models = seen.lock().unwrap().clone();
+    assert_eq!(
+        models,
+        vec![
+            Some("task/override".to_string()),
+            Some("config/default".to_string()),
+        ],
+        "frame model wins over config; absent falls back to config"
+    );
 }

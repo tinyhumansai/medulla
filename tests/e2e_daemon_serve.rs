@@ -18,15 +18,16 @@ mod support;
 #[path = "support/mock_signal_server.rs"]
 mod mock_signal_server;
 
-use std::sync::{Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard};
 
 use medulla::daemon::run_daemon;
 use medulla::tinyplace_support::tinyplace::{LocalSigner, Signer};
 
 use mock_signal_server::MockSignalServer;
 
-/// Serializes process-env mutation across the tests in this binary.
-static ENV_LOCK: Mutex<()> = Mutex::new(());
+/// Serializes process-env mutation across the tests in this binary. Async-aware
+/// because every holder crosses awaits while the daemon runs.
+static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
 /// A temp dir removed on drop.
 struct TempDir {
@@ -81,15 +82,15 @@ fn clear_touched() {
 
 /// Set a clean identity + endpoint env for a daemon run and return the guard that
 /// keeps the process-env mutation exclusive.
-fn lock_env() -> MutexGuard<'static, ()> {
-    let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+async fn lock_env() -> MutexGuard<'static, ()> {
+    let guard = ENV_LOCK.lock().await;
     clear_touched();
     guard
 }
 
 #[tokio::test]
 async fn once_mode_serves_a_drain_cycle_and_exits() {
-    let _guard = lock_env();
+    let _guard = lock_env().await;
     let server = MockSignalServer::start().await;
     let home = TempDir::new("home");
     let cfg = TempDir::new("cfg");
@@ -126,7 +127,7 @@ async fn once_mode_serves_a_drain_cycle_and_exits() {
 
 #[tokio::test]
 async fn once_mode_onboards_handle_and_owner() {
-    let _guard = lock_env();
+    let _guard = lock_env().await;
     let server = MockSignalServer::start().await;
     let home = TempDir::new("home-onb");
     let cfg = TempDir::new("cfg-onb");
@@ -174,7 +175,7 @@ async fn once_mode_onboards_handle_and_owner() {
 
 #[tokio::test]
 async fn unknown_provider_flag_is_rejected() {
-    let _guard = lock_env();
+    let _guard = lock_env().await;
     let args: Vec<String> = ["--providers", "not-a-provider"]
         .iter()
         .map(|s| s.to_string())
@@ -186,7 +187,7 @@ async fn unknown_provider_flag_is_rejected() {
 
 #[tokio::test]
 async fn no_detected_providers_bails() {
-    let _guard = lock_env();
+    let _guard = lock_env().await;
     // Point every provider bin at a nonexistent path so none are detected.
     std::env::set_var("TINYPLACE_CLAUDE_BIN", "/no/such/claude");
     std::env::set_var("TINYPLACE_CODEX_BIN", "/no/such/codex");
@@ -201,7 +202,7 @@ async fn no_detected_providers_bails() {
 
 #[tokio::test]
 async fn default_provider_must_be_detected() {
-    let _guard = lock_env();
+    let _guard = lock_env().await;
     // Only codex is available, but the operator asks for claude as default.
     std::env::set_var("TINYPLACE_CODEX_BIN", "/bin/echo");
     let args: Vec<String> = ["--providers", "codex", "--default-provider", "claude"]

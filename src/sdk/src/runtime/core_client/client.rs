@@ -1,17 +1,13 @@
-//! `CoreClient` — an async NDJSON RPC client over the core-js Unix socket
-//! (§1–§3 of docs/unified-app/04-protocol-contract.md).
+//! The connected [`CoreClient`] and its NDJSON transport: connect/split the Unix
+//! socket, correlate `{id, ok|error}` responses to awaiting `request`s, and drive
+//! the background read loop that forwards unsolicited `{"t":"event"}` frames to the
+//! events channel (§1–§3 of docs/unified-app/04-protocol-contract.md).
 //!
-//! It owns one `tokio::net::UnixStream`, split into a write half (behind a mutex,
-//! used by `request`) and a read half driven by a background task. That task:
-//!
-//!   - correlates each `{id, ok|error}` response with the `request` that is awaiting
-//!     it (via a per-id `oneshot`), and
-//!   - forwards every unsolicited `{"t":"event", ...}` frame to the events channel
-//!     handed back from [`connect`], so the runtime can fold the stream (§3.2).
-//!
-//! Frames are newline-delimited JSON with a 1 MiB cap (§1.1); an over-size frame is a
-//! protocol error, never a truncation. `serde_json` handles (de)serialization — no
-//! hand-rolled JSON, unlike the std-only scaffold this replaces.
+//! The client owns one `tokio::net::UnixStream`, split into a write half (behind a
+//! mutex, used by [`CoreClient::request`]) and a read half driven by
+//! [`read_loop`]. Frames are newline-delimited JSON with a 1 MiB cap
+//! ([`MAX_FRAME_BYTES`], §1.1); an over-size frame is a protocol error, never a
+//! truncation. `serde_json` handles (de)serialization — no hand-rolled JSON.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,79 +19,10 @@ use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::UnixStream;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
-/// The wire protocol version this client speaks (§2). Must equal core-js's
-/// `MEDULLA_PROTOCOL_VERSION`.
-pub const PROTOCOL_VERSION: &str = "1";
+use super::types::{CallError, CoreEvent, RpcError, MAX_FRAME_BYTES, PROTOCOL_VERSION};
 
-/// 1 MiB frame cap (§1.1). An over-size frame is a protocol error.
-pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
-
-/// One decoded event-stream frame (§3.2): the envelope plus the raw `event` body.
-#[derive(Debug, Clone)]
-pub struct CoreEvent {
-    pub seq: u64,
-    pub at: i64,
-    pub thread_id: String,
-    pub cycle_id: String,
-    /// The event body `{kind, ...}` — deserialized into a `TuiEvent` by the runtime.
-    pub event: Value,
-}
-
-impl CoreEvent {
-    pub fn kind(&self) -> &str {
-        self.event.get("kind").and_then(Value::as_str).unwrap_or("")
-    }
-}
-
-/// An RPC error body (§5.1/§5.2). `data` carries structured detail — notably the
-/// `{baselineSeq, snapshot}` a `resync.required` hands back so a client can rebaseline
-/// without a second round-trip.
-#[derive(Debug, Clone)]
-pub struct RpcError {
-    pub code: String,
-    pub message: String,
-    pub retryable: bool,
-    pub data: Option<Value>,
-}
-
-impl std::fmt::Display for RpcError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[{}] {} (retryable={})",
-            self.code, self.message, self.retryable
-        )
-    }
-}
-
-/// A failed `request`: either the transport broke or the core returned an RPC error.
-#[derive(Debug)]
-pub enum CallError {
-    Transport(String),
-    Rpc(RpcError),
-}
-
-impl std::fmt::Display for CallError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CallError::Transport(m) => write!(f, "transport: {m}"),
-            CallError::Rpc(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for CallError {}
-
-impl CallError {
-    /// The RPC error code, when this is an RPC error (for `resync.required` etc.).
-    pub fn rpc_code(&self) -> Option<&str> {
-        match self {
-            CallError::Rpc(e) => Some(&e.code),
-            _ => None,
-        }
-    }
-}
-
+/// The shared registry of in-flight requests, keyed by frame id, each awaiting its
+/// correlated response over a `oneshot`.
 type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>;
 
 /// A connected core client.
@@ -191,10 +118,12 @@ impl CoreClient {
         self.request("initialize", Value::Object(params)).await
     }
 
+    /// `thread.list` — enumerate the core's threads.
     pub async fn thread_list(&self) -> Result<Value, CallError> {
         self.request("thread.list", json!({})).await
     }
 
+    /// `thread.create` — create a thread, returning its new `threadId`.
     pub async fn thread_create(
         &self,
         name: Option<&str>,
@@ -214,11 +143,14 @@ impl CoreClient {
             .ok_or_else(|| CallError::Transport("thread.create returned no threadId".into()))
     }
 
+    /// `thread.resume` — reattach to an existing thread.
     pub async fn thread_resume(&self, thread_id: &str) -> Result<Value, CallError> {
         self.request("thread.resume", json!({ "threadId": thread_id }))
             .await
     }
 
+    /// `thread.fork` — branch a thread (optionally at `at_seq`), returning the new
+    /// `threadId`.
     pub async fn thread_fork(
         &self,
         thread_id: &str,
@@ -237,7 +169,7 @@ impl CoreClient {
     }
 
     /// `thread.subscribe` — register the go-forward tap and get `{baselineSeq,
-    /// resync?, snapshot?}` (§3.2). Events then arrive on the [`connect`] receiver.
+    /// resync?, snapshot?}` (§3.2). Events then arrive on the [`connect`](CoreClient::connect) receiver.
     pub async fn thread_subscribe(
         &self,
         thread_id: &str,
@@ -272,11 +204,13 @@ impl CoreClient {
             .ok_or_else(|| CallError::Transport("cycle.submit returned no cycleId".into()))
     }
 
+    /// `cycle.abort` — stop an in-flight cycle.
     pub async fn cycle_abort(&self, cycle_id: &str) -> Result<Value, CallError> {
         self.request("cycle.abort", json!({ "cycleId": cycle_id }))
             .await
     }
 
+    /// `task.cancel` — cancel one task lane within a cycle.
     pub async fn task_cancel(&self, cycle_id: &str, task_id: &str) -> Result<Value, CallError> {
         self.request(
             "task.cancel",
@@ -285,6 +219,7 @@ impl CoreClient {
         .await
     }
 
+    /// `question.answer` — reply to a pending `task_attention` question.
     pub async fn question_answer(
         &self,
         cycle_id: &str,
@@ -343,15 +278,18 @@ impl CoreClient {
         }
     }
 
+    /// `roster.list` — the delegatable-agent roster.
     pub async fn roster_list(&self) -> Result<Value, CallError> {
         self.request("roster.list", json!({})).await
     }
 
+    /// `context.inspect` — the assembled context for a cycle.
     pub async fn context_inspect(&self, cycle_id: &str) -> Result<Value, CallError> {
         self.request("context.inspect", json!({ "cycleId": cycle_id }))
             .await
     }
 
+    /// `config.set` — apply a config patch to a thread.
     pub async fn config_set(&self, thread_id: &str, patch: Value) -> Result<Value, CallError> {
         self.request(
             "config.set",
@@ -362,10 +300,12 @@ impl CoreClient {
 
     // --- worker.* (managed remote peers) ----------------------------------------
 
+    /// `worker.list` — the managed worker-peer registry.
     pub async fn worker_list(&self) -> Result<Value, CallError> {
         self.request("worker.list", json!({})).await
     }
 
+    /// `worker.add` — register a new worker peer.
     pub async fn worker_add(
         &self,
         address: Option<&str>,
@@ -389,15 +329,18 @@ impl CoreClient {
         self.request("worker.add", Value::Object(params)).await
     }
 
+    /// `worker.update` — patch fields on a registered worker peer.
     pub async fn worker_update(&self, id: &str, patch: Value) -> Result<Value, CallError> {
         self.request("worker.update", json!({ "id": id, "patch": patch }))
             .await
     }
 
+    /// `worker.remove` — deregister a worker peer.
     pub async fn worker_remove(&self, id: &str) -> Result<Value, CallError> {
         self.request("worker.remove", json!({ "id": id })).await
     }
 
+    /// `worker.select` — mark a worker peer as the active delegation target.
     pub async fn worker_select(&self, id: &str) -> Result<Value, CallError> {
         self.request("worker.select", json!({ "id": id })).await
     }
@@ -458,6 +401,7 @@ async fn read_loop(
     }
 }
 
+/// Strip trailing `\n`/`\r` bytes from a raw NDJSON line.
 fn trim_newline(buf: &[u8]) -> &[u8] {
     let mut end = buf.len();
     while end > 0 && (buf[end - 1] == b'\n' || buf[end - 1] == b'\r') {
@@ -466,7 +410,9 @@ fn trim_newline(buf: &[u8]) -> &[u8] {
     &buf[..end]
 }
 
-fn decode_response(value: &Value) -> Result<Value, RpcError> {
+/// Split a response frame into `Ok(ok-body)` or `Err(RpcError)`. A missing `ok`
+/// body defaults to an empty object so callers can index it uniformly.
+pub(super) fn decode_response(value: &Value) -> Result<Value, RpcError> {
     if let Some(err) = value.get("error") {
         return Err(RpcError {
             code: err
@@ -489,7 +435,9 @@ fn decode_response(value: &Value) -> Result<Value, RpcError> {
     Ok(value.get("ok").cloned().unwrap_or_else(|| json!({})))
 }
 
-fn decode_event(value: &Value) -> Option<CoreEvent> {
+/// Decode an event-stream envelope into a [`CoreEvent`]. Returns `None` when the
+/// frame lacks the mandatory `seq` or `event` body.
+pub(super) fn decode_event(value: &Value) -> Option<CoreEvent> {
     Some(CoreEvent {
         seq: value.get("seq").and_then(Value::as_u64)?,
         at: value.get("at").and_then(Value::as_i64).unwrap_or(0),
@@ -505,79 +453,4 @@ fn decode_event(value: &Value) -> Option<CoreEvent> {
             .to_string(),
         event: value.get("event").cloned()?,
     })
-}
-
-/// Tracks a thread's event `seq` to detect gaps (§3.2). A gap means the core
-/// coalesced/dropped frames and the client should `snapshot.get` to resync.
-#[derive(Debug, Clone)]
-pub struct SeqTracker {
-    last_seq: u64,
-}
-
-impl SeqTracker {
-    /// Start from a subscribe `baselineSeq`.
-    pub fn new(baseline_seq: u64) -> Self {
-        SeqTracker {
-            last_seq: baseline_seq,
-        }
-    }
-
-    pub fn last_seq(&self) -> u64 {
-        self.last_seq
-    }
-
-    /// Record an event's seq. Returns `true` when a gap was detected (this seq is
-    /// beyond the next expected). Advances regardless, so the client resyncs from here.
-    pub fn observe(&mut self, seq: u64) -> bool {
-        let expected = self.last_seq + 1;
-        let gap = seq > expected;
-        if seq > self.last_seq {
-            self.last_seq = seq;
-        }
-        gap
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn seq_tracker_detects_a_gap() {
-        let mut t = SeqTracker::new(0);
-        assert!(!t.observe(1));
-        assert!(!t.observe(2));
-        assert!(t.observe(10)); // core coalesced 3..9
-        assert_eq!(t.last_seq(), 10);
-        assert!(!t.observe(11));
-    }
-
-    #[test]
-    fn decode_event_reads_the_envelope() {
-        let frame = json!({
-            "t": "event", "seq": 5, "at": 42, "threadId": "th_x",
-            "cycleId": "cyc:app:th_x:1", "event": {"kind": "assistant", "body": "hi"}
-        });
-        let ev = decode_event(&frame).unwrap();
-        assert_eq!(ev.seq, 5);
-        assert_eq!(ev.at, 42);
-        assert_eq!(ev.kind(), "assistant");
-        assert_eq!(ev.cycle_id, "cyc:app:th_x:1");
-    }
-
-    #[test]
-    fn decode_response_splits_ok_and_error() {
-        let ok = json!({ "id": 1, "ok": { "threadId": "th_x" } });
-        assert_eq!(
-            decode_response(&ok)
-                .unwrap()
-                .get("threadId")
-                .and_then(Value::as_str),
-            Some("th_x")
-        );
-        let err = json!({ "id": 2, "error": { "code": "thread.not-found", "message": "no", "retryable": false } });
-        let e = decode_response(&err).unwrap_err();
-        assert_eq!(e.code, "thread.not-found");
-        assert!(!e.retryable);
-    }
 }

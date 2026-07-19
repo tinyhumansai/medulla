@@ -16,6 +16,7 @@
 //! scope here — the interactive wrapper lands separately.
 
 pub mod capabilities;
+pub mod dir_context;
 pub mod mappers;
 pub mod providers;
 pub mod transport;

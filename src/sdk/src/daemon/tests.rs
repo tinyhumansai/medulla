@@ -11,7 +11,7 @@ use crate::tinyplace_support::{
 };
 
 use super::mappers::HarnessSemanticEvent;
-use super::providers::{RunTaskOptions, RunTaskResult};
+use super::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use super::*;
 
 type Recorded = Arc<StdMutex<Vec<(String, String)>>>;

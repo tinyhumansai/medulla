@@ -10,6 +10,21 @@ Medulla v1 is the first model of its kind: not a chat model, not another agent h
 
 Medulla is currently the only model to bring all three together.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
+```
+
+This downloads the prebuilt `medulla` binary for your platform, verifies its sha256 against the release manifest, and installs to `~/.medulla/bin`. Then:
+
+```sh
+medulla login   # browser OAuth; stores a verified JWT
+medulla         # bare invocation starts the TUI (mock runtime with no credentials)
+```
+
+See [For developers](#for-developers) to build from source or embed the SDK.
+
 ## Why an Orchestrator Model
 
 Agent harnesses like Claude Code and Codex are remarkable at running one task deeply. But ask a harness to coordinate other harnesses and you hit the same quiet failure mode everywhere: the orchestrator is just another LLM with a transcript, and every harness it manages writes into that transcript. Model accuracy degrades well before the context window fills. So an orchestrator that reads raw harness traffic stops scaling at a handful of them. Long before the window runs out, it stops being able to think.
@@ -74,17 +89,11 @@ Fleets with everyone.
 
 This repo hosts the open-source Medulla Rust workspace — the [`medulla`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk) SDK library and the [`medulla-tui`](https://github.com/tinyhumansai/medulla/tree/main/src/tui) app crate that ships the `medulla` binary, a [ratatui](https://ratatui.rs/) terminal UI over the orchestrator.
 
-Install the prebuilt binary (downloads the release asset for your platform, verifies its sha256 against the release manifest, and installs to `~/.medulla/bin`):
+The prebuilt binary installs with the one-liner under [Install](#install) above. To build from source instead:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
-```
-
-Then:
-
-```sh
-medulla login   # browser OAuth; stores a verified JWT
-medulla         # bare invocation starts the TUI (mock runtime with no credentials)
+cargo install --path src/tui   # installs the `medulla` binary
+medulla                        # bare invocation starts the TUI
 ```
 
 Full developer documentation — CLI subcommands, configuration, authentication, architecture, and how to build from source — lives in the [Developers](gitbooks/developers/README.md) section of the docs.

@@ -228,17 +228,14 @@ async fn run_memory(args: &[String]) -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
-    let mut settings = medulla::memory::env::resolve(
+    // Summarization syncs through the backend when a token is available (an
+    // explicit OPENROUTER_API_KEY still wins inside the service).
+    let settings = medulla::memory::env::resolve_with_backend(
         loaded.config.memory.as_ref(),
+        &loaded.config.backend,
         &env,
         &medulla::home::medulla_home(&env),
     );
-    // Summarization syncs through the backend when a token is available (an
-    // explicit OPENROUTER_API_KEY still wins inside the service).
-    let stored = CredentialStore::at_home(&medulla::home::medulla_home(&env)).load_or_legacy();
-    if let Some(jwt) = resolve_backend_token(&env, &loaded.config.backend, stored.as_ref()) {
-        settings = settings.with_backend(loaded.config.backend.base_url.clone(), jwt);
-    }
     let service = medulla::memory::MemoryService::open(settings)?;
 
     match parsed.action {
@@ -351,18 +348,12 @@ async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Optional persona-memory service (tinycortex). Built once here and attached
     // to the core runtime so it can advertise + serve the memory toolset; also
     // available to a later TUI surface via the runtime seam.
-    let mut memory_settings = medulla::memory::env::resolve(
+    let memory_settings = medulla::memory::env::resolve_with_backend(
         loaded.config.memory.as_ref(),
+        &loaded.config.backend,
         &env,
         &medulla::home::medulla_home(&env),
     );
-    {
-        let stored = CredentialStore::at_home(&medulla::home::medulla_home(&env)).load_or_legacy();
-        if let Some(jwt) = resolve_backend_token(&env, &loaded.config.backend, stored.as_ref()) {
-            memory_settings =
-                memory_settings.with_backend(loaded.config.backend.base_url.clone(), jwt);
-        }
-    }
     let memory_service: Option<Arc<medulla::memory::MemoryService>> = if memory_settings.enabled {
         match medulla::memory::MemoryService::open(memory_settings) {
             Ok(svc) => Some(Arc::new(svc)),

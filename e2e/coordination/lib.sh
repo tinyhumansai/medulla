@@ -99,6 +99,12 @@ e2e_init() {
   trap cleanup EXIT
   resolve_binaries
   mkdir -p "$RUN_DIR"/{ochome,mhome,work,tp}
+  # opencode's snapshot feature misbehaves in a non-git cwd (upstream #31382):
+  # `opencode run` can produce no output at all. The config sets snapshot:false;
+  # a git repo in the workdir is belt-and-braces for when git is present.
+  if command -v git >/dev/null 2>&1; then
+    git -C "$RUN_DIR/work" init -q 2>/dev/null || true
+  fi
   log "run dir: $RUN_DIR"
   tmux new-session -d -s "$SESSION" -x 220 -y 50 -c "$RUN_DIR"
   tmux set-option -t "$SESSION" -g history-limit 20000 >/dev/null 2>&1 || true

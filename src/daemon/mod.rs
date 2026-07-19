@@ -282,7 +282,12 @@ impl DaemonRuntime {
 
     async fn handle_input(&self, from: String, frame: TaskFrame) {
         let key = Self::task_key(&from, &frame.task_id);
-        let (matched, harness) = {
+        let no_match = (
+            TaskFrameKind::Ack,
+            "no matching running task for input",
+            self.inner.config.default_provider,
+        );
+        let (kind, text, harness) = {
             let mut running = self.inner.running.lock().unwrap();
             match running.get_mut(&key) {
                 Some(task) => {
@@ -293,29 +298,31 @@ impl DaemonRuntime {
                         (Some(a), Some(b)) if a != b
                     );
                     if mismatch {
-                        (false, self.inner.config.default_provider)
+                        no_match
+                    } else if !providers::supports_stdin(task.provider) {
+                        // The child has a null stdin; buffering would silently
+                        // discard the guidance, so reject it honestly instead.
+                        (
+                            TaskFrameKind::Error,
+                            "provider does not accept mid-run input",
+                            task.provider,
+                        )
                     } else {
-                        let provider = task.provider;
                         match &task.stdin {
                             Some(stdin) => {
                                 let _ = stdin.send(frame.text.clone());
                             }
                             None => task.pending_input.push(frame.text.clone()),
                         }
-                        (true, provider)
+                        (TaskFrameKind::Ack, "input received", task.provider)
                     }
                 }
-                None => (false, self.inner.config.default_provider),
+                None => no_match,
             }
-        };
-        let text = if matched {
-            "input received"
-        } else {
-            "no matching running task for input"
         };
         self.reply(
             &from,
-            TaskFrameKind::Ack,
+            kind,
             &frame.task_id,
             text,
             frame.correlation_id.as_deref(),

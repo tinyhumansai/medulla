@@ -52,7 +52,7 @@ ARG TARGETARCH
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        tmux python3 curl bash ca-certificates; \
+        tmux python3 curl bash ca-certificates git; \
     rm -rf /var/lib/apt/lists/*; \
     ARCH="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "$ARCH" in \

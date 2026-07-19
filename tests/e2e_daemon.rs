@@ -260,6 +260,57 @@ async fn input_frame_reaches_provider_stdin() {
     );
 }
 
+// 3b. Input rejection: opencode children get a null stdin (no mid-run input
+//     channel), so an `input` frame must come back as an Error — never a false
+//     "input received" ack that silently discards the guidance.
+#[tokio::test]
+async fn input_frame_for_opencode_is_rejected() {
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+    let gate = Arc::new(Notify::new());
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(
+        config(HarnessProvider::Opencode, ".".into(), HashMap::new()),
+        blocking_runner(ready_tx, gate.clone()),
+        send,
+    );
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(TaskFrameKind::Task, "oc-in-1", "start", Some("c1"))),
+    );
+    tokio::time::timeout(T, ready_rx.recv()).await.unwrap();
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(
+            TaskFrameKind::Input,
+            "oc-in-1",
+            "guidance",
+            Some("c1"),
+        )),
+    );
+    wait_until("input rejected", T, || {
+        decoded_frames(&recorded)
+            .iter()
+            .any(|f| f.kind == TaskFrameKind::Error && f.task_id == "oc-in-1")
+    })
+    .await;
+    let rejection = decoded_frames(&recorded)
+        .into_iter()
+        .find(|f| f.kind == TaskFrameKind::Error && f.task_id == "oc-in-1")
+        .unwrap();
+    assert!(
+        rejection.text.contains("does not accept mid-run input"),
+        "got: {}",
+        rejection.text
+    );
+    assert_eq!(rejection.harness, Some(HarnessProvider::Opencode));
+    gate.notify_waiters();
+    runtime.idle().await;
+}
+
 /// A runner that signals readiness, then blocks until `gate` is released.
 fn blocking_runner(ready: mpsc::UnboundedSender<()>, gate: Arc<Notify>) -> RunTaskFn {
     Arc::new(move |opts: RunTaskOptions| {

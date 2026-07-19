@@ -211,11 +211,10 @@ fn resolve_endpoint_with_config(
     }
 }
 
+/// Milliseconds since the Unix epoch. Delegates to the shared [`crate::clock`]
+/// helper.
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::clock::now_millis()
 }
 
 #[cfg(test)]

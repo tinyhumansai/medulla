@@ -13,7 +13,6 @@
 use std::fs;
 use std::io;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -274,12 +273,10 @@ fn load_node(chat_dir: &Path, node: &StoredNode) -> ChatNode {
     }
 }
 
-/// Current wall-clock in epoch millis, for [`save_chat_tree`].
+/// Current wall-clock in epoch millis, for [`save_chat_tree`]. Delegates to the
+/// shared [`crate::clock`] helper.
 pub fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::clock::now_millis()
 }
 
 /// Format epoch millis as an ISO-8601 UTC timestamp (`YYYY-MM-DDTHH:MM:SS.sssZ`).

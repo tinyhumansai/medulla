@@ -236,10 +236,7 @@ pub async fn run_update(check_only: bool) -> Result<()> {
 }
 
 fn make_workdir() -> Result<PathBuf> {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let nanos = crate::clock::now_nanos();
     let dir = std::env::temp_dir().join(format!("medulla-update-{}-{}", std::process::id(), nanos));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)

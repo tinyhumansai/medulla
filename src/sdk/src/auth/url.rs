@@ -40,11 +40,7 @@ pub fn random_state_nonce() -> String {
     for chunk in bytes.chunks_mut(8) {
         let mut h = RandomState::new().build_hasher();
         h.write_u64(std::process::id() as u64);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        h.write_u128(nanos);
+        h.write_u128(crate::clock::now_nanos());
         let stack_probe = 0u8;
         h.write_usize(&stack_probe as *const u8 as usize);
         let v = h.finish().to_le_bytes();

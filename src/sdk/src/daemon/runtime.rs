@@ -181,10 +181,8 @@ impl DaemonRuntime {
     }
 }
 
-/// The default wall clock: epoch ms, saturating to 0 on error.
+/// The default wall clock: epoch ms, saturating to 0 on error. Delegates to the
+/// shared [`crate::clock`] helper.
 fn system_now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::clock::now_millis()
 }

@@ -68,12 +68,10 @@ pub(super) fn mint_session_id(provider: HarnessProvider) -> String {
     format!("tp-{}-{iso}-{short}", provider.as_str())
 }
 
-/// Milliseconds since the Unix epoch (0 on a clock error).
+/// Milliseconds since the Unix epoch (0 on a clock error). Delegates to the
+/// shared [`crate::clock`] helper.
 pub(super) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::clock::now_millis()
 }
 
 /// The tiny.place bridge for one wrapped session: encrypted transport plus the

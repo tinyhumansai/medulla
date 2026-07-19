@@ -16,11 +16,9 @@ pub(super) fn parse_timestamp_ms(value: Option<&Value>) -> i64 {
 }
 
 /// Current wall-clock time as epoch milliseconds (0 if the clock predates epoch).
+/// Delegates to the shared [`crate::clock`] helper.
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::clock::now_millis()
 }
 
 /// Parse an RFC3339 UTC-ish instant to epoch ms, or `None` if unreadable.

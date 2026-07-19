@@ -16,14 +16,14 @@ Medulla is currently the only model to bring all three together.
 curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
 ```
 
-This downloads the prebuilt `medulla` binary for your platform, verifies its sha256 against the release manifest, and installs to `~/.medulla/bin`. Then:
+This downloads the prebuilt `medulla` binary for your platform, verifies its SHA-256 against the release manifest (when a checksum tool such as `sha256sum`, `shasum`, or `openssl` is available), and installs to `~/.medulla/bin`. If the installer updated your `PATH`, reload your shell first — `exec $SHELL`, or open a new terminal — so `medulla` resolves. Then:
 
 ```sh
 medulla login   # browser OAuth; stores a verified JWT
-medulla         # bare invocation starts the TUI (mock runtime with no credentials)
+medulla         # bare invocation starts the TUI
 ```
 
-See [For developers](#for-developers) to build from source or embed the SDK.
+With no credentials, `medulla` opens a login screen — press `m` there to explore offline against the mock runtime. See [For developers](#for-developers) to build from source or embed the SDK.
 
 ## Why an Orchestrator Model
 
@@ -33,7 +33,7 @@ Orchestration is becoming the dominant pattern in agentic systems, yet it has be
 
 ## Benchmarks at a Glance
 
-Validated head to head against a leading open-source agent harness (the same category as Claude Code and Codex), with strict offline scoring against ground truth:
+Validated head-to-head against a leading open-source agent harness (the same category as Claude Code and Codex), with strict offline scoring against ground truth:
 
 | Benchmark                                | Medulla                | Baseline harness             |
 | ---------------------------------------- | ---------------------- | ---------------------------- |

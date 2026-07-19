@@ -11,6 +11,7 @@ for headless operation, bridging coding-agent harnesses to
 | `medulla daemon` | [Headless coding-agent daemon](#medulla-daemon) over tiny.place. |
 | `medulla codex` / `claude` / `opencode` | [Harness wrappers](#harness-wrappers): run a CLI, bridged to tiny.place. |
 | `medulla sessions` | List recent claude/codex sessions as JSON. |
+| `medulla memory <cmd>` | [Persona memory](#medulla-memory): `status` / `ingest` / `backfill` / `compile` / `search`. |
 | `medulla update` | [Self-update](#medulla-update): download, verify, install the latest release. |
 | `medulla version` / `help` | Version string; usage. |
 
@@ -103,6 +104,29 @@ The profile threads through the rest of the worker: the daemon advertises the
 profile name as its directory-card label (unless `--name` overrides it), and the
 wrapper uses the profile owner as the final fallback in the recipient chain (any
 `TINYPLACE_*` env owner still wins).
+
+## `medulla memory`
+
+Manage the [persona-memory](architecture.md#persona-memory) layer that turns local
+coding-agent history into a durable, prompt-ready persona pack:
+
+```sh
+medulla memory status                # print the memory-layer status
+medulla memory ingest                # incremental ingest pass (LLM-backed; needs an API key)
+medulla memory backfill              # full backfill ingest pass (LLM-backed; needs an API key)
+medulla memory compile               # recompile the pack from persisted trees (offline)
+medulla memory search "<query>"      # BM25 search over the persona corpus (offline)
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--json` | Emit JSON instead of human-readable output. |
+| `--facet <name>` | Restrict a `search` to one facet. |
+| `--k <n>` | Cap `search` results (default 5). |
+| `--config <path>` | Explicit config file (`.toml` or `.json`) for the memory section. |
+
+`ingest` and `backfill` call an LLM and need an API key; `status`, `compile`, and
+`search` run fully offline against the persisted corpus.
 
 ## `medulla update`
 

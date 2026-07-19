@@ -1,6 +1,6 @@
 # Benchmarks
 
-We validated Medulla head to head against a leading open-source agent harness (the same category as [Claude Code](https://www.anthropic.com/claude-code) and [Codex](https://github.com/openai/codex)), run both as a flat baseline and explicitly prompted to orchestrate its own subagents. Same tasks, same underlying models, strict offline scoring against ground truth.
+We validated Medulla head-to-head against a leading open-source agent harness (the same category as [Claude Code](https://www.anthropic.com/claude-code) and [Codex](https://github.com/openai/codex)), run both as a flat baseline and explicitly prompted to orchestrate its own subagents. Same tasks, same underlying models, strict offline scoring against ground truth.
 
 ## Heavy Fan-Out, 50 Bulky Sources
 

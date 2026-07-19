@@ -35,23 +35,25 @@ app crate, which ships the `medulla` binary.
 ## The 60-second version
 
 Install the prebuilt binary (it downloads the release asset for your platform,
-verifies its SHA-256 against the release manifest, and installs to
-`~/.medulla/bin`):
+verifies its SHA-256 against the release manifest when a checksum tool is
+available, and installs to `~/.medulla/bin`):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
 ```
 
-Then log in and start the TUI:
+If the installer updated your `PATH`, reload your shell (`exec $SHELL`, or open a
+new terminal) so `medulla` resolves. Then log in and start the TUI:
 
 ```sh
 medulla login   # browser OAuth; stores a verified JWT
 medulla         # bare invocation starts the TUI
 ```
 
-No credentials? `medulla` drops to a scripted [mock runtime](configuration.md#runtimes)
-so you can explore the interface with no network and no account. See
-[Getting Started](getting-started.md) for the full walkthrough.
+No credentials? `medulla` opens a login screen — press `m` there to explore the
+interface offline against the scripted [mock runtime](configuration.md#runtimes),
+with no network and no account. See [Getting Started](getting-started.md) for the
+full walkthrough.
 
 ## Open by design
 

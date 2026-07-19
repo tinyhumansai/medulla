@@ -17,11 +17,16 @@ and lets you steer the fleet. This page gets it installed and running.
 
 The install script downloads the release asset for your platform, verifies its
 SHA-256 against the [release](https://github.com/tinyhumansai/medulla/releases)
-manifest, and installs to `~/.medulla/bin`:
+manifest when a checksum tool (`sha256sum`, `shasum`, or `openssl`) is available —
+otherwise it warns and skips the check — and installs to `~/.medulla/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
 ```
+
+If the installer updated your `PATH`, reload your shell (`exec $SHELL`, or open a
+new terminal) so the `medulla` command resolves; otherwise invoke it directly as
+`~/.medulla/bin/medulla`.
 
 * Pin a version: `| sh -s -- X.Y.Z`.
 * Change the install prefix: set `MEDULLA_HOME`.
@@ -70,8 +75,9 @@ scripted [mock runtime](configuration.md#mock-zero-setup)).
 cargo run       # or: medulla, with no token configured
 ```
 
-With no token and no core socket you land in the mock runtime — a scripted demo
-with no credentials and no network, and the fastest way to explore the interface.
+With no token and no core socket, `medulla` opens a login screen; press `m` to
+continue offline against the mock runtime — a scripted demo with no credentials
+and no network, and the fastest way to explore the interface.
 Open the Settings tab (its Help subpage) or run `/help` for keybindings. Usage,
 effective config, and the color-theme editor live under Settings as well
 (`/usage`, `/config`, `/theme`).

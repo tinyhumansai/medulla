@@ -23,7 +23,7 @@ Under the home:
 * `worker.json` — the [worker profile](cli-reference.md#first-run-worker-registration).
 
 A `.env` file in the current directory is loaded at startup, before anything
-reads the environment: `KEY=VALUE` lines, `#` comments, an optional `export `
+reads the environment: `KEY=VALUE` lines, `#` comments, an optional `export`
 prefix, and single/double quotes are stripped. It never overrides variables
 already set in the process environment — this is the usual way to opt into
 `MEDULLA_DEV=1` for local dev.
@@ -106,14 +106,21 @@ runtime fails, it falls back down this chain and shows why in the status line.
    [`medulla login`](authentication.md)).
 3. **Mock** — otherwise.
 
+In the default (non-`--core`) path, when no token resolves the TUI does not drop
+straight to the mock: it first opens the [login screen](authentication.md#logging-in-from-the-tui),
+and the mock runtime is entered only if you press `m` to continue offline. An
+explicit `--core` run keeps the plain backend→mock fallback and is never
+redirected to the login screen.
+
 ### Mock (zero setup)
 
 ```sh
 cargo run
 ```
 
-With no token and no core socket you land in the mock runtime — a scripted demo,
-no credentials, no network, and the fastest way to explore the interface.
+With no token and no core socket, `medulla` opens a login screen; press `m` to
+continue offline against the mock runtime — a scripted demo, no credentials, no
+network, and the fastest way to explore the interface.
 
 ### Backend HTTP/SSE
 

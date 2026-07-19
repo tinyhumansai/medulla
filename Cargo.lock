@@ -1133,6 +1133,7 @@ dependencies = [
  "base64",
  "dirs",
  "futures",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

@@ -2,13 +2,28 @@
 
 # Medulla v1: The First Orchestrator Model
 
-Medulla v1 is the first model of its kind: not a chat model, not another agent harness, but an **orchestrator model**, purpose-built to command fleets of agent harnesses like Claude Code, Codex, and their peers. Medulla v1 brings three capabilities together for the first time:
+Medulla v1 is the first model of its kind: not a chat model, not another agent harness, but an **orchestrator model**, purpose-built to command fleets of agent harnesses like [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), and their peers. Medulla v1 brings three capabilities together for the first time:
 
-1. **A 10-million-token effective context**, handled efficiently through RLM (Recursive Language Model) techniques, so accuracy holds at a scale where single-context models collapse.
+1. **A 10-million-token effective context**, handled efficiently through [RLM (Recursive Language Model)](https://arxiv.org/abs/2512.24601) techniques, so accuracy holds at a scale where single-context models collapse.
 2. **Live streaming input from every running harness**, so fleet awareness is continuous rather than post-hoc.
 3. **Concurrency of up to 1,000 agent harnesses running at the same time**, governed end to end so every operation completes with an answer.
 
 Medulla is currently the only model to bring all three together.
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
+```
+
+This downloads the prebuilt `medulla` binary for your platform, verifies its SHA-256 against the release manifest (when a checksum tool such as `sha256sum`, `shasum`, or `openssl` is available), and installs to `~/.medulla/bin`. If the installer updated your `PATH`, reload your shell first — `exec $SHELL`, or open a new terminal — so `medulla` resolves. Then:
+
+```sh
+medulla login   # browser OAuth; stores a verified JWT
+medulla         # bare invocation starts the TUI
+```
+
+With no credentials, `medulla` opens a login screen — press `m` there to explore offline against the mock runtime. See [For developers](#for-developers) to build from source or embed the SDK.
 
 ## Why an Orchestrator Model
 
@@ -18,7 +33,7 @@ Orchestration is becoming the dominant pattern in agentic systems, yet it has be
 
 ## Benchmarks at a Glance
 
-Validated head to head against a leading open-source agent harness (the same category as Claude Code and Codex), with strict offline scoring against ground truth:
+Validated head-to-head against a leading open-source agent harness (the same category as Claude Code and Codex), with strict offline scoring against ground truth:
 
 | Benchmark                                | Medulla                | Baseline harness             |
 | ---------------------------------------- | ---------------------- | ---------------------------- |
@@ -26,7 +41,7 @@ Validated head to head against a leading open-source agent harness (the same cat
 | Noise stress (decoys, injection, decay)  | **1.00 / 1.00 / 1.00** | 0.00 (empty output)          |
 | Multi-turn steering                      | **1.00 / 1.00 / 1.00** | 0.91 / 0.92                  |
 | Dependency chains                        | **1.00** at $0.074     | 1.00                         |
-| 100 Project Euler problems in parallel   | **83/100** in 5 min    | 0/100                        |
+| 100 [Project Euler](https://projecteuler.net/) problems in parallel   | **83/100** in 5 min    | 0/100                        |
 
 Full tables, methodology, and the runs behind them are in the [documentation](gitbooks/README.md). Every fixture and the harness that runs them are open source, so you can reproduce every number.
 
@@ -48,7 +63,9 @@ Request access and tell us what you are orchestrating.
 
 ## Documentation
 
-The full documentation lives in [gitbooks/](gitbooks/README.md):
+The full documentation lives in [gitbooks/](gitbooks/README.md).
+
+**Overview**
 
 - [Why an Orchestrator Model](gitbooks/why-an-orchestrator-model.md)
 - [RLM: Context Scaling Without Collapse](gitbooks/rlm-context-scaling.md)
@@ -57,47 +74,26 @@ The full documentation lives in [gitbooks/](gitbooks/README.md):
 - [Open Benchmarks, Open SDKs](gitbooks/open-benchmarks-open-sdks.md)
 - [Pricing and Availability](gitbooks/pricing-and-availability.md)
 
+**Developers** — install the TUI, embed the SDK, and wire your own fleet to the orchestrator:
+
+- [Getting Started](gitbooks/developers/getting-started.md) — install, build, run, first login.
+- [CLI Reference](gitbooks/developers/cli-reference.md) — the TUI, the daemon, the harness wrappers, self-update.
+- [Configuration](gitbooks/developers/configuration.md) — the Medulla home, layered config, and the three runtimes.
+- [Authentication](gitbooks/developers/authentication.md) — the browser loopback login flow and token handling.
+- [Architecture](gitbooks/developers/architecture.md) — the SDK/TUI split, runtime adapters, RLM, and the tiny.place bridge.
+- [Contributing](gitbooks/developers/contributing.md) — build, test, lint, coverage, and releasing.
+
 Fleets with everyone.
 
-## Rust SDK & TUI
+## For developers
 
-This repo also hosts the Medulla Rust workspace — an SDK library and a terminal app:
+This repo hosts the open-source Medulla Rust workspace — the [`medulla`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk) SDK library and the [`medulla-tui`](https://github.com/tinyhumansai/medulla/tree/main/src/tui) app crate that ships the `medulla` binary, a [ratatui](https://ratatui.rs/) terminal UI over the orchestrator.
 
-- `src/sdk/` — the `medulla` SDK crate: the HTTP/SSE client for the Medulla backend API (auth, durable sessions, streaming events, the orchestration tool loop), the runtime adapters, persona memory, and the tinyplace integration that brings agent channels together (`tinyplace_support/`, `daemon/`).
-- `src/tui/` — the `medulla-tui` crate, shipping the `medulla` binary: a ratatui terminal UI over the SDK to chat with the orchestrator and watch agent lanes, traces, and context live.
-
-Install the prebuilt binary (downloads the release asset for your platform and verifies its sha256 against the release manifest, then installs to `~/.medulla/bin`):
+The prebuilt binary installs with the one-liner under [Install](#install) above. To build from source instead:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
+cargo install --path src/tui   # installs the `medulla` binary
+medulla                        # bare invocation starts the TUI
 ```
 
-Pass a specific version with `| sh -s -- X.Y.Z`; set `MEDULLA_HOME` to change the install prefix. On a platform without a prebuilt asset the script falls back to `cargo install`.
-
-Or build from source:
-
-```sh
-cargo install --path src/tui  # installs the `medulla` binary
-medulla login                 # browser login; stores credentials
-medulla                       # bare invocation starts the TUI
-```
-
-Use the SDK from your own crate as a git dependency (the repo vendors its path deps, so no extra setup):
-
-```toml
-[dependencies]
-medulla = { git = "https://github.com/tinyhumansai/medulla", tag = "v0.3.0" }
-```
-
-`medulla login` runs a browser-based OAuth loopback flow (`--provider google|github|twitter|discord`, `--no-browser` to copy the URL, or `--token <64-hex>` for headless one-time tokens) and saves a verified JWT to `<medulla-home>/credentials.json` (default `~/.medulla/credentials.json`); the TUI picks it up automatically. The loopback callback is guarded by a random state nonce so a page sharing the loopback origin can't forge it. `medulla logout` clears it. You can also pass a token directly with `MEDULLA_TOKEN=<jwt> medulla`. If you start `medulla` with no working credentials, the TUI shows an in-terminal login screen (browser flow, paste-a-token, or `m` to continue against the scripted mock runtime). Other subcommands:
-
-- `medulla daemon` — headless coding-agent daemon serving claude/codex/opencode over encrypted tiny.place DMs.
-- `medulla codex` / `medulla claude` / `medulla opencode` — launch the real coding-agent CLI in your terminal exactly as if run directly (inherited stdio; unrecognized flags pass through verbatim), while bridging the session to tiny.place underneath: the wrapper tails the harness transcript, forwards it as encrypted `SessionEnvelopeV2` DMs to the configured owner, and injects owner control-frame input into the child. `--no-bridge` runs a plain passthrough. Configured by `TINYPLACE_HARNESS_DM_TO` / `TINYPLACE_OPENHUMAN_OWNER` (and the `TINYPLACE_<P>_*` overrides); see `DEVELOPING.md`.
-- `medulla sessions` — list recent claude/codex sessions as JSON.
-- `medulla update` — download, verify (sha256), and install the latest release over the running binary (`--check` only reports). The TUI also checks in the background and shows an "update available" banner; disable with `[update] check = false` or `MEDULLA_NO_UPDATE_CHECK=1`.
-
-Prebuilt binaries ship for Linux (x86_64, aarch64), macOS (Apple Silicon), and Windows (x86_64). The core-socket runtime, the headless daemon's provider spawn paths, and the wrappers are unix-only; the TUI over the backend/mock runtimes and `medulla update` run on all three.
-
-The backend base URL defaults to production (`https://api.tinyhumans.ai`), and tiny.place to `https://api.tiny.place`. Set `MEDULLA_STAGING=1` to switch both to staging (`https://staging-api.tinyhumans.ai` / `https://staging-api.tiny.place`). Precedence for the backend URL is `MEDULLA_API_URL` > config-file `backend.baseUrl` > staging/prod default.
-
-Config and data live under one home directory (`~/.medulla` by default; `./.medulla` when `MEDULLA_DEV=1`; `MEDULLA_HOME=<path>` to override). Configuration is layered — built-in defaults < `<home>/config.toml` < project-local `./.medulla/config.toml` or `./medulla.toml` < env vars < CLI flags — with TOML as the primary format (`--config` still accepts `.json` too). See `config.example.toml` and `DEVELOPING.md`.
+Full developer documentation — CLI subcommands, configuration, authentication, architecture, and how to build from source — lives in the [Developers](gitbooks/developers/README.md) section of the docs.

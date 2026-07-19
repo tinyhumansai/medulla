@@ -7,6 +7,10 @@
 //! establish authoritatively (cwd, git project/branch, detected providers), which
 //! win. The probe never fails: a missing/wedged provider degrades to the facts
 //! plus empty arrays.
+//!
+//! The probe prompt is grounded in the workspace's CLAUDE.md/AGENTS.md/README.md
+//! (see [`super::dir_context`]) so `summary` carries a ≤100-token project digest;
+//! a deterministic digest of those files backs it up when the probe fails.
 
 use std::collections::HashMap;
 

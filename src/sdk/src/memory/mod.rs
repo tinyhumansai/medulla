@@ -108,6 +108,41 @@ pub struct IngestReport {
     pub pack_path: Option<String>,
 }
 
+/// Build the inference provider from resolved settings. An explicit
+/// `OPENROUTER_API_KEY` wins (back-compat); otherwise the tinyhumans backend's
+/// OpenAI-compatible surface is used with the resolved JWT and the
+/// summarization model. With neither, the caller has no model available and
+/// this errors — callers that can degrade (e.g. `medulla init`) should treat the
+/// error as "run offline" rather than fatal.
+///
+/// Shared so every LLM-backed surface (memory ingest, workspace init) resolves
+/// key, base URL, and model identically.
+pub fn chat_provider(settings: &MemorySettings) -> Result<OpenRouterProvider> {
+    let mut cfg = if let Some(key) = settings.openrouter_api_key.as_ref() {
+        OpenRouterConfig {
+            api_key: SecretString::new(key.clone()),
+            run_cost_limit_usd: Some(settings.max_cost_usd),
+            ..OpenRouterConfig::default()
+        }
+    } else if let Some(backend) = settings.backend.as_ref() {
+        OpenRouterConfig {
+            base_url: format!("{}/openai/v1", backend.base_url.trim_end_matches('/')),
+            api_key: SecretString::new(backend.jwt.clone()),
+            chat_model: env::DEFAULT_BACKEND_MODEL.to_string(),
+            run_cost_limit_usd: Some(settings.max_cost_usd),
+            ..OpenRouterConfig::default()
+        }
+    } else {
+        return Err(anyhow!(
+            "needs the backend (run `medulla login`) or OPENROUTER_API_KEY"
+        ));
+    };
+    if let Some(model) = &settings.llm_model {
+        cfg.chat_model = model.clone();
+    }
+    OpenRouterProvider::new(cfg)
+}
+
 /// A no-op chat provider for offline compiles: the `compile_only` path never
 /// calls it, but the [`Pipeline`] requires a `ChatProvider` to be bound.
 struct NoopProvider;
@@ -278,29 +313,7 @@ impl MemoryService {
     /// with the resolved JWT and the summarization model. With neither, memory
     /// runs local-only (status/search/compile) and ingest errors clearly.
     fn provider(&self) -> Result<OpenRouterProvider> {
-        let mut cfg = if let Some(key) = self.settings.openrouter_api_key.as_ref() {
-            OpenRouterConfig {
-                api_key: SecretString::new(key.clone()),
-                run_cost_limit_usd: Some(self.settings.max_cost_usd),
-                ..OpenRouterConfig::default()
-            }
-        } else if let Some(backend) = self.settings.backend.as_ref() {
-            OpenRouterConfig {
-                base_url: format!("{}/openai/v1", backend.base_url.trim_end_matches('/')),
-                api_key: SecretString::new(backend.jwt.clone()),
-                chat_model: env::DEFAULT_BACKEND_MODEL.to_string(),
-                run_cost_limit_usd: Some(self.settings.max_cost_usd),
-                ..OpenRouterConfig::default()
-            }
-        } else {
-            return Err(anyhow!(
-                "memory sync needs the backend (run `medulla login`) or OPENROUTER_API_KEY"
-            ));
-        };
-        if let Some(model) = &self.settings.llm_model {
-            cfg.chat_model = model.clone();
-        }
-        OpenRouterProvider::new(cfg)
+        chat_provider(&self.settings)
     }
 
     /// Run a live ingest pass (LLM-backed). Uses the backend summarizer (or an

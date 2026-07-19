@@ -6,7 +6,7 @@
 use medulla::auth::Provider;
 use medulla::tinyplace::HarnessProvider;
 
-use super::types::{Command, LoginArgs, MemoryAction, MemoryArgs, TuiArgs, UpdateArgs};
+use super::types::{Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, TuiArgs, UpdateArgs};
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
 pub fn parse_command(args: &[String]) -> Command {
@@ -19,6 +19,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("logout") => Command::Logout,
         Some("memory") => Command::Memory,
         Some("update") => Command::Update,
+        Some("init") => Command::Init,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),
@@ -121,6 +122,32 @@ pub fn parse_update_args(args: &[String]) -> UpdateArgs {
     out
 }
 
+/// Parse the flags following `medulla init`. The first non-flag argument is the
+/// target directory; everything else defaults, so a bare `medulla init` targets
+/// the current working directory.
+pub fn parse_init_args(args: &[String]) -> InitArgs {
+    let mut out = InitArgs::default();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                if let Some(v) = it.next() {
+                    out.config = Some(v.clone());
+                }
+            }
+            "--force" | "-f" => out.force = true,
+            "--offline" => out.offline = true,
+            other => {
+                // First bare word is the directory; later ones are ignored.
+                if !other.starts_with('-') && out.dir.is_none() {
+                    out.dir = Some(other.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Parse the TUI's own flags out of `argv[1..]`.
 pub fn parse_tui_args(args: &[String]) -> TuiArgs {
     let mut out = TuiArgs::default();
@@ -154,6 +181,7 @@ medulla opencode [args] Run OpenCode in your terminal, bridged to tiny.place\n  
 medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
 medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
+medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
@@ -170,6 +198,10 @@ Memory flags:\n  \
 --facet <name>          Restrict a search to one facet\n  \
 --k <n>                 Max search results (default 5)\n  \
 --config <path>         Explicit config file (.toml or .json) for the memory section\n\n\
+Init flags:\n  \
+--force, -f             Overwrite an existing MEDULLA.md\n  \
+--offline               Skip the model call and write an editable stub\n  \
+--config <path>         Explicit config file (.toml or .json) for backend/model settings\n\n\
 TUI flags:\n  \
 --config <path>         Explicit config file (.toml or .json); bypasses layered discovery\n  \
 --core                  Drive the core-js orchestration core over its Unix socket\n  \

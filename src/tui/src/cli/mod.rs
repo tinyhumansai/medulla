@@ -18,8 +18,10 @@ mod types;
 mod tests;
 
 pub use parse::{
-    help_text, parse_command, parse_login_args, parse_memory_args, parse_tui_args,
+    help_text, parse_command, parse_init_args, parse_login_args, parse_memory_args, parse_tui_args,
     parse_update_args,
 };
 pub use plan::{core_socket_plan, resolve_socket_path, sessions_json};
-pub use types::{Command, CorePlan, LoginArgs, MemoryAction, MemoryArgs, TuiArgs, UpdateArgs};
+pub use types::{
+    Command, CorePlan, InitArgs, LoginArgs, MemoryAction, MemoryArgs, TuiArgs, UpdateArgs,
+};

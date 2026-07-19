@@ -215,12 +215,11 @@ fn run_options_serialize_camel_case() {
         session_id: Some("s1".into()),
         tools: None,
         options: Some(RunOrchestrationOptions {
-            prompt_overrides: None,
             config: Some(RunConfig {
                 max_passes: Some(4),
                 ..Default::default()
             }),
-            limits: None,
+            ..Default::default()
         }),
     };
     let v = serde_json::to_value(&opts).unwrap();
@@ -228,4 +227,24 @@ fn run_options_serialize_camel_case() {
     assert_eq!(v["options"]["config"]["maxPasses"], json!(4));
     // Unset fields are omitted.
     assert!(v.get("tools").is_none());
+    assert!(v["options"].get("workspaceProfiles").is_none());
+}
+
+#[test]
+fn workspace_profiles_serialize_camel_case() {
+    let opts = RunOptions {
+        options: Some(RunOrchestrationOptions {
+            workspace_profiles: Some(vec![WorkspaceProfileInput {
+                workspace: "/repo/pay".into(),
+                medulla_md: "Payments service.".into(),
+            }]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&opts).unwrap();
+    let profiles = &v["options"]["workspaceProfiles"];
+    assert_eq!(profiles[0]["workspace"], json!("/repo/pay"));
+    // Sent verbatim as `medullaMd` — the backend/SDK owns parsing.
+    assert_eq!(profiles[0]["medullaMd"], json!("Payments service."));
 }

@@ -1,0 +1,18 @@
+---
+# Advisory routing preferences for this workspace. medulla renders these into
+# the orchestrator's context as guidance — it never gates delegation or model
+# selection on them. Every key is optional; delete what you do not need.
+
+# Harnesses the orchestrator should prefer for work here.
+harnesses: [{{harnesses}}]
+
+# Allowed / preferred models, scoped per cognitive tier.
+models:
+  reasoning: [{{models_reasoning}}]
+
+# Freeform routing guidance.
+routing: |
+{{routing}}
+---
+
+{{summary}}

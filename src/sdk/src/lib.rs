@@ -9,6 +9,7 @@ pub mod clock;
 pub mod config;
 pub mod daemon;
 pub mod home;
+pub mod init;
 pub mod memory;
 pub mod onboarding;
 pub mod runtime;

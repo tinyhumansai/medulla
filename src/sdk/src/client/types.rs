@@ -296,6 +296,18 @@ pub struct RunLimits {
     pub max_depth: Option<u32>,
 }
 
+/// One workspace's authored `MEDULLA.md`, sent verbatim on a run request. The
+/// medulla SDK owns the format, so the text is forwarded unparsed and the
+/// backend distils it into the orchestrator's context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceProfileInput {
+    /// The workspace/repo path this profile describes.
+    pub workspace: String,
+    /// Verbatim `MEDULLA.md` contents.
+    pub medulla_md: String,
+}
+
 /// The `options` object of a run request.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -306,6 +318,9 @@ pub struct RunOrchestrationOptions {
     pub config: Option<RunConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limits: Option<RunLimits>,
+    /// Authored workspace profiles for the directories this cycle works over.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_profiles: Option<Vec<WorkspaceProfileInput>>,
 }
 
 /// Optional inputs to [`crate::client::MedullaClient::run`].

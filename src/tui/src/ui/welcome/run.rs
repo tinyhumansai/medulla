@@ -38,8 +38,11 @@ use super::types::{
 ///
 /// Returns immediately with [`WelcomeOutcome::Skipped`] when the backend says the
 /// reward was already granted — the backend, not the local config flag, is the
-/// authority on that. Any transport failure while checking is also treated as
-/// "skip": a new user must never be blocked from the app by this optional flow.
+/// authority on that.
+///
+/// A transport failure while checking returns [`WelcomeOutcome::Unavailable`]
+/// instead: the user must never be blocked from the app by this optional flow,
+/// but nor should a transient backend error permanently burn their offer.
 ///
 /// Nothing is uploaded before the user explicitly approves the consent step.
 pub async fn run_welcome_ui(
@@ -84,7 +87,7 @@ where
     let max_reward_usd = match client.history_reward_status().await {
         Ok(status) if status.claimed => return Ok(WelcomeOutcome::Skipped),
         Ok(status) => status.max_reward_usd,
-        Err(_) => return Ok(WelcomeOutcome::Skipped),
+        Err(_) => return Ok(WelcomeOutcome::Unavailable),
     };
 
     let mut screen = WelcomeScreen::new(if max_reward_usd > 0.0 {

@@ -245,3 +245,68 @@ fn empty_scan_reports_zeroes() {
     assert_eq!(scan.session_count(), 0);
     assert_eq!(scan.total_bytes(), 0);
 }
+
+// --- Numeric secrets and bare token keys (review findings) ------------------
+
+#[test]
+fn redacts_numeric_secrets() {
+    // Judging by value shape would leak exactly these: a numeric password or
+    // API key is all-digits but still a secret. (Keys outside the alternation,
+    // like `PIN`, are out of scope — the consent screen promises API keys,
+    // tokens, and passwords, and the alternation is kept narrow so it cannot
+    // match innocuous keys such as `pinned_version`.)
+    for case in [
+        r#"{"t":"password: 12345678"}"#,
+        r#"{"t":"api_key=1234567890123456"}"#,
+        r#"{"secret":"0123456789012345"}"#,
+    ] {
+        let (out, count) = redact_text(case);
+        assert!(out.contains(REDACTED), "not redacted: {case} -> {out}");
+        assert_eq!(count, 1, "expected one redaction for {case}");
+    }
+}
+
+#[test]
+fn redacts_a_bare_token_assignment() {
+    // The commonest way a credential lands in a transcript, and the consent
+    // screen promises tokens are stripped.
+    let (out, count) = redact_text(r#"{"token":"abcdefghijklmnopqrstuvwxyz"}"#);
+
+    assert!(
+        !out.contains("abcdefghijklmnopqrstuvwxyz"),
+        "token survived: {out}"
+    );
+    assert!(out.contains(REDACTED));
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn the_plural_tokens_counters_are_never_redacted() {
+    // The precise carve-out that lets bare `token` be redacted safely: every
+    // scorer counter is plural, every credential key is singular.
+    let counters = [
+        r#"{"message":{"usage":{"input_tokens":21000}}}"#,
+        r#"{"message":{"usage":{"output_tokens":12345678}}}"#,
+        r#"{"message":{"usage":{"total_tokens":22100}}}"#,
+        r#"{"message":{"usage":{"cache_read_input_tokens":60000}}}"#,
+        r#"{"info":{"total_token_usage":{"input_tokens":9000,"total_tokens":9400}}}"#,
+    ];
+    for case in counters {
+        let (out, count) = redact_text(case);
+        assert_eq!(out, case, "counter was altered: {case} -> {out}");
+        assert_eq!(count, 0, "counter was redacted: {case}");
+    }
+}
+
+#[test]
+fn singular_token_keys_are_treated_as_secrets() {
+    for case in [
+        r#"{"access_token":"abcdefghijklmnop"}"#,
+        r#"{"refresh_token":"abcdefghijklmnop"}"#,
+        r#"{"api_token":"abcdefghijklmnop"}"#,
+    ] {
+        let (out, count) = redact_text(case);
+        assert!(out.contains(REDACTED), "not redacted: {case} -> {out}");
+        assert_eq!(count, 1);
+    }
+}

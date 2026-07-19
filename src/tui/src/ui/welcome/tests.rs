@@ -248,12 +248,12 @@ fn a_failure_lands_on_the_reveal_with_the_message() {
 
     assert_eq!(screen.step, Step::Reveal);
     assert_eq!(screen.error.as_deref(), Some("backend unreachable"));
-    // The user can still leave.
+
+    // The user can still leave — but as Unavailable, not Completed. The reward
+    // never settled, so the caller must keep the offer open rather than
+    // recording onboarding as done over a transient failure.
     screen.handle_key(key(KeyCode::Enter));
-    assert!(matches!(
-        screen.outcome(),
-        Some(WelcomeOutcome::Completed { .. })
-    ));
+    assert_eq!(screen.outcome(), Some(WelcomeOutcome::Unavailable));
 }
 
 #[test]
@@ -283,4 +283,28 @@ fn the_spinner_advances_on_tick() {
     let first = screen.spinner();
     screen.tick();
     assert_ne!(first, screen.spinner());
+}
+
+#[test]
+fn a_successful_claim_still_completes() {
+    // The counterpart to the failure case: no error means the reward settled,
+    // so onboarding is genuinely done.
+    let mut screen = screen_at(Step::Uploading);
+    screen.apply(WelcomeEvent::Claimed {
+        awarded_usd: 9.0,
+        tier: Some("Seasoned".into()),
+        breakdown: Vec::new(),
+        max_reward_usd: 25.0,
+        already_claimed: false,
+    });
+
+    screen.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        screen.outcome(),
+        Some(WelcomeOutcome::Completed {
+            awarded_usd: 9.0,
+            tier: Some("Seasoned".into()),
+        })
+    );
 }

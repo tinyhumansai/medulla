@@ -275,13 +275,24 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // user is never re-prompted; the backend independently refuses a second
     // grant. Only runs against a real authenticated backend — never on the mock.
     let config_path = home.join("config.toml");
+    // Onboarding state must be written back to the file it is *read* from. With
+    // an explicit --config, discovery is bypassed entirely, so persisting to the
+    // home config would leave the flag unread and the flow would reappear every
+    // launch.
+    let onboarding_path = args
+        .config
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| config_path.clone());
     if !loaded.config.onboarding.welcome_completed {
         if let Some(client) = &backend_client {
             match run_welcome_ui(&mut terminal, client, env.clone()).await {
                 // Completing *or* declining settles onboarding: a user who said
                 // no should not be asked again on every launch.
                 Ok(outcome @ (WelcomeOutcome::Completed { .. } | WelcomeOutcome::Skipped)) => {
-                    if let Err(e) = medulla::config::persist_welcome_completed(&config_path, true) {
+                    if let Err(e) =
+                        medulla::config::persist_welcome_completed(&onboarding_path, true)
+                    {
                         startup_status = Some(format!("could not save onboarding state ({e})"));
                     }
                     if let WelcomeOutcome::Completed { awarded_usd, .. } = outcome {
@@ -293,10 +304,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         }
                     }
                 }
-                // Nothing was found to share, so the offer was never really made.
-                // Leaving the flag unset keeps it available once this user has
-                // sessions — which is what the empty-state screen promises.
-                Ok(WelcomeOutcome::NothingToShare) => {}
+                // Nothing was found to share, or the flow never settled (status
+                // check or claim failed). Leaving the flag unset keeps the offer
+                // available rather than burning it on an empty scan or a
+                // transient backend error.
+                Ok(WelcomeOutcome::NothingToShare | WelcomeOutcome::Unavailable) => {}
                 Err(_) => {}
             }
         }

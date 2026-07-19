@@ -46,6 +46,13 @@ pub enum WelcomeOutcome {
     /// tells the user the offer will be waiting once they have sessions, so the
     /// caller must *not* record onboarding as done, or that promise is broken.
     NothingToShare,
+    /// The flow could not run or could not settle — the status check failed, or
+    /// the claim errored after uploading.
+    ///
+    /// Also must not record onboarding as done: a transient backend failure is
+    /// not the user declining, and burning the offer on it would be silently
+    /// taking away credit they never got the chance to earn.
+    Unavailable,
 }
 
 /// An async action the driver must run on the screen's behalf.

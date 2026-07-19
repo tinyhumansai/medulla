@@ -185,8 +185,10 @@ async fn an_already_claimed_reward_skips_without_drawing_anything() {
 }
 
 #[tokio::test]
-async fn an_unreachable_backend_skips_rather_than_blocking_startup() {
-    // Nothing is listening on this port; the flow must not block the app.
+async fn an_unreachable_backend_yields_unavailable_rather_than_blocking_startup() {
+    // Nothing is listening on this port. The flow must not block the app — but
+    // it must also not report a decline, or the caller would record onboarding
+    // as done and permanently burn the offer over a transient outage.
     let dead = MedullaClient::new("http://127.0.0.1:1", "test-jwt");
     let mut term = terminal();
 
@@ -194,7 +196,7 @@ async fn an_unreachable_backend_skips_rather_than_blocking_startup() {
         .await
         .unwrap();
 
-    assert_eq!(outcome, WelcomeOutcome::Skipped);
+    assert_eq!(outcome, WelcomeOutcome::Unavailable);
 }
 
 #[tokio::test]
@@ -232,7 +234,7 @@ async fn no_local_history_reaches_the_empty_state_and_skips() {
 }
 
 #[tokio::test]
-async fn a_failing_claim_still_ends_the_flow() {
+async fn a_failing_claim_ends_the_flow_but_stays_retryable() {
     let backend = MockBackend::start().await;
     // Uploads succeed but the claim 404s (an unknown route on the mock).
     backend.configure(|config| config.history_claim = serde_json::Value::Null);
@@ -248,9 +250,11 @@ async fn a_failing_claim_still_ends_the_flow() {
     .expect("flow should not hang")
     .unwrap();
 
-    // A null claim decodes to a zeroed one, so the flow still completes rather
-    // than trapping the user on a spinner.
-    assert!(matches!(outcome, WelcomeOutcome::Completed { .. }));
+    // The flow ends rather than trapping the user on a spinner — but as
+    // Unavailable, because the reward never settled. Reporting Completed here
+    // would let the caller mark onboarding done and lose a reward the user
+    // never actually received.
+    assert_eq!(outcome, WelcomeOutcome::Unavailable);
 }
 
 #[tokio::test]

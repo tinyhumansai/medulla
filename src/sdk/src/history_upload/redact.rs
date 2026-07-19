@@ -61,19 +61,36 @@ fn bearer_rule() -> &'static Regex {
     })
 }
 
-/// Secret-looking assignments: `api_key: "..."`, `PASSWORD=...`, and friends.
+/// Secret-looking assignments: `api_key: "..."`, `PASSWORD=...`, `token=...`.
 ///
-/// The key alternation deliberately omits a bare `token` so it cannot match the
-/// `input_tokens` / `total_tokens` family the scorer depends on; only explicit
-/// `access_token`-style compounds are treated as secrets.
+/// A bare `token` key is included — `"token":"…"` is one of the commonest ways a
+/// credential ends up pasted into a session, and the consent screen promises
+/// tokens are stripped. Protecting the scorer's counters is handled by
+/// [`is_token_counter_key`] instead, which is precise about the plural
+/// `*_tokens` family rather than excluding the whole word.
 fn assignment_rule() -> &'static Regex {
     static RULE: OnceLock<Regex> = OnceLock::new();
     RULE.get_or_init(|| {
         Regex::new(
-            r#"(?i)([A-Za-z0-9_\-]*(?:api[_\-]?key|secret|password|passwd|credential|private[_\-]?key|access[_\-]?token|auth[_\-]?token|refresh[_\-]?token)[A-Za-z0-9_\-]*"?\s*[:=]\s*"?)([^\s"',}\]]{8,})"#,
+            r#"(?i)([A-Za-z0-9_\-]*(?:api[_\-]?key|secret|password|passwd|credential|private[_\-]?key|token)[A-Za-z0-9_\-]*"?\s*[:=]\s*"?)([^\s"',}\]{]{8,})"#,
         )
         .expect("redaction pattern must compile")
     })
+}
+
+/// Whether a matched assignment key is one of the scorer's token counters.
+///
+/// Every counter the backend reads is plural — `input_tokens`, `output_tokens`,
+/// `total_tokens`, `cache_read_input_tokens` — while credentials are singular
+/// (`token`, `access_token`, `api_token`). Keying off that distinction lets bare
+/// `token` assignments be redacted without ever touching a usage number, which
+/// would silently under-credit the user.
+fn is_token_counter_key(prefix: &str) -> bool {
+    let key: String = prefix
+        .trim_end_matches(|ch: char| ch.is_whitespace() || matches!(ch, '"' | '\'' | ':' | '='))
+        .trim_matches(|ch: char| ch == '"' || ch == '\'')
+        .to_ascii_lowercase();
+    key.ends_with("tokens")
 }
 
 /// Scrubs secrets from `input`, returning the cleaned text and how many
@@ -102,15 +119,16 @@ pub fn redact_text(input: &str) -> (String, usize) {
             .into_owned();
     }
 
-    // The assignment rule needs a guard rather than a plain replace: an
-    // all-numeric value is a counter (`"total_tokens": 12345678`), not a secret,
-    // and redacting it would zero out the user's score.
+    // The assignment rule needs a guard rather than a plain replace, but the
+    // guard is on the *key*, not the value: `"total_tokens": 12345678` must
+    // survive, while a numeric secret (`password: 12345678`, a PIN, a recovery
+    // code) must not. Judging by value shape would leak exactly those.
     let assignment = assignment_rule();
     let mut assignment_hits = 0usize;
     let replaced = assignment.replace_all(&text, |caps: &regex::Captures<'_>| {
         let prefix = &caps[1];
         let value = &caps[2];
-        if value.chars().all(|ch| ch.is_ascii_digit()) {
+        if is_token_counter_key(prefix) {
             return format!("{prefix}{value}");
         }
         assignment_hits += 1;

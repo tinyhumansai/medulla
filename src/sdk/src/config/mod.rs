@@ -14,6 +14,8 @@ mod types;
 mod urls;
 
 #[cfg(test)]
+mod persist_tests;
+#[cfg(test)]
 mod tests;
 
 pub use load::load_config;

@@ -56,9 +56,17 @@ impl WelcomeScreen {
             },
             Step::Reveal => match key.code {
                 KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
-                    self.outcome = Some(WelcomeOutcome::Completed {
-                        awarded_usd: self.awarded_usd,
-                        tier: self.tier.clone(),
+                    // A reveal carrying an error means the claim never settled.
+                    // Reporting that as "completed" would let the caller record
+                    // onboarding as done and permanently lose the offer over a
+                    // transient failure.
+                    self.outcome = Some(if self.error.is_some() {
+                        WelcomeOutcome::Unavailable
+                    } else {
+                        WelcomeOutcome::Completed {
+                            awarded_usd: self.awarded_usd,
+                            tier: self.tier.clone(),
+                        }
                     });
                     None
                 }

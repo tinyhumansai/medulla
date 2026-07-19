@@ -124,6 +124,38 @@ pub enum WorkerOp {
     },
 }
 
+impl WorkerOp {
+    /// Parse a free-text "add worker" line into a [`WorkerOp::Add`].
+    ///
+    /// The first whitespace-delimited token is the identity; any remainder is a
+    /// human label. A leading `@` marks the token as a tiny.place handle
+    /// (`handle`); otherwise it is treated as an address. `harness` is left
+    /// `None`. Returns `None` when `input` is blank so callers can surface an
+    /// "empty" notice rather than issuing a no-op mutation.
+    pub fn parse_add(input: &str) -> Option<Self> {
+        let text = input.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let (first, rest) = match text.split_once(char::is_whitespace) {
+            Some((a, r)) => (a.trim().to_string(), r.trim().to_string()),
+            None => (text.to_string(), String::new()),
+        };
+        let label = if rest.is_empty() { None } else { Some(rest) };
+        let (address, handle) = if first.starts_with('@') {
+            (None, Some(first))
+        } else {
+            (Some(first), None)
+        };
+        Some(WorkerOp::Add {
+            address,
+            handle,
+            label,
+            harness: None,
+        })
+    }
+}
+
 /// The event stream's health, surfaced in the header when a cycle runs under the
 /// core runtime (§01 "lossy-but-not-silently").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,6 +301,44 @@ pub trait Runtime: Send + Sync {
 mod tests {
     use super::*;
     use crate::runtime::mock::MockRuntime;
+
+    #[test]
+    fn worker_op_parse_add_classifies_handle_address_and_label() {
+        // A leading @ marks a tiny.place handle; the remainder is the label.
+        match WorkerOp::parse_add("@alice friendly worker") {
+            Some(WorkerOp::Add {
+                address,
+                handle,
+                label,
+                harness,
+            }) => {
+                assert_eq!(address, None);
+                assert_eq!(handle.as_deref(), Some("@alice"));
+                assert_eq!(label.as_deref(), Some("friendly worker"));
+                assert_eq!(harness, None);
+            }
+            other => panic!("expected Add, got {other:?}"),
+        }
+
+        // A non-@ first token is an address; no remainder means no label.
+        match WorkerOp::parse_add("  tcp://host:9000  ") {
+            Some(WorkerOp::Add {
+                address,
+                handle,
+                label,
+                ..
+            }) => {
+                assert_eq!(address.as_deref(), Some("tcp://host:9000"));
+                assert_eq!(handle, None);
+                assert_eq!(label, None);
+            }
+            other => panic!("expected Add, got {other:?}"),
+        }
+
+        // Blank input yields nothing.
+        assert!(WorkerOp::parse_add("   ").is_none());
+        assert!(WorkerOp::parse_add("").is_none());
+    }
 
     #[test]
     fn stream_state_glyph_and_label() {

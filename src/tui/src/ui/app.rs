@@ -1083,29 +1083,16 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
-            PromptKind::WorkerAdd => {
-                if text.is_empty() {
-                    self.set_status("Add cancelled (empty)");
-                    return None;
+            PromptKind::WorkerAdd => match WorkerOp::parse_add(&text) {
+                Some(op) => {
+                    self.set_status("Adding worker…");
+                    Some(Cmd::WorkerOp(op))
                 }
-                let (addr, rest) = match text.split_once(char::is_whitespace) {
-                    Some((a, r)) => (a.trim().to_string(), r.trim().to_string()),
-                    None => (text.clone(), String::new()),
-                };
-                let label = if rest.is_empty() { None } else { Some(rest) };
-                let (address, handle) = if addr.starts_with('@') {
-                    (None, Some(addr))
-                } else {
-                    (Some(addr), None)
-                };
-                self.set_status("Adding worker…");
-                Some(Cmd::WorkerOp(WorkerOp::Add {
-                    address,
-                    handle,
-                    label,
-                    harness: None,
-                }))
-            }
+                None => {
+                    self.set_status("Add cancelled (empty)");
+                    None
+                }
+            },
             PromptKind::WorkerEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text));

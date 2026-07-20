@@ -139,6 +139,40 @@ async fn main() {
     }
 }
 
+/// How long to wait for the peer to accept our contact request.
+const CONTACT_ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Block until `peer` has accepted our contact request, or the timeout elapses.
+///
+/// The daemon accepts on a poll interval, so a DM sent immediately after the
+/// request races that tick and would be rejected with HTTP 403 `not_a_contact`.
+///
+/// Advisory: it never fails the run. A relay with no contact model (the mock
+/// Signal server) errors on the status route, and there the send succeeds
+/// anyway — letting the send report the real problem beats guessing here.
+async fn await_contact(client: &TinyPlaceClient, peer: &str) {
+    let deadline = Instant::now() + CONTACT_ACCEPT_TIMEOUT;
+    while Instant::now() < deadline {
+        match client.contacts.status(peer).await {
+            Ok(contact) if contact.status == "accepted" => {
+                eprintln!("coordination_owner: contact with {peer} accepted");
+                return;
+            }
+            Ok(contact) if contact.status == "blocked" => {
+                eprintln!("coordination_owner: peer {peer} blocked us");
+                return;
+            }
+            Ok(_) => {}
+            Err(_) => return, // no contact model on this relay; let the send speak
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    eprintln!(
+        "coordination_owner: contact with {peer} still pending after {}s",
+        CONTACT_ACCEPT_TIMEOUT.as_secs()
+    );
+}
+
 async fn run() -> Result<(), String> {
     let args = parse_args()?;
 
@@ -153,7 +187,7 @@ async fn run() -> Result<(), String> {
         signer: Some(signer.clone() as std::sync::Arc<dyn Signer>),
         ..Default::default()
     });
-    let transport = SignalTransport::new(client, &signer, &dir);
+    let transport = SignalTransport::new(client.clone(), &signer, &dir);
 
     // Publish keys so a peer can open an encrypted channel back to us.
     transport
@@ -170,6 +204,18 @@ async fn run() -> Result<(), String> {
 
     let to = args.to.clone().ok_or("missing --to <worker agent id>")?;
     eprintln!("coordination_owner: owner={owner_id} → worker={to}");
+
+    // The relay gates direct messages on an accepted contact relationship and
+    // rejects a DM between strangers with HTTP 403 `not_a_contact`, so ask for
+    // one first. The daemon auto-accepts incoming requests
+    // (`spawn_contact_auto_accepter`), so this normally settles within a tick.
+    //
+    // Best-effort, matching the wrapper: a relay with no contact model (the mock
+    // Signal server) has no such route, and that must not stop the run.
+    if let Err(err) = transport.request_contact(&to).await {
+        eprintln!("coordination_owner: contact request to {to} failed: {err}");
+    }
+    await_contact(&client, &to).await;
 
     // Send the request frame (encrypted; opens the X3DH session to the worker).
     // `--kind capabilities` probes the worker instead of delegating a task.

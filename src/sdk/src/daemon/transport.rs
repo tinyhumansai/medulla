@@ -41,7 +41,7 @@ const ONE_TIME_PRE_KEY_COUNT: usize = 20;
 /// request was rejected but never *why*. The body is the only place the backend
 /// explains itself (`{"error":"signature is required"}`), which is exactly what
 /// is needed to tell a stale client apart from a moved server.
-fn describe_error(err: &::tinyplace::Error) -> String {
+pub(super) fn describe_error(err: &::tinyplace::Error) -> String {
     match err {
         ::tinyplace::Error::Http(http) => {
             let body = http.body.to_string();
@@ -137,7 +137,7 @@ impl SignalTransport {
             .request(peer)
             .await
             .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| describe_error(&e))
     }
 
     /// This wallet's Ed25519 identity public key, base64 — the value the
@@ -237,7 +237,7 @@ impl SignalTransport {
                     .keys
                     .get_bundle(to)
                     .await
-                    .map_err(|e| e.to_string())?,
+                    .map_err(|e| describe_error(&e))?,
             )
         };
 
@@ -272,7 +272,7 @@ impl SignalTransport {
             .send(envelope)
             .await
             .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| describe_error(&e))
     }
 
     /// Destructively read the inbox (up to `limit`): decrypt each message, hand

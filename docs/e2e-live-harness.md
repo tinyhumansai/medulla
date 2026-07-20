@@ -31,8 +31,11 @@ medulla.
 | `e2e/coordination/lib.sh` | shared boot/teardown/assert helpers (the harness kernel) |
 | `e2e/coordination/run.sh` | happy-path round trip + TUI smoke leg; exit 0 on PASS |
 | `e2e/coordination/tests.sh` | 5 functional scenarios on top of `lib.sh` |
+| `e2e/coordination/tests_multi.sh` | 5 multi-agent scenarios: two daemons, two workspaces |
+| `e2e/coordination/run-live.sh` | the same fleet against real staging + OpenRouter |
 | `e2e/coordination/mock_llm.py` | stdlib-only OpenAI-compatible mock (SSE + unary) |
 | `e2e/coordination/opencode.json` | opencode config template → mock LLM; `autoupdate: false` |
+| `e2e/coordination/opencode.live.json` | opencode config template → OpenRouter (live suite) |
 | `e2e/coordination/Dockerfile` | multi-stage image: rust build stage → slim runtime |
 | `e2e/coordination/run-docker.sh` | build + run the whole harness in a container |
 | `examples/mock_signal_server.rs` | runnable mock Signal server with `/debug/stored` |
@@ -43,7 +46,9 @@ medulla.
 ```sh
 bash e2e/coordination/run.sh          # happy path + TUI smoke leg (~1-2 min)
 bash e2e/coordination/tests.sh        # 5 functional scenarios (~40s + boots)
+bash e2e/coordination/tests_multi.sh  # 5 multi-agent scenarios (~30s + boots)
 bash e2e/coordination/run-docker.sh   # the same, inside Linux/arm64 docker
+make e2e-docker                       # build the image, then run all three offline suites
 ```
 
 Knobs (all optional):
@@ -54,6 +59,70 @@ Knobs (all optional):
   overrides; unset means `cargo build --release` (the docker image bakes all four).
 - Docker: `IMAGE=`, `NO_CACHE=1`, `NET=host` (default is `--network none`).
 - Mock LLM: `MOCK_LLM_MARKER`, `MOCK_LLM_MODEL`, `MOCK_LLM_PORT`, `MOCK_LLM_LOG`.
+
+## The multi-agent suite (`tests_multi.sh`)
+
+The daemon is **one workspace per process** — `RunTaskOptions.cwd` comes from
+`config.workspace`, and nothing on the wire overrides it per task. So a fleet is
+N daemon processes, not one daemon with N directories. `tests_multi.sh` boots two
+(`alpha`, `beta`), each with its own workspace, `MEDULLA_HOME` and tiny.place
+identity, against **one shared** mock Signal server and mock LLM:
+
+```
+mock Signal ──┬── daemon alpha (work-alpha) ── opencode ──┐
+              └── daemon beta  (work-beta)  ── opencode ──┴─→ mock LLM
+```
+
+| Scenario | Asserts |
+| --- | --- |
+| fleet registration | two daemons onboard as *distinct* identities on one relay |
+| workspace binding | each reports its own `cwd`; sentinels prove each read only its own dir |
+| concurrent routing | two parallel legs each get their own marker back, no cross-talk |
+| crash containment | killing `beta` mid-task leaves `alpha` serving |
+| crash recovery | restarting `beta` re-onboards the *same* identity and serves again |
+
+Workspace binding is the subtle one. Asserting the reported `cwd` only proves the
+daemon *says* the right thing. To prove it *read* the right directory,
+`make_workspace` plants a unique sentinel in each workspace's `AGENTS.md` —
+which `dir_context` folds into the capabilities probe prompt — and the suite then
+asserts against `MOCK_LLM_LOG` that both sentinels reached the LLM and **never
+co-occurred in a single request**. Co-occurrence would mean a daemon read outside
+its own workspace.
+
+Note the daemons share a filesystem, so this is a *behavioural* guarantee (the
+daemon stays in its workspace), not an enforced one. Enforcing it would take
+separate containers with separate volumes.
+
+## The live suite (`run-live.sh`)
+
+Same fleet, same assertions in spirit, with the two mocks swapped for real
+infrastructure — the staging tiny.place relay and OpenRouter. It exists because a
+green mocked suite can still break against real staging.
+
+Two assertions necessarily change shape, because a real model does not behave like
+the echo mock:
+
+- **Routing** is asserted on `taskId` correlation rather than a verbatim marker
+  echo — a real model will not parrot `TASKALPHA-123` back.
+- **Capabilities** asserts the model populated `tools`, which proves the probe
+  round-tripped through OpenRouter instead of falling back to the local digest.
+
+It fails closed on every axis, because a live suite that runs by accident is worse
+than one that is annoying to start:
+
+```sh
+E2E_LIVE=1 OPENROUTER_API_KEY=sk-or-… make e2e-live
+```
+
+- `E2E_LIVE=1` — required; the deliberate opt-in.
+- `OPENROUTER_API_KEY` — required; billed per token.
+- `MEDULLA_STAGING=1` — the default. Targeting production additionally needs
+  `E2E_ALLOW_PROD=1`.
+- `LIVE_MODEL` — defaults to a cheap small model.
+
+The rendered opencode config holds a live API key, so it is written mode `600`.
+Live runs leave real identities on the relay. This target is deliberately **not**
+part of `make ci`.
 
 ## The patterns that made it work
 

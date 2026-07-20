@@ -28,7 +28,11 @@ dump_diagnostics() {
   for j in "$RUN_DIR"/*.json; do
     [ -f "$j" ] || continue
     printf '\n----- %s -----\n' "$(basename "$j")" >&2
-    cat "$j" >&2 || true
+    # opencode.json carries a provider API key — a real one under run-live.sh.
+    # Diagnostics land in CI logs and pasted bug reports, so redact any value
+    # that looks like a credential rather than trusting the file not to hold one.
+    sed -E 's/("(apiKey|api_key|token|secret)"[[:space:]]*:[[:space:]]*")[^"]*"/\1<redacted>"/g' \
+      "$j" >&2 || true
   done
   [ -f "$RUN_DIR/llm.jsonl" ] && { printf '\n----- llm.jsonl (last 5) -----\n' >&2; tail -n 5 "$RUN_DIR/llm.jsonl" >&2 || true; }
   if tmux has-session -t "$SESSION" 2>/dev/null; then
@@ -110,6 +114,35 @@ e2e_init() {
   tmux set-option -t "$SESSION" -g history-limit 20000 >/dev/null 2>&1 || true
 }
 
+# Create an additional isolated workspace for a second (third, …) daemon.
+# Usage: make_workspace <name> [sentinel]
+#
+# Each daemon owns a private workspace directory, so multi-daemon scenarios can
+# assert that a daemon only ever reports and reads its own directory. When a
+# SENTINEL is given it is written into the workspace's AGENTS.md — the daemon's
+# `dir_context` reader picks that file up to ground its capabilities probe, so
+# the sentinel shows up in that daemon's LLM requests and nowhere else. That is
+# what makes "this agent is bound to this dir" an assertion rather than a hope.
+#
+# Echoes the workspace path.
+make_workspace() {
+  local name="$1" sentinel="${2:-}"
+  local dir="$RUN_DIR/work-$name"
+  mkdir -p "$dir"
+  if command -v git >/dev/null 2>&1; then
+    git -C "$dir" init -q 2>/dev/null || true
+  fi
+  if [ -n "$sentinel" ]; then
+    cat > "$dir/AGENTS.md" <<EOF
+# Workspace $name
+
+This workspace is identified by the sentinel token $sentinel.
+When asked to describe this directory, always mention $sentinel.
+EOF
+  fi
+  printf '%s' "$dir"
+}
+
 # Launch a service in its own tmux window from a launcher script file. The BODY
 # (passed on stdin) is the command(s). Output → RUN_DIR/NAME.log; exit status →
 # RUN_DIR/NAME.rc.
@@ -156,33 +189,60 @@ EOF
   sed "s/MOCK_LLM_PORT/$LLM_PORT/" "$SCRIPT_DIR/opencode.json" > "$OC_CONFIG"
 }
 
-# Boot the medulla daemon; sets WORKER_ID. Extra daemon flags are appended.
-boot_daemon() {
-  local extra_flags="${1:-}"
-  launch daemon <<EOF
-export HOME=$(printf %q "$RUN_DIR/ochome")
+# Boot one medulla daemon under a caller-chosen NAME.
+#   boot_daemon_named <name> <workspace-dir> [extra-daemon-flags]
+#
+# NAME must be a bash-identifier-safe token; it names the tmux window, the log
+# file, and the `WORKER_ID_<NAME>` global holding the scraped agent id (read it
+# via `worker_id <name>`). Each daemon gets its own MEDULLA_HOME, TINYPLACE_CONFIG
+# (so it onboards as a *distinct* tiny.place identity) and opencode HOME, which
+# is what lets several run against one Signal server without colliding.
+#
+# The mock LLM and Signal server are shared: those are the fixtures under test.
+boot_daemon_named() {
+  local name="$1" workspace="$2" extra_flags="${3:-}"
+  mkdir -p "$RUN_DIR/ochome-$name" "$RUN_DIR/mhome-$name" "$RUN_DIR/tp-$name"
+  launch "$name" <<EOF
+export HOME=$(printf %q "$RUN_DIR/ochome-$name")
 export OPENCODE_CONFIG=$(printf %q "$OC_CONFIG")
 export OPENCODE_DISABLE_AUTOUPDATE=1
 export PATH=$(printf %q "$OPENCODE_DIR"):\$PATH
 export TINYPLACE_ENDPOINT=$(printf %q "$SIGNAL_URL")
-export TINYPLACE_CONFIG=$(printf %q "$RUN_DIR/tp/config.json")
-export MEDULLA_HOME=$(printf %q "$RUN_DIR/mhome")
+export TINYPLACE_CONFIG=$(printf %q "$RUN_DIR/tp-$name/config.json")
+export MEDULLA_HOME=$(printf %q "$RUN_DIR/mhome-$name")
 exec $(printf %q "$MEDULLA_BIN") daemon --providers opencode \
-  --workspace $(printf %q "$RUN_DIR/work") --poll-ms 500 $extra_flags
+  --workspace $(printf %q "$workspace") --poll-ms 500 $extra_flags
 EOF
-  wait_for_regex "$RUN_DIR/daemon.log" 'serving providers .* as .* on ' 90 \
-    || fail "medulla daemon did not reach the serving state"
-  WORKER_ID="$(grep -Eo 'as [^ ]+ on ' "$RUN_DIR/daemon.log" | head -1 | awk '{print $2}')"
-  [ -n "$WORKER_ID" ] || fail "could not scrape worker agent id from daemon.log"
-  log "daemon worker id: $WORKER_ID"
+  wait_for_regex "$RUN_DIR/$name.log" 'serving providers .* as .* on ' 90 \
+    || fail "medulla daemon '$name' did not reach the serving state"
+  local id
+  id="$(grep -Eo 'as [^ ]+ on ' "$RUN_DIR/$name.log" | head -1 | awk '{print $2}')"
+  [ -n "$id" ] || fail "could not scrape worker agent id from $name.log"
+  printf -v "WORKER_ID_$name" '%s' "$id"
+  log "daemon '$name' worker id: $id  workspace: $workspace"
 }
 
-# Run an owner leg in its own tmux window. Usage:
-#   run_owner <label> <owner-arg>...
-# Waits for completion, writes the terminal frame JSON to RUN_DIR/<label>.json,
-# and sets OWNER_RC to the owner exit code. Never fails the suite itself (the
-# caller asserts on the JSON / rc), so error-path scenarios can inspect it.
-run_owner() {
+# Echo the worker agent id registered by `boot_daemon_named <name>`.
+worker_id() {
+  local var="WORKER_ID_$1"
+  printf '%s' "${!var:-}"
+}
+
+# Boot the single default daemon in $RUN_DIR/work; sets WORKER_ID.
+# Back-compat wrapper over boot_daemon_named for the single-daemon callers
+# (run.sh, tests.sh) that predate multi-daemon support.
+boot_daemon() {
+  local extra_flags="${1:-}"
+  boot_daemon_named daemon "$RUN_DIR/work" "$extra_flags"
+  WORKER_ID="$(worker_id daemon)"
+}
+
+# Start an owner leg in its own tmux window and return immediately. Usage:
+#   start_owner <label> <owner-arg>...
+# Pair with `await_owner <label>`. Splitting start from await is what lets a
+# scenario run several owner legs concurrently, or interfere with the stack
+# (e.g. kill a daemon) while a leg is still in flight.
+start_owner() {
   local label="$1"; shift
   local args=""
   local a
@@ -190,9 +250,49 @@ run_owner() {
   launch "$label" <<EOF
 exec $(printf %q "$OWNER_BIN")$args
 EOF
-  wait_for_regex "$RUN_DIR/$label.rc" '.' 220 || fail "owner leg '$label' did not finish in time"
+}
+
+# Wait for a started owner leg to finish. Writes the terminal frame JSON to
+# RUN_DIR/<label>.json and sets OWNER_RC to the owner exit code. Never fails the
+# suite itself (the caller asserts on the JSON / rc), so error-path scenarios can
+# inspect the outcome. Pass a TIMEOUT (seconds, default 220) to bound the wait.
+await_owner() {
+  local label="$1" timeout="${2:-220}"
+  wait_for_regex "$RUN_DIR/$label.rc" '.' "$timeout" \
+    || fail "owner leg '$label' did not finish within ${timeout}s"
   OWNER_RC="$(cat "$RUN_DIR/$label.rc")"
   grep -E '^\{.*"kind"' "$RUN_DIR/$label.log" | tail -1 > "$RUN_DIR/$label.json" || true
+}
+
+# Wait for an owner leg, tolerating non-completion. Sets OWNER_RC to the exit
+# code, or the empty string if the leg was still running at the deadline. Used by
+# the failure scenarios, where "never finished" is itself a valid outcome.
+await_owner_maybe() {
+  local label="$1" timeout="${2:-60}"
+  if wait_for_regex "$RUN_DIR/$label.rc" '.' "$timeout"; then
+    OWNER_RC="$(cat "$RUN_DIR/$label.rc")"
+  else
+    # shellcheck disable=SC2034  # read by the sourcing scenario scripts
+    OWNER_RC=""
+  fi
+  grep -E '^\{.*"kind"' "$RUN_DIR/$label.log" | tail -1 > "$RUN_DIR/$label.json" || true
+}
+
+# Run an owner leg to completion. Usage:
+#   run_owner <label> <owner-arg>...
+run_owner() {
+  local label="$1"; shift
+  start_owner "$label" "$@"
+  await_owner "$label"
+}
+
+# Hard-kill a named daemon's tmux window, simulating an agent crash. The daemon
+# holds no listening socket, so killing the window is a faithful stand-in for the
+# process dying: the Signal relay simply stops being drained by that identity.
+kill_daemon() {
+  local name="$1"
+  tmux kill-window -t "$SESSION:$name" 2>/dev/null || true
+  log "killed daemon '$name'"
 }
 
 # Confirm bidirectional encrypted delivery via the Signal /debug/stored surface.

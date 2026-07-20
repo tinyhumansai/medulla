@@ -16,14 +16,14 @@ Medulla is currently the only model to bring all three together.
 curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
 ```
 
-This downloads the prebuilt `medulla` binary for your platform, verifies its SHA-256 against the release manifest (when a checksum tool such as `sha256sum`, `shasum`, or `openssl` is available), and installs to `~/.medulla/bin`. If the installer updated your `PATH`, reload your shell first — `exec $SHELL`, or open a new terminal — so `medulla` resolves. Then:
+This downloads the prebuilt `medulla` binary for your platform, verifies its SHA-256 against the release manifest (when a checksum tool such as `sha256sum`, `shasum`, or `openssl` is available), and installs to `~/.medulla/bin`. If the installer updated your `PATH`, reload your shell first, with `exec $SHELL` or a new terminal, so `medulla` resolves. Then:
 
 ```sh
 medulla login   # browser OAuth; stores a verified JWT
 medulla         # bare invocation starts the TUI
 ```
 
-With no credentials, `medulla` opens a login screen — press `m` there to explore offline against the mock runtime. See [For developers](#for-developers) to build from source or embed the SDK.
+With no credentials, `medulla` opens a login screen. Press `m` there to explore offline against the mock runtime. See [For developers](#for-developers) to build from source or embed the SDK.
 
 ## Why an Orchestrator Model
 
@@ -35,15 +35,15 @@ Orchestration is becoming the dominant pattern in agentic systems, yet it has be
 
 Five capabilities do most of the work. Each has a full page in the [documentation](gitbooks/features/README.md).
 
-**[Memory](gitbooks/features/memory.md).** Medulla reads the coding-agent history already on your machine — Claude Code transcripts, Codex rollouts, your instruction files — and distils it into a compact persona pack: your standing rules, your stack, how you like code written. You have already explained yourself hundreds of times to harnesses that forgot. Separately, the reasoning tier keeps a durable scratch space so a hard-won fact survives to the next cycle instead of being derived twice.
+**[Memory](gitbooks/features/memory.md).** Medulla reads the coding-agent history already on your machine, meaning Claude Code transcripts, Codex rollouts, and your instruction files, then distils it into a compact persona pack covering your standing rules, your stack, and how you like code written. You have already explained yourself hundreds of times to harnesses that forgot. Separately, the reasoning tier keeps a durable scratch space so a hard-won fact survives to the next cycle instead of being derived twice.
 
-**[Workers and sessions](gitbooks/features/workers-and-sessions.md).** A worker is capacity — a real harness running with your credentials in your workspace. A session is the thread you return to, resumable and forkable, surviving the terminal app that started it. Unassigned tasks go to the least-loaded healthy worker, failed ones get re-delegated, and every task settles into a definite state.
+**[Workers and sessions](gitbooks/features/workers-and-sessions.md).** A worker is capacity, meaning a real harness running with your credentials in your workspace. A session is the thread you return to, resumable and forkable, surviving the terminal app that started it. Unassigned tasks go to the least-loaded healthy worker, failed ones get re-delegated, and every task settles into a definite state.
 
-**[MEDULLA.md](gitbooks/features/workspace-profiles.md).** A short authored file at a repository root telling the orchestrator what the directory *is* and how to route work over it. `AGENTS.md` is written for an agent working inside a repo — too long, and silent on routing. This is ~100–200 tokens the orchestrator reads every cycle. `medulla init` drafts one from what your repo already has.
+**[MEDULLA.md](gitbooks/features/workspace-profiles.md).** A short authored file at a repository root telling the orchestrator what the directory is and how to route work over it. `AGENTS.md` is written for an agent working inside a repo, so it is too long and silent on routing. This is roughly 100 to 200 tokens the orchestrator reads every cycle, and `medulla init` drafts one from what your repo already has.
 
-**[Routing](gitbooks/features/routing.md).** Deciding how to decompose a problem, executing a step, and compressing a transcript are different jobs. Medulla splits them across three cognitive tiers — orchestrator, reasoning, compress — and routes each to a model sized for it. Workspace profiles and per-task hints steer harness and model choice as advisory guidance, never hard gates.
+**[Routing](gitbooks/features/routing.md).** Deciding how to decompose a problem, executing a step, and compressing a transcript are different jobs. Medulla splits them across three cognitive tiers, orchestrator, reasoning, and compress, and routes each to a model sized for it. Workspace profiles and per-task hints steer harness and model choice as advisory guidance rather than hard gates.
 
-**[Token efficiency and budgets](gitbooks/features/token-efficiency.md).** Two opposite problems. Spending less: bulk fleet output never reaches the orchestrator, so its reasoning surface stays small and you pay orchestrator rates on the distilled slice only. Wasting less: if you have connected paid subscriptions, those tokens are already bought — Medulla steers delegation toward seats with headroom, because leaving them unused at the end of a window is money thrown away.
+**[Token efficiency and budgets](gitbooks/features/token-efficiency.md).** Two opposite problems. On spending less, bulk fleet output never reaches the orchestrator, so its reasoning surface stays small and you pay orchestrator rates on the distilled slice only. On wasting less, if you have connected paid subscriptions those tokens are already bought, so Medulla steers delegation toward seats with headroom, because leaving them unused at the end of a window is money thrown away.
 
 ## Benchmarks at a Glance
 
@@ -88,28 +88,28 @@ The full documentation lives in [gitbooks/](gitbooks/README.md).
 - [Open Benchmarks, Open SDKs](gitbooks/open-benchmarks-open-sdks.md)
 - [Pricing and Availability](gitbooks/pricing-and-availability.md)
 
-**Features** — what Medulla does day to day:
+**Features**, what Medulla does day to day:
 
-- [Memory](gitbooks/features/memory.md) — the persona pack, and the orchestrator's scratch space.
-- [Workers and Sessions](gitbooks/features/workers-and-sessions.md) — capacity, threads, and what survives.
-- [MEDULLA.md Workspace Profiles](gitbooks/features/workspace-profiles.md) — telling the orchestrator what a repo is.
-- [Orchestrator Routing](gitbooks/features/routing.md) — cognitive tiers, harness selection, runtime fallback.
-- [Token Efficiency and Budgets](gitbooks/features/token-efficiency.md) — small surfaces, enforced budgets, tokenmax.
+- [Memory](gitbooks/features/memory.md): the persona pack, and the orchestrator's scratch space.
+- [Workers and Sessions](gitbooks/features/workers-and-sessions.md): capacity, threads, and what survives.
+- [MEDULLA.md Workspace Profiles](gitbooks/features/workspace-profiles.md): telling the orchestrator what a repo is.
+- [Orchestrator Routing](gitbooks/features/routing.md): cognitive tiers, harness selection, runtime fallback.
+- [Token Efficiency and Budgets](gitbooks/features/token-efficiency.md): small surfaces, enforced budgets, tokenmax.
 
-**Developers** — install the TUI, embed the SDK, and wire your own fleet to the orchestrator:
+**Developers**, to install the TUI, embed the SDK, and wire your own fleet to the orchestrator:
 
-- [Getting Started](gitbooks/developers/getting-started.md) — install, build, run, first login.
-- [CLI Reference](gitbooks/developers/cli-reference.md) — the TUI, the daemon, the harness wrappers, self-update.
-- [Configuration](gitbooks/developers/configuration.md) — the Medulla home, layered config, and the three runtimes.
-- [Authentication](gitbooks/developers/authentication.md) — the browser loopback login flow and token handling.
-- [Architecture](gitbooks/developers/architecture.md) — the SDK/TUI split, runtime adapters, RLM, and the tiny.place bridge.
-- [Contributing](gitbooks/developers/contributing.md) — build, test, lint, coverage, and releasing.
+- [Getting Started](gitbooks/developers/getting-started.md): install, build, run, first login.
+- [CLI Reference](gitbooks/developers/cli-reference.md): the TUI, the daemon, the harness wrappers, self-update.
+- [Configuration](gitbooks/developers/configuration.md): the Medulla home, layered config, and the three runtimes.
+- [Authentication](gitbooks/developers/authentication.md): the browser loopback login flow and token handling.
+- [Architecture](gitbooks/developers/architecture.md): the SDK/TUI split, runtime adapters, RLM, and the tiny.place bridge.
+- [Contributing](gitbooks/developers/contributing.md): build, test, lint, coverage, and releasing.
 
 Fleets with everyone.
 
 ## For developers
 
-This repo hosts the open-source Medulla Rust workspace — the [`medulla`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk) SDK library and the [`medulla-tui`](https://github.com/tinyhumansai/medulla/tree/main/src/tui) app crate that ships the `medulla` binary, a [ratatui](https://ratatui.rs/) terminal UI over the orchestrator.
+This repo hosts the open-source Medulla Rust workspace: the [`medulla`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk) SDK library and the [`medulla-tui`](https://github.com/tinyhumansai/medulla/tree/main/src/tui) app crate that ships the `medulla` binary, a [ratatui](https://ratatui.rs/) terminal UI over the orchestrator.
 
 The prebuilt binary installs with the one-liner under [Install](#install) above. To build from source instead:
 
@@ -118,4 +118,4 @@ cargo install --path src/tui   # installs the `medulla` binary
 medulla                        # bare invocation starts the TUI
 ```
 
-Full developer documentation — CLI subcommands, configuration, authentication, architecture, and how to build from source — lives in the [Developers](gitbooks/developers/README.md) section of the docs.
+Full developer documentation, covering CLI subcommands, configuration, authentication, architecture, and how to build from source, lives in the [Developers](gitbooks/developers/README.md) section of the docs.

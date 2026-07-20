@@ -1,6 +1,6 @@
 //! CLI config-file model and endpoint resolution.
 //!
-//! The config file (`TINYPLACE_CONFIG`, else `~/.tinyplace/config.json`) holds
+//! The config file (`TINYPLACE_CONFIG`, else `<medulla_home>/tinyplace/config.json`) holds
 //! the endpoint, identity key, SIWS proof, and OpenHuman owner. This module only
 //! reads and models it; it does not generate keys or write files. Environment
 //! lookups are passed in (not read from `std::env`) so resolution is testable.
@@ -35,12 +35,30 @@ pub struct TinyplaceFileConfig {
 }
 
 /// The absolute config-file path: `TINYPLACE_CONFIG` when set, otherwise
-/// `<home>/.tinyplace/config.json`.
+/// `<medulla_home>/tinyplace/config.json`.
+///
+/// The identity lives under the Medulla home, not `~/.tinyplace`, so one
+/// directory holds everything Medulla owns — wallet, Signal store, credentials,
+/// and config — and Medulla drives every handshake from keys it controls.
+/// `~/.tinyplace` belongs to the standalone tiny.place CLI; sharing it made the
+/// two tools contend over one wallet and one Signal ratchet.
+///
+/// `home_dir` is the fallback base used only when the injected environment
+/// carries no `HOME`/`USERPROFILE`, keeping resolution pure and testable.
 pub fn config_path(env: &HashMap<String, String>, home_dir: &Path) -> PathBuf {
-    match env.get("TINYPLACE_CONFIG") {
-        Some(path) if !path.is_empty() => PathBuf::from(path),
-        _ => home_dir.join(".tinyplace").join("config.json"),
+    if let Some(path) = env.get("TINYPLACE_CONFIG").filter(|p| !p.is_empty()) {
+        return PathBuf::from(path);
     }
+    let home = if env.contains_key("MEDULLA_HOME")
+        || env.contains_key("HOME")
+        || env.contains_key("USERPROFILE")
+        || env.get("MEDULLA_DEV").map(|v| crate::home::is_truthy(v)) == Some(true)
+    {
+        crate::home::medulla_home(env)
+    } else {
+        home_dir.join(".medulla")
+    };
+    home.join("tinyplace").join("config.json")
 }
 
 /// Parse config JSON into a [`TinyplaceFileConfig`]. A non-object or a malformed
@@ -144,17 +162,40 @@ mod tests {
     }
 
     #[test]
-    fn config_path_defaults_to_home() {
+    fn config_path_defaults_under_medulla_home() {
+        // No env at all: fall back to the injected home base.
         let e = env(&[]);
         assert_eq!(
             config_path(&e, Path::new("/home/me")),
-            PathBuf::from("/home/me/.tinyplace/config.json")
+            PathBuf::from("/home/me/.medulla/tinyplace/config.json")
         );
         // Empty override is ignored.
         let e2 = env(&[("TINYPLACE_CONFIG", "")]);
         assert_eq!(
             config_path(&e2, Path::new("/home/me")),
-            PathBuf::from("/home/me/.tinyplace/config.json")
+            PathBuf::from("/home/me/.medulla/tinyplace/config.json")
+        );
+    }
+
+    #[test]
+    fn config_path_follows_the_medulla_home_resolver() {
+        // MEDULLA_HOME wins over the injected base.
+        let e = env(&[("MEDULLA_HOME", "/explicit/home")]);
+        assert_eq!(
+            config_path(&e, Path::new("/home/me")),
+            PathBuf::from("/explicit/home/tinyplace/config.json")
+        );
+        // HOME from the environment is used ahead of the fallback base.
+        let e2 = env(&[("HOME", "/env/home")]);
+        assert_eq!(
+            config_path(&e2, Path::new("/home/me")),
+            PathBuf::from("/env/home/.medulla/tinyplace/config.json")
+        );
+        // The identity follows a dev home too.
+        let e3 = env(&[("MEDULLA_DEV", "1")]);
+        assert_eq!(
+            config_path(&e3, Path::new("/home/me")),
+            PathBuf::from(".medulla/tinyplace/config.json")
         );
     }
 

@@ -141,7 +141,10 @@ fn refresh_key_requests_usage_and_c_toggles_config() {
     let _ = key(&mut app, KeyCode::Char('c'));
     assert_eq!(app.settings_subpage(), "Config");
     let out = render(&mut app, 200, 50);
-    assert!(out.contains("Configuration ·"), "config view: {out}");
+    assert!(
+        out.contains("Effective configuration ·"),
+        "config view: {out}"
+    );
     // Number key 1 jumps back to the Usage subpage.
     let _ = key(&mut app, KeyCode::Char('1'));
     assert_eq!(app.settings_subpage(), "Usage");

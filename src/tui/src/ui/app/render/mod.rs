@@ -176,8 +176,8 @@ impl App {
         }
     }
 
-    /// Draw the top header: the MEDULLA wordmark, async/update badges, and the
-    /// right-aligned stream-health + status text.
+    /// Draw the top header: the MEDULLA wordmark, the backend host, async/update
+    /// badges, and the right-aligned stream-health + status text.
     pub(super) fn draw_header(&mut self, f: &mut Frame, area: Rect) {
         let halves = Layout::default()
             .direction(Direction::Horizontal)
@@ -189,6 +189,14 @@ impl App {
                 Style::default()
                     .fg(self.theme.primary)
                     .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            // The backend the session is attached to. Host only — the scheme and
+            // path are noise in a one-line header, and the host is what
+            // distinguishes prod from staging from a local dev server.
+            Span::styled(
+                medulla::config::display_host(&self.loaded.config.backend.base_url),
+                Style::default().add_modifier(Modifier::DIM),
             ),
             Span::raw("  "),
         ];
@@ -300,10 +308,8 @@ impl App {
             "Chat" => self.draw_chat(f, area),
             "Agents" => self.draw_agents(f, area),
             "Workers" => self.draw_workers(f, area),
-            "Trace" => self.draw_trace(f, area),
-            "Context" => self.draw_context(f, area),
             "Memory" => self.draw_memory(f, area),
-            "Feedback" => self.draw_feedback(f, area),
+            // Trace, Context, and Feedback are Settings subpages, not tabs.
             "Settings" => self.draw_settings(f, area),
             _ => self.draw_overview(f, area),
         }

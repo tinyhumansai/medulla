@@ -1,4 +1,5 @@
-//! Feature-level tests for the public feedback board ("Feedback" tab): browsing
+//! Feature-level tests for the public feedback board (Settings > Feedback):
+//! browsing
 //! and selection, the sort/filter cycles, voting (including retraction), the
 //! comment pane's three states, and the type/status labels.
 //!
@@ -16,7 +17,7 @@ use serde_json::json;
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackPage, FeedbackStatus, FeedbackType};
 use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
-use medulla_tui::ui::app::{App, Cmd, TABS};
+use medulla_tui::ui::app::{App, Cmd};
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
@@ -24,10 +25,11 @@ fn loaded() -> LoadedConfig {
     l
 }
 
-fn feedback_tab() -> usize {
-    TABS.iter()
-        .position(|t| *t == "Feedback")
-        .expect("Feedback tab")
+/// Focus the Feedback subpage. It lives under Settings rather than in the tab
+/// bar, so its list browses with j/k while ↑↓ drive the settings nav.
+fn focus_feedback(app: &mut App) {
+    let _ = app.focus_settings_subpage("Feedback");
+    assert_eq!(app.settings_subpage(), "Feedback");
 }
 
 fn key(code: KeyCode) -> Event {
@@ -79,7 +81,7 @@ fn comment(body: &str, who: Option<&str>) -> FeedbackComment {
 /// An app on the Feedback tab with a loaded page of two items.
 fn board() -> App {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
-    app.tab_index = feedback_tab();
+    focus_feedback(&mut app);
     app.set_feedback_page(Some(FeedbackPage {
         items: vec![
             item("f1", "feature", "Dark mode", 0),
@@ -125,19 +127,19 @@ fn navigation_moves_the_selection_and_clamps_at_both_ends() {
     assert_eq!(app.feedback_index(), 0);
 
     // Down past the end clamps to the last row.
-    let cmd = app.on_event(key(KeyCode::Down));
+    let cmd = app.on_event(key(KeyCode::Char('j')));
     assert_eq!(app.feedback_index(), 1);
     assert!(
         matches!(cmd, Some(Cmd::LoadFeedbackDetail(ref id)) if id == "f2"),
         "moving selection loads the new row's comments: {cmd:?}"
     );
-    app.on_event(key(KeyCode::Down));
+    app.on_event(key(KeyCode::Char('j')));
     assert_eq!(app.feedback_index(), 1, "clamped at the last row");
 
     // Up past the start clamps to the first.
-    app.on_event(key(KeyCode::Up));
+    app.on_event(key(KeyCode::Char('k')));
     assert_eq!(app.feedback_index(), 0);
-    app.on_event(key(KeyCode::Up));
+    app.on_event(key(KeyCode::Char('k')));
     assert_eq!(app.feedback_index(), 0, "clamped at the first row");
 
     // j/k mirror the arrows.
@@ -204,7 +206,7 @@ fn voting_emits_the_vote_and_retracts_when_repeated() {
     }
 
     // Second row is already upvoted, so u retracts rather than double-voting.
-    app.on_event(key(KeyCode::Down));
+    app.on_event(key(KeyCode::Char('j')));
     match app.on_event(key(KeyCode::Char('u'))) {
         Some(Cmd::VoteFeedback { id, value }) => {
             assert_eq!(id, "f2");
@@ -269,7 +271,7 @@ fn the_comment_pane_distinguishes_loading_empty_and_present() {
 #[test]
 fn an_empty_board_still_renders() {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
-    app.tab_index = feedback_tab();
+    focus_feedback(&mut app);
     app.set_feedback_page(Some(FeedbackPage {
         items: Vec::new(),
         total: 0,
@@ -283,7 +285,7 @@ fn an_empty_board_still_renders() {
 #[test]
 fn commenting_without_a_selection_explains_itself() {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
-    app.tab_index = feedback_tab();
+    focus_feedback(&mut app);
     app.set_feedback_page(Some(FeedbackPage {
         items: Vec::new(),
         total: 0,
@@ -353,7 +355,7 @@ fn the_header_names_the_active_filter_and_sort() {
 #[test]
 fn an_empty_board_mid_load_says_it_is_loading() {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
-    app.tab_index = feedback_tab();
+    focus_feedback(&mut app);
 
     // Cycling the sort marks the board loading and clears nothing, so an empty
     // board renders the loading hint rather than the "nothing here" prompt.
@@ -370,7 +372,7 @@ fn an_empty_board_mid_load_says_it_is_loading() {
 #[test]
 fn a_settled_empty_board_invites_the_first_submission() {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
-    app.tab_index = feedback_tab();
+    focus_feedback(&mut app);
     app.set_feedback_page(Some(FeedbackPage {
         items: Vec::new(),
         total: 0,

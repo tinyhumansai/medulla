@@ -174,7 +174,10 @@ fn slash_help_and_config_switch_tabs() {
     assert_eq!(app.settings_subpage(), "Config");
     // /config lands on the Settings·Config subpage showing the effective config.
     let out = render(&mut app, 200, 50);
-    assert!(out.contains("Configuration ·"), "config view: {out}");
+    assert!(
+        out.contains("Effective configuration ·"),
+        "config view: {out}"
+    );
     // /usage flips to the Settings·Usage subpage.
     let _ = submit_line(&mut app, "/usage");
     assert_eq!(app.settings_subpage(), "Usage");
@@ -265,8 +268,7 @@ fn each_tab_renders_its_signature() {
     let signatures = [
         ("Chat", "Threads"),
         ("Agents", "Agents ·"),
-        ("Trace", "Trace ·"),
-        ("Context", "Environment ·"),
+        ("Workers", "Workers"),
         ("Settings", "Settings"),
     ];
     for (name, sig) in signatures {

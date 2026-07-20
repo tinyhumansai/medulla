@@ -1,6 +1,9 @@
-//! Feature tests for the Settings tab: its subpage nav (Usage / Appearance /
-//! Config / Help), number-key and arrow navigation, the Appearance theme editor
+//! Feature tests for the Settings tab: its grouped subpage nav, number-key and
+//! arrow navigation, that every subpage renders, the Appearance theme editor
 //! (live-applies + persists), and the unified themed selection highlight.
+//!
+//! Settings also hosts what used to be the Trace, Context, and Feedback tabs,
+//! so the tab bar's shrinking is asserted here too.
 
 use std::sync::Arc;
 
@@ -50,7 +53,16 @@ fn settings_tab_renders_nav_and_default_usage_subpage() {
     let mut app = settings_app();
     let out = text_of(&draw(&mut app, 140, 40));
     // Left nav lists every subpage.
-    for name in ["Usage", "Appearance", "Config", "Help"] {
+    for name in [
+        "Usage",
+        "Appearance",
+        "Config",
+        "Feedback",
+        "Trace",
+        "Context",
+        "Account",
+        "Help",
+    ] {
         assert!(out.contains(name), "nav missing {name}: {out}");
     }
     // Default subpage is Usage.
@@ -65,7 +77,7 @@ fn number_keys_jump_subpages() {
     assert_eq!(app.settings_subpage(), "Appearance");
     let _ = key(&mut app, KeyCode::Char('3'));
     assert_eq!(app.settings_subpage(), "Config");
-    let _ = key(&mut app, KeyCode::Char('4'));
+    let _ = key(&mut app, KeyCode::Char('8'));
     assert_eq!(app.settings_subpage(), "Help");
     let out = text_of(&draw(&mut app, 140, 40));
     assert!(out.contains("Commands"), "help subpage: {out}");
@@ -149,4 +161,51 @@ fn selection_rows_use_theme_primary_background() {
         any_cell_with_bg(&buf, Color::Cyan),
         "selected nav row uses primary background"
     );
+}
+
+#[test]
+fn each_settings_subpage_renders_its_signature() {
+    // Trace and Context moved under Settings > DEBUG; Feedback under GENERAL.
+    let signatures = [
+        ("Usage", "This session"),
+        ("Appearance", "Appearance"),
+        ("Config", "Effective configuration ·"),
+        ("Trace", "Trace ·"),
+        ("Context", "Environment ·"),
+        ("Account", "Account"),
+        ("Help", "Keyboard & REPL help"),
+    ];
+    for (name, sig) in signatures {
+        let mut app = settings_app();
+        let _ = app.focus_settings_subpage(name);
+        let out = text_of(&draw(&mut app, 160, 50));
+        assert!(out.contains("MEDULLA"), "{name}: missing header");
+        assert!(
+            out.contains(sig),
+            "{name}: missing signature {sig:?}: {out}"
+        );
+    }
+}
+
+#[test]
+fn the_settings_nav_groups_its_subpages() {
+    let mut app = settings_app();
+    let _ = app.focus_settings_subpage("Usage");
+    let out = text_of(&draw(&mut app, 160, 50));
+    for heading in ["GENERAL", "DEBUG", "ABOUT"] {
+        assert!(
+            out.contains(heading),
+            "missing nav heading {heading}: {out}"
+        );
+    }
+}
+
+#[test]
+fn trace_context_and_feedback_are_no_longer_top_level_tabs() {
+    for gone in ["Trace", "Context", "Feedback"] {
+        assert!(
+            !TABS.contains(&gone),
+            "{gone} should live under Settings, not the tab bar"
+        );
+    }
 }

@@ -60,6 +60,41 @@ pub fn resolve_backend_base_url(env: &HashMap<String, String>, config_url: Optio
     default_backend_base_url(env)
 }
 
+/// The bare host of a base URL, for compact display in UI chrome.
+///
+/// Strips the scheme, any userinfo, the port, and any path/query/fragment, so
+/// `https://api.tinyhumans.ai/v1` renders as `api.tinyhumans.ai`. Input that
+/// does not parse as a URL is returned trimmed and unchanged rather than
+/// erroring — this is display-only, and a malformed base URL is worth showing
+/// verbatim so the user can spot the mistake.
+pub fn display_host(base_url: &str) -> String {
+    let trimmed = base_url.trim();
+    let without_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
+    let authority = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(without_scheme);
+    // Drop userinfo (`user:pass@host`) and the port, keeping only the host.
+    let host = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    // A bracketed IPv6 literal keeps its brackets; only a trailing `:port`
+    // outside them is dropped.
+    let host = match host.rfind(']') {
+        Some(close) => &host[..=close],
+        None => host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host),
+    };
+    if host.is_empty() {
+        trimmed.to_string()
+    } else {
+        host.to_string()
+    }
+}
+
 /// Resolve the tiny.place base URL for the `[tinyplace]` section. Order:
 /// explicitly-configured `tinyplace.baseUrl` > staging/prod default. (The
 /// `TINYPLACE_*`/`NEXT_PUBLIC_API_URL` env chain is applied later, at endpoint

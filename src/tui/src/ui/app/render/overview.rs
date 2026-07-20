@@ -20,7 +20,9 @@ impl App {
             .constraints([
                 Constraint::Length(4),
                 Constraint::Length(7),
-                Constraint::Length(5),
+                // Four routing rows plus the panel border. (Was five rows in a
+                // five-high panel, which silently clipped the last two.)
+                Constraint::Length(6),
                 Constraint::Min(0),
             ])
             .split(area);
@@ -117,11 +119,12 @@ impl App {
             top[1],
         );
 
-        // Third panel: tinyplace or opencode.
+        // Third panel: tiny.place presence, or the local worker harness.
         self.draw_overview_third(f, top[2]);
 
-        // Model routing: inference is server-managed, so show the runtime we
-        // are attached to plus the models actually observed on the stream.
+        // Model routing: inference is server-managed, so show the models
+        // actually observed on the stream. The runtime/backend the session is
+        // attached to lives in the header, not here.
         let workers_val = if let Some(tp) = &self.loaded.config.tinyplace {
             format!("tiny.place · {} peer(s)", tp.peers.len())
         } else {
@@ -132,10 +135,7 @@ impl App {
                 .map(|o| o.model.clone())
                 .unwrap_or_default()
         };
-        let mut routing = vec![TLine::from(vec![
-            Span::styled("runtime ", Style::default().fg(self.theme.primary)),
-            Span::raw(self.runtime.describe()),
-        ])];
+        let mut routing: Vec<TLine> = Vec::new();
         for (label, tier, color) in [
             ("orchestrator ", "orchestrator", Color::Yellow),
             ("reasoning ", "reasoning", Color::Yellow),
@@ -181,7 +181,7 @@ impl App {
     }
 
     /// The Overview tab's third top panel: the tiny.place presence summary, or
-    /// the OpenCode worker configuration when tiny.place is not enabled.
+    /// the local worker-harness configuration when tiny.place is not enabled.
     pub(super) fn draw_overview_third(&self, f: &mut Frame, area: Rect) {
         if let Some(tp) = &self.loaded.config.tinyplace {
             let peers: Vec<_> = self
@@ -238,16 +238,40 @@ impl App {
                 area,
             );
         } else {
-            let oc = self.loaded.config.opencode.clone().unwrap_or_default();
+            let worker = self.loaded.config.opencode.clone().unwrap_or_default();
             let lines = vec![
-                TLine::from(oc.model),
-                TLine::from(format!("agent {}", oc.agent)),
-                TLine::from(format!("concurrency {}", oc.max_concurrency)),
+                TLine::from(vec![
+                    Span::styled("harness ", Style::default().fg(Color::Magenta)),
+                    Span::raw(worker_harness_label(&worker.command)),
+                ]),
+                TLine::from(if worker.model.is_empty() {
+                    "model —".to_string()
+                } else {
+                    format!("model {}", worker.model)
+                }),
+                TLine::from(format!("agent {}", worker.agent)),
+                TLine::from(format!("concurrency {}", worker.max_concurrency)),
             ];
             f.render_widget(
-                Paragraph::new(Text::from(lines)).block(self.panel("OpenCode workers")),
+                Paragraph::new(Text::from(lines)).block(self.panel("Workers")),
                 area,
             );
         }
     }
+}
+
+/// The display name for the worker harness a `command` invokes.
+///
+/// Medulla drives several coding-agent CLIs, so the label is derived from the
+/// configured command rather than hard-coded. A recognized command basename maps
+/// to its product name ("claude" → "Claude Code"); anything else is shown
+/// verbatim, since a custom or wrapped binary is still worth naming.
+fn worker_harness_label(command: &str) -> String {
+    let basename = command.rsplit(['/', '\\']).next().unwrap_or(command).trim();
+    if basename.is_empty() {
+        return "—".to_string();
+    }
+    medulla::tinyplace::frames::HarnessProvider::from_wire(basename)
+        .map(|p| p.display_name().to_string())
+        .unwrap_or_else(|| basename.to_string())
 }

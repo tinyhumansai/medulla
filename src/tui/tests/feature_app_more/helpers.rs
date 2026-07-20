@@ -150,8 +150,15 @@ pub fn render(app: &mut App, w: u16, h: u16) -> String {
     buf.content().iter().map(|c| c.symbol()).collect()
 }
 
+/// Focus the view named `name`, whether it is a top-level tab or one of the
+/// Settings subpages (Trace, Context, Feedback, …) that used to be tabs.
 pub fn tab(app: &mut App, name: &str) {
-    app.tab_index = TABS.iter().position(|t| *t == name).unwrap();
+    match TABS.iter().position(|t| *t == name) {
+        Some(index) => app.tab_index = index,
+        None => {
+            let _ = app.focus_settings_subpage(name);
+        }
+    }
 }
 
 /// Script a running, cycle-scoped delegated task with a pending question onto the

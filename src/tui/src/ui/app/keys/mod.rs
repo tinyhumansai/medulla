@@ -1,20 +1,22 @@
-//! Keyboard handling for [`App`]: the single large [`App::on_key`] dispatcher
-//! that routes key events by active overlay, global control chords, and per-tab
-//! bindings. It leans on helpers defined in [`super::input`], [`super::commands`],
-//! and [`super::state`].
+//! Keyboard handling for [`App`]: the [`App::on_key`] dispatcher that routes key
+//! events by active overlay, global control chords, and per-tab bindings. It
+//! leans on helpers defined in [`super::input`], [`super::commands`], and
+//! [`super::state`].
+//!
+//! The Settings tab now hosts seven subpages with bindings of their own, so its
+//! handling lives in [`settings`] rather than inline here.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::ui::command::CopyScope;
 use crate::ui::composer::{delete_before, insert_at, move_caret_row, Draft};
-use crate::ui::theme::THEME_ROLES;
-use medulla::client::FeedbackType;
 use medulla::runtime::WorkerOp;
 
-use super::types::{
-    tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_USAGE,
-    TABS,
-};
+use super::types::{tab_pos, App, Cmd, Prompt, PromptKind, TABS};
+
+mod settings;
+
+use settings::SettingsKey;
 
 impl App {
     /// Handle a key press for the current overlay/tab, producing any follow-up
@@ -141,6 +143,14 @@ impl App {
             }
         }
 
+        // Settings owns a nav plus seven subpages; it gets first refusal on
+        // every key so its subpage bindings are not shadowed by the global ones.
+        if tab == "Settings" {
+            if let SettingsKey::Handled(cmd) = self.on_settings_key(k.code) {
+                return cmd;
+            }
+        }
+
         match k.code {
             KeyCode::Tab => {
                 self.tab_index = (self.tab_index + 1) % TABS.len();
@@ -151,51 +161,6 @@ impl App {
                 self.tab_index = (self.tab_index + TABS.len() - 1) % TABS.len();
                 self.selected = 0;
                 return self.tab_enter_cmd();
-            }
-            // Settings tab: subpage navigation + the Appearance theme editor.
-            KeyCode::Char(d @ '1'..='4') if tab == "Settings" => {
-                return self.set_settings_subpage(d as usize - '1' as usize);
-            }
-            KeyCode::Char('r') if tab == "Settings" && self.settings_index == SP_USAGE => {
-                self.set_status("Usage · refreshing…");
-                return Some(Cmd::LoadUsage);
-            }
-            KeyCode::Char('c') if tab == "Settings" && self.settings_index == SP_USAGE => {
-                self.settings_index = SP_CONFIG;
-            }
-            KeyCode::Up | KeyCode::Down if tab == "Settings" => {
-                let up = matches!(k.code, KeyCode::Up);
-                self.settings_index = if up {
-                    self.settings_index.saturating_sub(1)
-                } else {
-                    (self.settings_index + 1).min(SETTINGS_SUBPAGES.len() - 1)
-                };
-                return self.tab_enter_cmd();
-            }
-            KeyCode::Char('j') | KeyCode::Char('k')
-                if tab == "Settings" && self.settings_index == SP_APPEARANCE =>
-            {
-                let up = matches!(k.code, KeyCode::Char('k'));
-                self.appearance_index = if up {
-                    self.appearance_index.saturating_sub(1)
-                } else {
-                    (self.appearance_index + 1).min(THEME_ROLES.len() - 1)
-                };
-            }
-            KeyCode::Char('j') | KeyCode::Char('k') if tab == "Settings" => {
-                let up = matches!(k.code, KeyCode::Char('k'));
-                self.settings_index = if up {
-                    self.settings_index.saturating_sub(1)
-                } else {
-                    (self.settings_index + 1).min(SETTINGS_SUBPAGES.len() - 1)
-                };
-                return self.tab_enter_cmd();
-            }
-            KeyCode::Left | KeyCode::Right | KeyCode::Enter
-                if tab == "Settings" && self.settings_index == SP_APPEARANCE =>
-            {
-                let forward = !matches!(k.code, KeyCode::Left);
-                self.cycle_appearance_role(forward);
             }
             KeyCode::PageUp if tab == "Chat" => {
                 self.chat_scroll += self.visible_count().saturating_sub(1).max(1);
@@ -298,47 +263,6 @@ impl App {
                 let max = self.memory_entry_count().saturating_sub(1);
                 self.memory_index = (self.memory_index + 1).min(max);
             }
-            // Feedback board: browse, vote, comment, submit.
-            KeyCode::Up if tab == "Feedback" => {
-                return self.move_feedback_index(true);
-            }
-            KeyCode::Down if tab == "Feedback" => {
-                return self.move_feedback_index(false);
-            }
-            KeyCode::Char('k') if tab == "Feedback" => {
-                return self.move_feedback_index(true);
-            }
-            KeyCode::Char('j') if tab == "Feedback" => {
-                return self.move_feedback_index(false);
-            }
-            KeyCode::Char('u') if tab == "Feedback" => {
-                return self.vote_selected_feedback(1);
-            }
-            KeyCode::Char('d') if tab == "Feedback" => {
-                return self.vote_selected_feedback(-1);
-            }
-            KeyCode::Char('c') if tab == "Feedback" => {
-                self.open_feedback_comment();
-                return None;
-            }
-            KeyCode::Char('n') if tab == "Feedback" => {
-                self.open_feedback_submit(FeedbackType::Feature);
-                return None;
-            }
-            KeyCode::Char('b') if tab == "Feedback" => {
-                self.open_feedback_submit(FeedbackType::Bug);
-                return None;
-            }
-            KeyCode::Char('s') if tab == "Feedback" => {
-                return self.cycle_feedback_sort();
-            }
-            KeyCode::Char('f') if tab == "Feedback" => {
-                return self.cycle_feedback_filter();
-            }
-            KeyCode::Char('r') | KeyCode::Enter if tab == "Feedback" => {
-                self.set_status("Feedback · refreshing…");
-                return self.reload_feedback();
-            }
             KeyCode::Char('j') if tab == "Memory" && self.draft.text.is_empty() => {
                 let max = self.memory_entry_count().saturating_sub(1);
                 self.memory_index = (self.memory_index + 1).min(max);
@@ -367,13 +291,6 @@ impl App {
                 } else {
                     self.selected += 1;
                 }
-            }
-            KeyCode::Char('j') if tab == "Context" && self.draft.text.is_empty() => {
-                let max = self.contexts.len().saturating_sub(1);
-                self.context_index = (self.context_index + 1).min(max);
-            }
-            KeyCode::Char('k') if tab == "Context" && self.draft.text.is_empty() => {
-                self.context_index = self.context_index.saturating_sub(1);
             }
             KeyCode::Char(c) if tab == "Chat" && !ctrl && !alt => {
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, &c.to_string());

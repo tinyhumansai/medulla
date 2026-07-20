@@ -1,0 +1,185 @@
+//! Deterministic tests for the event loop's asynchronous command dispatcher.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use medulla::client::{FeedbackQuery, FeedbackType};
+use medulla::runtime::mock::MockRuntime;
+use medulla::runtime::{Runtime, WorkerOp};
+use medulla_tui::ui::app::Cmd;
+
+use super::{read_memory, run_cmd, spawn_update_checker, AppMsg};
+
+/// Receive the next dispatcher result without allowing a broken task to hang
+/// the entire test suite.
+async fn next(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppMsg>) -> AppMsg {
+    tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("dispatcher timed out")
+        .expect("dispatcher dropped its response channel")
+}
+
+#[tokio::test]
+async fn dispatches_conversation_fleet_usage_and_context_commands() {
+    let concrete = Arc::new(MockRuntime::demo());
+    let runtime: Arc<dyn Runtime> = concrete.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    run_cmd(Cmd::Quit, &runtime, None, &tx);
+    assert!(rx.try_recv().is_err());
+
+    run_cmd(Cmd::Submit("hello".into()), &runtime, None, &tx);
+    assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s == "Cycle complete"));
+
+    run_cmd(Cmd::Resume("tui-demo-1".into()), &runtime, None, &tx);
+    assert!(matches!(next(&mut rx).await, AppMsg::Resumed(s) if s == "Resumed chat"));
+
+    run_cmd(Cmd::ListChats, &runtime, None, &tx);
+    assert!(matches!(next(&mut rx).await, AppMsg::OpenResume(chats) if chats.len() == 2));
+
+    run_cmd(Cmd::InspectContext, &runtime, None, &tx);
+    assert!(matches!(next(&mut rx).await, AppMsg::Contexts(items) if items.len() == 2));
+
+    run_cmd(
+        Cmd::WorkerOp(WorkerOp::Add {
+            address: Some("peer-1".into()),
+            handle: None,
+            label: Some("Peer".into()),
+            harness: None,
+        }),
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s == "Worker registry updated"));
+
+    run_cmd(Cmd::LoadUsage, &runtime, None, &tx);
+    assert!(matches!(next(&mut rx).await, AppMsg::UsageLoaded(None)));
+}
+
+#[tokio::test]
+async fn dispatches_every_feedback_action() {
+    let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    run_cmd(
+        Cmd::LoadFeedback(FeedbackQuery::default()),
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(
+        matches!(next(&mut rx).await, AppMsg::FeedbackLoaded(Some(page)) if !page.items.is_empty())
+    );
+
+    run_cmd(Cmd::LoadFeedbackDetail("fb-2".into()), &runtime, None, &tx);
+    assert!(matches!(
+        next(&mut rx).await,
+        AppMsg::FeedbackComments { id, comments } if id == "fb-2" && !comments.is_empty()
+    ));
+
+    run_cmd(
+        Cmd::VoteFeedback {
+            id: "fb-2".into(),
+            value: 1,
+        },
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(matches!(next(&mut rx).await, AppMsg::FeedbackItemUpdated(item) if item.id == "fb-2"));
+
+    run_cmd(
+        Cmd::CommentFeedback {
+            id: "fb-2".into(),
+            body: "Useful".into(),
+        },
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(matches!(next(&mut rx).await, AppMsg::FeedbackChanged(s) if s.contains("comment")));
+
+    run_cmd(
+        Cmd::SubmitFeedback {
+            kind: FeedbackType::Feature,
+            title: "New feature".into(),
+            body: "Please add it".into(),
+        },
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(matches!(next(&mut rx).await, AppMsg::FeedbackChanged(s) if s.contains("submitted")));
+}
+
+#[tokio::test]
+async fn dispatcher_surfaces_feedback_and_resume_errors() {
+    let concrete = Arc::new(MockRuntime::demo());
+    let runtime: Arc<dyn Runtime> = concrete.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    for cmd in [
+        Cmd::LoadFeedbackDetail("missing".into()),
+        Cmd::VoteFeedback {
+            id: "missing".into(),
+            value: 1,
+        },
+        Cmd::CommentFeedback {
+            id: "missing".into(),
+            body: "nope".into(),
+        },
+    ] {
+        run_cmd(cmd, &runtime, None, &tx);
+        assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s.contains("not found")));
+    }
+
+    concrete.set_running(true);
+    run_cmd(Cmd::Resume("any".into()), &runtime, None, &tx);
+    assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s.contains("cannot resume")));
+    concrete.set_running(false);
+}
+
+#[tokio::test]
+async fn dispatches_runtime_memory_reads_searches_and_missing_ingest() {
+    let concrete = Arc::new(MockRuntime::empty());
+    concrete.set_memory_directives(vec!["Keep tests offline".into()]);
+    let runtime: Arc<dyn Runtime> = concrete;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let (status, directives) = read_memory(&runtime, None);
+    assert!(status.is_none());
+    assert_eq!(directives, ["Keep tests offline"]);
+
+    run_cmd(Cmd::LoadMemory, &runtime, None, &tx);
+    assert!(matches!(
+        next(&mut rx).await,
+        AppMsg::MemoryLoaded { status: None, directives } if directives == ["Keep tests offline"]
+    ));
+
+    run_cmd(Cmd::SearchMemory("needle".into()), &runtime, None, &tx);
+    assert!(matches!(next(&mut rx).await, AppMsg::MemoryLoaded { .. }));
+    assert!(matches!(
+        next(&mut rx).await,
+        AppMsg::MemoryResults { hits, query } if hits.is_empty() && query == "needle"
+    ));
+
+    run_cmd(Cmd::IngestMemory { backfill: false }, &runtime, None, &tx);
+    assert!(matches!(
+        next(&mut rx).await,
+        AppMsg::MemoryIngestDone(s) if s.contains("no memory service")
+    ));
+}
+
+#[test]
+fn disabled_update_check_spawns_no_background_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = std::collections::HashMap::new();
+    let mut loaded = medulla::config::load_config(None, &env, dir.path()).unwrap();
+    loaded.config.update.check = false;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    spawn_update_checker(&loaded, &tx);
+
+    assert!(rx.try_recv().is_err());
+}

@@ -14,82 +14,18 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use medulla::runtime::{ContextItem, Runtime};
+use medulla::runtime::Runtime;
 use medulla_tui::ui::app::{App, Cmd, TABS};
 
 use crate::terminal::set_mouse_capture;
 
-/// Messages sent from spawned async tasks back to the event loop.
-pub(crate) enum AppMsg {
-    Status(String),
-    Contexts(Vec<ContextItem>),
-    OpenResume(Vec<medulla::ui::chat_store::MainChatSummary>),
-    Resumed(String),
-    MemoryLoaded {
-        status: Option<medulla::memory::MemoryStatus>,
-        directives: Vec<String>,
-    },
-    UsageLoaded(Option<serde_json::Value>),
-    MemoryResults {
-        hits: Vec<medulla::memory::MemoryHit>,
-        query: String,
-    },
-    /// A newer release was detected by the background update checker.
-    UpdateAvailable(String),
-    /// A page of the feedback board. `None` = this runtime has no board.
-    FeedbackLoaded(Option<medulla::client::FeedbackPage>),
-    /// Comments for one board item.
-    FeedbackComments {
-        /// The item the comments belong to.
-        id: String,
-        /// The item's comments, oldest first.
-        comments: Vec<medulla::client::FeedbackComment>,
-    },
-    /// A board item the server re-tallied after a vote.
-    FeedbackItemUpdated(medulla::client::FeedbackItem),
-    /// A feedback action finished; reload the board and report `status`.
-    FeedbackChanged(String),
-    /// A memory ingest finished; clear the in-flight flag and report the outcome.
-    MemoryIngestDone(String),
-}
+mod types;
 
-/// Why the event loop stopped.
-///
-/// A logout is not an exit: it tears the authenticated session down but expects
-/// the caller to return to the login screen rather than to the shell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SessionExit {
-    /// The user quit; the process should exit.
-    Quit,
-    /// The user logged out; re-authenticate and start a fresh session.
-    Relogin,
-}
+#[cfg(test)]
+mod tests;
 
-/// Everything a session needs besides the terminal and the runtime.
-///
-/// Bundled rather than passed positionally: these are all "wire this into the
-/// app" values, and a session is started afresh on every relogin, so the call
-/// site reads better as one named record than as eight arguments.
-pub(crate) struct SessionWiring {
-    /// The loaded configuration for this session.
-    pub loaded: medulla::config::LoadedConfig,
-    /// A note to show on the status line at startup, if any.
-    pub startup_status: Option<String>,
-    /// The tiny.place presence observation, when that service is running.
-    pub tinyplace_obs:
-        Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
-    /// Where appearance/config edits are persisted.
-    pub config_path: std::path::PathBuf,
-    /// The Medulla home, used to locate the credential store.
-    pub medulla_home: std::path::PathBuf,
-    /// The persona-memory service backing the Memory tab.
-    pub memory_service: Option<Arc<medulla::memory::MemoryService>>,
-    /// Live events from a history share the welcome flow left running.
-    pub sharing:
-        Option<tokio::sync::mpsc::UnboundedReceiver<medulla_tui::ui::welcome::WelcomeEvent>>,
-    /// Where to record onboarding once a backgrounded share settles.
-    pub onboarding_path: std::path::PathBuf,
-}
+use types::AppMsg;
+pub(crate) use types::{SessionExit, SessionWiring};
 
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
 /// input events, runtime snapshots, background [`AppMsg`]s, and the animation

@@ -60,7 +60,7 @@ jobs:
         run: cargo build --locked --all-targets
 
   coverage:
-    name: Coverage (>= 90% lines)
+    name: Coverage (>= 95% lines)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -80,12 +80,16 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # Line-coverage gate over the offline suite (no opencode leg needed —
-      # live-CLI tests skip when the binary is absent). main.rs (real-TTY event
-      # loop) is the documented uncovered remainder and is NOT excluded; the
-      # suite must clear 90% with it counted.
+      # Gate reusable SDK and UI logic at 95%. The excluded files are the
+      # process/terminal drivers themselves: they depend on OS terminal state
+      # and are exercised separately by the binary subprocess + direct-PTY E2E
+      # suite (`e2e_cli`), while their state machines/renderers remain counted.
       - name: Coverage gate
-        run: cargo llvm-cov --locked --fail-under-lines 90 --summary-only
+        run: >-
+          cargo llvm-cov --locked
+          --ignore-filename-regex 'src/tui/src/(app_loop|commands|event_loop|terminal)\.rs|src/tui/src/ui/onboarding/run\.rs'
+          --fail-under-lines 95
+          --summary-only
 
   e2e-docker:
     name: E2E (docker + tmux + opencode)

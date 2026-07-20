@@ -4,7 +4,7 @@ description: >-
   harness, but an orchestrator model, purpose-built to command fleets of agent
   harnesses like Claude Code, Codex, etc.
 cover: .gitbook/assets/screen.png
-coverY: 356.141681768695
+coverY: 356.141681768691
 coverHeight: 417
 layout:
   width: default

@@ -26,7 +26,7 @@ use super::flags::{parse_provider, Flags};
 use super::providers::{
     detect_providers, provider_bin, run_provider_task, RunTaskFn, RunTaskOptions, DAEMON_PROVIDERS,
 };
-use super::transport::SignalTransport;
+use super::transport::{describe_error, SignalTransport};
 use super::types::{
     DaemonConfig, DaemonRuntime, SendFn, DEFAULT_MAX_PENDING, DEFAULT_STATUS_THROTTLE_MS,
 };
@@ -324,7 +324,10 @@ async fn onboard(
             .await;
         match result {
             Ok(_) => log(&format!("registered handle {handle}")),
-            Err(err) => log(&format!("handle registration skipped: {err}")),
+            Err(err) => log(&format!(
+                "handle registration skipped: {}",
+                describe_error(&err)
+            )),
         }
     }
 
@@ -358,7 +361,10 @@ async fn onboard(
     .expect("AgentCard JSON is well-formed");
     match directory.upsert_agent(agent_id, &card).await {
         Ok(_) => log("upserted directory card"),
-        Err(err) => log(&format!("directory upsert skipped: {err}")),
+        Err(err) => log(&format!(
+            "directory upsert skipped: {}",
+            describe_error(&err)
+        )),
     }
 }
 

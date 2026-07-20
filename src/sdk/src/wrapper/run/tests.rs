@@ -21,6 +21,19 @@ struct StubPty {
     requested: std::sync::Arc<std::sync::Mutex<Option<PtyRequest>>>,
 }
 
+/// A binary that exits 0 immediately, spelled for the host platform.
+///
+/// These tests assert on how the child is *wired up*, not on what it does, so
+/// any trivially spawnable program works — it just has to exist on Windows too,
+/// where the lib suite also runs.
+fn noop_bin() -> (&'static str, Vec<String>) {
+    if cfg!(windows) {
+        ("cmd", vec!["/C".to_string(), "exit".to_string()])
+    } else {
+        ("/bin/echo", Vec::new())
+    }
+}
+
 /// A config for `bin`, optionally carrying a spawner.
 fn config(spawner: Option<crate::wrapper::PtySpawner>) -> WrapperConfig {
     WrapperConfig {
@@ -110,7 +123,8 @@ async fn pty_failure_falls_back_to_inherited_stdio() {
         Box::new(|_| Err(anyhow::anyhow!("no pty available")));
     let mut cfg = config(Some(spawner));
 
-    let session = spawn_child_with("/bin/echo", &[], &mut cfg, true, true).unwrap();
+    let (bin, args) = noop_bin();
+    let session = spawn_child_with(bin, &args, &mut cfg, true, true).unwrap();
 
     // Fallback means no writable handle on the child's input.
     assert!(session.input.is_none());
@@ -126,7 +140,8 @@ async fn non_interactive_injection_uses_a_pipe() {
     let (spawner, stub) = stub_spawner();
     let mut cfg = config(Some(spawner));
 
-    let session = spawn_child_with("/bin/cat", &[], &mut cfg, true, false).unwrap();
+    let (bin, args) = noop_bin();
+    let session = spawn_child_with(bin, &args, &mut cfg, true, false).unwrap();
 
     assert!(
         stub.requested.lock().unwrap().is_none(),
@@ -140,7 +155,8 @@ async fn non_interactive_injection_uses_a_pipe() {
 #[tokio::test]
 async fn no_injection_inherits_stdio() {
     let mut cfg = config(None);
-    let session = spawn_child_with("/bin/echo", &[], &mut cfg, false, true).unwrap();
+    let (bin, args) = noop_bin();
+    let session = spawn_child_with(bin, &args, &mut cfg, false, true).unwrap();
     assert!(session.input.is_none());
     assert_eq!(session.done.await.unwrap(), 0);
 }

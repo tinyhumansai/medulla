@@ -176,6 +176,7 @@ async fn bridges_transcript_and_injects_owner_input() {
         cwd,
         no_bridge: false,
         session_id: Some("tp-codex-e2e".to_string()),
+        pty_spawner: None,
     }));
 
     // The session_start lifecycle and the first transcript message arrive.
@@ -268,6 +269,7 @@ async fn per_provider_dm_to_beats_generic() {
         cwd,
         no_bridge: false,
         session_id: Some("tp-codex-pp".to_string()),
+        pty_spawner: None,
     }));
 
     let mut view = OwnerView::default();
@@ -304,6 +306,7 @@ async fn passthrough_propagates_exit_code() {
         cwd: ".".to_string(),
         no_bridge: true,
         session_id: Some("tp-codex-passthrough".to_string()),
+        pty_spawner: None,
     })
     .await
     .unwrap();
@@ -325,6 +328,7 @@ async fn missing_binary_errors_clearly() {
         cwd: ".".to_string(),
         no_bridge: true,
         session_id: None,
+        pty_spawner: None,
     })
     .await
     .unwrap_err();

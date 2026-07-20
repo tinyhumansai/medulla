@@ -53,7 +53,13 @@ async fn main() -> anyhow::Result<()> {
             medulla::update::run_update(args.check).await
         }
         Command::Wrapper(provider) => {
-            let code = medulla::wrapper::run_wrapper(provider, &raw[1..], onboarding_ui()).await?;
+            let code = medulla::wrapper::run_wrapper(
+                provider,
+                &raw[1..],
+                onboarding_ui(),
+                Some(medulla_tui::harness_pty::spawner()),
+            )
+            .await?;
             std::process::exit(code);
         }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.

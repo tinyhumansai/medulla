@@ -8,6 +8,6 @@ Benchmark scores support the story; the runs themselves tell it better.
 
 **Taking correction mid-flight.** In a multi-turn steering scenario, the operator changed the plan while the fleet was running: skip the decommissioned sources, that figure is battery not serial, add source 13. Medulla honored every correction, and when a mid-archive bulletin contradicted a stale figure, it reported the authoritative 61% over the outdated 18%. It also recovers on its own: when workers fail, Medulla notices and re-delegates them, and when a task truly cannot be recovered, it reports the failure honestly rather than papering over it.
 
-**A hundred problems before your coffee cools.** Given 100 [Project Euler](https://projecteuler.net/) problems to solve in parallel, Medulla returned 83 correct answers in 5 minutes for $0.24. The baseline produced nothing scoreable in roughly the same time.
+**A hundred problems before your coffee cools.** Given 100 Project Euler problems to solve in parallel, Medulla returned 83 correct answers in 5 minutes for $0.24. The baseline produced nothing scoreable in roughly the same time.
 
 Underneath all of this is worker efficiency: Medulla's native workers average around 6,000 tokens per task, where an equivalent full harness session runs about 16x that. Efficiency at the worker level is what makes 1,000-harness fleets economically sane.

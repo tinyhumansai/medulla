@@ -8,6 +8,6 @@ Every fixture behind our published numbers ships in the open: the heavy fan-out 
 
 ## Open SDKs
 
-The SDKs are open source as well — the [`tinyhumansai/medulla`](https://github.com/tinyhumansai/medulla) repository ships the Rust [SDK](developers/architecture.md) and the [`medulla` TUI](developers/getting-started.md): wiring in your models and tools, streaming fleet input, tracing every cycle end to end. You can see exactly how your harnesses will talk to the orchestrator before you ever request access — start with the [Developers](developers/README.md) section.
+The SDKs are open source as well: wiring in your models and tools, streaming fleet input, tracing every cycle end to end. You can see exactly how your harnesses will talk to the orchestrator before you ever request access.
 
 Medulla is model-agnostic by design: route deep reasoning to your most capable model and routine work to cheaper ones, on any provider. Every published result was produced with off-the-shelf models you can rent today.

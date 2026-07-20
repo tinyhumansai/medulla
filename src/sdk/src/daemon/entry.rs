@@ -334,13 +334,26 @@ async fn onboard(
         .map(str::to_string)
         .or_else(|| handle.map(str::to_string))
         .unwrap_or_else(|| "coding-agent daemon".to_string());
+    // `createdAt`/`updatedAt` are required by the card contract and always
+    // serialized (they are plain `String`s, so a default empty value still goes
+    // on the wire and the directory rejects it while parsing RFC 3339). Stamp
+    // both with the SDK's own timestamp helper — the same one `messages.send`
+    // uses — rather than letting them default.
+    let now = ::tinyplace::auth::timestamp();
+    // The directory checks that `publicKey` derives `cryptoId` and rejects the
+    // card otherwise. They are two encodings of the same Ed25519 public key:
+    // `cryptoId` is its base58 (the agent id), `publicKey` its base64.
+    let public_key = ::tinyplace::crypto::public_key_to_base64(signer.public_key());
     let card: AgentCard = serde_json::from_value(serde_json::json!({
         "agentId": agent_id,
         "name": name,
         "description": bio,
         "username": handle,
         "cryptoId": agent_id,
+        "publicKey": public_key,
         "skills": skills,
+        "createdAt": now,
+        "updatedAt": now,
     }))
     .expect("AgentCard JSON is well-formed");
     match directory.upsert_agent(agent_id, &card).await {

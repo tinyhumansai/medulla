@@ -235,6 +235,15 @@ pub(super) async fn build_bridge(
     if let Err(err) = transport.publish_keys(&signer).await {
         eprintln!("medulla wrapper: pre-key publish failed: {err}");
     }
+    // The directory gates direct messages on an accepted contact relationship,
+    // so ask the owner for one before publishing any transcript envelope.
+    // Best-effort: the owner may not have accepted yet (or may never), and that
+    // must not stop the harness from running as a passthrough.
+    if let Some(peer) = recipient.as_deref() {
+        if let Err(err) = transport.request_contact(peer).await {
+            eprintln!("medulla wrapper: contact request to {peer} failed: {err}");
+        }
+    }
 
     let receive_active =
         receive_from.is_some() && tp_env::receive_enabled(config.provider, &config.env);

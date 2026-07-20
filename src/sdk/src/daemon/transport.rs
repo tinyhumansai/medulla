@@ -13,6 +13,7 @@
 //! wallet corrupt session state and silently drop messages. Contact-accept and
 //! presence are pure REST (no ratchet) and run unlocked.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -39,6 +40,23 @@ pub struct InboundMessage {
     pub text: String,
 }
 
+/// Mint a directory-unique message id.
+///
+/// The directory rejects an envelope with an empty `id` (`400 message id, from,
+/// and to are required`) and the Rust SDK's `messages.send` only defaults the
+/// `timestamp`, so the id has to be supplied here. Matches the reference
+/// TypeScript SDK's `msg_<millis>_<counter>` shape; the counter disambiguates
+/// envelopes minted within the same millisecond.
+fn next_message_id() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+    format!("msg_{millis}_{n}")
+}
+
 /// Encrypted transport bound to one machine wallet.
 #[derive(Clone)]
 pub struct SignalTransport {
@@ -46,7 +64,7 @@ pub struct SignalTransport {
     session: Arc<SignalSession>,
     store: Arc<FileSessionStore>,
     our_agent_id: String,
-    our_x25519_pub: [u8; 32],
+    our_ed25519_pub: [u8; 32],
     /// Serializes ratchet-touching ops (encrypt/decrypt) on this wallet.
     lock: Arc<Mutex<()>>,
 }
@@ -74,7 +92,7 @@ impl SignalTransport {
             session,
             store,
             our_agent_id,
-            our_x25519_pub,
+            our_ed25519_pub: *signer.public_key(),
             lock: Arc::new(Mutex::new(())),
         }
     }
@@ -84,9 +102,31 @@ impl SignalTransport {
         &self.our_agent_id
     }
 
-    /// This wallet's X25519 identity public key, base64.
+    /// Ask `peer` for a contact relationship.
+    ///
+    /// The directory refuses a direct message between agents that are not
+    /// contacts (`403 not_a_contact`), so a sender must request one before its
+    /// first DM. Requesting an existing contact is harmless, which keeps this
+    /// safe to call on every start.
+    pub async fn request_contact(&self, peer: &str) -> Result<(), String> {
+        self.client
+            .contacts
+            .request(peer)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// This wallet's Ed25519 identity public key, base64 — the value the
+    /// directory stores as `identityKey`.
+    ///
+    /// It must be the Ed25519 key, not the X25519 one derived from the same
+    /// seed: the server validates a published pre-key by verifying its Ed25519
+    /// `signature` against this field (`validSignedKeyForIdentity`). Sending the
+    /// X25519 form makes every publish fail with `400 invalid input`, because an
+    /// X25519 point cannot verify an Ed25519 signature.
     pub fn identity_key_base64(&self) -> String {
-        BASE64.encode(self.our_x25519_pub)
+        BASE64.encode(self.our_ed25519_pub)
     }
 
     /// Generate and publish a signed pre-key + one-time pre-keys so peers can run
@@ -191,11 +231,14 @@ impl SignalTransport {
             .map_err(|e| e.to_string())?;
 
         let envelope = MessageEnvelope {
-            id: String::new(),
+            id: next_message_id(),
             from: self.our_agent_id.clone(),
             to: to.to_string(),
             timestamp: String::new(),
-            device_id: 0,
+            // The directory rejects a zero device id (`400 deviceId must be
+            // positive`). One wallet is one device here, so it is always 1 —
+            // the same value the reference TypeScript SDK and the spec use.
+            device_id: 1,
             envelope_type: encrypted.message_type,
             body: encrypted.body,
             content_hint: None,

@@ -12,11 +12,13 @@
 //! - [`consumer`] — receiver-side fold of the SDK's v2 harness stream into a live
 //!   [`consumer::SessionView`].
 //! - [`status`] — the derived session-status state machine over SDK events.
+//! - [`attribution`] — git commit attribution for Medulla-launched harnesses.
 //! - [`config`] — the tinyplace CLI config-file model and endpoint resolution.
 //! - [`runtime`] — agent-runtime helpers: a file-backed [`runtime::FileSessionStore`],
 //!   identity bootstrap, and async mailbox / contact / presence loops driving the
 //!   SDK client.
 
+pub mod attribution;
 pub mod config;
 pub mod consumer;
 pub mod control;

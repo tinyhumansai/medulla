@@ -1,21 +1,89 @@
 //! Chat transcript, Overview, Trace, tiny.place merge, and events-seam coverage:
-//! the opencode third panel, the `events_changed` baseline seam, observation
+//! the worker third panel, the `events_changed` baseline seam, observation
 //! merge into the snapshot, error/wrapped/spinner/thread-badge chat rendering,
 //! the Trace JSON detail row, and Overview active-call/completed-task lines.
 
 use crate::helpers::*;
 
-// --- overview rendering: opencode third panel -------------------------------
+// --- overview rendering: worker third panel ---------------------------------
+
+/// A LoadedConfig whose worker harness is `command`, with tiny.place disabled so
+/// the Overview third panel takes the worker branch.
+fn worker_config(command: &str) -> LoadedConfig {
+    let mut l = LoadedConfig::defaults("medulla.tui.json".into());
+    l.config.opencode = Some(medulla::config::OpencodeConfig {
+        command: command.into(),
+        ..Default::default()
+    });
+    l
+}
 
 #[test]
-fn overview_renders_opencode_panel_without_tinyplace() {
+fn overview_renders_worker_panel_without_tinyplace() {
     let rt = Arc::new(MockRuntime::empty());
-    let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-    l.config.opencode = Some(medulla::config::OpencodeConfig::default());
-    let mut app = App::new(rt, l);
+    let mut app = App::new(rt, worker_config("opencode"));
     app.tab_index = 0; // Overview
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("OpenCode workers"), "opencode third panel");
+    assert!(out.contains("Workers"), "worker third panel");
+    assert!(
+        !out.contains("OpenCode workers"),
+        "the panel title must not be provider-specific: {out}"
+    );
+    assert!(out.contains("OpenCode"), "harness row names the provider");
+}
+
+#[test]
+fn overview_worker_panel_names_each_harness() {
+    // The panel is provider-agnostic: the label follows the configured command.
+    for (command, expected) in [
+        ("claude", "Claude Code"),
+        ("codex", "Codex"),
+        ("/usr/local/bin/opencode", "OpenCode"),
+        // An unrecognized binary is still worth naming, verbatim.
+        ("my-custom-agent", "my-custom-agent"),
+    ] {
+        let rt = Arc::new(MockRuntime::empty());
+        let mut app = App::new(rt, worker_config(command));
+        app.tab_index = 0;
+        let out = render(&mut app, 120, 40);
+        assert!(
+            out.contains(expected),
+            "command {command} should render harness {expected}: {out}"
+        );
+    }
+}
+
+#[test]
+fn overview_header_shows_the_backend_host_without_scheme() {
+    let rt = Arc::new(MockRuntime::empty());
+    let mut l = LoadedConfig::defaults("medulla.tui.json".into());
+    l.config.backend.base_url = "https://staging-api.tinyhumans.ai/v1".into();
+    let mut app = App::new(rt, l);
+    app.tab_index = 0;
+    let out = render(&mut app, 120, 40);
+    assert!(
+        out.contains("staging-api.tinyhumans.ai"),
+        "header names the backend host: {out}"
+    );
+    assert!(!out.contains("https://"), "scheme is stripped: {out}");
+}
+
+#[test]
+fn overview_model_routing_drops_the_runtime_row() {
+    // The runtime/backend now lives in the header; Model routing is models only.
+    let rt = Arc::new(MockRuntime::empty());
+    let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
+    app.tab_index = 0;
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("Model routing"), "panel still renders");
+    assert!(
+        out.contains("orchestrator") && out.contains("workers"),
+        "all four routing rows fit the panel: {out}"
+    );
+    assert!(
+        !out.contains("mock (scripted)"),
+        "the runtime descriptor is gone from Overview: {out}"
+    );
 }
 
 // --- events_changed seam ----------------------------------------------------

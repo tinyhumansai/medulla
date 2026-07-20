@@ -119,6 +119,13 @@ async fn run_provider_attempt(
     // extra args, so a per-provider env override applies to headless daemon runs
     // too — matching the wrapper's child-argv prefix.
     let mut extra_args = crate::tinyplace::env::provider_args(spec.provider, &spec.env);
+    // Medulla-launched harnesses attribute their commits to Medulla via a
+    // `Co-authored-by` trailer. Nothing is persisted — the flags live only on
+    // this child's argv. Empty for providers with no such knob.
+    extra_args.extend(crate::tinyplace::attribution::attribution_args(
+        spec.provider,
+        &spec.env,
+    ));
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_run_args(
         spec.provider,

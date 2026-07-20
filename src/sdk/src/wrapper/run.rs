@@ -84,6 +84,12 @@ pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
 
     // Extra args from `TINYPLACE_<P>_ARGS` are prepended to the child argv.
     let mut child_args = tp_env::provider_args(config.provider, &config.env);
+    // Attribute commits made through this session to Medulla. Injected per-spawn,
+    // so the operator's own `settings.json` is never touched.
+    child_args.extend(crate::tinyplace::attribution::attribution_args(
+        config.provider,
+        &config.env,
+    ));
     child_args.extend(config.child_args.iter().cloned());
 
     // Spawn the child. stdout/stderr are always inherited (the user interacts with

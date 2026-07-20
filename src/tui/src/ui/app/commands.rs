@@ -241,14 +241,14 @@ impl App {
                 self.set_settings_subpage(SP_HELP);
             }
             SlashCommand::Config => {
-                self.set_settings_subpage(SP_CONFIG);
+                self.enter_settings_subpage(SP_CONFIG);
             }
             SlashCommand::Settings => {
-                self.set_settings_subpage(SP_APPEARANCE);
+                self.enter_settings_subpage(SP_APPEARANCE);
             }
             SlashCommand::Usage => return self.set_settings_subpage(SP_USAGE),
             SlashCommand::Feedback => {
-                self.set_settings_subpage(SP_FEEDBACK);
+                self.enter_settings_subpage(SP_FEEDBACK);
                 self.set_status("Feedback · loading the board…");
                 return self.reload_feedback();
             }
@@ -290,7 +290,22 @@ impl App {
         self.settings_index = index.min(SETTINGS_SUBPAGES.len() - 1);
         // An armed logout must not survive a jump to another subpage.
         self.disarm_logout();
+        // A jump lands on the nav, not inside the new page: the digit keys are a
+        // way to move *between* subpages, so leaving focus in the content pane
+        // would strand the next arrow key on whatever page you just left.
+        self.settings_focused = false;
         self.tab_enter_cmd()
+    }
+
+    /// Jump to a Settings subpage *and* step into its content pane.
+    ///
+    /// Used by the slash commands: `/feedback` is a request to work with the
+    /// board, not to park on the nav next to it, so it should land ready to
+    /// browse.
+    pub(super) fn enter_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
+        let cmd = self.set_settings_subpage(index);
+        self.settings_focused = true;
+        cmd
     }
 
     /// Cycle the selected Appearance role's color, apply it to the live theme,

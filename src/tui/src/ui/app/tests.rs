@@ -91,7 +91,9 @@ fn typing_inserts_into_draft() {
 /// An app parked on the Feedback subpage with the mock board already loaded.
 fn feedback_app() -> App {
     let mut a = app();
-    a.set_settings_subpage(SP_FEEDBACK);
+    // Enter the content pane, as a user arriving via `/feedback` or Enter does:
+    // the board's letter bindings only act on a focused page.
+    a.enter_settings_subpage(SP_FEEDBACK);
     let page = futures::executor::block_on(a.runtime.list_feedback(a.feedback_query())).unwrap();
     a.set_feedback_page(page);
     a

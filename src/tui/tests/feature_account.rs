@@ -176,9 +176,16 @@ fn navigating_away_disarms_the_logout() {
     let mut app = account_app(dir.path());
 
     key(&mut app, KeyCode::Enter); // arm
+
+    // Leaving now takes two Escapes: the first disarms, the second steps out of
+    // the content pane back to the subpage nav.
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Esc);
+    assert!(!app.settings_focused(), "back on the nav");
     key(&mut app, KeyCode::Up); // move to Context
     assert_eq!(app.settings_subpage(), "Context");
     key(&mut app, KeyCode::Down); // back to Account
+    key(&mut app, KeyCode::Enter); // re-enter the pane
 
     // Returning must not resume an armed logout.
     key(&mut app, KeyCode::Enter);

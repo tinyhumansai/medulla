@@ -27,19 +27,31 @@ impl App {
             if let Some((heading, _)) = SETTINGS_GROUPS.iter().find(|(_, start)| *start == i) {
                 lines.push(TLine::from(Span::styled(format!(" {heading}"), dim)));
             }
-            let style = if i == self.settings_index {
-                self.theme.selection()
+            // The selected row is highlighted only while the nav holds focus.
+            // Once focus moves into the content pane it drops to a marker, so
+            // there is never more than one "live" cursor on screen.
+            let style = match (i == self.settings_index, self.settings_focused) {
+                (true, false) => self.theme.selection(),
+                (true, true) => Style::default().add_modifier(Modifier::BOLD),
+                _ => Style::default(),
+            };
+            let marker = if i == self.settings_index && self.settings_focused {
+                "▸"
             } else {
-                Style::default()
+                " "
             };
             lines.push(TLine::from(Span::styled(
-                format!("  {} {name} ", i + 1),
+                format!(" {marker}{} {name} ", i + 1),
                 style,
             )));
         }
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
-            format!(" ↑↓ nav · 1-{} jump", SETTINGS_SUBPAGES.len()),
+            if self.settings_focused {
+                " Esc menu".to_string()
+            } else {
+                format!(" ↑↓ nav · ⏎ open · 1-{} jump", SETTINGS_SUBPAGES.len())
+            },
             dim,
         )));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);

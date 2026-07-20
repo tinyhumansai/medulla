@@ -1,10 +1,18 @@
 //! Keyboard handling for the Settings tab and every subpage it hosts.
 //!
-//! Settings has two levels of focus, and the split is by key rather than by
-//! mode: `↑↓` always move the left-nav between subpages, while `j/k` and the
-//! subpage's own letter keys act inside the content pane. That keeps the nav
-//! reachable from any subpage without a focus-toggle, and it is why Feedback —
-//! which used `↑↓` and `j/k` interchangeably as a tab — now browses with `j/k`.
+//! Settings has two levels of focus, and the split is by *mode*: the left-hand
+//! nav owns the keyboard until you step into the content pane with `Enter` (or
+//! `→`), and `Esc` steps back out. While the nav has focus `↑↓` walk the subpage
+//! list; once the pane has focus they browse its contents instead.
+//!
+//! An earlier design split by key rather than by mode — `↑↓` always drove the
+//! nav, `j/k` and the subpage's letters drove the content. It avoided a focus
+//! toggle, but it did not survive Feedback: that page binds nine single letters
+//! as actions, so the keys you would reach for to get around instead voted,
+//! commented, or opened a submission, and the arrow keys jumped you off the page
+//! entirely. Making entry explicit is what makes those letters deliberate.
+//!
+//! `j/k` still browse inside a focused pane, so the old muscle memory works.
 
 use crossterm::event::KeyCode;
 
@@ -22,24 +30,59 @@ impl App {
     /// Returns `None` when the key is not one Settings claims, so the caller can
     /// fall through to the global bindings.
     pub(super) fn on_settings_key(&mut self, code: KeyCode) -> SettingsKey {
-        // Digit jumps and nav moves apply on every subpage.
-        match code {
-            KeyCode::Char(d @ '1'..='9') => {
-                let index = d as usize - '1' as usize;
-                if index < SETTINGS_SUBPAGES.len() {
-                    return SettingsKey::Handled(self.set_settings_subpage(index));
+        // Digit jumps work from either focus. They are menu selections — "take
+        // me to Appearance" — so they land *inside* the page, the same as
+        // `/appearance` does. Reaching the nav is what Esc is for.
+        if let KeyCode::Char(d @ '1'..='9') = code {
+            let index = d as usize - '1' as usize;
+            if index < SETTINGS_SUBPAGES.len() {
+                return SettingsKey::Handled(self.enter_settings_subpage(index));
+            }
+            return SettingsKey::Unhandled;
+        }
+
+        if !self.settings_focused {
+            // Nav focus: arrows walk the subpage list, Enter steps into the page.
+            match code {
+                KeyCode::Up | KeyCode::Down => {
+                    let up = matches!(code, KeyCode::Up);
+                    self.disarm_logout();
+                    self.settings_index = if up {
+                        self.settings_index.saturating_sub(1)
+                    } else {
+                        (self.settings_index + 1).min(SETTINGS_SUBPAGES.len() - 1)
+                    };
+                    return SettingsKey::Handled(self.tab_enter_cmd());
                 }
-                return SettingsKey::Unhandled;
+                // Enter alone opens a page: `→` is already the "increase this
+                // value" key on Appearance and Config, and overloading it would
+                // make the first press mean something different from the rest.
+                KeyCode::Enter => {
+                    self.settings_focused = true;
+                    self.set_status(format!(
+                        "{} · Esc to go back to the menu",
+                        self.settings_subpage()
+                    ));
+                    return SettingsKey::Handled(None);
+                }
+                // Every other key belongs to the content pane, which does not
+                // have focus — swallow it rather than letting a stray letter
+                // fire a page action from the nav.
+                _ => return SettingsKey::Handled(None),
+            }
+        }
+
+        // Content focus: Esc leaves, arrows browse, everything else is the
+        // subpage's own binding.
+        match code {
+            KeyCode::Esc if !self.logout_armed() => {
+                self.settings_focused = false;
+                self.set_status("Settings · menu");
+                return SettingsKey::Handled(None);
             }
             KeyCode::Up | KeyCode::Down => {
                 let up = matches!(code, KeyCode::Up);
-                self.disarm_logout();
-                self.settings_index = if up {
-                    self.settings_index.saturating_sub(1)
-                } else {
-                    (self.settings_index + 1).min(SETTINGS_SUBPAGES.len() - 1)
-                };
-                return SettingsKey::Handled(self.tab_enter_cmd());
+                return self.settings_content_scroll(up);
             }
             _ => {}
         }
@@ -53,6 +96,47 @@ impl App {
             SP_CONTEXT => self.context_key(code),
             SP_ACCOUNT => self.account_key(code),
             _ => SettingsKey::Unhandled,
+        }
+    }
+
+    /// Move the selection inside the focused subpage's content pane.
+    ///
+    /// This is what `↑↓` mean once the pane has focus; each subpage's `j/k`
+    /// bindings stay as they were, so both work.
+    fn settings_content_scroll(&mut self, up: bool) -> SettingsKey {
+        match self.settings_index {
+            SP_APPEARANCE => {
+                self.appearance_index = if up {
+                    self.appearance_index.saturating_sub(1)
+                } else {
+                    (self.appearance_index + 1).min(THEME_ROLES.len() - 1)
+                };
+                SettingsKey::Handled(None)
+            }
+            SP_CONFIG => {
+                self.move_config_index(up);
+                SettingsKey::Handled(None)
+            }
+            SP_FEEDBACK => SettingsKey::Handled(self.move_feedback_index(up)),
+            SP_TRACE => {
+                self.selected = if up {
+                    self.selected.saturating_sub(1)
+                } else {
+                    self.selected + 1
+                };
+                SettingsKey::Handled(None)
+            }
+            SP_CONTEXT => {
+                self.context_index = if up {
+                    self.context_index.saturating_sub(1)
+                } else {
+                    (self.context_index + 1).min(self.contexts.len().saturating_sub(1))
+                };
+                SettingsKey::Handled(None)
+            }
+            // Usage and Account have nothing to scroll; swallow the key so it
+            // does not fall through to the global bindings and switch tabs.
+            _ => SettingsKey::Handled(None),
         }
     }
 

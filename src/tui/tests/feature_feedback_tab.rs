@@ -25,8 +25,8 @@ fn loaded() -> LoadedConfig {
     l
 }
 
-/// Focus the Feedback subpage. It lives under Settings rather than in the tab
-/// bar, so its list browses with j/k while ↑↓ drive the settings nav.
+/// Focus the Feedback subpage and step into its content pane, which is where
+/// the board's own bindings (browse, vote, comment, submit) take effect.
 fn focus_feedback(app: &mut App) {
     let _ = app.focus_settings_subpage("Feedback");
     assert_eq!(app.settings_subpage(), "Feedback");
@@ -381,4 +381,49 @@ fn a_settled_empty_board_invites_the_first_submission() {
     let out = render(&mut app, 120, 32);
     assert!(out.contains("Nothing here yet"), "empty prompt: {out}");
     assert!(out.contains("item(s)"), "settled count: {out}");
+}
+
+// --- content focus ----------------------------------------------------------
+
+#[test]
+fn feedback_letter_keys_do_nothing_until_the_page_is_entered() {
+    // The bug this focus model fixes: Feedback binds nine single letters, so
+    // from the nav a stray keystroke used to vote or open a submission prompt.
+    let mut app = board();
+    app.on_event(key(KeyCode::Esc)); // step out to the subpage menu
+    assert!(!app.settings_focused(), "parked on the nav");
+
+    for k in ['u', 'd', 'c', 'n', 'b'] {
+        let cmd = app.on_event(key(KeyCode::Char(k)));
+        assert!(cmd.is_none(), "{k} must not act from the nav");
+    }
+    assert_eq!(app.feedback_index(), 0, "nothing moved");
+}
+
+#[test]
+fn arrows_browse_the_board_once_entered_and_the_nav_again_once_left() {
+    let mut app = board();
+    assert!(app.settings_focused(), "the board opens focused");
+
+    // Focused, Down browses rows and the subpage stays put.
+    app.on_event(key(KeyCode::Down));
+    assert_eq!(app.feedback_index(), 1, "arrows browse the board");
+    assert_eq!(app.settings_subpage(), "Feedback", "and stay on the page");
+
+    // Esc hands the arrows back to the nav.
+    app.on_event(key(KeyCode::Esc));
+    assert!(!app.settings_focused());
+    app.on_event(key(KeyCode::Down));
+    assert_ne!(app.settings_subpage(), "Feedback", "arrows moved the nav");
+
+    // Enter steps back in, where the board is as it was left.
+    app.on_event(key(KeyCode::Up));
+    app.on_event(key(KeyCode::Enter));
+    assert!(app.settings_focused());
+    assert_eq!(app.settings_subpage(), "Feedback");
+    assert_eq!(
+        app.feedback_index(),
+        1,
+        "the selection survived the round trip"
+    );
 }

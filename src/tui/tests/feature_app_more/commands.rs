@@ -117,6 +117,9 @@ fn entering_the_context_subpage_requests_inspect() {
 fn arrow_keys_walk_the_settings_nav_and_load_each_subpage() {
     let (mut app, _rt) = demo_app();
     let _ = app.focus_settings_subpage("Appearance");
+    // Arrows only walk the nav from the nav; step out of the content pane first.
+    app.on_event(key(KeyCode::Esc));
+    assert!(!app.settings_focused());
     // Down from Appearance → Config → Feedback → Trace → Context.
     for expected in ["Config", "Feedback", "Trace", "Context"] {
         let cmd = app.on_event(key(KeyCode::Down));

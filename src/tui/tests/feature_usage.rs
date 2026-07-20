@@ -132,6 +132,9 @@ fn account_panel_renders_backend_payload() {
 #[test]
 fn refresh_key_requests_usage_and_c_toggles_config() {
     let (mut app, _rt) = usage_app();
+    // Tabbing into Settings lands on the subpage menu; the page's own keys only
+    // act once you step into it.
+    let _ = key(&mut app, KeyCode::Enter);
     let cmd = key(&mut app, KeyCode::Char('r'));
     assert!(
         matches!(cmd, Some(medulla_tui::ui::app::Cmd::LoadUsage)),

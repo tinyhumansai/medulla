@@ -137,9 +137,21 @@ fn arrows_never_leave_the_subpage() {
 }
 
 #[test]
-fn up_and_down_still_move_the_settings_nav() {
+fn up_and_down_follow_focus_between_the_nav_and_the_page() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut app = config_app(dir.path());
+
+    // Focused on the page, arrows pick a setting and leave the nav alone.
+    assert!(app.settings_focused(), "config_app enters the page");
+    key(&mut app, KeyCode::Down);
+    assert_eq!(
+        app.settings_subpage(),
+        "Config",
+        "arrows stay inside the focused page"
+    );
+
+    // Back on the nav, the same keys walk the subpage list again.
+    key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Down);
     assert_eq!(app.settings_subpage(), "Feedback");
     key(&mut app, KeyCode::Up);

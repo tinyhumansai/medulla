@@ -287,6 +287,15 @@ pub struct App {
     pub account_usage: Option<serde_json::Value>,
     /// The active Settings subpage (index into [`SETTINGS_SUBPAGES`]).
     pub(super) settings_index: usize,
+    /// Whether keyboard focus is inside the Settings content pane rather than on
+    /// the left-hand subpage nav.
+    ///
+    /// Subpages whose content is a list of *actions* (Feedback especially) bind
+    /// enough single letters that they swallow the keys you would otherwise use
+    /// to get around, and `↑↓` moving the nav meant arrow keys jumped you off
+    /// the page entirely. Entering the pane hands `↑↓` to the content and makes
+    /// the letter bindings deliberate rather than ambient.
+    pub(super) settings_focused: bool,
     /// The selected theme role on the Appearance subpage.
     pub(super) appearance_index: usize,
     /// The selected editable row on the Config subpage.

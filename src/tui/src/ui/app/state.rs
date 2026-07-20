@@ -53,6 +53,7 @@ impl App {
             mouse_capture: true,
             account_usage: None,
             settings_index: 0,
+            settings_focused: false,
             appearance_index: 0,
             config_index: 0,
             logout_armed: false,
@@ -107,7 +108,16 @@ impl App {
             .iter()
             .position(|s| *s == name)
             .unwrap_or(0);
-        self.set_settings_subpage(index)
+        let cmd = self.set_settings_subpage(index);
+        // "Focus" means focus: callers addressing a subpage by name want to act
+        // on its contents, not to park on the nav beside it.
+        self.settings_focused = true;
+        cmd
+    }
+
+    /// Whether Settings focus is inside the content pane. Render/test seam.
+    pub fn settings_focused(&self) -> bool {
+        self.settings_focused
     }
 
     /// The current primary theme color. Test/inspection seam.

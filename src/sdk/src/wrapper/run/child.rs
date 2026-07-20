@@ -60,6 +60,18 @@ pub(super) fn spawn_child(
     inject: bool,
 ) -> anyhow::Result<ChildSession> {
     let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    spawn_child_with(bin, args, config, inject, interactive)
+}
+
+/// [`spawn_child`] with the tty check lifted into a parameter, so the PTY branch
+/// is reachable from tests that are not themselves attached to a terminal.
+pub(super) fn spawn_child_with(
+    bin: &str,
+    args: &[String],
+    config: &mut WrapperConfig,
+    inject: bool,
+    interactive: bool,
+) -> anyhow::Result<ChildSession> {
     if inject && interactive {
         if let Some(spawn_pty) = config.pty_spawner.take() {
             let request = PtyRequest {

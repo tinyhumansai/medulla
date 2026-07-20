@@ -21,6 +21,9 @@ use super::types::{PtySpawner, WrapperConfig, WrapperTimings};
 
 mod child;
 
+#[cfg(test)]
+mod tests;
+
 use child::{spawn_child, ChildSession};
 
 /// How long to wait for the PTY reader to copy the child's final output before

@@ -49,6 +49,8 @@ pub(crate) enum AppMsg {
     FeedbackItemUpdated(medulla::client::FeedbackItem),
     /// A feedback action finished; reload the board and report `status`.
     FeedbackChanged(String),
+    /// A memory ingest finished; clear the in-flight flag and report the outcome.
+    MemoryIngestDone(String),
 }
 
 /// Why the event loop stopped.
@@ -63,21 +65,49 @@ pub(crate) enum SessionExit {
     Relogin,
 }
 
+/// Everything a session needs besides the terminal and the runtime.
+///
+/// Bundled rather than passed positionally: these are all "wire this into the
+/// app" values, and a session is started afresh on every relogin, so the call
+/// site reads better as one named record than as eight arguments.
+pub(crate) struct SessionWiring {
+    /// The loaded configuration for this session.
+    pub loaded: medulla::config::LoadedConfig,
+    /// A note to show on the status line at startup, if any.
+    pub startup_status: Option<String>,
+    /// The tiny.place presence observation, when that service is running.
+    pub tinyplace_obs:
+        Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
+    /// Where appearance/config edits are persisted.
+    pub config_path: std::path::PathBuf,
+    /// The Medulla home, used to locate the credential store.
+    pub medulla_home: std::path::PathBuf,
+    /// The persona-memory service backing the Memory tab.
+    pub memory_service: Option<Arc<medulla::memory::MemoryService>>,
+}
+
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
 /// input events, runtime snapshots, background [`AppMsg`]s, and the animation
 /// tick until the app requests quit.
 pub(crate) async fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     runtime: Arc<dyn Runtime>,
-    loaded: medulla::config::LoadedConfig,
-    startup_status: Option<String>,
-    tinyplace_obs: Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
-    config_path: std::path::PathBuf,
-    medulla_home: std::path::PathBuf,
+    wiring: SessionWiring,
 ) -> anyhow::Result<SessionExit> {
+    let SessionWiring {
+        loaded,
+        startup_status,
+        tinyplace_obs,
+        config_path,
+        medulla_home,
+        memory_service,
+    } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
     app.set_medulla_home(medulla_home);
+    if let Some(svc) = memory_service {
+        app.set_memory_service(svc);
+    }
     if let Some(obs) = tinyplace_obs {
         app.set_tinyplace_observation(obs);
     }
@@ -110,7 +140,7 @@ pub(crate) async fn run(
             maybe_event = reader.next() => {
                 if let Some(Ok(ev)) = maybe_event {
                     if let Some(cmd) = app.on_event(ev) {
-                        run_cmd(cmd, &runtime, &msg_tx);
+                        run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
                     }
                 }
             }
@@ -118,7 +148,7 @@ pub(crate) async fn run(
                 if recv.is_ok() {
                     app.refresh_snapshot();
                     if app.tab() == "Context" && app.events_changed() {
-                        run_cmd(Cmd::InspectContext, &runtime, &msg_tx);
+                        run_cmd(Cmd::InspectContext, &runtime, app.memory_service(), &msg_tx);
                     }
                 }
             }
@@ -136,6 +166,9 @@ pub(crate) async fn run(
                     AppMsg::MemoryLoaded { status, directives } => {
                         app.set_memory_loaded(status, directives);
                     }
+                    AppMsg::MemoryIngestDone(status) => {
+                        app.set_memory_ingest_done(status);
+                    }
                     AppMsg::MemoryResults { hits, query } => {
                         let n = hits.len();
                         app.set_memory_results(hits, query);
@@ -145,7 +178,7 @@ pub(crate) async fn run(
                         app.set_feedback_page(page);
                         // Pull the newly selected row's comments in the same beat.
                         if let Some(cmd) = app.feedback_detail_cmd() {
-                            run_cmd(cmd, &runtime, &msg_tx);
+                            run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
                         }
                     }
                     AppMsg::FeedbackComments { id, comments } => {
@@ -159,7 +192,7 @@ pub(crate) async fn run(
                         app.set_status(status);
                         // A comment or submission changes the board, so re-pull
                         // it rather than patching state locally.
-                        run_cmd(Cmd::LoadFeedback(app.feedback_query()), &runtime, &msg_tx);
+                        run_cmd(Cmd::LoadFeedback(app.feedback_query()), &runtime, app.memory_service(), &msg_tx);
                     }
                     AppMsg::UpdateAvailable(notice) => {
                         app.set_update_notice(notice.clone());
@@ -222,6 +255,7 @@ fn spawn_update_checker(
 fn run_cmd(
     cmd: Cmd,
     runtime: &Arc<dyn Runtime>,
+    memory: Option<Arc<medulla::memory::MemoryService>>,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
     match cmd {
@@ -391,8 +425,7 @@ fn run_cmd(
             let rt = runtime.clone();
             let tx = msg_tx.clone();
             tokio::task::spawn_blocking(move || {
-                let status = rt.memory_status();
-                let directives = rt.memory_directives();
+                let (status, directives) = read_memory(&rt, memory.as_deref());
                 let _ = tx.send(AppMsg::MemoryLoaded { status, directives });
             });
         }
@@ -400,12 +433,91 @@ fn run_cmd(
             let rt = runtime.clone();
             let tx = msg_tx.clone();
             tokio::task::spawn_blocking(move || {
-                let status = rt.memory_status();
-                let directives = rt.memory_directives();
-                let hits = rt.memory_search(query.clone(), None, 20);
+                let (status, directives) = read_memory(&rt, memory.as_deref());
+                let hits = match memory.as_deref() {
+                    Some(svc) => svc.search(&query, None, 20),
+                    None => rt.memory_search(query.clone(), None, 20),
+                };
                 let _ = tx.send(AppMsg::MemoryLoaded { status, directives });
                 let _ = tx.send(AppMsg::MemoryResults { hits, query });
             });
         }
+        // Ingest is genuinely long-running (it walks transcripts and calls a
+        // paid summarizer), so it runs as a normal async task and reports a
+        // single terminal status rather than streaming progress.
+        Cmd::IngestMemory { backfill } => {
+            let tx = msg_tx.clone();
+            let Some(svc) = memory else {
+                let _ = tx.send(AppMsg::MemoryIngestDone(
+                    "Memory · no memory service is attached; nothing to ingest".into(),
+                ));
+                return;
+            };
+            let rt = runtime.clone();
+            // `ingest` returns a non-`Send` future, so it cannot ride
+            // `tokio::spawn`. Give it a dedicated blocking thread with its own
+            // current-thread runtime — that also keeps a long walk off the
+            // shared worker pool, where it would starve UI-facing tasks.
+            tokio::task::spawn_blocking(move || {
+                let mode = if backfill {
+                    medulla::memory::IngestMode::Backfill
+                } else {
+                    medulla::memory::IngestMode::Incremental
+                };
+                let local = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        let _ = tx.send(AppMsg::MemoryIngestDone(format!(
+                            "Memory · ingest failed to start: {e}"
+                        )));
+                        return;
+                    }
+                };
+                let status = match local.block_on(svc.ingest(mode)) {
+                    // Mirrors `medulla memory`'s summary line. The budget note
+                    // matters: a truncated run looks identical otherwise, and
+                    // the user needs to know more work remains.
+                    Ok(report) => format!(
+                        "Memory · {} complete — {} files, {} sessions, {} observations{}",
+                        report.mode,
+                        report.files_seen,
+                        report.sessions_processed,
+                        report.observations,
+                        if report.budget_hit {
+                            " (budget hit — rerun to continue)"
+                        } else {
+                            ""
+                        },
+                    ),
+                    Err(e) => format!("Memory · ingest failed: {e}"),
+                };
+                // Re-read so the tab reflects the store the ingest just grew.
+                let (st, directives) = read_memory(&rt, Some(svc.as_ref()));
+                let _ = tx.send(AppMsg::MemoryLoaded {
+                    status: st,
+                    directives,
+                });
+                let _ = tx.send(AppMsg::MemoryIngestDone(status));
+            });
+        }
+    }
+}
+
+/// Read memory status + directives, preferring the directly-attached service
+/// over the runtime seam.
+///
+/// The runtime seam only carries memory on the core runtime, so without this the
+/// Memory tab would be empty on the backend and mock paths. The seam remains the
+/// fallback because the mock scripts memory through it in tests.
+fn read_memory(
+    runtime: &Arc<dyn Runtime>,
+    memory: Option<&medulla::memory::MemoryService>,
+) -> (Option<medulla::memory::MemoryStatus>, Vec<String>) {
+    match memory {
+        Some(svc) => (Some(svc.status()), svc.directives()),
+        None => (runtime.memory_status(), runtime.memory_directives()),
     }
 }

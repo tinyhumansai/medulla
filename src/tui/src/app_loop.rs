@@ -30,7 +30,7 @@ use medulla_tui::ui::login::LoginOutcome;
 use medulla_tui::ui::welcome::{format_usd, run_welcome_ui};
 
 use crate::commands::{run_login_screen, save_credentials};
-use crate::event_loop::{run, SessionExit};
+use crate::event_loop::{run, SessionExit, SessionWiring};
 use crate::terminal::{restore, TermGuard};
 
 /// Parse TUI args, select a runtime, set up the terminal, optionally run the
@@ -84,9 +84,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // exactly when the welcome flow must not run.
     let mut backend_client: Option<MedullaClient> = None;
 
-    // Optional persona-memory service (tinycortex). Built once here and attached
-    // to the core runtime so it can advertise + serve the memory toolset; also
-    // available to a later TUI surface via the runtime seam.
+    // Persona-memory service (tinycortex), on by default. Built once here and
+    // wired two ways: into the core runtime, which advertises + serves the
+    // memory toolset, and into the app itself, which reads it for the Memory
+    // tab. The second wiring is what makes memory work on the backend and mock
+    // paths — the runtime seam only ever carried it on core.
     let memory_settings = medulla::memory::env::resolve_with_backend(
         loaded.config.memory.as_ref(),
         &loaded.config.backend,
@@ -104,11 +106,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     } else {
         None
     };
-    // The memory service is only consumed by the unix-only core runtime; keep it
-    // built (for its side effects / startup note) without an unused warning on
-    // platforms where core is unavailable.
-    #[cfg(not(unix))]
-    let _ = &memory_service;
+    // The core runtime additionally *serves* memory as a toolset, so it takes a
+    // clone below; the TUI's own Memory tab is wired straight to the service so
+    // it works on every runtime path, not just core.
 
     match plan {
         CorePlan::Skip => {}
@@ -333,11 +333,14 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         let result = run(
             &mut terminal,
             runtime.clone(),
-            loaded.clone(),
-            status.take(),
-            tinyplace_obs.clone(),
-            config_path.clone(),
-            home.clone(),
+            SessionWiring {
+                loaded: loaded.clone(),
+                startup_status: status.take(),
+                tinyplace_obs: tinyplace_obs.clone(),
+                config_path: config_path.clone(),
+                medulla_home: home.clone(),
+                memory_service: memory_service.clone(),
+            },
         )
         .await;
 

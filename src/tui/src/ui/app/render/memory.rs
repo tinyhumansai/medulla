@@ -47,7 +47,7 @@ impl App {
 
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(6), Constraint::Min(0)])
+            .constraints([Constraint::Length(7), Constraint::Min(0)])
             .split(area);
 
         // Status header.
@@ -72,7 +72,7 @@ impl App {
                 ))
             } else {
                 TLine::from(Span::styled(
-                    "pack ○ absent · run `medulla memory backfill`",
+                    "pack ○ absent · press b to backfill",
                     Style::default().add_modifier(Modifier::DIM),
                 ))
             },
@@ -80,6 +80,19 @@ impl App {
                 "{} observation(s) · {} directive(s)",
                 st.entry_count, st.directives_count
             )),
+            // A backfill can run for minutes with no other visible sign, so the
+            // in-flight state gets its own line rather than only a status flash.
+            if self.memory_ingesting {
+                TLine::from(Span::styled(
+                    "● ingesting… (this can take a while)",
+                    Style::default().fg(Color::Yellow),
+                ))
+            } else {
+                TLine::from(Span::styled(
+                    "b backfill · i ingest new · r refresh",
+                    Style::default().add_modifier(Modifier::DIM),
+                ))
+            },
         ];
         let facets = if st.facet_counts.is_empty() {
             "facets: (none)".to_string()

@@ -45,6 +45,8 @@ impl App {
             memory_directives: Vec::new(),
             memory_index: 0,
             memory_query: None,
+            memory_service: None,
+            memory_ingesting: false,
             feedback: Default::default(),
             prompt: None,
             frame: 0,
@@ -225,6 +227,29 @@ impl App {
     /// The active persona-memory selection index. Test/inspection seam.
     pub fn memory_index(&self) -> usize {
         self.memory_index
+    }
+
+    /// Attach the persona-memory service, making the Memory tab work on every
+    /// runtime path rather than only on core.
+    pub fn set_memory_service(&mut self, service: Arc<medulla::memory::MemoryService>) {
+        self.memory_service = Some(service);
+    }
+
+    /// The attached persona-memory service, if any. The event loop prefers it
+    /// over the runtime seam when serving Memory-tab commands.
+    pub fn memory_service(&self) -> Option<Arc<medulla::memory::MemoryService>> {
+        self.memory_service.clone()
+    }
+
+    /// Whether a memory ingest is in flight. Render/test seam.
+    pub fn memory_ingesting(&self) -> bool {
+        self.memory_ingesting
+    }
+
+    /// Record that an ingest finished, and report its outcome.
+    pub fn set_memory_ingest_done(&mut self, status: String) {
+        self.memory_ingesting = false;
+        self.set_status(status);
     }
 
     /// Open the resume picker with `chats`, or report that there is nothing to

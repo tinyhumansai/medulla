@@ -226,3 +226,76 @@ fn slash_memory_bare_requests_load() {
     assert_eq!(app.tab(), "Memory");
     assert!(matches!(cmd, Some(Cmd::LoadMemory)), "bare /memory loads");
 }
+
+// --- ingest controls --------------------------------------------------------
+
+#[test]
+fn b_and_i_request_backfill_and_incremental_ingest() {
+    let rt = Arc::new(MockRuntime::empty());
+    rt.set_memory_status(scripted_status());
+    let mut app = App::new(rt.clone(), loaded());
+    app.tab_index = memory_tab();
+    apply_load(&mut app, &rt);
+
+    let cmd = app.on_event(key(KeyCode::Char('b')));
+    assert!(
+        matches!(cmd, Some(Cmd::IngestMemory { backfill: true })),
+        "b walks everything"
+    );
+    assert!(app.memory_ingesting(), "the run is marked in flight");
+
+    // Finish it, then `i` must ask for the cursor-forward mode instead.
+    app.set_memory_ingest_done("done".into());
+    let cmd = app.on_event(key(KeyCode::Char('i')));
+    assert!(
+        matches!(cmd, Some(Cmd::IngestMemory { backfill: false })),
+        "i resumes from the cursor"
+    );
+}
+
+#[test]
+fn a_second_ingest_cannot_start_while_one_is_running() {
+    // Ingest spends real money against a provider, so a double keypress must not
+    // start a second walk.
+    let rt = Arc::new(MockRuntime::empty());
+    rt.set_memory_status(scripted_status());
+    let mut app = App::new(rt.clone(), loaded());
+    app.tab_index = memory_tab();
+    apply_load(&mut app, &rt);
+
+    assert!(
+        app.on_event(key(KeyCode::Char('b'))).is_some(),
+        "first runs"
+    );
+    let second = app.on_event(key(KeyCode::Char('b')));
+    assert!(second.is_none(), "the second press is refused");
+    assert!(
+        app.status().contains("already running"),
+        "and says why: {}",
+        app.status()
+    );
+
+    // Once it reports back, a new run is allowed again.
+    app.set_memory_ingest_done("Memory · backfill complete".into());
+    assert!(!app.memory_ingesting());
+    assert!(app.on_event(key(KeyCode::Char('b'))).is_some(), "unblocked");
+}
+
+#[test]
+fn the_memory_header_advertises_the_ingest_keys_and_progress() {
+    let rt = Arc::new(MockRuntime::empty());
+    rt.set_memory_status(scripted_status());
+    let mut app = App::new(rt.clone(), loaded());
+    app.tab_index = memory_tab();
+    apply_load(&mut app, &rt);
+
+    let out = render(&mut app, 110, 32);
+    assert!(out.contains("b backfill"), "keys are discoverable: {out}");
+
+    app.on_event(key(KeyCode::Char('b')));
+    let out = render(&mut app, 110, 32);
+    assert!(
+        out.contains("ingesting"),
+        "a long run stays visible in the header: {out}"
+    );
+}

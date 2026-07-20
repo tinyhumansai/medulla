@@ -15,6 +15,7 @@ mod commands;
 mod feedback;
 mod input;
 mod keys;
+mod memory;
 mod render;
 mod settings_edit;
 mod state;

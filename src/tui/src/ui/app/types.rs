@@ -92,6 +92,12 @@ pub enum Cmd {
     LoadUsage,
     /// Run a persona-memory search and land on the Memory tab.
     SearchMemory(String),
+    /// Run a persona-memory ingest, then reload the Memory tab. `backfill` walks
+    /// everything oldest-first; otherwise only changed files/repos are visited.
+    IngestMemory {
+        /// Whether to walk everything rather than resuming from the cursor.
+        backfill: bool,
+    },
     /// Load a page of the feedback board for the Feedback tab.
     LoadFeedback(FeedbackQuery),
     /// Load one board item's comments for the detail pane.
@@ -259,6 +265,17 @@ pub struct App {
     pub(super) memory_directives: Vec<String>,
     pub(super) memory_index: usize,
     pub(super) memory_query: Option<String>,
+    /// The persona-memory service, attached directly rather than through the
+    /// runtime seam. Memory is a local, on-disk surface that has nothing to do
+    /// with which runtime drives chat, so attaching it here keeps the Memory tab
+    /// working on the backend and mock paths — not just on core, which is the
+    /// only runtime that also *serves* memory as a toolset. `None` falls back to
+    /// the runtime seam (how the mock scripts memory in tests).
+    pub(super) memory_service: Option<Arc<medulla::memory::MemoryService>>,
+    /// Whether a memory ingest (backfill or incremental) is currently running.
+    /// Ingest calls a paid provider, so a second run must not be startable while
+    /// one is in flight.
+    pub(super) memory_ingesting: bool,
     /// Feedback-board tab state (lazily loaded on tab entry / refresh).
     pub(super) feedback: FeedbackState,
     pub(super) prompt: Option<Prompt>,

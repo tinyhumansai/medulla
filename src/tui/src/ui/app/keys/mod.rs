@@ -270,6 +270,18 @@ impl App {
             KeyCode::Char('k') if tab == "Memory" && self.draft.text.is_empty() => {
                 self.memory_index = self.memory_index.saturating_sub(1);
             }
+            // Memory maintenance. Ingest calls a paid provider, so both modes
+            // refuse to start a second run while one is in flight.
+            KeyCode::Char('r') if tab == "Memory" && self.draft.text.is_empty() => {
+                self.set_status("Memory · refreshing…");
+                return Some(Cmd::LoadMemory);
+            }
+            KeyCode::Char('b') | KeyCode::Char('i')
+                if tab == "Memory" && self.draft.text.is_empty() =>
+            {
+                let backfill = matches!(k.code, KeyCode::Char('b'));
+                return self.start_memory_ingest(backfill);
+            }
             KeyCode::Up => {
                 if tab == "Chat" {
                     if let Some(moved) = move_caret_row(&self.draft.text, self.draft.cursor, -1) {

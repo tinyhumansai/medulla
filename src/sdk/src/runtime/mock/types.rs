@@ -70,6 +70,9 @@ pub(super) struct State {
     pub(super) sessions: HashMap<String, Vec<PeerSession>>,
     /// The tiny.place identity, when configured.
     pub(super) tinyplace: Option<TinyplaceIdentity>,
+    /// Scripted agent-harness status, when a scenario exercises the harness
+    /// task board. `None` by default so the Agents view degrades to nothing.
+    pub(super) harness: Option<crate::harness_contract::HarnessStatus>,
 }
 
 impl State {
@@ -249,6 +252,7 @@ impl MockRuntime {
             presence: HashMap::new(),
             sessions: HashMap::new(),
             tinyplace: None,
+            harness: None,
         };
         MockRuntime::from_state(state)
     }

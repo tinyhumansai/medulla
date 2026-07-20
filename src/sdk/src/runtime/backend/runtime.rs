@@ -128,6 +128,7 @@ impl Runtime for BackendRuntime {
             async_mode: s.async_mode,
             threads,
             active_thread_id: s.active_id.clone(),
+            harness: None,
         }
     }
 

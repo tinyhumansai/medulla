@@ -215,6 +215,10 @@ pub struct RuntimeSnapshot {
     pub async_mode: bool,
     pub threads: Vec<ThreadSummary>,
     pub active_thread_id: String,
+    /// Latest agent-harness status, when the backing runtime fronts a medulla-v1
+    /// agent harness. `None` until (and unless) the backend surfaces one; the
+    /// Agents view renders the compact task board only while it is `Some`.
+    pub harness: Option<crate::harness_contract::HarnessStatus>,
 }
 
 /// The runtime the TUI drives. Snapshot/subscribe are synchronous; the rest is

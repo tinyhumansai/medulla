@@ -38,6 +38,7 @@ impl Runtime for MockRuntime {
             async_mode: s.async_mode,
             threads,
             active_thread_id: s.active_id.clone(),
+            harness: s.harness.clone(),
         }
     }
 

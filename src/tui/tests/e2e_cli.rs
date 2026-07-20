@@ -163,22 +163,45 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
     let (mut master, slave) = open_pty();
     let mut reader = master.try_clone().unwrap();
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
-    let drain = std::thread::spawn(move || {
-        let mut sink = Vec::new();
+    // The drain publishes into shared storage rather than returning its buffer,
+    // so the test never has to join it.
+    //
+    // Joining would deadlock: the thread only returns once reading the PTY
+    // master hits EOF, and EOF only arrives once *every* slave fd is closed. Any
+    // process that inherited the slave and outlives the TUI — a leaked child, a
+    // grandchild that missed the Ctrl-C — holds it open forever, and the test's
+    // own `drop(master)` cannot help because the drain holds its own dup. That
+    // left the whole job hanging until the CI runner's (previously absent)
+    // timeout fired.
+    //
+    // The assertions only need the bytes seen so far, so the thread is detached
+    // and dies with the process.
+    let sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let drain_sink = std::sync::Arc::clone(&sink);
+    std::thread::spawn(move || {
         let mut chunk = [0_u8; 4096];
         let mut announced = false;
         while let Ok(n) = reader.read(&mut chunk) {
             if n == 0 {
                 break;
             }
-            sink.extend_from_slice(&chunk[..n]);
-            if !announced && sink.windows(7).any(|window| window == b"MEDULLA") {
+            let mut buffered = drain_sink.lock().unwrap();
+            buffered.extend_from_slice(&chunk[..n]);
+            if !announced && buffered.windows(7).any(|window| window == b"MEDULLA") {
                 announced = true;
                 ready_tx.send(()).ok();
             }
         }
-        sink
     });
+    // Snapshot whatever the drain has captured. Callers pause first so bytes
+    // written just before exit are in the buffer.
+    let captured = {
+        let sink = std::sync::Arc::clone(&sink);
+        move || {
+            std::thread::sleep(Duration::from_millis(100));
+            sink.lock().unwrap().clone()
+        }
+    };
 
     let mut command = Command::new(binary);
     command
@@ -226,7 +249,7 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
     for _ in 0..100 {
         if let Some(status) = child.try_wait().unwrap() {
             drop(master);
-            let output = drain.join().unwrap();
+            let output = captured();
             assert!(
                 status.success(),
                 "TUI exited with {status:?}: {}",
@@ -241,7 +264,7 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
     child.kill().ok();
     child.wait().ok();
     drop(master);
-    let output = drain.join().unwrap();
+    let output = captured();
     panic!(
         "interactive TUI did not stop after Ctrl-C: {}",
         String::from_utf8_lossy(&output)

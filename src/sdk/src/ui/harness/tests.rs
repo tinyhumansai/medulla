@@ -63,6 +63,66 @@ fn board_lines_have_a_header_plus_one_row_per_task() {
 }
 
 #[test]
+fn board_lines_cap_rows_and_append_more_tail() {
+    // Eight tasks exceed the five-row cap: header + 5 rows + a "… +3 more" tail.
+    let status = status_with(vec![
+        task("1", "one", TrackedTaskStatus::Open),
+        task("2", "two", TrackedTaskStatus::Active),
+        task("3", "three", TrackedTaskStatus::Blocked),
+        task("4", "four", TrackedTaskStatus::Done),
+        task("5", "five", TrackedTaskStatus::Done),
+        task("6", "six", TrackedTaskStatus::Done),
+        task("7", "seven", TrackedTaskStatus::Cancelled),
+        task("8", "eight", TrackedTaskStatus::Cancelled),
+    ]);
+    let lines = task_board_lines(&status, 40);
+    assert_eq!(lines.len(), 7); // header + 5 rows + tail
+    assert!(lines[0].text.starts_with("tasks · "));
+    assert_eq!(lines[6].text, "… +3 more");
+    assert!(lines[6].dim);
+}
+
+#[test]
+fn board_cap_prioritizes_open_active_blocked_over_terminal() {
+    // Terminal tasks precede the actionable ones in input order, but the cap must
+    // keep the open/active/blocked rows and drop the done/cancelled ones.
+    let status = status_with(vec![
+        task("1", "done-a", TrackedTaskStatus::Done),
+        task("2", "done-b", TrackedTaskStatus::Done),
+        task("3", "cancelled", TrackedTaskStatus::Cancelled),
+        task("4", "open", TrackedTaskStatus::Open),
+        task("5", "active", TrackedTaskStatus::Active),
+        task("6", "blocked", TrackedTaskStatus::Blocked),
+    ]);
+    let lines = task_board_lines(&status, 40);
+    assert_eq!(lines.len(), 7); // header + 5 rows + "… +1 more"
+    assert_eq!(lines[6].text, "… +1 more");
+    let rows: Vec<&str> = lines[1..6].iter().map(|l| l.text.as_str()).collect();
+    assert!(rows.iter().any(|t| t.contains("open")));
+    assert!(rows.iter().any(|t| t.contains("active")));
+    assert!(rows.iter().any(|t| t.contains("blocked")));
+    // Exactly one terminal task is dropped; a done/cancelled row remains.
+    assert!(rows
+        .iter()
+        .any(|t| t.contains("done") || t.contains("cancelled")));
+}
+
+#[test]
+fn board_at_cap_boundary_has_no_more_tail() {
+    // Exactly five tasks fit without a tail: header + 5 rows.
+    let status = status_with(vec![
+        task("1", "one", TrackedTaskStatus::Open),
+        task("2", "two", TrackedTaskStatus::Open),
+        task("3", "three", TrackedTaskStatus::Open),
+        task("4", "four", TrackedTaskStatus::Open),
+        task("5", "five", TrackedTaskStatus::Open),
+    ]);
+    let lines = task_board_lines(&status, 40);
+    assert_eq!(lines.len(), 6); // header + 5 rows, no tail
+    assert!(!lines.iter().any(|l| l.text.contains("more")));
+}
+
+#[test]
 fn board_line_titles_are_ellipsized_to_width() {
     let status = status_with(vec![task(
         "1",

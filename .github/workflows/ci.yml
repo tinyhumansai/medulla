@@ -16,6 +16,7 @@ jobs:
   rust-sdk:
     name: Rust SDK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -54,6 +55,7 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Test
+        timeout-minutes: 20
         run: cargo test --locked
 
       - name: Build
@@ -62,6 +64,7 @@ jobs:
   coverage:
     name: Coverage (>= 95% lines)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -85,6 +88,7 @@ jobs:
       # and are exercised separately by the binary subprocess + direct-PTY E2E
       # suite (`e2e_cli`), while their state machines/renderers remain counted.
       - name: Coverage gate
+        timeout-minutes: 35
         run: >-
           cargo llvm-cov --locked
           --ignore-filename-regex 'src/tui/src/(app_loop|commands|event_loop|terminal)\.rs|src/tui/src/ui/onboarding/run\.rs'
@@ -129,6 +133,7 @@ jobs:
   rust-sdk-windows:
     name: Rust SDK (Windows)
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -148,4 +153,5 @@ jobs:
         run: cargo check --locked --all-targets
 
       - name: Test (lib)
+        timeout-minutes: 20
         run: cargo test --locked --lib

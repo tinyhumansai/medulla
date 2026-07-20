@@ -96,9 +96,13 @@ fn spawn(request: PtyRequest) -> anyhow::Result<PtyHarness> {
     let mut reader = pair.master.try_clone_reader()?;
     let mut writer = pair.master.take_writer()?;
 
-    // Raw mode only after the child is live, so an early spawn failure never
-    // leaves the terminal altered.
-    let guard = RawGuard::enter();
+    // Raw mode and keystroke forwarding only make sense against a real terminal.
+    // The wrapper only reaches for a PTY when stdin is one, so this is a guard
+    // against direct callers (tests) rather than a case that arises in the app.
+    // Entering raw mode only after the child is live also means an early spawn
+    // failure never leaves the terminal altered.
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let guard = interactive.then(RawGuard::enter);
 
     // PTY master -> our stdout. `drained` lets the wrapper wait for the child's
     // final frame before restoring the terminal.
@@ -136,21 +140,23 @@ fn spawn(request: PtyRequest) -> anyhow::Result<PtyHarness> {
 
     // Our stdin -> the same channel. In raw mode this is an unbuffered byte
     // stream, so control characters and escape sequences pass through intact.
-    let keystrokes = input_tx.clone();
-    std::thread::spawn(move || {
-        let mut buf = [0u8; BUF_LEN];
-        let mut stdin = std::io::stdin();
-        loop {
-            match stdin.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if keystrokes.send(buf[..n].to_vec()).is_err() {
-                        break;
+    if interactive {
+        let keystrokes = input_tx.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; BUF_LEN];
+            let mut stdin = std::io::stdin();
+            loop {
+                match stdin.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if keystrokes.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
                     }
                 }
             }
-        }
-    });
+        });
+    }
 
     // Window resizes must reach the child or its layout stays stale. The task
     // owns the master handle and lives for the rest of the process; the reader

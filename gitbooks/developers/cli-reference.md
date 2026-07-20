@@ -47,12 +47,17 @@ flow. `medulla daemon --reonboard` forces that flow again.
 
 `medulla codex` / `medulla claude` / `medulla opencode` launch the real
 coding-agent CLI in your terminal exactly as if you had run it directly —
-inherited stdio, unrecognized flags passed through verbatim — while bridging the
+unrecognized flags passed through verbatim — while bridging the
 session to tiny.place underneath. The wrapper tails the harness's own JSONL
 transcript, normalizes each record into a typed `SessionEnvelopeV2` event, and
 forwards the stream as encrypted [Signal-protocol](https://signal.org/docs/) DMs
 to the configured owner; with inbound input enabled it also polls for
 owner→session control frames and types their text into the child.
+
+With inbound input disabled the child simply inherits your stdio. With it
+enabled the harness is run on a pseudo-terminal instead, so a full-screen TUI
+still sees a real terminal on stdin and keeps its own echo, Ctrl-C handling, and
+resize behaviour while owner messages are typed in alongside your keystrokes.
 
 ```sh
 medulla codex resume            # any args after the provider go to the CLI verbatim
@@ -77,9 +82,7 @@ a single warning and runs as a plain passthrough.
 **Scope notes.** This is the single-terminal `--raw` wrapper. It does not build
 the tinyplace TUI chrome, the `--agent` plugin mode, the machine-bus
 multi-terminal coordination, the opencode SSE server, or the terminal-envelope
-writer. stdio is inherited (no PTY): for a pristine full-screen TUI, run without
-inbound input (or `--no-bridge`) so stdin stays attached to the terminal —
-enabling input injection pipes stdin as a best-effort byte pump. `medulla
+writer. `medulla
 opencode` runs as a passthrough with input injection but no transcript tailing
 (its session log is not a flat JSONL the mappers read).
 

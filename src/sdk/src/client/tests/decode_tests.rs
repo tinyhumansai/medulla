@@ -143,6 +143,27 @@ fn non_json_error_body_becomes_api_error() {
     assert_eq!(err.error_code(), None);
 }
 
+#[test]
+fn auth_error_classification_covers_status_codes_and_non_api_errors() {
+    let api_error = |status: Option<u16>, error_code: Option<&str>| ClientError::Api {
+        status,
+        message: "rejected".into(),
+        error_code: error_code.map(str::to_owned),
+        details: None,
+    };
+
+    assert!(api_error(Some(401), None).is_auth_error());
+    assert!(api_error(Some(403), None).is_auth_error());
+    assert!(api_error(Some(500), Some("TOKEN_EXPIRED")).is_auth_error());
+    assert!(!api_error(Some(400), Some("INVALID_REQUEST")).is_auth_error());
+
+    let decode = ClientError::Decode("bad response".into());
+    assert_eq!(decode.error_code(), None);
+    assert_eq!(decode.status(), None);
+    assert!(!decode.is_token_expired());
+    assert!(!decode.is_auth_error());
+}
+
 // ---------------------------------------------------------------------------
 // LoopEvent / run result decode
 // ---------------------------------------------------------------------------

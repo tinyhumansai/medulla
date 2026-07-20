@@ -123,6 +123,9 @@ jobs:
       - name: Functional scenarios (tests.sh, --network none)
         run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests.sh
 
+      - name: Multi-agent scenarios (tests_multi.sh, --network none)
+        run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests_multi.sh
+
   rust-sdk-windows:
     name: Rust SDK (Windows)
     runs-on: windows-latest

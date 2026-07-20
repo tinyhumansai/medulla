@@ -344,7 +344,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // delegated tasks reach local tiny.place workers, and fill the roster slot so
     // the Workers tab manages it live. Opt-in via `MEDULLA_TINYPLACE_PEER` /
     // `MEDULLA_HUB_WORKERS`; the session is dropped (disconnected) on exit.
-    let _hub_session = if backend_client.is_some() {
+    //
+    // The hub is scoped to the *authenticated* session: its Socket.IO uplink
+    // carries the current account's JWT and its roster handle is that account's.
+    // On a relogin (below) it is torn down and re-started for the new account so
+    // no worker mutation or task relay ever targets a revoked/stale session.
+    let mut _hub_session = if backend_client.is_some() {
         crate::hub_relay::start(&env, &home, hub_slot.clone()).await
     } else {
         None
@@ -384,6 +389,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             other => break other.map(|_| ()),
         }
 
+        // Retire the previous account's hub before re-authenticating: dropping the
+        // session aborts its task (disconnecting the old JWT's Socket.IO uplink),
+        // and clearing the slot stops the incoming runtime from inheriting the
+        // stale roster handle. A fresh hub is started below once new creds land.
+        _hub_session = None;
+        *hub_slot.lock().expect("hub slot") = None;
+
         let base_url = loaded.config.backend.base_url.clone();
         match run_login_screen(&mut terminal, base_url.clone()).await? {
             LoginOutcome::Quit => break Ok(()),
@@ -397,6 +409,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     Ok(rt) => {
                         runtime = Arc::new(rt);
                         status = save_credentials(&home, &base_url, &jwt);
+                        // Creds are now persisted, so the hub can read the new
+                        // account's JWT: start it fresh, scoped to this session.
+                        _hub_session = crate::hub_relay::start(&env, &home, hub_slot.clone()).await;
                     }
                     Err(e) => {
                         runtime = Arc::new(MockRuntime::demo());

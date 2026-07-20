@@ -1,13 +1,16 @@
-//! The hub's live worker roster and the [`HubHandle`] that mutates it.
+//! The hub's worker-roster data: the shared roster type, the `AgentDescriptor`
+//! payload the hub advertises, and the address resolution the socket layer uses
+//! to target a task. Pure and offline-testable; the live control handle that
+//! mutates the roster over the Socket.IO uplink lives in [`handle`](super::handle).
 //!
 //! The roster is shared (`Arc<Mutex<_>>`) between the Socket.IO layer — which
 //! reads it to advertise agents and resolve a task's address — and the
-//! [`HubHandle`] the TUI holds to add/remove workers at runtime. Every mutation
-//! re-emits `medulla:register_agents` so the backend's roster tracks the change.
+//! [`HubHandle`](super::handle::HubHandle) the TUI holds to add/remove workers at
+//! runtime. Every mutation re-emits `medulla:register_agents` so the backend's
+//! roster tracks the change.
 
 use std::sync::{Arc, Mutex};
 
-use rust_socketio::asynchronous::Client;
 use serde_json::{json, Value};
 
 /// One worker in the live roster.
@@ -47,112 +50,16 @@ pub(super) fn register_payload(workers: &[HubWorker]) -> Value {
 
 /// Resolve a targeted `agentId` to a tiny.place address.
 ///
-/// Prefers the roster entry whose id matches; if the id is unknown (or the
+/// Prefers the roster entry whose id matches. If the id is unknown (or the
 /// backend omitted `agentId` entirely — an empty string), falls back to the
-/// FIRST roster worker rather than the empty/unknown id, which would decode to a
-/// zero-length key and fail the send. `None` only when the roster is empty.
+/// **selected** worker, then the first — never the empty/unknown id, which would
+/// decode to a zero-length key and fail the send. `None` only when the roster is
+/// empty.
 pub(super) fn address_of(workers: &[HubWorker], agent_id: &str) -> Option<String> {
     workers
         .iter()
         .find(|w| w.id == agent_id)
+        .or_else(|| workers.iter().find(|w| w.selected))
         .or_else(|| workers.first())
         .map(|w| w.address.clone())
-}
-
-/// A live control handle over the hub's roster, held by the TUI. Mutations
-/// re-register the roster with the backend so a newly-added worker becomes a
-/// delegation target (and a removed one stops being one) without a restart.
-#[derive(Clone)]
-pub struct HubHandle {
-    roster: SharedRoster,
-    socket: Client,
-    address: String,
-    public_key: String,
-}
-
-impl HubHandle {
-    /// Build a handle over `roster`, re-registering through `socket`. `address`
-    /// and `public_key` are the hub's *own* tiny.place identity — surfaced to the
-    /// operator because every worker must trust it (as its owner / allowlisted
-    /// peer) before it will accept a task.
-    pub(super) fn new(
-        roster: SharedRoster,
-        socket: Client,
-        address: String,
-        public_key: String,
-    ) -> Self {
-        HubHandle {
-            roster,
-            socket,
-            address,
-            public_key,
-        }
-    }
-
-    /// The hub's own tiny.place address (base58 cryptoId). This is the value an
-    /// operator sets as a worker's `TINYPLACE_OPENHUMAN_OWNER` / adds to its
-    /// `acceptContacts` allowlist.
-    pub fn address(&self) -> &str {
-        &self.address
-    }
-
-    /// The hub's own Ed25519 identity public key, base64.
-    pub fn public_key(&self) -> &str {
-        &self.public_key
-    }
-
-    /// A snapshot of the current roster.
-    pub fn list(&self) -> Vec<HubWorker> {
-        self.roster.lock().expect("roster lock").clone()
-    }
-
-    /// Add (or replace, by id) a worker and re-register.
-    pub async fn add(&self, worker: HubWorker) -> anyhow::Result<()> {
-        {
-            let mut r = self.roster.lock().expect("roster lock");
-            r.retain(|w| w.id != worker.id);
-            r.push(worker);
-        }
-        self.reregister().await
-    }
-
-    /// Remove a worker by id and re-register.
-    pub async fn remove(&self, id: &str) -> anyhow::Result<()> {
-        {
-            self.roster
-                .lock()
-                .expect("roster lock")
-                .retain(|w| w.id != id);
-        }
-        self.reregister().await
-    }
-
-    /// Set a worker's label (no re-register needed — labels are display-only,
-    /// but we re-advertise so the backend roster's `name` stays in sync).
-    pub async fn set_label(&self, id: &str, label: Option<String>) -> anyhow::Result<()> {
-        {
-            let mut r = self.roster.lock().expect("roster lock");
-            if let Some(w) = r.iter_mut().find(|w| w.id == id) {
-                w.label = label;
-            }
-        }
-        self.reregister().await
-    }
-
-    /// Mark a worker as the selected default (local display state only).
-    pub fn select(&self, id: &str) {
-        let mut r = self.roster.lock().expect("roster lock");
-        for w in r.iter_mut() {
-            w.selected = w.id == id;
-        }
-    }
-
-    /// Re-emit `medulla:register_agents` for the current roster.
-    async fn reregister(&self) -> anyhow::Result<()> {
-        let payload = register_payload(&self.list());
-        self.socket
-            .emit("medulla:register_agents", payload)
-            .await
-            .map_err(|e| anyhow::anyhow!("re-register failed: {e}"))
-    }
 }

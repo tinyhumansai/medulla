@@ -26,6 +26,32 @@ const DEFAULT_POLL_MS: u64 = 1500;
 /// "subagent task timeout" instead of the hub's real error.
 const DEFAULT_TASK_TIMEOUT_S: u64 = 240;
 
+/// Hard ceiling for `MEDULLA_HUB_TASK_TIMEOUT_S`. The hub MUST expire before the
+/// backend's 300s deadline so its real worker error wins the race; a configured
+/// value of 300+ (or 0) is rejected in favour of this cap.
+const MAX_TASK_TIMEOUT_S: u64 = 290;
+
+/// Resolve the per-task timeout from `MEDULLA_HUB_TASK_TIMEOUT_S`, clamping to
+/// `[1, MAX_TASK_TIMEOUT_S]`. An unparseable, zero, or above-ceiling value falls
+/// back to a safe bound (default when unset/garbage, the cap when too large) so
+/// the hub can never be configured to outlive the backend.
+fn resolve_timeout_s(env: &HashMap<String, String>) -> u64 {
+    match env
+        .get("MEDULLA_HUB_TASK_TIMEOUT_S")
+        .and_then(|s| s.trim().parse::<u64>().ok())
+    {
+        None => DEFAULT_TASK_TIMEOUT_S,
+        Some(0) => DEFAULT_TASK_TIMEOUT_S,
+        Some(v) if v > MAX_TASK_TIMEOUT_S => {
+            eprintln!(
+                "hub: MEDULLA_HUB_TASK_TIMEOUT_S={v} exceeds the {MAX_TASK_TIMEOUT_S}s ceiling (must expire before the backend's 300s) — capping at {MAX_TASK_TIMEOUT_S}s"
+            );
+            MAX_TASK_TIMEOUT_S
+        }
+        Some(v) => v,
+    }
+}
+
 /// The shared slot a [`BackendRuntime`](medulla::runtime::backend::BackendRuntime)
 /// reads for its live worker roster; filled once the hub connects.
 pub(crate) type HubSlot = Arc<Mutex<Option<HubHandle>>>;
@@ -105,10 +131,7 @@ pub(crate) fn build_hub_config(env: &HashMap<String, String>, home: &Path) -> Op
         .get("MEDULLA_HUB_POLL_MS")
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_MS);
-    let timeout_s = env
-        .get("MEDULLA_HUB_TASK_TIMEOUT_S")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_TASK_TIMEOUT_S);
+    let timeout_s = resolve_timeout_s(env);
     Some(HubConfig {
         backend_url: creds.base_url,
         jwt: creds.jwt,
@@ -142,5 +165,4 @@ pub(crate) async fn start(
 }
 
 #[cfg(test)]
-#[path = "hub_relay_tests.rs"]
 mod tests;

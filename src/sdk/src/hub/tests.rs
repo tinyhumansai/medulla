@@ -18,6 +18,7 @@ use crate::tinyplace::{
 use super::relay::Relay;
 use super::roster::{address_of, register_payload, HubWorker};
 use super::types::{RunError, TaskRequest};
+use super::TaskRunner;
 
 fn worker(id: &str, addr: &str) -> HubWorker {
     HubWorker {
@@ -49,13 +50,28 @@ fn address_of_resolves_known_agent_and_falls_back_to_first_worker() {
     assert_eq!(address_of(&workers, "unknown").as_deref(), Some("ADDR1"));
     assert_eq!(address_of(&[], "w1"), None);
 }
-use super::TaskRunner;
+
+#[test]
+fn address_of_prefers_the_selected_worker_over_the_first() {
+    let mut selected = worker("w2", "ADDR2");
+    selected.selected = true;
+    let workers = [worker("w1", "ADDR1"), selected];
+    // An explicit match still wins.
+    assert_eq!(address_of(&workers, "w1").as_deref(), Some("ADDR1"));
+    // Unknown / empty agentId now routes to the SELECTED worker (making
+    // `select()` a real dispatch control), not the first entry.
+    assert_eq!(address_of(&workers, "").as_deref(), Some("ADDR2"));
+    assert_eq!(address_of(&workers, "unknown").as_deref(), Some("ADDR2"));
+}
 
 /// How the fake worker responds to a dispatched task.
 enum Mode {
     Reply(String),
     Error(String),
     Silent,
+    /// Acks (a sign of life) and streams a status, but never sends a terminal
+    /// frame — exercises the "peer alive, then the reply times out" path.
+    AckOnly,
     /// Silent until the sender has reset the session (simulating a restarted peer
     /// whose first `CIPHERTEXT` is undecryptable), then replies.
     RecoverAfterReset(String),
@@ -69,14 +85,29 @@ struct FakeWorker {
     mode: Mode,
     /// How many times the sender has reset the session with us.
     resets: AtomicU32,
+    /// When true, every `send` fails — exercises the transport-error path.
+    fail_send: bool,
+    /// `contact_accepted` returns false until it has been polled this many times,
+    /// simulating a peer whose auto-accepter settles a few polls later.
+    accept_after: u32,
+    /// How many times `contact_accepted` has been polled.
+    contact_checks: AtomicU32,
 }
 
 impl FakeWorker {
     fn new(mode: Mode) -> Arc<Self> {
+        Self::with(mode, false, 0)
+    }
+
+    /// A worker with explicit send-failure and contact-acceptance-delay knobs.
+    fn with(mode: Mode, fail_send: bool, accept_after: u32) -> Arc<Self> {
         Arc::new(Self {
             inbox: Mutex::new(VecDeque::new()),
             mode,
             resets: AtomicU32::new(0),
+            fail_send,
+            accept_after,
+            contact_checks: AtomicU32::new(0),
         })
     }
 }
@@ -84,6 +115,9 @@ impl FakeWorker {
 #[async_trait]
 impl Relay for FakeWorker {
     async fn send(&self, _to: &str, body: &str) -> Result<(), String> {
+        if self.fail_send {
+            return Err("send boom".to_string());
+        }
         let frame = decode_task_frame(body).expect("runner sends a valid task frame");
         assert_eq!(frame.kind, TaskFrameKind::Task);
         // Stay silent while there's nothing to say: unconditionally for `Silent`,
@@ -125,7 +159,8 @@ impl Relay for FakeWorker {
                 }),
             )),
             Mode::Error(text) => q.push_back(mk(TaskFrameKind::Error, text, None)),
-            Mode::Silent => {}
+            // Ack + status already queued above; no terminal frame follows.
+            Mode::Silent | Mode::AckOnly => {}
         }
         Ok(())
     }
@@ -146,9 +181,10 @@ impl Relay for FakeWorker {
         Ok(())
     }
 
-    /// Already a contact, so `run` proceeds straight to the send.
+    /// Accepted once polled `accept_after` times (0 → already a contact, so `run`
+    /// proceeds straight to the send).
     async fn contact_accepted(&self, _peer: &str) -> bool {
-        true
+        self.contact_checks.fetch_add(1, Ordering::Relaxed) >= self.accept_after
     }
 
     async fn reset_session(&self, _peer: &str) {
@@ -246,4 +282,63 @@ async fn concurrent_dispatches_are_routed_by_correlation_id() {
     };
     assert_eq!(a.await.unwrap().unwrap().reply, "done");
     assert_eq!(b.await.unwrap().unwrap().reply, "done");
+}
+
+#[tokio::test]
+async fn surfaces_a_transport_error_when_the_send_fails() {
+    // The relay's send fails outright (e.g. the address can't be decoded): the
+    // runner drops the waiter and returns a Transport error, not a hang.
+    let worker = FakeWorker::with(Mode::Reply("unused".to_string()), true, 0);
+    let runner = TaskRunner::start(worker, Duration::from_millis(5));
+
+    let err = runner.run(req("x"), None).await.expect_err("send fails");
+    assert_eq!(err, RunError::Transport("send boom".to_string()));
+}
+
+#[tokio::test]
+async fn waits_for_contact_acceptance_before_dispatching() {
+    // The peer isn't a contact yet: the runner requests one and polls until the
+    // auto-accepter settles (here, on the third check) before it sends the task.
+    let worker = FakeWorker::with(Mode::Reply("hi".to_string()), false, 2);
+    let runner = TaskRunner::start(worker.clone(), Duration::from_millis(5));
+
+    let outcome = runner
+        .run(req("x"), None)
+        .await
+        .expect("dispatches once accepted");
+    assert_eq!(outcome.reply, "hi");
+    assert!(
+        worker.contact_checks.load(Ordering::Relaxed) >= 2,
+        "the runner should have polled contact status until acceptance"
+    );
+}
+
+#[tokio::test]
+async fn times_out_after_the_peer_acks_but_never_replies() {
+    // The peer answers (ack + status) — so the runner commits to the full request
+    // timeout rather than resetting — but never sends a terminal frame, so the
+    // dispatch resolves as Timeout once that deadline passes.
+    let worker = FakeWorker::new(Mode::AckOnly);
+    let runner = TaskRunner::start(worker, Duration::from_millis(5));
+
+    let mut request = req("x");
+    request.timeout = Duration::from_millis(80);
+    let err = runner
+        .run(request, None)
+        .await
+        .expect_err("times out after ack");
+    assert_eq!(err, RunError::Timeout);
+}
+
+#[test]
+fn run_error_display_is_human_readable_per_variant() {
+    assert_eq!(RunError::Timeout.to_string(), "tiny.place task timed out");
+    assert_eq!(
+        RunError::Worker("boom".to_string()).to_string(),
+        "worker error: boom"
+    );
+    assert_eq!(
+        RunError::Transport("no route".to_string()).to_string(),
+        "transport error: no route"
+    );
 }

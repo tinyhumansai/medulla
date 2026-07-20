@@ -10,6 +10,7 @@
 //! over the one shared, destructively-drained inbox.
 
 mod boot;
+mod handle;
 mod relay;
 mod roster;
 mod runner;
@@ -20,7 +21,8 @@ mod types;
 mod tests;
 
 pub use boot::{run_hub, start_hub, HubConfig, HubSession, WorkerSpec};
+pub use handle::HubHandle;
 pub use relay::Relay;
-pub use roster::{HubHandle, HubWorker};
+pub use roster::HubWorker;
 pub use runner::TaskRunner;
 pub use types::{RunError, TaskOutcome, TaskRequest};

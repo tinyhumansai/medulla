@@ -17,13 +17,12 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::roster::{address_of, register_payload, SharedRoster};
+use super::runner::TaskRunner;
+use super::types::{RunError, TaskRequest};
 
 /// Margin subtracted from the backend's own per-task deadline so the hub replies
 /// with a real error just before the backend times out blind.
 const BACKEND_MARGIN: Duration = Duration::from_secs(5);
-
-use super::runner::TaskRunner;
-use super::types::{RunError, TaskRequest};
 
 /// The first JSON object carried by a received event payload, if any.
 fn first_obj(payload: Payload) -> Option<Value> {

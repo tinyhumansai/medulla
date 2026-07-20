@@ -37,6 +37,12 @@ impl BackendRuntime {
     /// Like [`connect`](Self::connect) but attaches a shared hub slot. The caller
     /// fills the slot once the orchestrator hub connects, so `workers()` /
     /// `worker_op()` manage the hub's tiny.place peers instead of being no-ops.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the eager initial backend-session creation fails
+    /// (network failure, auth rejection, or a non-2xx response from the backend);
+    /// the runtime is not constructed in that case.
     pub async fn connect_with_hub(
         client: MedullaClient,
         hub: Arc<Mutex<Option<crate::hub::HubHandle>>>,

@@ -46,7 +46,7 @@ pub struct SignalTransport {
     session: Arc<SignalSession>,
     store: Arc<FileSessionStore>,
     our_agent_id: String,
-    our_x25519_pub: [u8; 32],
+    our_ed25519_pub: [u8; 32],
     /// Serializes ratchet-touching ops (encrypt/decrypt) on this wallet.
     lock: Arc<Mutex<()>>,
 }
@@ -74,7 +74,7 @@ impl SignalTransport {
             session,
             store,
             our_agent_id,
-            our_x25519_pub,
+            our_ed25519_pub: *signer.public_key(),
             lock: Arc::new(Mutex::new(())),
         }
     }
@@ -84,9 +84,16 @@ impl SignalTransport {
         &self.our_agent_id
     }
 
-    /// This wallet's X25519 identity public key, base64.
+    /// This wallet's Ed25519 identity public key, base64 — the value the
+    /// directory stores as `identityKey`.
+    ///
+    /// It must be the Ed25519 key, not the X25519 one derived from the same
+    /// seed: the server validates a published pre-key by verifying its Ed25519
+    /// `signature` against this field (`validSignedKeyForIdentity`). Sending the
+    /// X25519 form makes every publish fail with `400 invalid input`, because an
+    /// X25519 point cannot verify an Ed25519 signature.
     pub fn identity_key_base64(&self) -> String {
-        BASE64.encode(self.our_x25519_pub)
+        BASE64.encode(self.our_ed25519_pub)
     }
 
     /// Generate and publish a signed pre-key + one-time pre-keys so peers can run

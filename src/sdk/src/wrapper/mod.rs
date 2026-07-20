@@ -2,7 +2,7 @@
 //! `medulla opencode`.
 //!
 //! The wrapper launches the real coding-agent CLI in the user's terminal exactly
-//! as if it were run directly (inherited stdio — no PTY re-implementation), while
+//! as if it were run directly, while
 //! bridging the session to tiny.place underneath: it tails the harness's own
 //! JSONL transcript, normalizes each record into a typed
 //! [`SessionEnvelopeV2`](crate::tinyplace::SessionEnvelopeV2) event, and
@@ -28,11 +28,20 @@
 //! - the **opencode SSE server** bridge — opencode therefore runs as a passthrough
 //!   with input injection but **no transcript tailing** (its session log is not a
 //!   flat JSONL the mappers read);
-//! - the terminal-envelope writer (raw keystroke/output capture);
-//! - `node-pty`: stdio is inherited. For a pristine full-screen TUI, run without
-//!   inbound input (or `--no-bridge`) so stdin stays attached to the terminal;
-//!   enabling input injection pipes stdin (a best-effort byte pump), which a
-//!   full-screen TUI may not drive perfectly.
+//! - the terminal-envelope writer (raw keystroke/output capture).
+//!
+//! ## Stdio strategy
+//!
+//! When inbound input is off the child simply inherits our stdio and the session
+//! is indistinguishable from running the CLI directly. When inbound input is on
+//! we need a writable handle on the child's stdin, which a full-screen TUI
+//! cannot tolerate as a plain pipe — Codex refuses to start with `stdin is not a
+//! terminal`. So on a real terminal the harness is instead run on a
+//! pseudo-terminal: it sees a tty, owns echo and Ctrl-C, and resizes with the
+//! window, while injected messages are written to the PTY master alongside the
+//! operator's own keystrokes. Allocating the PTY is an app-crate concern
+//! ([`PtySpawner`]) so this crate stays free of terminal dependencies; without a
+//! spawner, or off a tty (tests, headless runs), stdin falls back to a pipe.
 //!
 //! ## Module layout
 //!
@@ -58,4 +67,4 @@ mod tests;
 
 pub use args::parse_wrapper_args;
 pub use run::{run_wrapper, run_wrapper_with};
-pub use types::WrapperConfig;
+pub use types::{PtyHarness, PtyRequest, PtySpawner, WrapperConfig};

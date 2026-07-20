@@ -1,15 +1,13 @@
 //! Process orchestration for a wrapped session: the [`run_wrapper`] entry point,
-//! the [`run_wrapper_with`] core loop that spawns the child CLI and drives the
+//! the [`run_wrapper_with`] core loop that drives the child CLI and the
 //! tiny.place [`Bridge`](super::bridge::Bridge), and the exit-code / signal
 //! plumbing around it.
+//!
+//! Spawning itself lives in [`child`], which hides whether the harness is on a
+//! pseudo-terminal or on inherited stdio.
 
 use std::collections::HashMap;
-use std::io::Read as _;
 use std::time::Duration;
-
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
-use tokio::sync::mpsc;
 
 use crate::onboarding::OnboardingUi;
 use crate::tinyplace::HarnessProvider;
@@ -19,16 +17,31 @@ use super::bridge::{
     build_bridge, drain_and_inject, mint_session_id, now_ms, provider_bin_env_key, pump_tailer,
     sync_harness_id,
 };
-use super::types::{WrapperConfig, WrapperTimings};
+use super::types::{PtySpawner, WrapperConfig, WrapperTimings};
+
+mod child;
+
+#[cfg(test)]
+mod tests;
+
+use child::{spawn_child, ChildSession};
+
+/// How long to wait for the PTY reader to copy the child's final output before
+/// restoring the terminal. Bounded so a wedged reader cannot hang the exit.
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// The `medulla codex|claude|opencode` entry: build a [`WrapperConfig`] from the
 /// process environment and run the wrapper, returning the child's exit code.
+///
 /// `onboarding_ui` is the interactive first-run screen the app injects on a TTY;
-/// pass `None` to onboard headlessly.
+/// pass `None` to onboard headlessly. `pty_spawner` is the app-side seam that
+/// runs the harness on a real pseudo-terminal when remote input is enabled;
+/// pass `None` to keep the child on inherited stdio.
 pub async fn run_wrapper(
     provider: HarnessProvider,
     args: &[String],
     onboarding_ui: Option<OnboardingUi>,
+    pty_spawner: Option<PtySpawner>,
 ) -> anyhow::Result<i32> {
     let (no_bridge, child_args) = parse_wrapper_args(args);
     let env: HashMap<String, String> = std::env::vars().collect();
@@ -55,12 +68,13 @@ pub async fn run_wrapper(
         cwd,
         no_bridge,
         session_id: None,
+        pty_spawner,
     })
     .await
 }
 
 /// Run the wrapper described by `config`, returning the child's exit code.
-pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
+pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> {
     use crate::tinyplace::env as tp_env;
     let bin = tp_env::provider_bin(config.provider, &config.env);
     let lookup = crate::daemon::providers::make_path_lookup(&config.env);
@@ -92,64 +106,13 @@ pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
     ));
     child_args.extend(config.child_args.iter().cloned());
 
-    // Spawn the child. stdout/stderr are always inherited (the user interacts with
-    // the real CLI). stdin is piped only when we must inject input — otherwise it
-    // is inherited so a full-screen TUI stays fully interactive.
-    let mut command = Command::new(&bin);
-    command
-        .args(&child_args)
-        .envs(&config.env)
-        .current_dir(&config.cwd)
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit());
-    if receive_active {
-        command.stdin(std::process::Stdio::piped());
-    } else {
-        command.stdin(std::process::Stdio::inherit());
-    }
-    let mut child = command
-        .spawn()
-        .map_err(|err| anyhow::anyhow!("failed to start {bin}: {err}"))?;
-
-    // Child stdin writer: a single task owns the pipe; injection and the raw
-    // stdin pump feed it over a channel.
-    let stdin_tx = if receive_active {
-        child.stdin.take().map(|mut child_stdin| {
-            let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
-            tokio::spawn(async move {
-                while let Some(bytes) = rx.recv().await {
-                    if child_stdin.write_all(&bytes).await.is_err() {
-                        break;
-                    }
-                    let _ = child_stdin.flush().await;
-                }
-            });
-            tx
-        })
-    } else {
-        None
-    };
-    // Forward the real terminal's stdin to the child (best-effort byte pump), only
-    // when a TTY is attached so tests / pipes never consume the parent's stdin.
-    if let Some(tx) = &stdin_tx {
-        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-            let tx = tx.clone();
-            std::thread::spawn(move || {
-                let mut stdin = std::io::stdin();
-                let mut buf = [0u8; 1024];
-                loop {
-                    match stdin.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            if tx.send(buf[..n].to_vec()).is_err() {
-                                break;
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    }
+    let ChildSession {
+        input,
+        mut done,
+        mut kill,
+        drained,
+        restore,
+    } = spawn_child(&bin, &child_args, &mut config, receive_active)?;
 
     if let Some(bridge) = bridge.as_mut() {
         bridge.lifecycle("session_start").await;
@@ -161,10 +124,11 @@ pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
         tokio::time::interval(Duration::from_millis(timings.status_throttle_ms as u64));
     let mut signal_fut = signal_future();
 
-    let status = loop {
+    let code = loop {
         tokio::select! {
-            result = child.wait() => {
-                break result;
+            result = &mut done => {
+                // A dropped sender means the waiter task died; report failure.
+                break result.unwrap_or(1);
             }
             _ = tail_tick.tick() => {
                 if let Some(bridge) = bridge.as_mut() {
@@ -172,7 +136,7 @@ pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
                 }
             }
             _ = recv_tick.tick() => {
-                if let (Some(bridge), Some(tx)) = (bridge.as_mut(), stdin_tx.as_ref()) {
+                if let (Some(bridge), Some(tx)) = (bridge.as_mut(), input.as_ref()) {
                     drain_and_inject(bridge, tx).await;
                 }
             }
@@ -182,10 +146,22 @@ pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
                 }
             }
             _ = &mut signal_fut => {
-                let _ = child.start_kill();
+                if let Some(kill_tx) = kill.take() {
+                    let _ = kill_tx.send(());
+                }
             }
         }
     };
+
+    // Let the PTY reader flush whatever the child wrote on its way out, then put
+    // the terminal back into cooked mode *before* any teardown logging, so those
+    // messages land on a normal screen.
+    if let Some(drained) = drained {
+        let _ = tokio::time::timeout(DRAIN_TIMEOUT, drained).await;
+    }
+    if let Some(restore) = restore {
+        restore();
+    }
 
     // Teardown: final transcript drain, then the closing lifecycle event.
     if let Some(bridge) = bridge.as_mut() {
@@ -197,27 +173,14 @@ pub async fn run_wrapper_with(config: WrapperConfig) -> anyhow::Result<i32> {
         bridge.lifecycle("session_end").await;
     }
 
-    let code = exit_code(status?);
     Ok(code)
 }
 
-/// Translate a child [`ExitStatus`](std::process::ExitStatus) into a shell-style
-/// exit code (`128 + signal` for signal termination on Unix).
-fn exit_code(status: std::process::ExitStatus) -> i32 {
-    if let Some(code) = status.code() {
-        return code;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        if let Some(signal) = status.signal() {
-            return 128 + signal;
-        }
-    }
-    1
-}
-
 /// A future that resolves on SIGINT/SIGTERM (Unix) or Ctrl-C (elsewhere).
+///
+/// On the PTY path the terminal is in raw mode, so Ctrl-C reaches the child's
+/// own line discipline instead of us — exactly as if the harness had been run
+/// directly. This future then only fires for signals sent to the wrapper itself.
 fn signal_future() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     #[cfg(unix)]
     {

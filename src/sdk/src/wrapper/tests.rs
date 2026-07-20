@@ -97,6 +97,7 @@ async fn missing_binary_is_a_clear_error() {
         cwd: ".".to_string(),
         no_bridge: true,
         session_id: Some("wsid-test".to_string()),
+        pty_spawner: None,
     })
     .await
     .unwrap_err();

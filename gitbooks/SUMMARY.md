@@ -10,6 +10,15 @@
 * [Open Benchmarks, Open SDKs](open-benchmarks-open-sdks.md)
 * [Pricing and Availability](pricing-and-availability.md)
 
+## Features
+
+* [Features](features/README.md)
+* [Memory](features/memory.md)
+* [Workers and Sessions](features/workers-and-sessions.md)
+* [MEDULLA.md Workspace Profiles](features/workspace-profiles.md)
+* [Orchestrator Routing](features/routing.md)
+* [Token Efficiency and Budgets](features/token-efficiency.md)
+
 ## Developers
 
 * [Developers](developers/README.md)

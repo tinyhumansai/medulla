@@ -209,3 +209,29 @@ fn trace_context_and_feedback_are_no_longer_top_level_tabs() {
         );
     }
 }
+
+#[test]
+fn tab_leaves_the_settings_tab_from_both_focus_states() {
+    // Regression: the subpage nav used to swallow every key it did not bind,
+    // including Tab. Since the nav is where you land on entering Settings, that
+    // trapped the keyboard in the tab with no way out.
+    let mut app = settings_app();
+    assert!(
+        !app.settings_focused(),
+        "entering Settings lands on the nav"
+    );
+    let _ = key(&mut app, KeyCode::Tab);
+    assert_ne!(app.tab(), "Settings", "Tab escapes from the nav");
+
+    // And from inside a focused content pane.
+    let mut app = settings_app();
+    let _ = key(&mut app, KeyCode::Enter);
+    assert!(app.settings_focused());
+    let _ = key(&mut app, KeyCode::Tab);
+    assert_ne!(app.tab(), "Settings", "Tab escapes from a focused page");
+
+    // BackTab too, since it is the only way back to the previous tab.
+    let mut app = settings_app();
+    let _ = key(&mut app, KeyCode::BackTab);
+    assert_ne!(app.tab(), "Settings", "BackTab escapes from the nav");
+}

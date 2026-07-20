@@ -65,10 +65,15 @@ impl App {
                     ));
                     return SettingsKey::Handled(None);
                 }
-                // Every other key belongs to the content pane, which does not
-                // have focus — swallow it rather than letting a stray letter
-                // fire a page action from the nav.
-                _ => return SettingsKey::Handled(None),
+                // A letter would be a content-pane action, and the pane does not
+                // have focus — swallow it rather than letting a stray keystroke
+                // vote or open a prompt from the nav.
+                KeyCode::Char(_) => return SettingsKey::Handled(None),
+                // Everything else is structural (Tab/BackTab above all) and must
+                // reach the global bindings: swallowing them here trapped the
+                // keyboard inside Settings, since the nav is where you land on
+                // entering the tab.
+                _ => return SettingsKey::Unhandled,
             }
         }
 

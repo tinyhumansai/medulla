@@ -1,6 +1,5 @@
-//! Unit tests for the login screen: provider cycling, the loopback/token
-//! phases, outcome transitions, inline error rendering, and the token-display
-//! helper.
+//! Unit tests for the login screen: menu selection, the loopback/token phases,
+//! outcome transitions, inline error rendering, and the token-display helper.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
@@ -13,6 +12,14 @@ use super::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+/// Select the menu row at `index` and activate it, the way a user does.
+fn choose(screen: &mut LoginScreen, index: usize) -> Option<LoginCmd> {
+    for _ in 0..index {
+        screen.handle_key(key(KeyCode::Down));
+    }
+    screen.handle_key(key(KeyCode::Enter))
 }
 
 fn render(screen: &mut LoginScreen) -> String {
@@ -28,41 +35,65 @@ fn renders_branding_and_backend() {
     let out = render(&mut s);
     assert!(out.contains("▛▛▌█▌▛▌▌▌▐ ▐ ▀▌"), "logo: {out}");
     assert!(out.contains("localhost:5000"), "base url: {out}");
-    assert!(out.contains("google"), "default provider: {out}");
-}
-
-#[test]
-fn provider_cycles_with_arrows_and_p() {
-    let mut s = LoginScreen::new("x");
-    assert_eq!(s.provider(), Provider::Google);
-    assert!(s.handle_key(key(KeyCode::Right)).is_none());
-    assert_eq!(s.provider(), Provider::Github);
-    s.handle_key(key(KeyCode::Char('p')));
-    assert_eq!(s.provider(), Provider::Twitter);
-    s.handle_key(key(KeyCode::Left));
-    assert_eq!(s.provider(), Provider::Github);
-    s.handle_key(key(KeyCode::Left));
-    assert_eq!(s.provider(), Provider::Google);
-    // Wrap backwards past the start.
-    s.handle_key(key(KeyCode::Left));
-    assert_eq!(s.provider(), Provider::Discord);
-}
-
-#[test]
-fn enter_and_o_start_loopback() {
-    let mut s = LoginScreen::new("http://b");
-    let cmd = s.handle_key(key(KeyCode::Enter));
-    assert_eq!(
-        cmd,
-        Some(LoginCmd::StartLoopback {
-            base_url: "http://b".into(),
-            provider: Provider::Google,
-        })
+    // Every provider is offered as its own row rather than hidden behind a
+    // cycling field, so all four are visible without pressing anything.
+    for label in ["Google", "GitHub", "X (Twitter)"] {
+        assert!(out.contains(label), "{label} offered: {out}");
+    }
+    assert!(
+        !out.contains("Discord"),
+        "the backend has no Discord login: {out}"
     );
-    // 'o' also starts (from Idle after a cancel).
-    s.apply(LoginEvent::CallbackError("cancelled".into()));
-    let cmd = s.handle_key(key(KeyCode::Char('o')));
-    assert!(matches!(cmd, Some(LoginCmd::StartLoopback { .. })));
+    assert!(out.contains("Paste an API key"), "API-key row: {out}");
+    assert!(
+        !out.contains("offline"),
+        "signing in is the only way in: {out}"
+    );
+}
+
+#[test]
+fn each_provider_row_starts_loopback_with_that_provider() {
+    for (index, provider) in [Provider::Google, Provider::Github, Provider::Twitter]
+        .into_iter()
+        .enumerate()
+    {
+        let mut s = LoginScreen::new("http://b");
+        let cmd = choose(&mut s, index);
+        assert_eq!(
+            cmd,
+            Some(LoginCmd::StartLoopback {
+                base_url: "http://b".into(),
+                provider,
+            }),
+            "row {index} signs in with {provider:?}"
+        );
+        // The choice sticks, so a retry after a failure reuses it.
+        assert_eq!(s.provider(), provider);
+    }
+}
+
+#[test]
+fn the_menu_wraps_at_both_ends() {
+    // The list is short and every row is reachable both ways, so overshooting
+    // should not mean travelling back through the whole menu.
+    let mut s = LoginScreen::new("b");
+    s.handle_key(key(KeyCode::Up)); // wrap up from the first row to the last
+    assert!(s.handle_key(key(KeyCode::Enter)).is_none());
+    assert_eq!(s.outcome(), Some(LoginOutcome::Quit));
+}
+
+#[test]
+fn letters_no_longer_fire_actions() {
+    // The old screen bound o/t/m/q/p; a stray keystroke could start a browser
+    // flow or drop you into the mock. Selection is now the only way to act.
+    for c in ['o', 't', 'm', 'q', 'p'] {
+        let mut s = LoginScreen::new("b");
+        assert!(
+            s.handle_key(key(KeyCode::Char(c))).is_none(),
+            "{c} must not emit a command"
+        );
+        assert_eq!(s.outcome(), None, "{c} must not settle an outcome");
+    }
 }
 
 #[test]
@@ -87,7 +118,10 @@ fn esc_while_waiting_cancels_loopback() {
 #[test]
 fn token_entry_edits_and_submits() {
     let mut s = LoginScreen::new("b");
-    assert!(s.handle_key(key(KeyCode::Char('t'))).is_none());
+    assert!(
+        choose(&mut s, 3).is_none(),
+        "the API-key row opens the input"
+    );
     for c in "abc".chars() {
         s.handle_key(key(KeyCode::Char(c)));
     }
@@ -98,19 +132,15 @@ fn token_entry_edits_and_submits() {
     assert_eq!(cmd, Some(LoginCmd::SubmitToken("ab".into())));
     // Empty submit is refused with an error, no command.
     let mut s2 = LoginScreen::new("b");
-    s2.handle_key(key(KeyCode::Char('t')));
+    choose(&mut s2, 3);
     assert!(s2.handle_key(key(KeyCode::Enter)).is_none());
     assert!(render(&mut s2).contains("enter a token"));
 }
 
 #[test]
-fn m_and_q_yield_outcomes() {
-    let mut m = LoginScreen::new("b");
-    m.handle_key(key(KeyCode::Char('m')));
-    assert_eq!(m.outcome(), Some(LoginOutcome::Mock));
-
+fn the_quit_row_and_ctrl_c_yield_quit() {
     let mut q = LoginScreen::new("b");
-    q.handle_key(key(KeyCode::Char('q')));
+    choose(&mut q, 6);
     assert_eq!(q.outcome(), Some(LoginOutcome::Quit));
 
     let mut c = LoginScreen::new("b");
@@ -137,7 +167,7 @@ fn errors_render_inline_and_keep_screen_usable() {
     s.apply(LoginEvent::VerifyFailed("bad token".into()));
     let out = render(&mut s);
     assert!(out.contains("bad token"), "error: {out}");
-    assert!(out.contains("retry"), "retry hint: {out}");
+    assert!(out.contains("try again"), "retry hint: {out}");
     // Still usable: can start over.
     assert!(matches!(
         s.handle_key(key(KeyCode::Enter)),

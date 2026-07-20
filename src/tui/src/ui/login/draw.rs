@@ -10,7 +10,7 @@ use ratatui::Frame;
 
 use crate::ui::app::SPINNER;
 
-use super::types::{LoginScreen, Phase};
+use super::types::{LoginScreen, Phase, MENU, MENU_ACTIONS_START};
 
 impl LoginScreen {
     fn spinner(&self) -> &'static str {
@@ -19,7 +19,7 @@ impl LoginScreen {
 
     /// Render the centered login panel.
     pub fn draw(&mut self, f: &mut Frame) {
-        let area = centered_rect(64, 17, f.area());
+        let area = centered_rect(64, 24, f.area());
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -44,27 +44,39 @@ impl LoginScreen {
             format!("backend {}", self.base_url),
             Style::default().add_modifier(Modifier::DIM),
         )));
-        lines.push(Line::from(vec![
-            Span::styled("provider ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled(
-                self.provider.as_str(),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
         lines.push(Line::from(""));
 
         match self.phase {
             Phase::Idle => {
+                // One selectable list: sign-in providers, then the fallbacks.
+                // The highlighted row is inverted so the selection is legible
+                // without relying on color alone.
+                for (i, item) in MENU.iter().enumerate() {
+                    if i == MENU_ACTIONS_START {
+                        lines.push(Line::from(Span::styled(
+                            "─".repeat(30),
+                            Style::default().add_modifier(Modifier::DIM),
+                        )));
+                    }
+                    let selected = i == self.menu_index;
+                    let style = if selected {
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    lines.push(Line::from(Span::styled(
+                        format!("{} {:<32}", if selected { "▸" } else { " " }, item.label()),
+                        style,
+                    )));
+                }
+                lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    "Enter/o  log in via browser",
-                    Style::default(),
+                    "↑↓ choose · Enter select",
+                    Style::default().add_modifier(Modifier::DIM),
                 )));
-                lines.push(Line::from("←/→ or p  change provider"));
-                lines.push(Line::from("t  paste a token"));
-                lines.push(Line::from("m  continue offline (mock)"));
-                lines.push(Line::from("q  quit"));
             }
             Phase::Starting => {
                 lines.push(Line::from(format!("{} starting loopback…", self.spinner())));
@@ -89,7 +101,7 @@ impl LoginScreen {
             }
             Phase::TokenEntry => {
                 lines.push(Line::from(Span::styled(
-                    "Paste a JWT or 64-hex login token, Enter to submit:",
+                    "Paste an API key, JWT, or 64-hex login token — Enter to submit:",
                     Style::default().add_modifier(Modifier::DIM),
                 )));
                 let shown = token_display(&self.input, 56);
@@ -121,7 +133,7 @@ impl LoginScreen {
                 Style::default().fg(Color::Red),
             )));
             lines.push(Line::from(Span::styled(
-                "press Enter/o to retry",
+                "press Enter to try again",
                 Style::default().add_modifier(Modifier::DIM),
             )));
         }

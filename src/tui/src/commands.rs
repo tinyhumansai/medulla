@@ -311,6 +311,9 @@ fn dispatch_login_cmd(
                 h.abort();
             }
         }
+        // Best-effort, like the login-URL opener: a browser that refuses to
+        // launch must not interrupt a sign-in the user is part-way through.
+        LoginCmd::OpenUrl(url) => open_browser(&url),
         LoginCmd::SubmitToken(token) => {
             let base = base_url.to_string();
             let tx = tx.clone();

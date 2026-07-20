@@ -12,6 +12,10 @@ pub enum LoginOutcome {
     /// A verified JWT — proceed into the main app with a backend runtime.
     Token(String),
     /// Continue offline with the mock runtime.
+    ///
+    /// No longer offered on the login menu — signing in is the only way into the
+    /// app — but kept because the pre-app loop still falls back to the mock when
+    /// a verified token cannot reach the backend.
     Mock,
     /// Quit cleanly without starting the app.
     Quit,
@@ -27,8 +31,10 @@ pub enum LoginCmd {
     },
     /// Abort a running loopback task (Esc while waiting).
     CancelLoopback,
-    /// Redeem/verify a pasted JWT or 64-hex one-time token.
+    /// Redeem/verify a pasted API key, JWT, or 64-hex one-time token.
     SubmitToken(String),
+    /// Open `url` in the platform browser. Fire-and-forget: the screen stays put.
+    OpenUrl(String),
 }
 
 /// An event fed back from a spawned async task into [`LoginScreen::apply`].
@@ -46,6 +52,67 @@ pub enum LoginEvent {
     VerifyFailed(String),
 }
 
+/// One row of the Idle menu.
+///
+/// Sign-in providers and the non-provider actions share a single list so the
+/// whole screen is navigated one way — arrow keys and Enter — rather than by
+/// remembering a letter per action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MenuItem {
+    /// Start the browser loopback flow with this provider.
+    Provider(Provider),
+    /// Switch to the key-entry phase.
+    PasteKey,
+    /// Open the documentation in the browser. Does not leave the screen.
+    Docs,
+    /// Open the GitHub repository in the browser. Does not leave the screen.
+    Star,
+    /// Leave with [`LoginOutcome::Quit`].
+    Quit,
+}
+
+impl MenuItem {
+    /// The row's label.
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            MenuItem::Provider(Provider::Google) => "Continue with Google",
+            MenuItem::Provider(Provider::Github) => "Continue with GitHub",
+            MenuItem::Provider(Provider::Twitter) => "Continue with X (Twitter)",
+            // Not reachable from MENU; kept so the match stays exhaustive.
+            MenuItem::Provider(Provider::Discord) => "Continue with Discord",
+            MenuItem::PasteKey => "Paste an API key instead",
+            MenuItem::Docs => "Read the docs",
+            MenuItem::Star => "Star us on GitHub",
+            MenuItem::Quit => "Quit",
+        }
+    }
+}
+
+/// The Idle menu, in display order: every sign-in provider first, then the
+/// fallbacks and the exit.
+///
+/// `Provider::Discord` exists in the wire enum but the backend has no Discord
+/// login, so it is deliberately absent — offering a row that cannot succeed is
+/// worse than not offering it.
+pub(super) const MENU: [MenuItem; 7] = [
+    MenuItem::Provider(Provider::Google),
+    MenuItem::Provider(Provider::Github),
+    MenuItem::Provider(Provider::Twitter),
+    MenuItem::PasteKey,
+    MenuItem::Docs,
+    MenuItem::Star,
+    MenuItem::Quit,
+];
+
+/// Where "Read the docs" points.
+pub(super) const DOCS_URL: &str = "https://tinyhumans.gitbook.io/medulla";
+
+/// Where "Star us on GitHub" points.
+pub(super) const REPO_URL: &str = "https://github.com/tinyhumansai/medulla";
+
+/// The index of the first non-provider row, where the menu draws a separator.
+pub(super) const MENU_ACTIONS_START: usize = 3;
+
 /// Where the screen currently is in the flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Phase {
@@ -55,7 +122,7 @@ pub(super) enum Phase {
     Starting,
     /// The loopback listener is live; browser round-trip in progress.
     Waiting,
-    /// A focused single-line token input.
+    /// A focused single-line API-key / token input.
     TokenEntry,
     /// A captured/pasted token is being verified.
     Verifying,
@@ -69,6 +136,8 @@ pub(super) enum Phase {
 pub struct LoginScreen {
     pub(super) base_url: String,
     pub(super) provider: Provider,
+    /// The highlighted row of the Idle menu (index into [`MENU`]).
+    pub(super) menu_index: usize,
     pub(super) phase: Phase,
     pub(super) url: Option<String>,
     pub(super) port: Option<u16>,
@@ -85,6 +154,7 @@ impl LoginScreen {
         LoginScreen {
             base_url: base_url.into(),
             provider: Provider::default(),
+            menu_index: 0,
             phase: Phase::Idle,
             url: None,
             port: None,

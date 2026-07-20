@@ -6,31 +6,64 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use medulla::auth::Provider;
-
-use super::types::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen, Phase};
-
-/// The four providers, in the order the panel cycles through them.
-const PROVIDERS: [Provider; 4] = [
-    Provider::Google,
-    Provider::Github,
-    Provider::Twitter,
-    Provider::Discord,
-];
+use super::types::{
+    LoginCmd, LoginEvent, LoginOutcome, LoginScreen, MenuItem, Phase, DOCS_URL, MENU, REPO_URL,
+};
 
 impl LoginScreen {
-    fn cycle_provider(&mut self, forward: bool) {
-        let pos = PROVIDERS
-            .iter()
-            .position(|p| *p == self.provider)
-            .unwrap_or(0);
-        let len = PROVIDERS.len();
-        let next = if forward {
-            (pos + 1) % len
+    /// Move the Idle menu highlight, wrapping at both ends.
+    ///
+    /// Wrapping matters here: the list is short and every row is reachable
+    /// either way, so a user who overshoots Quit does not have to travel back up
+    /// through the whole menu.
+    fn move_menu(&mut self, down: bool) {
+        let len = MENU.len();
+        self.menu_index = if down {
+            (self.menu_index + 1) % len
         } else {
-            (pos + len - 1) % len
+            (self.menu_index + len - 1) % len
         };
-        self.provider = PROVIDERS[next];
+    }
+
+    /// Act on the highlighted menu row.
+    fn activate_menu(&mut self) -> Option<LoginCmd> {
+        match MENU[self.menu_index.min(MENU.len() - 1)] {
+            MenuItem::Provider(provider) => {
+                // Record the choice so a retry after an error reuses it.
+                self.provider = provider;
+                self.phase = Phase::Starting;
+                self.error = None;
+                self.flash = None;
+                Some(LoginCmd::StartLoopback {
+                    base_url: self.base_url.clone(),
+                    provider,
+                })
+            }
+            MenuItem::PasteKey => {
+                self.phase = Phase::TokenEntry;
+                self.input.clear();
+                self.error = None;
+                self.flash = None;
+                None
+            }
+            // Link rows open a browser tab and leave the menu exactly as it
+            // was: reading the docs is not a way of answering "how do I sign
+            // in", so it must not disturb the sign-in you are part-way through.
+            MenuItem::Docs => {
+                self.flash = Some(format!("opened {DOCS_URL}"));
+                self.error = None;
+                Some(LoginCmd::OpenUrl(DOCS_URL.to_string()))
+            }
+            MenuItem::Star => {
+                self.flash = Some(format!("opened {REPO_URL}"));
+                self.error = None;
+                Some(LoginCmd::OpenUrl(REPO_URL.to_string()))
+            }
+            MenuItem::Quit => {
+                self.outcome = Some(LoginOutcome::Quit);
+                None
+            }
+        }
     }
 
     /// Handle one key event, optionally emitting an async command.
@@ -81,39 +114,19 @@ impl LoginScreen {
                 _ => None,
             },
             Phase::Verifying => None,
+            // Every Idle action is a row in one menu: arrows move, Enter picks.
+            // Nothing here is bound to a letter, so there is no shortcut to
+            // learn and no keystroke that fires an action by surprise.
             Phase::Idle => match key.code {
-                KeyCode::Enter | KeyCode::Char('o') => {
-                    self.phase = Phase::Starting;
-                    self.error = None;
-                    self.flash = None;
-                    Some(LoginCmd::StartLoopback {
-                        base_url: self.base_url.clone(),
-                        provider: self.provider,
-                    })
-                }
-                KeyCode::Char('t') => {
-                    self.phase = Phase::TokenEntry;
-                    self.input.clear();
-                    self.error = None;
-                    self.flash = None;
+                KeyCode::Up => {
+                    self.move_menu(false);
                     None
                 }
-                KeyCode::Char('m') => {
-                    self.outcome = Some(LoginOutcome::Mock);
+                KeyCode::Down => {
+                    self.move_menu(true);
                     None
                 }
-                KeyCode::Char('q') => {
-                    self.outcome = Some(LoginOutcome::Quit);
-                    None
-                }
-                KeyCode::Right | KeyCode::Char('p') => {
-                    self.cycle_provider(true);
-                    None
-                }
-                KeyCode::Left => {
-                    self.cycle_provider(false);
-                    None
-                }
+                KeyCode::Enter => self.activate_menu(),
                 _ => None,
             },
         }

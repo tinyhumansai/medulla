@@ -14,6 +14,14 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 /// Render the screen into an 80x24 test terminal and flatten the buffer to text.
+/// Select the menu row at `index` and activate it, the way a user does.
+fn choose(screen: &mut LoginScreen, index: usize) -> Option<LoginCmd> {
+    for _ in 0..index {
+        screen.handle_key(key(KeyCode::Down));
+    }
+    screen.handle_key(key(KeyCode::Enter))
+}
+
 fn render(screen: &mut LoginScreen) -> String {
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|f| screen.draw(f)).unwrap();
@@ -27,33 +35,49 @@ fn render(screen: &mut LoginScreen) -> String {
 }
 
 #[test]
-fn renders_branding_backend_and_provider() {
+fn renders_branding_backend_and_every_sign_in_option() {
     let mut s = LoginScreen::new("http://localhost:5000");
     let out = render(&mut s);
     assert!(out.contains("▛▛▌█▌▛▌▌▌▐ ▐ ▀▌"), "logo: {out}");
     assert!(out.contains("http://localhost:5000"), "backend url: {out}");
-    assert!(out.contains("google"), "default provider shown: {out}");
-    // Idle menu hints are visible.
-    assert!(out.contains("mock"), "mock hint: {out}");
-    assert!(out.contains("quit"), "quit hint: {out}");
+    // Each provider is its own row, so the options are readable at a glance
+    // rather than hidden behind a field you have to cycle.
+    for label in ["Google", "GitHub", "X (Twitter)"] {
+        assert!(out.contains(label), "{label} offered: {out}");
+    }
+    assert!(out.contains("Paste an API key"), "API-key row: {out}");
+    assert!(out.contains("↑↓ choose"), "selection hint: {out}");
 }
 
 #[test]
-fn provider_cycles_and_renders_selection() {
+fn the_menu_offers_no_discord_and_no_offline_escape() {
+    // The backend has no Discord login, and signing in is the only way into the
+    // app — neither may be presented as an option.
     let mut s = LoginScreen::new("b");
-    s.handle_key(key(KeyCode::Right));
-    assert_eq!(s.provider(), Provider::Github);
-    assert!(render(&mut s).contains("github"));
-    s.handle_key(key(KeyCode::Char('p')));
-    assert_eq!(s.provider(), Provider::Twitter);
-    s.handle_key(key(KeyCode::Left));
+    let out = render(&mut s);
+    assert!(!out.contains("Discord"), "no Discord row: {out}");
+    assert!(!out.contains("offline"), "no offline row: {out}");
+    assert!(!out.contains("mock"), "no mock row: {out}");
+}
+
+#[test]
+fn selecting_a_provider_row_signs_in_with_it() {
+    let mut s = LoginScreen::new("b");
+    let cmd = choose(&mut s, 1); // GitHub
+    assert_eq!(
+        cmd,
+        Some(LoginCmd::StartLoopback {
+            base_url: "b".into(),
+            provider: Provider::Github,
+        })
+    );
     assert_eq!(s.provider(), Provider::Github);
 }
 
 #[test]
 fn enter_starts_loopback_and_waiting_shows_url_and_port() {
     let mut s = LoginScreen::new("http://backend");
-    let cmd = s.handle_key(key(KeyCode::Enter));
+    let cmd = choose(&mut s, 0);
     assert_eq!(
         cmd,
         Some(LoginCmd::StartLoopback {
@@ -76,15 +100,6 @@ fn enter_starts_loopback_and_waiting_shows_url_and_port() {
 }
 
 #[test]
-fn o_also_starts_loopback() {
-    let mut s = LoginScreen::new("b");
-    assert!(matches!(
-        s.handle_key(key(KeyCode::Char('o'))),
-        Some(LoginCmd::StartLoopback { .. })
-    ));
-}
-
-#[test]
 fn esc_cancels_waiting() {
     let mut s = LoginScreen::new("b");
     s.handle_key(key(KeyCode::Enter));
@@ -97,14 +112,20 @@ fn esc_cancels_waiting() {
         Some(LoginCmd::CancelLoopback)
     );
     // Back to the Idle menu after cancel.
-    assert!(render(&mut s).contains("continue offline"));
+    assert!(render(&mut s).contains("Continue with Google"));
 }
 
 #[test]
 fn token_input_mode_edits_and_submits() {
     let mut s = LoginScreen::new("b");
-    assert!(s.handle_key(key(KeyCode::Char('t'))).is_none());
-    assert!(render(&mut s).contains("Paste a JWT"), "input prompt shown");
+    assert!(
+        choose(&mut s, 3).is_none(),
+        "the API-key row opens the input"
+    );
+    assert!(
+        render(&mut s).contains("Paste an API key"),
+        "input prompt shown"
+    );
     for c in "jwt.token".chars() {
         s.handle_key(key(KeyCode::Char(c)));
     }
@@ -117,23 +138,16 @@ fn token_input_mode_edits_and_submits() {
 #[test]
 fn token_input_esc_returns_to_menu() {
     let mut s = LoginScreen::new("b");
-    s.handle_key(key(KeyCode::Char('t')));
+    choose(&mut s, 3);
     s.handle_key(key(KeyCode::Char('x')));
     assert!(s.handle_key(key(KeyCode::Esc)).is_none());
-    assert!(render(&mut s).contains("continue offline"));
+    assert!(render(&mut s).contains("Continue with Google"));
 }
 
 #[test]
-fn m_yields_mock_outcome() {
+fn the_quit_row_and_ctrl_c_yield_quit_outcome() {
     let mut s = LoginScreen::new("b");
-    assert!(s.handle_key(key(KeyCode::Char('m'))).is_none());
-    assert_eq!(s.outcome(), Some(LoginOutcome::Mock));
-}
-
-#[test]
-fn q_and_ctrl_c_yield_quit_outcome() {
-    let mut s = LoginScreen::new("b");
-    s.handle_key(key(KeyCode::Char('q')));
+    choose(&mut s, 6);
     assert_eq!(s.outcome(), Some(LoginOutcome::Quit));
 
     let mut c = LoginScreen::new("b");
@@ -169,7 +183,7 @@ fn apply_callback_error_and_verify_failed_render_inline() {
         out.contains("state mismatch timeout"),
         "callback error: {out}"
     );
-    assert!(out.contains("retry"), "retry hint: {out}");
+    assert!(out.contains("try again"), "retry hint: {out}");
     // Screen stays usable — can start again.
     assert!(matches!(
         s.handle_key(key(KeyCode::Enter)),
@@ -179,4 +193,30 @@ fn apply_callback_error_and_verify_failed_render_inline() {
     let mut s2 = LoginScreen::new("b");
     s2.apply(LoginEvent::VerifyFailed("verification failed: nope".into()));
     assert!(render(&mut s2).contains("verification failed: nope"));
+}
+
+#[test]
+fn the_docs_and_github_rows_open_links_without_disturbing_the_menu() {
+    // Reading the docs is not an answer to "how do I sign in", so opening one
+    // must leave the screen exactly where it was — same phase, no outcome.
+    for (index, expected) in [
+        (4, "https://tinyhumans.gitbook.io/medulla"),
+        (5, "https://github.com/tinyhumansai/medulla"),
+    ] {
+        let mut s = LoginScreen::new("b");
+        let cmd = choose(&mut s, index);
+        assert_eq!(cmd, Some(LoginCmd::OpenUrl(expected.into())), "row {index}");
+        assert_eq!(s.outcome(), None, "opening a link must not end the screen");
+        // Still on the menu and still able to sign in.
+        let out = render(&mut s);
+        assert!(out.contains("Continue with Google"), "menu intact: {out}");
+    }
+}
+
+#[test]
+fn the_menu_lists_the_docs_and_github_rows() {
+    let mut s = LoginScreen::new("b");
+    let out = render(&mut s);
+    assert!(out.contains("Read the docs"), "docs row: {out}");
+    assert!(out.contains("Star us on GitHub"), "github row: {out}");
 }

@@ -189,7 +189,7 @@ Wrapper flags:\n  \
 --no-bridge             Run the CLI as a plain passthrough (no tiny.place bridge)\n  \
 --                      Pass all following arguments to the CLI verbatim\n\n\
 Login flags:\n  \
---provider <name>       OAuth provider: google (default), github, twitter, discord\n  \
+--provider <name>       OAuth provider: google (default), github, twitter\n  \
 --no-browser            Print the login URL without launching a browser\n  \
 --token <64-hex>        Redeem a one-time login token instead (headless)\n  \
 --config <path>         Config file to read backend.baseUrl from (.toml or .json)\n\n\

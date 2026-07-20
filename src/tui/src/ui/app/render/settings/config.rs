@@ -83,7 +83,9 @@ impl App {
         f.render_widget(
             Paragraph::new(Text::from(lines))
                 .wrap(Wrap { trim: false })
-                .block(self.panel("Settings")),
+                // Not "Settings" — the left nav already owns that title, and two
+                // adjacent panels with the same name read as a rendering bug.
+                .block(self.panel("Preferences")),
             area,
         );
     }

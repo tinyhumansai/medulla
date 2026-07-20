@@ -61,9 +61,11 @@ pub(crate) async fn run(
     startup_status: Option<String>,
     tinyplace_obs: Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
     config_path: std::path::PathBuf,
+    medulla_home: std::path::PathBuf,
 ) -> anyhow::Result<()> {
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
+    app.set_medulla_home(medulla_home);
     if let Some(obs) = tinyplace_obs {
         app.set_tinyplace_observation(obs);
     }

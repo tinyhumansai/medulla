@@ -1,7 +1,7 @@
 //! Focused unit tests for the [`App`] screen: that every tab renders, the async
 //! header toggle shows, and the composer/slash-command dispatch behaves.
 
-use super::types::tab_pos;
+use super::types::SP_FEEDBACK;
 use super::*;
 use std::sync::Arc;
 
@@ -86,12 +86,12 @@ fn typing_inserts_into_draft() {
     assert_eq!(a.draft.text, "hi\n");
 }
 
-// --- Feedback tab -----------------------------------------------------------
+// --- Feedback subpage (Settings > GENERAL > Feedback) ------------------------
 
-/// An app parked on the Feedback tab with the mock board already loaded.
+/// An app parked on the Feedback subpage with the mock board already loaded.
 fn feedback_app() -> App {
     let mut a = app();
-    a.tab_index = tab_pos("Feedback");
+    a.set_settings_subpage(SP_FEEDBACK);
     let page = futures::executor::block_on(a.runtime.list_feedback(a.feedback_query())).unwrap();
     a.set_feedback_page(page);
     a
@@ -101,7 +101,8 @@ fn feedback_app() -> App {
 fn slash_feedback_opens_the_board() {
     let mut a = app();
     let cmd = a.execute("/feedback".into());
-    assert_eq!(a.tab(), "Feedback");
+    assert_eq!(a.tab(), "Settings");
+    assert_eq!(a.settings_subpage(), "Feedback");
     assert!(matches!(cmd, Some(Cmd::LoadFeedback(_))));
 }
 
@@ -117,17 +118,18 @@ fn feedback_tab_renders_rows_and_controls() {
 #[test]
 fn feedback_tab_without_a_board_shows_a_sign_in_hint() {
     let mut a = app();
-    a.tab_index = tab_pos("Feedback");
+    a.set_settings_subpage(SP_FEEDBACK);
     a.set_feedback_page(None);
     let out = render(&mut a);
     assert!(out.contains("signed-in backend connection"), "{out}");
 }
 
 #[test]
-fn arrow_keys_move_the_selection_and_load_comments() {
+fn jk_keys_move_the_selection_and_load_comments() {
     let mut a = feedback_app();
     assert_eq!(a.feedback_index(), 0);
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    // As a Settings subpage, Feedback browses with j/k — ↑↓ move the nav.
+    let cmd = a.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
     assert_eq!(a.feedback_index(), 1);
     // Selecting a row whose comments are not loaded asks for them.
     assert!(matches!(cmd, Some(Cmd::LoadFeedbackDetail(id)) if id == "fb-2"));

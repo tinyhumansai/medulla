@@ -11,8 +11,8 @@ use crate::ui::theme::{color_to_string, THEME_ROLES};
 use medulla::runtime::{WorkerInfo, WorkerOp};
 
 use super::types::{
-    tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_HELP,
-    SP_USAGE,
+    tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG,
+    SP_FEEDBACK, SP_HELP, SP_USAGE,
 };
 
 impl App {
@@ -248,7 +248,7 @@ impl App {
             }
             SlashCommand::Usage => return self.set_settings_subpage(SP_USAGE),
             SlashCommand::Feedback => {
-                self.tab_index = tab_pos("Feedback");
+                self.set_settings_subpage(SP_FEEDBACK);
                 self.set_status("Feedback · loading the board…");
                 return self.reload_feedback();
             }
@@ -284,10 +284,12 @@ impl App {
     }
 
     /// Land on the Settings tab at subpage `index`, returning its lazy-load
-    /// command (Usage fetches account usage on entry).
+    /// command (Usage, Context, and Feedback each fetch on entry).
     pub(super) fn set_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
         self.tab_index = tab_pos("Settings");
         self.settings_index = index.min(SETTINGS_SUBPAGES.len() - 1);
+        // An armed logout must not survive a jump to another subpage.
+        self.disarm_logout();
         self.tab_enter_cmd()
     }
 

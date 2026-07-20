@@ -21,17 +21,49 @@ use medulla::memory::{MemoryHit, MemoryStatus};
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 
 /// The ordered top-level tab names. The tab index selects into this array.
-pub const TABS: [&str; 9] = [
-    "Overview", "Chat", "Agents", "Workers", "Trace", "Context", "Memory", "Feedback", "Settings",
+///
+/// Trace, Context, and Feedback used to live here. They are secondary surfaces —
+/// two of them diagnostic — so they now sit under Settings, keeping the tab bar
+/// to the views a session is actually driven from.
+pub const TABS: [&str; 6] = [
+    "Overview", "Chat", "Agents", "Workers", "Memory", "Settings",
 ];
-/// The Settings tab's left-nav subpages, in order (number keys 1-4 jump to them).
-pub const SETTINGS_SUBPAGES: [&str; 4] = ["Usage", "Appearance", "Config", "Help"];
+
+/// The Settings tab's left-nav subpages, in order (number keys 1-8 jump to them).
+///
+/// This is the flat, selectable list [`App::settings_index`] indexes into.
+/// [`SETTINGS_GROUPS`] overlays the display-only headings.
+pub const SETTINGS_SUBPAGES: [&str; 8] = [
+    "Usage",
+    "Appearance",
+    "Config",
+    "Feedback",
+    "Trace",
+    "Context",
+    "Account",
+    "Help",
+];
+
+/// The left-nav group headings, as `(heading, first subpage index)`.
+///
+/// Headings are rendered dim and are not selectable — they exist to separate the
+/// everyday settings from the diagnostic ones. Each group runs until the next
+/// group's start index.
+pub const SETTINGS_GROUPS: [(&str, usize); 3] = [
+    ("GENERAL", SP_USAGE),
+    ("DEBUG", SP_TRACE),
+    ("ABOUT", SP_ACCOUNT),
+];
 
 // Settings subpage indices.
 pub(super) const SP_USAGE: usize = 0;
 pub(super) const SP_APPEARANCE: usize = 1;
 pub(super) const SP_CONFIG: usize = 2;
-pub(super) const SP_HELP: usize = 3;
+pub(super) const SP_FEEDBACK: usize = 3;
+pub(super) const SP_TRACE: usize = 4;
+pub(super) const SP_CONTEXT: usize = 5;
+pub(super) const SP_ACCOUNT: usize = 6;
+pub(super) const SP_HELP: usize = 7;
 
 /// The index of a tab by name, or 0 if unknown. Keeps tab jumps robust as the tab
 /// list grows.
@@ -240,6 +272,16 @@ pub struct App {
     pub(super) settings_index: usize,
     /// The selected theme role on the Appearance subpage.
     pub(super) appearance_index: usize,
+    /// The selected editable row on the Config subpage.
+    pub(super) config_index: usize,
+    /// Whether the Account subpage's logout is armed. Logging out clears stored
+    /// credentials, so the first Enter arms and the second confirms; any other
+    /// navigation disarms it.
+    pub(super) logout_armed: bool,
+    /// The Medulla home directory, used to locate the credential store the
+    /// Account subpage clears. Injectable so feature tests never touch the real
+    /// home; `None` disables logout.
+    pub(super) medulla_home: Option<std::path::PathBuf>,
     /// The resolved color theme; selection highlighting + chrome draw from it.
     pub(super) theme: Theme,
     /// Where appearance changes are persisted (the user-global `config.toml`).

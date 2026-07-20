@@ -101,27 +101,36 @@ fn empty_submission_is_ignored() {
     assert!(cmd.is_none());
 }
 
-// --- tab -> context inspect cmd ---------------------------------------------
+// --- entering the Context subpage requests an inspect ------------------------
 
 #[test]
-fn tab_into_context_requests_inspect() {
+fn entering_the_context_subpage_requests_inspect() {
     let (mut app, _rt) = demo_app();
-    // Context is index 5; Tab from Config(6)? Start at Context-1 and Tab forward.
-    app.tab_index = TABS.iter().position(|t| *t == "Trace").unwrap();
-    let cmd = app.on_event(key(KeyCode::Tab)); // Trace -> Context
-    assert_eq!(app.tab(), "Context");
-    assert!(matches!(cmd, Some(Cmd::InspectContext)));
-    // BackTab back into Context from the tab that now follows it (Memory).
-    app.tab_index = TABS.iter().position(|t| *t == "Memory").unwrap();
-    let cmd = app.on_event(Event::Key(KeyEvent::new(
-        KeyCode::BackTab,
-        KeyModifiers::SHIFT,
-    )));
-    assert_eq!(app.tab(), "Context");
+    // Context is a Settings subpage now, so entry — not a Tab press — loads it.
+    let cmd = app.focus_settings_subpage("Context");
+    assert_eq!(app.tab(), "Settings");
+    assert_eq!(app.settings_subpage(), "Context");
     assert!(matches!(cmd, Some(Cmd::InspectContext)));
 }
 
-// --- chat composer edits ----------------------------------------------------
+#[test]
+fn arrow_keys_walk_the_settings_nav_and_load_each_subpage() {
+    let (mut app, _rt) = demo_app();
+    let _ = app.focus_settings_subpage("Appearance");
+    // Down from Appearance → Config → Feedback → Trace → Context.
+    for expected in ["Config", "Feedback", "Trace", "Context"] {
+        let cmd = app.on_event(key(KeyCode::Down));
+        assert_eq!(app.settings_subpage(), expected);
+        if expected == "Context" {
+            assert!(
+                matches!(cmd, Some(Cmd::InspectContext)),
+                "Context loads on entry"
+            );
+        }
+    }
+    let _ = app.on_event(key(KeyCode::Up));
+    assert_eq!(app.settings_subpage(), "Trace");
+}
 
 #[test]
 fn chat_left_right_backspace_and_esc() {

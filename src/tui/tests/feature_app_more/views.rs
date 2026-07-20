@@ -185,25 +185,6 @@ fn context_mouse_wheel_scrolls() {
 // --- mouse clicks: context row, chat thread, tab-bar into Context -----------
 
 #[test]
-fn click_context_tab_requests_inspect() {
-    let (mut app, _rt) = demo_app();
-    let _ = render(&mut app, 120, 40);
-    // The tab bar sits on row 1; the Context label is the 6th tab. Walk columns
-    // until a click yields the InspectContext command.
-    let mut got = false;
-    for x in 0..120u16 {
-        if let Some(Cmd::InspectContext) =
-            app.on_event(mouse(MouseEventKind::Down(MouseButton::Left), x, 1))
-        {
-            got = true;
-            break;
-        }
-    }
-    assert!(got, "clicking the Context tab requests an inspect");
-    assert_eq!(app.tab(), "Context");
-}
-
-#[test]
 fn click_chat_thread_switches_active() {
     let (mut app, rt) = demo_app();
     rt.fork(Some("branch".into()));

@@ -13,7 +13,9 @@ use medulla::config::LoadedConfig;
 use medulla::memory::{MemoryHit, MemoryStatus};
 use medulla::runtime::{ContextItem, Runtime};
 
-use super::types::{App, Cmd, MemoryEntry, ResumePicker, SETTINGS_SUBPAGES, SP_USAGE, TABS};
+use super::types::{
+    App, Cmd, MemoryEntry, ResumePicker, SETTINGS_SUBPAGES, SP_CONTEXT, SP_FEEDBACK, SP_USAGE, TABS,
+};
 
 impl App {
     /// Build a fresh screen bound to `runtime` and `loaded`, starting on the
@@ -50,6 +52,9 @@ impl App {
             account_usage: None,
             settings_index: 0,
             appearance_index: 0,
+            config_index: 0,
+            logout_armed: false,
+            medulla_home: None,
             theme,
             config_path: None,
             resume_picker: None,
@@ -77,9 +82,29 @@ impl App {
         self.config_path = Some(path);
     }
 
+    /// Point the Account subpage's logout at a Medulla home directory. Wiring
+    /// seam so feature tests never clear the real credential store. Without it,
+    /// logout reports that it has nowhere to write rather than guessing.
+    pub fn set_medulla_home(&mut self, home: std::path::PathBuf) {
+        self.medulla_home = Some(home);
+    }
+
     /// The active Settings subpage name. Test/inspection seam.
     pub fn settings_subpage(&self) -> &'static str {
         SETTINGS_SUBPAGES[self.settings_index.min(SETTINGS_SUBPAGES.len() - 1)]
+    }
+
+    /// Focus the Settings tab on the subpage named `name`, returning its
+    /// lazy-load command. Unknown names land on the first subpage.
+    ///
+    /// The public counterpart to the internal index-based jump, for the event
+    /// loop and tests that address subpages by name rather than position.
+    pub fn focus_settings_subpage(&mut self, name: &str) -> Option<Cmd> {
+        let index = SETTINGS_SUBPAGES
+            .iter()
+            .position(|s| *s == name)
+            .unwrap_or(0);
+        self.set_settings_subpage(index)
     }
 
     /// The current primary theme color. Test/inspection seam.
@@ -217,13 +242,20 @@ impl App {
         TABS[self.tab_index]
     }
 
-    /// The lazy-load command a freshly entered tab needs, if any.
+    /// The lazy-load command a freshly entered tab (or Settings subpage) needs.
+    ///
+    /// Context, Feedback, and Usage all fetch on entry; since they are now
+    /// Settings subpages rather than tabs, the Settings arm dispatches on the
+    /// active subpage.
     pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
         match self.tab() {
-            "Context" => Some(Cmd::InspectContext),
             "Memory" => Some(Cmd::LoadMemory),
-            "Feedback" => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
-            "Settings" if self.settings_index == SP_USAGE => Some(Cmd::LoadUsage),
+            "Settings" => match self.settings_index {
+                SP_USAGE => Some(Cmd::LoadUsage),
+                SP_CONTEXT => Some(Cmd::InspectContext),
+                SP_FEEDBACK => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
+                _ => None,
+            },
             _ => None,
         }
     }

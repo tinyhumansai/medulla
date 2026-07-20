@@ -308,10 +308,8 @@ impl App {
             "Chat" => self.draw_chat(f, area),
             "Agents" => self.draw_agents(f, area),
             "Workers" => self.draw_workers(f, area),
-            "Trace" => self.draw_trace(f, area),
-            "Context" => self.draw_context(f, area),
             "Memory" => self.draw_memory(f, area),
-            "Feedback" => self.draw_feedback(f, area),
+            // Trace, Context, and Feedback are Settings subpages, not tabs.
             "Settings" => self.draw_settings(f, area),
             _ => self.draw_overview(f, area),
         }

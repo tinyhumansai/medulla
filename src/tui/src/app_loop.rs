@@ -330,6 +330,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         startup_status.or(tinyplace_status),
         tinyplace_obs,
         config_path,
+        home.clone(),
     )
     .await;
 

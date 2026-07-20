@@ -1,5 +1,5 @@
-//! The Overview tab: the logo, the session/orchestration/tiny.place panels, the
-//! model-routing panel, and the live-activity feed.
+//! The Overview tab: the logo, the session/orchestration/tiny.place panels, and
+//! the live-activity feed.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -13,16 +13,13 @@ use crate::ui::util::clip;
 use super::super::types::App;
 
 impl App {
-    /// Draw the Overview tab: logo, top panels, model routing, and live activity.
+    /// Draw the Overview tab: logo, top panels, and live activity.
     pub(super) fn draw_overview(&mut self, f: &mut Frame, area: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(4),
                 Constraint::Length(7),
-                // Four routing rows plus the panel border. (Was five rows in a
-                // five-high panel, which silently clipped the last two.)
-                Constraint::Length(6),
                 Constraint::Min(0),
             ])
             .split(area);
@@ -122,45 +119,8 @@ impl App {
         // Third panel: tiny.place presence, or the local worker harness.
         self.draw_overview_third(f, top[2]);
 
-        // Model routing: inference is server-managed, so show the models
-        // actually observed on the stream. The runtime/backend the session is
-        // attached to lives in the header, not here.
-        let workers_val = if let Some(tp) = &self.loaded.config.tinyplace {
-            format!("tiny.place · {} peer(s)", tp.peers.len())
-        } else {
-            self.loaded
-                .config
-                .opencode
-                .as_ref()
-                .map(|o| o.model.clone())
-                .unwrap_or_default()
-        };
-        let mut routing: Vec<TLine> = Vec::new();
-        for (label, tier, color) in [
-            ("orchestrator ", "orchestrator", Color::Yellow),
-            ("reasoning ", "reasoning", Color::Yellow),
-            ("summarizer ", "compress", Color::Blue),
-        ] {
-            routing.push(TLine::from(vec![
-                Span::styled(label, Style::default().fg(color)),
-                Span::raw(
-                    stream::observed_model(&self.snapshot.events, tier)
-                        .unwrap_or("—")
-                        .to_string(),
-                ),
-            ]));
-        }
-        routing.push(TLine::from(vec![
-            Span::styled("workers ", Style::default().fg(Color::Magenta)),
-            Span::raw(workers_val),
-        ]));
-        f.render_widget(
-            Paragraph::new(Text::from(routing)).block(self.panel("Model routing")),
-            rows[1],
-        );
-
         // Live activity.
-        let take = self.visible_count().saturating_sub(7).max(5);
+        let take = self.visible_count().saturating_sub(1).max(5);
         let start = self.snapshot.events.len().saturating_sub(take);
         let recent: Vec<TLine> = self.snapshot.events[start..]
             .iter()
@@ -176,7 +136,7 @@ impl App {
         };
         f.render_widget(
             Paragraph::new(body).block(self.panel("Live activity")),
-            rows[2],
+            rows[1],
         );
     }
 

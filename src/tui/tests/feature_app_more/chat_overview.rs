@@ -69,20 +69,18 @@ fn overview_header_shows_the_backend_host_without_scheme() {
 }
 
 #[test]
-fn overview_model_routing_drops_the_runtime_row() {
-    // The runtime/backend now lives in the header; Model routing is models only.
+fn overview_has_no_model_routing_panel() {
+    // Routing is server-managed and was never actionable here; the panel is gone
+    // and Live activity takes the space it used to occupy.
     let rt = Arc::new(MockRuntime::empty());
     let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
     app.tab_index = 0;
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Model routing"), "panel still renders");
+    assert!(!out.contains("Model routing"), "panel is gone: {out}");
+    assert!(!out.contains("summarizer"), "routing rows are gone: {out}");
     assert!(
-        out.contains("orchestrator") && out.contains("workers"),
-        "all four routing rows fit the panel: {out}"
-    );
-    assert!(
-        !out.contains("mock (scripted)"),
-        "the runtime descriptor is gone from Overview: {out}"
+        out.contains("Live activity"),
+        "the feed still renders: {out}"
     );
 }
 

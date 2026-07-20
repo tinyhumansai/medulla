@@ -25,49 +25,23 @@ medulla         # bare invocation starts the TUI
 
 With no credentials, `medulla` opens a login screen. Press `m` there to explore offline against the mock runtime. See [For developers](#for-developers) to build from source or embed the SDK.
 
-## Why an Orchestrator Model
-
-Agent harnesses like Claude Code and Codex are remarkable at running one task deeply. But ask a harness to coordinate other harnesses and you hit the same quiet failure mode everywhere: the orchestrator is just another LLM with a transcript, and every harness it manages writes into that transcript. Model accuracy degrades well before the context window fills. So an orchestrator that reads raw harness traffic stops scaling at a handful of them. Long before the window runs out, it stops being able to think.
-
-Orchestration is becoming the dominant pattern in agentic systems, yet it has been running on architectures designed for chat. A chat model manages one thread. An orchestrator model must hold an entire operation in its head: hundreds of harnesses in flight, work being decomposed and delegated, results streaming back, decisions made continuously under pressure. Medulla was designed for exactly this. Where a harness drowns in its own coordination noise, Medulla always sees a small, current, high-signal picture of everything happening beneath it, no matter how large the operation grows.
+Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
 ## What It Does
 
-Five capabilities do most of the work. Each has a full page in the [documentation](gitbooks/features/README.md).
+Five capabilities do most of the work. Each has a full page in the [documentation](https://tinyhumans.gitbook.io/medulla).
 
-**[Memory](gitbooks/features/memory.md).** Medulla reads the coding-agent history already on your machine, meaning Claude Code transcripts, Codex rollouts, and your instruction files, then distils it into a compact persona pack covering your standing rules, your stack, and how you like code written. You have already explained yourself hundreds of times to harnesses that forgot. Separately, the reasoning tier keeps a durable scratch space so a hard-won fact survives to the next cycle instead of being derived twice.
+**[Memory](https://tinyhumans.gitbook.io/medulla/features/memory).** Medulla reads the coding-agent history already on your machine, meaning Claude Code transcripts, Codex rollouts, and your instruction files, then distils it into a compact persona pack covering your standing rules, your stack, and how you like code written. You have already explained yourself hundreds of times to harnesses that forgot. Separately, the reasoning tier keeps a durable scratch space so a hard-won fact survives to the next cycle instead of being derived twice.
 
-**[Workers and sessions](gitbooks/features/workers-and-sessions.md).** A worker is capacity, meaning a real harness running with your credentials in your workspace. A session is the thread you return to, resumable and forkable, surviving the terminal app that started it. Unassigned tasks go to the least-loaded healthy worker, failed ones get re-delegated, and every task settles into a definite state.
+**[Workers and sessions](https://tinyhumans.gitbook.io/medulla/features/workers-and-sessions).** A worker is capacity, meaning a real harness running with your credentials in your workspace. A session is the thread you return to, resumable and forkable, surviving the terminal app that started it. Unassigned tasks go to the least-loaded healthy worker, failed ones get re-delegated, and every task settles into a definite state.
 
-**[MEDULLA.md](gitbooks/features/workspace-profiles.md).** A short authored file at a repository root telling the orchestrator what the directory is and how to route work over it. `AGENTS.md` is written for an agent working inside a repo, so it is too long and silent on routing. This is roughly 100 to 200 tokens the orchestrator reads every cycle, and `medulla init` drafts one from what your repo already has.
+**[MEDULLA.md](https://tinyhumans.gitbook.io/medulla/features/workspace-profiles).** A short authored file at a repository root telling the orchestrator what the directory is and how to route work over it. `AGENTS.md` is written for an agent working inside a repo, so it is too long and silent on routing. This is roughly 100 to 200 tokens the orchestrator reads every cycle, and `medulla init` drafts one from what your repo already has.
 
-**[Routing](gitbooks/features/routing.md).** Deciding how to decompose a problem, executing a step, and compressing a transcript are different jobs. Medulla splits them across three cognitive tiers, orchestrator, reasoning, and compress, and routes each to a model sized for it. Workspace profiles and per-task hints steer harness and model choice as advisory guidance rather than hard gates.
+**[Routing](https://tinyhumans.gitbook.io/medulla/features/routing).** Deciding how to decompose a problem, executing a step, and compressing a transcript are different jobs. Medulla splits them across three cognitive tiers, orchestrator, reasoning, and compress, and routes each to a model sized for it. Workspace profiles and per-task hints steer harness and model choice as advisory guidance rather than hard gates.
 
-**[Token efficiency and budgets](gitbooks/features/token-efficiency.md).** Two opposite problems. On spending less, bulk fleet output never reaches the orchestrator, so its reasoning surface stays small and you pay orchestrator rates on the distilled slice only. On wasting less, if you have connected paid subscriptions those tokens are already bought, so Medulla steers delegation toward seats with headroom, because leaving them unused at the end of a window is money thrown away.
+**[Token efficiency and budgets](https://tinyhumans.gitbook.io/medulla/features/token-efficiency).** Two opposite problems. On spending less, bulk fleet output never reaches the orchestrator, so its reasoning surface stays small and you pay orchestrator rates on the distilled slice only. On wasting less, if you have connected paid subscriptions those tokens are already bought, so Medulla steers delegation toward seats with headroom, because leaving them unused at the end of a window is money thrown away.
 
-## Benchmarks at a Glance
-
-Validated head-to-head against a leading open-source agent harness (the same category as Claude Code and Codex), with strict offline scoring against ground truth:
-
-| Benchmark                                | Medulla                | Baseline harness             |
-| ---------------------------------------- | ---------------------- | ---------------------------- |
-| Heavy fan-out, 50 bulky sources          | **1.00** at $0.27      | DNF (window exceeded) / 0.00 |
-| Noise stress (decoys, injection, decay)  | **1.00 / 1.00 / 1.00** | 0.00 (empty output)          |
-| Multi-turn steering                      | **1.00 / 1.00 / 1.00** | 0.91 / 0.92                  |
-| Dependency chains                        | **1.00** at $0.074     | 1.00                         |
-| 100 [Project Euler](https://projecteuler.net/) problems in parallel   | **83/100** in 5 min    | 0/100                        |
-
-Full tables, methodology, and the runs behind them are in the [documentation](gitbooks/README.md). Every fixture and the harness that runs them are open source, so you can reproduce every number.
-
-## Pricing
-
-|                     | Price           |
-| ------------------- | --------------- |
-| Input tokens        | $3 / million    |
-| Cached input tokens | $0.10 / million |
-| Output tokens       | $6 / million    |
-
-Because Medulla keeps its reasoning surface small and offloads the bulk, you pay orchestrator rates only on the distilled slice that actually reaches it, not on the millions of tokens flowing through your fleet.
+Validated head-to-head against a leading open-source agent harness with strict offline scoring against ground truth. Full tables, methodology, token pricing, and the runs behind the numbers are in the [documentation](https://tinyhumans.gitbook.io/medulla), and every fixture and the harness that runs them are open source, so you can reproduce them.
 
 ## Availability
 
@@ -77,35 +51,33 @@ Request access and tell us what you are orchestrating.
 
 ## Documentation
 
-The full documentation lives in [gitbooks/](gitbooks/README.md).
+The full documentation is at **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**.
 
 **Overview**
 
-- [Why an Orchestrator Model](gitbooks/why-an-orchestrator-model.md)
-- [RLM: Context Scaling Without Collapse](gitbooks/rlm-context-scaling.md)
-- [Benchmarks](gitbooks/benchmarks.md)
-- [Real-World Fleets](gitbooks/real-world-fleets.md)
-- [Open Benchmarks, Open SDKs](gitbooks/open-benchmarks-open-sdks.md)
-- [Pricing and Availability](gitbooks/pricing-and-availability.md)
+- [Why an Orchestrator Model](https://tinyhumans.gitbook.io/medulla/why-an-orchestrator-model)
+- [RLM: Context Scaling Without Collapse](https://tinyhumans.gitbook.io/medulla/rlm-context-scaling)
+- [Benchmarks](https://tinyhumans.gitbook.io/medulla/benchmarks)
+- [Real-World Fleets](https://tinyhumans.gitbook.io/medulla/real-world-fleets)
+- [Open Benchmarks, Open SDKs](https://tinyhumans.gitbook.io/medulla/open-benchmarks-open-sdks)
+- [Pricing and Availability](https://tinyhumans.gitbook.io/medulla/pricing-and-availability)
 
 **Features**, what Medulla does day to day:
 
-- [Memory](gitbooks/features/memory.md): the persona pack, and the orchestrator's scratch space.
-- [Workers and Sessions](gitbooks/features/workers-and-sessions.md): capacity, threads, and what survives.
-- [MEDULLA.md Workspace Profiles](gitbooks/features/workspace-profiles.md): telling the orchestrator what a repo is.
-- [Orchestrator Routing](gitbooks/features/routing.md): cognitive tiers, harness selection, runtime fallback.
-- [Token Efficiency and Budgets](gitbooks/features/token-efficiency.md): small surfaces, enforced budgets, tokenmax.
+- [Memory](https://tinyhumans.gitbook.io/medulla/features/memory): the persona pack, and the orchestrator's scratch space.
+- [Workers and Sessions](https://tinyhumans.gitbook.io/medulla/features/workers-and-sessions): capacity, threads, and what survives.
+- [MEDULLA.md Workspace Profiles](https://tinyhumans.gitbook.io/medulla/features/workspace-profiles): telling the orchestrator what a repo is.
+- [Orchestrator Routing](https://tinyhumans.gitbook.io/medulla/features/routing): cognitive tiers, harness selection, runtime fallback.
+- [Token Efficiency and Budgets](https://tinyhumans.gitbook.io/medulla/features/token-efficiency): small surfaces, enforced budgets, tokenmax.
 
 **Developers**, to install the TUI, embed the SDK, and wire your own fleet to the orchestrator:
 
-- [Getting Started](gitbooks/developers/getting-started.md): install, build, run, first login.
-- [CLI Reference](gitbooks/developers/cli-reference.md): the TUI, the daemon, the harness wrappers, self-update.
-- [Configuration](gitbooks/developers/configuration.md): the Medulla home, layered config, and the three runtimes.
-- [Authentication](gitbooks/developers/authentication.md): the browser loopback login flow and token handling.
-- [Architecture](gitbooks/developers/architecture.md): the SDK/TUI split, runtime adapters, RLM, and the tiny.place bridge.
-- [Contributing](gitbooks/developers/contributing.md): build, test, lint, coverage, and releasing.
-
-Fleets with everyone.
+- [Getting Started](https://tinyhumans.gitbook.io/medulla/developers/getting-started): install, build, run, first login.
+- [CLI Reference](https://tinyhumans.gitbook.io/medulla/developers/cli-reference): the TUI, the daemon, the harness wrappers, self-update.
+- [Configuration](https://tinyhumans.gitbook.io/medulla/developers/configuration): the Medulla home, layered config, and the three runtimes.
+- [Authentication](https://tinyhumans.gitbook.io/medulla/developers/authentication): the browser loopback login flow and token handling.
+- [Architecture](https://tinyhumans.gitbook.io/medulla/developers/architecture): the SDK/TUI split, runtime adapters, RLM, and the tiny.place bridge.
+- [Contributing](https://tinyhumans.gitbook.io/medulla/developers/contributing): build, test, lint, coverage, and releasing.
 
 ## For developers
 
@@ -118,4 +90,12 @@ cargo install --path src/tui   # installs the `medulla` binary
 medulla                        # bare invocation starts the TUI
 ```
 
-Full developer documentation, covering CLI subcommands, configuration, authentication, architecture, and how to build from source, lives in the [Developers](gitbooks/developers/README.md) section of the docs.
+Full developer documentation, covering CLI subcommands, configuration, authentication, architecture, and how to build from source, lives in the [Developers](https://tinyhumans.gitbook.io/medulla/developers) section of the docs.
+
+## Why an Orchestrator Model
+
+Agent harnesses like Claude Code and Codex are remarkable at running one task deeply. But ask a harness to coordinate other harnesses and you hit the same quiet failure mode everywhere: the orchestrator is just another LLM with a transcript, and every harness it manages writes into that transcript. Model accuracy degrades well before the context window fills. So an orchestrator that reads raw harness traffic stops scaling at a handful of them. Long before the window runs out, it stops being able to think.
+
+Orchestration is becoming the dominant pattern in agentic systems, yet it has been running on architectures designed for chat. A chat model manages one thread. An orchestrator model must hold an entire operation in its head: hundreds of harnesses in flight, work being decomposed and delegated, results streaming back, decisions made continuously under pressure. Medulla was designed for exactly this. Where a harness drowns in its own coordination noise, Medulla always sees a small, current, high-signal picture of everything happening beneath it, no matter how large the operation grows.
+
+Fleets with everyone.

@@ -231,6 +231,104 @@ fn agents_jk_scroll_and_arrow_nav() {
     let _ = render(&mut app, 120, 40);
 }
 
+// --- harness task board + read-only seat budget ------------------------------
+
+fn tracked(
+    id: &str,
+    title: &str,
+    status: medulla::harness_contract::TrackedTaskStatus,
+) -> medulla::harness_contract::TrackedTask {
+    medulla::harness_contract::TrackedTask {
+        id: id.into(),
+        title: title.into(),
+        detail: None,
+        status,
+        created_at: "2026-07-20T00:00:00.000Z".into(),
+        updated_at: "2026-07-20T00:00:00.000Z".into(),
+        instruction_id: None,
+        delegated_task_ids: Vec::new(),
+        notes: Vec::new(),
+    }
+}
+
+#[test]
+fn agents_renders_harness_task_board_when_status_present() {
+    use medulla::harness_contract::{HarnessState, HarnessStatus, HarnessUsage, TrackedTaskStatus};
+    let (mut app, _rt) = demo_app();
+    // Inject a harness status onto the cached snapshot (draw does not refresh).
+    app.snapshot.harness = Some(HarnessStatus {
+        state: HarnessState::Running,
+        queued: 0,
+        active_instruction_id: None,
+        active_cycle_id: None,
+        tasks: vec![
+            tracked("t1", "Wire the harness contract", TrackedTaskStatus::Active),
+            tracked("t2", "Ship the docs", TrackedTaskStatus::Open),
+        ],
+        running_delegations: 0,
+        usage: HarnessUsage::default(),
+        last_result: None,
+        escalations: Vec::new(),
+    });
+    tab(&mut app, "Agents");
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("tasks"), "board header renders: {out:?}");
+    assert!(out.contains("Wire the harness"), "a task title renders");
+}
+
+#[test]
+fn agents_absent_harness_status_renders_nothing_extra() {
+    // The default demo app has no harness status; the board must not appear.
+    let (mut app, _rt) = demo_app();
+    assert!(app.snapshot.harness.is_none());
+    tab(&mut app, "Agents");
+    let out = render(&mut app, 120, 40);
+    assert!(!out.contains("tasks ·"), "no board when status absent");
+}
+
+#[test]
+fn agents_renders_read_only_seat_budget_for_a_budgeted_lane() {
+    // A roster descriptor carrying a `metadata.budget` stamp lights the seat note
+    // in the transcript header when that lane is selected.
+    let mut descriptor = medulla::runtime::AgentDescriptor {
+        id: "budgeted-1".into(),
+        name: "budgeted".into(),
+        description: "a seat-backed agent".into(),
+        availability: "online".into(),
+        tags: Vec::new(),
+        metadata: serde_json::Map::new(),
+    };
+    let budget = serde_json::json!({
+        "seatId": "seat-1",
+        "provider": "anthropic",
+        "plan": "claude_max_5x",
+        "planLabel": "Claude Max 5×",
+        "headroomTokens": 1_250_000,
+        "exhausted": false,
+        "primaryResetsAt": "2026-07-20T05:00:00.000Z"
+    });
+    descriptor.metadata.insert("budget".into(), budget);
+
+    let (mut app, _rt) = demo_app();
+    app.snapshot.roster = vec![descriptor];
+    tab(&mut app, "Agents");
+    // Walk the cursor across lanes, rendering at each stop until the budgeted
+    // lane is the active one and its seat note appears.
+    let mut seen = false;
+    for _ in 0..16 {
+        let out = render(&mut app, 120, 40);
+        if out.contains("seat Claude Max") && out.contains("1.2M left") {
+            seen = true;
+            break;
+        }
+        let _ = app.on_event(key(KeyCode::Down));
+    }
+    assert!(
+        seen,
+        "the read-only seat budget note renders for the budgeted lane"
+    );
+}
+
 // --- cancel with a cycle-less task id ---------------------------------------
 
 #[test]

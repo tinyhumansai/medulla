@@ -1,6 +1,6 @@
 # Benchmarks
 
-We validated Medulla head to head against a leading open-source agent harness (the same category as Claude Code and Codex), run both as a flat baseline and explicitly prompted to orchestrate its own subagents. Same tasks, same underlying models, strict offline scoring against ground truth.
+We validated Medulla head-to-head against a leading open-source agent harness (the same category as [Claude Code](https://www.anthropic.com/claude-code) and [Codex](https://github.com/openai/codex)), run both as a flat baseline and explicitly prompted to orchestrate its own subagents. Same tasks, same underlying models, strict offline scoring against ground truth.
 
 ## Heavy Fan-Out, 50 Bulky Sources
 
@@ -8,7 +8,7 @@ The combined corpus alone exceeds a single model's window.
 
 | Engine                     | Accuracy | Cost   | Wall time | Outcome                                       |
 | -------------------------- | -------- | ------ | --------- | --------------------------------------------- |
-| **Medulla**                | **1.00** | $0.27  | \~4 min   | All 50 workers completed, zero fabrication    |
+| **Medulla**                | **1.00** | $0.27  | ~4 min    | All 50 workers completed, zero fabrication    |
 | Open-source harness (flat) | DNF      | n/a    | 15s       | API error: one turn of results exceeds window |
 | Open-source harness (CLI)  | 0.00     | $0.004 | 25s       | Never fanned out, returned empty              |
 
@@ -23,7 +23,7 @@ Scores are accuracy / relevancy / groundedness.
 | Heterogeneous fan-out (4 task kinds + planted distractors)     | **1.00 / 1.00 / 1.00** | 1.00                |
 | Dependency chains (case to locker to registrar)                | **1.00** at $0.074     | 1.00                |
 
-## 100 Project Euler Problems, Solved in Parallel
+## 100 [Project Euler](https://projecteuler.net/) Problems, Solved in Parallel
 
 | Engine                    | Correct    | Cost  | Wall time                  |
 | ------------------------- | ---------- | ----- | -------------------------- |

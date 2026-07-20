@@ -117,6 +117,39 @@ fn logout_takes_two_presses_and_clears_the_store() {
 }
 
 #[test]
+fn a_successful_logout_quits_back_to_the_login_screen() {
+    // The live runtime still holds the token that was just revoked, so the
+    // session must end rather than leave the user signed out on disk but signed
+    // in on screen.
+    let dir = tempfile::tempdir().expect("tempdir");
+    sign_in(dir.path());
+    let mut app = account_app(dir.path());
+
+    key(&mut app, KeyCode::Enter);
+    assert!(!app.should_quit, "arming must not end the session");
+    assert!(!app.relogin_requested(), "arming is not a relogin");
+
+    key(&mut app, KeyCode::Enter);
+    assert!(app.should_quit, "the session ends");
+    assert!(app.relogin_requested(), "and asks for the login screen");
+}
+
+#[test]
+fn a_failed_logout_leaves_the_session_running() {
+    // Nothing was cleared, so there is nothing to re-authenticate for; dropping
+    // the user to the login screen here would lose their session for no reason.
+    let rt = Arc::new(MockRuntime::demo());
+    let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
+    let _ = app.focus_settings_subpage("Account");
+
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Enter);
+    assert!(app.status().contains("no Medulla home"), "{}", app.status());
+    assert!(!app.should_quit, "the session survives a failed logout");
+    assert!(!app.relogin_requested(), "no relogin is requested");
+}
+
+#[test]
 fn escape_cancels_an_armed_logout() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = sign_in(dir.path());

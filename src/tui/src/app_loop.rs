@@ -30,7 +30,7 @@ use medulla_tui::ui::login::LoginOutcome;
 use medulla_tui::ui::welcome::{format_usd, run_welcome_ui};
 
 use crate::commands::{run_login_screen, save_credentials};
-use crate::event_loop::run;
+use crate::event_loop::{run, SessionExit};
 use crate::terminal::{restore, TermGuard};
 
 /// Parse TUI args, select a runtime, set up the terminal, optionally run the
@@ -239,7 +239,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
 
     // Pre-app login screen: runs inside the same alt-screen session and resolves
     // to a token (→ backend runtime), the mock, or a clean quit.
-    if let Some(base_url) = need_login {
+    if let Some(base_url) = need_login.take() {
         match run_login_screen(&mut terminal, base_url.clone()).await? {
             LoginOutcome::Quit => {
                 drop(guard);
@@ -268,7 +268,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    let runtime = runtime.expect("a runtime is always selected");
+    let mut runtime = runtime.expect("a runtime is always selected");
 
     // First-run welcome: offer promotional credit for sharing coding-agent
     // history. Gated locally by `[onboarding] welcomeCompleted` so a returning
@@ -323,20 +323,60 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     };
     let tinyplace_obs = tinyplace_service.as_ref().map(|s| s.observation());
 
-    let result = run(
-        &mut terminal,
-        runtime.clone(),
-        loaded,
-        startup_status.or(tinyplace_status),
-        tinyplace_obs,
-        config_path,
-        home.clone(),
-    )
-    .await;
+    // Session loop. A normal quit runs once and breaks; a logout tears the
+    // authenticated session down and comes back here to re-authenticate, so the
+    // user lands on the login screen rather than being dropped to the shell.
+    // The tiny.place service and the terminal guard outlive the loop — neither
+    // depends on which account is signed in.
+    let mut status = startup_status.or(tinyplace_status);
+    let result = loop {
+        let result = run(
+            &mut terminal,
+            runtime.clone(),
+            loaded.clone(),
+            status.take(),
+            tinyplace_obs.clone(),
+            config_path.clone(),
+            home.clone(),
+        )
+        .await;
+
+        // Retire this session's runtime either way: on a logout its token is the
+        // one that was just revoked, so it must not survive into the next one.
+        runtime.shutdown().await.ok();
+
+        match result {
+            Ok(SessionExit::Relogin) => {}
+            other => break other.map(|_| ()),
+        }
+
+        let base_url = loaded.config.backend.base_url.clone();
+        match run_login_screen(&mut terminal, base_url.clone()).await? {
+            LoginOutcome::Quit => break Ok(()),
+            LoginOutcome::Mock => {
+                runtime = Arc::new(MockRuntime::demo());
+                status = Some("continuing offline with the mock runtime".to_string());
+            }
+            LoginOutcome::Token(jwt) => {
+                let client = MedullaClient::new(base_url.clone(), jwt.clone());
+                match BackendRuntime::connect(client.clone()).await {
+                    Ok(rt) => {
+                        runtime = Arc::new(rt);
+                        status = save_credentials(&home, &base_url, &jwt);
+                    }
+                    Err(e) => {
+                        runtime = Arc::new(MockRuntime::demo());
+                        status = Some(format!(
+                            "backend connect failed ({e}) — running with mock runtime"
+                        ));
+                    }
+                }
+            }
+        }
+    };
 
     // Explicit teardown (the guard also runs on drop / panic).
     drop(guard);
     drop(tinyplace_service); // aborts the background loops.
-    runtime.shutdown().await.ok();
     result
 }

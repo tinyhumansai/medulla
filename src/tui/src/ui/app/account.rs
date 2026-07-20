@@ -22,18 +22,30 @@ impl App {
 
     /// Clear the stored credentials, returning the status to show.
     ///
-    /// The in-memory runtime keeps whatever token it already holds, so the
-    /// current session continues; the next launch starts signed out. Saying so
-    /// is better than implying the session ended.
+    /// On success this also requests a relogin: the in-memory runtime still
+    /// holds a live token, so leaving the session running would leave the user
+    /// signed out on disk but signed in on screen. Quitting back to the login
+    /// screen makes the logout mean what it says. A failed clear leaves the
+    /// session alone — there is nothing to return to the login screen for.
     fn perform_logout(&mut self) -> String {
         let Some(home) = self.medulla_home.clone() else {
             return "Account · cannot log out: no Medulla home configured".into();
         };
         let store = medulla::auth::CredentialStore::at_home(&home);
         match store.clear() {
-            Ok(()) => "Account · logged out. Stored credentials cleared; this session continues until you quit.".into(),
+            Ok(()) => {
+                self.relogin_requested = true;
+                self.should_quit = true;
+                "Account · logged out. Returning to the login screen…".into()
+            }
             Err(e) => format!("Account · logout failed: {e}"),
         }
+    }
+
+    /// Whether the app quit in order to re-authenticate. Read by the startup
+    /// loop after [`crate::event_loop::run`] returns.
+    pub fn relogin_requested(&self) -> bool {
+        self.relogin_requested
     }
 
     /// Disarm a pending logout. Called whenever focus moves, so an armed logout

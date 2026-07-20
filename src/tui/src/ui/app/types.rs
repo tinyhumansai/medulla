@@ -278,6 +278,10 @@ pub struct App {
     /// credentials, so the first Enter arms and the second confirms; any other
     /// navigation disarms it.
     pub(super) logout_armed: bool,
+    /// Whether the app is quitting in order to re-authenticate rather than to
+    /// exit. Set by a successful logout so the caller tears the session down and
+    /// returns to the login screen instead of returning to the shell.
+    pub(super) relogin_requested: bool,
     /// The Medulla home directory, used to locate the credential store the
     /// Account subpage clears. Injectable so feature tests never touch the real
     /// home; `None` disables logout.

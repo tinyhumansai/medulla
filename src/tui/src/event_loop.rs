@@ -51,6 +51,18 @@ pub(crate) enum AppMsg {
     FeedbackChanged(String),
 }
 
+/// Why the event loop stopped.
+///
+/// A logout is not an exit: it tears the authenticated session down but expects
+/// the caller to return to the login screen rather than to the shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionExit {
+    /// The user quit; the process should exit.
+    Quit,
+    /// The user logged out; re-authenticate and start a fresh session.
+    Relogin,
+}
+
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
 /// input events, runtime snapshots, background [`AppMsg`]s, and the animation
 /// tick until the app requests quit.
@@ -62,7 +74,7 @@ pub(crate) async fn run(
     tinyplace_obs: Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
     config_path: std::path::PathBuf,
     medulla_home: std::path::PathBuf,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<SessionExit> {
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
     app.set_medulla_home(medulla_home);
@@ -163,7 +175,11 @@ pub(crate) async fn run(
             }
         }
     }
-    Ok(())
+    Ok(if app.relogin_requested() {
+        SessionExit::Relogin
+    } else {
+        SessionExit::Quit
+    })
 }
 
 /// Spawn the periodic release-update checker unless disabled by config/env. It

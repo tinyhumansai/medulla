@@ -54,6 +54,7 @@ impl App {
             appearance_index: 0,
             config_index: 0,
             logout_armed: false,
+            relogin_requested: false,
             medulla_home: None,
             theme,
             config_path: None,

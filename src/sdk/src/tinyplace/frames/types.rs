@@ -33,6 +33,18 @@ impl HarnessProvider {
         }
     }
 
+    /// The human-readable product name, for UI labels.
+    ///
+    /// Distinct from [`HarnessProvider::as_str`], which is the lowercase wire
+    /// identifier and must not change.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            HarnessProvider::Claude => "Claude Code",
+            HarnessProvider::Codex => "Codex",
+            HarnessProvider::Opencode => "OpenCode",
+        }
+    }
+
     /// Parse a provider name, returning `None` for anything unrecognized.
     pub fn from_wire(value: &str) -> Option<Self> {
         match value {

@@ -456,3 +456,35 @@ fn peer_protocol_defaults_to_task() {
     let peer: Peer = serde_json::from_str(r#"{"id":"p1"}"#).unwrap();
     assert_eq!(peer.protocol, "task");
 }
+
+#[test]
+fn display_host_strips_scheme_port_and_path() {
+    use super::display_host;
+    assert_eq!(
+        display_host("https://api.tinyhumans.ai"),
+        "api.tinyhumans.ai"
+    );
+    assert_eq!(
+        display_host("https://api.tinyhumans.ai/v1/chat?x=1#f"),
+        "api.tinyhumans.ai"
+    );
+    assert_eq!(display_host("http://localhost:4000"), "localhost");
+    assert_eq!(
+        display_host("  https://staging-api.tiny.place/  "),
+        "staging-api.tiny.place"
+    );
+    assert_eq!(
+        display_host("https://user:pw@api.example.com/x"),
+        "api.example.com"
+    );
+    assert_eq!(display_host("http://[::1]:8080/v1"), "[::1]");
+}
+
+#[test]
+fn display_host_passes_through_unparseable_input() {
+    use super::display_host;
+    // Display-only: a malformed base URL is shown verbatim so the mistake is visible.
+    assert_eq!(display_host("not a url"), "not a url");
+    assert_eq!(display_host("api.tinyhumans.ai"), "api.tinyhumans.ai");
+    assert_eq!(display_host("https://"), "https://");
+}

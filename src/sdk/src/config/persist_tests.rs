@@ -131,3 +131,65 @@ fn persisting_replaces_a_non_table_onboarding_value() {
         toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
     assert!(parsed.onboarding.welcome_completed);
 }
+
+#[test]
+fn persist_setting_creates_and_merges_sections() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("nested").join("config.toml");
+
+    // Writing into a file that does not exist yet creates it and its parent.
+    super::persist_setting(&path, "memory", "enabled", toml::Value::Boolean(true)).expect("write");
+    // A second key in the same section merges rather than replacing.
+    super::persist_setting(&path, "medulla", "maxPasses", toml::Value::Integer(7)).expect("write");
+
+    let parsed: TuiConfig =
+        toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
+    assert_eq!(parsed.memory.and_then(|m| m.enabled), Some(true));
+    assert_eq!(parsed.medulla.max_passes, Some(7));
+}
+
+#[test]
+fn persist_setting_preserves_unrelated_sections() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[theme]\nprimary = \"cyan\"\n\n[memory]\nworkspace = \"/w\"\n",
+    )
+    .expect("seed");
+
+    super::persist_setting(&path, "memory", "enabled", toml::Value::Boolean(false)).expect("write");
+
+    let parsed: TuiConfig =
+        toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
+    assert_eq!(parsed.theme.primary.as_deref(), Some("cyan"));
+    let memory = parsed.memory.expect("memory section");
+    assert_eq!(memory.enabled, Some(false));
+    assert_eq!(
+        memory.workspace.as_deref(),
+        Some("/w"),
+        "sibling key survives"
+    );
+}
+
+#[test]
+fn clear_setting_removes_only_its_key() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[medulla]\nmaxPasses = 9\nmaxSteps = 40\n").expect("seed");
+
+    super::clear_setting(&path, "medulla", "maxPasses").expect("clear");
+
+    let parsed: TuiConfig =
+        toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
+    assert_eq!(parsed.medulla.max_passes, None, "cleared back to unset");
+    assert_eq!(parsed.medulla.max_steps, Some(40));
+}
+
+#[test]
+fn clear_setting_on_a_missing_file_is_a_no_op() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("absent.toml");
+    super::clear_setting(&path, "medulla", "maxPasses").expect("no-op");
+    assert!(!path.exists(), "clearing must not create the file");
+}

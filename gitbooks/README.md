@@ -53,6 +53,8 @@ Medulla is built around one principle: get the right answer. When a worker fails
 * [Open Benchmarks, Open SDKs](open-benchmarks-open-sdks.md) — reproduce every number yourself.
 * [Pricing and Availability](pricing-and-availability.md) — pricing, early alpha, and how to request access.
 
+The [Features](features/README.md) section covers what Medulla does day to day: [memory](features/memory.md), [workers and sessions](features/workers-and-sessions.md), [`MEDULLA.md` workspace profiles](features/workspace-profiles.md), [routing](features/routing.md), and [token efficiency and budgets](features/token-efficiency.md).
+
 Building on Medulla? The [Developers](developers/README.md) section covers installing the [TUI](developers/getting-started.md), embedding the [SDK](developers/architecture.md), and wiring your own fleet to the orchestrator.
 
 ## What Comes Next

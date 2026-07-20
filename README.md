@@ -31,6 +31,20 @@ Agent harnesses like Claude Code and Codex are remarkable at running one task de
 
 Orchestration is becoming the dominant pattern in agentic systems, yet it has been running on architectures designed for chat. A chat model manages one thread. An orchestrator model must hold an entire operation in its head: hundreds of harnesses in flight, work being decomposed and delegated, results streaming back, decisions made continuously under pressure. Medulla was designed for exactly this. Where a harness drowns in its own coordination noise, Medulla always sees a small, current, high-signal picture of everything happening beneath it, no matter how large the operation grows.
 
+## What It Does
+
+Five capabilities do most of the work. Each has a full page in the [documentation](gitbooks/features/README.md).
+
+**[Memory](gitbooks/features/memory.md).** Medulla reads the coding-agent history already on your machine — Claude Code transcripts, Codex rollouts, your instruction files — and distils it into a compact persona pack: your standing rules, your stack, how you like code written. You have already explained yourself hundreds of times to harnesses that forgot. Separately, the reasoning tier keeps a durable scratch space so a hard-won fact survives to the next cycle instead of being derived twice.
+
+**[Workers and sessions](gitbooks/features/workers-and-sessions.md).** A worker is capacity — a real harness running with your credentials in your workspace. A session is the thread you return to, resumable and forkable, surviving the terminal app that started it. Unassigned tasks go to the least-loaded healthy worker, failed ones get re-delegated, and every task settles into a definite state.
+
+**[MEDULLA.md](gitbooks/features/workspace-profiles.md).** A short authored file at a repository root telling the orchestrator what the directory *is* and how to route work over it. `AGENTS.md` is written for an agent working inside a repo — too long, and silent on routing. This is ~100–200 tokens the orchestrator reads every cycle. `medulla init` drafts one from what your repo already has.
+
+**[Routing](gitbooks/features/routing.md).** Deciding how to decompose a problem, executing a step, and compressing a transcript are different jobs. Medulla splits them across three cognitive tiers — orchestrator, reasoning, compress — and routes each to a model sized for it. Workspace profiles and per-task hints steer harness and model choice as advisory guidance, never hard gates.
+
+**[Token efficiency and budgets](gitbooks/features/token-efficiency.md).** Two opposite problems. Spending less: bulk fleet output never reaches the orchestrator, so its reasoning surface stays small and you pay orchestrator rates on the distilled slice only. Wasting less: if you have connected paid subscriptions, those tokens are already bought — Medulla steers delegation toward seats with headroom, because leaving them unused at the end of a window is money thrown away.
+
 ## Benchmarks at a Glance
 
 Validated head-to-head against a leading open-source agent harness (the same category as Claude Code and Codex), with strict offline scoring against ground truth:
@@ -73,6 +87,14 @@ The full documentation lives in [gitbooks/](gitbooks/README.md).
 - [Real-World Fleets](gitbooks/real-world-fleets.md)
 - [Open Benchmarks, Open SDKs](gitbooks/open-benchmarks-open-sdks.md)
 - [Pricing and Availability](gitbooks/pricing-and-availability.md)
+
+**Features** — what Medulla does day to day:
+
+- [Memory](gitbooks/features/memory.md) — the persona pack, and the orchestrator's scratch space.
+- [Workers and Sessions](gitbooks/features/workers-and-sessions.md) — capacity, threads, and what survives.
+- [MEDULLA.md Workspace Profiles](gitbooks/features/workspace-profiles.md) — telling the orchestrator what a repo is.
+- [Orchestrator Routing](gitbooks/features/routing.md) — cognitive tiers, harness selection, runtime fallback.
+- [Token Efficiency and Budgets](gitbooks/features/token-efficiency.md) — small surfaces, enforced budgets, tokenmax.
 
 **Developers** — install the TUI, embed the SDK, and wire your own fleet to the orchestrator:
 

@@ -12,16 +12,15 @@
 
 ## Features
 
-* [Features](features/README.md)
 * [Memory](features/memory.md)
 * [Workers and Sessions](features/workers-and-sessions.md)
-* [MEDULLA.md Workspace Profiles](features/workspace-profiles.md)
+* [MEDULLA.md](features/workspace-profiles.md)
 * [Orchestrator Routing](features/routing.md)
 * [Token Efficiency and Budgets](features/token-efficiency.md)
 
 ## Developers
 
-* [Developers](developers/README.md)
+* [Overview](developers/README.md)
 * [Getting Started](developers/getting-started.md)
 * [CLI Reference](developers/cli-reference.md)
 * [Configuration](developers/configuration.md)

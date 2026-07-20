@@ -8,5 +8,6 @@ pub mod agents;
 pub mod chat_store;
 pub mod command;
 pub mod events;
+pub mod harness;
 pub mod stream;
 pub mod util;

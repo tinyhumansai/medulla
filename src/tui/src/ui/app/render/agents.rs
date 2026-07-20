@@ -12,7 +12,9 @@ use crate::ui::agents::{
     lane_lines, task_lines, AgentLane, AgentRole, AgentRow, Line as StyledLine, TaskState,
     TaskStatus,
 };
+use crate::ui::harness::{budget_note, task_board_lines};
 use crate::ui::util::fmt_tokens;
+use medulla::harness_contract::AgentBudgetMetadata;
 
 use super::super::types::App;
 use super::{color, styled_to_tline};
@@ -90,6 +92,28 @@ impl App {
         let inner = block.inner(cols[1]);
         f.render_widget(block, cols[1]);
         let mut header: Vec<TLine> = Vec::new();
+        // Harness task board: session-wide, shown only when the backend surfaces a
+        // `HarnessStatus`. Degrades to nothing (empty vec) when absent or empty.
+        if let Some(status) = &self.snapshot.harness {
+            for line in task_board_lines(status, pane_width) {
+                header.push(styled_to_tline(&line));
+            }
+        }
+        // Read-only seat budget for the selected lane, when its descriptor carries
+        // a `metadata.budget` stamp. Seat CRUD stays a backend REST concern.
+        if let Some(budget) = lane
+            .and_then(|l| l.descriptor.as_ref())
+            .and_then(|d| AgentBudgetMetadata::from_metadata(&d.metadata))
+        {
+            header.push(TLine::from(Span::styled(
+                format!("seat {}", budget_note(&budget)),
+                Style::default().fg(if budget.exhausted {
+                    Color::Red
+                } else {
+                    Color::Magenta
+                }),
+            )));
+        }
         // Context bar.
         if let Some(l) = lane {
             if let Some(used) = l.context_tokens {

@@ -28,7 +28,11 @@ dump_diagnostics() {
   for j in "$RUN_DIR"/*.json; do
     [ -f "$j" ] || continue
     printf '\n----- %s -----\n' "$(basename "$j")" >&2
-    cat "$j" >&2 || true
+    # opencode.json carries a provider API key — a real one under run-live.sh.
+    # Diagnostics land in CI logs and pasted bug reports, so redact any value
+    # that looks like a credential rather than trusting the file not to hold one.
+    sed -E 's/("(apiKey|api_key|token|secret)"[[:space:]]*:[[:space:]]*")[^"]*"/\1<redacted>"/g' \
+      "$j" >&2 || true
   done
   [ -f "$RUN_DIR/llm.jsonl" ] && { printf '\n----- llm.jsonl (last 5) -----\n' >&2; tail -n 5 "$RUN_DIR/llm.jsonl" >&2 || true; }
   if tmux has-session -t "$SESSION" 2>/dev/null; then

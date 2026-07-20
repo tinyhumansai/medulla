@@ -2,7 +2,7 @@
 
 ## Overview
 
-* [Medulla - The First Orchestrator Model](README.md)
+* [The First Orchestrator Model](README.md)
 * [Why an Orchestrator Model](why-an-orchestrator-model.md)
 * [RLM: Context Scaling Without Collapse](rlm-context-scaling.md)
 * [Benchmarks](benchmarks.md)

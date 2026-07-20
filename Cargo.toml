@@ -6,7 +6,7 @@ members = ["src/sdk", "src/tui"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/medulla"

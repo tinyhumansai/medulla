@@ -27,13 +27,15 @@
 mod draw;
 mod run;
 mod state;
+mod status;
 mod types;
 
 #[cfg(test)]
 mod tests;
 
 pub use run::{drive_welcome_ui, run_welcome_ui};
+pub use status::{persist_onboarding, settles_share, share_status};
 pub use types::{
     format_usd, ScanSummary, WelcomeCmd, WelcomeEvent, WelcomeOutcome, WelcomeScreen,
-    DEFAULT_MAX_REWARD_USD,
+    WelcomeSession, DEFAULT_MAX_REWARD_USD,
 };

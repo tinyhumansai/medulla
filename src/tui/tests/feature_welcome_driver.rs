@@ -19,7 +19,7 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use medulla::client::MedullaClient;
-use medulla_tui::ui::welcome::{drive_welcome_ui, WelcomeOutcome};
+use medulla_tui::ui::welcome::{drive_welcome_ui, WelcomeEvent, WelcomeOutcome, WelcomeSession};
 
 #[path = "../../sdk/tests/support/mod.rs"]
 mod support;
@@ -76,14 +76,29 @@ fn client(backend: &MockBackend) -> MedullaClient {
     MedullaClient::new(backend.base_url.clone(), "test-jwt")
 }
 
+/// Drain a backgrounded share to its settled event.
+///
+/// The upload deliberately outlives the welcome screen, so a test that asserts
+/// on uploads or the award has to wait for the detached task the way the app
+/// does — by reading the channel the driver handed back.
+async fn settle(session: WelcomeSession) -> Option<WelcomeEvent> {
+    let mut rx = session.sharing?;
+    while let Some(ev) = rx.recv().await {
+        if matches!(ev, WelcomeEvent::Claimed { .. } | WelcomeEvent::Failed(_)) {
+            return Some(ev);
+        }
+    }
+    None
+}
+
 #[tokio::test]
-async fn the_full_flow_runs_from_intro_to_a_claimed_reward() {
+async fn consenting_returns_immediately_and_shares_in_the_background() {
     let backend = MockBackend::start().await;
     let dir = tempfile::tempdir().unwrap();
     let env = staged_history(dir.path());
     let mut term = terminal();
 
-    let outcome = tokio::time::timeout(
+    let session = tokio::time::timeout(
         Duration::from_secs(20),
         drive_welcome_ui(&mut term, &client(&backend), env, repeating(KeyCode::Enter)),
     )
@@ -91,13 +106,20 @@ async fn the_full_flow_runs_from_intro_to_a_claimed_reward() {
     .expect("flow should not hang")
     .expect("flow should succeed");
 
-    assert_eq!(
-        outcome,
-        WelcomeOutcome::Completed {
-            awarded_usd: 5.0,
-            tier: Some("Rising".into()),
+    // Consent is the last thing the screen needs; the transfer continues without
+    // holding the user on a progress bar.
+    assert_eq!(session.outcome, WelcomeOutcome::Sharing);
+
+    let settled = settle(session).await.expect("the share settles");
+    match settled {
+        WelcomeEvent::Claimed {
+            awarded_usd, tier, ..
+        } => {
+            assert_eq!(awarded_usd, 5.0);
+            assert_eq!(tier, Some("Rising".into()));
         }
-    );
+        other => panic!("expected a claim, got {other:?}"),
+    }
 
     // Status, then one upload per staged transcript, then exactly one claim.
     let paths: Vec<String> = backend.requests().iter().map(|r| r.path.clone()).collect();
@@ -113,13 +135,14 @@ async fn the_uploaded_transcripts_are_redacted_on_the_wire() {
     let env = staged_history(dir.path());
     let mut term = terminal();
 
-    tokio::time::timeout(
+    let session = tokio::time::timeout(
         Duration::from_secs(20),
         drive_welcome_ui(&mut term, &client(&backend), env, repeating(KeyCode::Enter)),
     )
     .await
     .expect("flow should not hang")
     .unwrap();
+    settle(session).await.expect("the share settles");
 
     let requests = backend.requests();
     let uploads: Vec<&String> = requests
@@ -153,7 +176,7 @@ async fn declining_at_the_intro_uploads_nothing() {
     .expect("flow should not hang")
     .unwrap();
 
-    assert_eq!(outcome, WelcomeOutcome::Skipped);
+    assert_eq!(outcome.outcome, WelcomeOutcome::Skipped);
 
     // Only the opening status check — nothing was scanned or sent.
     let paths: Vec<String> = backend.requests().iter().map(|r| r.path.clone()).collect();
@@ -180,7 +203,7 @@ async fn an_already_claimed_reward_skips_without_drawing_anything() {
         .await
         .unwrap();
 
-    assert_eq!(outcome, WelcomeOutcome::Skipped);
+    assert_eq!(outcome.outcome, WelcomeOutcome::Skipped);
     assert_eq!(backend.requests().len(), 1, "only the status check");
 }
 
@@ -196,7 +219,7 @@ async fn an_unreachable_backend_yields_unavailable_rather_than_blocking_startup(
         .await
         .unwrap();
 
-    assert_eq!(outcome, WelcomeOutcome::Unavailable);
+    assert_eq!(outcome.outcome, WelcomeOutcome::Unavailable);
 }
 
 #[tokio::test]
@@ -224,7 +247,7 @@ async fn no_local_history_reaches_the_empty_state_and_skips() {
 
     // Not Skipped: the offer stays open so it can be made once this user has
     // sessions, matching what the empty-state screen tells them.
-    assert_eq!(outcome, WelcomeOutcome::NothingToShare);
+    assert_eq!(outcome.outcome, WelcomeOutcome::NothingToShare);
     let paths: Vec<String> = backend.requests().iter().map(|r| r.path.clone()).collect();
     assert_eq!(
         paths.iter().filter(|p| p.ends_with("/uploads")).count(),
@@ -234,7 +257,7 @@ async fn no_local_history_reaches_the_empty_state_and_skips() {
 }
 
 #[tokio::test]
-async fn a_failing_claim_ends_the_flow_but_stays_retryable() {
+async fn a_failing_claim_is_reported_through_the_share_channel() {
     let backend = MockBackend::start().await;
     // Uploads succeed but the claim 404s (an unknown route on the mock).
     backend.configure(|config| config.history_claim = serde_json::Value::Null);
@@ -242,7 +265,7 @@ async fn a_failing_claim_ends_the_flow_but_stays_retryable() {
     let env = staged_history(dir.path());
     let mut term = terminal();
 
-    let outcome = tokio::time::timeout(
+    let session = tokio::time::timeout(
         Duration::from_secs(20),
         drive_welcome_ui(&mut term, &client(&backend), env, repeating(KeyCode::Enter)),
     )
@@ -250,29 +273,36 @@ async fn a_failing_claim_ends_the_flow_but_stays_retryable() {
     .expect("flow should not hang")
     .unwrap();
 
-    // The flow ends rather than trapping the user on a spinner — but as
-    // Unavailable, because the reward never settled. Reporting Completed here
-    // would let the caller mark onboarding done and lose a reward the user
-    // never actually received.
-    assert_eq!(outcome, WelcomeOutcome::Unavailable);
+    // The user is already in the app; the failure reaches them on the status
+    // line instead of trapping them on a spinner. Crucially it arrives as
+    // `Failed`, which does not record onboarding — marking it done here would
+    // lose a reward the user never actually received.
+    assert_eq!(session.outcome, WelcomeOutcome::Sharing);
+    let settled = settle(session).await.expect("the share settles");
+    assert!(
+        matches!(settled, WelcomeEvent::Failed(_)),
+        "expected a failure, got {settled:?}"
+    );
 }
 
 #[tokio::test]
-async fn the_flow_renders_every_step_it_passes_through() {
+async fn the_last_frame_the_user_sees_is_the_consent_step() {
+    // The screen now hands off at consent, so the consent panel — not a progress
+    // bar or a reveal — is the last thing drawn before the app takes over.
     let backend = MockBackend::start().await;
     let dir = tempfile::tempdir().unwrap();
     let env = staged_history(dir.path());
     let mut term = terminal();
 
-    tokio::time::timeout(
+    let session = tokio::time::timeout(
         Duration::from_secs(20),
         drive_welcome_ui(&mut term, &client(&backend), env, repeating(KeyCode::Enter)),
     )
     .await
     .expect("flow should not hang")
     .unwrap();
+    assert_eq!(session.outcome, WelcomeOutcome::Sharing);
 
-    // The terminal's final frame is the reveal.
     let rendered: String = term
         .backend()
         .buffer()
@@ -280,11 +310,9 @@ async fn the_flow_renders_every_step_it_passes_through() {
         .iter()
         .map(|cell| cell.symbol())
         .collect();
-    assert!(rendered.contains("POWER LEVEL"), "final frame: {rendered}");
-    assert!(rendered.contains("RISING"), "final frame: {rendered}");
     assert!(
-        rendered.contains("$5 of $25 earned"),
-        "final frame: {rendered}"
+        !rendered.contains("POWER LEVEL"),
+        "the reveal is no longer reached in this flow: {rendered}"
     );
 }
 
@@ -313,32 +341,27 @@ fn many_sessions(dir: &std::path::Path, count: usize) -> HashMap<String, String>
 }
 
 #[tokio::test]
-async fn skipping_mid_upload_cancels_the_share_and_never_claims() {
-    // Withdrawing consent has to actually stop the work. The share runs as a
-    // spawned task, so without an abort the flow would return "skipped" while
-    // that task kept uploading and went on to claim the reward.
+async fn declining_at_the_consent_step_uploads_nothing() {
+    // Consent is now the last point at which the user can stop this: once they
+    // approve, the share is handed to the app and runs to completion. So the
+    // guarantee that matters is that declining *at the gate* transfers nothing
+    // — no upload, no claim.
     let backend = std::sync::Arc::new(MockBackend::start().await);
     let dir = tempfile::tempdir().unwrap();
     let env = many_sessions(dir.path(), 60);
     let mut term = terminal();
 
-    // Keys react to observed state rather than a timer: press Enter until an
-    // upload is actually in flight, then press Esc.
+    // Enter past the intro, then Esc as soon as the consent panel appears.
+    // Keys react to observed state rather than a timer: the scan has to have
+    // finished before Esc means "decline" rather than "abandon the scan".
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<KeyEvent>();
-    let probe = backend.clone();
     tokio::spawn(async move {
+        let _ = tx.send(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         loop {
-            let uploads = probe
-                .requests()
-                .iter()
-                .filter(|r| r.path.ends_with("/uploads"))
-                .count();
-            let code = if uploads > 0 {
-                KeyCode::Esc
-            } else {
-                KeyCode::Enter
-            };
-            if tx.send(KeyEvent::new(code, KeyModifiers::NONE)).is_err() {
+            if tx
+                .send(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+                .is_err()
+            {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(2)).await;
@@ -348,7 +371,7 @@ async fn skipping_mid_upload_cancels_the_share_and_never_claims() {
         rx.recv().await.map(|key| (key, rx))
     }));
 
-    let outcome = tokio::time::timeout(
+    let session = tokio::time::timeout(
         Duration::from_secs(20),
         drive_welcome_ui(&mut term, &client(&backend), env, keys),
     )
@@ -356,19 +379,19 @@ async fn skipping_mid_upload_cancels_the_share_and_never_claims() {
     .expect("flow should not hang")
     .unwrap();
 
-    assert_eq!(outcome, WelcomeOutcome::Skipped);
+    assert_eq!(session.outcome, WelcomeOutcome::Skipped);
+    assert!(
+        session.sharing.is_none(),
+        "declining must not leave a share running"
+    );
 
-    // Give any un-aborted task a chance to finish and claim, so this fails loudly
-    // if the abort regresses.
+    // Give any stray task a chance to act, so this fails loudly if a future
+    // change starts the upload before the gate.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let paths: Vec<String> = backend.requests().iter().map(|r| r.path.clone()).collect();
     let uploads = paths.iter().filter(|p| p.ends_with("/uploads")).count();
     let claims = paths.iter().filter(|p| p.ends_with("/claim")).count();
-
-    assert_eq!(claims, 0, "a cancelled share must never claim the reward");
-    assert!(
-        uploads < 60,
-        "upload should have been cut short, got {uploads}"
-    );
+    assert_eq!(uploads, 0, "nothing may be uploaded: {paths:?}");
+    assert_eq!(claims, 0, "and nothing may be claimed: {paths:?}");
 }

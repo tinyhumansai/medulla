@@ -116,3 +116,45 @@ fn install_binary_replaces_and_backs_up() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A fresh temp directory for one install test.
+fn install_dir(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "medulla-install-{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn installing_where_nothing_exists_yet_needs_no_backup() {
+    // A first install has no current binary to move aside; that must not be
+    // mistaken for a failure.
+    let dir = install_dir("fresh");
+    let target = dir.join("medulla");
+    let new = dir.join("staged");
+    std::fs::write(&new, b"NEW").unwrap();
+
+    install_binary(&new, &target).unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), b"NEW");
+    assert!(
+        !backup_path(&target).exists(),
+        "nothing was there to back up"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_writable_directory_is_reported_as_installable() {
+    let dir = install_dir("writable");
+    assert!(exe_is_writable(&dir.join("medulla")));
+    // A path whose parent does not exist cannot be written to.
+    assert!(!exe_is_writable(&dir.join("no-such-dir/medulla")));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -363,3 +363,130 @@ fn only_a_positive_completed_award_is_announced() {
     assert_eq!(WelcomeOutcome::NothingToShare.granted_usd(), None);
     assert_eq!(WelcomeOutcome::Unavailable.granted_usd(), None);
 }
+
+// --- backgrounded-share status ----------------------------------------------
+
+mod share {
+    use super::super::status::{settles_share, share_status};
+    use super::super::types::WelcomeEvent;
+    use std::cell::Cell;
+
+    fn claimed(awarded_usd: f64) -> WelcomeEvent {
+        WelcomeEvent::Claimed {
+            awarded_usd,
+            tier: Some("Rising".into()),
+            breakdown: vec![],
+            max_reward_usd: 25.0,
+            already_claimed: false,
+        }
+    }
+
+    #[test]
+    fn progress_is_reported_without_settling_anything() {
+        let persisted = Cell::new(false);
+        let status = share_status(
+            &WelcomeEvent::UploadProgress {
+                uploaded: 3,
+                total: 9,
+                redactions: 1,
+            },
+            || {
+                persisted.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(status.as_deref(), Some("sharing history · 3/9 transcripts"));
+        assert!(!persisted.get(), "progress must not record onboarding");
+    }
+
+    #[test]
+    fn a_claim_announces_the_credit_and_records_onboarding() {
+        let persisted = Cell::new(false);
+        let status = share_status(&claimed(7.0), || {
+            persisted.set(true);
+            Ok(())
+        });
+        assert_eq!(
+            status.as_deref(),
+            Some("$7 in free credits added to your balance")
+        );
+        assert!(persisted.get(), "a settled claim records onboarding");
+    }
+
+    #[test]
+    fn a_zero_award_still_settles_but_does_not_claim_credit() {
+        // The offer was answered — it just scored nothing. Announcing "$0 in
+        // free credits" would be worse than saying nothing about the amount.
+        let persisted = Cell::new(false);
+        let status = share_status(&claimed(0.0), || {
+            persisted.set(true);
+            Ok(())
+        });
+        assert_eq!(status.as_deref(), Some("history shared — thanks!"));
+        assert!(persisted.get(), "a zero award still settles the offer");
+    }
+
+    #[test]
+    fn a_failed_share_keeps_the_offer_open() {
+        // The load-bearing rule: a transient failure must not cost the user the
+        // credit they consented to earn.
+        let persisted = Cell::new(false);
+        let status = share_status(&WelcomeEvent::Failed("upload 500".into()), || {
+            persisted.set(true);
+            Ok(())
+        });
+        assert_eq!(status.as_deref(), Some("history share failed: upload 500"));
+        assert!(!persisted.get(), "a failure must never record onboarding");
+    }
+
+    #[test]
+    fn a_failed_persist_is_reported_alongside_the_award() {
+        // The credit is real even when the local flag could not be written, so
+        // the user hears about both rather than only the error.
+        let status = share_status(&claimed(3.0), || Err("disk full".into()));
+        let status = status.expect("still reports");
+        assert!(status.contains("$3 in free credits"), "{status}");
+        assert!(status.contains("disk full"), "{status}");
+    }
+
+    #[test]
+    fn a_late_scan_event_says_nothing() {
+        // The scan finished before the channel was handed over; if one arrives
+        // anyway it must not produce a status line out of nowhere.
+        let status = share_status(&WelcomeEvent::ScanReady(Default::default()), || {
+            panic!("must not persist")
+        });
+        assert_eq!(status, None);
+    }
+
+    #[test]
+    fn persisting_onboarding_writes_the_flag_and_reports_failure_as_text() {
+        use super::super::status::persist_onboarding;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        persist_onboarding(&path).expect("writes the flag");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("welcomeCompleted"), "flag written: {text}");
+
+        // Writing it twice is idempotent — a second settled share (or a retry)
+        // must not corrupt the file.
+        persist_onboarding(&path).expect("writes again");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            text.matches("welcomeCompleted").count(),
+            1,
+            "the flag is replaced, not appended: {text}"
+        );
+    }
+
+    #[test]
+    fn only_terminal_events_end_the_share() {
+        assert!(settles_share(&claimed(1.0)));
+        assert!(settles_share(&WelcomeEvent::Failed("x".into())));
+        assert!(!settles_share(&WelcomeEvent::UploadProgress {
+            uploaded: 1,
+            total: 2,
+            redactions: 0,
+        }));
+    }
+}

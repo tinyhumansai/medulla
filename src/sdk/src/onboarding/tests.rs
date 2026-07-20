@@ -134,3 +134,101 @@ async fn headless_without_owner_still_registers() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A temp-dir environment with a fixed identity, so onboarding needs no network
+/// and the derived address is stable across a test.
+fn interactive_env(dir: &std::path::Path) -> HashMap<String, String> {
+    let mut e = env(&[
+        ("MEDULLA_HOME", dir.join("home").to_str().unwrap()),
+        ("TINYPLACE_CONFIG", dir.join("tp.json").to_str().unwrap()),
+        ("USER", "ada"),
+        ("HOSTNAME", "box-1"),
+    ]);
+    let signer = LocalSigner::generate();
+    let hex: String = signer.seed().iter().map(|b| format!("{b:02x}")).collect();
+    e.insert("TINYPLACE_SECRET_KEY".to_string(), hex);
+    e
+}
+
+#[tokio::test]
+async fn an_aborted_interactive_onboarding_registers_nothing() {
+    // `None` from the UI means the operator pressed q / Ctrl-C. That must leave
+    // no profile behind, or the next launch would treat them as registered under
+    // a name they never agreed to.
+    let dir = tempfile::tempdir().unwrap();
+    let e = interactive_env(dir.path());
+
+    let outcome = ensure_registered(
+        &e,
+        false,
+        Some(Box::new(|_ctx| Box::pin(async { Ok(None) }))),
+    )
+    .await
+    .expect("aborting is not an error");
+
+    assert!(outcome.is_none(), "an abort registers nothing");
+    assert!(
+        crate::onboarding::WorkerProfile::load(&crate::onboarding::profile_path(&e)).is_none(),
+        "no profile may be written"
+    );
+}
+
+#[tokio::test]
+async fn the_interactive_name_and_owner_are_what_get_registered() {
+    // The whole point of the callback is that the operator's choices win over
+    // the machine-derived defaults.
+    let dir = tempfile::tempdir().unwrap();
+    let e = interactive_env(dir.path());
+
+    let reg = ensure_registered(
+        &e,
+        false,
+        Some(Box::new(|_ctx| {
+            Box::pin(async {
+                Ok(Some((
+                    "chosen-name".to_string(),
+                    Some("@chosen".to_string()),
+                )))
+            })
+        })),
+    )
+    .await
+    .unwrap()
+    .expect("registers");
+
+    assert!(reg.newly_registered);
+    assert_eq!(reg.profile.name, "chosen-name");
+    assert_eq!(reg.profile.owner.as_deref(), Some("@chosen"));
+}
+
+#[tokio::test]
+async fn the_interactive_context_carries_the_defaults_to_prefill() {
+    // The UI cannot prefill sensibly unless it is handed the derived name and
+    // the resolved endpoint, so assert they actually arrive.
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = interactive_env(dir.path());
+    e.insert("TINYPLACE_OPENHUMAN_OWNER".into(), "@from-env".into());
+
+    let reg = ensure_registered(
+        &e,
+        false,
+        Some(Box::new(|ctx| {
+            Box::pin(async move {
+                assert!(
+                    ctx.default_name.starts_with("ada@box-1/"),
+                    "derived default: {}",
+                    ctx.default_name
+                );
+                assert_eq!(ctx.prefill_owner.as_deref(), Some("@from-env"));
+                assert!(!ctx.endpoint.is_empty(), "an endpoint is resolved");
+                assert!(!ctx.address.is_empty(), "the identity address is passed");
+                Ok(Some((ctx.default_name.clone(), ctx.prefill_owner.clone())))
+            })
+        })),
+    )
+    .await
+    .unwrap()
+    .expect("registers");
+
+    assert_eq!(reg.profile.owner.as_deref(), Some("@from-env"));
+}

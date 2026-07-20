@@ -84,6 +84,11 @@ pub(crate) struct SessionWiring {
     pub medulla_home: std::path::PathBuf,
     /// The persona-memory service backing the Memory tab.
     pub memory_service: Option<Arc<medulla::memory::MemoryService>>,
+    /// Live events from a history share the welcome flow left running.
+    pub sharing:
+        Option<tokio::sync::mpsc::UnboundedReceiver<medulla_tui::ui::welcome::WelcomeEvent>>,
+    /// Where to record onboarding once a backgrounded share settles.
+    pub onboarding_path: std::path::PathBuf,
 }
 
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
@@ -101,6 +106,8 @@ pub(crate) async fn run(
         config_path,
         medulla_home,
         memory_service,
+        mut sharing,
+        onboarding_path,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
@@ -199,6 +206,23 @@ pub(crate) async fn run(
                         app.set_status(notice);
                         app.refresh_snapshot();
                     }
+                }
+            }
+            // A history share the welcome flow handed over. Reported on the
+            // status line so the user sees it land without ever being blocked
+            // by it. `recv` on a `None` receiver would be `Poll::Pending`
+            // forever, so the arm is disabled outright when nothing is running.
+            Some(ev) = async { sharing.as_mut()?.recv().await }, if sharing.is_some() => {
+                let status = medulla_tui::ui::welcome::share_status(&ev, || {
+                    medulla_tui::ui::welcome::persist_onboarding(&onboarding_path)
+                });
+                if let Some(status) = status {
+                    app.set_status(status);
+                }
+                // A settled share is the last thing this channel will say. Drop
+                // it so the arm stops being polled.
+                if medulla_tui::ui::welcome::settles_share(&ev) {
+                    sharing = None;
                 }
             }
             _ = tick.tick() => {

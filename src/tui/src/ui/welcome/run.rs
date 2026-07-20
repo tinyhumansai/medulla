@@ -31,7 +31,8 @@ use medulla::client::MedullaClient;
 use medulla::history_upload::{scan_local_history, share_history, HistoryScan};
 
 use super::types::{
-    ScanSummary, WelcomeCmd, WelcomeEvent, WelcomeOutcome, WelcomeScreen, DEFAULT_MAX_REWARD_USD,
+    ScanSummary, WelcomeCmd, WelcomeEvent, WelcomeOutcome, WelcomeScreen, WelcomeSession,
+    DEFAULT_MAX_REWARD_USD,
 };
 
 /// Render the welcome flow and return what the user chose.
@@ -49,7 +50,7 @@ pub async fn run_welcome_ui(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     client: &MedullaClient,
     env: HashMap<String, String>,
-) -> anyhow::Result<WelcomeOutcome> {
+) -> anyhow::Result<WelcomeSession> {
     // Crossterm's raw event stream, narrowed to the key presses the screen cares
     // about, so the loop itself never touches terminal types.
     let keys = EventStream::new().filter_map(|event| async move {
@@ -79,15 +80,15 @@ pub async fn drive_welcome_ui<B, K>(
     client: &MedullaClient,
     env: HashMap<String, String>,
     mut keys: K,
-) -> anyhow::Result<WelcomeOutcome>
+) -> anyhow::Result<WelcomeSession>
 where
     B: Backend,
     K: Stream<Item = KeyEvent> + Unpin,
 {
     let max_reward_usd = match client.history_reward_status().await {
-        Ok(status) if status.claimed => return Ok(WelcomeOutcome::Skipped),
+        Ok(status) if status.claimed => return Ok(WelcomeSession::done(WelcomeOutcome::Skipped)),
         Ok(status) => status.max_reward_usd,
-        Err(_) => return Ok(WelcomeOutcome::Unavailable),
+        Err(_) => return Ok(WelcomeSession::done(WelcomeOutcome::Unavailable)),
     };
 
     let mut screen = WelcomeScreen::new(if max_reward_usd > 0.0 {
@@ -115,7 +116,21 @@ where
         tokio::select! {
             Some(key) = keys.next() => {
                 if let Some(cmd) = screen.handle_key(key) {
-                    inflight = Some(dispatch(cmd, client, &env, &scan, &tx));
+                    let uploading = matches!(cmd, WelcomeCmd::UploadAndClaim);
+                    let handle = dispatch(cmd, client, &env, &scan, &tx);
+                    // Consent is the only part of this flow that needs the
+                    // user. Hand the running upload back to the caller and let
+                    // them into the app instead of holding them on a progress
+                    // bar. The task is intentionally not tracked as `inflight`:
+                    // it must survive this function returning.
+                    if uploading {
+                        drop(handle);
+                        return Ok(WelcomeSession {
+                            outcome: WelcomeOutcome::Sharing,
+                            sharing: Some(rx),
+                        });
+                    }
+                    inflight = Some(handle);
                 }
             }
             Some(ev) = rx.recv() => screen.apply(ev),
@@ -129,7 +144,17 @@ where
         handle.abort();
     }
 
-    Ok(outcome)
+    Ok(WelcomeSession::done(outcome))
+}
+
+impl WelcomeSession {
+    /// A session with nothing left running.
+    fn done(outcome: WelcomeOutcome) -> Self {
+        WelcomeSession {
+            outcome,
+            sharing: None,
+        }
+    }
 }
 
 /// Spawn the async work a [`WelcomeCmd`] requires, returning its handle so the

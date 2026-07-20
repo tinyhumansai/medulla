@@ -30,25 +30,30 @@ impl App {
         }
         let tab = self.tab();
         match m.kind {
-            MouseEventKind::ScrollUp => match tab {
-                "Chat" => self.chat_scroll += 3,
-                "Agents" => self.agent_scroll += 3,
-                "Trace" => self.selected = self.selected.saturating_sub(3),
-                "Context" => self.context_index = self.context_index.saturating_sub(1),
-                "Memory" => self.memory_index = self.memory_index.saturating_sub(1),
+            // Trace and Context are Settings subpages, not tabs, so they are
+            // matched on the subpage rather than on `tab` — which is always
+            // "Settings" for both, and used to make these arms unreachable.
+            MouseEventKind::ScrollUp => match (tab, self.settings_subpage()) {
+                ("Chat", _) => self.chat_scroll += 3,
+                ("Agents", _) => self.agent_scroll += 3,
+                ("Memory", _) => self.memory_index = self.memory_index.saturating_sub(1),
+                ("Settings", "Trace") => self.selected = self.selected.saturating_sub(3),
+                ("Settings", "Context") => {
+                    self.context_index = self.context_index.saturating_sub(1)
+                }
                 _ => {}
             },
-            MouseEventKind::ScrollDown => match tab {
-                "Chat" => self.chat_scroll = self.chat_scroll.saturating_sub(3),
-                "Agents" => self.agent_scroll = self.agent_scroll.saturating_sub(3),
-                "Trace" => self.selected += 3,
-                "Context" => {
-                    let max = self.contexts.len().saturating_sub(1);
-                    self.context_index = (self.context_index + 1).min(max);
-                }
-                "Memory" => {
+            MouseEventKind::ScrollDown => match (tab, self.settings_subpage()) {
+                ("Chat", _) => self.chat_scroll = self.chat_scroll.saturating_sub(3),
+                ("Agents", _) => self.agent_scroll = self.agent_scroll.saturating_sub(3),
+                ("Memory", _) => {
                     let max = self.memory_entry_count().saturating_sub(1);
                     self.memory_index = (self.memory_index + 1).min(max);
+                }
+                ("Settings", "Trace") => self.selected += 3,
+                ("Settings", "Context") => {
+                    let max = self.contexts.len().saturating_sub(1);
+                    self.context_index = (self.context_index + 1).min(max);
                 }
                 _ => {}
             },
@@ -87,7 +92,9 @@ impl App {
                     }
                 }
             }
-        } else if tab == "Context" {
+        } else if tab == "Settings" && self.settings_subpage() == "Context" {
+            // Context is a Settings subpage, not a tab — matching on `tab` here
+            // made this branch unreachable, so clicking a chunk did nothing.
             if let Some(rect) = self.hit_context {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;

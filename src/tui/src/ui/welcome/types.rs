@@ -46,6 +46,13 @@ pub enum WelcomeOutcome {
     /// tells the user the offer will be waiting once they have sessions, so the
     /// caller must *not* record onboarding as done, or that promise is broken.
     NothingToShare,
+    /// The user consented and the upload is still running in the background.
+    ///
+    /// The flow returns here rather than holding the user on a progress screen:
+    /// consent is the part that needs them, the transfer is not. Whether the
+    /// offer is settled is decided later, by the share's own result — see
+    /// [`settles_onboarding`](Self::settles_onboarding).
+    Sharing,
     /// The flow could not run or could not settle — the status check failed, or
     /// the claim errored after uploading.
     ///
@@ -68,6 +75,11 @@ impl WelcomeOutcome {
     /// This lives here, on the outcome itself, rather than in the startup
     /// wiring: it is the single decision that determines whether a user keeps
     /// or loses the offer, so it belongs somewhere it can be tested directly.
+    ///
+    /// [`Sharing`](Self::Sharing) is deliberately *not* settled here. The user
+    /// has consented, but the upload has not finished; if it fails we must not
+    /// have already burned the offer. The app records onboarding when the
+    /// background share reports a claim instead.
     pub fn settles_onboarding(&self) -> bool {
         matches!(
             self,
@@ -141,6 +153,22 @@ pub enum WelcomeEvent {
     },
     /// The flow failed; the message is shown and the user can skip out.
     Failed(String),
+}
+
+/// What the welcome flow returned, plus any work it left running.
+///
+/// The upload deliberately outlives the screen, so the driver hands its event
+/// channel back to the caller: the app keeps reporting progress and the final
+/// award on the status line while the user gets on with their session.
+pub struct WelcomeSession {
+    /// What the user chose.
+    pub outcome: WelcomeOutcome,
+    /// Live events from a backgrounded share, when one is still running.
+    ///
+    /// `None` for every other outcome. The task is detached: dropping this
+    /// receiver stops the app hearing about the result, it does not cancel the
+    /// upload.
+    pub sharing: Option<tokio::sync::mpsc::UnboundedReceiver<WelcomeEvent>>,
 }
 
 /// Which step the flow is on.

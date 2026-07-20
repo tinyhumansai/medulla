@@ -284,25 +284,33 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         .as_deref()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| config_path.clone());
+    // A consented upload outlives the welcome screen; the event loop reports its
+    // progress and result on the status line while the user works.
+    let mut sharing = None;
     if !loaded.config.onboarding.welcome_completed {
         if let Some(client) = &backend_client {
-            if let Ok(outcome) = run_welcome_ui(&mut terminal, client, env.clone()).await {
+            if let Ok(session) = run_welcome_ui(&mut terminal, client, env.clone()).await {
                 // Which outcomes settle onboarding is decided by the outcome
                 // itself (and unit-tested there) — getting it wrong either nags
                 // a user who declined or silently burns an unclaimed offer.
-                if outcome.settles_onboarding() {
+                if session.outcome.settles_onboarding() {
                     if let Err(e) =
                         medulla::config::persist_welcome_completed(&onboarding_path, true)
                     {
                         startup_status = Some(format!("could not save onboarding state ({e})"));
                     }
                 }
-                if let Some(awarded) = outcome.granted_usd() {
+                if let Some(awarded) = session.outcome.granted_usd() {
                     startup_status = Some(format!(
                         "{} in free credits added to your balance",
                         format_usd(awarded)
                     ));
                 }
+                if session.sharing.is_some() {
+                    startup_status =
+                        Some("sharing your history in the background — thanks!".to_string());
+                }
+                sharing = session.sharing;
             }
         }
     }
@@ -340,6 +348,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 config_path: config_path.clone(),
                 medulla_home: home.clone(),
                 memory_service: memory_service.clone(),
+                // Only the first session can inherit the share: by the time a
+                // relogin happens it has long finished.
+                sharing: sharing.take(),
+                onboarding_path: onboarding_path.clone(),
             },
         )
         .await;

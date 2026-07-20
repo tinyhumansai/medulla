@@ -134,4 +134,8 @@ pub struct BackendRuntime {
     pub(super) state: Arc<Mutex<State>>,
     /// Broadcast handle pinged after every fold so the UI re-pulls a snapshot.
     pub(super) tx: broadcast::Sender<()>,
+    /// Live orchestrator-hub roster control, filled after the hub connects. When
+    /// present, `workers()`/`worker_op()` manage the hub's tiny.place peers; an
+    /// empty slot means no worker surface (the default).
+    pub(super) hub: Arc<Mutex<Option<crate::hub::HubHandle>>>,
 }

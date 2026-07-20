@@ -31,6 +31,9 @@ pub enum Command {
     Update,
     /// Author a `MEDULLA.md` workspace profile for a directory.
     Init,
+    /// Run the orchestrator hub: relay hosted-backend tasks to tiny.place
+    /// workers over Signal DMs; carries the remaining args.
+    Hub,
 }
 
 /// Parsed `medulla init` flags.

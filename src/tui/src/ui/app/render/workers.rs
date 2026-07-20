@@ -64,6 +64,20 @@ impl App {
                 lines.push(TLine::from(Span::styled(text, style)));
             }
         }
+        // This hub's own tiny.place address. A worker only accepts a task from a
+        // peer it trusts, so the operator needs this verbatim — rendered in full
+        // (never clipped) so it can be copied into the worker's config.
+        if let Some(me) = &self.snapshot.tinyplace {
+            lines.push(TLine::from(""));
+            lines.push(TLine::from(vec![
+                Span::styled("this hub · ", Style::default().fg(Color::Cyan)),
+                Span::raw(me.agent_id.clone()),
+            ]));
+            lines.push(TLine::from(Span::styled(
+                "set on each worker as TINYPLACE_OPENHUMAN_OWNER (and allowlist it) so it accepts tasks",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
         lines.push(TLine::from(Span::styled(
             "a add · Enter/s select · e edit label · d/x remove",
             Style::default().add_modifier(Modifier::DIM),

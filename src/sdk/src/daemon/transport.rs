@@ -125,6 +125,30 @@ impl SignalTransport {
         &self.our_agent_id
     }
 
+    /// Drop the local Signal session with `peer` so the next send re-runs X3DH
+    /// (a fresh `PREKEY_BUNDLE`). Used by senders to recover from a one-sided
+    /// session — e.g. after the peer restarted and lost its ratchet state, our
+    /// `CIPHERTEXT` becomes undecryptable and is silently dropped.
+    pub async fn reset_session(&self, peer: &str) {
+        let _guard = self.lock.lock().await;
+        let _ = self.session.remove_session(peer).await;
+    }
+
+    /// Whether `peer` has *accepted* our contact request.
+    ///
+    /// A request only creates a `pending` edge; the peer's auto-accepter settles
+    /// it a poll later. Since the relay refuses a DM between non-contacts
+    /// (`403 not_a_contact`), callers wait on this before the first send rather
+    /// than racing into a 403. Any lookup failure reads as "not accepted".
+    pub async fn contact_accepted(&self, peer: &str) -> bool {
+        self.client
+            .contacts
+            .status(peer)
+            .await
+            .map(|c| c.status == "accepted")
+            .unwrap_or(false)
+    }
+
     /// Ask `peer` for a contact relationship.
     ///
     /// The directory refuses a direct message between agents that are not
@@ -291,11 +315,26 @@ impl SignalTransport {
         };
         let mut out = Vec::new();
         for message in response.messages {
-            if let Some(text) = self.decrypt(&message).await {
-                out.push(InboundMessage {
+            match self.decrypt(&message).await {
+                Ok(text) => out.push(InboundMessage {
                     from: message.from.clone(),
                     text,
-                });
+                }),
+                // A dropped message is otherwise invisible — the daemon would
+                // just never run a task it was sent. Log the reason (stale
+                // ratchet, prekey mismatch, bad envelope) instead of swallowing.
+                // Then drop our half-session with the sender so its re-handshake
+                // (a fresh `PREKEY_BUNDLE`) establishes cleanly rather than
+                // failing forever against poisoned ratchet state.
+                Err(e) => {
+                    eprintln!(
+                        "medulla daemon: dropped undecryptable {:?} from {} ({e}) — resetting session",
+                        message.envelope_type, message.from
+                    );
+                    if is_session_error(&e) {
+                        let _ = self.session.remove_session(&message.from).await;
+                    }
+                }
             }
             let _ = self
                 .client
@@ -306,15 +345,15 @@ impl SignalTransport {
         out
     }
 
-    async fn decrypt(&self, envelope: &MessageEnvelope) -> Option<String> {
-        let sender_ed = decode_agent_id(&envelope.from).ok()?;
-        let sender_x = ed25519_pub_to_x25519_pub(&sender_ed).ok()?;
+    async fn decrypt(&self, envelope: &MessageEnvelope) -> Result<String, String> {
+        let sender_ed = decode_agent_id(&envelope.from)?;
+        let sender_x = ed25519_pub_to_x25519_pub(&sender_ed).map_err(|e| e.to_string())?;
         let plaintext = self
             .session
             .decrypt(&envelope.from, &sender_x, envelope)
             .await
-            .ok()?;
-        String::from_utf8(plaintext).ok()
+            .map_err(|e| format!("decrypt: {e}"))?;
+        String::from_utf8(plaintext).map_err(|e| format!("utf8: {e}"))
     }
 }
 

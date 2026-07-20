@@ -8,7 +8,7 @@
 //! everything down on exit.
 
 use std::io::{self, IsTerminal};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -83,6 +83,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // backend directly. `None` whenever we end up on core or the mock, which is
     // exactly when the welcome flow must not run.
     let mut backend_client: Option<MedullaClient> = None;
+
+    // Shared hub roster slot: filled after the hub connects (backend runtime),
+    // read by `BackendRuntime::workers()`/`worker_op()` so the Workers tab manages
+    // the hub's tiny.place peers live.
+    let hub_slot: crate::hub_relay::HubSlot = Arc::new(Mutex::new(None));
 
     // Persona-memory service (tinycortex), on by default. Built once here and
     // wired two ways: into the core runtime, which advertises + serves the
@@ -168,7 +173,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             // Explicit core that fell back: preserve the old backend→mock path.
             (true, Some(tok)) => {
                 let client = MedullaClient::new(backend.base_url.clone(), tok);
-                match BackendRuntime::connect(client.clone()).await {
+                match BackendRuntime::connect_with_hub(client.clone(), hub_slot.clone()).await {
                     Ok(rt) => {
                         backend_client = Some(client);
                         (Some(Arc::new(rt)), None)
@@ -196,18 +201,22 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             (false, Some(tok)) => {
                 let client = MedullaClient::new(backend.base_url.clone(), tok);
                 match client.me().await {
-                    Ok(_) => match BackendRuntime::connect(client.clone()).await {
-                        Ok(rt) => {
-                            backend_client = Some(client);
-                            (Some(Arc::new(rt)), None)
+                    Ok(_) => {
+                        match BackendRuntime::connect_with_hub(client.clone(), hub_slot.clone())
+                            .await
+                        {
+                            Ok(rt) => {
+                                backend_client = Some(client);
+                                (Some(Arc::new(rt)), None)
+                            }
+                            Err(e) => (
+                                Some(Arc::new(MockRuntime::demo())),
+                                Some(format!(
+                                    "backend connect failed ({e}) — running with mock runtime"
+                                )),
+                            ),
                         }
-                        Err(e) => (
-                            Some(Arc::new(MockRuntime::demo())),
-                            Some(format!(
-                                "backend connect failed ({e}) — running with mock runtime"
-                            )),
-                        ),
-                    },
+                    }
                     Err(e) if e.is_auth_error() => {
                         need_login = Some(backend.base_url.clone());
                         (None, None)
@@ -251,7 +260,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             }
             LoginOutcome::Token(jwt) => {
                 let client = MedullaClient::new(base_url.clone(), jwt.clone());
-                match BackendRuntime::connect(client.clone()).await {
+                match BackendRuntime::connect_with_hub(client.clone(), hub_slot.clone()).await {
                     Ok(rt) => {
                         runtime = Some(Arc::new(rt));
                         backend_client = Some(client);
@@ -331,6 +340,16 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     };
     let tinyplace_obs = tinyplace_service.as_ref().map(|s| s.observation());
 
+    // Backend runtime only: start the orchestrator hub so the hosted brain's
+    // delegated tasks reach local tiny.place workers, and fill the roster slot so
+    // the Workers tab manages it live. Opt-in via `MEDULLA_TINYPLACE_PEER` /
+    // `MEDULLA_HUB_WORKERS`; the session is dropped (disconnected) on exit.
+    let _hub_session = if backend_client.is_some() {
+        crate::hub_relay::start(&env, &home, hub_slot.clone()).await
+    } else {
+        None
+    };
+
     // Session loop. A normal quit runs once and breaks; a logout tears the
     // authenticated session down and comes back here to re-authenticate, so the
     // user lands on the login screen rather than being dropped to the shell.
@@ -374,7 +393,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             }
             LoginOutcome::Token(jwt) => {
                 let client = MedullaClient::new(base_url.clone(), jwt.clone());
-                match BackendRuntime::connect(client.clone()).await {
+                match BackendRuntime::connect_with_hub(client.clone(), hub_slot.clone()).await {
                     Ok(rt) => {
                         runtime = Arc::new(rt);
                         status = save_credentials(&home, &base_url, &jwt);

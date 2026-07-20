@@ -20,6 +20,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("memory") => Command::Memory,
         Some("update") => Command::Update,
         Some("init") => Command::Init,
+        Some("hub") => Command::Hub,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),

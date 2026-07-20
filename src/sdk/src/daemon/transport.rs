@@ -33,6 +33,29 @@ use ::tinyplace::{LocalSigner, Signer, TinyPlaceClient};
 /// How many one-time pre-keys to publish on onboard.
 const ONE_TIME_PRE_KEY_COUNT: usize = 20;
 
+/// Render a tiny.place SDK error for a log line, keeping the server's response
+/// body when there is one.
+///
+/// [`tinyplace::Error`]'s `Display` renders an HTTP failure as `HTTP <status>:
+/// <path>` and drops [`HttpError::body`] entirely, so an operator sees *that* a
+/// request was rejected but never *why*. The body is the only place the backend
+/// explains itself (`{"error":"signature is required"}`), which is exactly what
+/// is needed to tell a stale client apart from a moved server.
+fn describe_error(err: &::tinyplace::Error) -> String {
+    match err {
+        ::tinyplace::Error::Http(http) => {
+            let body = http.body.to_string();
+            // A body-less error renders as JSON `null`; don't append noise.
+            if body == "null" || body.is_empty() {
+                err.to_string()
+            } else {
+                format!("{err} — {body}")
+            }
+        }
+        other => other.to_string(),
+    }
+}
+
 /// One decrypted inbound DM.
 #[derive(Debug, Clone)]
 pub struct InboundMessage {
@@ -166,7 +189,7 @@ impl SignalTransport {
                 },
             )
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| describe_error(&e))?;
         self.client
             .keys
             .upload_pre_keys(
@@ -177,7 +200,7 @@ impl SignalTransport {
                 },
             )
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| describe_error(&e))?;
         Ok(())
     }
 

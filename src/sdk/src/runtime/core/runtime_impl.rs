@@ -76,6 +76,9 @@ impl Runtime for CoreRuntime {
                     role: "user".into(),
                     content: input.clone(),
                 });
+                // Remember this turn so the wire echo of it (folded back via
+                // `fold_event`) is recognised and not appended a second time.
+                s.pending_user_echo = Some(input.clone());
                 s.emit(TuiEvent::User {
                     body: input.clone(),
                 });

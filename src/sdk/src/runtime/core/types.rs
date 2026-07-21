@@ -166,6 +166,11 @@ pub(super) struct CoreState {
     pub(super) chat_events: Vec<EventEnvelope>,
     /// The rendered chat transcript.
     pub(super) messages: Vec<ChatMessage>,
+    /// The body of the most recently optimistically-appended user turn still
+    /// awaiting its wire echo, so [`fold_event`](super::protocol::fold_event)
+    /// can skip re-appending it to [`messages`](CoreState::messages) when the
+    /// serve stream reflects the same turn back.
+    pub(super) pending_user_echo: Option<String>,
     /// The most recent cycle's result summary, if any.
     pub(super) last_result: Option<CycleResultSummary>,
     /// The live agent-harness status, folded from `status`/harness events.
@@ -190,6 +195,7 @@ impl CoreState {
             events: Vec::new(),
             chat_events: Vec::new(),
             messages: Vec::new(),
+            pending_user_echo: None,
             last_result: None,
             harness: None,
             seq: 0,
@@ -261,6 +267,7 @@ impl CoreState {
         self.events.clear();
         self.chat_events.clear();
         self.messages.clear();
+        self.pending_user_echo = None;
         self.last_result = None;
         self.harness = None;
         self.seq = 0;

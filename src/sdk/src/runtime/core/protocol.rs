@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 use crate::harness_contract::{HarnessEvent, HarnessState, HarnessStatus, HarnessUsage};
 use crate::runtime::CycleResultSummary;
+use crate::ui::chat_store::ChatMessage;
 use crate::ui::events::TuiEvent;
 
 use super::types::{CoreState, WireError, HOST_PORTS, PROTOCOL_VERSION};
@@ -136,8 +137,11 @@ pub(super) fn hello_params() -> Value {
 /// chat/board-visible change occurred (the caller pings subscribers on `true`).
 ///
 /// Recognised `HarnessEvent` kinds drive the running flag, the task board, and
-/// the transcript; anything else (including serve's `roster_event`) rides
-/// through as a passthrough [`TuiEvent`] so no row is silently dropped.
+/// the transcript (user/assistant turns are pushed into
+/// [`CoreState::messages`] as they fold, deduplicated against the optimistic
+/// echo `submit` already appended); anything else (including serve's
+/// `roster_event`) rides through as a passthrough [`TuiEvent`] so no row is
+/// silently dropped.
 pub(super) fn fold_event(state: &mut CoreState, event: &Value) -> bool {
     match serde_json::from_value::<HarnessEvent>(event.clone()) {
         Ok(HarnessEvent::CycleStart {
@@ -198,10 +202,22 @@ pub(super) fn fold_event(state: &mut CoreState, event: &Value) -> bool {
         Ok(HarnessEvent::CycleEvent { event: inner }) => {
             // The inner CycleEvent is opaque; TuiEvent's permissive decode keeps
             // any `{kind,...}` shape (unknown kinds ride through verbatim).
-            if let Ok(tui) = serde_json::from_value::<TuiEvent>(inner.clone()) {
-                state.emit(tui);
-            } else {
-                state.emit(passthrough(&inner));
+            match serde_json::from_value::<TuiEvent>(inner.clone()) {
+                Ok(TuiEvent::User { body })
+                    if state.pending_user_echo.as_deref() == Some(body.as_str()) =>
+                {
+                    // The wire echo of the turn `submit` already appended
+                    // optimistically (serve-protocol §4.1 `instruct` reflects the
+                    // user turn back over the event stream): drop it rather than
+                    // double it up in the transcript, mirroring how the backend
+                    // runtime's `fold` de-duplicates `pending_user_echo`.
+                    state.pending_user_echo = None;
+                }
+                Ok(tui) => {
+                    push_chat_message(state, &tui);
+                    state.emit(tui);
+                }
+                Err(_) => state.emit(passthrough(&inner)),
             }
             true
         }
@@ -210,6 +226,27 @@ pub(super) fn fold_event(state: &mut CoreState, event: &Value) -> bool {
             state.emit(passthrough(event));
             true
         }
+    }
+}
+
+/// Append a chat-visible turn into the rendered transcript
+/// ([`CoreState::messages`]) as it folds, so [`CoreRuntime::snapshot`]'s
+/// `messages`/turn count stay in step with what the event stream shows. Only
+/// user/assistant turns render into the transcript; other kinds are no-ops
+/// here (they still ride through the general event log via `emit`).
+///
+/// [`CoreRuntime::snapshot`]: crate::runtime::Runtime::snapshot
+fn push_chat_message(state: &mut CoreState, event: &TuiEvent) {
+    match event {
+        TuiEvent::User { body } => state.messages.push(ChatMessage {
+            role: "user".into(),
+            content: body.clone(),
+        }),
+        TuiEvent::Assistant { body } => state.messages.push(ChatMessage {
+            role: "assistant".into(),
+            content: body.clone(),
+        }),
+        _ => {}
     }
 }
 

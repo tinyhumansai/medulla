@@ -147,6 +147,64 @@ async fn socket_drop_triggers_reconnect() {
 }
 
 #[tokio::test]
+async fn reconnect_replay_rebaselines_instead_of_double_counting() {
+    // The first connection folds two full cycles (usage.cycles == 2), then drops.
+    // On re-attach the host sends subscribe{replay}, and the stub replays a single
+    // cycle. Because the driver resets the fold-derived state before the replay,
+    // the settled state reflects exactly that one replayed cycle (usage.cycles ==
+    // 1) rather than stacking it on top of the pre-drop count (which would read 3).
+    let server = StubServer::start(StubConfig {
+        drop_after_instruct: true,
+        instruct_events: vec![
+            json!({"kind":"cycle_start","instructionId":"i0","cycleId":"c0"}),
+            json!({"kind":"cycle_end","instructionId":"i0","cycleId":"c0"}),
+            json!({"kind":"cycle_start","instructionId":"i1","cycleId":"c1"}),
+            json!({"kind":"cycle_end","instructionId":"i1","cycleId":"c1"}),
+        ],
+        replay_events: vec![
+            json!({"kind":"cycle_start","instructionId":"i0","cycleId":"c0"}),
+            json!({"kind":"task_board_changed","task":{
+                "id":"t1","title":"reconcile","status":"active",
+                "createdAt":"0","updatedAt":"0","delegatedTaskIds":[],"notes":[]}}),
+            json!({"kind":"cycle_end","instructionId":"i0","cycleId":"c0"}),
+        ],
+        ..StubConfig::default()
+    });
+    let rt = CoreRuntime::attach(server.path.clone());
+    assert!(wait_until(|| rt.stream_state() == Some(StreamState::Live)).await);
+
+    // First instruct: streams two cycles, then the stub drops the socket.
+    rt.submit("first".into())
+        .await
+        .expect("first instruct acks");
+    assert!(
+        wait_until(|| server.accept_count() >= 2).await,
+        "the host should re-attach after the drop"
+    );
+
+    // usage.cycles == 1 is only reachable if the replay rebaselined a reset state:
+    // pre-drop the counter was 2, and without the reset the replay would drive it
+    // to 3 — never back to 1. The board is rebuilt from the replayed task too.
+    assert!(
+        wait_until(|| {
+            let s = rt.snapshot();
+            s.harness
+                .as_ref()
+                .map(|h| {
+                    h.usage.cycles == 1
+                        && h.queued == 0
+                        && h.tasks.len() == 1
+                        && h.tasks[0].id == "t1"
+                })
+                .unwrap_or(false)
+        })
+        .await,
+        "replay should rebaseline usage.cycles to 1, not double-count to 3: {:?}",
+        rt.snapshot().harness
+    );
+}
+
+#[tokio::test]
 async fn steering_hooks_reach_serve() {
     let server = StubServer::start(StubConfig::default());
     let rt = CoreRuntime::attach(server.path.clone());
@@ -420,6 +478,79 @@ fn fold_event_passes_unknown_and_cycle_events_through() {
         &json!({"kind":"cycle_event","event":{"kind":"inference_end"}})
     ));
     assert!(!s.events.is_empty());
+}
+
+#[test]
+fn fold_event_drains_queue_when_a_cycle_starts() {
+    let mut s = CoreState::new();
+
+    // Two instructions queue up behind the running one: backlog climbs to 2.
+    for _ in 0..2 {
+        assert!(fold_event(
+            &mut s,
+            &json!({"kind":"instruction_queued","instructionId":"i","cycleId":"c"})
+        ));
+    }
+    assert_eq!(s.harness.as_ref().unwrap().queued, 2);
+
+    // Each cycle_start dequeues one instruction, draining the backlog back to 0.
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"cycle_start","instructionId":"i1","cycleId":"c1"})
+    ));
+    assert_eq!(s.harness.as_ref().unwrap().queued, 1);
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"cycle_start","instructionId":"i2","cycleId":"c2"})
+    ));
+    assert_eq!(s.harness.as_ref().unwrap().queued, 0);
+
+    // A cycle_start with no queued instruction behind it never underflows.
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"cycle_start","instructionId":"i3","cycleId":"c3"})
+    ));
+    assert_eq!(s.harness.as_ref().unwrap().queued, 0);
+}
+
+#[test]
+fn reset_for_replay_clears_fold_derived_state_but_keeps_identity() {
+    let mut s = CoreState::new();
+    s.session_id = "agent".into();
+    s.serve_version = Some("3.12.0".into());
+    s.async_mode = true;
+    // Fold a full cycle so counters, tasks, and the event log are all populated.
+    fold_event(
+        &mut s,
+        &json!({"kind":"cycle_start","instructionId":"i","cycleId":"c"}),
+    );
+    fold_event(
+        &mut s,
+        &json!({"kind":"task_board_changed","task":{
+            "id":"t1","title":"do","status":"active","createdAt":"0","updatedAt":"0",
+            "delegatedTaskIds":[],"notes":[]}}),
+    );
+    fold_event(
+        &mut s,
+        &json!({"kind":"cycle_end","instructionId":"i","cycleId":"c"}),
+    );
+    assert!(s.harness.is_some());
+    assert!(!s.events.is_empty());
+
+    s.reset_for_replay();
+
+    // Fold-derived state is gone so a replay rebuilds it from scratch.
+    assert!(s.harness.is_none());
+    assert!(s.events.is_empty());
+    assert!(s.chat_events.is_empty());
+    assert!(s.messages.is_empty());
+    assert!(s.last_result.is_none());
+    assert!(!s.running);
+    assert_eq!(s.seq, 0);
+    // Connection-spanning identity and local toggles survive.
+    assert_eq!(s.session_id, "agent");
+    assert_eq!(s.serve_version.as_deref(), Some("3.12.0"));
+    assert!(s.async_mode);
 }
 
 #[test]

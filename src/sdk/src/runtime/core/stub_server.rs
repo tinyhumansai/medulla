@@ -27,6 +27,10 @@ pub(super) struct StubConfig {
     pub(super) instruct_fail: bool,
     /// The `event.event` payloads streamed after an `instruct` receipt.
     pub(super) instruct_events: Vec<Value>,
+    /// The `event.event` payloads re-emitted when a `subscribe` carries a
+    /// `replay` key (a re-attach rebaseline, serve-protocol §5). Empty ⇒ the
+    /// stub replays nothing, matching a serve with no recent history.
+    pub(super) replay_events: Vec<Value>,
     /// Raw frames to push right after answering `hello` (e.g. a `call` or a
     /// duplicate `ready`), exercising the host's inbound-frame handling.
     pub(super) after_hello: Vec<Value>,
@@ -40,6 +44,7 @@ impl Default for StubConfig {
             drop_after_instruct: false,
             instruct_fail: false,
             after_hello: Vec::new(),
+            replay_events: Vec::new(),
             instruct_events: vec![
                 json!({"kind":"cycle_start","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
                 json!({"kind":"task_board_changed","task":{
@@ -161,9 +166,9 @@ async fn handle_conn(
             .unwrap_or("")
             .to_string();
         let params = value.get("params").cloned().unwrap_or(Value::Null);
-        received.lock().unwrap().push((op.clone(), params));
+        received.lock().unwrap().push((op.clone(), params.clone()));
 
-        let closed = serve_op(&mut wr, &cfg, &op, &id, &mut seq).await;
+        let closed = serve_op(&mut wr, &cfg, &op, &id, &params, &mut seq).await;
         if closed {
             return;
         }
@@ -176,6 +181,7 @@ async fn serve_op(
     cfg: &StubConfig,
     op: &str,
     id: &str,
+    params: &Value,
     seq: &mut u64,
 ) -> bool {
     match op {
@@ -205,6 +211,17 @@ async fn serve_op(
                 &json!({"t":"res","id":id,"ok":true,"result":{"subscribed":true,"seq":*seq}}),
             )
             .await;
+            // A `replay` key means a re-attach rebaseline: re-emit recent events
+            // so the host can rebuild its state (serve-protocol §5).
+            if params.get("replay").is_some() {
+                for event in &cfg.replay_events {
+                    *seq += 1;
+                    let frame = json!({"t":"event","seq":*seq,"at":0,"event":event});
+                    if send(wr, &frame).await.is_err() {
+                        return true;
+                    }
+                }
+            }
             false
         }
         "instruct" if cfg.instruct_fail => {

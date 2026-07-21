@@ -153,6 +153,12 @@ async fn serve_connection(
     record_ready(state, hello_ok.serve, hello_ok.session_id);
     {
         let mut s = state.lock().unwrap();
+        // On a re-attach we replay (below) to rebaseline; clear the fold-derived
+        // state first so the replayed events rebuild it rather than double-count
+        // onto what the dropped connection already folded.
+        if attempt > 0 {
+            s.reset_for_replay();
+        }
         s.reset_stream_cursor();
         s.conn = ConnState::Live;
     }

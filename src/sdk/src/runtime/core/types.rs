@@ -244,6 +244,28 @@ impl CoreState {
         self.gap = false;
     }
 
+    /// Drop the fold-derived observable state ahead of a `subscribe{replay}` on a
+    /// re-attach, so serve's replayed events rebaseline it instead of stacking on
+    /// top of what the previous connection already folded.
+    ///
+    /// Without this, replayed `cycle_*`/`instruction_queued` frames are folded a
+    /// second time: cumulative counters (`usage.cycles`, `queued`) double-count
+    /// and every replayed frame appends a duplicate row into `events`/`chat_events`
+    /// (serve-protocol §5, `StreamState::Resyncing` rebaseline). The replay is the
+    /// authoritative post-drop baseline, so the derived log/status/transcript are
+    /// cleared and rebuilt from it; the negotiated identity (`session_id`,
+    /// `serve_version`) and the local `async_mode` toggle are connection-spanning
+    /// and left untouched.
+    pub(super) fn reset_for_replay(&mut self) {
+        self.running = false;
+        self.events.clear();
+        self.chat_events.clear();
+        self.messages.clear();
+        self.last_result = None;
+        self.harness = None;
+        self.seq = 0;
+    }
+
     /// The event stream's health, mapped from the connection lifecycle and the
     /// gap latch (serve-protocol §6 `StreamState`).
     pub(super) fn stream_health(&self) -> StreamState {

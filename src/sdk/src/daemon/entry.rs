@@ -274,6 +274,11 @@ pub async fn run_daemon(
     // relay pool actually runs low. The immediate first tick is consumed here
     // because we already published at startup.
     let mut maintain = tokio::time::interval(KEY_MAINTAIN_INTERVAL);
+    // `interval` defaults to `Burst`, which would fire every tick missed while the
+    // host slept (or while a slow publish held the loop) back-to-back, starving
+    // inbox processing with a run of redundant health calls. Maintenance has no
+    // backlog worth replaying — one pass at the next tick is enough.
+    maintain.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     maintain.tick().await;
     loop {
         tokio::select! {

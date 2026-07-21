@@ -189,7 +189,20 @@ impl SignalTransport {
     /// (re)publish on first boot, a wiped store, or a low/depleted pool. Not
     /// republishing on a healthy restart is what prevents orphaning the keys the
     /// relay still serves.
+    ///
+    /// Takes the same Signal lock as [`send`](Self::send) / [`drain_inbox`](Self::drain_inbox):
+    /// [`FileSessionStore`] deliberately does not lock, so every path that writes
+    /// key or session state must serialize here. Since this now also runs
+    /// periodically alongside live traffic, an unlocked write could interleave
+    /// with a concurrent `send` and clobber the store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when local Signal key state cannot be read or persisted,
+    /// or when the relay rejects or cannot complete key maintenance (health check,
+    /// signed pre-key rotation, or one-time upload).
     pub async fn publish_keys(&self, signer: &LocalSigner) -> Result<(), String> {
+        let _guard = self.lock.lock().await;
         ::tinyplace::signal::maintain::maintain_keys(
             &self.client.keys,
             &*self.store,

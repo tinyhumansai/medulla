@@ -97,7 +97,8 @@ fn parses_tui_flags() {
         a,
         TuiArgs {
             config: Some("c.json".into()),
-            alt_screen: false
+            alt_screen: false,
+            mock: false,
         }
     );
     // A dangling --config keeps the default (None → layered discovery).
@@ -218,4 +219,18 @@ fn help_lists_init() {
     let help = help_text();
     assert!(help.contains("medulla init"));
     assert!(help.contains("--offline"));
+}
+
+#[test]
+fn tui_args_parse_the_mock_flag() {
+    // `--mock` is the only headless route to a working runtime with no backend
+    // token: it must skip the login screen entirely.
+    let a = parse_tui_args(&argv(&["--mock"]));
+    assert!(a.mock);
+    assert!(!parse_tui_args(&argv(&["--no-alt-screen"])).mock);
+}
+
+#[test]
+fn help_text_documents_the_mock_flag() {
+    assert!(help_text().contains("--mock"));
 }

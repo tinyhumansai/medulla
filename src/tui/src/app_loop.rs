@@ -81,6 +81,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Decide between a backend runtime, the interactive login screen, or the
     // mock.
     let mut need_login: Option<String> = None;
+    if args.mock {
+        // Explicit offline demo: skip the token lookup and the login screen
+        // entirely so the TUI is drivable with no backend at all.
+        runtime = Some(Arc::new(MockRuntime::demo()));
+        startup_status = Some("running the offline mock runtime (--mock)".to_string());
+    }
     if runtime.is_none() {
         let backend = &loaded.config.backend;
         let stored = CredentialStore::at_home(&home).load_or_legacy();

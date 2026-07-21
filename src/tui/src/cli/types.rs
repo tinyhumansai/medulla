@@ -104,6 +104,9 @@ pub struct TuiArgs {
     /// (`./.medulla/config.toml` / `./medulla.toml` / `<home>/config.toml`).
     pub config: Option<String>,
     pub alt_screen: bool,
+    /// Force the offline demo runtime, skipping the token lookup and the login
+    /// screen. The only headless way to reach a working runtime with no backend.
+    pub mock: bool,
 }
 
 impl Default for TuiArgs {
@@ -111,6 +114,7 @@ impl Default for TuiArgs {
         TuiArgs {
             config: None,
             alt_screen: true,
+            mock: false,
         }
     }
 }

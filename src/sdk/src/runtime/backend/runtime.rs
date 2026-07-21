@@ -422,7 +422,10 @@ impl Runtime for BackendRuntime {
 
 /// Map a hub roster entry to the UI's [`WorkerInfo`](crate::runtime::WorkerInfo)
 /// row. An `@handle` address is surfaced as the `handle` field too.
-fn hub_worker_to_info(w: crate::hub::HubWorker) -> crate::runtime::WorkerInfo {
+///
+/// `pub(super)` so the module's sibling test module can pin the mapping without
+/// standing up a live hub handle.
+pub(super) fn hub_worker_to_info(w: crate::hub::HubWorker) -> crate::runtime::WorkerInfo {
     crate::runtime::WorkerInfo {
         handle: w.address.starts_with('@').then(|| w.address.clone()),
         id: w.id,

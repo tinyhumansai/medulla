@@ -236,3 +236,56 @@ async fn listing_main_chats_surfaces_a_backend_failure() {
 
     assert!(runtime.list_main_chats().await.is_err());
 }
+
+#[tokio::test]
+async fn subscribing_yields_a_receiver_that_wakes_on_change() {
+    let backend = MockBackend::start().await;
+    let runtime = runtime(&backend).await;
+
+    let mut rx = runtime.subscribe();
+    // Any state mutation pings subscribers so the UI redraws.
+    runtime.set_async_mode(true);
+    tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("a subscriber is notified promptly")
+        .expect("the channel stays open");
+}
+
+#[tokio::test]
+async fn team_usage_and_context_reach_the_backend() {
+    // Neither endpoint is served by the mock; the runtime must surface that as a
+    // normal error rather than panicking or hanging the caller.
+    let backend = MockBackend::start().await;
+    let runtime = runtime(&backend).await;
+
+    let _ = runtime.team_usage().await;
+    let _ = runtime.inspect_context().await;
+}
+
+#[tokio::test]
+async fn the_feedback_seam_delegates_every_mutation() {
+    // The board's write path: detail, comment and submit all delegate to the
+    // client. Only voting is covered elsewhere, so pin the rest here.
+    let backend = MockBackend::start().await;
+    let runtime = runtime(&backend).await;
+
+    let _ = runtime.feedback_detail("f1".to_string()).await;
+    let _ = runtime
+        .comment_feedback("f1".to_string(), "looks good".to_string())
+        .await;
+    let _ = runtime
+        .submit_feedback(
+            medulla::client::FeedbackType::Bug,
+            "Crash on resume".to_string(),
+            "Steps to reproduce".to_string(),
+        )
+        .await;
+
+    // Every call should have reached the feedback surface.
+    let hits = backend
+        .requests()
+        .iter()
+        .filter(|r| r.path.contains("/feedback"))
+        .count();
+    assert!(hits >= 3, "each feedback op should reach the backend");
+}

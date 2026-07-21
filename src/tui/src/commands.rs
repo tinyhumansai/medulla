@@ -83,6 +83,21 @@ pub(crate) fn run_logout() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `medulla hub`: run the orchestrator hub — bridge the hosted backend brain to
+/// tiny.place worker daemons. Reads the backend JWT from saved credentials and
+/// the worker roster from `MEDULLA_TINYPLACE_PEER` / `MEDULLA_HUB_WORKERS`.
+pub(crate) async fn run_hub(_args: &[String]) -> anyhow::Result<()> {
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let home = medulla::home::medulla_home(&env);
+    match crate::hub_relay::build_hub_config(&env, &home) {
+        Some(config) => medulla::hub::run_hub(config).await,
+        None => anyhow::bail!(
+            "hub: nothing to run — set MEDULLA_TINYPLACE_PEER (or MEDULLA_HUB_WORKERS) and run \
+             `medulla login` first"
+        ),
+    }
+}
+
 /// `medulla memory <status|ingest|backfill|compile|search <query>>`: manage the
 /// persona-memory layer from the command line.
 pub(crate) async fn run_memory(args: &[String]) -> anyhow::Result<()> {

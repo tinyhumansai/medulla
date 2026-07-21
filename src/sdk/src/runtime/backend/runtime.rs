@@ -31,6 +31,22 @@ impl BackendRuntime {
     /// keeps every thread's stream-task lifecycle uniform (a thread always has a
     /// session to stream).
     pub async fn connect(client: MedullaClient) -> anyhow::Result<Self> {
+        Self::connect_with_hub(client, Arc::new(Mutex::new(None))).await
+    }
+
+    /// Like [`connect`](Self::connect) but attaches a shared hub slot. The caller
+    /// fills the slot once the orchestrator hub connects, so `workers()` /
+    /// `worker_op()` manage the hub's tiny.place peers instead of being no-ops.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the eager initial backend-session creation fails
+    /// (network failure, auth rejection, or a non-2xx response from the backend);
+    /// the runtime is not constructed in that case.
+    pub async fn connect_with_hub(
+        client: MedullaClient,
+        hub: Arc<Mutex<Option<crate::hub::HubHandle>>>,
+    ) -> anyhow::Result<Self> {
         let created = client
             .create_session(None)
             .await
@@ -43,7 +59,12 @@ impl BackendRuntime {
             next_thread: 2,
             async_mode: false,
         }));
-        let rt = BackendRuntime { client, state, tx };
+        let rt = BackendRuntime {
+            client,
+            state,
+            tx,
+            hub,
+        };
         start_stream_on(&rt.client, &rt.state, &rt.tx, "t1", None);
         Ok(rt)
     }
@@ -57,6 +78,27 @@ impl BackendRuntime {
 impl Runtime for BackendRuntime {
     fn describe(&self) -> String {
         format!("backend {}", self.client.base_url())
+    }
+
+    /// The hub's live tiny.place worker roster (empty until a hub is attached).
+    fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
+        let handle = self.hub.lock().unwrap().clone();
+        match handle {
+            Some(h) => h.list().into_iter().map(hub_worker_to_info).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Apply a Workers-tab mutation to the hub (add/remove/relabel/select),
+    /// re-registering with the backend on change.
+    fn worker_op(&self, op: crate::runtime::WorkerOp) -> BoxFuture<'static, anyhow::Result<()>> {
+        let handle = self.hub.lock().unwrap().clone();
+        Box::pin(async move {
+            match handle {
+                Some(h) => apply_worker_op(&h, op).await,
+                None => Ok(()),
+            }
+        })
     }
 
     fn team_usage(&self) -> BoxFuture<'static, anyhow::Result<Option<serde_json::Value>>> {
@@ -124,7 +166,18 @@ impl Runtime for BackendRuntime {
             roster: Vec::<AgentDescriptor>::new(),
             presence: HashMap::<String, AgentPresence>::new(),
             sessions: HashMap::<String, Vec<PeerSession>>::new(),
-            tinyplace: None::<TinyplaceIdentity>,
+            // The hub's own identity, so the operator can read off the address a
+            // worker must trust (owner / allowlist) before it accepts a task.
+            tinyplace: self
+                .hub
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|h| TinyplaceIdentity {
+                    agent_id: h.address().to_string(),
+                    public_key: h.public_key().to_string(),
+                    handle: None,
+                }),
             async_mode: s.async_mode,
             threads,
             active_thread_id: s.active_id.clone(),
@@ -364,5 +417,61 @@ impl Runtime for BackendRuntime {
             }
         }
         Box::pin(async move { Ok(()) })
+    }
+}
+
+/// Map a hub roster entry to the UI's [`WorkerInfo`](crate::runtime::WorkerInfo)
+/// row. An `@handle` address is surfaced as the `handle` field too.
+fn hub_worker_to_info(w: crate::hub::HubWorker) -> crate::runtime::WorkerInfo {
+    crate::runtime::WorkerInfo {
+        handle: w.address.starts_with('@').then(|| w.address.clone()),
+        id: w.id,
+        address: w.address,
+        label: w.label,
+        harness: Some(w.harness),
+        peer_id: None,
+        selected: w.selected,
+    }
+}
+
+/// Translate a [`WorkerOp`](crate::runtime::WorkerOp) into a hub-handle mutation.
+async fn apply_worker_op(
+    handle: &crate::hub::HubHandle,
+    op: crate::runtime::WorkerOp,
+) -> anyhow::Result<()> {
+    use crate::runtime::WorkerOp;
+    match op {
+        WorkerOp::Add {
+            address,
+            handle: h,
+            label,
+            harness,
+        } => {
+            let addr = address
+                .or(h)
+                .ok_or_else(|| anyhow!("a worker needs an address or @handle"))?;
+            handle
+                .add(crate::hub::HubWorker {
+                    id: addr.clone(),
+                    address: addr,
+                    harness: harness.unwrap_or_else(|| "claude".to_string()),
+                    label,
+                    selected: false,
+                })
+                .await
+        }
+        WorkerOp::Remove { id } => handle.remove(&id).await,
+        WorkerOp::Update { id, patch } => {
+            let label = patch
+                .get("label")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .filter(|s| !s.is_empty());
+            handle.set_label(&id, label).await
+        }
+        WorkerOp::Select { id } => {
+            handle.select(&id);
+            Ok(())
+        }
     }
 }

@@ -11,6 +11,7 @@ pub mod daemon;
 pub mod harness_contract;
 pub mod history_upload;
 pub mod home;
+pub mod hub;
 pub mod init;
 pub mod memory;
 pub mod onboarding;

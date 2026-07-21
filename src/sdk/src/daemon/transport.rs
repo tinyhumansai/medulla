@@ -125,6 +125,37 @@ impl SignalTransport {
         &self.our_agent_id
     }
 
+    /// Drop the local Signal session with `peer` so the next send re-runs X3DH
+    /// (a fresh `PREKEY_BUNDLE`). Used by senders to recover from a one-sided
+    /// session — e.g. after the peer restarted and lost its ratchet state, our
+    /// `CIPHERTEXT` becomes undecryptable and is silently dropped.
+    ///
+    /// Best-effort: the following resend re-runs X3DH regardless, so a store
+    /// failure here surfaces as that resend's error rather than being fatal. We
+    /// log it so a persistently-unwritable store is visible instead of looking
+    /// like a clean recovery that keeps failing.
+    pub async fn reset_session(&self, peer: &str) {
+        let _guard = self.lock.lock().await;
+        if let Err(e) = self.session.remove_session(peer).await {
+            eprintln!("medulla: reset_session for {peer} failed to clear the store ({e}) — resend will retry X3DH anyway");
+        }
+    }
+
+    /// Whether `peer` has *accepted* our contact request.
+    ///
+    /// A request only creates a `pending` edge; the peer's auto-accepter settles
+    /// it a poll later. Since the relay refuses a DM between non-contacts
+    /// (`403 not_a_contact`), callers wait on this before the first send rather
+    /// than racing into a 403. Any lookup failure reads as "not accepted".
+    pub async fn contact_accepted(&self, peer: &str) -> bool {
+        self.client
+            .contacts
+            .status(peer)
+            .await
+            .map(|c| c.status == "accepted")
+            .unwrap_or(false)
+    }
+
     /// Ask `peer` for a contact relationship.
     ///
     /// The directory refuses a direct message between agents that are not
@@ -212,8 +243,12 @@ impl SignalTransport {
         match self.encrypt_and_send(to, body).await {
             Ok(()) => Ok(()),
             Err(err) if is_session_error(&err) => {
-                // Drop the desynced session so the retry re-runs X3DH.
-                let _ = self.session.remove_session(to).await;
+                // Drop the desynced session so the retry re-runs X3DH. A store
+                // failure here is logged (not fatal): the retry re-handshakes
+                // regardless and surfaces its own error to the caller.
+                if let Err(e) = self.session.remove_session(to).await {
+                    eprintln!("medulla: failed to clear desynced session with {to} ({e}) — retrying send anyway");
+                }
                 self.encrypt_and_send(to, body).await
             }
             Err(err) => Err(err),
@@ -291,12 +326,40 @@ impl SignalTransport {
         };
         let mut out = Vec::new();
         for message in response.messages {
-            if let Some(text) = self.decrypt(&message).await {
-                out.push(InboundMessage {
+            match self.decrypt(&message).await {
+                Ok(text) => out.push(InboundMessage {
                     from: message.from.clone(),
                     text,
-                });
+                }),
+                // A dropped message is otherwise invisible — the daemon would
+                // just never run a task it was sent. Log the reason (stale
+                // ratchet, prekey mismatch, bad envelope) instead of swallowing.
+                // Then drop our half-session with the sender so its re-handshake
+                // (a fresh `PREKEY_BUNDLE`) establishes cleanly rather than
+                // failing forever against poisoned ratchet state.
+                Err(e) => {
+                    eprintln!(
+                        "medulla daemon: dropped undecryptable {:?} from {} ({e}) — resetting session",
+                        message.envelope_type, message.from
+                    );
+                    if is_session_error(&e) {
+                        // Best-effort: a failed clear leaves the poisoned session
+                        // in place, so log it rather than pretend recovery
+                        // succeeded. The sender's re-handshake produces a fresh
+                        // envelope; this one is unrecoverable either way.
+                        if let Err(re) = self.session.remove_session(&message.from).await {
+                            eprintln!(
+                                "medulla daemon: failed to reset session with {} ({re}) — future messages may keep failing until the store recovers",
+                                message.from
+                            );
+                        }
+                    }
+                }
             }
+            // Ack regardless: the ciphertext cannot be decrypted under the current
+            // (absent/poisoned) session and never will be, so leaving it un-acked
+            // would only cause the relay to redeliver the same undecryptable
+            // envelope forever. Recovery comes from the sender's next envelope.
             let _ = self
                 .client
                 .messages
@@ -306,15 +369,15 @@ impl SignalTransport {
         out
     }
 
-    async fn decrypt(&self, envelope: &MessageEnvelope) -> Option<String> {
-        let sender_ed = decode_agent_id(&envelope.from).ok()?;
-        let sender_x = ed25519_pub_to_x25519_pub(&sender_ed).ok()?;
+    async fn decrypt(&self, envelope: &MessageEnvelope) -> Result<String, String> {
+        let sender_ed = decode_agent_id(&envelope.from)?;
+        let sender_x = ed25519_pub_to_x25519_pub(&sender_ed).map_err(|e| e.to_string())?;
         let plaintext = self
             .session
             .decrypt(&envelope.from, &sender_x, envelope)
             .await
-            .ok()?;
-        String::from_utf8(plaintext).ok()
+            .map_err(|e| format!("decrypt: {e}"))?;
+        String::from_utf8(plaintext).map_err(|e| format!("utf8: {e}"))
     }
 }
 

@@ -84,14 +84,18 @@ jobs:
           tool: cargo-llvm-cov
 
       # Gate reusable SDK and UI logic at 95%. The excluded files are the
-      # process/terminal drivers themselves: they depend on OS terminal state
-      # and are exercised separately by the binary subprocess + direct-PTY E2E
-      # suite (`e2e_cli`), while their state machines/renderers remain counted.
+      # process/terminal/network drivers themselves: they depend on OS terminal
+      # state or a live Socket.IO/tiny.place connection and are exercised
+      # separately by the binary subprocess + direct-PTY E2E suite (`e2e_cli`)
+      # and the live staging hub run, while their pure state machines, routing,
+      # and data types remain counted. The orchestrator-hub split keeps the
+      # dispatch runner + roster resolution + data types counted; only the
+      # connect/boot/relay/handle IO drivers and the TUI hub wiring are excluded.
       - name: Coverage gate
         timeout-minutes: 35
         run: >-
           cargo llvm-cov --locked
-          --ignore-filename-regex 'src/tui/src/(app_loop|commands|event_loop|terminal)\.rs|src/tui/src/ui/onboarding/run\.rs'
+          --ignore-filename-regex 'src/tui/src/(app_loop|commands|event_loop|terminal|hub_relay)\.rs|src/tui/src/ui/onboarding/run\.rs|src/sdk/src/hub/(boot|socket|relay|handle)\.rs'
           --fail-under-lines 95
           --summary-only
 

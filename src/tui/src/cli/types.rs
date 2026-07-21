@@ -11,6 +11,9 @@ use medulla::tinyplace::HarnessProvider;
 pub enum Command {
     /// Run the interactive TUI (bare invocation, or with TUI flags).
     Tui,
+    /// Run the non-interactive core-runtime driver: submit one instruction over
+    /// a `medulla-serve` socket and stream the cycle's events as JSON lines.
+    Run,
     /// Run the headless daemon; carries the remaining args.
     Daemon,
     Version,
@@ -107,6 +110,11 @@ pub struct TuiArgs {
     /// Force the offline demo runtime, skipping the token lookup and the login
     /// screen. The only headless way to reach a working runtime with no backend.
     pub mock: bool,
+    /// Explicit `--core-socket <path>`: attach the core (`medulla-serve`) runtime
+    /// at this socket instead of the backend. `None` leaves the choice to the
+    /// `[core]` config section / `MEDULLA_CORE_SOCKET` env (see
+    /// [`LoadedConfig::core_socket_request`](medulla::config::LoadedConfig::core_socket_request)).
+    pub core_socket: Option<String>,
 }
 
 impl Default for TuiArgs {
@@ -115,6 +123,20 @@ impl Default for TuiArgs {
             config: None,
             alt_screen: true,
             mock: false,
+            core_socket: None,
         }
     }
+}
+
+/// Parsed `medulla run` flags: the non-interactive one-instruction core-runtime
+/// driver for scripting / e2e.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RunArgs {
+    /// Explicit `--config` path. `None` selects the layered config discovery.
+    pub config: Option<String>,
+    /// Explicit `--core-socket <path>` override. `None` resolves the socket from
+    /// the config / `MEDULLA_CORE_SOCKET` env / the default runtime dir.
+    pub core_socket: Option<String>,
+    /// The instruction to submit — every non-flag argument, joined by spaces.
+    pub instruction: String,
 }

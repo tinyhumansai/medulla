@@ -1,8 +1,7 @@
 //! Unit tests for the CLI plumbing: subcommand dispatch, the per-subcommand
-//! flag parsers, help text, the `sessions` JSON, and the core-socket plan.
+//! flag parsers, help text, and the `sessions` JSON.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use medulla::auth::Provider;
 use medulla::tinyplace::HarnessProvider;
@@ -93,13 +92,12 @@ fn memory_args_parse() {
 #[test]
 fn parses_tui_flags() {
     assert_eq!(parse_tui_args(&argv(&[])), TuiArgs::default());
-    let a = parse_tui_args(&argv(&["--config", "c.json", "--core", "--no-alt-screen"]));
+    let a = parse_tui_args(&argv(&["--config", "c.json", "--no-alt-screen"]));
     assert_eq!(
         a,
         TuiArgs {
             config: Some("c.json".into()),
-            alt_screen: false,
-            core: true
+            alt_screen: false
         }
     );
     // A dangling --config keeps the default (None → layered discovery).
@@ -111,51 +109,6 @@ fn help_names_the_binary() {
     let text = help_text();
     assert!(text.starts_with("medulla "));
     assert!(text.contains("--no-alt-screen"));
-}
-
-#[test]
-fn resolve_prefers_override_then_xdg_then_state() {
-    let over = resolve_socket_path(Some("/tmp/x.sock"), Some("/run/user/1000"), Some("/state"));
-    assert_eq!(over.unwrap(), PathBuf::from("/tmp/x.sock"));
-
-    let xdg = resolve_socket_path(None, Some("/run/user/1000"), Some("/state"));
-    assert_eq!(
-        xdg.unwrap(),
-        PathBuf::from("/run/user/1000/medulla/core.sock")
-    );
-
-    let state = resolve_socket_path(None, None, Some("/state"));
-    assert_eq!(state.unwrap(), PathBuf::from("/state/core.sock"));
-
-    assert!(resolve_socket_path(None, None, None).is_none());
-    // Empty strings are treated as unset.
-    assert!(resolve_socket_path(Some(""), None, None).is_none());
-}
-
-#[test]
-fn core_plan_skips_when_not_wanted() {
-    let plan = core_socket_plan(false, None, None, None, |_| true);
-    assert_eq!(plan, CorePlan::Skip);
-}
-
-#[test]
-fn core_plan_connects_when_socket_present() {
-    let plan = core_socket_plan(true, Some("/run/core.sock"), None, None, |_| true);
-    assert_eq!(plan, CorePlan::Connect(PathBuf::from("/run/core.sock")));
-}
-
-#[test]
-fn core_plan_falls_back_when_absent() {
-    let plan = core_socket_plan(true, Some("/run/core.sock"), None, None, |_| false);
-    match plan {
-        CorePlan::Fallback(note) => assert!(note.contains("not present")),
-        other => panic!("expected fallback, got {other:?}"),
-    }
-    let plan = core_socket_plan(true, None, None, None, |_| false);
-    match plan {
-        CorePlan::Fallback(note) => assert!(note.contains("no core socket resolved")),
-        other => panic!("expected fallback, got {other:?}"),
-    }
 }
 
 #[test]
@@ -188,7 +141,6 @@ fn help_text_carries_crate_version() {
     assert!(text.contains("medulla codex"));
     assert!(text.contains("--no-bridge"));
     assert!(text.contains("--provider"));
-    assert!(text.contains("--core"));
 }
 
 #[test]
@@ -218,22 +170,9 @@ fn tui_args_default_and_debug() {
     let d = TuiArgs::default();
     assert_eq!(d.config, None);
     assert!(d.alt_screen);
-    assert!(!d.core);
     // Command derives Debug/Eq for assertions.
     assert!(format!("{:?}", Command::Tui).contains("Tui"));
     assert_ne!(Command::Tui, Command::Daemon);
-}
-
-#[test]
-fn core_plan_connects_via_state_dir_when_no_config_socket() {
-    // resolve_socket_path falls back to <stateDir>/core.sock.
-    let plan = core_socket_plan(true, None, None, Some("/var/lib/medulla"), |_| true);
-    match plan {
-        CorePlan::Connect(path) => {
-            assert!(path.ends_with("core.sock"));
-        }
-        other => panic!("expected connect, got {other:?}"),
-    }
 }
 
 #[test]

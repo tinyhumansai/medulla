@@ -1,10 +1,7 @@
 //! CLI data model: the top-level [`Command`], the per-subcommand parsed-flag
 //! structs ([`LoginArgs`], [`MemoryArgs`]/[`MemoryAction`], [`UpdateArgs`],
-//! [`TuiArgs`]), and the core-runtime [`CorePlan`] decision. The parsers that
-//! build these live in the sibling `parse` module and the socket planning in
-//! `plan`.
-
-use std::path::PathBuf;
+//! [`TuiArgs`]). The parsers that build these live in the sibling `parse`
+//! module.
 
 use medulla::auth::Provider;
 use medulla::tinyplace::HarnessProvider;
@@ -107,7 +104,9 @@ pub struct TuiArgs {
     /// (`./.medulla/config.toml` / `./medulla.toml` / `<home>/config.toml`).
     pub config: Option<String>,
     pub alt_screen: bool,
-    pub core: bool,
+    /// Force the offline demo runtime, skipping the token lookup and the login
+    /// screen. The only headless way to reach a working runtime with no backend.
+    pub mock: bool,
 }
 
 impl Default for TuiArgs {
@@ -115,18 +114,7 @@ impl Default for TuiArgs {
         TuiArgs {
             config: None,
             alt_screen: true,
-            core: false,
+            mock: false,
         }
     }
-}
-
-/// The decision made about the core runtime before any I/O.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CorePlan {
-    /// Core was not requested — go straight to backend/mock.
-    Skip,
-    /// A present socket path worth a connection attempt.
-    Connect(PathBuf),
-    /// Core was requested but is unavailable; carry the fallback note.
-    Fallback(String),
 }

@@ -161,7 +161,7 @@ pub fn parse_tui_args(args: &[String]) -> TuiArgs {
                 }
             }
             "--no-alt-screen" => out.alt_screen = false,
-            "--core" => out.core = true,
+            "--mock" => out.mock = true,
             _ => {}
         }
     }
@@ -205,7 +205,7 @@ Init flags:\n  \
 --config <path>         Explicit config file (.toml or .json) for backend/model settings\n\n\
 TUI flags:\n  \
 --config <path>         Explicit config file (.toml or .json); bypasses layered discovery\n  \
---core                  Drive the core-js orchestration core over its Unix socket\n  \
+--mock                  Run the offline demo runtime (no backend, no login)\n  \
 --no-alt-screen         Do not switch to the alternate screen\n",
         version = env!("CARGO_PKG_VERSION"),
     )

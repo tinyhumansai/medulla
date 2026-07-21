@@ -205,7 +205,7 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
 
     let mut command = Command::new(binary);
     command
-        .args(["--core", "--no-alt-screen"])
+        .args(["--mock", "--no-alt-screen"])
         .env("MEDULLA_HOME", dir.path())
         .env("MEDULLA_STATE_DIR", dir.path().join("state"))
         .env("MEDULLA_NO_UPDATE_CHECK", "1")

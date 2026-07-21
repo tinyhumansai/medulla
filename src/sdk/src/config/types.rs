@@ -166,16 +166,6 @@ impl Default for OpencodeConfig {
     }
 }
 
-/// Where the TUI reaches the core-js orchestration core (its NDJSON Unix socket).
-/// An explicit `socketPath` overrides the env-based resolution
-/// (`$XDG_RUNTIME_DIR/medulla/core.sock` → `<stateDir>/core.sock`).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-pub struct CoreConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub socket_path: Option<String>,
-}
-
 /// The `update` section: the periodic release-update check. Disabled entirely
 /// by `check = false` here, or by the `MEDULLA_NO_UPDATE_CHECK=1` environment
 /// variable (see [`UpdateConfig::enabled`]).
@@ -301,8 +291,6 @@ pub struct TuiConfig {
     pub state_dir: String,
     pub backend: BackendConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub core: Option<CoreConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryConfigSection>,
     #[serde(default)]
     pub update: UpdateConfig,
@@ -320,7 +308,6 @@ impl Default for TuiConfig {
             medulla: MedullaConfig::default(),
             state_dir: d_state_dir(),
             backend: BackendConfig::default(),
-            core: None,
             memory: None,
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),

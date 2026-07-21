@@ -1,14 +1,12 @@
 //! Pure, testable CLI plumbing for `main`: subcommand dispatch, TUI flag
-//! parsing, help text, the `sessions` JSON, and the runtime-selection decision
-//! (core → backend → mock). I/O-bound work (connecting sockets, reading the
+//! parsing, help text, and the `sessions` JSON. I/O-bound work (reading the
 //! terminal) stays in `main`; everything here is a pure function over its
-//! inputs so it can be unit-tested without a TTY or a live core/backend.
+//! inputs so it can be unit-tested without a TTY or a live backend.
 //!
 //! The module is split by responsibility: [`types`] holds the data model
-//! (the [`Command`] enum, the parsed-flag structs, and [`CorePlan`]), [`parse`]
-//! the argument parsers and [`help_text`], and [`plan`] the session listing and
-//! core-socket resolution. All public items are re-exported here so callers use
-//! `medulla_tui::cli::*`.
+//! (the [`Command`] enum and the parsed-flag structs), [`parse`] the argument
+//! parsers and [`help_text`], and [`plan`] the session listing. All public
+//! items are re-exported here so callers use `medulla_tui::cli::*`.
 
 mod parse;
 mod plan;
@@ -21,7 +19,5 @@ pub use parse::{
     help_text, parse_command, parse_init_args, parse_login_args, parse_memory_args, parse_tui_args,
     parse_update_args,
 };
-pub use plan::{core_socket_plan, resolve_socket_path, sessions_json};
-pub use types::{
-    Command, CorePlan, InitArgs, LoginArgs, MemoryAction, MemoryArgs, TuiArgs, UpdateArgs,
-};
+pub use plan::sessions_json;
+pub use types::{Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, TuiArgs, UpdateArgs};

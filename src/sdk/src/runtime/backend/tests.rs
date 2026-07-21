@@ -1,6 +1,6 @@
 //! Unit tests for the backend runtime's local fold: event mapping, the
-//! optimistic-echo de-duplication, the cycle bracket, log caps, and the
-//! session-summary mapper.
+//! optimistic-echo de-duplication, the cycle bracket, log caps, the
+//! session-summary mapper, and the hub roster row mapper.
 
 use serde_json::{json, Value};
 
@@ -8,7 +8,9 @@ use crate::client::{EventEnvelope as ClientEnvelope, SessionSummary};
 use crate::ui::events::TuiEvent;
 
 use super::fold::summary_from_session;
+use super::runtime::hub_worker_to_info;
 use super::types::{State, Thread, CHAT_CAP, EVENT_CAP};
+use crate::hub::HubWorker;
 
 fn client_env(session: &str, seq: Option<u64>, event: Value) -> ClientEnvelope {
     let mut raw = json!({
@@ -210,4 +212,48 @@ fn session_summary_falls_back_to_id_for_name() {
     let row = summary_from_session(&s);
     assert_eq!(row.name, "sess-bare");
     assert_eq!(row.turns, 0);
+}
+
+fn hub_worker(address: &str) -> HubWorker {
+    HubWorker {
+        id: "w1".to_string(),
+        address: address.to_string(),
+        harness: "claude".to_string(),
+        label: Some("builder".to_string()),
+        selected: false,
+    }
+}
+
+#[test]
+fn a_plain_address_maps_to_a_row_without_a_handle() {
+    let info = hub_worker_to_info(hub_worker("GRV1worker"));
+
+    assert_eq!(info.id, "w1");
+    assert_eq!(info.address, "GRV1worker");
+    // A base58 address is not a handle, so the handle column stays empty.
+    assert_eq!(info.handle, None);
+    assert_eq!(info.label.as_deref(), Some("builder"));
+    assert_eq!(info.harness.as_deref(), Some("claude"));
+    assert_eq!(info.peer_id, None);
+    assert!(!info.selected);
+}
+
+#[test]
+fn an_at_handle_address_is_surfaced_as_the_handle_too() {
+    // `@name` addresses are shown in both columns so the roster reads naturally.
+    let info = hub_worker_to_info(hub_worker("@builder"));
+
+    assert_eq!(info.address, "@builder");
+    assert_eq!(info.handle.as_deref(), Some("@builder"));
+}
+
+#[test]
+fn selection_carries_through_to_the_row() {
+    let mut w = hub_worker("GRV1worker");
+    w.selected = true;
+    w.label = None;
+
+    let info = hub_worker_to_info(w);
+    assert!(info.selected);
+    assert_eq!(info.label, None);
 }

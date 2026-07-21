@@ -2,8 +2,8 @@
 //! pre-app login screen, and background-service wiring before handing off to the
 //! [`crate::event_loop::run`] loop.
 //!
-//! [`run_tui`] implements the runtime-selection order (core socket → backend
-//! token → login screen → mock), installs the panic-safe terminal guard, starts
+//! [`run_tui`] implements the runtime-selection order (backend token → login
+//! screen → mock), installs the panic-safe terminal guard, starts
 //! the optional tiny.place presence service, runs the event loop, and tears
 //! everything down on exit.
 
@@ -13,19 +13,13 @@ use std::sync::{Arc, Mutex};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use medulla::auth::{missing_token_note, resolve_backend_token, CredentialStore};
+use medulla::auth::{resolve_backend_token, CredentialStore};
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
 use medulla::runtime::backend::BackendRuntime;
-#[cfg(unix)]
-use medulla::runtime::core::CoreRuntime;
-#[cfg(unix)]
-use medulla::runtime::core_client::CoreClient;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
-#[cfg(unix)]
-use medulla_tui::cli::core_socket_plan;
-use medulla_tui::cli::{parse_tui_args, CorePlan};
+use medulla_tui::cli::parse_tui_args;
 use medulla_tui::ui::login::LoginOutcome;
 use medulla_tui::ui::welcome::{format_usd, run_welcome_ui};
 
@@ -49,39 +43,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let home = medulla::home::medulla_home(&env);
 
     // Runtime selection order (spec §5):
-    //   1. `--core`, or a `[core]` config section, with a reachable core socket → CoreRuntime
-    //   2. a backend token (inline or via `backend.tokenEnv`)             → BackendRuntime
-    //   3. otherwise                                                       → MockRuntime
-    let want_core = args.core || loaded.config.core.is_some();
-    // The core runtime rides a Unix domain socket, so on Windows a core request
-    // resolves to a clear note and falls through to the backend→mock chain.
-    #[cfg(unix)]
-    let plan = core_socket_plan(
-        want_core,
-        loaded
-            .config
-            .core
-            .as_ref()
-            .and_then(|c| c.socket_path.as_deref()),
-        env.get("XDG_RUNTIME_DIR").map(String::as_str),
-        // The resolved state dir already reflects MEDULLA_STATE_DIR / <home>/state.
-        Some(loaded.config.state_dir.as_str()),
-        |p| p.exists(),
-    );
-    #[cfg(not(unix))]
-    let plan = if want_core {
-        CorePlan::Fallback(
-            "core runtime requires unix sockets — unavailable on Windows; falling back".into(),
-        )
-    } else {
-        CorePlan::Skip
-    };
-
+    //   1. a backend token (inline or via `backend.tokenEnv`) → BackendRuntime
+    //   2. otherwise                                          → login screen → mock
     let mut runtime: Option<Arc<dyn Runtime>> = None;
     let mut startup_status: Option<String> = None;
     // Kept alongside the runtime so the first-run welcome flow can talk to the
-    // backend directly. `None` whenever we end up on core or the mock, which is
-    // exactly when the welcome flow must not run.
+    // backend directly. `None` whenever we end up on the mock, which is exactly
+    // when the welcome flow must not run.
     let mut backend_client: Option<MedullaClient> = None;
 
     // Shared hub roster slot: filled after the hub connects (backend runtime),
@@ -89,11 +57,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // the hub's tiny.place peers live.
     let hub_slot: crate::hub_relay::HubSlot = Arc::new(Mutex::new(None));
 
-    // Persona-memory service (tinycortex), on by default. Built once here and
-    // wired two ways: into the core runtime, which advertises + serves the
-    // memory toolset, and into the app itself, which reads it for the Memory
-    // tab. The second wiring is what makes memory work on the backend and mock
-    // paths — the runtime seam only ever carried it on core.
+    // Persona-memory service (tinycortex), on by default. Wired into the app
+    // itself, which reads it for the Memory tab, so memory works on the backend
+    // and mock paths alike.
     let memory_settings = medulla::memory::env::resolve_with_backend(
         loaded.config.memory.as_ref(),
         &loaded.config.backend,
@@ -111,94 +77,31 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     } else {
         None
     };
-    // The core runtime additionally *serves* memory as a toolset, so it takes a
-    // clone below; the TUI's own Memory tab is wired straight to the service so
-    // it works on every runtime path, not just core.
 
-    match plan {
-        CorePlan::Skip => {}
-        CorePlan::Fallback(note) => startup_status = Some(note),
-        CorePlan::Connect(_path) => {
-            #[cfg(unix)]
-            {
-                let path = _path;
-                let version = env!("CARGO_PKG_VERSION");
-                match CoreClient::connect(&path).await {
-                    Ok((client, events_rx)) => {
-                        match CoreRuntime::connect(
-                            client,
-                            events_rx,
-                            version,
-                            memory_service.clone(),
-                        )
-                        .await
-                        {
-                            Ok(rt) => runtime = Some(Arc::new(rt)),
-                            Err(e) => {
-                                startup_status =
-                                    Some(format!("core handshake failed ({e}) — falling back"));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        startup_status = Some(format!(
-                            "core socket {} unreachable ({e}) — falling back",
-                            path.display()
-                        ));
-                    }
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                startup_status = Some(
-                    "core runtime requires unix sockets — unavailable on Windows; falling back"
-                        .into(),
-                );
-            }
-        }
-    }
-
-    // When core is not the runtime, decide between a backend runtime, the
-    // interactive login screen, or the mock. `--core` (or a `[core]` config) is
-    // left on its existing backend→mock fallback so an explicit core request is
-    // never hijacked by the login UX.
+    // Decide between a backend runtime, the interactive login screen, or the
+    // mock.
     let mut need_login: Option<String> = None;
+    if args.mock {
+        // Explicit offline demo: skip the token lookup and the login screen
+        // entirely so the TUI is drivable with no backend at all.
+        runtime = Some(Arc::new(MockRuntime::demo()));
+        startup_status = Some("running the offline mock runtime (--mock)".to_string());
+    }
     if runtime.is_none() {
         let backend = &loaded.config.backend;
-        let core_note = startup_status.take();
         let stored = CredentialStore::at_home(&home).load_or_legacy();
         let token = resolve_backend_token(&env, backend, stored.as_ref());
 
-        let (rt, note): (Option<Arc<dyn Runtime>>, Option<String>) = match (want_core, token) {
-            // Explicit core that fell back: preserve the old backend→mock path.
-            (true, Some(tok)) => {
-                let client = MedullaClient::new(backend.base_url.clone(), tok);
-                match BackendRuntime::connect_with_hub(client.clone(), hub_slot.clone()).await {
-                    Ok(rt) => {
-                        backend_client = Some(client);
-                        (Some(Arc::new(rt)), None)
-                    }
-                    Err(e) => (
-                        Some(Arc::new(MockRuntime::demo())),
-                        Some(format!(
-                            "backend connect failed ({e}) — running with mock runtime"
-                        )),
-                    ),
-                }
-            }
-            (true, None) => (
-                Some(Arc::new(MockRuntime::demo())),
-                Some(missing_token_note(backend)),
-            ),
-            // Default path: no token → login screen.
-            (false, None) => {
+        let (rt, note): (Option<Arc<dyn Runtime>>, Option<String>) = match token {
+            // No token → login screen.
+            None => {
                 need_login = Some(backend.base_url.clone());
                 (None, None)
             }
-            // Default path with a token: preflight `me()` so an expired/rejected
-            // token routes to the login screen instead of silently dropping to
-            // mock; a network failure keeps the old mock fallback.
-            (false, Some(tok)) => {
+            // With a token: preflight `me()` so an expired/rejected token routes
+            // to the login screen instead of silently dropping to mock; a network
+            // failure keeps the mock fallback.
+            Some(tok) => {
                 let client = MedullaClient::new(backend.base_url.clone(), tok);
                 match client.me().await {
                     Ok(_) => {
@@ -231,8 +134,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             }
         };
         runtime = rt;
-        // Prefer the more specific fallback note (core → backend → mock).
-        startup_status = core_note.or(note);
+        startup_status = note;
     }
 
     // Restore the terminal on panic before the default hook prints the message.

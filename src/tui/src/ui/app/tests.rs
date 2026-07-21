@@ -247,3 +247,41 @@ fn a_vote_result_updates_the_row_in_place() {
     // Applying an update must not move the cursor.
     assert_eq!(a.feedback_index(), 0);
 }
+
+#[test]
+fn clicking_a_context_chunk_selects_it() {
+    // Context is a Settings *subpage*, not a top-level tab, so the click router
+    // has to match on the subpage — matching on the tab made this branch
+    // unreachable and clicking a chunk silently did nothing.
+    let mut a = app();
+    let _ = a.focus_settings_subpage("Context");
+    assert_eq!(a.settings_subpage(), "Context");
+
+    a.contexts = vec![
+        medulla::runtime::ContextItem {
+            ref_: "a".into(),
+            kind: "file".into(),
+            bytes: 10,
+            content: "alpha".into(),
+        },
+        medulla::runtime::ContextItem {
+            ref_: "b".into(),
+            kind: "file".into(),
+            bytes: 20,
+            content: "bravo".into(),
+        },
+    ];
+    a.hit_context = Some(ratatui::layout::Rect::new(0, 5, 40, 10));
+
+    // Second row inside the hit rect selects the second chunk.
+    let _ = a.handle_click(3, 6);
+    assert_eq!(a.context_index, 1);
+
+    // A click past the last chunk leaves the selection alone.
+    let _ = a.handle_click(3, 9);
+    assert_eq!(a.context_index, 1);
+
+    // A click outside the rect is ignored entirely.
+    let _ = a.handle_click(3, 40);
+    assert_eq!(a.context_index, 1);
+}

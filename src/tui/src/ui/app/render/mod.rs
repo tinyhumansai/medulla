@@ -334,3 +334,6 @@ impl App {
         TLine::from(Span::styled(text, style))
     }
 }
+
+#[cfg(test)]
+mod tests;

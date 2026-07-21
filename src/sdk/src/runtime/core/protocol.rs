@@ -147,6 +147,11 @@ pub(super) fn fold_event(state: &mut CoreState, event: &Value) -> bool {
             state.running = true;
             let status = status_mut(state);
             status.state = HarnessState::Running;
+            // The instruction has left the FIFO queue to run, so it no longer
+            // counts as backlog. Saturating so a cycle_start without a matching
+            // instruction_queued (e.g. one seen before the connection attached)
+            // can never underflow the depth below zero.
+            status.queued = status.queued.saturating_sub(1);
             status.active_instruction_id = Some(instruction_id);
             status.active_cycle_id = Some(cycle_id.clone());
             state.emit(TuiEvent::CycleStart { cycle_id });

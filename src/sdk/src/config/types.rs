@@ -7,6 +7,7 @@
 //! [`load_config`](super::load_config), not here.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -227,6 +228,23 @@ pub struct MemoryConfigSection {
     pub max_cost_usd: Option<f64>,
 }
 
+/// The optional `core` section: the NDJSON `medulla-serve` orchestration socket.
+///
+/// When configured, the core runtime attaches to a long-lived `medulla-serve`
+/// process over a unix domain socket (the `medulla-serve` protocol, plan §2.2).
+/// This milestone is attach-only: the socket must already be listening. The
+/// section is unix-only; on Windows a request for it degrades to the
+/// backend→mock chain (see [`super::load_config`]).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CoreConfig {
+    /// Explicit NDJSON unix socket path. When unset the socket is resolved from
+    /// `$XDG_RUNTIME_DIR/medulla/serve.sock`, then `<stateDir>/serve.sock` (see
+    /// [`LoadedConfig::core_socket_path`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub socket_path: Option<String>,
+}
+
 /// Where the TUI reaches the Medulla backend HTTP API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -291,6 +309,8 @@ pub struct TuiConfig {
     pub state_dir: String,
     pub backend: BackendConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub core: Option<CoreConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryConfigSection>,
     #[serde(default)]
     pub update: UpdateConfig,
@@ -308,6 +328,7 @@ impl Default for TuiConfig {
             medulla: MedullaConfig::default(),
             state_dir: d_state_dir(),
             backend: BackendConfig::default(),
+            core: None,
             memory: None,
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),
@@ -351,6 +372,35 @@ impl LoadedConfig {
         } else {
             "WORKER".into()
         }
+    }
+
+    /// Resolve the NDJSON `medulla-serve` socket path for the core runtime.
+    ///
+    /// Precedence follows the serve-protocol transport contract (plan §2.2): an
+    /// explicit `[core] socketPath` wins; otherwise
+    /// `$XDG_RUNTIME_DIR/medulla/serve.sock`, then `<stateDir>/serve.sock`. A
+    /// blank or whitespace-only `socketPath` is treated as unset. The returned
+    /// path is where the runtime *attaches*; this milestone never spawns serve,
+    /// so a missing socket surfaces as an attach error, not a spawn.
+    pub fn core_socket_path(&self, env: &HashMap<String, String>) -> PathBuf {
+        if let Some(explicit) = self
+            .config
+            .core
+            .as_ref()
+            .and_then(|c| c.socket_path.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return PathBuf::from(explicit);
+        }
+        if let Some(xdg) = env
+            .get("XDG_RUNTIME_DIR")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return PathBuf::from(xdg).join("medulla").join("serve.sock");
+        }
+        PathBuf::from(&self.config.state_dir).join("serve.sock")
     }
 
     /// Pretty-printed config JSON for the Config tab, with `backend.tokenEnv`

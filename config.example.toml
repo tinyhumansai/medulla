@@ -32,7 +32,7 @@
 # Under the home:
 #   <home>/credentials.json     saved by `medulla login`  (mode 0600)
 #   <home>/config.toml          the user-global config file
-#   <home>/state                default stateDir          (chats, core.sock)
+#   <home>/state                default stateDir          (chats, serve.sock)
 #   <home>/tinyplace            default tinyplace identity dir
 #
 # `.env` in the cwd is loaded at startup (KEY=VALUE, `#` comments, optional
@@ -52,14 +52,14 @@ tokenEnv = "MEDULLA_TOKEN"
 # token = "eyJ..."
 
 # ---------------------------------------------------------------------------
-# core — the core-js orchestration socket (optional)
+# core — the medulla-serve NDJSON orchestration socket (optional)
 # ---------------------------------------------------------------------------
 # [core]
 # Explicit NDJSON Unix socket path. When unset the socket is resolved from
-# $XDG_RUNTIME_DIR/medulla/core.sock, then <stateDir>/core.sock.
-# The core runtime is unix-only; on Windows a --core / [core] request logs a
-# note and falls through to the backend→mock chain.
-# socketPath = "/run/user/1000/medulla/core.sock"
+# $XDG_RUNTIME_DIR/medulla/serve.sock, then <stateDir>/serve.sock.
+# The core runtime is attach-only and unix-only; on Windows a --core / [core]
+# request logs a note and falls through to the backend→mock chain.
+# socketPath = "/run/user/1000/medulla/serve.sock"
 
 # ---------------------------------------------------------------------------
 # update — background release-update check (optional)
@@ -73,7 +73,7 @@ tokenEnv = "MEDULLA_TOKEN"
 # check = true
 
 # ---------------------------------------------------------------------------
-# stateDir — TUI state (chats, resolved core socket). Default: <home>/state
+# stateDir — TUI state (chats, resolved serve socket). Default: <home>/state
 # Env override: MEDULLA_STATE_DIR.
 # ---------------------------------------------------------------------------
 # stateDir = "/absolute/path/to/state"

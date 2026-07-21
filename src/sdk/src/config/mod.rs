@@ -21,7 +21,7 @@ mod tests;
 pub use load::load_config;
 pub use persist::{clear_setting, persist_setting, persist_welcome_completed};
 pub use types::{
-    BackendConfig, LoadedConfig, MedullaConfig, MemoryConfigSection, OnboardingConfig,
+    BackendConfig, CoreConfig, LoadedConfig, MedullaConfig, MemoryConfigSection, OnboardingConfig,
     OpencodeConfig, Peer, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
 };
 pub use urls::{

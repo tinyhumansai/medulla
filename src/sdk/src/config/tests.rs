@@ -248,6 +248,78 @@ fn context_window_honors_override() {
 }
 
 #[test]
+fn core_socket_path_prefers_explicit_over_xdg_and_state_dir() {
+    // An explicit [core] socketPath wins over both fallbacks.
+    let cfg: TuiConfig =
+        serde_json::from_str(r#"{"core":{"socketPath":"/tmp/explicit.sock"}}"#).unwrap();
+    let loaded = LoadedConfig {
+        config: cfg,
+        path: "x".into(),
+        sources: Vec::new(),
+    };
+    let resolved = loaded.core_socket_path(&env(&[("XDG_RUNTIME_DIR", "/run/user/1000")]));
+    assert_eq!(resolved, PathBuf::from("/tmp/explicit.sock"));
+}
+
+#[test]
+fn core_socket_path_falls_back_to_xdg_then_state_dir() {
+    // No explicit path: XDG_RUNTIME_DIR wins when set, else <stateDir>.
+    let cfg = TuiConfig {
+        state_dir: "/var/state".into(),
+        ..Default::default()
+    };
+    let loaded = LoadedConfig {
+        config: cfg,
+        path: "x".into(),
+        sources: Vec::new(),
+    };
+    // XDG present → $XDG_RUNTIME_DIR/medulla/serve.sock.
+    assert_eq!(
+        loaded.core_socket_path(&env(&[("XDG_RUNTIME_DIR", "/run/user/1000")])),
+        PathBuf::from("/run/user/1000/medulla/serve.sock")
+    );
+    // XDG absent (and blank treated as unset) → <stateDir>/serve.sock.
+    assert_eq!(
+        loaded.core_socket_path(&env(&[("XDG_RUNTIME_DIR", "  ")])),
+        PathBuf::from("/var/state/serve.sock")
+    );
+    assert_eq!(
+        loaded.core_socket_path(&env(&[])),
+        PathBuf::from("/var/state/serve.sock")
+    );
+}
+
+#[test]
+fn core_socket_path_treats_blank_explicit_as_unset() {
+    // A whitespace-only socketPath must not shadow the fallbacks.
+    let mut cfg: TuiConfig = serde_json::from_str(r#"{"core":{"socketPath":"   "}}"#).unwrap();
+    cfg.state_dir = "/var/state".into();
+    let loaded = LoadedConfig {
+        config: cfg,
+        path: "x".into(),
+        sources: Vec::new(),
+    };
+    assert_eq!(
+        loaded.core_socket_path(&env(&[])),
+        PathBuf::from("/var/state/serve.sock")
+    );
+}
+
+#[test]
+fn core_section_round_trips_and_omits_when_absent() {
+    // Present socketPath deserializes; absent [core] serializes to nothing.
+    let cfg: TuiConfig =
+        serde_json::from_str(r#"{"core":{"socketPath":"/run/serve.sock"}}"#).unwrap();
+    assert_eq!(
+        cfg.core.as_ref().unwrap().socket_path.as_deref(),
+        Some("/run/serve.sock")
+    );
+    let bare = TuiConfig::default();
+    let json = serde_json::to_value(&bare).unwrap();
+    assert!(json.get("core").is_none(), "absent core must be omitted");
+}
+
+#[test]
 fn unknown_fields_are_ignored() {
     // Permissive parsing: extra keys (including retired sections like
     // `inference`/`langfuse`) must not fail the load.

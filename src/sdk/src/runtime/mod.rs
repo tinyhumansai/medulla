@@ -1,8 +1,12 @@
 //! The `Runtime` trait the UI drives, plus its snapshot contract. Concrete
-//! implementations live alongside: [`backend`] (HTTP/SSE) and [`mock`] (tests
-//! and demos). The UI depends only on the trait and its types.
+//! implementations live alongside: [`backend`] (HTTP/SSE), [`mock`] (tests and
+//! demos), and [`core`] (the unix-socket `medulla-serve` attach, unix-only). The
+//! UI depends only on the trait and its types.
 
 pub mod backend;
+/// The `medulla-serve` NDJSON socket runtime (attach-only, unix-only).
+#[cfg(unix)]
+pub mod core;
 pub mod mock;
 
 use std::collections::HashMap;

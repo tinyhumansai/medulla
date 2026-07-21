@@ -146,8 +146,18 @@ async fn submitting_posts_the_message_and_abort_is_accepted() {
         .any(|r| r.path.contains("/messages"));
     assert!(posted, "submit should reach the messages endpoint");
 
-    // Abort is fire-and-forget; it must not panic with a cycle in flight.
+    // Abort is fire-and-forget (it spawns), so wait for the request to actually
+    // land rather than racing the spawned task to the end of the test.
     runtime.abort();
+    let mut aborted = false;
+    for _ in 0..80 {
+        if backend.requests().iter().any(|r| r.path.contains("/abort")) {
+            aborted = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(aborted, "abort should reach the backend");
 }
 
 #[tokio::test]

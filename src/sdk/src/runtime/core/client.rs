@@ -112,7 +112,22 @@ async fn driver_loop(
             ConnOutcome::Dropped => {
                 set_conn(&state, &tx, ConnState::Reconnecting);
                 attempt += 1;
-                tokio::time::sleep(RECONNECT_DELAY).await;
+                // Race the inter-attempt backoff against `cmd_rx` so a
+                // `Command::Shutdown` sent while the driver is stuck
+                // reconnecting (server down, or the driver started before
+                // serve came up) is acked promptly instead of sitting unread
+                // until a connection eventually lands.
+                tokio::select! {
+                    _ = tokio::time::sleep(RECONNECT_DELAY) => {}
+                    cmd = cmd_rx.recv() => {
+                        if let ConnOutcome::Shutdown = handle_disconnected_command(cmd) {
+                            return;
+                        }
+                        // A non-shutdown command was drained (and failed, since
+                        // there is no live connection to dispatch it over);
+                        // retry the attach immediately.
+                    }
+                }
             }
         }
     }
@@ -127,11 +142,17 @@ async fn serve_connection(
     cmd_rx: &mut mpsc::UnboundedReceiver<Command>,
     attempt: u64,
 ) -> ConnOutcome {
-    let stream = match UnixStream::connect(path).await {
-        Ok(s) => s,
-        // Socket not present yet / refused: treat as a transient drop so the
-        // driver keeps re-attaching (serve may still be coming up).
-        Err(_) => return ConnOutcome::Dropped,
+    // Race the connect attempt against `cmd_rx` too: the socket may not exist
+    // yet (serve still coming up) and `connect` can sit there, so a caller's
+    // `shutdown()` must not wait behind it.
+    let stream = tokio::select! {
+        result = UnixStream::connect(path) => match result {
+            Ok(s) => s,
+            // Socket not present yet / refused: treat as a transient drop so
+            // the driver keeps re-attaching (serve may still be coming up).
+            Err(_) => return ConnOutcome::Dropped,
+        },
+        cmd = cmd_rx.recv() => return handle_disconnected_command(cmd),
     };
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
@@ -237,6 +258,27 @@ async fn serve_connection(
     fail_pending(&mut pending);
     reader_task.abort();
     outcome
+}
+
+/// Handle a command received while there is no live connection to dispatch it
+/// over (mid-connect or mid-backoff). `Shutdown` is acked immediately so
+/// `shutdown()` can never hang behind a driver stuck reconnecting, mirroring
+/// the in-loop `Command::Shutdown` arm in [`serve_connection`]. Any other
+/// command has nothing to send it over yet, so it fails the same way a
+/// dropped connection would.
+fn handle_disconnected_command(cmd: Option<Command>) -> ConnOutcome {
+    match cmd {
+        None => ConnOutcome::Shutdown, // handle dropped
+        Some(Command::Shutdown { reply }) => {
+            let _ = reply.send(());
+            ConnOutcome::Shutdown
+        }
+        Some(Command::Request { reply, .. }) => {
+            let _ = reply.send(Err(CoreError::transport("core runtime is not connected")));
+            ConnOutcome::Dropped
+        }
+        Some(Command::Fire { .. }) => ConnOutcome::Dropped, // nothing to dispatch to
+    }
 }
 
 /// The serve identity learned from a successful handshake.

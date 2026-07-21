@@ -34,6 +34,10 @@ use super::types::{
 const DEFAULT_CONCURRENCY: usize = 2;
 const DEFAULT_TASK_TIMEOUT_MS: u64 = 600_000;
 const DEFAULT_POLL_MS: u64 = 2_000;
+/// How often the serve loop runs (idempotent) key maintenance to refill a
+/// consumed one-time pre-key pool. Long enough to be negligible overhead (the
+/// call is a health-gated no-op when the pool is healthy).
+const KEY_MAINTAIN_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(300);
 
 /// Run `medulla daemon` until a shutdown signal. `args` are the tokens after
 /// the `daemon` subcommand. `onboarding_ui` is the interactive first-run screen
@@ -263,11 +267,24 @@ pub async fn run_daemon(
     // Serve loop: poll → decode → dispatch, until a signal.
     let poll = tokio::time::Duration::from_millis(poll_ms);
     let mut sigterm = signal_stream()?;
+    // Periodic key maintenance. As the responder, this worker's one-time pre-key
+    // pool is consumed one key per new peer handshake; without a refill a
+    // long-lived daemon eventually runs dry and can no longer complete X3DH.
+    // `publish_keys` is health-gated (idempotent), so this is a no-op until the
+    // relay pool actually runs low. The immediate first tick is consumed here
+    // because we already published at startup.
+    let mut maintain = tokio::time::interval(KEY_MAINTAIN_INTERVAL);
+    maintain.tick().await;
     loop {
         tokio::select! {
             _ = &mut sigterm => {
                 log("received shutdown signal, shutting down");
                 break;
+            }
+            _ = maintain.tick() => {
+                if let Err(e) = transport.publish_keys(&signer).await {
+                    log(&format!("periodic key maintenance failed: {e}"));
+                }
             }
             _ = tokio::time::sleep(poll) => {
                 for message in transport.drain_inbox(50).await {

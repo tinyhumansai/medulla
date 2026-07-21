@@ -70,6 +70,28 @@ impl RelayControls {
         self.state.messages.lock().unwrap().len()
     }
 
+    /// How many one-time pre-keys the relay currently holds for `agent_id` — the
+    /// same pool `GET /health` counts. Lets a test assert that an idempotent
+    /// `publish_keys` did NOT re-upload a fresh batch.
+    pub fn one_time_count(&self, agent_id: &str) -> usize {
+        self.state
+            .keys
+            .lock()
+            .unwrap()
+            .get(agent_id)
+            .map(|k| k.one_time.len())
+            .unwrap_or(0)
+    }
+
+    /// Empty `agent_id`'s one-time pre-key pool, simulating every key being
+    /// consumed by peers' handshakes — so a subsequent health check reports the
+    /// pool depleted and `publish_keys` must top it back up.
+    pub fn drain_one_time(&self, agent_id: &str) {
+        if let Some(k) = self.state.keys.lock().unwrap().get_mut(agent_id) {
+            k.one_time.clear();
+        }
+    }
+
     /// Inject a raw envelope addressed to `to` (used to exercise the decrypt
     /// failure path with an undecryptable body).
     pub fn inject_message(&self, from: &str, to: &str, body: &str) {
@@ -158,17 +180,26 @@ async fn handle_conn(mut sock: TcpStream, state: Arc<RelayState>) -> std::io::Re
     // GET /keys/:id/health
     if method == "GET" && route.starts_with("/keys/") && route.ends_with("/health") {
         let id = key_agent_id(&route, "/health");
-        let count = state
-            .keys
-            .lock()
-            .unwrap()
-            .get(&id)
-            .map(|k| k.one_time.len())
-            .unwrap_or(0);
+        let (count, signed_pre_key_id) = {
+            let keys = state.keys.lock().unwrap();
+            match keys.get(&id) {
+                Some(k) => (
+                    k.one_time.len(),
+                    k.signed_pre_key
+                        .as_ref()
+                        .and_then(|spk| spk.get("keyId").cloned()),
+                ),
+                None => (0, None),
+            }
+        };
         let health = json!({
             "agentId": id,
             "oneTimePreKeyCount": count,
             "lowOneTimePreKeys": count < 5,
+            // The real relay reports WHICH signed pre-key it is serving; key
+            // maintenance uses it to confirm the store can still back that exact
+            // id before deciding a rotation is unnecessary.
+            "signedPreKeyKeyId": signed_pre_key_id,
             "updatedAt": "",
         });
         return respond(&mut sock, "200 OK", &health.to_string()).await;

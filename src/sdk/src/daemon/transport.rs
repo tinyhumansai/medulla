@@ -24,14 +24,10 @@ use tokio::sync::Mutex;
 use crate::tinyplace::FileSessionStore;
 use ::tinyplace::crypto::decode_base58;
 use ::tinyplace::signal::crypto::{ed25519_pub_to_x25519_pub, ed25519_seed_to_x25519_keypair};
-use ::tinyplace::signal::keys::{generate_pre_keys, generate_signed_pre_key, serialize_pre_key};
 use ::tinyplace::signal::session::SignalSession;
 use ::tinyplace::signal::store::SessionStore;
-use ::tinyplace::types::{MessageEnvelope, PreKeysRequest, SignedPreKeyRequest};
+use ::tinyplace::types::MessageEnvelope;
 use ::tinyplace::{LocalSigner, Signer, TinyPlaceClient};
-
-/// How many one-time pre-keys to publish on onboard.
-const ONE_TIME_PRE_KEY_COUNT: usize = 20;
 
 /// Render a tiny.place SDK error for a log line, keeping the server's response
 /// body when there is one.
@@ -183,56 +179,28 @@ impl SignalTransport {
         BASE64.encode(self.our_ed25519_pub)
     }
 
-    /// Generate and publish a signed pre-key + one-time pre-keys so peers can run
-    /// X3DH against this wallet. Idempotent enough to run on every start; stores
-    /// the private material locally and uploads the public parts.
+    /// Ensure this wallet has a usable, relay-consistent key bundle,
+    /// **idempotently**. Safe to call on every boot and periodically.
+    ///
+    /// Delegates to the tiny.place SDK's
+    /// [`maintain_keys`](::tinyplace::signal::maintain::maintain_keys), which
+    /// publishes only when the relay actually needs it: a no-op when the store
+    /// already holds a signed pre-key and the relay's one-time pool is healthy, a
+    /// (re)publish on first boot, a wiped store, or a low/depleted pool. Not
+    /// republishing on a healthy restart is what prevents orphaning the keys the
+    /// relay still serves.
     pub async fn publish_keys(&self, signer: &LocalSigner) -> Result<(), String> {
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let spk_id = format!("spk_{now_secs}");
-        let spk = generate_signed_pre_key(signer, &spk_id)
-            .await
-            .map_err(|e| e.to_string())?;
-        self.store
-            .store_signed_pre_key(spk.clone())
-            .await
-            .map_err(|e| e.to_string())?;
-        let one_time = generate_pre_keys(signer, now_secs, ONE_TIME_PRE_KEY_COUNT)
-            .await
-            .map_err(|e| e.to_string())?;
-        for key in &one_time {
-            self.store
-                .store_pre_key(key.clone())
-                .await
-                .map_err(|e| e.to_string())?;
-        }
-
-        let identity_key = self.identity_key_base64();
-        self.client
-            .keys
-            .rotate_signed_pre_key(
-                &self.our_agent_id,
-                &SignedPreKeyRequest {
-                    identity_key: Some(identity_key.clone()),
-                    signed_pre_key: serialize_pre_key(&spk),
-                },
-            )
-            .await
-            .map_err(|e| describe_error(&e))?;
-        self.client
-            .keys
-            .upload_pre_keys(
-                &self.our_agent_id,
-                &PreKeysRequest {
-                    identity_key: Some(identity_key),
-                    pre_keys: one_time.iter().map(serialize_pre_key).collect(),
-                },
-            )
-            .await
-            .map_err(|e| describe_error(&e))?;
-        Ok(())
+        ::tinyplace::signal::maintain::maintain_keys(
+            &self.client.keys,
+            &*self.store,
+            signer,
+            &self.our_agent_id,
+            &self.identity_key_base64(),
+            &::tinyplace::signal::maintain::MaintainPolicy::default(),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| describe_error(&e))
     }
 
     /// Encrypt and send `body` to `to`. On a Signal session error (poisoned

@@ -403,6 +403,40 @@ impl LoadedConfig {
         PathBuf::from(&self.config.state_dir).join("serve.sock")
     }
 
+    /// Whether the core (`medulla-serve`) runtime is *requested*, and if so the
+    /// socket to attach to.
+    ///
+    /// Opting into the core runtime is explicit — the backend runtime stays the
+    /// default. A request comes from, in precedence order: an explicit
+    /// `--core-socket <path>` (`cli_socket`), the `MEDULLA_CORE_SOCKET`
+    /// environment variable, or the presence of a `[core]` config section. The
+    /// first two carry the socket path directly; a `[core]` section resolves the
+    /// path through [`core_socket_path`](Self::core_socket_path) (explicit
+    /// `socketPath`, then `$XDG_RUNTIME_DIR`, then the state dir). Blank/whitespace
+    /// values for the flag and env var are treated as unset so an empty override
+    /// never masks the config. Returns `None` when nothing opts in, which the
+    /// caller reads as "use the backend/mock chain".
+    pub fn core_socket_request(
+        &self,
+        env: &HashMap<String, String>,
+        cli_socket: Option<&str>,
+    ) -> Option<PathBuf> {
+        if let Some(explicit) = cli_socket.map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(PathBuf::from(explicit));
+        }
+        if let Some(from_env) = env
+            .get("MEDULLA_CORE_SOCKET")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(PathBuf::from(from_env));
+        }
+        if self.config.core.is_some() {
+            return Some(self.core_socket_path(env));
+        }
+        None
+    }
+
     /// Pretty-printed config JSON for the Config tab, with `backend.tokenEnv`
     /// annotated `<env> (set|missing)`.
     pub fn pretty_json(&self) -> String {

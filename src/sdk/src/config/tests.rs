@@ -306,6 +306,71 @@ fn core_socket_path_treats_blank_explicit_as_unset() {
 }
 
 #[test]
+fn core_socket_request_opts_in_only_when_asked() {
+    // No [core] section and no flag/env: the core runtime is not requested, so
+    // the caller keeps the backend/mock chain.
+    let bare = LoadedConfig {
+        config: TuiConfig {
+            state_dir: "/var/state".into(),
+            ..Default::default()
+        },
+        path: "x".into(),
+        sources: Vec::new(),
+    };
+    assert_eq!(bare.core_socket_request(&env(&[]), None), None);
+
+    // A `--core-socket` flag opts in and wins over everything else.
+    let cfg_with_core: TuiConfig =
+        serde_json::from_str(r#"{"core":{"socketPath":"/tmp/from-config.sock"}}"#).unwrap();
+    let loaded = LoadedConfig {
+        config: cfg_with_core,
+        path: "x".into(),
+        sources: Vec::new(),
+    };
+    assert_eq!(
+        loaded.core_socket_request(
+            &env(&[("MEDULLA_CORE_SOCKET", "/tmp/from-env.sock")]),
+            Some("/tmp/from-flag.sock"),
+        ),
+        Some(PathBuf::from("/tmp/from-flag.sock"))
+    );
+    // A blank flag is treated as unset, so the env var wins next.
+    assert_eq!(
+        loaded.core_socket_request(
+            &env(&[("MEDULLA_CORE_SOCKET", "/tmp/from-env.sock")]),
+            Some(" ")
+        ),
+        Some(PathBuf::from("/tmp/from-env.sock"))
+    );
+    // With neither flag nor env, the presence of [core] opts in and the path is
+    // resolved through `core_socket_path` (explicit socketPath here).
+    assert_eq!(
+        loaded.core_socket_request(&env(&[]), None),
+        Some(PathBuf::from("/tmp/from-config.sock"))
+    );
+
+    // A bare (empty) [core] section still opts in, falling back to the state dir.
+    let empty_core: TuiConfig = serde_json::from_str(r#"{"core":{}}"#).unwrap();
+    let loaded_empty = LoadedConfig {
+        config: TuiConfig {
+            state_dir: "/var/state".into(),
+            ..empty_core
+        },
+        path: "x".into(),
+        sources: Vec::new(),
+    };
+    assert_eq!(
+        loaded_empty.core_socket_request(&env(&[]), None),
+        Some(PathBuf::from("/var/state/serve.sock"))
+    );
+    // Even with no [core] section, the env var alone opts in.
+    assert_eq!(
+        bare.core_socket_request(&env(&[("MEDULLA_CORE_SOCKET", "/tmp/env-only.sock")]), None),
+        Some(PathBuf::from("/tmp/env-only.sock"))
+    );
+}
+
+#[test]
 fn core_section_round_trips_and_omits_when_absent() {
     // Present socketPath deserializes; absent [core] serializes to nothing.
     let cfg: TuiConfig =

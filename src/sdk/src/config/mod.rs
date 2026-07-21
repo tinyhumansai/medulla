@@ -14,9 +14,13 @@ mod types;
 mod urls;
 
 #[cfg(test)]
+mod load_tests;
+#[cfg(test)]
 mod persist_tests;
 #[cfg(test)]
-mod tests;
+mod types_tests;
+#[cfg(test)]
+mod urls_tests;
 
 pub use load::load_config;
 pub use persist::{clear_setting, persist_setting, persist_welcome_completed};

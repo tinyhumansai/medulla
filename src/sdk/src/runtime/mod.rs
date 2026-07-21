@@ -7,6 +7,8 @@ pub mod backend;
 /// The `medulla-serve` NDJSON socket runtime (attach-only, unix-only).
 #[cfg(unix)]
 pub mod core;
+/// The non-interactive one-instruction driver for scripting / e2e automation.
+pub mod headless;
 pub mod mock;
 
 use std::collections::HashMap;

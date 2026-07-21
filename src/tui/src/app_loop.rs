@@ -87,6 +87,22 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         runtime = Some(Arc::new(MockRuntime::demo()));
         startup_status = Some("running the offline mock runtime (--mock)".to_string());
     }
+    // Core (`medulla-serve`) runtime: selected only when explicitly requested via
+    // `--core-socket`, `MEDULLA_CORE_SOCKET`, or a `[core]` config section — the
+    // backend stays the default. Unix-only, so this is gated; on other platforms
+    // a request falls through to the backend/mock chain (see `CoreConfig` docs).
+    #[cfg(unix)]
+    if runtime.is_none() {
+        if let Some(socket) = loaded.core_socket_request(&env, args.core_socket.as_deref()) {
+            startup_status = Some(format!(
+                "attaching to medulla-serve at {}",
+                socket.display()
+            ));
+            runtime = Some(Arc::new(medulla::runtime::core::CoreRuntime::attach(
+                socket,
+            )));
+        }
+    }
     if runtime.is_none() {
         let backend = &loaded.config.backend;
         let stored = CredentialStore::at_home(&home).load_or_legacy();

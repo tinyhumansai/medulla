@@ -207,6 +207,40 @@ async fn attach_to_missing_socket_stays_reconnecting() {
     assert!(!is_unavailable(&rt));
 }
 
+#[tokio::test]
+async fn failed_instruct_surfaces_the_wire_error() {
+    let server = StubServer::start(StubConfig {
+        instruct_fail: true,
+        ..StubConfig::default()
+    });
+    let rt = CoreRuntime::attach(server.path.clone());
+    assert!(wait_until(|| rt.stream_state() == Some(StreamState::Live)).await);
+
+    let err = rt
+        .submit("do it".into())
+        .await
+        .expect_err("a failed instruct must propagate");
+    assert!(err.to_string().contains("instruct failed"), "{err}");
+}
+
+#[tokio::test]
+async fn inbound_port_call_and_late_ready_are_handled() {
+    // After hello, the stub pushes a reverse-RPC `call` (refused port_unavailable)
+    // and a duplicate `ready` (re-recorded). The session stays Live throughout.
+    let server = StubServer::start(StubConfig {
+        after_hello: vec![
+            json!({"t":"call","id":"c1","port":"inference","method":"invoke","params":{}}),
+            json!({"t":"ready","protocol":1,"serve":"3.12.1","sessionId":"agent","error":null}),
+        ],
+        ..StubConfig::default()
+    });
+    let rt = CoreRuntime::attach(server.path.clone());
+    assert!(wait_until(|| rt.stream_state() == Some(StreamState::Live)).await);
+    // A follow-up instruct still round-trips after handling the extra frames.
+    rt.submit("ping".into()).await.expect("still serviceable");
+    assert!(rt.describe().contains("3.12"), "{}", rt.describe());
+}
+
 // --- frame grammar (protocol.rs) -------------------------------------------
 
 #[test]
@@ -421,6 +455,8 @@ fn describe_reflects_lifecycle_and_error_display() {
     s.serve_version = Some("3.12.0".into());
     s.conn = ConnState::Live;
     assert!(s.describe().contains("3.12.0") && s.describe().contains("attached"));
+    s.conn = ConnState::Reconnecting;
+    assert!(s.describe().contains("reconnecting"));
     s.conn = ConnState::Unavailable("bad".into());
     assert!(s.describe().contains("unavailable: bad"));
 

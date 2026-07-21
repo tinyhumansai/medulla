@@ -23,8 +23,13 @@ pub(super) struct StubConfig {
     pub(super) hello_ok: bool,
     /// Close the connection right after an `instruct` (to force a reconnect).
     pub(super) drop_after_instruct: bool,
+    /// Answer `instruct` with `ok:false` (to exercise the failed-request path).
+    pub(super) instruct_fail: bool,
     /// The `event.event` payloads streamed after an `instruct` receipt.
     pub(super) instruct_events: Vec<Value>,
+    /// Raw frames to push right after answering `hello` (e.g. a `call` or a
+    /// duplicate `ready`), exercising the host's inbound-frame handling.
+    pub(super) after_hello: Vec<Value>,
 }
 
 impl Default for StubConfig {
@@ -33,6 +38,8 @@ impl Default for StubConfig {
             protocol: 1,
             hello_ok: true,
             drop_after_instruct: false,
+            instruct_fail: false,
+            after_hello: Vec::new(),
             instruct_events: vec![
                 json!({"kind":"cycle_start","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
                 json!({"kind":"task_board_changed","task":{
@@ -181,13 +188,30 @@ async fn serve_op(
                 json!({"t":"res","id":id,"ok":false,
                     "error":{"code":"port_unavailable","message":"host missing a required port"}})
             };
-            let _ = send(wr, &res).await;
+            if send(wr, &res).await.is_err() {
+                return true;
+            }
+            // Push any scripted post-hello frames (e.g. a reverse-RPC `call`).
+            for frame in &cfg.after_hello {
+                if send(wr, frame).await.is_err() {
+                    return true;
+                }
+            }
             !cfg.hello_ok
         }
         "subscribe" => {
             let _ = send(
                 wr,
                 &json!({"t":"res","id":id,"ok":true,"result":{"subscribed":true,"seq":*seq}}),
+            )
+            .await;
+            false
+        }
+        "instruct" if cfg.instruct_fail => {
+            let _ = send(
+                wr,
+                &json!({"t":"res","id":id,"ok":false,
+                "error":{"code":"internal","message":"harness rejected the instruction"}}),
             )
             .await;
             false

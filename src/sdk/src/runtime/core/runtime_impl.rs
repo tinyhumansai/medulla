@@ -76,7 +76,9 @@ impl Runtime for CoreRuntime {
                     role: "user".into(),
                     content: input.clone(),
                 });
-                s.emit(TuiEvent::User { body: input.clone() });
+                s.emit(TuiEvent::User {
+                    body: input.clone(),
+                });
             }
             let _ = tx.send(());
 

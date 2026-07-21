@@ -23,9 +23,7 @@ use super::protocol::{
     check_ready, fold_event, hello_params, parse_line, port_unavailable_ret, req_line, Inbound,
     ReadyCheck,
 };
-use super::types::{
-    Command, ConnState, CoreError, CoreState, HANDSHAKE_TIMEOUT, RECONNECT_DELAY,
-};
+use super::types::{Command, ConnState, CoreError, CoreState, HANDSHAKE_TIMEOUT, RECONNECT_DELAY};
 
 /// A [`Runtime`](crate::runtime::Runtime) attached to a `medulla-serve` process
 /// over a unix domain socket. Snapshot/subscribe read the shared state the
@@ -138,14 +136,17 @@ async fn serve_connection(
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
-    let hello_ok =
-        match tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(&mut reader, &mut write_half)).await
-        {
-            Ok(Ok(ok)) => ok,
-            Ok(Err(HandshakeError::Fatal(reason))) => return ConnOutcome::Fatal(reason),
-            Ok(Err(HandshakeError::Dropped)) => return ConnOutcome::Dropped,
-            Err(_) => return ConnOutcome::Dropped, // handshake timeout
-        };
+    let hello_ok = match tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        handshake(&mut reader, &mut write_half),
+    )
+    .await
+    {
+        Ok(Ok(ok)) => ok,
+        Ok(Err(HandshakeError::Fatal(reason))) => return ConnOutcome::Fatal(reason),
+        Ok(Err(HandshakeError::Dropped)) => return ConnOutcome::Dropped,
+        Err(_) => return ConnOutcome::Dropped, // handshake timeout
+    };
 
     // Handshake succeeded: record identity, reset the per-connection cursor, go
     // Live, and ping so the UI observes the attach.
@@ -345,7 +346,10 @@ async fn handle_inbound(
             record_ready(state, serve, session_id);
         }
         Inbound::Res {
-            id, ok, result, error,
+            id,
+            ok,
+            result,
+            error,
         } => {
             if let Some(reply) = pending.remove(&id) {
                 let outcome = if ok {

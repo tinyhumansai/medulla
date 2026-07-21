@@ -264,8 +264,10 @@ fn core_socket_path_prefers_explicit_over_xdg_and_state_dir() {
 #[test]
 fn core_socket_path_falls_back_to_xdg_then_state_dir() {
     // No explicit path: XDG_RUNTIME_DIR wins when set, else <stateDir>.
-    let mut cfg = TuiConfig::default();
-    cfg.state_dir = "/var/state".into();
+    let cfg = TuiConfig {
+        state_dir: "/var/state".into(),
+        ..Default::default()
+    };
     let loaded = LoadedConfig {
         config: cfg,
         path: "x".into(),
@@ -290,8 +292,7 @@ fn core_socket_path_falls_back_to_xdg_then_state_dir() {
 #[test]
 fn core_socket_path_treats_blank_explicit_as_unset() {
     // A whitespace-only socketPath must not shadow the fallbacks.
-    let cfg: TuiConfig = serde_json::from_str(r#"{"core":{"socketPath":"   "}}"#).unwrap();
-    let mut cfg = cfg;
+    let mut cfg: TuiConfig = serde_json::from_str(r#"{"core":{"socketPath":"   "}}"#).unwrap();
     cfg.state_dir = "/var/state".into();
     let loaded = LoadedConfig {
         config: cfg,

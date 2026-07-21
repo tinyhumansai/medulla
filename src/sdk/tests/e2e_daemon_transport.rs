@@ -68,6 +68,51 @@ fn make_identity(tag: &str, base_url: &str) -> Identity {
 }
 
 #[tokio::test]
+async fn publish_keys_is_idempotent_and_does_not_orphan() {
+    // The core orphan-prevention: republishing on a healthy restart would append
+    // a second one-time batch to the relay while the store still backs only its
+    // own — orphaning keys the relay then serves. So a second publish, with the
+    // store intact and the relay pool healthy, must be a NO-OP.
+    let relay = MockRelay::start().await;
+    let controls = relay.controls();
+    let alice = make_identity("alice", &relay.base_url);
+    let alice_id = alice.signer.agent_id();
+
+    alice.transport.publish_keys(&alice.signer).await.unwrap();
+    let after_first = controls.one_time_count(&alice_id);
+    assert!(after_first > 0, "first publish uploads a one-time pool");
+
+    alice.transport.publish_keys(&alice.signer).await.unwrap();
+    assert_eq!(
+        controls.one_time_count(&alice_id),
+        after_first,
+        "an idempotent publish must not re-upload / grow the relay pool"
+    );
+}
+
+#[tokio::test]
+async fn publish_keys_refills_a_depleted_relay_pool() {
+    // The other side of the gate: when peers have consumed the one-time pool, a
+    // later publish_keys (boot or periodic) MUST top it back up rather than no-op,
+    // or new peers can no longer run a full X3DH against this wallet.
+    let relay = MockRelay::start().await;
+    let controls = relay.controls();
+    let alice = make_identity("alice", &relay.base_url);
+    let alice_id = alice.signer.agent_id();
+
+    alice.transport.publish_keys(&alice.signer).await.unwrap();
+    controls.drain_one_time(&alice_id);
+    assert_eq!(controls.one_time_count(&alice_id), 0);
+
+    // Store still holds a signed pre-key, but the relay pool is empty → republish.
+    alice.transport.publish_keys(&alice.signer).await.unwrap();
+    assert!(
+        controls.one_time_count(&alice_id) > 0,
+        "a depleted pool must be refilled"
+    );
+}
+
+#[tokio::test]
 async fn publish_keys_and_encrypted_roundtrip() {
     let relay = MockRelay::start().await;
     let alice = make_identity("alice", &relay.base_url);

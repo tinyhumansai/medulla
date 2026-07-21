@@ -11,6 +11,7 @@
 use medulla::client::MedullaClient;
 use medulla::runtime::backend::BackendRuntime;
 use medulla::runtime::{Runtime, WorkerOp};
+use serde_json::json;
 
 #[path = "support/mod.rs"]
 mod support;
@@ -159,4 +160,79 @@ async fn shutdown_is_idempotent() {
         .shutdown()
         .await
         .expect("a second shutdown is harmless");
+}
+
+#[tokio::test]
+async fn main_chats_are_listed_with_titles_and_turn_counts() {
+    let backend = MockBackend::start().await;
+    backend.configure(|c| {
+        c.sessions_list = json!([
+            {"sessionId": "sess-a", "title": "Repo audit", "lastActiveAt": 1_700_000_000,
+             "status": "active", "lastSeq": 7},
+            // No title → the session id stands in as the display name.
+            {"sessionId": "sess-b", "status": "idle", "lastSeq": 0},
+        ]);
+    });
+    let runtime = runtime(&backend).await;
+
+    let chats = runtime
+        .list_main_chats()
+        .await
+        .expect("the mock lists sessions");
+
+    assert_eq!(chats.len(), 2);
+    assert_eq!(chats[0].session_id, "sess-a");
+    assert_eq!(chats[0].name, "Repo audit");
+    // Turns are message pairs, so seq 7 folds to 3.
+    assert_eq!(chats[0].turns, 3);
+    assert!(!chats[0].updated_at.is_empty());
+    // Untitled sessions fall back to the id rather than rendering blank.
+    assert_eq!(chats[1].name, "sess-b");
+    assert_eq!(chats[1].turns, 0);
+}
+
+#[tokio::test]
+async fn resuming_a_chat_replays_its_transcript_into_the_active_thread() {
+    let backend = MockBackend::start().await;
+    backend.configure(|c| {
+        c.messages_replay = json!([
+            {"seq": 1, "role": "user", "body": "audit the repo"},
+            {"seq": 2, "role": "assistant", "body": "found 3 issues"},
+        ]);
+        c.session_event_seq = 2;
+    });
+    let runtime = runtime(&backend).await;
+
+    runtime
+        .resume_chat("sess-a".to_string())
+        .await
+        .expect("the mock replays the transcript");
+
+    let snap = runtime.snapshot();
+    // The resumed session becomes the active thread's session, and its
+    // transcript is folded in so the UI renders history immediately.
+    assert_eq!(snap.session_id, "sess-a");
+    assert!(
+        snap.messages.len() >= 2,
+        "the replayed transcript should populate the thread"
+    );
+    assert!(snap
+        .messages
+        .iter()
+        .any(|m| m.content.contains("audit the repo")));
+    assert!(snap
+        .messages
+        .iter()
+        .any(|m| m.content.contains("found 3 issues")));
+}
+
+#[tokio::test]
+async fn listing_main_chats_surfaces_a_backend_failure() {
+    // The list endpoint is the one the resume picker calls; a 5xx must surface
+    // as an error rather than an empty picker that looks like "no chats".
+    let backend = MockBackend::start().await;
+    backend.configure(|c| c.sessions_list = json!({"not": "an array"}));
+    let runtime = runtime(&backend).await;
+
+    assert!(runtime.list_main_chats().await.is_err());
 }

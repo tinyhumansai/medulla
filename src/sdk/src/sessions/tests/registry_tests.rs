@@ -106,6 +106,48 @@ fn bindings_evict_least_recently_used_first() {
     );
 }
 
+#[test]
+fn an_empty_session_id_is_never_recorded_as_a_binding() {
+    // A harness that announced no id must not leave a blank binding that a later
+    // turn would try (and fail) to resume.
+    let registry = SessionRegistry::default();
+    let alice = key("alice", HarnessProvider::Claude);
+    registry.record(&alice, "   ");
+    assert!(registry.is_empty(), "a blank id is not a binding");
+    assert_eq!(registry.bound(&alice), None);
+
+    // A real id still records normally.
+    registry.record(&alice, "sess-1");
+    assert_eq!(registry.bound(&alice).as_deref(), Some("sess-1"));
+}
+
+#[tokio::test]
+async fn a_released_chain_is_pruned_and_can_be_reacquired() {
+    // prune_chain drops a chain only when no turn still holds it, so a closed
+    // conversation stops leaking its per-key mutex — but a later turn can still
+    // open a fresh one.
+    let registry = SessionRegistry::default();
+    let alice = key("alice", HarnessProvider::Claude);
+
+    let held = registry
+        .acquire_turn(&alice, SessionClass::Unbound)
+        .await
+        .expect("unbound turns serialize");
+    // While the guard is live the chain must survive a prune attempt.
+    registry.prune_chain(&alice);
+    drop(held);
+
+    // Released, it is now pruned; acquiring again must still succeed.
+    registry.prune_chain(&alice);
+    assert!(
+        registry
+            .acquire_turn(&alice, SessionClass::Unbound)
+            .await
+            .is_some(),
+        "a pruned chain is transparently recreated on the next turn"
+    );
+}
+
 #[tokio::test]
 async fn only_unbound_turns_take_the_conversation_chain() {
     let registry = SessionRegistry::default();

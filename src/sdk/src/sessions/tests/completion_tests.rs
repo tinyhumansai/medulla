@@ -153,6 +153,42 @@ fn tool_use_does_not_complete_the_turn() {
 }
 
 #[test]
+fn two_text_blocks_in_one_record_join_with_a_newline() {
+    // Claude can emit several text blocks in a single assistant record; the fold
+    // must join them, not concatenate or drop one.
+    let mut watcher = TurnWatcher::new();
+    let blocks = serde_json::json!([
+        { "type": "text", "text": "first" },
+        { "type": "text", "text": "second" },
+    ]);
+    watcher.observe(&assistant(blocks, Some("end_turn")));
+    let signal = watcher.observe(AFTER_MESSAGE);
+    let Some(TurnSignal::Complete { reply, .. }) = signal else {
+        panic!("expected completion, got {signal:?}");
+    };
+    assert_eq!(reply, "first\nsecond");
+}
+
+#[test]
+fn a_terminal_record_with_no_message_id_closes_on_the_next_line() {
+    // A record without a `message.id` can share its id with nothing, so the very
+    // next line — whatever it is — closes it rather than absorbing more blocks.
+    let mut watcher = TurnWatcher::new();
+    let record = r#"{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}"#;
+    watcher.observe(record);
+    assert!(
+        watcher.terminal_pending(),
+        "held, awaiting the message close"
+    );
+    let signal = watcher.observe(AFTER_MESSAGE);
+    assert!(
+        matches!(signal, Some(TurnSignal::Complete { ref reply, .. }) if reply == "done"),
+        "got {signal:?}"
+    );
+    assert!(watcher.is_done());
+}
+
+#[test]
 fn stop_sequence_is_terminal_too() {
     let mut watcher = TurnWatcher::new();
     watcher.observe(&assistant(text_block("halted"), Some("stop_sequence")));
@@ -381,6 +417,20 @@ fn codex_falls_back_to_streamed_text_when_the_completion_carries_none() {
         panic!("expected completion, got {signal:?}");
     };
     assert_eq!(reply, "the answer");
+}
+
+#[test]
+fn an_empty_codex_agent_message_is_not_reported_as_progress() {
+    // An empty streamed message carries nothing to show, so it must fold to
+    // nothing rather than pushing a blank progress line onto the reply.
+    let mut watcher = codex_watcher();
+    assert_eq!(
+        watcher.observe(&event_msg(serde_json::json!({
+            "type": "agent_message", "message": "", "phase": "main",
+        }))),
+        None
+    );
+    assert_eq!(watcher.reply(), "", "nothing was accumulated");
 }
 
 #[test]

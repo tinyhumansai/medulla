@@ -62,6 +62,8 @@ pub mod types;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod turn_stream_tests;
 
 pub use completion::{TurnSignal, TurnWatcher};
 pub use input::{fold, fold_envelope, Folded, Observation, SessionInput};

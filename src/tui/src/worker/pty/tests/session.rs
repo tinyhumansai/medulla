@@ -219,6 +219,81 @@ fn the_clock_is_injectable() {
 }
 
 #[test]
+fn state_labels_and_glyphs_cover_every_variant() {
+    // Pure projections the list pane reads: each variant maps to its own label
+    // and glyph, a clean exit reads the same as no reported code, and only a
+    // running child counts as alive.
+    assert_eq!(PtyState::Running.as_str(), "running");
+    assert_eq!(PtyState::Exited { code: Some(0) }.as_str(), "exited");
+    assert_eq!(PtyState::Failed.as_str(), "failed");
+
+    assert_eq!(PtyState::Running.glyph(), '●');
+    assert_eq!(PtyState::Exited { code: Some(0) }.glyph(), '✓');
+    assert_eq!(PtyState::Exited { code: None }.glyph(), '✓');
+    assert_eq!(
+        PtyState::Exited { code: Some(3) }.glyph(),
+        '✕',
+        "a non-zero exit is failure"
+    );
+    assert_eq!(PtyState::Failed.glyph(), '✕');
+
+    assert!(PtyState::Running.is_running());
+    assert!(!(PtyState::Exited { code: Some(0) }).is_running());
+    assert!(!PtyState::Failed.is_running());
+}
+
+#[test]
+fn resizing_an_unknown_session_is_a_no_op() {
+    // The render pass resizes whichever session is selected; a stale id (a
+    // session forgotten between selection and draw) must be ignored, not panic.
+    let manager = PtyManager::new();
+    manager.resize("w_nope", 80, 24);
+    assert!(manager.rows().is_empty());
+}
+
+#[test]
+fn writing_to_an_unknown_session_names_the_missing_id() {
+    let manager = PtyManager::new();
+    let error = manager
+        .write("w_ghost", b"x")
+        .expect_err("there is no such session to write to");
+    assert!(error.contains("no session"), "got: {error}");
+    assert!(error.contains("w_ghost"), "the error names the id: {error}");
+}
+
+#[test]
+fn writing_raw_bytes_to_an_exited_session_is_refused() {
+    // `inject_prompt` refuses at the readiness gate, but the raw write path has
+    // its own guard: a dead session must be rejected here too rather than
+    // writing into a closed pty.
+    let manager = PtyManager::new();
+    let id = manager.open(sh("exit 0")).unwrap();
+    wait_for("exit recorded", || {
+        !manager.row(&id).unwrap().state.is_running()
+    });
+    let error = manager
+        .write(&id, b"x")
+        .expect_err("a dead session cannot be written to");
+    assert!(error.contains("has exited"), "got: {error}");
+}
+
+#[test]
+fn closing_or_recording_against_an_unknown_session_is_harmless() {
+    // Both are called from paths that may race a session's removal; neither may
+    // panic or invent a session when the id is gone.
+    let manager = PtyManager::new();
+    assert!(
+        !manager.close("w_missing"),
+        "nothing to close returns false"
+    );
+    manager.record_session_id("w_missing", "sess-x");
+    assert!(
+        manager.rows().is_empty(),
+        "recording an id for no session changes nothing"
+    );
+}
+
+#[test]
 fn many_sessions_exiting_at_once_are_all_reaped_without_stalling_reads() {
     // Regression: the reaper used to hold the manager's lock across a blocking
     // `child.wait()`. EOF on the pty master and the child's exit are not

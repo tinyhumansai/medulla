@@ -175,3 +175,108 @@ fn a_blank_agent_id_is_never_recorded() {
     assert!(!book.observe("   ", None, 1));
     assert!(book.requests().is_empty());
 }
+
+// ------------------------------------------------------- contact reconcile ---
+
+use super::super::service::{reconcile_contacts, spawn_contact_poll};
+use std::time::Duration;
+
+#[tokio::test]
+async fn reconcile_contacts_records_established_peers_and_counts_only_new_ones() {
+    let relay = FakeRelay::with_contacts(&["a", "b"]);
+    let book = ContactBook::default();
+    let now = clock();
+
+    assert_eq!(
+        reconcile_contacts(relay.as_ref(), &book, &now)
+            .await
+            .unwrap(),
+        2,
+        "both established contacts are new to a fresh book"
+    );
+    assert!(book.is_accepted("a") && book.is_accepted("b"));
+
+    // The relay keeps listing them; a second pass must add nothing.
+    assert_eq!(
+        reconcile_contacts(relay.as_ref(), &book, &now)
+            .await
+            .unwrap(),
+        0,
+        "re-reading the same list is not news"
+    );
+}
+
+#[tokio::test]
+async fn reconcile_contacts_is_additive_a_contact_the_relay_drops_is_kept() {
+    // `list` is paginated, so a truncated page must never strip a real contact:
+    // losing a contact is worse than carrying a stale one.
+    let relay = FakeRelay::with_contacts(&["a", "b"]);
+    let book = ContactBook::default();
+    let now = clock();
+    reconcile_contacts(relay.as_ref(), &book, &now)
+        .await
+        .unwrap();
+
+    // The next page omits "b".
+    relay
+        .accepted
+        .lock()
+        .unwrap()
+        .retain(|contact| contact.agent_id == "a");
+    reconcile_contacts(relay.as_ref(), &book, &now)
+        .await
+        .unwrap();
+
+    assert!(
+        book.is_accepted("b"),
+        "a contact the relay stopped listing must not be demoted"
+    );
+}
+
+#[tokio::test]
+async fn a_poll_against_an_unreachable_relay_surfaces_the_error() {
+    // A down relay is an error, not an empty queue — the poll must not swallow it
+    // and leave the operator staring at a queue that merely looks quiet.
+    let relay = FakeRelay::with_incoming(&["alice"]);
+    *relay.fail.lock().unwrap() = true;
+    let book = ContactBook::default();
+    let now = clock();
+
+    let outcome = poll_once(relay.as_ref(), &book, &now).await;
+    assert!(outcome.is_err(), "the failure propagates out of poll_once");
+    assert!(
+        book.requests().is_empty(),
+        "nothing was observed against a relay that could not be reached"
+    );
+}
+
+#[tokio::test]
+async fn spawn_contact_poll_fills_the_shared_book_and_stops_when_aborted() {
+    let relay = FakeRelay::with_incoming(&["alice"]);
+    let book = ContactBook::default();
+    let handle = spawn_contact_poll(
+        relay as Arc<dyn ContactRelay>,
+        book.clone(),
+        Duration::from_millis(1),
+        clock(),
+    );
+
+    // The loop runs on its own; wait until it has observed the request.
+    for _ in 0..200 {
+        if book.pending_count() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    assert_eq!(
+        book.pending_count(),
+        1,
+        "the spawned loop fills the book the caller kept a clone of"
+    );
+
+    handle.abort();
+    assert!(
+        handle.await.unwrap_err().is_cancelled(),
+        "aborting the handle ends the loop"
+    );
+}

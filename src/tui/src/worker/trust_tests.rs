@@ -235,3 +235,143 @@ fn the_default_settings_path_is_under_dot_claude() {
         Path::new("/home/x/.claude/settings.json")
     );
 }
+
+#[test]
+fn a_skip_says_out_loud_what_it_could_not_do() {
+    // The already-settled case is silent, but a skip is the one outcome an
+    // operator needs to see, so it must render a line naming the failure.
+    let line = TrustOutcome::Skipped("no HOME or CLAUDE_CONFIG_DIR".to_string())
+        .log_line("trust /work")
+        .expect("a skip is worth logging");
+    assert!(line.contains("could not trust /work"), "{line}");
+    assert!(line.contains("no HOME or CLAUDE_CONFIG_DIR"), "{line}");
+}
+
+#[test]
+fn without_a_home_or_config_dir_both_preflights_skip_rather_than_guess() {
+    // With nowhere to look, guessing at a path would write the flag where
+    // nothing reads it — so both steps decline rather than invent a location.
+    assert!(matches!(
+        ensure_bypass_accepted(&HashMap::new()),
+        TrustOutcome::Skipped(_)
+    ));
+    assert!(matches!(
+        ensure_workspace_trusted(&HashMap::new(), "/work"),
+        TrustOutcome::Skipped(_)
+    ));
+}
+
+#[test]
+fn an_unparseable_settings_file_is_left_untouched() {
+    // The settings file is the operator's; a value this code cannot parse is
+    // never overwritten, only skipped.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    match ensure_bypass_accepted(&env_at(dir.path())) {
+        TrustOutcome::Skipped(why) => assert!(why.contains("not valid JSON"), "{why}"),
+        other => panic!("an unparseable settings file must be skipped, got {other:?}"),
+    }
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "{ not json",
+        "the operator's file must not be rewritten"
+    );
+}
+
+#[test]
+fn a_settings_file_that_is_not_an_object_is_replaced_before_the_flag_is_set() {
+    // A settings file holding a non-object (an array, say) must not make
+    // inserting the key panic — it is replaced with an object carrying the flag.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    std::fs::write(&path, "[1, 2, 3]").unwrap();
+    assert!(matches!(
+        ensure_bypass_accepted(&env_at(dir.path())),
+        TrustOutcome::Granted(_)
+    ));
+    assert_eq!(
+        read(&path)["skipDangerousModePermissionPrompt"],
+        json!(true)
+    );
+}
+
+#[test]
+fn bypass_is_skipped_when_its_directory_cannot_be_created() {
+    // A config dir *underneath a regular file* can never be created, so the
+    // write is declined rather than crashing the launch.
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("not-a-dir");
+    std::fs::write(&blocker, b"x").unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "CLAUDE_CONFIG_DIR".to_string(),
+        blocker.join("sub").to_string_lossy().into_owned(),
+    );
+    match ensure_bypass_accepted(&env) {
+        TrustOutcome::Skipped(why) => assert!(why.contains("could not create"), "{why}"),
+        other => panic!("an uncreatable dir must be skipped, got {other:?}"),
+    }
+}
+
+#[test]
+fn bypass_is_skipped_when_the_settings_file_cannot_be_written() {
+    // A directory sitting where the settings file belongs makes the atomic
+    // rename fail; the failure is reported, not panicked on.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("settings.json")).unwrap();
+    match ensure_bypass_accepted(&env_at(dir.path())) {
+        TrustOutcome::Skipped(why) => assert!(why.contains("could not write"), "{why}"),
+        other => panic!("an unwritable settings file must be skipped, got {other:?}"),
+    }
+}
+
+#[test]
+fn granting_repairs_unexpected_shapes_at_every_level() {
+    // The config is claude's; a value of the wrong shape at any level — the root,
+    // `projects`, or a single entry — is replaced rather than panicked on, and
+    // the flag still lands.
+    let mut root_wrong = json!([1, 2, 3]);
+    grant(&mut root_wrong, Path::new("/work"));
+    assert_eq!(
+        root_wrong["projects"]["/work"]["hasTrustDialogAccepted"],
+        json!(true)
+    );
+
+    let mut projects_wrong = json!({"projects": 5});
+    grant(&mut projects_wrong, Path::new("/work"));
+    assert_eq!(
+        projects_wrong["projects"]["/work"]["hasTrustDialogAccepted"],
+        json!(true)
+    );
+
+    let mut entry_wrong = json!({"projects": {"/work": "not-an-object"}});
+    grant(&mut entry_wrong, Path::new("/work"));
+    assert_eq!(
+        entry_wrong["projects"]["/work"]["hasTrustDialogAccepted"],
+        json!(true)
+    );
+}
+
+#[test]
+fn workspace_trust_is_skipped_when_the_config_cannot_be_written() {
+    // The config parses fine and the workspace is untrusted, but the atomic
+    // write's temp path is blocked by a directory of the same name — a write
+    // failure must skip, never truncate the operator's config.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".claude.json");
+    std::fs::write(&path, json!({"projects": {}}).to_string()).unwrap();
+    std::fs::create_dir(dir.path().join(".claude.json.medulla-tmp")).unwrap();
+
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    match ensure_workspace_trusted(&env_at(dir.path()), workspace.to_str().unwrap()) {
+        TrustOutcome::Skipped(why) => assert!(why.contains("could not write"), "{why}"),
+        other => panic!("an unwritable config must be skipped, got {other:?}"),
+    }
+    assert_eq!(
+        read(&path)["projects"],
+        json!({}),
+        "the original config must survive a failed write"
+    );
+}

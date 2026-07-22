@@ -31,6 +31,56 @@ async fn a_failing_relay_is_reported_rather_than_looking_like_an_empty_queue() {
     );
 }
 
+#[test]
+fn a_never_polled_desk_says_so_rather_than_looking_healthy() {
+    // Before the first poll the header must not read like a successful check of
+    // an empty queue — the two are not the same and the operator can act on the
+    // difference.
+    use super::super::desk::PollHealth;
+    assert_eq!(PollHealth::Pending.summary(1_000), "not polled yet");
+}
+
+#[tokio::test]
+async fn declining_and_blocking_report_their_own_outcome_lines() {
+    // Each decision returns the status line the UI shows; a decline and a block
+    // must each name what happened rather than borrowing the accept wording.
+    use super::super::desk::ContactDesk;
+
+    let relay = FakeRelay::with_incoming(&["alice", "spammer"]);
+    let desk = ContactDesk::new(
+        relay.clone() as Arc<dyn ContactRelay>,
+        AdmissionPolicy::Manual,
+        Vec::<String>::new(),
+    )
+    .with_now(clock());
+    desk.refresh().await;
+
+    let declined = desk
+        .decide("alice", ContactDecision::Decline)
+        .await
+        .expect("a decline succeeds against the relay");
+    assert!(
+        declined.contains("alice") && declined.contains("declined"),
+        "{declined}"
+    );
+
+    let blocked = desk
+        .decide("spammer", ContactDecision::Block)
+        .await
+        .expect("a block succeeds against the relay");
+    assert!(
+        blocked.contains("spammer") && blocked.contains("blocked"),
+        "{blocked}"
+    );
+
+    assert!(
+        relay.calls().contains(&"decline:alice".to_string())
+            && relay.calls().contains(&"block:spammer".to_string()),
+        "each decision must reach the relay: {:?}",
+        relay.calls()
+    );
+}
+
 #[tokio::test]
 async fn a_successful_poll_records_when_and_how_many() {
     use super::super::desk::{ContactDesk, PollHealth};

@@ -9,5 +9,6 @@
 mod completion_tests;
 mod input_tests;
 mod manager_tests;
+mod ops_tests;
 mod registry_tests;
 mod routing_tests;

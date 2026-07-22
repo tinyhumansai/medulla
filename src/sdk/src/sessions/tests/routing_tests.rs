@@ -48,6 +48,26 @@ fn a_requested_class_outranks_the_operator_policy() {
 }
 
 #[test]
+fn an_unbound_policy_pin_overrides_a_task_stimulus() {
+    // A task frame is discrete work and routes bounded by default; an explicit
+    // Unbound pin must win, so an operator can force conversations for tasks.
+    assert_eq!(
+        route_session_class(Stimulus::Task, None, SessionPolicy::Unbound),
+        SessionClass::Unbound
+    );
+    assert_eq!(
+        route_session_class(Stimulus::Operator, None, SessionPolicy::Unbound),
+        SessionClass::Unbound
+    );
+}
+
+#[test]
+fn transport_renders_its_wire_string() {
+    assert_eq!(Transport::OneShot.as_str(), "one-shot");
+    assert_eq!(Transport::Interactive.as_str(), "interactive");
+}
+
+#[test]
 fn unknown_policy_names_fall_back_to_auto() {
     assert_eq!(SessionPolicy::parse("nonsense"), SessionPolicy::Auto);
     assert_eq!(SessionPolicy::parse("conversation"), SessionPolicy::Unbound);

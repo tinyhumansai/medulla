@@ -86,6 +86,53 @@ fn a_live_session_renders_its_terminal_in_the_pane() {
     sessions.shutdown();
 }
 
+#[test]
+fn exited_and_failed_sessions_stay_in_the_list_after_they_end() {
+    // A session that has finished is kept on screen so the operator can read how
+    // it ended — a clean exit and a non-zero one both render, in their own
+    // colours, rather than vanishing.
+    let sessions = PtyManager::new();
+    let clean = sessions.open(sh("true", "peer-clean")).unwrap();
+    let broken = sessions.open(sh("exit 3", "peer-broken")).unwrap();
+    wait_for("both sessions to exit", || {
+        !sessions.row(&clean).unwrap().state.is_running()
+            && !sessions.row(&broken).unwrap().state.is_running()
+    });
+
+    let mut app = app_with(sessions.clone(), None);
+    let out = render(&mut app, 110, 20);
+    assert!(
+        out.contains("peer-clean"),
+        "the clean exit stays listed: {out}"
+    );
+    assert!(
+        out.contains("peer-broken"),
+        "the failed exit stays listed: {out}"
+    );
+    sessions.shutdown();
+}
+
+#[test]
+fn a_long_quiet_running_session_is_called_out_as_quiet() {
+    // A running session that has said nothing for a while is the signal an
+    // operator hunts for, so the list annotates it rather than leaving it to be
+    // inferred from a timestamp. The clock is pushed far ahead so the last
+    // output reads as long ago.
+    // The label deliberately avoids the word "quiet" so the assertion can only
+    // match the annotation the render adds, never the peer's name.
+    let sessions = PtyManager::new();
+    sessions.open(sh("sleep 30", "peer-seven")).unwrap();
+    let mut app =
+        app_with(sessions.clone(), None).with_now(std::sync::Arc::new(|| 10_000_000_000_000));
+
+    let out = render(&mut app, 110, 20);
+    assert!(
+        out.contains("quiet"),
+        "a running session gone silent must be flagged: {out}"
+    );
+    sessions.shutdown();
+}
+
 // ------------------------------------------------------------------ setup ---
 
 #[test]
@@ -209,6 +256,32 @@ fn the_setup_step_can_be_quit_without_choosing() {
     assert_eq!(app.on_key(key(KeyCode::Char('q'))), Some(WorkerCmd::Quit));
 }
 
+#[test]
+fn ctrl_c_quits_the_setup_step_too() {
+    // The launch step owns the keyboard, so the usual quit chord has to be
+    // honoured there as well or an operator is trapped mid-setup.
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    let app = &mut app_at_setup(PtyManager::new(), None);
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert_eq!(app.on_key(ctrl_c), Some(WorkerCmd::Quit));
+    assert_eq!(app.screen(), Screen::Setup, "quitting is not choosing");
+}
+
+#[test]
+fn enter_answers_the_highlighted_setup_option() {
+    // The number keys answer directly; Enter answers whatever the cursor is on.
+    // From the mode step with the cursor at rest that settles headless and
+    // advances to the harness question — without starting the worker yet.
+    let app = &mut app_at_setup(PtyManager::new(), None);
+    assert!(
+        app.on_key(key(KeyCode::Enter)).is_none(),
+        "answering the first of two questions does not start the worker"
+    );
+    assert_eq!(app.mode(), Some(ExecutionMode::Headless));
+    assert_eq!(app.setup_step(), SetupStep::Harness);
+    assert_eq!(app.screen(), Screen::Setup, "still choosing the harness");
+}
+
 // --------------------------------------------------------------- headless ---
 
 #[test]
@@ -238,6 +311,31 @@ fn the_first_tab_is_labelled_for_the_mode() {
 
     let mut interactive = app_with(PtyManager::new(), None);
     assert!(render(&mut interactive, 100, 14).contains("1 Sessions"));
+}
+
+#[test]
+fn the_daemon_log_colours_every_class_of_line_it_renders() {
+    // The accent colour is keyed off the markers the daemon already writes. The
+    // render must handle a failure line (✗), a success line (✓), a hand-off
+    // line (→) and a plain line without tripping over any of them — every
+    // branch of the colouring is walked here.
+    let mut app = super::helpers::headless_app(PtyManager::new(), None);
+    app.logs().push("task t1 → claude");
+    app.logs().push("task t1 ✓ done");
+    app.logs().push("task t2 ✗ provider failed");
+    app.logs().push("a plain narration line with no markers");
+
+    let out = render(&mut app, 100, 18);
+    assert!(out.contains("→ claude"), "the hand-off line renders: {out}");
+    assert!(out.contains("✓ done"), "the success line renders: {out}");
+    assert!(
+        out.contains("✗ provider failed"),
+        "the failure line renders: {out}"
+    );
+    assert!(
+        out.contains("plain narration line"),
+        "an unmarked line renders too: {out}"
+    );
 }
 
 #[test]

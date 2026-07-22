@@ -277,10 +277,16 @@ mod tests {
     #[test]
     fn an_unwritable_directory_never_stops_logging() {
         // Logging must not be the reason a daemon fails to start.
+        //
+        // The unusable path is a directory *underneath a file*, which no
+        // platform will create. It used to be `/proc/nonexistent/nope`, which is
+        // only unusable where there is a `/proc` to speak of — on Windows that
+        // is an ordinary relative path and the attach succeeded.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not-a-directory");
+        std::fs::write(&file, b"x").unwrap();
         let buffer = LogBuffer::new();
-        assert!(buffer
-            .attach_file(std::path::Path::new("/proc/nonexistent/nope"), "worker")
-            .is_none());
+        assert!(buffer.attach_file(&file.join("nope"), "worker").is_none());
         buffer.push("still recorded in memory");
         assert_eq!(buffer.len(), 1);
     }
@@ -324,5 +330,50 @@ mod tests {
         let other = buffer.clone();
         other.push("from the clone");
         assert_eq!(buffer.len(), 1);
+    }
+
+    #[test]
+    fn the_default_buffer_is_an_empty_ring_on_the_system_clock() {
+        // `Default` is what a struct field derives, so it must behave like the
+        // named constructor rather than diverge silently.
+        let buffer = LogBuffer::default();
+        assert!(buffer.is_empty(), "a fresh buffer holds nothing");
+        assert_eq!(buffer.len(), 0);
+        buffer.push("first");
+        assert!(!buffer.is_empty(), "a line makes it non-empty");
+        assert_eq!(buffer.len(), 1);
+    }
+
+    #[test]
+    fn a_sink_that_can_no_longer_be_written_disables_itself_and_stops_trying() {
+        // The file mirror is best-effort: a write error must disable the file
+        // rather than propagate, and once disabled a later line must be dropped
+        // silently instead of erroring again. Constructed directly because the
+        // failure needs a handle that is open but not writable, which
+        // `FileSink::open` (append mode) never produces.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("read-only.log");
+        std::fs::write(&path, b"seed\n").unwrap();
+        // Opened read-only: writing to it returns an error at the OS layer.
+        let handle = OpenOptions::new().read(true).open(&path).unwrap();
+        let mut sink = FileSink {
+            path: path.clone(),
+            handle: Some(handle),
+        };
+
+        sink.write("first attempt fails");
+        assert!(
+            sink.handle.is_none(),
+            "a write error must disable the file, not surface"
+        );
+        // The second call takes the early return for an already-disabled handle.
+        sink.write("second attempt is a silent no-op");
+
+        // Nothing the failed sink was handed reached the file.
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            on_disk, "seed\n",
+            "no line was written through a dead handle"
+        );
     }
 }

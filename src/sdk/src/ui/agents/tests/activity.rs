@@ -137,6 +137,24 @@ fn activity_lands_on_the_worker_that_ran_it() {
 }
 
 #[test]
+fn a_worker_lane_without_an_agent_id_cannot_be_attributed_activity() {
+    // A lane is keyed to a peer by its agent id; with none there is nothing to
+    // match activity against, so the fold must skip it rather than guess.
+    let mut lane = worker_lane("claude-worker");
+    lane.agent_id = None;
+    let mut lanes = vec![lane];
+    merge_worker_activity(
+        &mut lanes,
+        &[record("claude-worker", "t1", "status", "running", 10)],
+    );
+    assert!(
+        lanes[0].tasks.is_empty(),
+        "an id-less lane cannot claim a task"
+    );
+    assert_eq!(lanes[0].active_tasks, 0);
+}
+
+#[test]
 fn a_tier_lane_is_never_given_worker_tasks() {
     // Orchestrator/Reasoning lanes are cognitive tiers, not agents; hanging a
     // delegated task off one would claim the tier ran it.

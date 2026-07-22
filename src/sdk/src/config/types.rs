@@ -262,6 +262,23 @@ pub struct MemoryConfigSection {
     pub max_cost_usd: Option<f64>,
 }
 
+/// The optional `core` section: the NDJSON `medulla-serve` orchestration socket.
+///
+/// When configured, the core runtime attaches to a long-lived `medulla-serve`
+/// process over a unix domain socket (the `medulla-serve` protocol, plan §2.2).
+/// This milestone is attach-only: the socket must already be listening. The
+/// section is unix-only; on Windows a request for it degrades to the
+/// backend→mock chain (see [`super::load_config`]).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CoreConfig {
+    /// Explicit NDJSON unix socket path. When unset the socket is resolved from
+    /// `$XDG_RUNTIME_DIR/medulla/serve.sock`, then `<stateDir>/serve.sock` (see
+    /// [`LoadedConfig::core_socket_path`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub socket_path: Option<String>,
+}
+
 /// Where the TUI reaches the Medulla backend HTTP API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -326,6 +343,8 @@ pub struct TuiConfig {
     pub state_dir: String,
     pub backend: BackendConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub core: Option<CoreConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryConfigSection>,
     #[serde(default)]
     pub update: UpdateConfig,
@@ -345,6 +364,7 @@ impl Default for TuiConfig {
             medulla: MedullaConfig::default(),
             state_dir: d_state_dir(),
             backend: BackendConfig::default(),
+            core: None,
             memory: None,
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),

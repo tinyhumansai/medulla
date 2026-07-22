@@ -6,14 +6,18 @@
 use medulla::auth::Provider;
 use medulla::tinyplace::HarnessProvider;
 
-use super::types::{Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, TuiArgs, UpdateArgs};
+use super::types::{
+    Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs, UpdateArgs,
+};
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
 pub fn parse_command(args: &[String]) -> Command {
     match args.first().map(String::as_str) {
+        Some("run") => Command::Run,
         // `--tui` selects the worker-daemon screen instead of the headless
         // daemon. It is one process either way: the TUI *is* the daemon, so the
-        // flag chooses a face, not a second program.
+        // flag chooses a face, not a second program. Must precede the bare
+        // `daemon` arm, which would otherwise match first and swallow the flag.
         Some("daemon") if args.iter().any(|a| a == "--tui") => Command::DaemonTui,
         Some("daemon") => Command::Daemon,
         Some("version") | Some("--version") | Some("-v") => Command::Version,
@@ -164,6 +168,11 @@ pub fn parse_tui_args(args: &[String]) -> TuiArgs {
                     out.config = Some(v.clone());
                 }
             }
+            "--core-socket" => {
+                if let Some(v) = it.next() {
+                    out.core_socket = Some(v.clone());
+                }
+            }
             "--no-alt-screen" => out.alt_screen = false,
             "--mock" => out.mock = true,
             _ => {}
@@ -172,13 +181,43 @@ pub fn parse_tui_args(args: &[String]) -> TuiArgs {
     out
 }
 
+/// Parse `medulla run [flags] <instruction...>`. `--config` / `--core-socket`
+/// take a value; every other non-flag token is part of the instruction, joined
+/// by spaces. Returns a usage error when no instruction text is supplied.
+pub fn parse_run_args(args: &[String]) -> Result<RunArgs, String> {
+    let mut out = RunArgs::default();
+    let mut instruction: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                if let Some(v) = it.next() {
+                    out.config = Some(v.clone());
+                }
+            }
+            "--core-socket" => {
+                if let Some(v) = it.next() {
+                    out.core_socket = Some(v.clone());
+                }
+            }
+            other => instruction.push(other.to_string()),
+        }
+    }
+    out.instruction = instruction.join(" ");
+    if out.instruction.trim().is_empty() {
+        return Err("run: expected an instruction to submit".to_string());
+    }
+    Ok(out)
+}
+
 /// The `medulla help` / `--help` text.
 pub fn help_text() -> String {
     format!(
         "medulla {version}\n\n\
 Usage:\n  \
 medulla                 Start the interactive chat TUI (default)\n  \
-medulla daemon [flags]  Run the coding-agent daemon (serves tasks over tiny.place)\n  \
+medulla run <text>      Submit one instruction to a local medulla-serve socket and stream events (JSON lines)\n  \
+medulla daemon [flags]  Run the headless coding-agent daemon (serves tasks over tiny.place)\n  \
 medulla daemon --tui    Run the daemon with its operator screen\n  \
                         --workspace <dir>      where peer tasks run\n  \
                         --no-trust-workspace   don't pre-trust it with claude\n  \
@@ -220,8 +259,12 @@ Init flags:\n  \
 --force, -f             Overwrite an existing MEDULLA.md\n  \
 --offline               Skip the model call and write an editable stub\n  \
 --config <path>         Explicit config file (.toml or .json) for backend/model settings\n\n\
+Run flags:\n  \
+--core-socket <path>    medulla-serve unix socket to attach (else MEDULLA_CORE_SOCKET / [core] config)\n  \
+--config <path>         Explicit config file (.toml or .json) for the [core] section\n\n\
 TUI flags:\n  \
 --config <path>         Explicit config file (.toml or .json); bypasses layered discovery\n  \
+--core-socket <path>    Attach the core medulla-serve runtime at this socket instead of the backend\n  \
 --mock                  Run the offline demo runtime (no backend, no login)\n  \
 --no-alt-screen         Do not switch to the alternate screen\n",
         version = env!("CARGO_PKG_VERSION"),

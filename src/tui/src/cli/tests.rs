@@ -44,6 +44,7 @@ fn dispatches_subcommands() {
         Command::Update
     );
     assert_eq!(parse_command(&argv(&["--config", "x.json"])), Command::Tui);
+    assert_eq!(parse_command(&argv(&["run", "do", "it"])), Command::Run);
 }
 
 #[test]
@@ -99,10 +100,16 @@ fn parses_tui_flags() {
             config: Some("c.json".into()),
             alt_screen: false,
             mock: false,
+            core_socket: None,
         }
     );
     // A dangling --config keeps the default (None → layered discovery).
     assert_eq!(parse_tui_args(&argv(&["--config"])).config, None);
+    // `--core-socket` selects the core runtime at an explicit socket path.
+    assert_eq!(
+        parse_tui_args(&argv(&["--core-socket", "/run/serve.sock"])).core_socket,
+        Some("/run/serve.sock".into())
+    );
 }
 
 #[test]
@@ -270,4 +277,38 @@ fn worker_flag_values_parse_in_both_spellings() {
     assert_eq!(flag_value(&bare, "--workspace"), None);
     let dangling: Vec<String> = vec!["--workspace".to_string()];
     assert_eq!(flag_value(&dangling, "--workspace"), None);
+}
+
+#[test]
+fn run_args_join_the_instruction_and_read_flags() {
+    let a = parse_run_args(&argv(&[
+        "--core-socket",
+        "/run/serve.sock",
+        "--config",
+        "c.toml",
+        "reconcile",
+        "the",
+        "world",
+    ]))
+    .expect("a run with an instruction parses");
+    assert_eq!(a.core_socket.as_deref(), Some("/run/serve.sock"));
+    assert_eq!(a.config.as_deref(), Some("c.toml"));
+    assert_eq!(a.instruction, "reconcile the world");
+}
+
+#[test]
+fn run_args_require_an_instruction() {
+    // Only flags, no instruction text → a usage error rather than an empty run.
+    let err = parse_run_args(&argv(&["--core-socket", "/run/serve.sock"]))
+        .expect_err("a flags-only run is a usage error");
+    assert!(err.contains("instruction"), "{err}");
+    // A dangling value-flag consumes the following token, so this is empty too.
+    assert!(parse_run_args(&argv(&["--config"])).is_err());
+}
+
+#[test]
+fn help_text_documents_the_run_command() {
+    let help = help_text();
+    assert!(help.contains("medulla run"));
+    assert!(help.contains("--core-socket"));
 }

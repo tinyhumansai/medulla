@@ -10,11 +10,13 @@ use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
 use crate::commands::{run_hub, run_init, run_login, run_logout, run_memory};
+use crate::run::run_core;
 
 mod app_loop;
 mod commands;
 mod event_loop;
 mod hub_relay;
+mod run;
 mod terminal;
 mod worker_loop;
 
@@ -26,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
     match parse_command(&raw) {
+        Command::Run => run_core(&raw[1..]).await,
         Command::Daemon => medulla::daemon::run_daemon(&raw[1..], onboarding_ui()).await,
         Command::DaemonTui => run_worker_tui_command(&raw[1..]).await,
         Command::Version => {

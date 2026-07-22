@@ -1,8 +1,14 @@
 //! The `Runtime` trait the UI drives, plus its snapshot contract. Concrete
-//! implementations live alongside: [`backend`] (HTTP/SSE) and [`mock`] (tests
-//! and demos). The UI depends only on the trait and its types.
+//! implementations live alongside: [`backend`] (HTTP/SSE), [`mock`] (tests and
+//! demos), and [`core`] (the unix-socket `medulla-serve` attach, unix-only). The
+//! UI depends only on the trait and its types.
 
 pub mod backend;
+/// The `medulla-serve` NDJSON socket runtime (attach-only, unix-only).
+#[cfg(unix)]
+pub mod core;
+/// The non-interactive one-instruction driver for scripting / e2e automation.
+pub mod headless;
 pub mod mock;
 
 use std::collections::HashMap;
@@ -209,6 +215,25 @@ pub struct RuntimeSnapshot {
     /// agent harness. `None` until (and unless) the backend surfaces one; the
     /// Agents view renders the compact task board only while it is `Some`.
     pub harness: Option<crate::harness_contract::HarnessStatus>,
+    /// Bumped each time the backing runtime rebaselines its folded event log —
+    /// e.g. the core runtime clearing state ahead of a reconnect replay — which
+    /// restarts the local `seq`s in [`events`](RuntimeSnapshot::events). Pollers
+    /// tracking a "last streamed seq" cursor must rewind it when this changes,
+    /// or every rebaselined event lands at or below the stale cursor and is
+    /// silently dropped. Stays `0` on runtimes that never rebaseline.
+    pub replay_epoch: u64,
+}
+
+/// The correlation receipt an instruct-style submit returns, when the backing
+/// wire carries one (the core runtime's `instruct` `res`, serve-protocol §4.1).
+/// It lets a poller tie a later `cycle_end` back to *this* submission instead
+/// of completing on the first cycle end it happens to observe.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SubmitReceipt {
+    /// The instruction id the runtime minted for this submission, if reported.
+    pub instruction_id: Option<String>,
+    /// The cycle id this instruction will run under, if reported.
+    pub cycle_id: Option<String>,
 }
 
 /// The runtime the TUI drives. Snapshot/subscribe are synchronous; the rest is
@@ -227,6 +252,18 @@ pub trait Runtime: Send + Sync {
     /// A change notification channel — a ping fires after every event/mutation.
     fn subscribe(&self) -> broadcast::Receiver<()>;
     fn submit(&self, input: String) -> BoxFuture<'static, anyhow::Result<()>>;
+    /// Like [`submit`](Runtime::submit), but returns the wire's correlation
+    /// receipt when it carries one, so a caller waiting on the submitted
+    /// cycle's end (the headless driver) can ignore other cycles' ends. The
+    /// default delegates to `submit` and reports no receipt — runtimes whose
+    /// wire has no receipt (mock, HTTP backend) need not override it.
+    fn submit_with_receipt(
+        &self,
+        input: String,
+    ) -> BoxFuture<'static, anyhow::Result<Option<SubmitReceipt>>> {
+        let fut = self.submit(input);
+        Box::pin(async move { fut.await.map(|_| None) })
+    }
     fn abort(&self);
     fn new_session(&self);
     /// Fork the active thread, inheriting its history but with a fresh session.

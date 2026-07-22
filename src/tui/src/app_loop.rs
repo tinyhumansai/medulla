@@ -62,9 +62,15 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Persist them too: the failures worth chasing are usually noticed after the
     // fact, and an in-memory ring dies with the process.
     let log_dir = medulla_tui::log::default_log_dir(&env);
-    if let Some(path) = hub_logs.attach_file(&log_dir, "orchestrator") {
-        startup_status.get_or_insert(format!("logging to {}", path.display()));
-    }
+    // Held apart rather than written into `startup_status`: this runs before
+    // anything else could have set one, so `get_or_insert` always won here and
+    // was then overwritten by every later assignment — the line never showed on
+    // any path that reported anything at all. It is the least interesting thing
+    // that could be said at startup, so it belongs at the end of the fallback
+    // chain, not the front.
+    let log_note = hub_logs
+        .attach_file(&log_dir, "orchestrator")
+        .map(|path| format!("logging to {}", path.display()));
 
     // Persona-memory service (tinycortex), on by default. Wired into the app
     // itself, which reads it for the Memory tab, so memory works on the backend
@@ -294,7 +300,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // user lands on the login screen rather than being dropped to the shell.
     // The tiny.place service and the terminal guard outlive the loop — neither
     // depends on which account is signed in.
-    let mut status = startup_status.or(tinyplace_status);
+    let mut status = startup_status.or(tinyplace_status).or(log_note);
     let result = loop {
         let result = run(
             &mut terminal,

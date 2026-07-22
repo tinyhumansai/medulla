@@ -176,7 +176,14 @@ pub(super) fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLi
                     .unwrap_or("")
                     .to_string();
                 match pending.iter_mut().find(|(i, _)| *i == index) {
-                    Some((_, call)) => call.name = name,
+                    // A start re-announcing a live index is a *new* call taking
+                    // that slot — providers reuse indices across calls. Keeping
+                    // the args would render the new call with the old one's
+                    // arguments.
+                    Some((_, call)) => {
+                        call.name = name;
+                        call.args.clear();
+                    }
                     None => pending.push((
                         index,
                         PendingCall {

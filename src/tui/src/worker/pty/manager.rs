@@ -194,8 +194,6 @@ impl PtyManager {
         let now = self.now();
         let id = format!("w_{}", self.inner.next_id.fetch_add(1, Ordering::SeqCst));
 
-        self.spawn_reader(id.clone(), reader, screen.clone());
-
         self.inner.sessions.lock().unwrap().push(PtySession {
             row: SessionRow {
                 id: id.clone(),
@@ -212,11 +210,18 @@ impl PtyManager {
                 // starts.
                 busy: true,
             },
-            screen,
+            screen: screen.clone(),
             master: pty.master,
             writer,
             child: Some(child),
         });
+
+        // Only now: the reader `touch`es the session on every read, and a child
+        // that greets the pty immediately would otherwise have its first output
+        // land before there is a session to record it against — losing the
+        // `last_output_at` that idle detection reads.
+        self.spawn_reader(id.clone(), reader, screen);
+
         Ok(id)
     }
 

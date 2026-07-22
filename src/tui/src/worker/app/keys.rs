@@ -160,6 +160,13 @@ impl WorkerApp {
 
     /// Requests tab: accept, decline, block, cycle policy.
     fn on_requests_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
+        // Policy is a property of the desk, not of any one request, so it stays
+        // reachable when the queue is empty — which is exactly when an operator
+        // wants to change it, since the policy is why nothing is queued.
+        if key.code == KeyCode::Char('p') {
+            self.cycle_policy();
+            return None;
+        }
         let Some(request) = self.selected_request() else {
             if matches!(key.code, KeyCode::Char('a' | 'x' | 'B')) {
                 self.set_status("No pending request selected");
@@ -178,10 +185,6 @@ impl WorkerApp {
             // Blocking is the one decision here that is not casually undone.
             KeyCode::Char('B') => {
                 self.arm(Confirm::BlockPeer(request.agent_id));
-                None
-            }
-            KeyCode::Char('p') => {
-                self.cycle_policy();
                 None
             }
             _ => None,

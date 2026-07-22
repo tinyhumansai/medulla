@@ -106,6 +106,17 @@ impl InteractiveSession {
     /// process is started eagerly here; callers that want a zero-cost handle
     /// keep the [`InteractiveSpec`] and open lazily on the first turn.
     pub async fn open(spec: &InteractiveSpec) -> Result<Arc<Self>, String> {
+        // A provider binary is untrusted configuration — an override from a
+        // config file or an env var. Check it against the PATH the *child* will
+        // get (`spec.env`, since the environment is cleared), so a bad override
+        // is named as such instead of arriving as a bare OS spawn error.
+        let on_path = crate::daemon::providers::make_path_lookup(&spec.env);
+        if !on_path(&spec.bin) {
+            return Err(format!(
+                "{} is not an executable on the session's PATH",
+                spec.bin
+            ));
+        }
         let args = build_interactive_args(spec);
         let mut child = Command::new(&spec.bin)
             .args(&args)

@@ -75,7 +75,8 @@ fn screen_text(manager: &PtyManager, id: &str) -> String {
 #[test]
 fn a_childs_output_reaches_the_emulator_screen() {
     let manager = PtyManager::new();
-    // `interactive_args` prepends nothing for claude, so extra_args is the argv.
+    // `interactive_args` prepends nothing for codex (see `sh`), so extra_args is
+    // the whole argv.
     let id = manager.open(sh("echo hello-from-pty; sleep 30")).unwrap();
     wait_for("output on screen", || {
         screen_text(&manager, &id).contains("hello-from-pty")

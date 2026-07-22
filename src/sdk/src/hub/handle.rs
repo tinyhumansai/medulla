@@ -231,13 +231,22 @@ impl HubHandle {
     }
 
     /// Remove a worker by id and re-register.
+    ///
+    /// Reports whether anything was actually removed: an operator chasing a
+    /// worker that keeps answering needs to know the id never matched, and
+    /// "worker X removed" for an id that was not in the roster says the
+    /// opposite.
     pub async fn remove(&self, id: &str) -> anyhow::Result<()> {
-        (self.log)(&format!("hub: worker {id} removed"));
-        {
-            self.roster
-                .lock()
-                .expect("roster lock")
-                .retain(|w| w.id != id);
+        let removed = {
+            let mut r = self.roster.lock().expect("roster lock");
+            let before = r.len();
+            r.retain(|w| w.id != id);
+            before != r.len()
+        };
+        if removed {
+            (self.log)(&format!("hub: worker {id} removed"));
+        } else {
+            (self.log)(&format!("hub: no worker {id} to remove"));
         }
         self.save();
         self.reregister().await

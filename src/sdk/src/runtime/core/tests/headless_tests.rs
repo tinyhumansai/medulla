@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::runtime::headless::{drive_once, HeadlessOptions};
+use crate::runtime::headless::{drive_once, HeadlessError, HeadlessOptions};
 use crate::runtime::Runtime;
 
 use super::super::client::CoreRuntime;
@@ -152,7 +152,10 @@ async fn headless_driver_surfaces_a_rejected_instruct() {
     let err = drive_once(runtime, "do it".into(), &mut out, fast_opts())
         .await
         .expect_err("a rejected instruct must fail the run");
-    assert!(err.to_string().contains("instruct failed"), "{err}");
+    assert!(
+        matches!(&err, HeadlessError::SubmitRejected(cause) if cause.to_string().contains("instruct failed")),
+        "{err}"
+    );
 
     // The `ready` line was still emitted before the submit failed.
     let transcript = lines(&out);
@@ -185,7 +188,7 @@ async fn headless_driver_times_out_when_the_cycle_never_ends() {
     )
     .await
     .expect_err("a cycle that never ends must time out");
-    assert!(err.to_string().contains("cycle to finish"), "{err}");
+    assert!(matches!(err, HeadlessError::CycleTimeout), "{err}");
 
     // The transcript still opened with `ready` and streamed the partial cycle,
     // but never reached a `result`.
@@ -221,7 +224,7 @@ async fn headless_driver_times_out_waiting_to_attach() {
     )
     .await
     .expect_err("an attach that never completes must time out");
-    assert!(err.to_string().contains("waiting for the runtime"), "{err}");
+    assert!(matches!(err, HeadlessError::AttachTimeout), "{err}");
     assert!(out.is_empty());
 }
 
@@ -239,7 +242,7 @@ async fn headless_driver_reports_an_unavailable_runtime() {
     let err = drive_once(runtime, "hi".into(), &mut out, fast_opts())
         .await
         .expect_err("an unavailable runtime must fail the run");
-    assert!(err.to_string().contains("unavailable"), "{err}");
+    assert!(matches!(err, HeadlessError::Unavailable { .. }), "{err}");
     // Nothing was streamed: the attach never reached Live.
     assert!(out.is_empty());
 }

@@ -21,8 +21,9 @@
 //!   cycle ends; the driver returns immediately after.
 //!
 //! Errors (attach timeout, an unavailable runtime, a rejected instruction, a
-//! stalled cycle) are returned as `Err` for the caller to surface on stderr and
-//! map to an exit code — they are never written to the transcript stream.
+//! stalled cycle) are returned as a typed [`HeadlessError`] for the caller to
+//! surface on stderr and map to an exit code deterministically — they are never
+//! written to the transcript stream.
 
 use std::io::Write;
 use std::sync::Arc;
@@ -55,6 +56,42 @@ impl Default for HeadlessOptions {
     }
 }
 
+/// Why a headless run failed, as an explicit SDK-boundary error type so a
+/// caller (the `medulla run` wiring, a CI harness) can map each outcome to an
+/// exit code or assertion by variant instead of matching display strings.
+#[derive(Debug, thiserror::Error)]
+pub enum HeadlessError {
+    /// The runtime never reached a `Live` (attached) stream state within
+    /// [`HeadlessOptions::ready_timeout`].
+    #[error("timed out waiting for the runtime to attach")]
+    AttachTimeout,
+    /// The runtime latched unavailable (`Stalled`) before the instruction was
+    /// submitted — a rejected handshake or version mismatch.
+    #[error("core runtime is unavailable: {runtime}")]
+    Unavailable {
+        /// The runtime's [`Runtime::describe`] line, naming what was attached.
+        runtime: String,
+    },
+    /// The runtime latched unavailable (`Stalled`) after the instruction was
+    /// accepted but before its cycle ended.
+    #[error("core runtime became unavailable mid-cycle: {runtime}")]
+    UnavailableMidCycle {
+        /// The runtime's [`Runtime::describe`] line, naming what was attached.
+        runtime: String,
+    },
+    /// The runtime refused the submitted instruction — no cycle will ever
+    /// start, so the run fails fast instead of waiting out the cycle timeout.
+    #[error("the runtime rejected the instruction: {0}")]
+    SubmitRejected(#[source] anyhow::Error),
+    /// The submitted instruction's cycle did not finish within
+    /// [`HeadlessOptions::cycle_timeout`].
+    #[error("timed out waiting for the cycle to finish")]
+    CycleTimeout,
+    /// Writing an NDJSON line to the caller's `out` stream failed.
+    #[error("failed to write the transcript stream: {0}")]
+    Output(#[from] std::io::Error),
+}
+
 /// What one headless run settled to, for the caller's exit code / assertions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadlessSummary {
@@ -69,15 +106,16 @@ pub struct HeadlessSummary {
 ///
 /// Preconditions: `runtime` is freshly constructed (its driver may still be
 /// mid-handshake — the function waits for it). Side effects: writes and flushes
-/// one line per event to `out`. Errors: the runtime never attaches within
-/// `ready_timeout`, latches unavailable, rejects the `submit`, or the cycle does
-/// not finish within `cycle_timeout`.
+/// one line per event to `out`. Errors: one [`HeadlessError`] variant per
+/// failure mode — the runtime never attaches within `ready_timeout`, latches
+/// unavailable, rejects the `submit`, the cycle does not finish within
+/// `cycle_timeout`, or `out` fails to accept a line.
 pub async fn drive_once<W: Write>(
     runtime: Arc<dyn Runtime>,
     instruction: String,
     out: &mut W,
     opts: HeadlessOptions,
-) -> anyhow::Result<HeadlessSummary> {
+) -> Result<HeadlessSummary, HeadlessError> {
     let mut rx = runtime.subscribe();
 
     // 1. Wait for the runtime to attach. `stream_state` gates it: `Stalled`
@@ -88,14 +126,16 @@ pub async fn drive_once<W: Write>(
     loop {
         match runtime.stream_state() {
             Some(StreamState::Stalled) => {
-                anyhow::bail!("core runtime is unavailable: {}", runtime.describe());
+                return Err(HeadlessError::Unavailable {
+                    runtime: runtime.describe(),
+                });
             }
             Some(StreamState::Live) | None => break,
             Some(StreamState::Resyncing) => {}
         }
         wait_for_change(&mut rx, ready_deadline)
             .await
-            .map_err(|_| anyhow::anyhow!("timed out waiting for the runtime to attach"))?;
+            .map_err(|_| HeadlessError::AttachTimeout)?;
     }
 
     // Announce the attached runtime before the instruction goes out.
@@ -120,7 +160,10 @@ pub async fn drive_once<W: Write>(
 
     // 2. Submit the one instruction. A rejected `instruct` surfaces here as an
     //    `Err` (no cycle will ever start), so fail fast rather than wait it out.
-    runtime.submit(instruction).await?;
+    runtime
+        .submit(instruction)
+        .await
+        .map_err(HeadlessError::SubmitRejected)?;
 
     // 3. Drain and stream events until the cycle ends. Completion is signalled
     //    by the terminal `cycle_end` event (rather than the `running` flag) so a
@@ -175,15 +218,14 @@ pub async fn drive_once<W: Write>(
         // A mid-cycle drop that latches unavailable must not hang until the
         // deadline — surface it as soon as the stream reports `Stalled`.
         if runtime.stream_state() == Some(StreamState::Stalled) {
-            anyhow::bail!(
-                "core runtime became unavailable mid-cycle: {}",
-                runtime.describe()
-            );
+            return Err(HeadlessError::UnavailableMidCycle {
+                runtime: runtime.describe(),
+            });
         }
 
         wait_for_change(&mut rx, cycle_deadline)
             .await
-            .map_err(|_| anyhow::anyhow!("timed out waiting for the cycle to finish"))?;
+            .map_err(|_| HeadlessError::CycleTimeout)?;
     }
 }
 
@@ -214,9 +256,11 @@ async fn wait_for_change(
 }
 
 /// Write one JSON value as an NDJSON line and flush so a piped consumer (a
-/// docker container reading stdout) sees each event as it lands.
-fn write_line<W: Write>(out: &mut W, value: &serde_json::Value) -> anyhow::Result<()> {
-    serde_json::to_writer(&mut *out, value)?;
+/// docker container reading stdout) sees each event as it lands. A serialize
+/// failure folds into `io::Error` (serde_json carries the underlying I/O
+/// error), which the caller surfaces as [`HeadlessError::Output`].
+fn write_line<W: Write>(out: &mut W, value: &serde_json::Value) -> std::io::Result<()> {
+    serde_json::to_writer(&mut *out, value).map_err(std::io::Error::from)?;
     out.write_all(b"\n")?;
     out.flush()?;
     Ok(())

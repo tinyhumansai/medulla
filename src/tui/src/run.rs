@@ -51,9 +51,10 @@ pub(crate) async fn run_core(args: &[String]) -> anyhow::Result<()> {
     .await;
 
     // Always tear the attachment down cleanly, whether the run passed or failed,
-    // so serve is not left with a dangling connection.
+    // so serve is not left with a dangling connection. The driver's typed
+    // `HeadlessError` folds into `anyhow` here — the binary layer only reports.
     runtime.shutdown().await.ok();
-    result.map(|_| ())
+    result.map(|_| ()).map_err(anyhow::Error::from)
 }
 
 /// On non-unix platforms the core runtime is unavailable (it speaks a unix

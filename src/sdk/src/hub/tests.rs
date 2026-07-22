@@ -591,3 +591,25 @@ fn a_preview_is_clipped_and_flattened_but_says_so() {
     assert_eq!(out.chars().count(), PREVIEW_CHARS + 1);
     assert_eq!(preview(""), "");
 }
+
+#[test]
+fn an_unlabelled_worker_advertises_one_token_not_two() {
+    // `agent_list` renders `id (name)`. When those differ and both read as
+    // names, the model picks one and may pick the unroutable one — which is the
+    // original bug. Unlabelled, they must coincide.
+    let payload = register_payload(&[worker("claude-worker", "3Hob1Fxu")]);
+    let agents = payload.get("agents").unwrap().as_array().unwrap();
+    assert_eq!(agents[0]["id"], "claude-worker");
+    assert_eq!(
+        agents[0]["name"], "claude-worker",
+        "an unlabelled worker must not advertise a second, different name"
+    );
+
+    // A labelled one keeps its human name; the id stays a visible slug of it.
+    let mut labelled = worker("sanil-laptop", "3Hob1Fxu");
+    labelled.label = Some("Sanil Laptop".to_string());
+    let payload = register_payload(&[labelled]);
+    let agents = payload.get("agents").unwrap().as_array().unwrap();
+    assert_eq!(agents[0]["id"], "sanil-laptop");
+    assert_eq!(agents[0]["name"], "Sanil Laptop");
+}

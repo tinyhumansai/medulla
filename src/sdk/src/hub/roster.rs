@@ -43,7 +43,12 @@ pub type SharedRoster = Arc<Mutex<Vec<HubWorker>>>;
 fn to_agent(w: &HubWorker) -> Value {
     json!({
         "id": w.id,
-        "name": w.label.clone().unwrap_or_else(|| "tinyplace-worker".to_string()),
+        // The name falls back to the id, not to a second constant. `agent_list`
+        // renders `id (name)`, so two different readable tokens put the wrong
+        // answer back on the table — which is the whole failure being fixed
+        // here. Unlabelled, the two coincide and there is nothing to get wrong;
+        // labelled, the id is a visible slug of the name.
+        "name": w.label.clone().unwrap_or_else(|| w.id.clone()),
         "description": format!("{} daemon", w.harness),
         "availability": "online",
         "tags": ["code"],

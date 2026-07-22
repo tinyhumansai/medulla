@@ -48,6 +48,43 @@ fn fold_event_drives_running_and_board() {
 }
 
 #[test]
+fn fold_event_streams_task_board_changes_into_the_event_log() {
+    // Codex review finding: task_board_changed used to update
+    // `RuntimeSnapshot.harness` only, so headless `run` consumers (which drain
+    // `snapshot().events`) silently lost task progress. The fold must also
+    // append an event envelope carrying the changed row.
+    let mut s = CoreState::new();
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"task_board_changed","task":{
+            "id":"t1","title":"reconcile","status":"active","createdAt":"0","updatedAt":"0",
+            "delegatedTaskIds":[],"notes":[]}})
+    ));
+
+    // The board updated, and the same change landed in the event log.
+    assert_eq!(s.harness.as_ref().unwrap().tasks.len(), 1);
+    assert_eq!(s.events.len(), 1);
+    let env = &s.events[0];
+    assert_eq!(env.event.kind(), "task_board_changed");
+    let json = serde_json::to_value(&env.event).unwrap();
+    assert_eq!(json["kind"], "task_board_changed");
+    assert_eq!(json["task"]["id"], "t1");
+    assert_eq!(json["task"]["status"], "active");
+
+    // An update to the same task streams a second envelope (one per change).
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"task_board_changed","task":{
+            "id":"t1","title":"reconcile","status":"done","createdAt":"0","updatedAt":"1",
+            "delegatedTaskIds":[],"notes":[]}})
+    ));
+    assert_eq!(s.harness.as_ref().unwrap().tasks.len(), 1);
+    assert_eq!(s.events.len(), 2);
+    let json = serde_json::to_value(&s.events[1].event).unwrap();
+    assert_eq!(json["task"]["status"], "done");
+}
+
+#[test]
 fn fold_event_passes_unknown_and_cycle_events_through() {
     let mut s = CoreState::new();
     // A serve-level roster_event is not a HarnessEvent: kept verbatim.

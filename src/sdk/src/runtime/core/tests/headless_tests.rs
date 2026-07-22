@@ -79,6 +79,12 @@ async fn headless_driver_round_trips_one_instruct_against_the_stub() {
         event_kinds.iter().any(|k| k == "user"),
         "streamed the optimistic user turn: {event_kinds:?}"
     );
+    // The board row must stream too — harness-only folds used to drop it from
+    // the NDJSON output (Codex review finding).
+    assert!(
+        event_kinds.iter().any(|k| k == "task_board_changed"),
+        "streamed the task board change: {event_kinds:?}"
+    );
     assert!(summary.events_streamed >= 3, "{}", summary.events_streamed);
 
     // The instruction actually reached serve.

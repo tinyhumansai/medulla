@@ -214,6 +214,8 @@ fn run_streams_one_cycle_from_a_serve_socket() {
         .collect();
     assert!(kinds.iter().any(|k| k == "cycle_start"), "{kinds:?}");
     assert!(kinds.iter().any(|k| k == "cycle_end"), "{kinds:?}");
+    // Task-board progress must stream too, not just fold into the snapshot.
+    assert!(kinds.iter().any(|k| k == "task_board_changed"), "{kinds:?}");
 }
 
 #[test]

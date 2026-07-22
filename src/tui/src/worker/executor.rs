@@ -54,6 +54,11 @@ const LOCATE_BUDGET: Duration = Duration::from_secs(30);
 /// never mistaken for a finished turn.
 const STALL_BUDGET_MS: i64 = 120_000;
 
+/// How long to wait for the rest of a terminal message before replying with what
+/// arrived. The blocks of one message are written in a single burst, so this only
+/// has to outlast that write — it is a safety net, not the normal path.
+const SETTLE_GRACE_MS: i64 = 1_500;
+
 /// The session a task will run in, and whether it was already running.
 ///
 /// The distinction decides how its transcript is tailed: a fresh session writes
@@ -335,6 +340,22 @@ impl PtySessionExecutor {
                 ));
             }
             let idle_ms = medulla::clock::now_millis().saturating_sub(last_line_at);
+            // The turn ended, but its message is written one record per content
+            // block and the reply usually lives in the last one. Normally the
+            // records that follow close it immediately; this covers a transcript
+            // that simply stops, so a finished turn is never held for the full
+            // stall budget.
+            if stream.terminal_pending() && idle_ms >= SETTLE_GRACE_MS {
+                if let Some(reply) = stream.settle_pending() {
+                    return Ok(RunTaskResult {
+                        provider,
+                        reply,
+                        events: stream.events(),
+                        usage: stream.usage(),
+                        session_id: self.sessions.row(id).and_then(|row| row.session_id),
+                    });
+                }
+            }
             if tailer.is_located() && stream.stalled_for(idle_ms, STALL_BUDGET_MS) {
                 return Ok(RunTaskResult {
                     provider,

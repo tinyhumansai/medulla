@@ -48,6 +48,22 @@ use crate::tinyplace::HarnessProvider;
 /// A claude `stop_reason` meaning the assistant will continue working.
 const CONTINUES: &str = "tool_use";
 
+/// A terminal `stop_reason` seen, held until its message is fully written.
+///
+/// Claude Code writes **one transcript record per content block**, repeating the
+/// message-level `stop_reason` on every one. A final `[thinking, text]` message
+/// therefore lands as two `end_turn` records — the thinking one first, carrying
+/// no reply text at all. Settling on the first would answer with whatever
+/// narration preceded it, or with nothing.
+#[derive(Debug, Clone)]
+struct PendingTerminal {
+    /// `message.id`, shared by every record of the same message. `None` when the
+    /// record carried no id, in which case the next record of any kind closes it.
+    message_id: Option<String>,
+    /// The `stop_reason` that ended the turn.
+    stop_reason: String,
+}
+
 /// What one transcript line said about the turn in flight.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnSignal {
@@ -84,6 +100,8 @@ pub struct TurnWatcher {
     /// Whether a tool call is outstanding — used only by the stall backstop, so
     /// a long build is never mistaken for a finished turn.
     tool_outstanding: bool,
+    /// A terminal record seen, waiting for the rest of its message.
+    pending: Option<PendingTerminal>,
     /// Whether the turn has already been settled.
     done: bool,
 }
@@ -110,6 +128,7 @@ impl TurnWatcher {
             provider,
             said: Vec::new(),
             tool_outstanding: false,
+            pending: None,
             done: false,
         }
     }
@@ -205,6 +224,12 @@ impl TurnWatcher {
 
     /// Fold one claude transcript record.
     fn observe_claude(&mut self, record: &Value) -> Option<TurnSignal> {
+        // A terminal record does not end the turn on its own — the rest of its
+        // message may still be unwritten, and the reply usually lives there. The
+        // turn ends when something arrives that is not part of that message.
+        if self.pending.is_some() && !self.continues_pending(record) {
+            return Some(self.close_pending());
+        }
         if record.get("type").and_then(Value::as_str) != Some("assistant") {
             return None;
         }
@@ -259,14 +284,18 @@ impl TurnWatcher {
                 })
             }
             // Any other *stated* reason is terminal: `end_turn` normally,
-            // `stop_sequence` occasionally.
+            // `stop_sequence` occasionally. Hold it until the message closes, so
+            // the text blocks still to come are part of the reply.
             Some(reason) => {
-                self.done = true;
                 self.tool_outstanding = false;
-                Some(TurnSignal::Complete {
-                    reply: self.reply(),
+                self.pending = Some(PendingTerminal {
+                    message_id: message
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     stop_reason: reason.to_string(),
-                })
+                });
+                (!text.is_empty()).then_some(TurnSignal::Progress { text })
             }
             // No stated reason (0.08% of records). Not terminal — say nothing
             // and let the stall backstop decide, rather than guessing either way.
@@ -275,6 +304,54 @@ impl TurnWatcher {
                 (!text.is_empty()).then_some(TurnSignal::Progress { text })
             }
         }
+    }
+
+    /// Whether `record` is another block of the pending terminal message.
+    ///
+    /// Requires a *stated* matching id: a record with no `message.id` — every
+    /// `system`, `user`, and attachment record — is not a continuation, so the
+    /// message closes on the next line rather than absorbing unrelated ones.
+    fn continues_pending(&self, record: &Value) -> bool {
+        let Some(id) = self.pending.as_ref().and_then(|p| p.message_id.as_deref()) else {
+            return false;
+        };
+        record.get("type").and_then(Value::as_str) == Some("assistant")
+            && record
+                .get("message")
+                .and_then(|m| m.get("id"))
+                .and_then(Value::as_str)
+                == Some(id)
+    }
+
+    /// Settle the held terminal, replying with everything the message said.
+    fn close_pending(&mut self) -> TurnSignal {
+        let stop_reason = self
+            .pending
+            .take()
+            .map(|p| p.stop_reason)
+            .unwrap_or_else(|| "end_turn".to_string());
+        self.done = true;
+        self.tool_outstanding = false;
+        TurnSignal::Complete {
+            reply: self.reply(),
+            stop_reason,
+        }
+    }
+
+    /// Whether a terminal record is held pending the rest of its message.
+    ///
+    /// The turn is over; only the reply text may still be incomplete. A caller
+    /// that sees this stay true across a short quiet period should
+    /// [`settle_pending`](Self::settle_pending) — nothing more is coming.
+    pub fn terminal_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Close a held terminal without waiting for a following record.
+    ///
+    /// Returns `None` when nothing is pending.
+    pub fn settle_pending(&mut self) -> Option<TurnSignal> {
+        self.pending.is_some().then(|| self.close_pending())
     }
 
     /// Whether the turn should be given up on after `idle_ms` of silence.

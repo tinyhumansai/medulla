@@ -5,11 +5,25 @@
 
 use super::super::completion::{TurnSignal, TurnWatcher};
 
+/// The record that follows a finished message in a real transcript — `system`,
+/// then `last-prompt` / `ai-title`. Anything not carrying the message's own id
+/// closes it.
+const AFTER_MESSAGE: &str = r#"{"type":"system","subtype":"post_turn"}"#;
+
 /// An `assistant` record with the given content blocks and stop reason.
 fn assistant(blocks: serde_json::Value, stop_reason: Option<&str>) -> String {
+    assistant_msg(blocks, stop_reason, "m-1")
+}
+
+/// An `assistant` record belonging to message `id`.
+///
+/// Claude Code writes one record per content block and repeats `message.id` on
+/// each, so the id is what ties a split message back together.
+fn assistant_msg(blocks: serde_json::Value, stop_reason: Option<&str>, id: &str) -> String {
     let mut message = serde_json::json!({
         "role": "assistant",
         "type": "message",
+        "id": id,
         "content": blocks,
     });
     if let Some(reason) = stop_reason {
@@ -37,14 +51,89 @@ fn tool_block(name: &str) -> serde_json::Value {
 fn end_turn_completes_the_turn_with_the_assistants_answer() {
     // The whole point: completion is *stated* by the transcript, not inferred.
     let mut watcher = TurnWatcher::new();
+    watcher.observe(&assistant(text_block("all done"), Some("end_turn")));
     assert_eq!(
-        watcher.observe(&assistant(text_block("all done"), Some("end_turn"))),
+        watcher.observe(AFTER_MESSAGE),
         Some(TurnSignal::Complete {
             reply: "all done".to_string(),
             stop_reason: "end_turn".to_string(),
         })
     );
     assert!(watcher.is_done());
+}
+
+#[test]
+fn a_terminal_message_split_across_records_replies_with_its_text() {
+    // Claude Code writes ONE RECORD PER CONTENT BLOCK, repeating the
+    // message-level stop_reason on every one. A final `[thinking, text]` message
+    // is therefore two `end_turn` records, thinking first — and thinking is
+    // deliberately not part of a reply.
+    //
+    // Settling on the first one shipped the narration that happened to precede
+    // it, or nothing at all. Observed in the field: a worker asked to run nine
+    // commands answered "I'll survey the workspace. Let me start with the
+    // basics." — and another answered with zero characters.
+    let mut watcher = TurnWatcher::new();
+    watcher.observe(&assistant(text_block("Let me start."), Some("tool_use")));
+    watcher.observe(&assistant(tool_block("Bash"), Some("tool_use")));
+    let thinking = serde_json::json!([{ "type": "thinking", "thinking": "that covers it" }]);
+    assert!(
+        !matches!(
+            watcher.observe(&assistant(thinking, Some("end_turn"))),
+            Some(TurnSignal::Complete { .. })
+        ),
+        "the thinking block of a terminal message must not settle the turn — \
+         the answer is in the record after it"
+    );
+    watcher.observe(&assistant(
+        text_block("Here is the output."),
+        Some("end_turn"),
+    ));
+
+    let signal = watcher.observe(AFTER_MESSAGE);
+    let Some(TurnSignal::Complete { reply, .. }) = signal else {
+        panic!("expected completion, got {signal:?}");
+    };
+    assert_eq!(reply, "Let me start.\nHere is the output.");
+}
+
+#[test]
+fn a_pending_terminal_settles_without_a_following_record() {
+    // A transcript that simply stops must not hold a finished turn for the full
+    // stall budget; the executor closes it after a short grace.
+    let mut watcher = TurnWatcher::new();
+    watcher.observe(&assistant(text_block("the answer"), Some("end_turn")));
+    assert!(watcher.terminal_pending());
+    assert!(!watcher.is_done(), "not settled until the message closes");
+
+    let signal = watcher.settle_pending();
+    assert!(
+        matches!(signal, Some(TurnSignal::Complete { ref reply, .. }) if reply == "the answer"),
+        "got {signal:?}"
+    );
+    assert!(watcher.is_done());
+    assert!(watcher.settle_pending().is_none(), "settles exactly once");
+}
+
+#[test]
+fn a_new_messages_records_never_join_the_pending_reply() {
+    // Closing on "not this message id" must mean exactly that: the next turn's
+    // text is not ours, even though it is also an assistant record.
+    let mut watcher = TurnWatcher::new();
+    watcher.observe(&assistant_msg(
+        text_block("ours"),
+        Some("end_turn"),
+        "m-first",
+    ));
+    let signal = watcher.observe(&assistant_msg(
+        text_block("someone else's"),
+        Some("end_turn"),
+        "m-second",
+    ));
+    assert!(
+        matches!(signal, Some(TurnSignal::Complete { ref reply, .. }) if reply == "ours"),
+        "got {signal:?}"
+    );
 }
 
 #[test]
@@ -66,7 +155,8 @@ fn tool_use_does_not_complete_the_turn() {
 #[test]
 fn stop_sequence_is_terminal_too() {
     let mut watcher = TurnWatcher::new();
-    let signal = watcher.observe(&assistant(text_block("halted"), Some("stop_sequence")));
+    watcher.observe(&assistant(text_block("halted"), Some("stop_sequence")));
+    let signal = watcher.observe(AFTER_MESSAGE);
     assert!(
         matches!(signal, Some(TurnSignal::Complete { ref stop_reason, .. }) if stop_reason == "stop_sequence"),
         "got {signal:?}"
@@ -80,10 +170,11 @@ fn a_multi_step_turn_accumulates_every_answer_then_settles_once() {
     watcher.observe(&assistant(text_block("looking now"), Some("tool_use")));
     watcher.observe(&assistant(tool_block("Read"), Some("tool_use")));
     watcher.observe(&assistant(text_block("found it"), Some("tool_use")));
-    let signal = watcher.observe(&assistant(
+    watcher.observe(&assistant(
         text_block("fixed in client.rs"),
         Some("end_turn"),
     ));
+    let signal = watcher.observe(AFTER_MESSAGE);
 
     let Some(TurnSignal::Complete { reply, .. }) = signal else {
         panic!("expected completion, got {signal:?}");
@@ -99,7 +190,8 @@ fn thinking_is_not_part_of_the_reply() {
         { "type": "thinking", "thinking": "let me consider the options" },
         { "type": "text", "text": "the answer" },
     ]);
-    let signal = watcher.observe(&assistant(blocks, Some("end_turn")));
+    watcher.observe(&assistant(blocks, Some("end_turn")));
+    let signal = watcher.observe(AFTER_MESSAGE);
     let Some(TurnSignal::Complete { reply, .. }) = signal else {
         panic!("expected completion");
     };
@@ -110,9 +202,15 @@ fn thinking_is_not_part_of_the_reply() {
 fn nothing_is_reported_after_the_turn_has_settled() {
     // The next turn's records must not leak into this one's reply.
     let mut watcher = TurnWatcher::new();
-    watcher.observe(&assistant(text_block("done"), Some("end_turn")));
+    watcher.observe(&assistant_msg(text_block("done"), Some("end_turn"), "m-1"));
+    watcher.observe(AFTER_MESSAGE);
+    assert!(watcher.is_done());
     assert_eq!(
-        watcher.observe(&assistant(text_block("next turn"), Some("end_turn"))),
+        watcher.observe(&assistant_msg(
+            text_block("next turn"),
+            Some("end_turn"),
+            "m-2"
+        )),
         None
     );
     assert_eq!(watcher.reply(), "done");
@@ -191,6 +289,7 @@ fn the_stall_backstop_refuses_while_a_tool_is_outstanding() {
 fn a_settled_turn_never_stalls() {
     let mut watcher = TurnWatcher::new();
     watcher.observe(&assistant(text_block("done"), Some("end_turn")));
+    watcher.observe(AFTER_MESSAGE);
     assert!(!watcher.stalled_for(999_999, 10_000));
 }
 

@@ -106,6 +106,21 @@ impl TurnStream {
         LineFold { events, reply }
     }
 
+    /// Whether the turn has ended but its reply may still be being written.
+    ///
+    /// See [`TurnWatcher::terminal_pending`](crate::sessions::TurnWatcher::terminal_pending).
+    pub fn terminal_pending(&self) -> bool {
+        self.watcher.terminal_pending()
+    }
+
+    /// Close a pending terminal, returning the reply. `None` if none is pending.
+    pub fn settle_pending(&mut self) -> Option<String> {
+        match self.watcher.settle_pending() {
+            Some(TurnSignal::Complete { reply, .. }) => Some(reply),
+            _ => None,
+        }
+    }
+
     /// Whether the turn should be given up on after `idle_ms` of silence.
     ///
     /// Refuses while a tool call is outstanding, so a long build is never

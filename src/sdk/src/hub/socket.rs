@@ -226,11 +226,17 @@ async fn handle_task_run(
         }
     });
 
+    // The instruction is on the line, not just the id. Two dispatches sharing a
+    // task id are either two different pieces of work colliding on a name — ids
+    // are assigned positionally per `delegate_tasks` call, so every call starts
+    // again at `t1` — or the same work emitted twice. Those call for opposite
+    // fixes, and the id alone cannot tell them apart.
     log(&format!(
-        "hub: task_run {} → {} (timeout {}s)",
+        "hub: task_run {} → {} (timeout {}s) · {}",
         task_id,
         worker_address,
-        timeout.as_secs()
+        timeout.as_secs(),
+        crate::logging::preview(&instruction),
     ));
 
     let req = TaskRequest {

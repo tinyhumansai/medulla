@@ -1,9 +1,9 @@
-//! Unit tests for the config data model: serde defaults/parsing, derived
-//! labels, and core-socket path/request resolution on [`LoadedConfig`].
+//! Unit tests for the config data model: serde defaults/parsing and derived
+//! labels on [`LoadedConfig`]. Core-socket resolution/validation tests live in
+//! [`super::core_socket_tests`].
 
 use super::*;
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -111,129 +111,6 @@ fn context_window_honors_override() {
     let cfg: TuiConfig =
         serde_json::from_str(r#"{"medulla":{"contextWindowTokens":128000}}"#).unwrap();
     assert_eq!(cfg.medulla.context_window(), 128_000);
-}
-
-#[test]
-fn core_socket_path_prefers_explicit_over_xdg_and_state_dir() {
-    // An explicit [core] socketPath wins over both fallbacks.
-    let cfg: TuiConfig =
-        serde_json::from_str(r#"{"core":{"socketPath":"/tmp/explicit.sock"}}"#).unwrap();
-    let loaded = LoadedConfig {
-        config: cfg,
-        path: "x".into(),
-        sources: Vec::new(),
-    };
-    let resolved = loaded.core_socket_path(&env(&[("XDG_RUNTIME_DIR", "/run/user/1000")]));
-    assert_eq!(resolved, PathBuf::from("/tmp/explicit.sock"));
-}
-
-#[test]
-fn core_socket_path_falls_back_to_xdg_then_state_dir() {
-    // No explicit path: XDG_RUNTIME_DIR wins when set, else <stateDir>.
-    let cfg = TuiConfig {
-        state_dir: "/var/state".into(),
-        ..Default::default()
-    };
-    let loaded = LoadedConfig {
-        config: cfg,
-        path: "x".into(),
-        sources: Vec::new(),
-    };
-    // XDG present → $XDG_RUNTIME_DIR/medulla/serve.sock.
-    assert_eq!(
-        loaded.core_socket_path(&env(&[("XDG_RUNTIME_DIR", "/run/user/1000")])),
-        PathBuf::from("/run/user/1000/medulla/serve.sock")
-    );
-    // XDG absent (and blank treated as unset) → <stateDir>/serve.sock.
-    assert_eq!(
-        loaded.core_socket_path(&env(&[("XDG_RUNTIME_DIR", "  ")])),
-        PathBuf::from("/var/state/serve.sock")
-    );
-    assert_eq!(
-        loaded.core_socket_path(&env(&[])),
-        PathBuf::from("/var/state/serve.sock")
-    );
-}
-
-#[test]
-fn core_socket_path_treats_blank_explicit_as_unset() {
-    // A whitespace-only socketPath must not shadow the fallbacks.
-    let mut cfg: TuiConfig = serde_json::from_str(r#"{"core":{"socketPath":"   "}}"#).unwrap();
-    cfg.state_dir = "/var/state".into();
-    let loaded = LoadedConfig {
-        config: cfg,
-        path: "x".into(),
-        sources: Vec::new(),
-    };
-    assert_eq!(
-        loaded.core_socket_path(&env(&[])),
-        PathBuf::from("/var/state/serve.sock")
-    );
-}
-
-#[test]
-fn core_socket_request_opts_in_only_when_asked() {
-    // No [core] section and no flag/env: the core runtime is not requested, so
-    // the caller keeps the backend/mock chain.
-    let bare = LoadedConfig {
-        config: TuiConfig {
-            state_dir: "/var/state".into(),
-            ..Default::default()
-        },
-        path: "x".into(),
-        sources: Vec::new(),
-    };
-    assert_eq!(bare.core_socket_request(&env(&[]), None), None);
-
-    // A `--core-socket` flag opts in and wins over everything else.
-    let cfg_with_core: TuiConfig =
-        serde_json::from_str(r#"{"core":{"socketPath":"/tmp/from-config.sock"}}"#).unwrap();
-    let loaded = LoadedConfig {
-        config: cfg_with_core,
-        path: "x".into(),
-        sources: Vec::new(),
-    };
-    assert_eq!(
-        loaded.core_socket_request(
-            &env(&[("MEDULLA_CORE_SOCKET", "/tmp/from-env.sock")]),
-            Some("/tmp/from-flag.sock"),
-        ),
-        Some(PathBuf::from("/tmp/from-flag.sock"))
-    );
-    // A blank flag is treated as unset, so the env var wins next.
-    assert_eq!(
-        loaded.core_socket_request(
-            &env(&[("MEDULLA_CORE_SOCKET", "/tmp/from-env.sock")]),
-            Some(" ")
-        ),
-        Some(PathBuf::from("/tmp/from-env.sock"))
-    );
-    // With neither flag nor env, the presence of [core] opts in and the path is
-    // resolved through `core_socket_path` (explicit socketPath here).
-    assert_eq!(
-        loaded.core_socket_request(&env(&[]), None),
-        Some(PathBuf::from("/tmp/from-config.sock"))
-    );
-
-    // A bare (empty) [core] section still opts in, falling back to the state dir.
-    let empty_core: TuiConfig = serde_json::from_str(r#"{"core":{}}"#).unwrap();
-    let loaded_empty = LoadedConfig {
-        config: TuiConfig {
-            state_dir: "/var/state".into(),
-            ..empty_core
-        },
-        path: "x".into(),
-        sources: Vec::new(),
-    };
-    assert_eq!(
-        loaded_empty.core_socket_request(&env(&[]), None),
-        Some(PathBuf::from("/var/state/serve.sock"))
-    );
-    // Even with no [core] section, the env var alone opts in.
-    assert_eq!(
-        bare.core_socket_request(&env(&[("MEDULLA_CORE_SOCKET", "/tmp/env-only.sock")]), None),
-        Some(PathBuf::from("/tmp/env-only.sock"))
-    );
 }
 
 #[test]

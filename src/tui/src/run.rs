@@ -22,7 +22,7 @@ use medulla_tui::cli::parse_run_args;
 pub(crate) async fn run_core(args: &[String]) -> anyhow::Result<()> {
     use std::sync::Arc;
 
-    use medulla::config::load_config;
+    use medulla::config::{load_config, validate_core_socket, CoreSocketSource};
     use medulla::runtime::core::CoreRuntime;
     use medulla::runtime::headless::{drive_once, HeadlessOptions};
     use medulla::runtime::Runtime;
@@ -35,9 +35,14 @@ pub(crate) async fn run_core(args: &[String]) -> anyhow::Result<()> {
 
     // `run` always drives the core runtime, so resolve a socket even when no
     // `[core]` section opted in: fall back to the default runtime-dir path.
-    let socket = loaded
-        .core_socket_request(&env, parsed.core_socket.as_deref())
-        .unwrap_or_else(|| loaded.core_socket_path(&env));
+    let (socket, source) = loaded
+        .core_socket_request_sourced(&env, parsed.core_socket.as_deref())
+        .unwrap_or_else(|| (loaded.core_socket_path(&env), CoreSocketSource::DefaultPath));
+
+    // Fail fast on a path that can never be attached (exists but is not a unix
+    // socket) — the error names the path and the knob that produced it, instead
+    // of the driver spinning in reconnect until the attach timeout.
+    validate_core_socket(&socket, source)?;
 
     let runtime: Arc<dyn Runtime> = Arc::new(CoreRuntime::attach(socket));
 

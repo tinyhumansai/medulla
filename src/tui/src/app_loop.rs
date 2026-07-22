@@ -93,7 +93,14 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // a request falls through to the backend/mock chain (see `CoreConfig` docs).
     #[cfg(unix)]
     if runtime.is_none() {
-        if let Some(socket) = loaded.core_socket_request(&env, args.core_socket.as_deref()) {
+        if let Some((socket, source)) =
+            loaded.core_socket_request_sourced(&env, args.core_socket.as_deref())
+        {
+            // Fail fast on a path that can never be attached (exists but is not
+            // a unix socket): a clear startup error beats a TUI stuck forever in
+            // a resyncing header. A missing path still attaches and waits —
+            // serve may legitimately come up after the TUI.
+            medulla::config::validate_core_socket(&socket, source)?;
             startup_status = Some(format!(
                 "attaching to medulla-serve at {}",
                 socket.display()

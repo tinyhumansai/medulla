@@ -148,9 +148,21 @@ async fn serve_connection(
     let stream = tokio::select! {
         result = UnixStream::connect(path) => match result {
             Ok(s) => s,
-            // Socket not present yet / refused: treat as a transient drop so
-            // the driver keeps re-attaching (serve may still be coming up).
-            Err(_) => return ConnOutcome::Dropped,
+            Err(_) => {
+                // A path that exists but is not a unix socket can never be
+                // attached (a mistyped --core-socket / env var / config value):
+                // latch fatal instead of spinning in reconnect forever. A
+                // *missing* path stays a transient drop so the legitimate
+                // attach-before-serve flow keeps waiting for the socket to
+                // appear (serve may still be coming up).
+                if exists_as_non_socket(path) {
+                    return ConnOutcome::Fatal(format!(
+                        "core socket path {} exists but is not a unix socket",
+                        path.display()
+                    ));
+                }
+                return ConnOutcome::Dropped;
+            }
         },
         cmd = cmd_rx.recv() => return handle_disconnected_command(cmd),
     };
@@ -258,6 +270,16 @@ async fn serve_connection(
     fail_pending(&mut pending);
     reader_task.abort();
     outcome
+}
+
+/// Whether `path` exists on disk as something other than a unix domain socket —
+/// a config error the driver treats as fatal, because connecting to it can
+/// never succeed no matter how long it retries.
+fn exists_as_non_socket(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    std::fs::metadata(path)
+        .map(|meta| !meta.file_type().is_socket())
+        .unwrap_or(false)
 }
 
 /// Handle a command received while there is no live connection to dispatch it

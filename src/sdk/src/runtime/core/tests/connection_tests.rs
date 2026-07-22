@@ -248,6 +248,26 @@ async fn attach_to_missing_socket_stays_reconnecting() {
 }
 
 #[tokio::test]
+async fn attach_to_a_non_socket_path_latches_unavailable() {
+    // Codex review finding: a resolved path that exists but is not a unix
+    // socket (a mistyped --core-socket / env / config value) used to spin in
+    // the reconnect loop forever. Connecting to it can never succeed, so the
+    // driver must latch a fatal, operator-facing state instead.
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("not-a-socket");
+    std::fs::write(&file, b"plain file").unwrap();
+
+    let rt = CoreRuntime::attach(file.clone());
+    assert!(
+        wait_until(|| is_unavailable(&rt)).await,
+        "an existing non-socket path must latch unavailable, not keep retrying"
+    );
+    assert_eq!(rt.stream_state(), Some(StreamState::Stalled));
+    let desc = rt.describe();
+    assert!(desc.contains("not a unix socket"), "{desc}");
+}
+
+#[tokio::test]
 async fn shutdown_does_not_hang_while_reconnecting() {
     // No server is ever started: the driver sits in the connect/backoff loop
     // (attempting `UnixStream::connect` against an absent socket, then

@@ -5,14 +5,18 @@
 //! The module is split by responsibility: [`urls`] holds the endpoint base-URL
 //! constants and their env-aware resolvers, [`types`] the config data model,
 //! [`load`] the layered discovery/parse/merge that produces a [`LoadedConfig`],
-//! and [`persist`] writes back the few sections the app owns as state.
+//! [`persist`] writes back the few sections the app owns as state, and
+//! [`core_socket`] resolves and validates the core (`medulla-serve`) socket path.
 //! All public items are re-exported here so callers use `medulla::config::*`.
 
+mod core_socket;
 mod load;
 mod persist;
 mod types;
 mod urls;
 
+#[cfg(test)]
+mod core_socket_tests;
 #[cfg(test)]
 mod load_tests;
 #[cfg(test)]
@@ -22,6 +26,7 @@ mod types_tests;
 #[cfg(test)]
 mod urls_tests;
 
+pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
 pub use load::load_config;
 pub use persist::{clear_setting, persist_setting, persist_welcome_completed};
 pub use types::{

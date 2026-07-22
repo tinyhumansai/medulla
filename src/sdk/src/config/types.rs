@@ -7,7 +7,6 @@
 //! [`load_config`](super::load_config), not here.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -372,69 +371,6 @@ impl LoadedConfig {
         } else {
             "WORKER".into()
         }
-    }
-
-    /// Resolve the NDJSON `medulla-serve` socket path for the core runtime.
-    ///
-    /// Precedence follows the serve-protocol transport contract (plan §2.2): an
-    /// explicit `[core] socketPath` wins; otherwise
-    /// `$XDG_RUNTIME_DIR/medulla/serve.sock`, then `<stateDir>/serve.sock`. A
-    /// blank or whitespace-only `socketPath` is treated as unset. The returned
-    /// path is where the runtime *attaches*; this milestone never spawns serve,
-    /// so a missing socket surfaces as an attach error, not a spawn.
-    pub fn core_socket_path(&self, env: &HashMap<String, String>) -> PathBuf {
-        if let Some(explicit) = self
-            .config
-            .core
-            .as_ref()
-            .and_then(|c| c.socket_path.as_deref())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            return PathBuf::from(explicit);
-        }
-        if let Some(xdg) = env
-            .get("XDG_RUNTIME_DIR")
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            return PathBuf::from(xdg).join("medulla").join("serve.sock");
-        }
-        PathBuf::from(&self.config.state_dir).join("serve.sock")
-    }
-
-    /// Whether the core (`medulla-serve`) runtime is *requested*, and if so the
-    /// socket to attach to.
-    ///
-    /// Opting into the core runtime is explicit — the backend runtime stays the
-    /// default. A request comes from, in precedence order: an explicit
-    /// `--core-socket <path>` (`cli_socket`), the `MEDULLA_CORE_SOCKET`
-    /// environment variable, or the presence of a `[core]` config section. The
-    /// first two carry the socket path directly; a `[core]` section resolves the
-    /// path through [`core_socket_path`](Self::core_socket_path) (explicit
-    /// `socketPath`, then `$XDG_RUNTIME_DIR`, then the state dir). Blank/whitespace
-    /// values for the flag and env var are treated as unset so an empty override
-    /// never masks the config. Returns `None` when nothing opts in, which the
-    /// caller reads as "use the backend/mock chain".
-    pub fn core_socket_request(
-        &self,
-        env: &HashMap<String, String>,
-        cli_socket: Option<&str>,
-    ) -> Option<PathBuf> {
-        if let Some(explicit) = cli_socket.map(str::trim).filter(|s| !s.is_empty()) {
-            return Some(PathBuf::from(explicit));
-        }
-        if let Some(from_env) = env
-            .get("MEDULLA_CORE_SOCKET")
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            return Some(PathBuf::from(from_env));
-        }
-        if self.config.core.is_some() {
-            return Some(self.core_socket_path(env));
-        }
-        None
     }
 
     /// Pretty-printed config JSON for the Config tab, with `backend.tokenEnv`

@@ -217,6 +217,36 @@ fn run_streams_one_cycle_from_a_serve_socket() {
 }
 
 #[test]
+fn run_rejects_a_core_socket_path_that_is_not_a_socket() {
+    // Codex review finding: a --core-socket value pointing at an existing
+    // non-socket used to hand the path to the runtime driver, which spun in
+    // reconnect until the attach timeout. The resolved path is now validated
+    // up front, so the run fails fast naming the path and the flag.
+    let home = TempDir::new().unwrap();
+    let not_a_socket = home.path().join("not-a-socket");
+    std::fs::write(&not_a_socket, b"plain file").unwrap();
+    let missing_config = home.path().join("none.toml");
+
+    let out = run(
+        &[
+            "run",
+            "--core-socket",
+            not_a_socket.to_str().unwrap(),
+            "--config",
+            missing_config.to_str().unwrap(),
+            "hello",
+        ],
+        home.path(),
+    );
+
+    assert!(!out.status.success(), "a non-socket path must fail the run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not a unix socket"), "stderr: {stderr}");
+    assert!(stderr.contains("--core-socket"), "stderr: {stderr}");
+    assert!(stderr.contains("not-a-socket"), "stderr: {stderr}");
+}
+
+#[test]
 fn run_without_an_instruction_is_a_usage_error() {
     let home = TempDir::new().unwrap();
     // No instruction text: the parser rejects it before any socket work, so this

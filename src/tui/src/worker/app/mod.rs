@@ -9,7 +9,8 @@ pub mod render;
 pub mod state;
 pub mod types;
 
-#[cfg(test)]
+// Unix-only: the screen's tests populate it with live `/bin/sh` sessions.
+#[cfg(all(test, unix))]
 mod tests;
 
 pub use state::WorkerWiring;

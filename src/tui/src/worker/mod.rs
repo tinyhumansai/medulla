@@ -14,7 +14,8 @@
 
 pub mod app;
 pub mod executor;
-#[cfg(test)]
+// Unix-only: these run a fake harness as a `/bin/sh` script on a pty.
+#[cfg(all(test, unix))]
 #[path = "executor_tests.rs"]
 mod executor_tests;
 pub mod pty;

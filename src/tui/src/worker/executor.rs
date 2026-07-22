@@ -114,7 +114,7 @@ impl PtySessionExecutor {
     ///
     /// Test seam: exercises the same body the daemon reaches, without needing a
     /// `DaemonRuntime` to route a frame first.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) async fn run_for_test(
         self,
         options: RunTaskOptions,
@@ -123,7 +123,7 @@ impl PtySessionExecutor {
     }
 
     /// The live session manager, for assertions about what a run left behind.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn sessions_for_test(&self) -> PtyManager {
         self.sessions.clone()
     }

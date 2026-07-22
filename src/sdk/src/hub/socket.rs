@@ -24,6 +24,26 @@ use super::types::{RunError, TaskRequest};
 /// with a real error just before the backend times out blind.
 const BACKEND_MARGIN: Duration = Duration::from_secs(5);
 
+/// Monotonic suffix making each dispatch's worker-facing task id unique.
+static DISPATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The id the *worker* sees for this dispatch, unique per dispatch.
+///
+/// `delegate_tasks` names unnamed tasks positionally *per call* (`t${n}`), so
+/// every call starts again at `t1`. The worker dedupes on sender + taskId, so a
+/// second call's `t1` is refused as a duplicate of the first's — which is
+/// entirely different work. Seen in the field: three dispatches all named `t1`,
+/// carrying three different instructions, two of them refused.
+///
+/// Worker-facing only. Every frame sent back to the backend keeps the original
+/// id, because that is the key its waiter is registered under.
+pub(super) fn wire_task_id(task_id: &str) -> String {
+    format!(
+        "{task_id}#{}",
+        DISPATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
 /// The first JSON object carried by a received event payload, if any.
 fn first_obj(payload: Payload) -> Option<Value> {
     match payload {
@@ -201,11 +221,13 @@ async fn handle_task_run(
         return;
     };
 
+    let wire_task_id = wire_task_id(&task_id);
+
     // Attribute the task to the lane it will run on, before any frame comes
     // back — a frame that arrives before its dispatch is recorded would be
     // orphaned onto no worker at all.
     if let Some(activity) = &activity {
-        activity.dispatched(&task_id, &resolved_id);
+        activity.dispatched(&wire_task_id, &resolved_id);
     }
 
     // Forward `status` frames up as `task_envelope` while the task runs.
@@ -232,15 +254,16 @@ async fn handle_task_run(
     // again at `t1` — or the same work emitted twice. Those call for opposite
     // fixes, and the id alone cannot tell them apart.
     log(&format!(
-        "hub: task_run {} → {} (timeout {}s) · {}",
+        "hub: task_run {} (as {}) → {} (timeout {}s) · {}",
         task_id,
+        wire_task_id,
         worker_address,
         timeout.as_secs(),
         crate::logging::preview(&instruction),
     ));
 
     let req = TaskRequest {
-        task_id: task_id.clone(),
+        task_id: wire_task_id.clone(),
         cycle_id,
         instruction,
         worker_address,

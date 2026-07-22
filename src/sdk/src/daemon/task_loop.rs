@@ -21,6 +21,7 @@ impl DaemonRuntime {
         match frame.kind {
             TaskFrameKind::Task => self.handle_task(from, frame).await,
             TaskFrameKind::Input => self.handle_input(from, frame).await,
+            TaskFrameKind::Abort => self.handle_abort(from, frame).await,
             TaskFrameKind::Capabilities => self.handle_capabilities(from, frame).await,
             // status/reply/error/ack/capabilities_result are responses; ignore.
             _ => {}
@@ -88,6 +89,46 @@ impl DaemonRuntime {
     }
 
     /// Deliver an `input` frame to the matching running task (or reject it).
+    /// Stop a running task the requester has given up on.
+    ///
+    /// Two things are being freed, and the second is the one that bites: the
+    /// harness stops working on an answer nobody will read, and the task's id
+    /// stops being live. A responder refuses a second task whose id is already
+    /// running, so an abandoned task holds its name — and unnamed tasks are
+    /// named positionally, so `t1` recurs constantly — until its own timeout
+    /// expires, which is far longer than the requester's.
+    ///
+    /// Acked either way. "I stopped it" and "there was nothing to stop" are both
+    /// fine outcomes for the requester, who is no longer waiting regardless.
+    async fn handle_abort(&self, from: String, frame: TaskFrame) {
+        let key = Self::task_key(&from, &frame.task_id);
+        let aborted = {
+            let running = self.inner.running.lock().unwrap();
+            match running.get(&key) {
+                Some(task) => {
+                    task.abort.abort();
+                    true
+                }
+                None => false,
+            }
+        };
+        let detail = if aborted {
+            "task aborted"
+        } else {
+            "no matching running task to abort"
+        };
+        self.log(&format!("task {} ⨯ {detail}", frame.task_id));
+        self.reply(
+            &from,
+            TaskFrameKind::Ack,
+            &frame.task_id,
+            detail,
+            frame.correlation_id.as_deref(),
+            None,
+        )
+        .await;
+    }
+
     async fn handle_input(&self, from: String, frame: TaskFrame) {
         let key = Self::task_key(&from, &frame.task_id);
         let no_match = (
@@ -211,6 +252,7 @@ impl DaemonRuntime {
             key.clone(),
             RunningTask {
                 provider,
+                abort: abort.clone(),
                 correlation_id: correlation.clone(),
                 stdin: None,
                 pending_input: Vec::new(),

@@ -145,6 +145,8 @@ enum Mode {
 /// `ack → status → (reply|error)` sequence (echoing `correlationId`), which the
 /// pump then drains. `Silent` queues nothing, to exercise the timeout path.
 struct FakeWorker {
+    /// The kind of every frame the runner sent us, in order.
+    sent: Mutex<Vec<String>>,
     inbox: Mutex<VecDeque<InboundMessage>>,
     mode: Mode,
     /// How many times the sender has reset the session with us.
@@ -159,6 +161,11 @@ struct FakeWorker {
 }
 
 impl FakeWorker {
+    /// The kinds of frame the runner has sent us, in order.
+    async fn sent_kinds(&self) -> Vec<String> {
+        self.sent.lock().await.clone()
+    }
+
     fn new(mode: Mode) -> Arc<Self> {
         Self::with(mode, false, 0)
     }
@@ -166,6 +173,7 @@ impl FakeWorker {
     /// A worker with explicit send-failure and contact-acceptance-delay knobs.
     fn with(mode: Mode, fail_send: bool, accept_after: u32) -> Arc<Self> {
         Arc::new(Self {
+            sent: Mutex::new(Vec::new()),
             inbox: Mutex::new(VecDeque::new()),
             mode,
             resets: AtomicU32::new(0),
@@ -183,7 +191,12 @@ impl Relay for FakeWorker {
             return Err("send boom".to_string());
         }
         let frame = decode_task_frame(body).expect("runner sends a valid task frame");
-        assert_eq!(frame.kind, TaskFrameKind::Task);
+        self.sent.lock().await.push(frame.kind.as_str().to_string());
+        // Only a `task` frame starts work. An `abort` is the runner telling us to
+        // stop one, and queues nothing.
+        if frame.kind != TaskFrameKind::Task {
+            return Ok(());
+        }
         // Stay silent while there's nothing to say: unconditionally for `Silent`,
         // and until a reset has happened for `RecoverAfterReset`.
         let silent = matches!(self.mode, Mode::Silent)
@@ -669,4 +682,48 @@ async fn a_worker_that_goes_quiet_still_times_out() {
 
     let err = runner.run(request, None).await.expect_err("must time out");
     assert!(matches!(err, RunError::Timeout), "got {err:?}");
+}
+
+#[test]
+fn each_dispatch_gets_its_own_worker_facing_task_id() {
+    // `delegate_tasks` names unnamed tasks positionally per call, so every call
+    // starts again at `t1`. The worker dedupes on sender + taskId, so without a
+    // per-dispatch id the second call's `t1` is refused as a duplicate of the
+    // first's — three dispatches named `t1`, carrying three different
+    // instructions, two refused. Observed in the field.
+    let a = super::socket::wire_task_id("t1");
+    let b = super::socket::wire_task_id("t1");
+    assert_ne!(
+        a, b,
+        "two dispatches of `t1` must not collide on the worker"
+    );
+    // The original id stays legible in it, so a worker log line can still be
+    // traced back to the task the orchestrator named.
+    assert!(a.starts_with("t1#"), "got {a}");
+    assert!(b.starts_with("t1#"), "got {b}");
+    // A named task keeps its name too.
+    assert!(super::socket::wire_task_id("repo-scan").starts_with("repo-scan#"));
+}
+
+#[tokio::test]
+async fn giving_up_tells_the_worker_to_stop() {
+    // An abandoned task keeps a harness busy AND keeps its id live — a responder
+    // refuses a later task whose id is already running, and unnamed tasks are
+    // named positionally, so that id is very often `t1`. Without this, one task
+    // the hub gave up on poisons `t1` for the rest of the responder's own
+    // timeout, which is far longer than the hub's.
+    let worker = FakeWorker::new(Mode::AckOnly);
+    let runner = TaskRunner::start(worker.clone(), Duration::from_millis(1));
+
+    let mut request = req("scan the filesystem");
+    request.timeout = Duration::from_millis(20);
+
+    let err = runner.run(request, None).await.expect_err("must time out");
+    assert!(matches!(err, RunError::Timeout), "got {err:?}");
+
+    let aborts = worker.sent_kinds().await;
+    assert!(
+        aborts.iter().any(|k| k == "abort"),
+        "an abandoned task must be cancelled, got {aborts:?}"
+    );
 }

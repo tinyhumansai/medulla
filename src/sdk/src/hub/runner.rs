@@ -326,10 +326,16 @@ impl TaskRunner {
                             _ = activity.notified() => continue,
                             _ = tokio::time::sleep_until(ceiling) => {
                                 self.waiters.lock().await.remove(&cid);
+                                send_abort(
+                                    self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
+                                ).await;
                                 return Err(RunError::Timeout);
                             }
                             _ = tokio::time::sleep(req.timeout) => {
                                 self.waiters.lock().await.remove(&cid);
+                                send_abort(
+                                    self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
+                                ).await;
                                 return Err(RunError::Timeout);
                             }
                         }
@@ -340,6 +346,9 @@ impl TaskRunner {
                     // session). Reset and resend, or give up.
                     self.waiters.lock().await.remove(&cid);
                     if attempt >= MAX_RESETS {
+                        send_abort(
+                            self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
+                        ).await;
                         return Err(RunError::Timeout);
                     }
                     attempt += 1;
@@ -348,6 +357,27 @@ impl TaskRunner {
             }
         }
     }
+}
+
+/// Tell a worker to stop a task we have stopped waiting for.
+///
+/// Best-effort and fire-and-forget: we are already returning an error, and a
+/// failed abort must not replace it with a different one. Worth sending even
+/// so — an abandoned task keeps a harness busy *and* keeps its id live, and a
+/// responder refuses a later task whose id is already running. Unnamed tasks are
+/// named positionally, so that id is very often `t1`.
+async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) {
+    let body = encode_task_frame(EncodeFrameInput {
+        kind: TaskFrameKind::Abort,
+        task_id: task_id.to_string(),
+        text: "requester stopped waiting".to_string(),
+        ts: ::tinyplace::auth::timestamp(),
+        correlation_id: Some(cid.to_string()),
+        harness: None,
+        provider: None,
+        model: None,
+    });
+    let _ = relay.send(address, &body).await;
 }
 
 /// Map the oneshot outcome into a [`RunError`].

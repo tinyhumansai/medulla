@@ -215,6 +215,13 @@ pub struct RuntimeSnapshot {
     /// agent harness. `None` until (and unless) the backend surfaces one; the
     /// Agents view renders the compact task board only while it is `Some`.
     pub harness: Option<crate::harness_contract::HarnessStatus>,
+    /// Bumped each time the backing runtime rebaselines its folded event log —
+    /// e.g. the core runtime clearing state ahead of a reconnect replay — which
+    /// restarts the local `seq`s in [`events`](RuntimeSnapshot::events). Pollers
+    /// tracking a "last streamed seq" cursor must rewind it when this changes,
+    /// or every rebaselined event lands at or below the stale cursor and is
+    /// silently dropped. Stays `0` on runtimes that never rebaseline.
+    pub replay_epoch: u64,
 }
 
 /// The runtime the TUI drives. Snapshot/subscribe are synchronous; the rest is

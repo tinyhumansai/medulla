@@ -56,6 +56,7 @@ impl Runtime for CoreRuntime {
             threads,
             active_thread_id: "core".into(),
             harness: s.harness.clone(),
+            replay_epoch: s.replay_epoch,
         }
     }
 

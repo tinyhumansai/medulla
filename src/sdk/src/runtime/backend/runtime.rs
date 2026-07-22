@@ -182,6 +182,9 @@ impl Runtime for BackendRuntime {
             threads,
             active_thread_id: s.active_id.clone(),
             harness: None,
+            // The backend runtime never rebaselines its log: local seqs only
+            // grow, so the cursor contract needs no epoch here.
+            replay_epoch: 0,
         }
     }
 

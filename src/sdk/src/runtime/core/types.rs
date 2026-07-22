@@ -177,6 +177,13 @@ pub(super) struct CoreState {
     pub(super) harness: Option<HarnessStatus>,
     /// Monotonic local sequence for [`EventEnvelope`]s.
     pub(super) seq: u64,
+    /// Bumped by [`reset_for_replay`](CoreState::reset_for_replay) each time the
+    /// folded log is rebaselined (local seqs restart from 0). Surfaced on
+    /// [`RuntimeSnapshot::replay_epoch`](crate::runtime::RuntimeSnapshot::replay_epoch)
+    /// so pollers holding a "last streamed seq" cursor (the headless driver)
+    /// can observe the rebaseline and rewind instead of silently dropping the
+    /// replayed events whose fresh seqs fall at or below the stale cursor.
+    pub(super) replay_epoch: u64,
     /// The last protocol `event.seq` seen, for gap detection (serve-protocol §6).
     pub(super) last_stream_seq: Option<u64>,
     /// Latched when a `seq` gap was seen; cleared on a fresh connection.
@@ -199,6 +206,7 @@ impl CoreState {
             last_result: None,
             harness: None,
             seq: 0,
+            replay_epoch: 0,
             last_stream_seq: None,
             gap: false,
         }
@@ -281,6 +289,7 @@ impl CoreState {
         self.last_result = None;
         self.harness = None;
         self.seq = 0;
+        self.replay_epoch += 1;
         if let Some(body) = unacked {
             self.messages.push(ChatMessage {
                 role: "user".into(),

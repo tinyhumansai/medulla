@@ -86,6 +86,59 @@ async fn headless_driver_round_trips_one_instruct_against_the_stub() {
 }
 
 #[tokio::test]
+async fn headless_driver_folds_a_replayed_cycle_end_after_a_reconnect() {
+    // Codex review finding: the driver's `last_seq` cursor only grew, but a
+    // reconnect replay rebaselines the runtime's folded log (local seqs restart
+    // at 1). The replayed events — including the terminal cycle_end — then land
+    // at or below the stale cursor and were silently dropped, hanging the run
+    // until `cycle_timeout`. The stub drops the socket right after streaming a
+    // cycle_start; the re-attach replay carries the full cycle, and the driver
+    // must fold it and settle on the result.
+    let server = StubServer::start(StubConfig {
+        drop_after_instruct: true,
+        instruct_events: vec![
+            json!({"kind":"cycle_start","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
+        ],
+        replay_events: vec![
+            json!({"kind":"cycle_start","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
+            json!({"kind":"cycle_end","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
+        ],
+        ..StubConfig::default()
+    });
+    let runtime: Arc<dyn Runtime> = Arc::new(CoreRuntime::attach(server.path.clone()));
+
+    let mut out: Vec<u8> = Vec::new();
+    let summary = drive_once(runtime, "survive the drop".into(), &mut out, fast_opts())
+        .await
+        .expect("the replayed cycle_end must settle the run, not time it out");
+    assert_eq!(summary.pass_count, 0);
+
+    // The drop really forced a second connection (attach + re-attach).
+    assert!(server.accept_count() >= 2, "{}", server.accept_count());
+
+    // The transcript settled on a result, and the cycle_end that carried it was
+    // a streamed event line (i.e. the replayed fold reached the output).
+    let transcript = lines(&out);
+    assert_eq!(transcript[0]["type"], "ready");
+    assert_eq!(transcript.last().unwrap()["type"], "result");
+    let event_kinds: Vec<String> = transcript
+        .iter()
+        .filter(|l| l["type"] == "event")
+        .filter_map(|l| l["event"]["kind"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        event_kinds.iter().any(|k| k == "cycle_end"),
+        "the replayed cycle_end must stream: {event_kinds:?}"
+    );
+    // The optimistic user turn survived the replay reset (it may never have
+    // reached serve, so only the preserved local copy can carry it).
+    assert!(
+        event_kinds.iter().any(|k| k == "user"),
+        "the preserved user turn must stream: {event_kinds:?}"
+    );
+}
+
+#[tokio::test]
 async fn headless_driver_surfaces_a_rejected_instruct() {
     // The stub answers `instruct` with ok:false; the driver must propagate that
     // as an error rather than wait out the cycle timeout.

@@ -112,6 +112,11 @@ pub async fn drive_once<W: Write>(
     // Only stream events produced from here on: baseline at the highest seq the
     // snapshot already carries (0 on a fresh attach with no replayed history).
     let mut last_seq = attached.events.last().map(|e| e.seq).unwrap_or(0);
+    // The rebaseline generation the cursor belongs to. A reconnect replay clears
+    // the runtime's folded log and restarts its local seqs, so a cursor from the
+    // previous generation would silently drop every replayed event — including
+    // the terminal cycle_end, hanging the run until `cycle_timeout`.
+    let mut replay_epoch = attached.replay_epoch;
 
     // 2. Submit the one instruction. A rejected `instruct` surfaces here as an
     //    `Err` (no cycle will ever start), so fail fast rather than wait it out.
@@ -124,6 +129,15 @@ pub async fn drive_once<W: Write>(
     let mut events_streamed = 0usize;
     loop {
         let snap = runtime.snapshot();
+        // The runtime rebaselined (a reconnect replay): rewind the cursor so the
+        // rebuilt log folds from the top. Some replayed lines duplicate ones
+        // already streamed pre-drop; that is acceptable — the replay is the
+        // authoritative post-drop baseline — where a dropped terminal event is
+        // not.
+        if snap.replay_epoch != replay_epoch {
+            replay_epoch = snap.replay_epoch;
+            last_seq = 0;
+        }
         let mut ended: Option<i64> = None;
         // Collect the new envelopes first so `last_seq` can be advanced inside
         // the loop without holding a borrow on `snap.events`.

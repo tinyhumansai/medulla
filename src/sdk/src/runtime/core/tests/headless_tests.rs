@@ -145,6 +145,51 @@ async fn headless_driver_folds_a_replayed_cycle_end_after_a_reconnect() {
 }
 
 #[tokio::test]
+async fn headless_driver_waits_for_the_submitted_cycles_end() {
+    // Codex review finding: completion used to trigger on the FIRST cycle_end
+    // observed after the submit, with no correlation to the submitted
+    // instruction — an earlier in-flight/replayed cycle's end terminated the
+    // run prematurely and `run_core` then tore the attachment down mid-cycle.
+    // The stub streams a stale cycle's end first (alone, thanks to the event
+    // gap), then the submitted cycle (`cyc:agent:0`, as named by the instruct
+    // receipt); the driver must ride past the stale end and settle only on the
+    // matching one.
+    let server = StubServer::start(StubConfig {
+        instruct_events: vec![
+            json!({"kind":"cycle_end","instructionId":"inst-agent-prev","cycleId":"cyc:agent:prev"}),
+            json!({"kind":"cycle_start","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
+            json!({"kind":"cycle_end","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
+        ],
+        instruct_event_gap: Some(Duration::from_millis(120)),
+        ..StubConfig::default()
+    });
+    let runtime: Arc<dyn Runtime> = Arc::new(CoreRuntime::attach(server.path.clone()));
+
+    let mut out: Vec<u8> = Vec::new();
+    drive_once(runtime, "reconcile".into(), &mut out, fast_opts())
+        .await
+        .expect("the run must settle on the submitted cycle's end");
+
+    // The stale end still streamed as an event (nothing is dropped), but the
+    // run only completed once the matching cycle_end arrived.
+    let transcript = lines(&out);
+    assert_eq!(transcript.last().unwrap()["type"], "result");
+    let ends: Vec<String> = transcript
+        .iter()
+        .filter(|l| l["type"] == "event" && l["event"]["kind"] == "cycle_end")
+        .filter_map(|l| l["event"]["cycleId"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        ends.contains(&"cyc:agent:0".to_string()),
+        "the submitted cycle's end must reach the transcript before the result: {ends:?}"
+    );
+    assert!(
+        ends.contains(&"cyc:agent:prev".to_string()),
+        "the stale end still streams as an event: {ends:?}"
+    );
+}
+
+#[tokio::test]
 async fn headless_driver_surfaces_a_rejected_instruct() {
     // The stub answers `instruct` with ok:false; the driver must propagate that
     // as an error rather than wait out the cycle timeout.

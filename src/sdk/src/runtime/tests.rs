@@ -92,6 +92,13 @@ async fn default_trait_methods_are_no_ops() {
         .unwrap();
     // No lossy stream to surface.
     assert!(rt.stream_state().is_none());
+    // The default receipt-carrying submit delegates to `submit` and reports no
+    // receipt (only wires that mint ids override it).
+    assert!(rt
+        .submit_with_receipt("hello".into())
+        .await
+        .expect("the delegated submit succeeds")
+        .is_none());
 }
 
 #[test]

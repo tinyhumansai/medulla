@@ -224,6 +224,18 @@ pub struct RuntimeSnapshot {
     pub replay_epoch: u64,
 }
 
+/// The correlation receipt an instruct-style submit returns, when the backing
+/// wire carries one (the core runtime's `instruct` `res`, serve-protocol §4.1).
+/// It lets a poller tie a later `cycle_end` back to *this* submission instead
+/// of completing on the first cycle end it happens to observe.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SubmitReceipt {
+    /// The instruction id the runtime minted for this submission, if reported.
+    pub instruction_id: Option<String>,
+    /// The cycle id this instruction will run under, if reported.
+    pub cycle_id: Option<String>,
+}
+
 /// The runtime the TUI drives. Snapshot/subscribe are synchronous; the rest is
 /// async where it may touch the backend.
 pub trait Runtime: Send + Sync {
@@ -240,6 +252,18 @@ pub trait Runtime: Send + Sync {
     /// A change notification channel — a ping fires after every event/mutation.
     fn subscribe(&self) -> broadcast::Receiver<()>;
     fn submit(&self, input: String) -> BoxFuture<'static, anyhow::Result<()>>;
+    /// Like [`submit`](Runtime::submit), but returns the wire's correlation
+    /// receipt when it carries one, so a caller waiting on the submitted
+    /// cycle's end (the headless driver) can ignore other cycles' ends. The
+    /// default delegates to `submit` and reports no receipt — runtimes whose
+    /// wire has no receipt (mock, HTTP backend) need not override it.
+    fn submit_with_receipt(
+        &self,
+        input: String,
+    ) -> BoxFuture<'static, anyhow::Result<Option<SubmitReceipt>>> {
+        let fut = self.submit(input);
+        Box::pin(async move { fut.await.map(|_| None) })
+    }
     fn abort(&self);
     fn new_session(&self);
     /// Fork the active thread, inheriting its history but with a fresh session.

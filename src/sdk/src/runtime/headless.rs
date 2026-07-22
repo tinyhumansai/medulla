@@ -18,7 +18,8 @@
 //! - `{"type":"event","seq":<u64>,"at":<i64>,"event":<TuiEvent>}` — one per
 //!   folded event, in stream order, for every event produced after the submit.
 //! - `{"type":"result","passCount":<i64>}` — the terminal line, emitted when the
-//!   cycle ends; the driver returns immediately after.
+//!   *submitted* cycle ends (correlated via the submit receipt's cycle id when
+//!   the wire carries one); the driver returns immediately after.
 //!
 //! Errors (attach timeout, an unavailable runtime, a rejected instruction, a
 //! stalled cycle) are returned as a typed [`HeadlessError`] for the caller to
@@ -160,10 +161,18 @@ pub async fn drive_once<W: Write>(
 
     // 2. Submit the one instruction. A rejected `instruct` surfaces here as an
     //    `Err` (no cycle will ever start), so fail fast rather than wait it out.
-    runtime
-        .submit(instruction)
+    //    Keep the receipt: it names the cycle this instruction runs under.
+    let receipt = runtime
+        .submit_with_receipt(instruction)
         .await
         .map_err(HeadlessError::SubmitRejected)?;
+    // The cycle id this run must wait for. When the wire reported one, only the
+    // matching cycle_end completes the run — the attached serve may already
+    // have a cycle in flight (or replay an earlier one), and completing on the
+    // first observed end would cut the submitted cycle short. Without a
+    // receipt (a runtime whose wire carries none) the first end still wins,
+    // with the cycle timeout as the backstop either way.
+    let expected_cycle: Option<String> = receipt.and_then(|r| r.cycle_id);
 
     // 3. Drain and stream events until the cycle ends. Completion is signalled
     //    by the terminal `cycle_end` event (rather than the `running` flag) so a
@@ -202,8 +211,22 @@ pub async fn drive_once<W: Write>(
             )?;
             last_seq = env.seq;
             events_streamed += 1;
-            if let TuiEvent::CycleEnd { pass_count, .. } = &env.event {
-                ended = Some(*pass_count);
+            if let TuiEvent::CycleEnd {
+                cycle_id,
+                pass_count,
+                ..
+            } = &env.event
+            {
+                // Only the submitted instruction's cycle terminates the run; an
+                // earlier/concurrent cycle's end (still streamed above) is not
+                // this run's result.
+                let is_ours = expected_cycle
+                    .as_deref()
+                    .map(|want| want == cycle_id)
+                    .unwrap_or(true);
+                if is_ours {
+                    ended = Some(*pass_count);
+                }
             }
         }
 

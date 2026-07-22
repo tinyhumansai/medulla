@@ -70,6 +70,23 @@ async fn instruct_round_trips_and_streams_events() {
 }
 
 #[tokio::test]
+async fn submit_with_receipt_reports_the_instruct_ids() {
+    // The instruct `res` names the ids serve minted (serve-protocol §4.1); the
+    // receipt carries them so pollers can correlate the eventual cycle_end.
+    let server = StubServer::start(StubConfig::default());
+    let rt = CoreRuntime::attach(server.path.clone());
+    assert!(wait_until(|| rt.stream_state() == Some(StreamState::Live)).await);
+
+    let receipt = rt
+        .submit_with_receipt("go".into())
+        .await
+        .expect("instruct should ack")
+        .expect("the core wire carries a receipt");
+    assert_eq!(receipt.instruction_id.as_deref(), Some("inst-agent-0"));
+    assert_eq!(receipt.cycle_id.as_deref(), Some("cyc:agent:0"));
+}
+
+#[tokio::test]
 async fn version_mismatch_marks_unavailable() {
     let server = StubServer::start(StubConfig {
         protocol: 2,

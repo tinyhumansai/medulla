@@ -1,202 +1,19 @@
-//! The frame- and task-handling half of [`DaemonRuntime`]: routing decoded task
-//! frames, the cached capability probe, mid-run input delivery, the slot-limited
-//! task execution with throttled status forwarding, plain-text fallback, and
-//! provider selection. Lifecycle/dispatch/reply glue lives in [`super::runtime`].
+//! Executing one delegated task: slots, status forwarding, fallback.
 
 use std::sync::atomic::Ordering;
 
 use tokio::sync::mpsc;
 
-use crate::tinyplace::{AgentCapabilities, HarnessProvider, TaskFrame, TaskFrameKind};
+use crate::tinyplace::{TaskFrame, TaskFrameKind};
 
-use super::capabilities::{probe_capabilities, ProbeOptions};
-use super::mappers;
-use super::providers::{self, Abort, RunTaskOptions};
-use super::status::status_detail;
-use super::types::{DaemonRuntime, RunningTask, DEFAULT_CAPABILITY_TIMEOUT_MS};
+use super::super::mappers;
+use super::super::providers::{Abort, RunTaskOptions};
+use super::super::status::status_detail;
+use super::super::types::{DaemonRuntime, RunningTask};
 
 impl DaemonRuntime {
-    /// Route a decoded task frame to its handler; responses are ignored.
-    pub(super) async fn handle_frame(&self, from: String, frame: TaskFrame) {
-        match frame.kind {
-            TaskFrameKind::Task => self.handle_task(from, frame).await,
-            TaskFrameKind::Input => self.handle_input(from, frame).await,
-            TaskFrameKind::Abort => self.handle_abort(from, frame).await,
-            TaskFrameKind::Capabilities => self.handle_capabilities(from, frame).await,
-            // status/reply/error/ack/capabilities_result are responses; ignore.
-            _ => {}
-        }
-    }
-
-    /// Answer a `capabilities` probe with the cached [`AgentCapabilities`].
-    async fn handle_capabilities(&self, from: String, frame: TaskFrame) {
-        let capabilities = self.get_capabilities().await;
-        let text = serde_json::to_string(&capabilities).unwrap_or_else(|_| "{}".to_string());
-        self.reply(
-            &from,
-            TaskFrameKind::CapabilitiesResult,
-            &frame.task_id,
-            &text,
-            frame.correlation_id.as_deref(),
-            Some(self.inner.config.default_provider),
-        )
-        .await;
-    }
-
-    /// Return the capabilities, probing once and caching the result.
-    async fn get_capabilities(&self) -> AgentCapabilities {
-        // Single cached probe shared across askers: holding the async mutex across
-        // the probe means concurrent callers wait for the one run, then serve from
-        // cache. Deliberately NOT counted against maxPending.
-        let mut guard = self.inner.capabilities.lock().await;
-        if let Some(capabilities) = guard.as_ref() {
-            return capabilities.clone();
-        }
-        let provider = self
-            .select_provider(None)
-            .unwrap_or(self.inner.config.default_provider);
-        self.log(&format!("capability probe → {}", provider.as_str()));
-        let abort = Abort::new();
-        let controller_id = self.register_controller(abort.clone());
-        // Compete for the concurrency budget like a task.
-        let permit = self
-            .inner
-            .slots
-            .acquire()
-            .await
-            .expect("semaphore is never closed");
-        let capabilities = probe_capabilities(ProbeOptions {
-            provider,
-            run_task: self.inner.run_task.clone(),
-            workspace: self.inner.config.workspace.clone(),
-            env: self.inner.config.env.clone(),
-            providers: self.inner.config.providers.clone(),
-            timeout_ms: self
-                .inner
-                .config
-                .capability_timeout_ms
-                .or(Some(DEFAULT_CAPABILITY_TIMEOUT_MS)),
-            model: self.inner.config.model.clone(),
-            agent: self.inner.config.agent.clone(),
-            skip_permissions: self.inner.config.skip_permissions,
-            abort,
-        })
-        .await;
-        drop(permit);
-        self.unregister_controller(controller_id);
-        *guard = Some(capabilities.clone());
-        capabilities
-    }
-
-    /// Deliver an `input` frame to the matching running task (or reject it).
-    /// Stop a running task the requester has given up on.
-    ///
-    /// Two things are being freed, and the second is the one that bites: the
-    /// harness stops working on an answer nobody will read, and the task's id
-    /// stops being live. A responder refuses a second task whose id is already
-    /// running, so an abandoned task holds its name — and unnamed tasks are
-    /// named positionally, so `t1` recurs constantly — until its own timeout
-    /// expires, which is far longer than the requester's.
-    ///
-    /// Acked either way. "I stopped it" and "there was nothing to stop" are both
-    /// fine outcomes for the requester, who is no longer waiting regardless.
-    async fn handle_abort(&self, from: String, frame: TaskFrame) {
-        let key = Self::task_key(&from, &frame.task_id);
-        let aborted = {
-            let running = self.inner.running.lock().unwrap();
-            match running.get(&key) {
-                Some(task) => {
-                    // A correlationId mismatch means a different dispatch reused
-                    // the taskId — the same guard `handle_input` makes, and for
-                    // a worse failure. Task ids recur by construction: they are
-                    // positional per `delegate_tasks` call, and the hub's
-                    // uniquifying suffix restarts from zero when it restarts. So
-                    // a late abort for a task that already finished can name a
-                    // live one, and cancelling that is silent and total.
-                    let mismatch = matches!(
-                        (&frame.correlation_id, &task.correlation_id),
-                        (Some(a), Some(b)) if a != b
-                    );
-                    if mismatch {
-                        false
-                    } else {
-                        task.abort.abort();
-                        true
-                    }
-                }
-                None => false,
-            }
-        };
-        let detail = if aborted {
-            "task aborted"
-        } else {
-            "no matching running task to abort"
-        };
-        self.log(&format!("task {} ⨯ {detail}", frame.task_id));
-        self.reply(
-            &from,
-            TaskFrameKind::Ack,
-            &frame.task_id,
-            detail,
-            frame.correlation_id.as_deref(),
-            None,
-        )
-        .await;
-    }
-
-    async fn handle_input(&self, from: String, frame: TaskFrame) {
-        let key = Self::task_key(&from, &frame.task_id);
-        let no_match = (
-            TaskFrameKind::Ack,
-            "no matching running task for input",
-            self.inner.config.default_provider,
-        );
-        let (kind, text, harness) = {
-            let mut running = self.inner.running.lock().unwrap();
-            match running.get_mut(&key) {
-                Some(task) => {
-                    // A correlationId mismatch means a different dispatch reused
-                    // the taskId — treat as no match rather than crossing sessions.
-                    let mismatch = matches!(
-                        (&frame.correlation_id, &task.correlation_id),
-                        (Some(a), Some(b)) if a != b
-                    );
-                    if mismatch {
-                        no_match
-                    } else if !providers::supports_stdin(task.provider) {
-                        // The child has a null stdin; buffering would silently
-                        // discard the guidance, so reject it honestly instead.
-                        (
-                            TaskFrameKind::Error,
-                            "provider does not accept mid-run input",
-                            task.provider,
-                        )
-                    } else {
-                        match &task.stdin {
-                            Some(stdin) => {
-                                let _ = stdin.send(frame.text.clone());
-                            }
-                            None => task.pending_input.push(frame.text.clone()),
-                        }
-                        (TaskFrameKind::Ack, "input received", task.provider)
-                    }
-                }
-                None => no_match,
-            }
-        };
-        self.reply(
-            &from,
-            kind,
-            &frame.task_id,
-            text,
-            frame.correlation_id.as_deref(),
-            Some(harness),
-        )
-        .await;
-    }
-
     /// Admit, execute, and reply to a `task` frame, forwarding throttled status.
-    async fn handle_task(&self, from: String, frame: TaskFrame) {
+    pub(super) async fn handle_task(&self, from: String, frame: TaskFrame) {
         let correlation = frame.correlation_id.clone();
         let provider = match self.select_provider(frame.provider) {
             Some(provider) => provider,
@@ -430,7 +247,7 @@ impl DaemonRuntime {
     }
 
     /// Run a plain-text DM through the default provider, replying with raw text.
-    pub(super) async fn handle_plain_text(&self, from: String, text: String) {
+    pub(in crate::daemon) async fn handle_plain_text(&self, from: String, text: String) {
         let provider = self.inner.config.default_provider;
         if !self.inner.config.providers.contains(&provider) {
             self.send_raw(&from, "No coding agent is available on this daemon.")
@@ -486,21 +303,5 @@ impl DaemonRuntime {
         drop(permit);
         self.unregister_controller(controller_id);
         self.inner.admitted.fetch_sub(1, Ordering::SeqCst);
-    }
-
-    /// Choose a provider: the requested one if offered, else the default, else
-    /// the first offered.
-    fn select_provider(&self, requested: Option<HarnessProvider>) -> Option<HarnessProvider> {
-        let providers = &self.inner.config.providers;
-        match requested {
-            Some(requested) => providers.contains(&requested).then_some(requested),
-            None => {
-                if providers.contains(&self.inner.config.default_provider) {
-                    Some(self.inner.config.default_provider)
-                } else {
-                    providers.first().copied()
-                }
-            }
-        }
     }
 }

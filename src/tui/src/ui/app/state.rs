@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use ratatui::layout::Rect;
 
-use crate::ui::agents::{derive_agent_lanes, merge_worker_roster, AgentLane};
+use crate::ui::agents::{
+    derive_agent_lanes, merge_worker_activity, merge_worker_roster, AgentLane,
+};
 use crate::ui::composer::Draft;
 use crate::ui::theme::Theme;
 use medulla::config::LoadedConfig;
@@ -305,7 +307,12 @@ impl App {
     /// reading the snapshot alone left a live, dispatchable worker off this tab.
     pub(super) fn lanes(&self) -> Vec<AgentLane> {
         let roster = merge_worker_roster(&self.snapshot.roster, &self.runtime.workers());
-        derive_agent_lanes(&self.snapshot.events, &self.loaded.harness(), &roster)
+        let mut lanes = derive_agent_lanes(&self.snapshot.events, &self.loaded.harness(), &roster);
+        // The snapshot's events come from the backend, whose vocabulary says
+        // nothing about delegated tasks — so a busy worker renders idle unless
+        // the activity the hub observed locally is folded in.
+        merge_worker_activity(&mut lanes, &self.runtime.worker_activity());
+        lanes
     }
 
     /// The index of the active thread in the snapshot's thread list.

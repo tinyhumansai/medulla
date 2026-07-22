@@ -5,6 +5,7 @@
 
 use crate::ui::events::{EventEnvelope, TuiEvent};
 
+mod activity;
 mod fold;
 mod render;
 mod roster;

@@ -81,6 +81,14 @@ impl Runtime for BackendRuntime {
     }
 
     /// The hub's live tiny.place worker roster (empty until a hub is attached).
+    fn worker_activity(&self) -> Vec<crate::hub::WorkerActivity> {
+        let handle = self.hub.lock().unwrap().clone();
+        match handle {
+            Some(h) => h.activity().snapshot(),
+            None => Vec::new(),
+        }
+    }
+
     fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
         let handle = self.hub.lock().unwrap().clone();
         match handle {

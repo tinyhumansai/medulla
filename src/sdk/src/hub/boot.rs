@@ -110,10 +110,14 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
     // opens contact edges through it. A second on the same wallet would be a
     // second writer to one Signal session store.
     let relay: Arc<dyn super::relay::Relay> = Arc::new(transport);
-    let runner = Arc::new(TaskRunner::start_with_log(
+    // One activity log, shared by the pump that observes frames and the socket
+    // that dispatches them — the Agents view reads what both write.
+    let activity = super::ActivityLog::new();
+    let runner = Arc::new(TaskRunner::start_with_log_and_activity(
         relay.clone(),
         config.poll,
         config.log.clone(),
+        activity.clone(),
     ));
 
     // The shared roster the socket advertises and the handle mutates.
@@ -143,19 +147,21 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         runner.clone(),
         config.task_timeout,
         config.log.clone(),
+        Some(activity.clone()),
     )
     .await?;
     (config.log)("hub: connected + registered — relaying tasks to tiny.place workers");
 
-    let handle = HubHandle::new(
+    let handle = HubHandle::new(super::handle::HandleWiring {
         roster,
-        socket.clone(),
-        hub_address,
-        hub_public_key,
+        socket: socket.clone(),
+        address: hub_address,
+        public_key: hub_public_key,
         relay,
-        config.log.clone(),
-        config.persist.clone(),
-    );
+        log: config.log.clone(),
+        persist: config.persist.clone(),
+        activity,
+    });
     Ok(HubSession {
         handle,
         _runner: runner,

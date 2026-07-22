@@ -55,9 +55,11 @@ pub async fn connect_harness(
     runner: Arc<TaskRunner>,
     task_timeout: Duration,
     log: super::types::HubLog,
+    activity: Option<super::ActivityLog>,
 ) -> anyhow::Result<Client> {
     let connect_roster = roster.clone();
     let run_log = log.clone();
+    let run_activity = activity.clone();
     let run_roster = roster.clone();
     let cap_roster = roster.clone();
 
@@ -82,6 +84,7 @@ pub async fn connect_harness(
             let run_log = run_log.clone();
             let runner = runner.clone();
             let roster = run_roster.clone();
+            let run_activity = run_activity.clone();
             async move {
                 tokio::spawn(handle_task_run(
                     payload,
@@ -90,6 +93,7 @@ pub async fn connect_harness(
                     roster,
                     task_timeout,
                     run_log,
+                    run_activity,
                 ));
             }
             .boxed()
@@ -136,6 +140,7 @@ async fn handle_task_run(
     roster: SharedRoster,
     timeout: Duration,
     log: super::types::HubLog,
+    activity: Option<super::ActivityLog>,
 ) {
     let Some(obj) = first_obj(payload) else {
         return;
@@ -161,10 +166,17 @@ async fn handle_task_run(
 
     // Resolve the address, then drop the lock before any await (the std guard is
     // not held across suspension points). An empty roster ⇒ nothing to run.
-    let (worker_address, known) = {
+    let (worker_address, resolved_id, known) = {
         let r = roster.lock().expect("roster lock");
         let known: Vec<String> = r.iter().map(|w| w.id.clone()).collect();
-        (address_of(&r, &agent_id), known)
+        let addr = address_of(&r, &agent_id);
+        // The roster id this resolved to, which is the lane the Agents view
+        // groups the task under — not the raw `agentId`, which may be absent.
+        let id = addr
+            .as_ref()
+            .and_then(|a| r.iter().find(|w| &w.address == a).map(|w| w.id.clone()))
+            .unwrap_or_default();
+        (addr, id, known)
     };
     let Some(worker_address) = worker_address else {
         // Say which of the two it is. "No workers" and "no worker by that name"
@@ -188,6 +200,13 @@ async fn handle_task_run(
             .await;
         return;
     };
+
+    // Attribute the task to the lane it will run on, before any frame comes
+    // back — a frame that arrives before its dispatch is recorded would be
+    // orphaned onto no worker at all.
+    if let Some(activity) = &activity {
+        activity.dispatched(&task_id, &resolved_id);
+    }
 
     // Forward `status` frames up as `task_envelope` while the task runs.
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();

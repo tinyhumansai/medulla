@@ -11,6 +11,7 @@
 //! private `fmt` submodule. All public items are re-exported here so callers use
 //! `medulla::ui::agents::*`.
 
+mod activity;
 mod fmt;
 mod keys;
 mod lanes;
@@ -22,6 +23,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use activity::merge_worker_activity;
 pub use keys::parse_task_key;
 pub use lanes::derive_agent_lanes;
 pub use lines::{lane_lines, task_lines};

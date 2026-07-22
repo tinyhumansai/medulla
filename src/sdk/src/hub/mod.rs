@@ -9,6 +9,7 @@
 //! fake — and the runner correlates concurrent dispatches by `correlationId`
 //! over the one shared, destructively-drained inbox.
 
+mod activity;
 mod boot;
 mod handle;
 mod relay;
@@ -20,6 +21,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use activity::{ActivityLog, WorkerActivity};
 pub use boot::{run_hub, start_hub, HubConfig, HubSession, WorkerSpec};
 pub use handle::HubHandle;
 pub use relay::Relay;

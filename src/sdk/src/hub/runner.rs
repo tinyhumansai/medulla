@@ -55,7 +55,22 @@ type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
 /// to `taskId`). Any frame pokes the waiter's `activity` (sign of life);
 /// `reply`/`error` then settle and remove it; `status` forwards; `ack` just
 /// counted as activity.
-async fn route_frame(waiters: &Waiters, frame: TaskFrame, log: &Option<super::types::HubLog>) {
+async fn route_frame(
+    waiters: &Waiters,
+    frame: TaskFrame,
+    log: &Option<super::types::HubLog>,
+    activity: &Option<super::ActivityLog>,
+) {
+    // Recorded as well as logged: the log is for a human reading afterwards,
+    // this is what the Agents view renders live.
+    if let Some(activity) = activity {
+        activity.observed(
+            &frame.task_id,
+            frame.kind.as_str(),
+            &frame.text,
+            crate::clock::now_millis(),
+        );
+    }
     // Every frame a worker sends, as it arrives. The hub used to report only the
     // settled outcome, so a reply that never came and a reply that came back
     // empty read the same from here — and neither said whether the worker had
@@ -115,11 +130,12 @@ async fn pump_loop(
     waiters: Waiters,
     poll: Duration,
     log: Option<super::types::HubLog>,
+    activity: Option<super::ActivityLog>,
 ) {
     loop {
         for msg in relay.drain_inbox(DRAIN_LIMIT).await {
             if let Some(frame) = decode_task_frame(&msg.text) {
-                route_frame(&waiters, frame, &log).await;
+                route_frame(&waiters, frame, &log, &activity).await;
             }
         }
         tokio::time::sleep(poll).await;
@@ -164,7 +180,18 @@ impl TaskRunner {
         poll: Duration,
         log: super::types::HubLog,
     ) -> Self {
-        Self::build(relay, poll, ACK_WINDOW, Some(log))
+        Self::build(relay, poll, ACK_WINDOW, Some(log), None)
+    }
+
+    /// Like [`start_with_log`](Self::start_with_log), also recording what each
+    /// worker does so the Agents view can render it.
+    pub fn start_with_log_and_activity(
+        relay: Arc<dyn Relay>,
+        poll: Duration,
+        log: super::types::HubLog,
+        activity: super::ActivityLog,
+    ) -> Self {
+        Self::build(relay, poll, ACK_WINDOW, Some(log), Some(activity))
     }
 
     /// Like [`start`](Self::start) with an explicit ack window (tests use a short
@@ -174,7 +201,7 @@ impl TaskRunner {
         poll: Duration,
         ack_window: Duration,
     ) -> Self {
-        Self::build(relay, poll, ack_window, None)
+        Self::build(relay, poll, ack_window, None, None)
     }
 
     fn build(
@@ -182,9 +209,16 @@ impl TaskRunner {
         poll: Duration,
         ack_window: Duration,
         log: Option<super::types::HubLog>,
+        activity: Option<super::ActivityLog>,
     ) -> Self {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
-        let pump = tokio::spawn(pump_loop(relay.clone(), waiters.clone(), poll, log));
+        let pump = tokio::spawn(pump_loop(
+            relay.clone(),
+            waiters.clone(),
+            poll,
+            log,
+            activity,
+        ));
         TaskRunner {
             relay,
             waiters,

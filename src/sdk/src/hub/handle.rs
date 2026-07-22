@@ -30,6 +30,8 @@ pub struct HubHandle {
     /// Where the roster is written so it outlives the process. `None` keeps the
     /// old behaviour: in memory only, gone at exit.
     persist: Option<super::types::RosterSink>,
+    /// What the workers are doing, for the Agents view.
+    activity: super::ActivityLog,
 }
 
 /// Whether `address` is a directory alias rather than a cryptoId.
@@ -66,29 +68,49 @@ pub(super) fn should_request_contact(address: &str, accepted: bool) -> bool {
     !address.trim().is_empty() && !accepted
 }
 
+/// Everything a [`HubHandle`] is built from.
+///
+/// A struct rather than a parameter list: the handle needs the roster, the
+/// uplink, the hub's own identity and three side-channels, and eight positional
+/// arguments is a place where two of the same type get silently transposed.
+pub(super) struct HandleWiring {
+    /// The shared roster this handle mutates.
+    pub roster: SharedRoster,
+    /// The uplink to re-register through.
+    pub socket: Client,
+    /// The hub's own tiny.place address — surfaced to the operator because every
+    /// worker must trust it before it will accept a task.
+    pub address: String,
+    /// The hub's own identity public key.
+    pub public_key: String,
+    /// The encrypted transport, for opening contact edges.
+    pub relay: Arc<dyn Relay>,
+    /// Where roster mutations are narrated.
+    pub log: super::types::HubLog,
+    /// Where the roster is saved, when it is saved at all.
+    pub persist: Option<super::types::RosterSink>,
+    /// What the workers are doing, for the Agents view.
+    pub activity: super::ActivityLog,
+}
+
 impl HubHandle {
-    /// Build a handle over `roster`, re-registering through `socket`. `address`
-    /// and `public_key` are the hub's *own* tiny.place identity — surfaced to the
-    /// operator because every worker must trust it (as its owner / allowlisted
-    /// peer) before it will accept a task.
-    pub(super) fn new(
-        roster: SharedRoster,
-        socket: Client,
-        address: String,
-        public_key: String,
-        relay: Arc<dyn Relay>,
-        log: super::types::HubLog,
-        persist: Option<super::types::RosterSink>,
-    ) -> Self {
+    /// Build a handle from its wiring.
+    pub(super) fn new(wiring: HandleWiring) -> Self {
         HubHandle {
-            roster,
-            socket,
-            address,
-            public_key,
-            relay,
-            log,
-            persist,
+            roster: wiring.roster,
+            socket: wiring.socket,
+            address: wiring.address,
+            public_key: wiring.public_key,
+            relay: wiring.relay,
+            log: wiring.log,
+            persist: wiring.persist,
+            activity: wiring.activity,
         }
+    }
+
+    /// What this hub's workers are doing right now.
+    pub fn activity(&self) -> super::ActivityLog {
+        self.activity.clone()
     }
 
     /// Write the current roster through the persist sink, if one is attached.

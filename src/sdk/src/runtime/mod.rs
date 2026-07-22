@@ -251,6 +251,16 @@ pub trait Runtime: Send + Sync {
     /// Cancel a running task lane (`task.cancel`). Fire-and-forget.
     fn cancel_task(&self, _cycle_id: String, _task_id: String) {}
 
+    /// What the managed workers are doing right now.
+    ///
+    /// Separate from the render snapshot's event log on purpose: that log is
+    /// filled from the backend's SSE stream, whose vocabulary carries nothing
+    /// about delegated tasks. A runtime that dispatches work itself knows, and
+    /// this is how it says so. Empty when the runtime has no worker surface.
+    fn worker_activity(&self) -> Vec<crate::hub::WorkerActivity> {
+        Vec::new()
+    }
+
     /// The managed worker-peer registry snapshot (`worker.list`). Empty when the
     /// runtime has no worker surface.
     fn workers(&self) -> Vec<WorkerInfo> {

@@ -6,7 +6,10 @@
 //! pure, offline-testable roster data and address resolution. This driver is
 //! exercised by the live staging E2E rather than unit tests.
 
-use super::roster::{register_payload, HubWorker, SharedRoster};
+use std::sync::Arc;
+
+use super::relay::Relay;
+use super::roster::{register_payload, remove_conflicting, HubWorker, SharedRoster};
 use rust_socketio::asynchronous::Client;
 
 /// A live control handle over the hub's roster, held by the TUI. Mutations
@@ -18,6 +21,49 @@ pub struct HubHandle {
     socket: Client,
     address: String,
     public_key: String,
+    /// The encrypted transport, used to open a contact edge with a peer the
+    /// moment it is added rather than at first dispatch.
+    relay: Arc<dyn Relay>,
+    /// Where roster mutations are narrated. An add that quietly does nothing is
+    /// the hardest kind of failure to chase.
+    log: super::types::HubLog,
+    /// Where the roster is written so it outlives the process. `None` keeps the
+    /// old behaviour: in memory only, gone at exit.
+    persist: Option<super::types::RosterSink>,
+}
+
+/// Whether `address` is a directory alias rather than a cryptoId.
+pub(super) fn is_handle(address: &str) -> bool {
+    address.trim_start().starts_with('@')
+}
+
+/// Whether `address` could plausibly be a tiny.place destination.
+///
+/// A cryptoId is a base58-encoded 32-byte key, so it is 32-64 characters from
+/// the base58 alphabet — which excludes `0`, `O`, `I` and `l` precisely because
+/// they are easy to confuse. A handle is anything after a leading `@`.
+///
+/// This exists because a mis-paste is silent otherwise: a stray `>` was accepted
+/// as an address, registered as a worker, and had a contact request sent to it.
+/// Nothing downstream can tell that from a real peer that never replies.
+pub(super) fn is_plausible_address(address: &str) -> bool {
+    let address = address.trim();
+    if is_handle(address) {
+        return address.trim_start_matches('@').chars().count() >= 2;
+    }
+    let len = address.chars().count();
+    (32..=64).contains(&len)
+        && address
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() && !matches!(c, '0' | 'O' | 'I' | 'l'))
+}
+
+/// Whether adding a worker at `address` should send a contact request.
+///
+/// Split out so the rule is testable without a live Socket.IO client, which the
+/// rest of this handle needs.
+pub(super) fn should_request_contact(address: &str, accepted: bool) -> bool {
+    !address.trim().is_empty() && !accepted
 }
 
 impl HubHandle {
@@ -30,12 +76,29 @@ impl HubHandle {
         socket: Client,
         address: String,
         public_key: String,
+        relay: Arc<dyn Relay>,
+        log: super::types::HubLog,
+        persist: Option<super::types::RosterSink>,
     ) -> Self {
         HubHandle {
             roster,
             socket,
             address,
             public_key,
+            relay,
+            log,
+            persist,
+        }
+    }
+
+    /// Write the current roster through the persist sink, if one is attached.
+    ///
+    /// Called after every mutation rather than on exit: a hub that is killed —
+    /// which is how a TUI usually ends — would otherwise save nothing, and the
+    /// roster this exists to remember is exactly what the operator just typed.
+    fn save(&self) {
+        if let Some(persist) = &self.persist {
+            persist(&self.list());
         }
     }
 
@@ -56,24 +119,105 @@ impl HubHandle {
         self.roster.lock().expect("roster lock").clone()
     }
 
-    /// Add (or replace, by id) a worker and re-register.
-    pub async fn add(&self, worker: HubWorker) -> anyhow::Result<()> {
+    /// Add (or replace, by id) a worker, open a contact edge, and re-register.
+    ///
+    /// The contact request is sent here rather than only at first dispatch.
+    /// A worker cannot receive a DM until it has accepted one, and its operator
+    /// approves that request on screen — so deferring it means adding a peer
+    /// looks like nothing happened, and the approval only appears much later,
+    /// attached to a task that is already waiting on it.
+    ///
+    /// Re-adding an address that is already present therefore re-sends the
+    /// request when the edge is not yet accepted, which is the natural way to
+    /// retry one the peer missed. Requesting an existing contact is harmless, so
+    /// the accepted case simply does nothing.
+    ///
+    /// It also *replaces* rather than duplicates: an entry matching either the
+    /// id or the address is dropped first, so one peer can never occupy two
+    /// roster slots however it was named.
+    pub async fn add(&self, mut worker: HubWorker) -> anyhow::Result<()> {
+        if !is_plausible_address(&worker.address) {
+            let given = worker.address.clone();
+            (self.log)(&format!("hub: refused worker address {given:?}"));
+            anyhow::bail!(
+                "{given:?} is not a tiny.place address — expected a base58 cryptoId or an @handle"
+            );
+        }
+        // A handle is a directory alias; contacts, pre-key bundles and DMs are
+        // all keyed on the cryptoId behind it. Storing the alias would register
+        // a peer that nothing can address.
+        if is_handle(&worker.address) {
+            match self.relay.resolve_handle(&worker.address).await {
+                Some(crypto_id) => {
+                    (self.log)(&format!("hub: resolved {} → {crypto_id}", worker.address));
+                    if worker.id == worker.address {
+                        worker.id = crypto_id.clone();
+                    }
+                    worker.label.get_or_insert_with(|| worker.address.clone());
+                    worker.address = crypto_id;
+                }
+                None => {
+                    let name = worker.address.clone();
+                    (self.log)(&format!("hub: {name} is not in the directory"));
+                    anyhow::bail!("{name} is not in the tiny.place directory");
+                }
+            }
+        }
+        let address = worker.address.clone();
         {
             let mut r = self.roster.lock().expect("roster lock");
-            r.retain(|w| w.id != worker.id);
+            remove_conflicting(&mut r, &worker);
+            // Give it an id the orchestrator can actually reproduce. Done after
+            // conflict removal so a re-add reuses the freed name rather than
+            // colliding with the entry it is replacing.
+            if worker.id.trim().is_empty() || worker.id == worker.address {
+                let taken: Vec<String> = r.iter().map(|w| w.id.clone()).collect();
+                worker.id =
+                    super::roster::worker_id(worker.label.as_deref(), &worker.harness, &taken);
+            }
             r.push(worker);
         }
+        let accepted = if address.is_empty() {
+            false
+        } else {
+            self.relay.contact_accepted(&address).await
+        };
+        if should_request_contact(&address, accepted) {
+            // Best-effort: a peer that is unreachable right now is still a valid
+            // roster entry, and dispatch retries the handshake anyway.
+            match self.relay.request_contact(&address).await {
+                Ok(()) => (self.log)(&format!(
+                    "hub: worker {address} added · contact requested, awaiting its approval"
+                )),
+                Err(err) => (self.log)(&format!(
+                    "hub: worker {address} added · contact request FAILED: {err}"
+                )),
+            }
+        } else {
+            (self.log)(&format!("hub: worker {address} added · already a contact"));
+        }
+        self.save();
         self.reregister().await
+    }
+
+    /// Whether `address` has accepted this hub's contact request.
+    ///
+    /// Lets a caller tell "added but waiting on approval" from "ready", which
+    /// otherwise look identical in the roster.
+    pub async fn contact_accepted(&self, address: &str) -> bool {
+        self.relay.contact_accepted(address).await
     }
 
     /// Remove a worker by id and re-register.
     pub async fn remove(&self, id: &str) -> anyhow::Result<()> {
+        (self.log)(&format!("hub: worker {id} removed"));
         {
             self.roster
                 .lock()
                 .expect("roster lock")
                 .retain(|w| w.id != id);
         }
+        self.save();
         self.reregister().await
     }
 
@@ -86,15 +230,19 @@ impl HubHandle {
                 w.label = label;
             }
         }
+        self.save();
         self.reregister().await
     }
 
     /// Mark a worker as the selected default (local display state only).
     pub fn select(&self, id: &str) {
-        let mut r = self.roster.lock().expect("roster lock");
-        for w in r.iter_mut() {
-            w.selected = w.id == id;
+        {
+            let mut r = self.roster.lock().expect("roster lock");
+            for w in r.iter_mut() {
+                w.selected = w.id == id;
+            }
         }
+        self.save();
     }
 
     /// Re-emit `medulla:register_agents` for the current roster.

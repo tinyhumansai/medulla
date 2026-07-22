@@ -55,7 +55,20 @@ type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
 /// to `taskId`). Any frame pokes the waiter's `activity` (sign of life);
 /// `reply`/`error` then settle and remove it; `status` forwards; `ack` just
 /// counted as activity.
-async fn route_frame(waiters: &Waiters, frame: TaskFrame) {
+async fn route_frame(waiters: &Waiters, frame: TaskFrame, log: &Option<super::types::HubLog>) {
+    // Every frame a worker sends, as it arrives. The hub used to report only the
+    // settled outcome, so a reply that never came and a reply that came back
+    // empty read the same from here — and neither said whether the worker had
+    // been talking at all.
+    if let Some(log) = log {
+        log(&format!(
+            "hub ← task {} {} · {} chars: {}",
+            frame.task_id,
+            frame.kind.as_str(),
+            frame.text.chars().count(),
+            crate::logging::preview(&frame.text),
+        ));
+    }
     let key = frame
         .correlation_id
         .clone()
@@ -97,11 +110,16 @@ async fn route_frame(waiters: &Waiters, frame: TaskFrame) {
 
 /// The pump: drain the inbox, decode each message, route it, then sleep. Runs
 /// until the owning [`TaskRunner`] is dropped (which aborts the task).
-async fn pump_loop(relay: Arc<dyn Relay>, waiters: Waiters, poll: Duration) {
+async fn pump_loop(
+    relay: Arc<dyn Relay>,
+    waiters: Waiters,
+    poll: Duration,
+    log: Option<super::types::HubLog>,
+) {
     loop {
         for msg in relay.drain_inbox(DRAIN_LIMIT).await {
             if let Some(frame) = decode_task_frame(&msg.text) {
-                route_frame(&waiters, frame).await;
+                route_frame(&waiters, frame, &log).await;
             }
         }
         tokio::time::sleep(poll).await;
@@ -135,6 +153,20 @@ impl TaskRunner {
         Self::start_with_ack_window(relay, poll, ACK_WINDOW)
     }
 
+    /// Start a runner that narrates every inbound worker frame to `log`.
+    ///
+    /// The sink is passed at construction rather than attached afterwards: the
+    /// pump begins draining the moment it is spawned, and restarting it to add a
+    /// logger would leave a window in which a frame is consumed unlogged — and,
+    /// with no waiter registered yet, dropped.
+    pub fn start_with_log(
+        relay: Arc<dyn Relay>,
+        poll: Duration,
+        log: super::types::HubLog,
+    ) -> Self {
+        Self::build(relay, poll, ACK_WINDOW, Some(log))
+    }
+
     /// Like [`start`](Self::start) with an explicit ack window (tests use a short
     /// one to exercise the reset-and-resend recovery without real delays).
     pub fn start_with_ack_window(
@@ -142,8 +174,17 @@ impl TaskRunner {
         poll: Duration,
         ack_window: Duration,
     ) -> Self {
+        Self::build(relay, poll, ack_window, None)
+    }
+
+    fn build(
+        relay: Arc<dyn Relay>,
+        poll: Duration,
+        ack_window: Duration,
+        log: Option<super::types::HubLog>,
+    ) -> Self {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
-        let pump = tokio::spawn(pump_loop(relay.clone(), waiters.clone(), poll));
+        let pump = tokio::spawn(pump_loop(relay.clone(), waiters.clone(), poll, log));
         TaskRunner {
             relay,
             waiters,

@@ -56,6 +56,15 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // read by `BackendRuntime::workers()`/`worker_op()` so the Workers tab manages
     // the hub's tiny.place peers live.
     let hub_slot: crate::hub_relay::HubSlot = Arc::new(Mutex::new(None));
+    // The hub narrates itself; those lines must not reach the terminal while the
+    // TUI owns the screen, so they are captured here instead.
+    let hub_logs = medulla_tui::log::LogBuffer::new();
+    // Persist them too: the failures worth chasing are usually noticed after the
+    // fact, and an in-memory ring dies with the process.
+    let log_dir = medulla_tui::log::default_log_dir(&env);
+    if let Some(path) = hub_logs.attach_file(&log_dir, "orchestrator") {
+        startup_status.get_or_insert(format!("logging to {}", path.display()));
+    }
 
     // Persona-memory service (tinycortex), on by default. Wired into the app
     // itself, which reads it for the Memory tab, so memory works on the backend
@@ -252,7 +261,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // On a relogin (below) it is torn down and re-started for the new account so
     // no worker mutation or task relay ever targets a revoked/stale session.
     let mut _hub_session = if backend_client.is_some() {
-        crate::hub_relay::start(&env, &home, hub_slot.clone()).await
+        crate::hub_relay::start(&env, &home, hub_slot.clone(), hub_logs.clone()).await
     } else {
         None
     };
@@ -313,7 +322,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         status = save_credentials(&home, &base_url, &jwt);
                         // Creds are now persisted, so the hub can read the new
                         // account's JWT: start it fresh, scoped to this session.
-                        _hub_session = crate::hub_relay::start(&env, &home, hub_slot.clone()).await;
+                        _hub_session = crate::hub_relay::start(
+                            &env,
+                            &home,
+                            hub_slot.clone(),
+                            hub_logs.clone(),
+                        )
+                        .await;
                     }
                     Err(e) => {
                         runtime = Arc::new(MockRuntime::demo());

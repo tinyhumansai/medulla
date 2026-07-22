@@ -18,11 +18,11 @@ mod persist_tests;
 #[cfg(test)]
 mod tests;
 
-pub use load::load_config;
-pub use persist::{clear_setting, persist_setting, persist_welcome_completed};
+pub use load::{default_tinyplace_config, load_config};
+pub use persist::{clear_setting, persist_hub_workers, persist_setting, persist_welcome_completed};
 pub use types::{
-    BackendConfig, LoadedConfig, MedullaConfig, MemoryConfigSection, OnboardingConfig,
-    OpencodeConfig, Peer, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
+    BackendConfig, HubSection, HubWorkerConfig, LoadedConfig, MedullaConfig, MemoryConfigSection,
+    OnboardingConfig, OpencodeConfig, Peer, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, display_host, is_staging,

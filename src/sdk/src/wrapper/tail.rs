@@ -13,9 +13,7 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
-use crate::session_history::{
-    discover_newest_session_file, preexisting_session_files, SessionAgentKind,
-};
+use crate::session_history::{discover_session_file, preexisting_session_files, SessionAgentKind};
 
 /// Grace applied to the discovery mtime floor: a transcript touched just before
 /// launch still counts as this run's, matching the TS wrapper's `start - 2000`.
@@ -61,6 +59,10 @@ pub struct SessionTailer {
     start_ms: i64,
     ignored: std::collections::HashSet<PathBuf>,
     active: Option<Active>,
+    /// When set, only the transcript recording this session id is accepted.
+    expect_session_id: Option<String>,
+    /// Start reading at the transcript's current end rather than at byte zero.
+    from_end: bool,
 }
 
 impl SessionTailer {
@@ -80,7 +82,50 @@ impl SessionTailer {
             start_ms,
             ignored,
             active: None,
+            expect_session_id: None,
+            from_end: false,
         }
+    }
+
+    /// Pin this tailer to one session id.
+    ///
+    /// Without a pin the tailer takes the newest transcript in `cwd`, which is
+    /// correct for one session per directory and wrong for any other number:
+    /// two concurrent sessions in one repo make the choice flip-flop, and the
+    /// consequence is a reply carrying another session's answer. With a pin,
+    /// identity beats recency and a mismatch simply stays unlocated.
+    pub fn expecting(mut self, session_id: impl Into<String>) -> Self {
+        self.expect_session_id = Some(session_id.into());
+        self
+    }
+
+    /// Tail a session that is **already running**, from where its transcript
+    /// currently ends.
+    ///
+    /// [`new`](Self::new) is built for a session about to start: it snapshots
+    /// the transcripts that already exist and ignores them, and it discounts any
+    /// file older than the launch instant, so the one new file that appears is
+    /// unambiguously this session's. Every one of those rules is exactly wrong
+    /// for a session being reused — its transcript is by definition pre-existing
+    /// and older than this turn — and the symptom is a turn that never locates
+    /// anything and reports that the harness never started.
+    ///
+    /// So identity replaces recency: the pinned id decides, and the read starts
+    /// at the file's current end. Starting at byte zero would be worse than not
+    /// locating it at all, because the completion record of the *previous* turn
+    /// is still in the file — the fold would settle on it immediately and hand
+    /// the peer the answer to the question it asked last time.
+    pub fn resuming(mut self, session_id: impl Into<String>) -> Self {
+        self.expect_session_id = Some(session_id.into());
+        self.ignored.clear();
+        self.start_ms = 0;
+        self.from_end = true;
+        self
+    }
+
+    /// The session id this tailer is pinned to, if any.
+    pub fn expected_session_id(&self) -> Option<&str> {
+        self.expect_session_id.as_deref()
     }
 
     /// Whether the transcript has been located yet.
@@ -92,12 +137,13 @@ impl SessionTailer {
     pub fn poll(&mut self) -> TailPoll {
         let mut out = TailPoll::default();
         if self.active.is_none() {
-            match discover_newest_session_file(
+            match discover_session_file(
                 &self.env,
                 self.agent,
                 &self.cwd,
                 self.start_ms - DISCOVER_MTIME_GRACE_MS,
                 &self.ignored,
+                self.expect_session_id.as_deref(),
             ) {
                 Some(found) => {
                     out.located = Some(LocatedSession {
@@ -105,9 +151,16 @@ impl SessionTailer {
                         harness_session_id: found.id,
                         cwd: found.cwd,
                     });
+                    // A resumed tail opens at the end: everything before this
+                    // point belongs to turns that are already answered.
+                    let byte_offset = if self.from_end {
+                        std::fs::metadata(&found.path).map(|m| m.len()).unwrap_or(0)
+                    } else {
+                        0
+                    };
                     self.active = Some(Active {
                         path: found.path,
-                        byte_offset: 0,
+                        byte_offset,
                         line_no: 0,
                         pending: String::new(),
                     });
@@ -251,6 +304,59 @@ mod tests {
             "payload": { "type": "agent_message", "message": text }
         })
         .to_string()
+    }
+
+    #[test]
+    fn resuming_starts_at_the_end_of_an_existing_transcript() {
+        // A session being *reused* has a transcript that already exists and is
+        // older than this turn — exactly what `new` is built to ignore. Without
+        // `resuming` the turn never locates anything and reports that the
+        // harness never started; located at byte zero it would be worse, because
+        // the previous turn's completion record is still in the file and the
+        // fold would settle on it and answer the wrong question.
+        let fx = Fixture::new();
+        let path = fx.codex_dir.join("rollout-live.jsonl");
+        let mut file = fs::File::create(&path).unwrap();
+        writeln!(file, "{}", fx.meta_line("sess-live")).unwrap();
+        writeln!(file, "{}", agent_message("answer to the previous turn")).unwrap();
+        file.flush().unwrap();
+
+        // `new` alone cannot see it: pre-existing, and older than the start.
+        let mut fresh = SessionTailer::new(
+            fx.env.clone(),
+            SessionAgentKind::Codex,
+            fx.cwd.clone(),
+            crate::clock::now_millis(),
+        )
+        .expecting("sess-live");
+        assert!(
+            fresh.poll().located.is_none(),
+            "a fresh tailer must not adopt a transcript that predates it"
+        );
+
+        let mut resumed = SessionTailer::new(
+            fx.env.clone(),
+            SessionAgentKind::Codex,
+            fx.cwd.clone(),
+            crate::clock::now_millis(),
+        )
+        .resuming("sess-live");
+
+        let first = resumed.poll();
+        assert!(first.located.is_some(), "the live transcript must be found");
+        assert!(
+            first.lines.is_empty(),
+            "history is already answered; only what comes next is this turn's: {:?}",
+            first.lines
+        );
+
+        writeln!(file, "{}", agent_message("answer to this turn")).unwrap();
+        file.flush().unwrap();
+
+        let next = resumed.poll();
+        let texts: Vec<&str> = next.lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts.len(), 1, "got {texts:?}");
+        assert!(texts[0].contains("answer to this turn"), "got {texts:?}");
     }
 
     #[test]

@@ -13,6 +13,8 @@ pub enum Command {
     Tui,
     /// Run the headless daemon; carries the remaining args.
     Daemon,
+    /// `medulla daemon --tui` — the worker daemon with its operator screen.
+    DaemonTui,
     Version,
     Help,
     Sessions,

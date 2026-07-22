@@ -33,8 +33,8 @@ pub type SendFn =
 /// A clock, in epoch ms (injectable for tests).
 pub type NowFn = Arc<dyn Fn() -> i64 + Send + Sync>;
 
-/// A line sink for daemon diagnostics.
-pub type LogFn = Arc<dyn Fn(&str) + Send + Sync>;
+/// A line sink for daemon diagnostics. See [`crate::logging::LineSink`].
+pub type LogFn = crate::logging::LineSink;
 
 /// Non-callback daemon configuration.
 #[derive(Clone)]

@@ -171,6 +171,29 @@ impl SignalTransport {
             .map_err(|e| describe_error(&e))
     }
 
+    /// Resolve an `@handle` to the cryptoId the contact graph is keyed on.
+    ///
+    /// Contacts, pre-key bundles and DMs are all addressed by cryptoId; a handle
+    /// is only a directory alias. Passing the alias through unresolved produces
+    /// `POST /contacts/%40name`, which cannot match anything.
+    ///
+    /// Returns `None` when the name is unknown, so a caller can say so rather
+    /// than registering a peer nothing can reach.
+    pub async fn resolve_handle(&self, name: &str) -> Option<String> {
+        let trimmed = name.trim().trim_start_matches('@');
+        if trimmed.is_empty() {
+            return None;
+        }
+        self.client
+            .directory
+            .resolve(trimmed)
+            .await
+            .ok()?
+            .identity
+            .map(|identity| identity.crypto_id)
+            .filter(|id| !id.trim().is_empty())
+    }
+
     /// This wallet's Ed25519 identity public key, base64 — the value the
     /// directory stores as `identityKey`.
     ///

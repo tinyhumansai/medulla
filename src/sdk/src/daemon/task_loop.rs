@@ -277,6 +277,11 @@ impl DaemonRuntime {
         };
 
         let options = RunTaskOptions {
+            // The *authenticated* sender, never anything from the frame body: a
+            // frame cannot be trusted to name its own author, and this value
+            // decides which session serves the task and whose context it may see.
+            conversation: from.clone(),
+            resume_session_id: None,
             provider,
             prompt: frame.text.clone(),
             cwd: self.inner.config.workspace.clone(),
@@ -334,7 +339,18 @@ impl DaemonRuntime {
                     run.usage,
                 )
                 .await;
-                self.log(&format!("task {} ✓ ({} events)", frame.task_id, run.events));
+                // The captured turn content, as it was read out of the harness's
+                // own transcript. Logged next to the send below so "the harness
+                // answered" and "the peer was told" stop being one fact: an
+                // empty reply here and a failed send there look identical from
+                // the outside, and only one of them is the harness's fault.
+                self.log(&format!(
+                    "task {} ✓ ({} events) · captured {} chars: {}",
+                    frame.task_id,
+                    run.events,
+                    run.reply.chars().count(),
+                    crate::logging::preview(&run.reply),
+                ));
             }
             Err(message) => {
                 self.reply(
@@ -387,6 +403,8 @@ impl DaemonRuntime {
             .expect("semaphore is never closed");
         self.log(&format!("plaintext DM → {}", provider.as_str()));
         let options = RunTaskOptions {
+            conversation: from.clone(),
+            resume_session_id: None,
             provider,
             prompt: text,
             cwd: self.inner.config.workspace.clone(),

@@ -37,7 +37,9 @@ pub struct WorkerSpec {
 }
 
 /// Everything [`start_hub`] needs to bridge the backend to tiny.place workers.
-#[derive(Debug, Clone)]
+/// Not `Debug`: the log sink is a boxed closure with no useful representation,
+/// and the JWT should not be printable by accident either.
+#[derive(Clone)]
 pub struct HubConfig {
     /// Backend Socket.IO base URL (e.g. `https://staging-api.tinyhumans.ai`).
     pub backend_url: String,
@@ -51,6 +53,11 @@ pub struct HubConfig {
     pub poll: Duration,
     /// Per-task deadline for a worker's terminal reply.
     pub task_timeout: Duration,
+    /// Where diagnostics go. Defaults to stderr; a TUI supplies its own so the
+    /// hub never writes over a screen it does not own.
+    pub log: super::types::HubLog,
+    /// Where roster changes are saved. `None` keeps the roster in memory only.
+    pub persist: Option<super::types::RosterSink>,
 }
 
 /// A running hub: the live [`HubHandle`] plus the client/runner kept alive for
@@ -75,7 +82,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
     let base_url = resolve_endpoint(&env, &tp_config);
     let signer = Arc::new(signer);
     let client = TinyPlaceClient::new(TinyPlaceClientOptions {
-        base_url,
+        base_url: base_url.clone(),
         signer: Some(signer.clone() as Arc<dyn Signer>),
         ..Default::default()
     });
@@ -83,7 +90,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
 
     // Publish pre-keys so a worker can run X3DH against us (best-effort).
     if let Err(e) = transport.publish_keys(&signer).await {
-        eprintln!("hub: pre-key publish skipped ({e})");
+        (config.log)(&format!("hub: pre-key publish skipped ({e})"));
     }
 
     // The hub's own identity, captured before the transport moves into the
@@ -92,9 +99,22 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
     // `TINYPLACE_OPENHUMAN_OWNER` / `acceptContacts` allowlist.
     let hub_address = transport.agent_id().to_string();
     let hub_public_key = transport.identity_key_base64();
-    eprintln!("hub: identity {hub_address} (set as the worker's owner / allowlist it)");
+    // The relay is named here, not just the backend: a contact request is
+    // delivered on the relay, so a hub and a worker that disagree about it can
+    // never reach each other however healthy both look.
+    (config.log)(&format!(
+        "hub: identity {hub_address} on {base_url} (set as the worker's owner / allowlist it)"
+    ));
 
-    let runner = Arc::new(TaskRunner::start(Arc::new(transport), config.poll));
+    // One transport, shared: the runner dispatches through it and the handle
+    // opens contact edges through it. A second on the same wallet would be a
+    // second writer to one Signal session store.
+    let relay: Arc<dyn super::relay::Relay> = Arc::new(transport);
+    let runner = Arc::new(TaskRunner::start_with_log(
+        relay.clone(),
+        config.poll,
+        config.log.clone(),
+    ));
 
     // The shared roster the socket advertises and the handle mutates.
     let roster: SharedRoster = Arc::new(Mutex::new(
@@ -111,22 +131,31 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
             .collect(),
     ));
 
-    eprintln!(
+    (config.log)(&format!(
         "hub: connecting to {} ({} worker(s))",
         config.backend_url,
         config.workers.len()
-    );
+    ));
     let socket = connect_harness(
         &config.backend_url,
         &config.jwt,
         roster.clone(),
         runner.clone(),
         config.task_timeout,
+        config.log.clone(),
     )
     .await?;
-    eprintln!("hub: connected + registered — relaying tasks to tiny.place workers");
+    (config.log)("hub: connected + registered — relaying tasks to tiny.place workers");
 
-    let handle = HubHandle::new(roster, socket.clone(), hub_address, hub_public_key);
+    let handle = HubHandle::new(
+        roster,
+        socket.clone(),
+        hub_address,
+        hub_public_key,
+        relay,
+        config.log.clone(),
+        config.persist.clone(),
+    );
     Ok(HubSession {
         handle,
         _runner: runner,
@@ -137,8 +166,9 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
 /// Standalone entry: start a hub session and hold until interrupted (Ctrl-C /
 /// SIGINT, or the parent killing the process).
 pub async fn run_hub(config: HubConfig) -> anyhow::Result<()> {
+    let log = config.log.clone();
     let _session = start_hub(config).await?;
     tokio::signal::ctrl_c().await.ok();
-    eprintln!("hub: shutting down");
+    log("hub: shutting down");
     Ok(())
 }

@@ -102,6 +102,41 @@ pub struct Peer {
     pub protocol: String,
 }
 
+/// One worker in the persisted `[hub]` roster.
+///
+/// Named apart from [`crate::hub::HubWorker`] on purpose: that is the live
+/// in-memory entry the hub dispatches through, this is its on-disk form. They
+/// carry the same fields today and are still different things — one survives a
+/// restart, the other does not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubWorkerConfig {
+    /// The `agentId` the backend targets.
+    pub id: String,
+    /// tiny.place address (base58 cryptoId or `@handle`).
+    pub address: String,
+    /// Coding-agent harness the worker runs.
+    pub harness: String,
+    /// Optional human label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Whether this worker is the selected default.
+    #[serde(default)]
+    pub selected: bool,
+}
+
+/// The `hub` section: the orchestrator's worker roster, remembered across runs.
+///
+/// Without this the roster lived only in memory, seeded from the environment at
+/// boot — so a worker added from the Workers tab vanished at exit and the tab
+/// was empty on the next launch however many peers were actually reachable.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HubSection {
+    /// Workers the operator has added, in roster order.
+    pub workers: Vec<HubWorkerConfig>,
+}
+
 /// The `tinyplace` section: identity, discovery, and the static peer roster.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -298,6 +333,8 @@ pub struct TuiConfig {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub onboarding: OnboardingConfig,
+    #[serde(default)]
+    pub hub: HubSection,
 }
 
 impl Default for TuiConfig {
@@ -312,6 +349,7 @@ impl Default for TuiConfig {
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),
             onboarding: OnboardingConfig::default(),
+            hub: HubSection::default(),
         }
     }
 }

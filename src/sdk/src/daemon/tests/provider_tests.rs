@@ -45,6 +45,7 @@ async fn plaintext_dm_runs_default_provider() {
     let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
         Box::pin(async move {
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply: format!("echo: {}", opts.prompt),
@@ -69,6 +70,7 @@ async fn plaintext_without_available_provider_is_refused() {
     let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
         Box::pin(async move {
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply: "unreachable".to_string(),
@@ -128,6 +130,7 @@ async fn select_provider_falls_back_to_first_when_default_absent() {
     let run_task: RunTaskFn = Arc::new(|opts: RunTaskOptions| {
         Box::pin(async move {
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply: "ok".to_string(),

@@ -54,8 +54,10 @@ pub async fn connect_harness(
     roster: SharedRoster,
     runner: Arc<TaskRunner>,
     task_timeout: Duration,
+    log: super::types::HubLog,
 ) -> anyhow::Result<Client> {
     let connect_roster = roster.clone();
+    let run_log = log.clone();
     let run_roster = roster.clone();
     let cap_roster = roster.clone();
 
@@ -77,6 +79,7 @@ pub async fn connect_harness(
         // server then drops us and every later delegation fails with "no harness
         // connected" while this process still looks alive.
         .on("medulla:task_run", move |payload, socket| {
+            let run_log = run_log.clone();
             let runner = runner.clone();
             let roster = run_roster.clone();
             async move {
@@ -86,16 +89,25 @@ pub async fn connect_harness(
                     runner,
                     roster,
                     task_timeout,
+                    run_log,
                 ));
             }
             .boxed()
         })
         // Surface transport faults instead of dying silently.
-        .on(Event::Error, |payload, _socket| {
-            async move { eprintln!("hub: socket error: {payload:?}") }.boxed()
+        .on(Event::Error, {
+            let log = log.clone();
+            move |payload, _socket| {
+                let log = log.clone();
+                async move { log(&format!("hub: socket error: {payload:?}")) }.boxed()
+            }
         })
-        .on(Event::Close, |_payload, _socket| {
-            async move { eprintln!("hub: socket closed — reconnecting") }.boxed()
+        .on(Event::Close, {
+            let log = log.clone();
+            move |_payload, _socket| {
+                let log = log.clone();
+                async move { log("hub: socket closed — reconnecting") }.boxed()
+            }
         })
         // Capability probe: answer from the roster metadata.
         .on("medulla:capabilities_request", move |payload, socket| {
@@ -123,6 +135,7 @@ async fn handle_task_run(
     runner: Arc<TaskRunner>,
     roster: SharedRoster,
     timeout: Duration,
+    log: super::types::HubLog,
 ) {
     let Some(obj) = first_obj(payload) else {
         return;
@@ -148,15 +161,29 @@ async fn handle_task_run(
 
     // Resolve the address, then drop the lock before any await (the std guard is
     // not held across suspension points). An empty roster ⇒ nothing to run.
-    let worker_address = {
+    let (worker_address, known) = {
         let r = roster.lock().expect("roster lock");
-        address_of(&r, &agent_id)
+        let known: Vec<String> = r.iter().map(|w| w.id.clone()).collect();
+        (address_of(&r, &agent_id), known)
     };
     let Some(worker_address) = worker_address else {
+        // Say which of the two it is. "No workers" and "no worker by that name"
+        // call for completely different actions, and reporting the first for
+        // the second sent an operator looking for a connection problem that was
+        // really a misaddressed task.
+        let error = if known.is_empty() {
+            "hub has no workers".to_string()
+        } else {
+            format!(
+                "hub has no worker \"{agent_id}\" — known: {}",
+                known.join(", ")
+            )
+        };
+        (log)(&format!("hub: task {task_id} refused — {error}"));
         let _ = socket
             .emit(
                 "medulla:task_result",
-                json!({ "taskId": task_id, "ok": false, "error": "hub has no workers", "retryable": false }),
+                json!({ "taskId": task_id, "ok": false, "error": error, "retryable": false }),
             )
             .await;
         return;
@@ -180,12 +207,12 @@ async fn handle_task_run(
         }
     });
 
-    eprintln!(
+    log(&format!(
         "hub: task_run {} → {} (timeout {}s)",
         task_id,
         worker_address,
         timeout.as_secs()
-    );
+    ));
 
     let req = TaskRequest {
         task_id: task_id.clone(),
@@ -199,8 +226,12 @@ async fn handle_task_run(
 
     let outcome = runner.run(req, Some(tx)).await;
     match &outcome {
-        Ok(o) => eprintln!("hub: task {} ok ({} chars)", task_id, o.reply.len()),
-        Err(e) => eprintln!("hub: task {} FAILED: {e}", task_id),
+        Ok(o) => log(&format!(
+            "hub: task {} ok ({} chars)",
+            task_id,
+            o.reply.len()
+        )),
+        Err(e) => log(&format!("hub: task {task_id} FAILED: {e}")),
     }
 
     let frame = match outcome {

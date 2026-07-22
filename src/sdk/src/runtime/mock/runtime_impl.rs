@@ -42,6 +42,12 @@ impl Runtime for MockRuntime {
         }
     }
 
+    /// The scripted worker registry (see
+    /// [`MockRuntime::set_workers`](super::types::MockRuntime::set_workers)).
+    fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
+        self.state.lock().unwrap().workers.clone()
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<()> {
         self.tx.subscribe()
     }

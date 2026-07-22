@@ -25,4 +25,4 @@ pub use handle::HubHandle;
 pub use relay::Relay;
 pub use roster::HubWorker;
 pub use runner::TaskRunner;
-pub use types::{RunError, TaskOutcome, TaskRequest};
+pub use types::{stderr_log, HubLog, RosterSink, RunError, TaskOutcome, TaskRequest};

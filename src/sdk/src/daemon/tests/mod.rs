@@ -106,6 +106,7 @@ pub(super) fn blocking_runner(ready: mpsc::UnboundedSender<()>, gate: Arc<Notify
             let _ = ready.send(());
             gate.notified().await;
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),
@@ -140,6 +141,7 @@ pub(super) fn stdin_runner(
             gate.notified().await;
             reader.abort();
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),
@@ -181,6 +183,7 @@ pub(super) fn status_runner(count: usize) -> RunTaskFn {
                 }
             }
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply: "ok".to_string(),
@@ -195,6 +198,22 @@ pub(super) async fn wait_ready(rx: &mut mpsc::UnboundedReceiver<()>) {
     tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .expect("runner did not signal readiness in time");
+}
+
+/// A runner that records the `conversation` each run was attributed to.
+pub(super) fn conversation_runner(seen: Arc<StdMutex<Vec<String>>>) -> RunTaskFn {
+    Arc::new(move |opts: RunTaskOptions| {
+        seen.lock().unwrap().push(opts.conversation.clone());
+        Box::pin(async move {
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: opts.provider,
+                reply: "done".to_string(),
+                events: 0,
+            })
+        })
+    })
 }
 
 /// A runner that returns Err once its abort is signalled (models a real run
@@ -217,6 +236,7 @@ pub(super) fn counting_capability_runner(count: Arc<AtomicUsize>) -> RunTaskFn {
         Box::pin(async move {
             count.fetch_add(1, Ordering::SeqCst);
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply:

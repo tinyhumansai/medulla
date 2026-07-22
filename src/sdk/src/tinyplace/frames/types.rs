@@ -12,7 +12,7 @@ use std::fmt;
 pub const TINYPLACE_PROTO: &str = "medulla-tinyplace/1";
 
 /// The coding-agent CLI that ran (or should run) a task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessProvider {
     /// Anthropic's `claude` CLI harness.

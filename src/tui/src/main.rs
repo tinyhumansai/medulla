@@ -16,6 +16,7 @@ mod commands;
 mod event_loop;
 mod hub_relay;
 mod terminal;
+mod worker_loop;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,6 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let raw: Vec<String> = std::env::args().skip(1).collect();
     match parse_command(&raw) {
         Command::Daemon => medulla::daemon::run_daemon(&raw[1..], onboarding_ui()).await,
+        Command::DaemonTui => run_worker_tui_command(&raw[1..]).await,
         Command::Version => {
             println!("medulla {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -80,4 +82,115 @@ fn onboarding_ui() -> Option<medulla::onboarding::OnboardingUi> {
     } else {
         None
     }
+}
+
+/// Start the worker-daemon TUI (`medulla daemon --tui`).
+///
+/// One process: the tiny.place identity, the contact queue, the harness PTYs,
+/// and the screen all live in it. Harness sessions run in the current working
+/// directory with this process's environment, so the operator sees the repo they
+/// launched from.
+async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| ".".to_string());
+    // Where peer tasks run. This is the single most consequential argument the
+    // worker takes: a harness serving a peer edits files here, so defaulting to
+    // the current directory means the shell you launched from decides what a
+    // remote peer can touch.
+    let workspace = flag_value(args, "--workspace")
+        .map(|dir| {
+            std::fs::canonicalize(&dir)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or(dir)
+        })
+        .unwrap_or_else(|| cwd.clone());
+    let loaded = medulla::config::load_config(None, &env, std::path::Path::new(&cwd))?;
+
+    // The contact queue and this daemon's address both come from the tiny.place
+    // service. Without a `[tinyplace]` section there is no identity, so the
+    // Contacts and Requests tabs say so rather than showing empty lists.
+    let mut startup_status = None;
+    // A worker always has an identity: the address is minted on first run and
+    // reused from `<medulla_home>/tinyplace/config.json` thereafter. Absent a
+    // `[tinyplace]` section we synthesize one rather than running without it, so
+    // `medulla daemon --tui` bootstraps exactly like `medulla daemon` does —
+    // same wallet, same location, same relay. Requiring config for the TUI and
+    // not for the daemon would mean adding `--tui` silently cost you your peers.
+    // It must be `default_tinyplace_config`, not `TinyplaceConfig::default()`:
+    // only the former reads `MEDULLA_STAGING`, and a worker on the prod relay
+    // never sees a contact request sent on staging.
+    let tinyplace_config = loaded
+        .config
+        .tinyplace
+        .clone()
+        .unwrap_or_else(|| medulla::config::default_tinyplace_config(&env));
+    let service = match medulla::tinyplace::service::TinyplaceService::start(&tinyplace_config) {
+        Ok(service) => Some(service),
+        Err(err) => {
+            startup_status = Some(format!("tiny.place service failed to start ({err})"));
+            None
+        }
+    };
+    let contacts = service.as_ref().map(|s| s.contacts());
+    // The encrypted transport is what lets peers reach this worker at all, and
+    // it comes from the same service as the contact queue — one transport per
+    // wallet, because two would be two writers to one Signal session store.
+    // Without a `[tinyplace]` section there is no identity, so the TUI runs as a
+    // local-sessions screen and simply never receives peer work.
+    let transport = service.as_ref().map(|s| s.transport());
+    // A failed pre-key publish makes this worker undeliverable, which otherwise
+    // looks from both ends like peer messages simply vanish. Surface it.
+    if let Some(notice) = service
+        .as_ref()
+        .and_then(|s| s.observation().lock().ok().and_then(|o| o.notice.clone()))
+    {
+        startup_status = Some(notice);
+    }
+    let agent_id = service.as_ref().and_then(|s| {
+        s.observation()
+            .lock()
+            .ok()
+            .and_then(|o| o.identity.as_ref().map(|i| i.agent_id.clone()))
+    });
+
+    let result = worker_loop::run_worker_tui(
+        env,
+        workspace,
+        contacts,
+        agent_id,
+        startup_status,
+        transport,
+        service.as_ref().map(|s| s.endpoint().to_string()),
+        // Claude gates a fresh directory behind a modal trust dialog that only
+        // appears on a TTY, so the worker clears it up front — naming the
+        // workspace at launch is the decision to run peer work there. This
+        // declines that on the operator's behalf instead.
+        !args.iter().any(|a| a == "--no-trust-workspace"),
+        // Peer sessions run unattended, so they run with the harness's
+        // permission bypass — nobody is in the pane to answer a prompt, and a
+        // task that stops on one has hung until it times out.
+        !args.iter().any(|a| a == "--no-skip-permissions"),
+    )
+    .await;
+    drop(service); // aborts the background polls
+    result
+}
+
+/// Read `--name <value>` out of an argument list.
+///
+/// A local parse rather than the daemon's: its flag types are private to the
+/// SDK, and the worker screen needs exactly one of them.
+fn flag_value(args: &[String], name: &str) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == name {
+            return it.next().cloned().filter(|v| !v.is_empty());
+        }
+        if let Some(rest) = arg.strip_prefix(name).and_then(|r| r.strip_prefix('=')) {
+            return (!rest.is_empty()).then(|| rest.to_string());
+        }
+    }
+    None
 }

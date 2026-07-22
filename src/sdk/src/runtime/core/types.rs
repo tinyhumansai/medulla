@@ -262,15 +262,33 @@ impl CoreState {
     /// cleared and rebuilt from it; the negotiated identity (`session_id`,
     /// `serve_version`) and the local `async_mode` toggle are connection-spanning
     /// and left untouched.
+    ///
+    /// One piece of transcript state survives the reset: an optimistic user turn
+    /// still awaiting its wire echo. The drop can race the `instruct` write, so
+    /// the turn may never have reached serve and the replay cannot be trusted to
+    /// restore it — wiping it would silently lose what the operator typed. It is
+    /// re-appended after the clear with `pending_user_echo` kept armed, so a
+    /// replayed echo still de-duplicates into exactly one transcript row. This
+    /// mirrors the backend runtime's `fold()`, which likewise keeps the
+    /// optimistic copy and de-duplicates the echo; the turn is *not* resubmitted,
+    /// because an `instruct` that did land before the drop would then run twice.
     pub(super) fn reset_for_replay(&mut self) {
+        let unacked = self.pending_user_echo.take();
         self.running = false;
         self.events.clear();
         self.chat_events.clear();
         self.messages.clear();
-        self.pending_user_echo = None;
         self.last_result = None;
         self.harness = None;
         self.seq = 0;
+        if let Some(body) = unacked {
+            self.messages.push(ChatMessage {
+                role: "user".into(),
+                content: body.clone(),
+            });
+            self.pending_user_echo = Some(body.clone());
+            self.emit(TuiEvent::User { body });
+        }
     }
 
     /// The event stream's health, mapped from the connection lifecycle and the

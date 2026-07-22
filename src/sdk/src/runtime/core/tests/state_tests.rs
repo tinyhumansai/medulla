@@ -190,6 +190,44 @@ fn reset_for_replay_clears_fold_derived_state_but_keeps_identity() {
 }
 
 #[test]
+fn reset_for_replay_preserves_the_unacked_optimistic_user_turn() {
+    // Codex review finding: a user turn submitted just before a connection drop
+    // is only optimistic local state — the serve replay re-sends *events*, and
+    // the turn may never have reached serve — so `reset_for_replay` must carry
+    // it across the reset instead of wiping what the operator typed.
+    let mut s = CoreState::new();
+    // Mirror what `submit` does: optimistic message + echo marker + User event.
+    s.messages.push(crate::ui::chat_store::ChatMessage {
+        role: "user".into(),
+        content: "ship it".into(),
+    });
+    s.pending_user_echo = Some("ship it".into());
+    s.emit(TuiEvent::User {
+        body: "ship it".into(),
+    });
+
+    s.reset_for_replay();
+
+    // The un-acked turn survives, in both the transcript and the event log.
+    assert_eq!(s.messages.len(), 1);
+    assert_eq!(s.messages[0].role, "user");
+    assert_eq!(s.messages[0].content, "ship it");
+    assert!(s
+        .events
+        .iter()
+        .any(|e| matches!(&e.event, TuiEvent::User { body } if body == "ship it")));
+    // The echo marker stays armed, so a replayed echo still folds into exactly
+    // one transcript row rather than doubling the preserved copy.
+    assert_eq!(s.pending_user_echo.as_deref(), Some("ship it"));
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"cycle_event","event":{"kind":"user","body":"ship it"}})
+    ));
+    assert_eq!(s.messages.len(), 1, "the replayed echo must not double up");
+    assert!(s.pending_user_echo.is_none());
+}
+
+#[test]
 fn stream_health_maps_conn_and_gap() {
     let mut s = CoreState::new();
     assert_eq!(s.stream_health(), StreamState::Resyncing); // Connecting

@@ -48,6 +48,43 @@ fn fold_event_drives_running_and_board() {
 }
 
 #[test]
+fn fold_event_streams_task_board_changes_into_the_event_log() {
+    // Codex review finding: task_board_changed used to update
+    // `RuntimeSnapshot.harness` only, so headless `run` consumers (which drain
+    // `snapshot().events`) silently lost task progress. The fold must also
+    // append an event envelope carrying the changed row.
+    let mut s = CoreState::new();
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"task_board_changed","task":{
+            "id":"t1","title":"reconcile","status":"active","createdAt":"0","updatedAt":"0",
+            "delegatedTaskIds":[],"notes":[]}})
+    ));
+
+    // The board updated, and the same change landed in the event log.
+    assert_eq!(s.harness.as_ref().unwrap().tasks.len(), 1);
+    assert_eq!(s.events.len(), 1);
+    let env = &s.events[0];
+    assert_eq!(env.event.kind(), "task_board_changed");
+    let json = serde_json::to_value(&env.event).unwrap();
+    assert_eq!(json["kind"], "task_board_changed");
+    assert_eq!(json["task"]["id"], "t1");
+    assert_eq!(json["task"]["status"], "active");
+
+    // An update to the same task streams a second envelope (one per change).
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"task_board_changed","task":{
+            "id":"t1","title":"reconcile","status":"done","createdAt":"0","updatedAt":"1",
+            "delegatedTaskIds":[],"notes":[]}})
+    ));
+    assert_eq!(s.harness.as_ref().unwrap().tasks.len(), 1);
+    assert_eq!(s.events.len(), 2);
+    let json = serde_json::to_value(&s.events[1].event).unwrap();
+    assert_eq!(json["task"]["status"], "done");
+}
+
+#[test]
 fn fold_event_passes_unknown_and_cycle_events_through() {
     let mut s = CoreState::new();
     // A serve-level roster_event is not a HarnessEvent: kept verbatim.
@@ -187,6 +224,44 @@ fn reset_for_replay_clears_fold_derived_state_but_keeps_identity() {
     assert_eq!(s.session_id, "agent");
     assert_eq!(s.serve_version.as_deref(), Some("3.12.0"));
     assert!(s.async_mode);
+}
+
+#[test]
+fn reset_for_replay_preserves_the_unacked_optimistic_user_turn() {
+    // Codex review finding: a user turn submitted just before a connection drop
+    // is only optimistic local state — the serve replay re-sends *events*, and
+    // the turn may never have reached serve — so `reset_for_replay` must carry
+    // it across the reset instead of wiping what the operator typed.
+    let mut s = CoreState::new();
+    // Mirror what `submit` does: optimistic message + echo marker + User event.
+    s.messages.push(crate::ui::chat_store::ChatMessage {
+        role: "user".into(),
+        content: "ship it".into(),
+    });
+    s.pending_user_echo = Some("ship it".into());
+    s.emit(TuiEvent::User {
+        body: "ship it".into(),
+    });
+
+    s.reset_for_replay();
+
+    // The un-acked turn survives, in both the transcript and the event log.
+    assert_eq!(s.messages.len(), 1);
+    assert_eq!(s.messages[0].role, "user");
+    assert_eq!(s.messages[0].content, "ship it");
+    assert!(s
+        .events
+        .iter()
+        .any(|e| matches!(&e.event, TuiEvent::User { body } if body == "ship it")));
+    // The echo marker stays armed, so a replayed echo still folds into exactly
+    // one transcript row rather than doubling the preserved copy.
+    assert_eq!(s.pending_user_echo.as_deref(), Some("ship it"));
+    assert!(fold_event(
+        &mut s,
+        &json!({"kind":"cycle_event","event":{"kind":"user","body":"ship it"}})
+    ));
+    assert_eq!(s.messages.len(), 1, "the replayed echo must not double up");
+    assert!(s.pending_user_echo.is_none());
 }
 
 #[test]

@@ -39,6 +39,8 @@ impl Runtime for MockRuntime {
             threads,
             active_thread_id: s.active_id.clone(),
             harness: s.harness.clone(),
+            // The mock runtime never rebaselines its log; seqs only grow.
+            replay_epoch: 0,
         }
     }
 

@@ -177,6 +177,13 @@ pub(super) struct CoreState {
     pub(super) harness: Option<HarnessStatus>,
     /// Monotonic local sequence for [`EventEnvelope`]s.
     pub(super) seq: u64,
+    /// Bumped by [`reset_for_replay`](CoreState::reset_for_replay) each time the
+    /// folded log is rebaselined (local seqs restart from 0). Surfaced on
+    /// [`RuntimeSnapshot::replay_epoch`](crate::runtime::RuntimeSnapshot::replay_epoch)
+    /// so pollers holding a "last streamed seq" cursor (the headless driver)
+    /// can observe the rebaseline and rewind instead of silently dropping the
+    /// replayed events whose fresh seqs fall at or below the stale cursor.
+    pub(super) replay_epoch: u64,
     /// The last protocol `event.seq` seen, for gap detection (serve-protocol §6).
     pub(super) last_stream_seq: Option<u64>,
     /// Latched when a `seq` gap was seen; cleared on a fresh connection.
@@ -199,6 +206,7 @@ impl CoreState {
             last_result: None,
             harness: None,
             seq: 0,
+            replay_epoch: 0,
             last_stream_seq: None,
             gap: false,
         }
@@ -262,15 +270,34 @@ impl CoreState {
     /// cleared and rebuilt from it; the negotiated identity (`session_id`,
     /// `serve_version`) and the local `async_mode` toggle are connection-spanning
     /// and left untouched.
+    ///
+    /// One piece of transcript state survives the reset: an optimistic user turn
+    /// still awaiting its wire echo. The drop can race the `instruct` write, so
+    /// the turn may never have reached serve and the replay cannot be trusted to
+    /// restore it — wiping it would silently lose what the operator typed. It is
+    /// re-appended after the clear with `pending_user_echo` kept armed, so a
+    /// replayed echo still de-duplicates into exactly one transcript row. This
+    /// mirrors the backend runtime's `fold()`, which likewise keeps the
+    /// optimistic copy and de-duplicates the echo; the turn is *not* resubmitted,
+    /// because an `instruct` that did land before the drop would then run twice.
     pub(super) fn reset_for_replay(&mut self) {
+        let unacked = self.pending_user_echo.take();
         self.running = false;
         self.events.clear();
         self.chat_events.clear();
         self.messages.clear();
-        self.pending_user_echo = None;
         self.last_result = None;
         self.harness = None;
         self.seq = 0;
+        self.replay_epoch += 1;
+        if let Some(body) = unacked {
+            self.messages.push(ChatMessage {
+                role: "user".into(),
+                content: body.clone(),
+            });
+            self.pending_user_echo = Some(body.clone());
+            self.emit(TuiEvent::User { body });
+        }
     }
 
     /// The event stream's health, mapped from the connection lifecycle and the

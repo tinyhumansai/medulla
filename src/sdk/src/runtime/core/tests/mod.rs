@@ -10,6 +10,7 @@
 use std::time::Duration;
 
 mod connection_tests;
+mod headless_tests;
 mod protocol_tests;
 mod state_tests;
 

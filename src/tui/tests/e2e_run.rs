@@ -1,0 +1,323 @@
+//! End-to-end coverage for `medulla run`, the non-interactive core-runtime
+//! driver (`src/run.rs`). It drives the installed binary against a minimal,
+//! in-test `medulla-serve` NDJSON stub over a unix socket — the same shape a
+//! docker e2e uses — and asserts the streamed JSON-line transcript: a `ready`
+//! line, the folded cycle events, and a terminal `result`. Unix-only, because
+//! the core runtime speaks a unix domain socket.
+#![cfg(unix)]
+
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use serde_json::{json, Value};
+use tempfile::TempDir;
+
+/// Run the workspace binary with an isolated home and no inherited credentials
+/// or model keys, mirroring the `e2e_cli` harness.
+fn run(args: &[&str], home: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_medulla"))
+        .args(args)
+        .current_dir(home)
+        .env("MEDULLA_HOME", home)
+        .env_remove("MEDULLA_TOKEN")
+        .env_remove("MEDULLA_CORE_SOCKET")
+        .env_remove("OPENROUTER_API_KEY")
+        .env_remove("MEDULLA_BACKEND_URL")
+        .output()
+        .expect("the medulla binary should run")
+}
+
+/// A short, process-unique socket path (kept well under the ~104-char sun_path
+/// cap by living directly in the temp dir).
+fn unique_socket() -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("mdl-run-{}-{nanos}.sock", std::process::id()))
+}
+
+/// How long the stub waits for the `medulla` process to connect before giving
+/// up. Generous for CI; a healthy run connects within a couple of seconds.
+const STUB_ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Serve exactly one `medulla-serve` connection synchronously: the `ready`
+/// banner, then answer `hello`/`subscribe`, stream one full cycle on `instruct`,
+/// and ack `stop`. Enough of the protocol for the driver to round-trip one
+/// instruction. Returns the accept-loop thread so the test can join it.
+///
+/// The accept is bounded by `timeout`: if no client connects (the binary exited
+/// before attaching — a parser/config regression), the thread panics with a
+/// clear message instead of blocking `join()` and hanging the whole suite
+/// (Codex review finding).
+fn spawn_serve_stub(path: &Path, timeout: Duration) -> JoinHandle<()> {
+    let listener = UnixListener::bind(path).expect("bind stub serve socket");
+    listener
+        .set_nonblocking(true)
+        .expect("stub listener nonblocking");
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + timeout;
+        let stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "serve stub: no client connected within {timeout:?} — \
+                         did the medulla process exit before attaching?"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("serve stub: accept failed: {e}"),
+            }
+        };
+        // BSD-derived platforms make the accepted stream inherit the listener's
+        // nonblocking flag; the line-oriented protocol below needs blocking IO.
+        stream
+            .set_nonblocking(false)
+            .expect("stub stream blocking mode");
+        serve_conn(stream);
+    })
+}
+
+/// Drive one connection to completion.
+fn serve_conn(stream: UnixStream) {
+    let mut writer = stream.try_clone().expect("clone stub stream");
+    let mut reader = BufReader::new(stream);
+
+    // serve writes the ready banner first (protocol §3).
+    send(
+        &mut writer,
+        &json!({
+            "t": "ready", "protocol": 1, "serve": "3.12.0", "sessionId": "agent",
+            "capabilities": ["inference", "tools", "subagents"], "error": null
+        }),
+    );
+
+    let mut seq: u64 = 0;
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return, // peer closed
+            Ok(_) => {}
+        }
+        let Ok(frame) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
+        if frame.get("t").and_then(Value::as_str) != Some("req") {
+            continue;
+        }
+        let id = frame
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let op = frame.get("op").and_then(Value::as_str).unwrap_or("");
+        if serve_op(&mut writer, op, &id, &mut seq) {
+            return; // `stop` closes the connection
+        }
+    }
+}
+
+/// Answer one request. Returns `true` when the connection should close.
+fn serve_op(writer: &mut UnixStream, op: &str, id: &str, seq: &mut u64) -> bool {
+    match op {
+        "hello" => {
+            send(
+                writer,
+                &json!({"t":"res","id":id,"ok":true,"result":{
+                    "protocol":1,"sessionId":"agent","ports":["inference","tools","subagents"]
+                }}),
+            );
+            false
+        }
+        "subscribe" => {
+            send(
+                writer,
+                &json!({"t":"res","id":id,"ok":true,"result":{"subscribed":true,"seq":*seq}}),
+            );
+            false
+        }
+        "instruct" => {
+            send(
+                writer,
+                &json!({"t":"res","id":id,"ok":true,"result":{
+                    "instructionId":"inst-agent-0","cycleId":"cyc:agent:0"
+                }}),
+            );
+            for event in [
+                json!({"kind":"cycle_start","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
+                json!({"kind":"task_board_changed","task":{
+                    "id":"t1","title":"reconcile","status":"active",
+                    "createdAt":"0","updatedAt":"0","delegatedTaskIds":[],"notes":[]}}),
+                json!({"kind":"cycle_end","instructionId":"inst-agent-0","cycleId":"cyc:agent:0"}),
+            ] {
+                *seq += 1;
+                send(
+                    writer,
+                    &json!({"t":"event","seq":*seq,"at":0,"event":event}),
+                );
+            }
+            false
+        }
+        "stop" => {
+            send(
+                writer,
+                &json!({"t":"res","id":id,"ok":true,"result":{"stopped":true}}),
+            );
+            true
+        }
+        _ => {
+            send(
+                writer,
+                &json!({"t":"res","id":id,"ok":false,
+                    "error":{"code":"unknown_op","message":"unknown op"}}),
+            );
+            false
+        }
+    }
+}
+
+/// Write one newline-terminated NDJSON frame.
+fn send(writer: &mut UnixStream, frame: &Value) {
+    let _ = writer.write_all(format!("{frame}\n").as_bytes());
+    let _ = writer.flush();
+}
+
+#[test]
+fn run_streams_one_cycle_from_a_serve_socket() {
+    let home = TempDir::new().unwrap();
+    let socket = unique_socket();
+    let _ = std::fs::remove_file(&socket);
+    let stub = spawn_serve_stub(&socket, STUB_ACCEPT_TIMEOUT);
+
+    // A non-existent --config keeps load_config on built-in defaults, so the run
+    // never touches the user's real configuration.
+    let missing_config = home.path().join("none.toml");
+    let out = run(
+        &[
+            "run",
+            "--core-socket",
+            socket.to_str().unwrap(),
+            "--config",
+            missing_config.to_str().unwrap(),
+            "reconcile",
+            "the",
+            "world",
+        ],
+        home.path(),
+    );
+
+    // Surface a stub failure (e.g. its bounded accept expiring) as this test's
+    // own panic rather than silently swallowing it.
+    if let Err(panic) = stub.join() {
+        std::panic::resume_unwind(panic);
+    }
+    let _ = std::fs::remove_file(&socket);
+
+    assert!(
+        out.status.success(),
+        "run should exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<Value> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str::<Value>(l).expect("each stdout line is JSON"))
+        .collect();
+
+    // First a `ready` line naming the attached serve, last a `result` line.
+    assert_eq!(lines.first().unwrap()["type"], "ready");
+    assert_eq!(lines.first().unwrap()["sessionId"], "agent");
+    let result = lines.last().unwrap();
+    assert_eq!(result["type"], "result");
+    assert_eq!(result["passCount"], 0);
+
+    // The cycle framing streamed through in between.
+    let kinds: Vec<String> = lines
+        .iter()
+        .filter(|l| l["type"] == "event")
+        .filter_map(|l| l["event"]["kind"].as_str().map(str::to_string))
+        .collect();
+    assert!(kinds.iter().any(|k| k == "cycle_start"), "{kinds:?}");
+    assert!(kinds.iter().any(|k| k == "cycle_end"), "{kinds:?}");
+    // Task-board progress must stream too, not just fold into the snapshot.
+    assert!(kinds.iter().any(|k| k == "task_board_changed"), "{kinds:?}");
+}
+
+#[test]
+fn serve_stub_accept_is_bounded() {
+    // Codex review finding: an unconditional `listener.accept()` blocked the
+    // stub thread forever when the client never connected, hanging the suite at
+    // `join()` instead of reporting the real failure. With the bounded accept
+    // the thread gives up (panics with a clear message) within the timeout.
+    let socket = unique_socket();
+    let _ = std::fs::remove_file(&socket);
+    let started = Instant::now();
+    let stub = spawn_serve_stub(&socket, Duration::from_millis(200));
+
+    let joined = stub.join();
+    assert!(
+        joined.is_err(),
+        "with no client the stub must fail its bounded accept, not serve"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the bounded accept must expire promptly"
+    );
+    let _ = std::fs::remove_file(&socket);
+}
+
+#[test]
+fn run_rejects_a_core_socket_path_that_is_not_a_socket() {
+    // Codex review finding: a --core-socket value pointing at an existing
+    // non-socket used to hand the path to the runtime driver, which spun in
+    // reconnect until the attach timeout. The resolved path is now validated
+    // up front, so the run fails fast naming the path and the flag.
+    let home = TempDir::new().unwrap();
+    let not_a_socket = home.path().join("not-a-socket");
+    std::fs::write(&not_a_socket, b"plain file").unwrap();
+    let missing_config = home.path().join("none.toml");
+
+    let out = run(
+        &[
+            "run",
+            "--core-socket",
+            not_a_socket.to_str().unwrap(),
+            "--config",
+            missing_config.to_str().unwrap(),
+            "hello",
+        ],
+        home.path(),
+    );
+
+    assert!(!out.status.success(), "a non-socket path must fail the run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not a unix socket"), "stderr: {stderr}");
+    assert!(stderr.contains("--core-socket"), "stderr: {stderr}");
+    assert!(stderr.contains("not-a-socket"), "stderr: {stderr}");
+}
+
+#[test]
+fn run_without_an_instruction_is_a_usage_error() {
+    let home = TempDir::new().unwrap();
+    // No instruction text: the parser rejects it before any socket work, so this
+    // stays fast and offline.
+    let out = run(
+        &["run", "--core-socket", "/nonexistent/serve.sock"],
+        home.path(),
+    );
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("instruction"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

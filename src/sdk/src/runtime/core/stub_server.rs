@@ -27,6 +27,10 @@ pub(super) struct StubConfig {
     pub(super) instruct_fail: bool,
     /// The `event.event` payloads streamed after an `instruct` receipt.
     pub(super) instruct_events: Vec<Value>,
+    /// An optional pause between consecutive `instruct_events` writes, so a
+    /// test can force the host to observe (and act on) each event alone rather
+    /// than folding the whole batch in one wakeup.
+    pub(super) instruct_event_gap: Option<std::time::Duration>,
     /// The `event.event` payloads re-emitted when a `subscribe` carries a
     /// `replay` key (a re-attach rebaseline, serve-protocol §5). Empty ⇒ the
     /// stub replays nothing, matching a serve with no recent history.
@@ -43,6 +47,7 @@ impl Default for StubConfig {
             hello_ok: true,
             drop_after_instruct: false,
             instruct_fail: false,
+            instruct_event_gap: None,
             after_hello: Vec::new(),
             replay_events: Vec::new(),
             instruct_events: vec![
@@ -240,7 +245,12 @@ async fn serve_op(
             if send(wr, &receipt).await.is_err() {
                 return true;
             }
-            for event in &cfg.instruct_events {
+            for (i, event) in cfg.instruct_events.iter().enumerate() {
+                if i > 0 {
+                    if let Some(gap) = cfg.instruct_event_gap {
+                        tokio::time::sleep(gap).await;
+                    }
+                }
                 *seq += 1;
                 let frame = json!({"t":"event","seq":*seq,"at":0,"event":event});
                 if send(wr, &frame).await.is_err() {

@@ -70,6 +70,23 @@ async fn instruct_round_trips_and_streams_events() {
 }
 
 #[tokio::test]
+async fn submit_with_receipt_reports_the_instruct_ids() {
+    // The instruct `res` names the ids serve minted (serve-protocol §4.1); the
+    // receipt carries them so pollers can correlate the eventual cycle_end.
+    let server = StubServer::start(StubConfig::default());
+    let rt = CoreRuntime::attach(server.path.clone());
+    assert!(wait_until(|| rt.stream_state() == Some(StreamState::Live)).await);
+
+    let receipt = rt
+        .submit_with_receipt("go".into())
+        .await
+        .expect("instruct should ack")
+        .expect("the core wire carries a receipt");
+    assert_eq!(receipt.instruction_id.as_deref(), Some("inst-agent-0"));
+    assert_eq!(receipt.cycle_id.as_deref(), Some("cyc:agent:0"));
+}
+
+#[tokio::test]
 async fn version_mismatch_marks_unavailable() {
     let server = StubServer::start(StubConfig {
         protocol: 2,
@@ -245,6 +262,26 @@ async fn attach_to_missing_socket_stays_reconnecting() {
     tokio::time::sleep(Duration::from_millis(80)).await;
     assert_ne!(rt.stream_state(), Some(StreamState::Live));
     assert!(!is_unavailable(&rt));
+}
+
+#[tokio::test]
+async fn attach_to_a_non_socket_path_latches_unavailable() {
+    // Codex review finding: a resolved path that exists but is not a unix
+    // socket (a mistyped --core-socket / env / config value) used to spin in
+    // the reconnect loop forever. Connecting to it can never succeed, so the
+    // driver must latch a fatal, operator-facing state instead.
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("not-a-socket");
+    std::fs::write(&file, b"plain file").unwrap();
+
+    let rt = CoreRuntime::attach(file.clone());
+    assert!(
+        wait_until(|| is_unavailable(&rt)).await,
+        "an existing non-socket path must latch unavailable, not keep retrying"
+    );
+    assert_eq!(rt.stream_state(), Some(StreamState::Stalled));
+    let desc = rt.describe();
+    assert!(desc.contains("not a unix socket"), "{desc}");
 }
 
 #[tokio::test]

@@ -10,7 +10,9 @@ use futures::future::BoxFuture;
 use serde_json::json;
 use tokio::sync::{broadcast, oneshot};
 
-use crate::runtime::{ContextItem, Runtime, RuntimeSnapshot, StreamState, ThreadSummary};
+use crate::runtime::{
+    ContextItem, Runtime, RuntimeSnapshot, StreamState, SubmitReceipt, ThreadSummary,
+};
 use crate::ui::chat_store::{ChatMessage, MainChatSummary};
 use crate::ui::events::TuiEvent;
 
@@ -56,6 +58,7 @@ impl Runtime for CoreRuntime {
             threads,
             active_thread_id: "core".into(),
             harness: s.harness.clone(),
+            replay_epoch: s.replay_epoch,
         }
     }
 
@@ -64,6 +67,14 @@ impl Runtime for CoreRuntime {
     }
 
     fn submit(&self, input: String) -> BoxFuture<'static, anyhow::Result<()>> {
+        let fut = self.submit_with_receipt(input);
+        Box::pin(async move { fut.await.map(|_| ()) })
+    }
+
+    fn submit_with_receipt(
+        &self,
+        input: String,
+    ) -> BoxFuture<'static, anyhow::Result<Option<SubmitReceipt>>> {
         let cmd_tx = self.cmd_tx.clone();
         let state = self.state.clone();
         let tx = self.tx.clone();
@@ -86,7 +97,14 @@ impl Runtime for CoreRuntime {
             let _ = tx.send(());
 
             let params = json!({ "message": input, "meta": { "origin": "submit" } });
-            request(&cmd_tx, "instruct", params).await.map(|_| ())
+            // The `instruct` receipt names the ids serve minted for this
+            // submission (serve-protocol §4.1), letting a poller correlate the
+            // eventual cycle_end back to it.
+            let result = request(&cmd_tx, "instruct", params).await?;
+            Ok(Some(SubmitReceipt {
+                instruction_id: value_str(&result, "instructionId"),
+                cycle_id: value_str(&result, "cycleId"),
+            }))
         })
     }
 
@@ -187,6 +205,14 @@ impl Runtime for CoreRuntime {
         // contiguous, Resyncing on a gap / reconnect, Stalled when unavailable.
         Some(self.state.lock().unwrap().stream_health())
     }
+}
+
+/// Read an optional string field off a JSON receipt, `None` when absent/null.
+fn value_str(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 /// Whether a tracked-task status counts as an in-flight lane for the thread card.

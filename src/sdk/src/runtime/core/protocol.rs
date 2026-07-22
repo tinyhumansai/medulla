@@ -192,11 +192,25 @@ pub(super) fn fold_event(state: &mut CoreState, event: &Value) -> bool {
             true
         }
         Ok(HarnessEvent::TaskBoardChanged { task }) => {
-            let status = status_mut(state);
-            match status.tasks.iter_mut().find(|t| t.id == task.id) {
-                Some(existing) => *existing = task,
-                None => status.tasks.push(task),
+            // Serialize the row before it moves into the board: the change must
+            // also land in the event log, because headless `run` consumers
+            // drain `snapshot().events` — a harness-only fold would silently
+            // drop task progress from the NDJSON stream.
+            let data = serde_json::Map::from_iter([(
+                "task".to_string(),
+                serde_json::to_value(&task).unwrap_or(Value::Null),
+            )]);
+            {
+                let status = status_mut(state);
+                match status.tasks.iter_mut().find(|t| t.id == task.id) {
+                    Some(existing) => *existing = task,
+                    None => status.tasks.push(task),
+                }
             }
+            state.emit(TuiEvent::Unknown {
+                kind: "task_board_changed".into(),
+                data,
+            });
             true
         }
         Ok(HarnessEvent::CycleEvent { event: inner }) => {

@@ -7,7 +7,6 @@
 //! [`load_config`](super::load_config), not here.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -372,35 +371,6 @@ impl LoadedConfig {
         } else {
             "WORKER".into()
         }
-    }
-
-    /// Resolve the NDJSON `medulla-serve` socket path for the core runtime.
-    ///
-    /// Precedence follows the serve-protocol transport contract (plan §2.2): an
-    /// explicit `[core] socketPath` wins; otherwise
-    /// `$XDG_RUNTIME_DIR/medulla/serve.sock`, then `<stateDir>/serve.sock`. A
-    /// blank or whitespace-only `socketPath` is treated as unset. The returned
-    /// path is where the runtime *attaches*; this milestone never spawns serve,
-    /// so a missing socket surfaces as an attach error, not a spawn.
-    pub fn core_socket_path(&self, env: &HashMap<String, String>) -> PathBuf {
-        if let Some(explicit) = self
-            .config
-            .core
-            .as_ref()
-            .and_then(|c| c.socket_path.as_deref())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            return PathBuf::from(explicit);
-        }
-        if let Some(xdg) = env
-            .get("XDG_RUNTIME_DIR")
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            return PathBuf::from(xdg).join("medulla").join("serve.sock");
-        }
-        PathBuf::from(&self.config.state_dir).join("serve.sock")
     }
 
     /// Pretty-printed config JSON for the Config tab, with `backend.tokenEnv`

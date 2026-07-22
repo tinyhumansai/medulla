@@ -184,7 +184,14 @@ impl PtySessionExecutor {
         // to be listening and for the paste to land before pressing Enter — a
         // return sent in the same burst is absorbed by the paste, which leaves
         // the prompt sitting in the composer, complete and unsent.
-        super::pty::inject_prompt(&self.sessions, &id, &options.prompt).await?;
+        if let Err(err) = super::pty::inject_prompt(&self.sessions, &id, &options.prompt).await {
+            if class == SessionClass::Bounded {
+                self.sessions.close(&id);
+            } else {
+                self.sessions.release(&id);
+            }
+            return Err(err);
+        }
 
         // Only the plain data and the (owned) callback cross into the polling
         // loop: `RunTaskOptions` is `Send` but not `Sync`, so holding a borrow
@@ -197,6 +204,11 @@ impl PtySessionExecutor {
         if class == SessionClass::Bounded {
             // Bounded means bounded: the session dies with its reply.
             self.sessions.close(&id);
+        } else {
+            // Free it for this peer's next turn. Released on the error path too:
+            // a session left claimed by a failed turn is never reusable again,
+            // and every later task would open a new harness.
+            self.sessions.release(&id);
         }
         outcome
     }
@@ -208,11 +220,16 @@ impl PtySessionExecutor {
         class: SessionClass,
     ) -> Result<OpenedSession, String> {
         if class == SessionClass::Unbound {
-            if let Some(row) = self.sessions.rows().into_iter().find(|row| {
-                row.label == options.conversation
-                    && row.provider == options.provider
-                    && row.state.is_running()
-            }) {
+            // Reuse this peer's session only when it is *idle*. A harness serves
+            // one turn at a time: a fan-out that pastes three prompts into one
+            // composer gets them answered as a single conversation, and all
+            // three tails settle on the same completion — three different
+            // instructions, one answer, delivered three times. A busy session
+            // therefore does not qualify, and the task gets a fresh one.
+            if let Some(row) = self
+                .sessions
+                .claim_idle(&options.conversation, options.provider)
+            {
                 return Ok(OpenedSession {
                     id: row.id.clone(),
                     harness_session_id: row.session_id.clone(),

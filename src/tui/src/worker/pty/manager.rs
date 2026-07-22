@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
+use medulla::tinyplace::HarnessProvider;
+
 use super::launch::{interactive_args, mint_session_id};
 use super::types::{
     LaunchSpec, PtySession, PtyState, SessionRow, DEFAULT_COLS, DEFAULT_ROWS, SCROLLBACK,
@@ -205,6 +207,10 @@ impl PtyManager {
                 started_at: now,
                 last_output_at: now,
                 last_error: None,
+                // Opened because a turn is about to run in it. Claimed here so a
+                // concurrent task cannot take it in the gap before that turn
+                // starts.
+                busy: true,
             },
             screen,
             master: pty.master,
@@ -276,6 +282,34 @@ impl PtyManager {
     }
 
     /// Every session, open order — the list pane's rows.
+    /// Take an idle session for `label` on `provider`, marking it busy.
+    ///
+    /// Find-and-claim under one lock, deliberately. Checking `busy` and then
+    /// setting it in two steps lets two concurrent tasks both observe the same
+    /// idle session and both take it — which is precisely the collision this
+    /// exists to prevent, and it would show up only under a real fan-out.
+    ///
+    /// `None` when there is no idle session, and the caller opens a fresh one.
+    pub fn claim_idle(&self, label: &str, provider: HarnessProvider) -> Option<SessionRow> {
+        let mut sessions = self.inner.sessions.lock().unwrap();
+        let session = sessions.iter_mut().find(|s| {
+            s.row.label == label
+                && s.row.provider == provider
+                && s.row.state.is_running()
+                && !s.row.busy
+        })?;
+        session.row.busy = true;
+        Some(session.row.clone())
+    }
+
+    /// Mark a session free for the next turn.
+    pub fn release(&self, id: &str) {
+        let mut sessions = self.inner.sessions.lock().unwrap();
+        if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
+            session.row.busy = false;
+        }
+    }
+
     pub fn rows(&self) -> Vec<SessionRow> {
         self.inner
             .sessions

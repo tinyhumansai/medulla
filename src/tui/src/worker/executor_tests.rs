@@ -336,3 +336,65 @@ async fn a_second_turn_on_a_reused_session_gets_its_own_answer() {
     );
     sessions.shutdown();
 }
+
+#[tokio::test]
+async fn concurrent_tasks_from_one_peer_do_not_share_a_session() {
+    // Reproduced from the field. The orchestrator fans out — its prompt calls
+    // delegation its DEFAULT path — so three tasks arrived from the same peer at
+    // once. All three found the same running session, were pasted into the same
+    // composer, and all three tails settled on the same completion:
+    //
+    //   repo-scan-1              reply · 872 chars: Continuing from the scan I already ran…
+    //   repo-scan-2              reply · 872 chars: Continuing from the scan I already ran…
+    //   repo-scan-claude-daemon  reply · 872 chars: Continuing from the scan I already ran…
+    //
+    // Three different instructions, one answer, delivered three times.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
+
+    // Each session writes its own rollout, so a shared session would be visible
+    // as a shared transcript rather than only as a shared answer.
+    let script = |n: u32| {
+        let rollout = dir.path().join(format!("rollout-{n}.jsonl"));
+        fake_harness_script(&rollout.to_string_lossy(), &cwd, &format!("answer {n}"))
+    };
+
+    let a = tokio::spawn({
+        let (e, env, s) = (executor.clone(), env.clone(), script(1));
+        async move {
+            e.run_for_test(options(&env, "peer-dave", &s, &cwd_of(&env)))
+                .await
+        }
+    });
+    let b = tokio::spawn({
+        let (e, env, s) = (executor.clone(), env.clone(), script(2));
+        async move {
+            e.run_for_test(options(&env, "peer-dave", &s, &cwd_of(&env)))
+                .await
+        }
+    });
+
+    let (ra, rb) = tokio::join!(a, b);
+    let ra = ra.expect("no panic").expect("first task must succeed");
+    let rb = rb.expect("no panic").expect("second task must succeed");
+
+    assert_ne!(
+        ra.reply, rb.reply,
+        "two concurrent tasks must get their own answers, not one answer twice"
+    );
+    assert_eq!(
+        sessions.rows().len(),
+        2,
+        "a busy session must not be reused; the second task needs its own"
+    );
+    sessions.shutdown();
+}
+
+/// The workspace an options set was built for.
+fn cwd_of(env: &HashMap<String, String>) -> String {
+    env.get("TINYPLACE_CODEX_SESSIONS_DIR")
+        .cloned()
+        .unwrap_or_default()
+}

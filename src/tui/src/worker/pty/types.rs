@@ -107,6 +107,13 @@ pub struct SessionRow {
     pub last_output_at: i64,
     /// Why it failed, when it did.
     pub last_error: Option<String>,
+    /// Whether a turn is running in this session right now.
+    ///
+    /// A harness serves one turn at a time: two prompts typed into one composer
+    /// are answered as one conversation, and both tails settle on the same
+    /// completion. So a busy session is not reusable, however idle its pty
+    /// looks.
+    pub busy: bool,
 }
 
 impl SessionRow {

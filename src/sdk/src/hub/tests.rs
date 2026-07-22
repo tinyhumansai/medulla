@@ -132,6 +132,13 @@ enum Mode {
     /// Silent until the sender has reset the session (simulating a restarted peer
     /// whose first `CIPHERTEXT` is undecryptable), then replies.
     RecoverAfterReset(String),
+    /// Streams `statuses` progress frames, one per drain, then replies. Models a
+    /// worker that is plainly working but takes longer than one idle budget —
+    /// the case a wall-clock deadline kills and an idle one does not.
+    Chatty {
+        statuses: u32,
+        reply: String,
+    },
 }
 
 /// A fake worker: on `send`, decodes the task frame and queues the daemon's
@@ -216,6 +223,12 @@ impl Relay for FakeWorker {
                 }),
             )),
             Mode::Error(text) => q.push_back(mk(TaskFrameKind::Error, text, None)),
+            Mode::Chatty { statuses, reply } => {
+                for n in 0..*statuses {
+                    q.push_back(mk(TaskFrameKind::Status, &format!("working {n}"), None));
+                }
+                q.push_back(mk(TaskFrameKind::Reply, reply, None));
+            }
             // Ack + status already queued above; no terminal frame follows.
             Mode::Silent | Mode::AckOnly => {}
         }
@@ -223,6 +236,13 @@ impl Relay for FakeWorker {
     }
 
     async fn drain_inbox(&self, limit: i64) -> Vec<InboundMessage> {
+        // One frame per drain in `Chatty`, so the stream is spread across poll
+        // intervals rather than arriving in a single burst — otherwise every
+        // frame lands inside the first idle budget and proves nothing.
+        let limit = match self.mode {
+            Mode::Chatty { .. } => 1,
+            _ => limit,
+        };
         let mut q = self.inbox.lock().await;
         let mut out = Vec::new();
         while out.len() < limit as usize {
@@ -612,4 +632,41 @@ fn an_unlabelled_worker_advertises_one_token_not_two() {
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["id"], "sanil-laptop");
     assert_eq!(agents[0]["name"], "Sanil Laptop");
+}
+
+#[tokio::test]
+async fn a_worker_that_keeps_reporting_progress_is_not_timed_out() {
+    // The deadline was wall-clock from the first sign of life, so a worker
+    // streaming `running Bash: …` every few seconds died at exactly the same
+    // moment as one that had gone silent — and a real coding task crosses that
+    // line routinely. Every frame now resets the clock.
+    let worker = FakeWorker::new(Mode::Chatty {
+        // Comfortably more than one idle budget's worth at the 1ms poll below,
+        // and comfortably inside the ceiling — the window this must land in.
+        statuses: 30,
+        reply: "scan complete".to_string(),
+    });
+    let runner = TaskRunner::start(worker, Duration::from_millis(1));
+
+    let mut request = req("scan the filesystem");
+    // Short enough that a wall-clock deadline would fire long before the reply,
+    // while the ceiling (4x) stays well clear.
+    request.timeout = Duration::from_millis(25);
+
+    let outcome = runner.run(request, None).await.expect("must not time out");
+    assert_eq!(outcome.reply, "scan complete");
+}
+
+#[tokio::test]
+async fn a_worker_that_goes_quiet_still_times_out() {
+    // The idle deadline must still fire — otherwise a peer that acks and dies
+    // holds its dispatch until the ceiling.
+    let worker = FakeWorker::new(Mode::AckOnly);
+    let runner = TaskRunner::start(worker, Duration::from_millis(1));
+
+    let mut request = req("scan the filesystem");
+    request.timeout = Duration::from_millis(30);
+
+    let err = runner.run(request, None).await.expect_err("must time out");
+    assert!(matches!(err, RunError::Timeout), "got {err:?}");
 }

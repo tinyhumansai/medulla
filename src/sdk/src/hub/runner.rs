@@ -33,6 +33,14 @@ const CONTACT_POLL: Duration = Duration::from_millis(500);
 /// `status`, `reply`, `error`) before treating the peer as unreachable and
 /// re-handshaking. Short: a live worker acks within a poll or two.
 const ACK_WINDOW: Duration = Duration::from_secs(12);
+
+/// How many idle budgets a task may span in total before it is given up on
+/// regardless of how much it is saying.
+///
+/// The idle deadline answers "is anyone home"; this answers "is this ever going
+/// to end". Without it a worker emitting a status frame every few seconds would
+/// hold its dispatch indefinitely.
+const MAX_IDLE_EXTENSIONS: u32 = 4;
 /// How many times to reset the Signal session + resend before giving up. Covers
 /// the common one-sided-session desync (worker restarted) in one extra round.
 const MAX_RESETS: u32 = 2;
@@ -299,14 +307,33 @@ impl TaskRunner {
                 biased;
                 terminal = &mut rx => return settle(terminal),
                 _ = activity.notified() => {
-                    // Peer is alive — await the terminal reply for the full timeout.
-                    return match tokio::time::timeout(req.timeout, rx).await {
-                        Ok(terminal) => settle(terminal),
-                        Err(_) => {
-                            self.waiters.lock().await.remove(&cid);
-                            Err(RunError::Timeout)
+                    // Alive. From here the deadline is IDLE, not wall-clock:
+                    // every frame resets it, so a worker streaming progress is
+                    // left to work and only a silent one is given up on. It used
+                    // to be a single wall-clock timeout, which killed a task
+                    // reporting `running Bash: …` every few seconds at exactly
+                    // the same moment as one that had died — and a real coding
+                    // task crosses that line routinely.
+                    //
+                    // A ceiling still bounds it, because a worker that chatters
+                    // without ever finishing must not hold the dispatch forever.
+                    let ceiling = tokio::time::Instant::now() + req.timeout * MAX_IDLE_EXTENSIONS;
+                    loop {
+                        tokio::select! {
+                            biased;
+                            terminal = &mut rx => return settle(terminal),
+                            // A frame: the peer is working. Reset the idle clock.
+                            _ = activity.notified() => continue,
+                            _ = tokio::time::sleep_until(ceiling) => {
+                                self.waiters.lock().await.remove(&cid);
+                                return Err(RunError::Timeout);
+                            }
+                            _ = tokio::time::sleep(req.timeout) => {
+                                self.waiters.lock().await.remove(&cid);
+                                return Err(RunError::Timeout);
+                            }
                         }
-                    };
+                    }
                 }
                 _ = tokio::time::sleep(self.ack_window) => {
                     // Silence — the peer likely can't decrypt (restarted / one-sided

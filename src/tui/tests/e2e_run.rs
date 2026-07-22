@@ -11,6 +11,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -40,16 +41,45 @@ fn unique_socket() -> PathBuf {
     std::env::temp_dir().join(format!("mdl-run-{}-{nanos}.sock", std::process::id()))
 }
 
+/// How long the stub waits for the `medulla` process to connect before giving
+/// up. Generous for CI; a healthy run connects within a couple of seconds.
+const STUB_ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Serve exactly one `medulla-serve` connection synchronously: the `ready`
 /// banner, then answer `hello`/`subscribe`, stream one full cycle on `instruct`,
 /// and ack `stop`. Enough of the protocol for the driver to round-trip one
 /// instruction. Returns the accept-loop thread so the test can join it.
-fn spawn_serve_stub(path: &Path) -> JoinHandle<()> {
+///
+/// The accept is bounded by `timeout`: if no client connects (the binary exited
+/// before attaching — a parser/config regression), the thread panics with a
+/// clear message instead of blocking `join()` and hanging the whole suite
+/// (Codex review finding).
+fn spawn_serve_stub(path: &Path, timeout: Duration) -> JoinHandle<()> {
     let listener = UnixListener::bind(path).expect("bind stub serve socket");
+    listener
+        .set_nonblocking(true)
+        .expect("stub listener nonblocking");
     std::thread::spawn(move || {
-        let Ok((stream, _)) = listener.accept() else {
-            return;
+        let deadline = Instant::now() + timeout;
+        let stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "serve stub: no client connected within {timeout:?} — \
+                         did the medulla process exit before attaching?"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("serve stub: accept failed: {e}"),
+            }
         };
+        // BSD-derived platforms make the accepted stream inherit the listener's
+        // nonblocking flag; the line-oriented protocol below needs blocking IO.
+        stream
+            .set_nonblocking(false)
+            .expect("stub stream blocking mode");
         serve_conn(stream);
     })
 }
@@ -164,7 +194,7 @@ fn run_streams_one_cycle_from_a_serve_socket() {
     let home = TempDir::new().unwrap();
     let socket = unique_socket();
     let _ = std::fs::remove_file(&socket);
-    let stub = spawn_serve_stub(&socket);
+    let stub = spawn_serve_stub(&socket, STUB_ACCEPT_TIMEOUT);
 
     // A non-existent --config keeps load_config on built-in defaults, so the run
     // never touches the user's real configuration.
@@ -183,7 +213,11 @@ fn run_streams_one_cycle_from_a_serve_socket() {
         home.path(),
     );
 
-    let _ = stub.join();
+    // Surface a stub failure (e.g. its bounded accept expiring) as this test's
+    // own panic rather than silently swallowing it.
+    if let Err(panic) = stub.join() {
+        std::panic::resume_unwind(panic);
+    }
     let _ = std::fs::remove_file(&socket);
 
     assert!(
@@ -216,6 +250,29 @@ fn run_streams_one_cycle_from_a_serve_socket() {
     assert!(kinds.iter().any(|k| k == "cycle_end"), "{kinds:?}");
     // Task-board progress must stream too, not just fold into the snapshot.
     assert!(kinds.iter().any(|k| k == "task_board_changed"), "{kinds:?}");
+}
+
+#[test]
+fn serve_stub_accept_is_bounded() {
+    // Codex review finding: an unconditional `listener.accept()` blocked the
+    // stub thread forever when the client never connected, hanging the suite at
+    // `join()` instead of reporting the real failure. With the bounded accept
+    // the thread gives up (panics with a clear message) within the timeout.
+    let socket = unique_socket();
+    let _ = std::fs::remove_file(&socket);
+    let started = Instant::now();
+    let stub = spawn_serve_stub(&socket, Duration::from_millis(200));
+
+    let joined = stub.join();
+    assert!(
+        joined.is_err(),
+        "with no client the stub must fail its bounded accept, not serve"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the bounded accept must expire promptly"
+    );
+    let _ = std::fs::remove_file(&socket);
 }
 
 #[test]

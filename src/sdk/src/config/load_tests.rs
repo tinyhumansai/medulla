@@ -289,8 +289,11 @@ fn a_synthesized_tinyplace_section_honours_the_staging_switch() {
         default_tinyplace_config(&prod).base_url,
         "https://api.tiny.place"
     );
-    assert_eq!(
-        default_tinyplace_config(&prod).identity_dir,
-        "/tmp/mh/tinyplace"
-    );
+    // Built with `join` rather than written out: the value is a real path, so
+    // on Windows it comes back separated with a backslash.
+    let expected = std::path::Path::new("/tmp/mh")
+        .join("tinyplace")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(default_tinyplace_config(&prod).identity_dir, expected);
 }

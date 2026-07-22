@@ -396,18 +396,25 @@ async fn a_worker_that_keeps_reporting_progress_is_not_timed_out() {
     // streaming `running Bash: …` every few seconds died at exactly the same
     // moment as one that had gone silent — and a real coding task crosses that
     // line routinely. Every frame now resets the clock.
+    // Elapsed has to land between one idle budget and the 4x ceiling, so the
+    // margins are what make this test stable rather than flaky. At 20 statuses
+    // and a 40ms poll the run takes ~800ms against a 500ms budget and a 2000ms
+    // ceiling: it would need a 2.5x slowdown to overrun, or to somehow finish
+    // twelve polls early to undershoot.
+    //
+    // The first cut used a 1ms poll against a 25ms budget, where the ceiling was
+    // 100ms of wall clock for 30 round trips — Windows CI spent that on timer
+    // granularity alone and the test failed there.
     let worker = FakeWorker::new(Mode::Chatty {
-        // Comfortably more than one idle budget's worth at the 1ms poll below,
-        // and comfortably inside the ceiling — the window this must land in.
-        statuses: 30,
+        statuses: 20,
         reply: "scan complete".to_string(),
     });
-    let runner = TaskRunner::start(worker, Duration::from_millis(1));
+    let runner = TaskRunner::start(worker, Duration::from_millis(40));
 
     let mut request = req("scan the filesystem");
-    // Short enough that a wall-clock deadline would fire long before the reply,
-    // while the ceiling (4x) stays well clear.
-    request.timeout = Duration::from_millis(25);
+    // Well under the elapsed total, so a wall-clock deadline would have fired
+    // long before the reply — which is the whole point of the test.
+    request.timeout = Duration::from_millis(500);
 
     let outcome = runner.run(request, None).await.expect("must not time out");
     assert_eq!(outcome.reply, "scan complete");

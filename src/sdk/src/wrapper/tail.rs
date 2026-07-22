@@ -9,9 +9,10 @@
 //! [`crate::daemon::mappers`]. (opencode is out of scope here — its wrapper uses
 //! an SSE bridge, a documented scope cut.)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use crate::session_history::{discover_session_file, preexisting_session_files, SessionAgentKind};
 
@@ -57,12 +58,25 @@ pub struct SessionTailer {
     agent: SessionAgentKind,
     cwd: String,
     start_ms: i64,
-    ignored: std::collections::HashSet<PathBuf>,
+    ignored: HashSet<PathBuf>,
     active: Option<Active>,
     /// When set, only the transcript recording this session id is accepted.
     expect_session_id: Option<String>,
     /// Start reading at the transcript's current end rather than at byte zero.
     from_end: bool,
+    /// Transcripts already latched onto by another tailer in this process.
+    ///
+    /// Only consulted for *unpinned* discovery, which is the ambiguous case: a
+    /// codex session mints its own id, so a new one has nothing to pin to and
+    /// discovery falls back to "the newest transcript that appeared after we
+    /// launched". Two sessions starting together both match the first rollout to
+    /// appear, and both tails then settle on it — one task's answer, returned
+    /// twice. A claim makes the first tailer's choice exclusive.
+    ///
+    /// A pinned tailer ignores claims entirely: identity already decides, and a
+    /// resumed session must be able to re-latch the transcript it claimed on its
+    /// previous turn.
+    claims: Option<Arc<Mutex<HashSet<PathBuf>>>>,
 }
 
 impl SessionTailer {
@@ -84,7 +98,16 @@ impl SessionTailer {
             active: None,
             expect_session_id: None,
             from_end: false,
+            claims: None,
         }
+    }
+
+    /// Share `claims` with every other tailer that may discover the same
+    /// directory, so an unpinned discovery cannot take a transcript another
+    /// tailer already holds.
+    pub fn with_claims(mut self, claims: Arc<Mutex<HashSet<PathBuf>>>) -> Self {
+        self.claims = Some(claims);
+        self
     }
 
     /// Pin this tailer to one session id.
@@ -137,15 +160,30 @@ impl SessionTailer {
     pub fn poll(&mut self) -> TailPoll {
         let mut out = TailPoll::default();
         if self.active.is_none() {
+            // Claims only bind unpinned discovery; see the field's docs.
+            let skip = match (&self.claims, self.expect_session_id.is_some()) {
+                (Some(claims), false) => {
+                    let mut skip = self.ignored.clone();
+                    skip.extend(claims.lock().expect("claim lock").iter().cloned());
+                    std::borrow::Cow::Owned(skip)
+                }
+                _ => std::borrow::Cow::Borrowed(&self.ignored),
+            };
             match discover_session_file(
                 &self.env,
                 self.agent,
                 &self.cwd,
                 self.start_ms - DISCOVER_MTIME_GRACE_MS,
-                &self.ignored,
+                &skip,
                 self.expect_session_id.as_deref(),
             ) {
                 Some(found) => {
+                    if let Some(claims) = &self.claims {
+                        claims
+                            .lock()
+                            .expect("claim lock")
+                            .insert(found.path.clone());
+                    }
                     out.located = Some(LocatedSession {
                         path: found.path.clone(),
                         harness_session_id: found.id,

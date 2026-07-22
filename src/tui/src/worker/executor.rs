@@ -22,8 +22,9 @@
 //! sees does not depend on which mode served it — the two differ only in where
 //! the raw lines come from.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use medulla::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
@@ -79,6 +80,12 @@ pub struct PtySessionExecutor {
     sessions: PtyManager,
     env: HashMap<String, String>,
     workspace: String,
+    /// Transcripts already latched onto, shared by every tailer this executor
+    /// builds. Two concurrent tasks open two sessions in one workspace, and a
+    /// codex session mints its own id, so neither tailer has anything to pin to
+    /// — both match the first rollout to appear and both settle on it, handing
+    /// one task's answer to two peers. The claim makes the first one exclusive.
+    claims: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 impl PtySessionExecutor {
@@ -91,6 +98,7 @@ impl PtySessionExecutor {
             sessions,
             env,
             workspace,
+            claims: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -150,7 +158,8 @@ impl PtySessionExecutor {
             agent,
             self.workspace.clone(),
             medulla::clock::now_millis(),
-        );
+        )
+        .with_claims(self.claims.clone());
         let opened = self.session_for(&options, class)?;
         if let Some(pinned) = &opened.harness_session_id {
             // A reused session's transcript already exists, so the fresh-session

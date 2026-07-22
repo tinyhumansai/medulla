@@ -24,11 +24,22 @@ use super::pty::PtyManager;
 /// It reads the injected prompt from its pty, echoes it (so the pane shows
 /// something), then writes a rollout that says the turn is complete.
 fn fake_harness_script(rollout: &str, cwd: &str, reply: &str) -> String {
+    fake_harness_script_as(rollout, cwd, reply, "sess-fake-1")
+}
+
+/// As [`fake_harness_script`], with the harness session id stated.
+///
+/// Concurrent sessions must each claim their own: the tailer pins to the id it
+/// learns from the rollout, so two sessions reporting the same one are
+/// indistinguishable to it and both tails can settle on whichever rollout is
+/// found first. Real codex sessions mint distinct ids; a fixture that does not
+/// was testing something the product never sees.
+fn fake_harness_script_as(rollout: &str, cwd: &str, reply: &str, session_id: &str) -> String {
     format!(
         r#"
 read -r prompt
 printf 'working on: %s\r\n' "$prompt"
-printf '{{"type":"session_meta","payload":{{"session_id":"sess-fake-1","cwd":"{cwd}"}}}}\n' >> '{rollout}'
+printf '{{"type":"session_meta","payload":{{"session_id":"{session_id}","cwd":"{cwd}"}}}}\n' >> '{rollout}'
 printf '{{"type":"event_msg","payload":{{"type":"task_started","turn_id":"t1"}}}}\n' >> '{rollout}'
 printf '{{"type":"event_msg","payload":{{"type":"agent_message","message":"looking at it","phase":"main"}}}}\n' >> '{rollout}'
 printf '{{"type":"event_msg","payload":{{"type":"task_complete","turn_id":"t1","last_agent_message":"{reply}"}}}}\n' >> '{rollout}'
@@ -358,7 +369,12 @@ async fn concurrent_tasks_from_one_peer_do_not_share_a_session() {
     // as a shared transcript rather than only as a shared answer.
     let script = |n: u32| {
         let rollout = dir.path().join(format!("rollout-{n}.jsonl"));
-        fake_harness_script(&rollout.to_string_lossy(), &cwd, &format!("answer {n}"))
+        fake_harness_script_as(
+            &rollout.to_string_lossy(),
+            &cwd,
+            &format!("answer {n}"),
+            &format!("sess-fake-{n}"),
+        )
     };
 
     let a = tokio::spawn({

@@ -450,6 +450,39 @@ async fn a_successful_poll_records_when_and_how_many() {
 }
 
 #[tokio::test]
+async fn a_log_attached_to_one_handle_narrates_from_every_handle() {
+    // The desk documents itself as cheap to clone with the clones sharing one
+    // book — but the sink was per-instance, so the handle that polls and the
+    // handle you attach a log to had to be the same value. They are not: the
+    // service spawns the poll and hands a clone to the screen, which is what
+    // wants the narration. Working around it by polling the clone gave two
+    // polls of one relay: doubled traffic, interleaved snapshots, and duplicate
+    // "new request(s)" lines.
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let relay = FakeRelay::with_incoming(&["alice"]);
+    let polling = ContactDesk::new(
+        relay.clone() as Arc<dyn ContactRelay>,
+        AdmissionPolicy::Manual,
+        Vec::<String>::new(),
+    )
+    .with_now(clock());
+
+    // A different handle entirely — as `TinyplaceService::contacts()` hands out.
+    let _screen = polling.clone().with_log({
+        let seen = seen.clone();
+        Arc::new(move |line: &str| seen.lock().unwrap().push(line.to_string()))
+    });
+
+    polling.refresh().await;
+
+    let lines = seen.lock().unwrap().clone();
+    assert!(
+        lines.iter().any(|l| l.contains("1 new request")),
+        "the poll must narrate through a sink attached to another handle: {lines:?}"
+    );
+}
+
+#[tokio::test]
 async fn contact_activity_is_narrated_so_silence_is_readable() {
     // A worker that receives nothing and a worker nobody has asked for look
     // identical in the UI. Only one of them is a problem with the worker.

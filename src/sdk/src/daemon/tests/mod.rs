@@ -97,6 +97,15 @@ pub(super) fn input_frame(task_id: &str, text: &str, correlation: Option<&str>) 
     }
 }
 
+/// Build an `Abort`-kind frame (otherwise identical to [`task_frame`]).
+pub(super) fn abort_frame(task_id: &str, correlation: Option<&str>) -> TaskFrame {
+    TaskFrame {
+        usage: None,
+        kind: TaskFrameKind::Abort,
+        ..task_frame(task_id, "", correlation)
+    }
+}
+
 /// A runner that signals readiness, then blocks until `gate` is released.
 pub(super) fn blocking_runner(ready: mpsc::UnboundedSender<()>, gate: Arc<Notify>) -> RunTaskFn {
     Arc::new(move |opts: RunTaskOptions| {

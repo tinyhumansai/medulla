@@ -11,8 +11,8 @@ use crate::daemon::DaemonRuntime;
 use crate::tinyplace::TaskFrameKind;
 
 use super::{
-    abortable_runner, base_config, blocking_runner, conversation_runner, decoded_frames,
-    input_frame, recording_send, stdin_runner, task_frame, wait_ready,
+    abort_frame, abortable_runner, base_config, blocking_runner, conversation_runner,
+    decoded_frames, input_frame, recording_send, stdin_runner, task_frame, wait_ready,
 };
 
 #[tokio::test]
@@ -132,6 +132,95 @@ async fn forwards_input_into_running_task() {
         .any(|f| f.kind == TaskFrameKind::Ack && f.text == "input received"));
 
     gate.notify_waiters();
+    runtime.idle().await;
+}
+
+#[tokio::test]
+async fn abort_with_mismatched_correlation_leaves_the_running_task_alone() {
+    // Task ids recur by construction — they are positional per `delegate_tasks`
+    // call, and the hub's uniquifying suffix restarts from zero when the hub
+    // does. So an abort for a task that has already finished can name a live
+    // one, and cancelling that is silent and total: the peer waiting on the new
+    // task simply never hears back.
+    //
+    // `handle_input` has guarded this since it was written; `handle_abort` did
+    // not, and it is the more damaging of the two.
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+    let gate = Arc::new(Notify::new());
+    let received = Arc::new(StdMutex::new(Vec::new()));
+    let run_task = stdin_runner(ready_tx, gate.clone(), received.clone());
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+
+    // The live task, from a *later* dispatch that reused the id.
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", Some("corr-B"))),
+    );
+    wait_ready(&mut ready_rx).await;
+    assert_eq!(runtime.active_count(), 1);
+
+    // A stale abort for the earlier dispatch of the same id.
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(abort_frame("t1", Some("corr-A"))),
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    assert_eq!(
+        runtime.active_count(),
+        1,
+        "a stale abort must not cancel the task that reused the id"
+    );
+    let frames = decoded_frames(&recorded);
+    assert!(
+        frames
+            .iter()
+            .any(|f| f.kind == TaskFrameKind::Ack && f.text == "no matching running task to abort"),
+        "acked either way, but as a no-match: {frames:?}"
+    );
+
+    gate.notify_waiters();
+    runtime.shutdown();
+    runtime.idle().await;
+}
+
+#[tokio::test]
+async fn an_abort_that_matches_the_running_dispatch_stops_it() {
+    // The other half: the guard must not make Abort inert.
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+    let gate = Arc::new(Notify::new());
+    let received = Arc::new(StdMutex::new(Vec::new()));
+    let run_task = stdin_runner(ready_tx, gate.clone(), received.clone());
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", Some("corr-A"))),
+    );
+    wait_ready(&mut ready_rx).await;
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(abort_frame("t1", Some("corr-A"))),
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let frames = decoded_frames(&recorded);
+    assert!(
+        frames
+            .iter()
+            .any(|f| f.kind == TaskFrameKind::Ack && f.text == "task aborted"),
+        "a matching abort must still stop the task: {frames:?}"
+    );
+
+    gate.notify_waiters();
+    runtime.shutdown();
     runtime.idle().await;
 }
 

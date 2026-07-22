@@ -34,9 +34,6 @@ use crate::terminal::TermGuard;
 /// look native, slow enough to bound the cost of a full repaint.
 const TICK: Duration = Duration::from_millis(40);
 
-/// How often the contact queue is refreshed from the relay.
-const CONTACT_POLL: Duration = Duration::from_millis(1_500);
-
 /// How often the encrypted inbox is drained for new peer work.
 const INBOX_POLL: Duration = Duration::from_millis(1_000);
 
@@ -80,13 +77,15 @@ pub async fn run_worker_tui(
 
     // The contact queue narrates into the same log as everything else, so
     // "nobody asked" and "the worker never saw it" stop looking alike.
+    // No `spawn_poll` here: `TinyplaceService::start` already polls this same
+    // desk, and a second loop would double the relay traffic and interleave the
+    // snapshots — which shows up as duplicate "new request(s)" narration. The
+    // sink is shared across handles, so attaching it here reaches the poll the
+    // service owns.
     let contacts = contacts.map(|desk| {
         let logs = logs.clone();
         desk.with_log(Arc::new(move |line: &str| logs.push(line)))
     });
-    if let Some(desk) = &contacts {
-        desk.spawn_poll(CONTACT_POLL);
-    }
 
     // The inbox is not drained until the operator has answered the launch step.
     // A worker should not accept peer work before it has been told how to run

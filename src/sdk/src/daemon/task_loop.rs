@@ -106,8 +106,23 @@ impl DaemonRuntime {
             let running = self.inner.running.lock().unwrap();
             match running.get(&key) {
                 Some(task) => {
-                    task.abort.abort();
-                    true
+                    // A correlationId mismatch means a different dispatch reused
+                    // the taskId — the same guard `handle_input` makes, and for
+                    // a worse failure. Task ids recur by construction: they are
+                    // positional per `delegate_tasks` call, and the hub's
+                    // uniquifying suffix restarts from zero when it restarts. So
+                    // a late abort for a task that already finished can name a
+                    // live one, and cancelling that is silent and total.
+                    let mismatch = matches!(
+                        (&frame.correlation_id, &task.correlation_id),
+                        (Some(a), Some(b)) if a != b
+                    );
+                    if mismatch {
+                        false
+                    } else {
+                        task.abort.abort();
+                        true
+                    }
                 }
                 None => false,
             }

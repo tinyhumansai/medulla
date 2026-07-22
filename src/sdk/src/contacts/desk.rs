@@ -72,7 +72,13 @@ pub struct ContactDesk {
     /// Where contact activity is narrated. A worker that appears to receive
     /// nothing and a worker that is never asked for anything look identical
     /// otherwise, and only one of them is a problem with the worker.
-    log: Option<crate::logging::LineSink>,
+    ///
+    /// Shared across clones like everything else here. It was per-instance, and
+    /// the consequence was subtle: the poll runs on whichever handle called
+    /// `spawn_poll`, so attaching a sink to a *different* handle narrated
+    /// nothing — and the natural fix, polling the handle you attached to,
+    /// silently gave you two polls of the same relay.
+    log: Arc<Mutex<Option<crate::logging::LineSink>>>,
 }
 
 impl ContactDesk {
@@ -88,19 +94,26 @@ impl ContactDesk {
             relay,
             now: Arc::new(crate::clock::now_millis),
             health: Arc::new(Mutex::new(PollHealth::Pending)),
-            log: None,
+            log: Arc::new(Mutex::new(None)),
         }
     }
 
     /// Narrate contact activity to `log`.
-    pub fn with_log(mut self, log: crate::logging::LineSink) -> Self {
-        self.log = Some(log);
+    ///
+    /// Takes effect for every handle of this desk, including one already
+    /// polling — so the caller that wants the narration does not have to be the
+    /// caller that owns the poll.
+    pub fn with_log(self, log: crate::logging::LineSink) -> Self {
+        *self.log.lock().expect("contact log lock") = Some(log);
         self
     }
 
     /// Emit a line if a sink is attached.
     fn say(&self, line: &str) {
-        if let Some(log) = &self.log {
+        // Clone the sink out before calling it: the sink is arbitrary caller
+        // code, and holding the lock across it invites a deadlock.
+        let sink = self.log.lock().expect("contact log lock").clone();
+        if let Some(log) = sink {
             log(line);
         }
     }

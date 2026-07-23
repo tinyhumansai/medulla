@@ -20,12 +20,14 @@ use medulla_tui::ui::app::{App, Cmd, TABS};
 use crate::terminal::set_mouse_capture;
 
 mod types;
+mod update_checker;
 
 #[cfg(test)]
 mod tests;
 
 use types::AppMsg;
 pub(crate) use types::{SessionExit, SessionWiring};
+use update_checker::spawn_update_checker;
 
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
 /// input events, runtime snapshots, background [`AppMsg`]s, and the animation
@@ -60,6 +62,7 @@ pub(crate) async fn run(
     let mut sub = runtime.subscribe();
     let mut reader = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(90));
+    let mut slow_tick = tokio::time::interval(Duration::from_secs(5));
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
     let mut mouse_on = true;
 
@@ -99,6 +102,16 @@ pub(crate) async fn run(
                 match msg {
                     AppMsg::Status(s) => { app.set_status(s); app.refresh_snapshot(); }
                     AppMsg::Contexts(c) => app.set_contexts(c),
+                    AppMsg::WorkspacesLoaded(reports) => {
+                        app.set_workspace_reports(reports);
+                        app.set_status("Repo · refreshed");
+                        if let Some(cmd) = app.selected_repo_diff_cmd() {
+                            run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
+                        }
+                    }
+                    AppMsg::WorkspaceDiffLoaded { workspace, path, result } => {
+                        app.set_workspace_diff(workspace, path, result);
+                    }
                     AppMsg::UsageLoaded(data) => app.set_account_usage(data),
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
                     AppMsg::Resumed(s) => {
@@ -166,6 +179,17 @@ pub(crate) async fn run(
                     app.frame = app.frame.wrapping_add(1);
                 }
             }
+            _ = slow_tick.tick() => {
+                if app.tab() == "Repo" {
+                    app.set_workspaces_loading();
+                    run_cmd(
+                        Cmd::LoadWorkspaces(app.loaded.workflow_workspaces()),
+                        &runtime,
+                        app.memory_service(),
+                        &msg_tx,
+                    );
+                }
+            }
         }
     }
     Ok(if app.relogin_requested() {
@@ -173,40 +197,6 @@ pub(crate) async fn run(
     } else {
         SessionExit::Quit
     })
-}
-
-/// Spawn the periodic release-update checker unless disabled by config/env. It
-/// waits ~10s, checks once, then rechecks every 6h, sending [`AppMsg::UpdateAvailable`]
-/// on a newer release.
-fn spawn_update_checker(
-    loaded: &medulla::config::LoadedConfig,
-    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
-) {
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    if !loaded.config.update.enabled(&env) {
-        return;
-    }
-    let tx = msg_tx.clone();
-    tokio::spawn(async move {
-        let url = medulla::update::update_url();
-        let current = env!("CARGO_PKG_VERSION");
-        let mut first = true;
-        loop {
-            let delay = if first {
-                Duration::from_secs(10)
-            } else {
-                Duration::from_secs(6 * 60 * 60)
-            };
-            first = false;
-            tokio::time::sleep(delay).await;
-            if let Ok(Some(info)) = medulla::update::check_for_update(&url, current).await {
-                let notice = format!("update v{} available — run `medulla update`", info.version);
-                if tx.send(AppMsg::UpdateAvailable(notice)).is_err() {
-                    break; // app exited
-                }
-            }
-        }
-    });
 }
 
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
@@ -271,6 +261,31 @@ fn run_cmd(
                         let _ = tx.send(AppMsg::Status(e.to_string()));
                     }
                 }
+            });
+        }
+        Cmd::LoadWorkspaces(roots) => {
+            let tx = msg_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let reports = roots
+                    .into_iter()
+                    .map(|root| {
+                        let result = medulla::workspace::inspect_workspace(&root);
+                        medulla::workspace::WorkspaceReport::from_result(root, result)
+                    })
+                    .collect();
+                let _ = tx.send(AppMsg::WorkspacesLoaded(reports));
+            });
+        }
+        Cmd::LoadWorkspaceDiff { workspace, path } => {
+            let tx = msg_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let result =
+                    medulla::workspace::diff(&workspace, &path).map_err(|error| error.to_string());
+                let _ = tx.send(AppMsg::WorkspaceDiffLoaded {
+                    workspace,
+                    path,
+                    result,
+                });
             });
         }
         // --- feedback board ---------------------------------------------

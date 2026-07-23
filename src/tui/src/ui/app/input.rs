@@ -36,6 +36,7 @@ impl App {
             MouseEventKind::ScrollUp => match (tab, self.settings_subpage()) {
                 ("Chat", _) => self.chat_scroll += 3,
                 ("Agents", _) => self.agent_scroll += 3,
+                ("Repo", _) => self.repo.diff_scroll = self.repo.diff_scroll.saturating_sub(3),
                 ("Memory", _) => self.memory_index = self.memory_index.saturating_sub(1),
                 ("Settings", "Trace") => self.selected = self.selected.saturating_sub(3),
                 ("Settings", "Context") => {
@@ -46,6 +47,7 @@ impl App {
             MouseEventKind::ScrollDown => match (tab, self.settings_subpage()) {
                 ("Chat", _) => self.chat_scroll = self.chat_scroll.saturating_sub(3),
                 ("Agents", _) => self.agent_scroll = self.agent_scroll.saturating_sub(3),
+                ("Repo", _) => self.repo.diff_scroll = self.repo.diff_scroll.saturating_add(3),
                 ("Memory", _) => {
                     let max = self.memory_entry_count().saturating_sub(1);
                     self.memory_index = (self.memory_index + 1).min(max);

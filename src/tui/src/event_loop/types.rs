@@ -10,6 +10,17 @@ pub(super) enum AppMsg {
     Status(String),
     /// Fresh context-inspection rows.
     Contexts(Vec<ContextItem>),
+    /// Best-effort local Git summaries for configured workspace roots.
+    WorkspacesLoaded(Vec<medulla::workspace::WorkspaceReport>),
+    /// A selected local path's patch (or typed error).
+    WorkspaceDiffLoaded {
+        /// Local repository root.
+        workspace: std::path::PathBuf,
+        /// Repository-relative changed path.
+        path: std::path::PathBuf,
+        /// Patch or displayable failure.
+        result: Result<String, String>,
+    },
     /// Chats to display in the resume picker.
     OpenResume(Vec<medulla::ui::chat_store::MainChatSummary>),
     /// Confirmation that a chat was resumed.

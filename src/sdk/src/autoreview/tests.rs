@@ -52,6 +52,11 @@ fn instruction_composition_includes_contract_diff_and_verdict_shape() {
     assert!(instruction.contains("APPROVE"));
     assert!(instruction.contains("FINDINGS:"));
     assert_eq!(review_target(&instruction), Some("task-7"));
+
+    let mut sparse = request;
+    sparse.contract.non_goals.clear();
+    sparse.contract.verify.clear();
+    assert!(compose_instruction(&sparse).contains("- (none recorded)"));
 }
 
 #[test]
@@ -83,4 +88,8 @@ fn verdict_parser_requires_the_structured_terminal_shape() {
     assert_eq!(parse_verdict("looks good"), None);
     assert_eq!(parse_verdict("FINDINGS:"), None);
     assert_eq!(ReviewVerdict::Approve.badge(), "✓ reviewed");
+    assert_eq!(
+        ReviewVerdict::Findings(vec!["missing test".into()]).badge(),
+        "✗ findings(1)"
+    );
 }

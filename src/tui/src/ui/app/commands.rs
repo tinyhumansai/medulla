@@ -81,7 +81,13 @@ impl App {
             .and_then(|descriptor| descriptor.metadata.get("workspace"))
             .and_then(serde_json::Value::as_str)
             .map(std::path::PathBuf::from)
-            .or_else(|| self.loaded.workflow_workspaces().into_iter().next());
+            .filter(|path| !path.as_os_str().is_empty())
+            .or_else(|| {
+                self.loaded
+                    .workflow_workspaces()
+                    .into_iter()
+                    .find(|path| !path.as_os_str().is_empty())
+            });
         let Some(workspace) = workspace else {
             self.set_status(
                 medulla::autoreview::ReviewError::MissingWorkspace(target.into()).to_string(),

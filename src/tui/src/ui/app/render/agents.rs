@@ -190,6 +190,13 @@ impl App {
                     Span::styled(format!("   {branch} {} · ", task.task_id), style),
                     Span::styled(task.status.label().to_string(), status_style),
                     Span::styled(format!(" · {} turns", task.turns), style),
+                    Span::styled(
+                        task.review
+                            .as_ref()
+                            .map(|verdict| format!(" · {}", verdict.badge()))
+                            .unwrap_or_default(),
+                        style,
+                    ),
                 ])
             }
             AgentRow::Lane { lane_index } => {

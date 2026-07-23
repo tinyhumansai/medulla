@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
-use medulla::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity};
+use medulla::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity, WorkerInfo};
 use medulla::tinyplace::service::TinyplaceObservation;
 use medulla_tui::ui::app::{App, TABS};
 
@@ -64,6 +64,7 @@ fn agents_app(ids: &[&str], online: &[(&str, bool)]) -> App {
         );
     }
     app.set_tinyplace_observation(Arc::new(Mutex::new(TinyplaceObservation {
+        notice: None,
         identity: Some(TinyplaceIdentity {
             agent_id: "me".into(),
             public_key: "pk".into(),
@@ -138,6 +139,70 @@ fn a_peer_with_no_presence_reading_is_marked_as_merely_announced() {
     assert!(
         out.contains('◌') || out.contains('◆'),
         "a peer with no reading is neither online nor offline: {out}"
+    );
+}
+
+/// A worker as the local registry holds it: an address, a harness, no backend
+/// descriptor behind it.
+fn local_worker(address: &str, label: Option<&str>) -> WorkerInfo {
+    WorkerInfo {
+        id: address.into(),
+        address: address.into(),
+        handle: None,
+        label: label.map(str::to_string),
+        harness: Some("claude".into()),
+        peer_id: None,
+        selected: true,
+    }
+}
+
+/// An app on the Agents tab whose *registry* holds `workers` while the snapshot
+/// roster stays empty — the shape of a tiny.place worker added at runtime.
+fn workers_app(workers: Vec<WorkerInfo>) -> App {
+    let rt = MockRuntime::empty();
+    rt.set_workers(workers);
+    let mut app = App::new(
+        Arc::new(rt),
+        LoadedConfig::defaults("medulla.tui.json".into()),
+    );
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
+    app
+}
+
+#[test]
+fn a_locally_registered_worker_is_listed_even_with_an_empty_backend_roster() {
+    // The registry is what actually resolves a delegated task's address, so a
+    // worker in it is live and dispatchable. Reading only the backend-advertised
+    // roster left it invisible here while tasks were running on it.
+    let mut app = workers_app(vec![local_worker("Wk3Hob1FxUwsy1K2rweppbmCkuPef", None)]);
+    let out = render(&mut app, 140, 40);
+    assert!(
+        out.contains("Wk3Hob1FxUwsy1K2rweppbmCkuPef"),
+        "the registered worker has a lane: {out}"
+    );
+    assert!(out.contains("CLAUDE"), "its harness tags the lane: {out}");
+    // Registered is not the same as heard from: the registry knows the peer is
+    // dispatchable, not that it is up, and the glyph must not claim otherwise.
+    assert!(
+        out.contains('◌'),
+        "a registered worker with no presence reading is announced, not online: {out}"
+    );
+}
+
+#[test]
+fn a_registered_worker_prefers_its_label_and_is_not_listed_twice() {
+    // The same peer reached the roster from the backend and the local registry;
+    // one lane, and the operator's own label names it.
+    let mut app = workers_app(vec![
+        local_worker("addr-1", Some("build box")),
+        local_worker("addr-1", Some("build box")),
+    ]);
+    let out = render(&mut app, 140, 40);
+    assert!(out.contains("build box"), "the label names the lane: {out}");
+    assert_eq!(
+        out.matches("build box").count(),
+        1,
+        "one peer, one lane: {out}"
     );
 }
 

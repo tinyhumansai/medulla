@@ -66,6 +66,10 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         None => CAPABILITY_PROMPT.to_string(),
     };
     let run_options = RunTaskOptions {
+        // Unattributed by design: the probe asks this machine about itself, on
+        // no peer's behalf, so it must not join any conversation.
+        conversation: String::new(),
+        resume_session_id: None,
         provider: options.provider,
         prompt,
         cwd: cwd.clone(),
@@ -325,7 +329,9 @@ mod tests {
     async fn probe_merges_agent_report_over_facts() {
         let run_task: RunTaskFn = Arc::new(|opts| {
             Box::pin(async move {
-                Ok(RunTaskResult { usage: None,
+                Ok(RunTaskResult {
+                    usage: None,
+                    session_id: None,
                     provider: opts.provider,
                     reply: r#"{"tools":["Edit"],"mcpServers":["gh"],"accessibleDirs":["/x"],"summary":"can code"}"#
                         .to_string(),
@@ -369,6 +375,7 @@ mod tests {
             *captured.lock().unwrap() = opts.prompt.clone();
             Box::pin(async move {
                 Ok(RunTaskResult {
+                    session_id: None,
                     usage: None,
                     provider: opts.provider,
                     reply: r#"{"tools":[],"summary":"widget dev agent"}"#.to_string(),
@@ -414,6 +421,7 @@ mod tests {
         let run_task: RunTaskFn = Arc::new(|opts| {
             Box::pin(async move {
                 Ok(RunTaskResult {
+                    session_id: None,
                     usage: None,
                     provider: opts.provider,
                     reply: r#"{"tools":["Edit"]}"#.to_string(),

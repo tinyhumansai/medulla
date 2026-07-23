@@ -44,6 +44,12 @@ impl Runtime for MockRuntime {
         }
     }
 
+    /// The scripted worker registry (see
+    /// [`MockRuntime::set_workers`](super::types::MockRuntime::set_workers)).
+    fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
+        self.state.lock().unwrap().workers.clone()
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<()> {
         self.tx.subscribe()
     }
@@ -190,6 +196,11 @@ impl Runtime for MockRuntime {
                 s.active_id = id;
             }
         }
+        self.ping();
+    }
+
+    fn answer_question(&self, cycle_id: String, question_id: String, body: String) {
+        self.record(&format!("answer_question:{cycle_id}:{question_id}:{body}"));
         self.ping();
     }
 

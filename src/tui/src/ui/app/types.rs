@@ -186,6 +186,15 @@ pub(super) enum PromptKind {
         /// The pending question's id.
         question_id: String,
     },
+    /// Answer a prepared decision and dismiss it locally once routed.
+    DecisionAnswer {
+        /// Stable decision id.
+        decision_id: String,
+        /// Cycle that owns the question.
+        cycle_id: String,
+        /// Harness question id.
+        question_id: String,
+    },
     /// Comment on the given feedback board item.
     FeedbackComment {
         /// The item being commented on.
@@ -323,6 +332,12 @@ pub struct App {
     pub(super) repo: RepoState,
     /// Manual permitted-path globs keyed by stable Agents lane id.
     pub(super) lane_claims: std::collections::BTreeMap<String, Vec<String>>,
+    /// Whether the prepared-decision modal is visible.
+    pub(super) decision_open: bool,
+    /// Highlighted decision row.
+    pub(super) decision_index: usize,
+    /// Session-local ids intentionally hidden by the operator.
+    pub(super) dismissed_decisions: std::collections::BTreeSet<String>,
     pub(super) prompt: Option<Prompt>,
     /// The animation frame counter (drives the spinner).
     pub frame: usize,

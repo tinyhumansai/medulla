@@ -1,6 +1,6 @@
-//! Unit tests for the sender-runner, driven by a `FakeWorker` [`Relay`] that
-//! replays the daemon's `ack → status → reply|error` sequence into the inbox so
-//! the runner exercises its full dispatch/route/settle path with no network.
+//! Tests for the sender-runner, driven by a `FakeWorker` [`Relay`] that replays
+//! the daemon's `ack → status → reply|error` sequence into the inbox so the
+//! runner exercises its full dispatch/route/settle path with no network.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -15,54 +15,9 @@ use crate::tinyplace::{
     decode_task_frame, encode_task_frame_with_usage, EncodeFrameInput, TaskFrameKind, TokenUsage,
 };
 
-use super::relay::Relay;
-use super::roster::{address_of, register_payload, HubWorker};
-use super::types::{RunError, TaskRequest};
-use super::TaskRunner;
-
-fn worker(id: &str, addr: &str) -> HubWorker {
-    HubWorker {
-        id: id.to_string(),
-        address: addr.to_string(),
-        harness: "claude".to_string(),
-        label: None,
-        selected: false,
-    }
-}
-
-#[test]
-fn register_payload_advertises_id_address_and_harness() {
-    let payload = register_payload(&[worker("w1", "GRVaddr")]);
-    let agents = payload.get("agents").unwrap().as_array().unwrap();
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0]["id"], "w1");
-    assert_eq!(agents[0]["metadata"]["address"], "GRVaddr");
-    assert_eq!(agents[0]["metadata"]["harness"], "claude");
-}
-
-#[test]
-fn address_of_resolves_known_agent_and_falls_back_to_first_worker() {
-    let workers = [worker("w1", "ADDR1"), worker("w2", "ADDR2")];
-    assert_eq!(address_of(&workers, "w2").as_deref(), Some("ADDR2"));
-    // Unknown / empty agentId (backend omitted it): fall back to the first
-    // worker, NOT the empty id (which would decode to a zero-length key).
-    assert_eq!(address_of(&workers, "").as_deref(), Some("ADDR1"));
-    assert_eq!(address_of(&workers, "unknown").as_deref(), Some("ADDR1"));
-    assert_eq!(address_of(&[], "w1"), None);
-}
-
-#[test]
-fn address_of_prefers_the_selected_worker_over_the_first() {
-    let mut selected = worker("w2", "ADDR2");
-    selected.selected = true;
-    let workers = [worker("w1", "ADDR1"), selected];
-    // An explicit match still wins.
-    assert_eq!(address_of(&workers, "w1").as_deref(), Some("ADDR1"));
-    // Unknown / empty agentId now routes to the SELECTED worker (making
-    // `select()` a real dispatch control), not the first entry.
-    assert_eq!(address_of(&workers, "").as_deref(), Some("ADDR2"));
-    assert_eq!(address_of(&workers, "unknown").as_deref(), Some("ADDR2"));
-}
+use super::super::relay::Relay;
+use super::super::types::{RunError, TaskRequest};
+use super::super::TaskRunner;
 
 /// How the fake worker responds to a dispatched task.
 enum Mode {
@@ -75,12 +30,18 @@ enum Mode {
     /// Silent until the sender has reset the session (simulating a restarted peer
     /// whose first `CIPHERTEXT` is undecryptable), then replies.
     RecoverAfterReset(String),
+    /// Streams `statuses` progress frames, one per drain, then replies. Models a
+    /// worker that is plainly working but takes longer than one idle budget —
+    /// the case a wall-clock deadline kills and an idle one does not.
+    Chatty {
+        statuses: u32,
+        reply: String,
+    },
 }
 
-/// A fake worker: on `send`, decodes the task frame and queues the daemon's
-/// `ack → status → (reply|error)` sequence (echoing `correlationId`), which the
-/// pump then drains. `Silent` queues nothing, to exercise the timeout path.
 struct FakeWorker {
+    /// The kind of every frame the runner sent us, in order.
+    sent: Mutex<Vec<String>>,
     inbox: Mutex<VecDeque<InboundMessage>>,
     mode: Mode,
     /// How many times the sender has reset the session with us.
@@ -95,6 +56,11 @@ struct FakeWorker {
 }
 
 impl FakeWorker {
+    /// The kinds of frame the runner has sent us, in order.
+    async fn sent_kinds(&self) -> Vec<String> {
+        self.sent.lock().await.clone()
+    }
+
     fn new(mode: Mode) -> Arc<Self> {
         Self::with(mode, false, 0)
     }
@@ -102,6 +68,7 @@ impl FakeWorker {
     /// A worker with explicit send-failure and contact-acceptance-delay knobs.
     fn with(mode: Mode, fail_send: bool, accept_after: u32) -> Arc<Self> {
         Arc::new(Self {
+            sent: Mutex::new(Vec::new()),
             inbox: Mutex::new(VecDeque::new()),
             mode,
             resets: AtomicU32::new(0),
@@ -119,7 +86,12 @@ impl Relay for FakeWorker {
             return Err("send boom".to_string());
         }
         let frame = decode_task_frame(body).expect("runner sends a valid task frame");
-        assert_eq!(frame.kind, TaskFrameKind::Task);
+        self.sent.lock().await.push(frame.kind.as_str().to_string());
+        // Only a `task` frame starts work. An `abort` is the runner telling us to
+        // stop one, and queues nothing.
+        if frame.kind != TaskFrameKind::Task {
+            return Ok(());
+        }
         // Stay silent while there's nothing to say: unconditionally for `Silent`,
         // and until a reset has happened for `RecoverAfterReset`.
         let silent = matches!(self.mode, Mode::Silent)
@@ -159,6 +131,12 @@ impl Relay for FakeWorker {
                 }),
             )),
             Mode::Error(text) => q.push_back(mk(TaskFrameKind::Error, text, None)),
+            Mode::Chatty { statuses, reply } => {
+                for n in 0..*statuses {
+                    q.push_back(mk(TaskFrameKind::Status, &format!("working {n}"), None));
+                }
+                q.push_back(mk(TaskFrameKind::Reply, reply, None));
+            }
             // Ack + status already queued above; no terminal frame follows.
             Mode::Silent | Mode::AckOnly => {}
         }
@@ -166,6 +144,13 @@ impl Relay for FakeWorker {
     }
 
     async fn drain_inbox(&self, limit: i64) -> Vec<InboundMessage> {
+        // One frame per drain in `Chatty`, so the stream is spread across poll
+        // intervals rather than arriving in a single burst — otherwise every
+        // frame lands inside the first idle budget and proves nothing.
+        let limit = match self.mode {
+            Mode::Chatty { .. } => 1,
+            _ => limit,
+        };
         let mut q = self.inbox.lock().await;
         let mut out = Vec::new();
         while out.len() < limit as usize {
@@ -340,5 +325,155 @@ fn run_error_display_is_human_readable_per_variant() {
     assert_eq!(
         RunError::Transport("no route".to_string()).to_string(),
         "transport error: no route"
+    );
+}
+
+// ------------------------------------------------------- contact on add ---
+
+/// Adding a peer opens the contact edge; re-adding retries it.
+///
+/// Deferring the request to first dispatch — which is what used to happen —
+/// makes adding a worker look like nothing happened: the peer's operator sees no
+/// approval to give, and when one finally appears it is attached to a task
+/// already blocked on it. Re-adding is then the natural way to retry a request
+/// the peer missed.
+///
+/// The decision is tested here; the socket plumbing around it belongs to the
+/// live staging E2E, as the rest of `HubHandle` does.
+
+#[tokio::test]
+async fn every_inbound_worker_frame_is_narrated_with_its_payload() {
+    // The hub reported only the settled outcome, so "the worker never answered"
+    // and "the worker answered with nothing" read identically from the
+    // orchestrator's side — and neither said whether the worker had been
+    // talking at all. Every frame it sends is now on the record.
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let worker = FakeWorker::new(Mode::Reply("REMOTE: 4 agents, 1 offline".to_string()));
+    let runner = TaskRunner::start_with_log(worker, Duration::from_millis(5), {
+        let seen = seen.clone();
+        Arc::new(move |line: &str| seen.lock().unwrap().push(line.to_string()))
+    });
+
+    let outcome = runner.run(req("audit"), None).await.expect("ok");
+    assert_eq!(outcome.reply, "REMOTE: 4 agents, 1 offline");
+
+    let lines = seen.lock().unwrap().clone();
+    let reply_line = lines
+        .iter()
+        .find(|l| l.contains("reply"))
+        .unwrap_or_else(|| panic!("the reply must be narrated, got {lines:?}"));
+    assert!(
+        reply_line.contains("REMOTE: 4 agents, 1 offline"),
+        "the payload itself is the point: {reply_line}"
+    );
+    assert!(
+        reply_line.contains("27 chars"),
+        "a truncated preview cannot report its own truncation: {reply_line}"
+    );
+    // The status frame that preceded it is on the record too, so a worker that
+    // is working but not finishing is distinguishable from a silent one.
+    assert!(
+        lines.iter().any(|l| l.contains("running python audit.py")),
+        "got {lines:?}"
+    );
+}
+
+#[test]
+fn a_preview_is_clipped_and_flattened_but_says_so() {
+    use crate::logging::{preview, PREVIEW_CHARS};
+
+    assert_eq!(preview("one\ntwo   three"), "one two three");
+    let long = "x".repeat(PREVIEW_CHARS + 50);
+    let out = preview(&long);
+    assert!(out.ends_with('…'), "truncation must be visible: {out}");
+    assert_eq!(out.chars().count(), PREVIEW_CHARS + 1);
+    assert_eq!(preview(""), "");
+}
+
+#[tokio::test]
+async fn a_worker_that_keeps_reporting_progress_is_not_timed_out() {
+    // The deadline was wall-clock from the first sign of life, so a worker
+    // streaming `running Bash: …` every few seconds died at exactly the same
+    // moment as one that had gone silent — and a real coding task crosses that
+    // line routinely. Every frame now resets the clock.
+    // Elapsed has to land between one idle budget and the 4x ceiling, so the
+    // margins are what make this test stable rather than flaky. At 20 statuses
+    // and a 40ms poll the run takes ~800ms against a 500ms budget and a 2000ms
+    // ceiling: it would need a 2.5x slowdown to overrun, or to somehow finish
+    // twelve polls early to undershoot.
+    //
+    // The first cut used a 1ms poll against a 25ms budget, where the ceiling was
+    // 100ms of wall clock for 30 round trips — Windows CI spent that on timer
+    // granularity alone and the test failed there.
+    let worker = FakeWorker::new(Mode::Chatty {
+        statuses: 20,
+        reply: "scan complete".to_string(),
+    });
+    let runner = TaskRunner::start(worker, Duration::from_millis(40));
+
+    let mut request = req("scan the filesystem");
+    // Well under the elapsed total, so a wall-clock deadline would have fired
+    // long before the reply — which is the whole point of the test.
+    request.timeout = Duration::from_millis(500);
+
+    let outcome = runner.run(request, None).await.expect("must not time out");
+    assert_eq!(outcome.reply, "scan complete");
+}
+
+#[tokio::test]
+async fn a_worker_that_goes_quiet_still_times_out() {
+    // The idle deadline must still fire — otherwise a peer that acks and dies
+    // holds its dispatch until the ceiling.
+    let worker = FakeWorker::new(Mode::AckOnly);
+    let runner = TaskRunner::start(worker, Duration::from_millis(1));
+
+    let mut request = req("scan the filesystem");
+    request.timeout = Duration::from_millis(30);
+
+    let err = runner.run(request, None).await.expect_err("must time out");
+    assert!(matches!(err, RunError::Timeout), "got {err:?}");
+}
+
+#[test]
+fn each_dispatch_gets_its_own_worker_facing_task_id() {
+    // `delegate_tasks` names unnamed tasks positionally per call, so every call
+    // starts again at `t1`. The worker dedupes on sender + taskId, so without a
+    // per-dispatch id the second call's `t1` is refused as a duplicate of the
+    // first's — three dispatches named `t1`, carrying three different
+    // instructions, two refused. Observed in the field.
+    let a = super::super::socket::wire_task_id("t1");
+    let b = super::super::socket::wire_task_id("t1");
+    assert_ne!(
+        a, b,
+        "two dispatches of `t1` must not collide on the worker"
+    );
+    // The original id stays legible in it, so a worker log line can still be
+    // traced back to the task the orchestrator named.
+    assert!(a.starts_with("t1#"), "got {a}");
+    assert!(b.starts_with("t1#"), "got {b}");
+    // A named task keeps its name too.
+    assert!(super::super::socket::wire_task_id("repo-scan").starts_with("repo-scan#"));
+}
+
+#[tokio::test]
+async fn giving_up_tells_the_worker_to_stop() {
+    // An abandoned task keeps a harness busy AND keeps its id live — a responder
+    // refuses a later task whose id is already running, and unnamed tasks are
+    // named positionally, so that id is very often `t1`. Without this, one task
+    // the hub gave up on poisons `t1` for the rest of the responder's own
+    // timeout, which is far longer than the hub's.
+    let worker = FakeWorker::new(Mode::AckOnly);
+    let runner = TaskRunner::start(worker.clone(), Duration::from_millis(1));
+
+    let mut request = req("scan the filesystem");
+    request.timeout = Duration::from_millis(20);
+
+    let err = runner.run(request, None).await.expect_err("must time out");
+    assert!(matches!(err, RunError::Timeout), "got {err:?}");
+
+    let aborts = worker.sent_kinds().await;
+    assert!(
+        aborts.iter().any(|k| k == "abort"),
+        "an abandoned task must be cancelled, got {aborts:?}"
     );
 }

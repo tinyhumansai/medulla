@@ -24,6 +24,26 @@ use super::types::{RunError, TaskRequest};
 /// with a real error just before the backend times out blind.
 const BACKEND_MARGIN: Duration = Duration::from_secs(5);
 
+/// Monotonic suffix making each dispatch's worker-facing task id unique.
+static DISPATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The id the *worker* sees for this dispatch, unique per dispatch.
+///
+/// `delegate_tasks` names unnamed tasks positionally *per call* (`t${n}`), so
+/// every call starts again at `t1`. The worker dedupes on sender + taskId, so a
+/// second call's `t1` is refused as a duplicate of the first's — which is
+/// entirely different work. Seen in the field: three dispatches all named `t1`,
+/// carrying three different instructions, two of them refused.
+///
+/// Worker-facing only. Every frame sent back to the backend keeps the original
+/// id, because that is the key its waiter is registered under.
+pub(super) fn wire_task_id(task_id: &str) -> String {
+    format!(
+        "{task_id}#{}",
+        DISPATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
 /// The first JSON object carried by a received event payload, if any.
 fn first_obj(payload: Payload) -> Option<Value> {
     match payload {
@@ -54,8 +74,12 @@ pub async fn connect_harness(
     roster: SharedRoster,
     runner: Arc<TaskRunner>,
     task_timeout: Duration,
+    log: super::types::HubLog,
+    activity: Option<super::ActivityLog>,
 ) -> anyhow::Result<Client> {
     let connect_roster = roster.clone();
+    let run_log = log.clone();
+    let run_activity = activity.clone();
     let run_roster = roster.clone();
     let cap_roster = roster.clone();
 
@@ -77,8 +101,10 @@ pub async fn connect_harness(
         // server then drops us and every later delegation fails with "no harness
         // connected" while this process still looks alive.
         .on("medulla:task_run", move |payload, socket| {
+            let run_log = run_log.clone();
             let runner = runner.clone();
             let roster = run_roster.clone();
+            let run_activity = run_activity.clone();
             async move {
                 tokio::spawn(handle_task_run(
                     payload,
@@ -86,16 +112,26 @@ pub async fn connect_harness(
                     runner,
                     roster,
                     task_timeout,
+                    run_log,
+                    run_activity,
                 ));
             }
             .boxed()
         })
         // Surface transport faults instead of dying silently.
-        .on(Event::Error, |payload, _socket| {
-            async move { eprintln!("hub: socket error: {payload:?}") }.boxed()
+        .on(Event::Error, {
+            let log = log.clone();
+            move |payload, _socket| {
+                let log = log.clone();
+                async move { log(&format!("hub: socket error: {payload:?}")) }.boxed()
+            }
         })
-        .on(Event::Close, |_payload, _socket| {
-            async move { eprintln!("hub: socket closed — reconnecting") }.boxed()
+        .on(Event::Close, {
+            let log = log.clone();
+            move |_payload, _socket| {
+                let log = log.clone();
+                async move { log("hub: socket closed — reconnecting") }.boxed()
+            }
         })
         // Capability probe: answer from the roster metadata.
         .on("medulla:capabilities_request", move |payload, socket| {
@@ -123,6 +159,8 @@ async fn handle_task_run(
     runner: Arc<TaskRunner>,
     roster: SharedRoster,
     timeout: Duration,
+    log: super::types::HubLog,
+    activity: Option<super::ActivityLog>,
 ) {
     let Some(obj) = first_obj(payload) else {
         return;
@@ -148,19 +186,49 @@ async fn handle_task_run(
 
     // Resolve the address, then drop the lock before any await (the std guard is
     // not held across suspension points). An empty roster ⇒ nothing to run.
-    let worker_address = {
+    let (worker_address, resolved_id, known) = {
         let r = roster.lock().expect("roster lock");
-        address_of(&r, &agent_id)
+        let known: Vec<String> = r.iter().map(|w| w.id.clone()).collect();
+        let addr = address_of(&r, &agent_id);
+        // The roster id this resolved to, which is the lane the Agents view
+        // groups the task under — not the raw `agentId`, which may be absent.
+        let id = addr
+            .as_ref()
+            .and_then(|a| r.iter().find(|w| &w.address == a).map(|w| w.id.clone()))
+            .unwrap_or_default();
+        (addr, id, known)
     };
     let Some(worker_address) = worker_address else {
+        // Say which of the two it is. "No workers" and "no worker by that name"
+        // call for completely different actions, and reporting the first for
+        // the second sent an operator looking for a connection problem that was
+        // really a misaddressed task.
+        let error = if known.is_empty() {
+            "hub has no workers".to_string()
+        } else {
+            format!(
+                "hub has no worker \"{agent_id}\" — known: {}",
+                known.join(", ")
+            )
+        };
+        (log)(&format!("hub: task {task_id} refused — {error}"));
         let _ = socket
             .emit(
                 "medulla:task_result",
-                json!({ "taskId": task_id, "ok": false, "error": "hub has no workers", "retryable": false }),
+                json!({ "taskId": task_id, "ok": false, "error": error, "retryable": false }),
             )
             .await;
         return;
     };
+
+    let wire_task_id = wire_task_id(&task_id);
+
+    // Attribute the task to the lane it will run on, before any frame comes
+    // back — a frame that arrives before its dispatch is recorded would be
+    // orphaned onto no worker at all.
+    if let Some(activity) = &activity {
+        activity.dispatched(&wire_task_id, &resolved_id);
+    }
 
     // Forward `status` frames up as `task_envelope` while the task runs.
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -180,15 +248,22 @@ async fn handle_task_run(
         }
     });
 
-    eprintln!(
-        "hub: task_run {} → {} (timeout {}s)",
+    // The instruction is on the line, not just the id. Two dispatches sharing a
+    // task id are either two different pieces of work colliding on a name — ids
+    // are assigned positionally per `delegate_tasks` call, so every call starts
+    // again at `t1` — or the same work emitted twice. Those call for opposite
+    // fixes, and the id alone cannot tell them apart.
+    log(&format!(
+        "hub: task_run {} (as {}) → {} (timeout {}s) · {}",
         task_id,
+        wire_task_id,
         worker_address,
-        timeout.as_secs()
-    );
+        timeout.as_secs(),
+        crate::logging::preview(&instruction),
+    ));
 
     let req = TaskRequest {
-        task_id: task_id.clone(),
+        task_id: wire_task_id.clone(),
         cycle_id,
         instruction,
         worker_address,
@@ -199,8 +274,12 @@ async fn handle_task_run(
 
     let outcome = runner.run(req, Some(tx)).await;
     match &outcome {
-        Ok(o) => eprintln!("hub: task {} ok ({} chars)", task_id, o.reply.len()),
-        Err(e) => eprintln!("hub: task {} FAILED: {e}", task_id),
+        Ok(o) => log(&format!(
+            "hub: task {} ok ({} chars)",
+            task_id,
+            o.reply.len()
+        )),
+        Err(e) => log(&format!("hub: task {task_id} FAILED: {e}")),
     }
 
     let frame = match outcome {

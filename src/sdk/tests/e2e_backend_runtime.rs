@@ -101,16 +101,18 @@ async fn a_new_session_replaces_the_active_thread_session() {
 }
 
 #[tokio::test]
-async fn workers_are_empty_without_a_hub_and_ops_do_not_error() {
-    // `workers()`/`worker_op()` answer from the orchestrator hub. With no hub
-    // attached the roster is empty and operations are inert — the TUI's Workers
-    // tab must render an empty list, not surface a failure.
+async fn without_a_hub_the_roster_reads_empty_but_mutations_say_why() {
+    // Reading and mutating are not the same promise. An empty roster is the
+    // truth when no hub is attached, so `workers()` must render an empty list
+    // rather than an error. But a mutation that cannot possibly have happened
+    // must not report success: an add that silently no-ops leaves the operator
+    // watching for a peer that was never registered anywhere.
     let backend = MockBackend::start().await;
     let runtime = runtime(&backend).await;
 
-    assert!(runtime.workers().is_empty());
+    assert!(runtime.workers().is_empty(), "reads stay inert");
 
-    runtime
+    let error = runtime
         .worker_op(WorkerOp::Add {
             address: Some("GRV1worker".to_string()),
             handle: None,
@@ -118,14 +120,18 @@ async fn workers_are_empty_without_a_hub_and_ops_do_not_error() {
             harness: Some("claude".to_string()),
         })
         .await
-        .expect("an add with no hub attached is inert, not an error");
+        .expect_err("an add with nowhere to go must not report success");
+    assert!(
+        error.to_string().contains("hub"),
+        "the reason must name what is missing: {error}"
+    );
 
     runtime
         .worker_op(WorkerOp::Select {
             id: "GRV1worker".to_string(),
         })
         .await
-        .expect("a select with no hub attached is inert");
+        .expect_err("nor a select");
 
     assert!(runtime.workers().is_empty());
 }

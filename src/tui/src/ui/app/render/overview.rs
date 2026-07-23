@@ -118,6 +118,13 @@ impl App {
                 Style::default().fg(Color::Red),
             )));
         }
+        let decisions = self.decisions().len();
+        if decisions > 0 {
+            orch.push(TLine::from(Span::styled(
+                format!("decisions: {decisions} · E open"),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
         f.render_widget(
             Paragraph::new(Text::from(orch)).block(self.panel("Orchestration")),
             top[1],

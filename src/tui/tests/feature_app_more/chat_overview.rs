@@ -119,6 +119,7 @@ fn tinyplace_observation_merges_into_snapshot() {
         },
     );
     let obs = TinyplaceObservation {
+        notice: None,
         identity: Some(TinyplaceIdentity {
             agent_id: "cid-xyz".into(),
             public_key: "pk".into(),

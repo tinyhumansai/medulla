@@ -22,7 +22,8 @@ use medulla::auth::{
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
 use medulla_tui::cli::{
-    parse_init_args, parse_login_args, parse_memory_args, LoginArgs, MemoryAction,
+    parse_init_args, parse_lessons_args, parse_login_args, parse_memory_args, LessonsAction,
+    LoginArgs, MemoryAction,
 };
 use medulla_tui::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
 
@@ -71,6 +72,44 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
     let store = CredentialStore::at_home(&medulla::home::medulla_home(&env));
     store.save(&Credentials { base_url, jwt })?;
     println!("Credentials saved to {}", store.path().display());
+    Ok(())
+}
+
+/// `medulla lessons <list|add>`: inspect or extend the current workspace ledger.
+pub(crate) fn run_lessons(args: &[String]) -> anyhow::Result<()> {
+    let parsed = match parse_lessons_args(args) {
+        Ok(parsed) => parsed,
+        Err(msg) => {
+            eprintln!("medulla lessons: {msg}");
+            std::process::exit(2);
+        }
+    };
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let workspace = parsed
+        .workspace
+        .map_or_else(|| cwd.clone(), |path| cwd.join(path));
+    match parsed.action {
+        LessonsAction::List => {
+            for lesson in medulla::lessons::list_lessons(&workspace)? {
+                println!("- when {}: {}", lesson.trigger, lesson.rule);
+            }
+        }
+        LessonsAction::Add { trigger, rule } => {
+            let outcome = medulla::lessons::add_lesson(
+                &workspace,
+                medulla::lessons::Lesson::new(trigger, rule),
+            )?;
+            match outcome {
+                medulla::lessons::AddLessonOutcome::Added => println!(
+                    "Added lesson to {}",
+                    workspace.join(medulla::init::PROFILE_FILE).display()
+                ),
+                medulla::lessons::AddLessonOutcome::AlreadyPresent => {
+                    println!("Lesson already present")
+                }
+            }
+        }
+    }
     Ok(())
 }
 

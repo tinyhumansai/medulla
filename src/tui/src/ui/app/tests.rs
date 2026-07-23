@@ -185,6 +185,42 @@ fn repo_tab_keeps_typed_workspace_errors_visible() {
     assert!(out.contains("repository discovery failed"), "{out}");
 }
 
+#[test]
+fn repo_tab_renders_loading_clean_detached_and_fallback_states() {
+    let mut loading = app();
+    loading.tab_index = tab_pos("Repo");
+    loading.set_workspaces_loading();
+    assert!(render(&mut loading).contains("Refreshing local repositories"));
+
+    let mut clean = repository_report();
+    let snapshot = clean.snapshot.as_mut().unwrap();
+    snapshot.branch.detached = true;
+    snapshot.files.clear();
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![clean]);
+    let out = render(&mut a);
+    assert!(out.contains("detached feat/ledger"), "{out}");
+    assert!(out.contains("✓ clean"), "{out}");
+
+    a.set_workspaces_loading();
+    assert!(render(&mut a).contains("Git ledger · refreshing"),);
+
+    a.set_workspace_diff(
+        "/workspace/project".into(),
+        "missing.rs".into(),
+        Err("diff unavailable".into()),
+    );
+    assert!(render(&mut a).contains("diff unavailable"));
+
+    a.set_workspace_reports(vec![medulla::workspace::WorkspaceReport {
+        root: "/broken".into(),
+        snapshot: None,
+        error: None,
+    }]);
+    assert!(render(&mut a).contains("inspection failed"));
+}
+
 // --- Feedback subpage (Settings > GENERAL > Feedback) ------------------------
 
 /// An app parked on the Feedback subpage with the mock board already loaded.

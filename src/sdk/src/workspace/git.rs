@@ -115,7 +115,15 @@ pub fn status_porcelain(workspace: &Path) -> Result<Vec<FileChange>, WorkspaceEr
         "status",
         ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
     )?;
-    let mut fields = output.stdout.split(|byte| *byte == 0).peekable();
+    parse_status(workspace, &output.stdout)
+}
+
+/// Parse Git's NUL-delimited porcelain output independently of process I/O.
+pub(super) fn parse_status(
+    workspace: &Path,
+    output: &[u8],
+) -> Result<Vec<FileChange>, WorkspaceError> {
+    let mut fields = output.split(|byte| *byte == 0).peekable();
     let mut changes = Vec::new();
     while let Some(field) = fields.next() {
         if field.is_empty() {
@@ -224,8 +232,16 @@ pub fn log_recent(workspace: &Path, limit: usize) -> Result<Vec<CommitSummary>, 
             format!("--format={format}"),
         ],
     )?;
+    parse_log(workspace, &output.stdout)
+}
+
+/// Parse Git's record/field-delimited log format independently of process I/O.
+pub(super) fn parse_log(
+    workspace: &Path,
+    output: &[u8],
+) -> Result<Vec<CommitSummary>, WorkspaceError> {
     let mut commits = Vec::new();
-    for record in output.stdout.split(|byte| *byte == 0) {
+    for record in output.split(|byte| *byte == 0) {
         let record = String::from_utf8_lossy(record);
         let record = record.trim_start_matches('\n').trim();
         if record.is_empty() {

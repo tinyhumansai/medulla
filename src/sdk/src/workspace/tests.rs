@@ -5,6 +5,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+use super::git::{parse_log, parse_status};
 use super::*;
 
 fn git(root: &Path, args: &[&str]) {
@@ -135,4 +136,74 @@ fn non_repository_returns_a_typed_git_error() {
             ..
         }
     ));
+
+    let diff_error = diff(dir.path(), Path::new("missing.txt")).unwrap_err();
+    assert!(matches!(
+        diff_error,
+        WorkspaceError::Git {
+            operation: "path diff",
+            ..
+        }
+    ));
+}
+
+#[test]
+fn malformed_status_records_are_typed_errors() {
+    let root = Path::new("/workspace");
+    let short = parse_status(root, b"M\0").unwrap_err();
+    assert!(matches!(
+        short,
+        WorkspaceError::Malformed {
+            operation: "status",
+            ..
+        }
+    ));
+    assert!(short.to_string().contains("porcelain record"));
+
+    let rename_without_origin = parse_status(root, b"R  renamed.txt\0").unwrap_err();
+    assert!(rename_without_origin.to_string().contains("original path"));
+}
+
+#[test]
+fn status_parser_skips_terminal_empty_records() {
+    assert!(parse_status(Path::new("/workspace"), b"\0")
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn malformed_log_records_and_timestamps_are_typed_errors() {
+    let root = Path::new("/workspace");
+    let fields = parse_log(root, b"only-one-field\0").unwrap_err();
+    assert!(fields.to_string().contains("expected 5 fields"));
+
+    let timestamp = parse_log(root, b"id\x1fshort\x1fauthor\x1fnope\x1fsubject\0").unwrap_err();
+    assert!(timestamp.to_string().contains("timestamp"));
+}
+
+#[test]
+fn log_parser_skips_empty_records() {
+    assert!(parse_log(Path::new("/workspace"), b"\0\n\0")
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn workspace_report_preserves_both_success_and_failure() {
+    let dir = repository();
+    let snapshot = inspect_workspace(dir.path()).unwrap();
+    let success = WorkspaceReport::from_result(dir.path().to_path_buf(), Ok(snapshot.clone()));
+    assert_eq!(success.snapshot, Some(snapshot));
+    assert_eq!(success.error, None);
+
+    let failure = WorkspaceReport::from_result(
+        Path::new("/bad").to_path_buf(),
+        Err(WorkspaceError::Malformed {
+            operation: "status",
+            workspace: Path::new("/bad").to_path_buf(),
+            message: "bad status".into(),
+        }),
+    );
+    assert!(failure.snapshot.is_none());
+    assert!(failure.error.unwrap().contains("bad status"));
 }

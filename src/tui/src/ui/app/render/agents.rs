@@ -131,9 +131,13 @@ impl App {
                     Style::default().fg(Color::Red),
                 )));
             }
-            if let Some(patterns) = self.lane_claims().get(&lane.key) {
+            if let Some((patterns, from_contract)) = self.effective_lane_claim(lane) {
                 header.push(TLine::from(Span::styled(
-                    format!("claim {}", patterns.join(", ")),
+                    format!(
+                        "{} {}",
+                        if from_contract { "contract" } else { "claim" },
+                        patterns.join(", ")
+                    ),
                     Style::default().fg(Color::DarkGray),
                 )));
             }

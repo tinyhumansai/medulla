@@ -19,12 +19,14 @@
 #                           alpha caused, and vice versa.
 #   3. concurrent-routing — two owner legs dispatched in parallel, one per worker,
 #                           both return their own task's marker with no cross-talk.
-#   4. crash-containment  — killing beta mid-task does not disturb alpha: alpha
+#   4. fresh-review       — a review task is routed to a different worker and
+#                           returns the required structured verdict note.
+#   5. crash-containment  — killing beta mid-task does not disturb alpha: alpha
 #                           still answers a fresh task while beta is down.
-#   5. crash-recovery     — restarting beta re-onboards the *same* identity and it
+#   6. crash-recovery     — restarting beta re-onboards the *same* identity and it
 #                           serves again, proving a crash is not terminal.
 #
-# Scenarios 1–5 share one booted stack. Same env overrides as run.sh (see lib.sh).
+# Scenarios 1–6 share one booted stack. Same env overrides as run.sh (see lib.sh).
 # Exit 0 iff every scenario passes.
 set -euo pipefail
 
@@ -194,7 +196,41 @@ PY
   assert_reply_excludes "$RUN_DIR/task_beta.json" "$ta" "beta"
   ok "concurrent routing without cross-talk"
 
-  # ── 4. a crashed daemon does not take the fleet down ──────────────────────
+  # ── 4. fresh-context review returns a structured verdict note ─────────────
+  scenario "review task runs on a different worker and returns APPROVE"
+  local review_task="MEDULLA_AUTOREVIEW target=ta-$$
+Delegate this review to beta. The implementer alpha MUST NOT perform this review.
+
+## Contract
+Outcome: emit the marker for $ta
+Non-goals:
+- do not change beta
+Verify:
+- inspect the supplied evidence
+
+## Exact diff
+\`\`\`diff
+-before
++after
+\`\`\`
+
+## Required verdict
+APPROVE | FINDINGS:"
+  run_owner review --endpoint "$SIGNAL_URL" --to "$beta" \
+    --task "$review_task" --task-id "review-$$" --timeout-ms 180000
+  [ "$OWNER_RC" = "0" ] || fail "review owner exited $OWNER_RC (expected 0)"
+  "$PYTHON_BIN" - "$RUN_DIR/review.json" <<'PY' || fail "fresh-review assertion failed"
+import json, sys
+frame = json.load(open(sys.argv[1]))
+assert frame.get("kind") == "Reply", f"kind={frame.get('kind')!r}"
+text = (frame.get("text") or "").strip()
+assert "APPROVE" in text, f"review did not return required verdict: {text!r}"
+assert "FINDINGS:" not in text, f"review returned both verdict shapes: {text!r}"
+print(f"[e2e]   review verdict note: {text!r}", file=sys.stderr)
+PY
+  ok "fresh-context review verdict round trip"
+
+  # ── 5. a crashed daemon does not take the fleet down ──────────────────────
   scenario "killing beta leaves alpha serving"
   kill_daemon beta
   # Beta is gone: nothing drains its inbox, so this leg must NOT come back.
@@ -214,7 +250,7 @@ PY
   log "  orphaned leg to dead beta did not succeed (rc=${OWNER_RC:-<still running>})"
   ok "crash containment"
 
-  # ── 5. the crashed daemon recovers ────────────────────────────────────────
+  # ── 6. the crashed daemon recovers ────────────────────────────────────────
   scenario "restarting beta restores service under the same identity"
   boot_daemon_named beta "$WORK_BETA"
   local rebooted; rebooted="$(worker_id beta)"

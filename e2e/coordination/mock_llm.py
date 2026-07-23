@@ -59,6 +59,11 @@ def last_user_message(body):
 
 def reply_text(body):
     echo = re.sub(r"\s+", " ", last_user_message(body)).strip()
+    # The fresh-context review ritual requires one machine-readable terminal
+    # note. Keep this branch deterministic so the multi-agent suite can prove a
+    # delegated review returns through the real daemon/provider/Signal chain.
+    if "MEDULLA_AUTOREVIEW target=" in echo and "Required verdict" in echo:
+        return "APPROVE"
     # Keep the echo short and marker-adjacent so assertions stay simple.
     echo = echo[:120]
     return f"{MARKER} {echo}".strip()

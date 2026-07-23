@@ -5,7 +5,7 @@ use super::types::{tab_pos, SP_FEEDBACK};
 use super::*;
 use std::sync::Arc;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
@@ -244,6 +244,103 @@ fn repo_commit_success_clears_marks_and_refresh_prunes_stale_marks() {
     clean.snapshot.as_mut().unwrap().files.clear();
     a.set_workspace_reports(vec![clean]);
     assert!(a.repo.marked.is_empty());
+}
+
+#[test]
+fn repo_empty_commit_prompt_and_empty_ledger_are_safe() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![repository_report()]);
+    a.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+    assert!(a
+        .on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .is_none());
+    assert!(a.status().contains("empty subject"));
+
+    a.set_workspace_reports(Vec::new());
+    a.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(a.status().contains("no changed path"));
+}
+
+#[test]
+fn repo_up_navigation_and_generic_navigation_branches_are_bounded() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![repository_report()]);
+    a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(a.repo.file_index, 0);
+
+    a.tab_index = tab_pos("Overview");
+    a.selected = 1;
+    a.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(a.selected, 1);
+}
+
+#[test]
+fn irrelevant_pointer_events_and_missed_hit_targets_are_noops() {
+    let mut a = app();
+    let pointer = |kind| MouseEvent {
+        kind,
+        column: 99,
+        row: 99,
+        modifiers: KeyModifiers::NONE,
+    };
+
+    assert!(a.on_mouse(pointer(MouseEventKind::ScrollUp)).is_none());
+    assert!(a.on_mouse(pointer(MouseEventKind::ScrollDown)).is_none());
+    assert!(a.on_mouse(pointer(MouseEventKind::Moved)).is_none());
+
+    a.hit_tabs_row = 3;
+    a.hit_tabs.clear();
+    assert!(a.handle_click(99, 3).is_none());
+    assert!(a.handle_click(99, 99).is_none());
+}
+
+#[test]
+fn empty_navigation_and_outside_pointer_regions_remain_bounded() {
+    let mut a = app();
+    a.snapshot.events.clear();
+    a.snapshot.roster.clear();
+    a.move_agent_index(false);
+    assert_eq!(a.agent_index, 1);
+
+    a.history = vec!["older".into()];
+    a.history_index = 0;
+    a.recall_newer();
+    assert!(a.draft.text.is_empty());
+
+    a.tab_index = tab_pos("Agents");
+    a.hit_agents = Some((ratatui::layout::Rect::new(0, 0, 1, 1), 0));
+    assert!(a.handle_click(5, 5).is_none());
+    a.hit_agents = Some((ratatui::layout::Rect::new(0, 0, 10, 10), 99));
+    assert!(a.handle_click(1, 1).is_none());
+
+    let _ = a.focus_settings_subpage("Context");
+    a.hit_context = None;
+    assert!(a.handle_click(1, 1).is_none());
+
+    a.tab_index = tab_pos("Chat");
+    a.hit_threads = Some((ratatui::layout::Rect::new(0, 0, 1, 1), 0));
+    assert!(a.handle_click(5, 5).is_none());
+}
+
+#[test]
+fn memory_refresh_and_failed_theme_persistence_surface_status() {
+    let mut a = app();
+    a.tab_index = tab_pos("Memory");
+    assert!(matches!(
+        a.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
+        Some(Cmd::LoadMemory)
+    ));
+    assert!(a.status().contains("refreshing"));
+
+    let dir = tempfile::tempdir().unwrap();
+    a.set_config_path(dir.path().to_path_buf());
+    a.persist_theme_now("primary");
+    assert!(a.status().contains("save failed"));
 }
 
 #[test]

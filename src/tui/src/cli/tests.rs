@@ -83,6 +83,16 @@ fn commit_args_require_workspace_subject_and_paths() {
 }
 
 #[test]
+fn parsers_ignore_documented_unknown_inputs_and_dangling_optional_values() {
+    assert_eq!(
+        parse_login_args(&argv(&["--unknown"])).unwrap(),
+        LoginArgs::default()
+    );
+    assert_eq!(parse_memory_args(&argv(&["status", "--k"])).unwrap().k, 5);
+    assert_eq!(parse_tui_args(&argv(&["--unknown"])), TuiArgs::default());
+}
+
+#[test]
 fn update_args_parse() {
     assert_eq!(parse_update_args(&argv(&[])), UpdateArgs { check: false });
     assert_eq!(

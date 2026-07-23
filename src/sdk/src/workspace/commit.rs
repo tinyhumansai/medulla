@@ -10,6 +10,10 @@ use regex::Regex;
 
 use super::types::{CommitError, CommitOptions, CommitOutcome};
 
+const STATUS_ARGS: [&str; 3] = ["status", "--porcelain=v1", "-z"];
+const STAGED_PATH_ARGS: [&str; 4] = ["diff", "--cached", "--name-only", "-z"];
+const SHORT_ID_ARGS: [&str; 3] = ["rev-parse", "--short", "HEAD"];
+
 fn run_git<I, S>(workspace: &Path, operation: &'static str, args: I) -> Result<Output, CommitError>
 where
     I: IntoIterator<Item = S>,
@@ -121,11 +125,9 @@ pub fn commit(
         "repository discovery",
         ["rev-parse", "--show-toplevel"],
     )?;
-    let status = run_git(
-        workspace,
-        "status",
-        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
+    let mut status_args = STATUS_ARGS.to_vec();
+    status_args.push("--untracked-files=all");
+    let status = run_git(workspace, "status", status_args)?;
     let changed = parse_changed_paths(&status.stdout);
     for path in &named {
         if !changed.contains(path) {
@@ -133,11 +135,7 @@ pub fn commit(
         }
     }
 
-    let staged = run_git(
-        workspace,
-        "staged-path inspection",
-        ["diff", "--cached", "--name-only", "-z"],
-    )?;
+    let staged = run_git(workspace, "staged-path inspection", STAGED_PATH_ARGS)?;
     for path in nul_paths(&staged.stdout) {
         if !named.contains(&path) {
             return Err(CommitError::ForeignStaged(path));
@@ -177,11 +175,7 @@ pub fn commit(
 
     let id = run_git(workspace, "commit id", ["rev-parse", "HEAD"])?;
     let id = String::from_utf8_lossy(&id.stdout).trim().to_owned();
-    let short_id = run_git(
-        workspace,
-        "short commit id",
-        ["rev-parse", "--short", "HEAD"],
-    )?;
+    let short_id = run_git(workspace, "short commit id", SHORT_ID_ARGS)?;
     Ok(CommitOutcome {
         short_id: String::from_utf8_lossy(&short_id.stdout).trim().to_owned(),
         id,

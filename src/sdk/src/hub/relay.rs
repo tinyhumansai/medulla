@@ -25,6 +25,13 @@ pub trait Relay: Send + Sync {
     /// contact is harmless.
     async fn request_contact(&self, peer: &str) -> Result<(), String>;
 
+    /// Resolve an `@handle` to its cryptoId, or `None` when unknown.
+    ///
+    /// Defaulted so a fake relay only implements it when the test cares.
+    async fn resolve_handle(&self, _name: &str) -> Option<String> {
+        None
+    }
+
     /// Whether `peer` has *accepted* the contact request. A request only creates
     /// a pending edge, so the runner waits on this before its first send.
     async fn contact_accepted(&self, peer: &str) -> bool;
@@ -46,6 +53,10 @@ impl Relay for SignalTransport {
 
     async fn request_contact(&self, peer: &str) -> Result<(), String> {
         SignalTransport::request_contact(self, peer).await
+    }
+
+    async fn resolve_handle(&self, name: &str) -> Option<String> {
+        SignalTransport::resolve_handle(self, name).await
     }
 
     async fn contact_accepted(&self, peer: &str) -> bool {

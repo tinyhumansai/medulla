@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 
 use crate::runtime::{
     AgentDescriptor, AgentPresence, CycleResultSummary, PeerSession, ThreadSummary,
-    TinyplaceIdentity,
+    TinyplaceIdentity, WorkerInfo,
 };
 use crate::ui::chat_store::ChatMessage;
 use crate::ui::events::{EventEnvelope, TuiEvent};
@@ -64,6 +64,10 @@ pub(super) struct State {
     pub(super) tracing: bool,
     /// The scripted agent roster.
     pub(super) roster: Vec<AgentDescriptor>,
+    /// The scripted worker registry, as `Runtime::workers` reports it. Distinct
+    /// from `roster`: the registry is the fleet this process can delegate to,
+    /// which is not necessarily what a backend advertises.
+    pub(super) workers: Vec<WorkerInfo>,
     /// Presence keyed by agent id.
     pub(super) presence: HashMap<String, AgentPresence>,
     /// Peer sessions keyed by agent id.
@@ -220,6 +224,18 @@ impl MockRuntime {
         self.ping();
     }
 
+    /// Script the registry returned by [`Runtime::workers`](crate::runtime::Runtime::workers).
+    ///
+    /// The worker registry is a separate surface from the snapshot roster — a
+    /// locally-added tiny.place worker is in the former and not the latter —
+    /// so views that read both need a mock that can populate them apart.
+    pub fn set_workers(&self, workers: Vec<WorkerInfo>) {
+        {
+            self.state.lock().unwrap().workers = workers;
+        }
+        self.ping();
+    }
+
     /// Force the active thread's running flag. Test/demo scripting seam.
     pub fn set_running(&self, running: bool) {
         {
@@ -249,6 +265,7 @@ impl MockRuntime {
             async_mode: false,
             tracing: false,
             roster: Vec::new(),
+            workers: Vec::new(),
             presence: HashMap::new(),
             sessions: HashMap::new(),
             tinyplace: None,

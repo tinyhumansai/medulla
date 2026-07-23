@@ -27,11 +27,12 @@ mod types_tests;
 mod urls_tests;
 
 pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
-pub use load::load_config;
-pub use persist::{clear_setting, persist_setting, persist_welcome_completed};
+pub use load::{default_tinyplace_config, load_config};
+pub use persist::{clear_setting, persist_hub_workers, persist_setting, persist_welcome_completed};
 pub use types::{
-    BackendConfig, CoreConfig, LoadedConfig, MedullaConfig, MemoryConfigSection, OnboardingConfig,
-    OpencodeConfig, Peer, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
+    BackendConfig, CoreConfig, HubSection, HubWorkerConfig, LoadedConfig, MedullaConfig,
+    MemoryConfigSection, OnboardingConfig, OpencodeConfig, Peer, ThemeConfig, TinyplaceConfig,
+    TuiConfig, UpdateConfig,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, display_host, is_staging,

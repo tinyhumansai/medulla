@@ -390,3 +390,46 @@ async fn contact_auto_accepter_honours_allow_predicate() {
 
     handle.abort();
 }
+
+/// The service publishes Signal pre-keys on startup.
+///
+/// Without a published bundle a peer cannot run X3DH against this identity, so
+/// every DM to it fails to establish a session — the agent shows up in the
+/// directory but silently receives nothing. The headless daemon has always done
+/// this during onboarding; anything else that holds an identity must too.
+#[tokio::test]
+async fn service_publishes_pre_keys_so_peers_can_reach_it() {
+    let mock = MockTinyplace::start(MockConfig::default()).await;
+    let dir = temp_identity_dir("prekeys");
+
+    let config = tp_config(&mock.base_url, &dir, vec![], "peers");
+    let service = TinyplaceService::start(&config).expect("service starts");
+
+    // The publish is what makes this identity reachable: without a bundle a peer
+    // cannot run X3DH against it, so every DM fails to establish a session and
+    // the agent silently receives nothing. The mock serves no key routes, so the
+    // call cannot succeed — what matters, and what was missing entirely, is that
+    // it is attempted at all.
+    wait_until("pre-key publish attempted", T, || {
+        mock.requests().iter().any(|r| r.path.contains("/keys/"))
+    })
+    .await;
+
+    // And the failure is reported rather than swallowed: an agent nobody can
+    // reach must not look identical to one that simply has no mail.
+    wait_until("failure surfaced", T, || {
+        service.observation().lock().unwrap().notice.is_some()
+    })
+    .await;
+    let notice = service
+        .observation()
+        .lock()
+        .unwrap()
+        .notice
+        .clone()
+        .expect("a failed publish leaves a notice");
+    assert!(notice.contains("pre-key"), "got: {notice}");
+
+    drop(service);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -56,6 +56,21 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // read by `BackendRuntime::workers()`/`worker_op()` so the Workers tab manages
     // the hub's tiny.place peers live.
     let hub_slot: crate::hub_relay::HubSlot = Arc::new(Mutex::new(None));
+    // The hub narrates itself; those lines must not reach the terminal while the
+    // TUI owns the screen, so they are captured here instead.
+    let hub_logs = medulla_tui::log::LogBuffer::new();
+    // Persist them too: the failures worth chasing are usually noticed after the
+    // fact, and an in-memory ring dies with the process.
+    let log_dir = medulla_tui::log::default_log_dir(&env);
+    // Held apart rather than written into `startup_status`: this runs before
+    // anything else could have set one, so `get_or_insert` always won here and
+    // was then overwritten by every later assignment — the line never showed on
+    // any path that reported anything at all. It is the least interesting thing
+    // that could be said at startup, so it belongs at the end of the fallback
+    // chain, not the front.
+    let log_note = hub_logs
+        .attach_file(&log_dir, "orchestrator")
+        .map(|path| format!("logging to {}", path.display()));
 
     // Persona-memory service (tinycortex), on by default. Wired into the app
     // itself, which reads it for the Memory tab, so memory works on the backend
@@ -275,7 +290,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // On a relogin (below) it is torn down and re-started for the new account so
     // no worker mutation or task relay ever targets a revoked/stale session.
     let mut _hub_session = if backend_client.is_some() {
-        crate::hub_relay::start(&env, &home, hub_slot.clone()).await
+        crate::hub_relay::start(&env, &home, hub_slot.clone(), hub_logs.clone()).await
     } else {
         None
     };
@@ -285,7 +300,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // user lands on the login screen rather than being dropped to the shell.
     // The tiny.place service and the terminal guard outlive the loop — neither
     // depends on which account is signed in.
-    let mut status = startup_status.or(tinyplace_status);
+    let mut status = startup_status.or(tinyplace_status).or(log_note);
     let result = loop {
         let result = run(
             &mut terminal,
@@ -336,7 +351,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         status = save_credentials(&home, &base_url, &jwt);
                         // Creds are now persisted, so the hub can read the new
                         // account's JWT: start it fresh, scoped to this session.
-                        _hub_session = crate::hub_relay::start(&env, &home, hub_slot.clone()).await;
+                        _hub_session = crate::hub_relay::start(
+                            &env,
+                            &home,
+                            hub_slot.clone(),
+                            hub_logs.clone(),
+                        )
+                        .await;
                     }
                     Err(e) => {
                         runtime = Arc::new(MockRuntime::demo());

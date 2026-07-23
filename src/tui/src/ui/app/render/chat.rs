@@ -85,7 +85,11 @@ impl App {
         f.render_widget(block, cols[1]);
         let width = inner.width as usize;
         let capacity = (inner.height as usize).saturating_sub(1).max(4);
-        let lines = chat_lines(&self.snapshot.chat_events, width.saturating_sub(2));
+        // Rendered from the full log, not the chat subset: tool activity lives
+        // there. `chat_events` is left untouched — it is what ^Y copies and what
+        // CHAT_CAP budgets, and widening it would put raw JSON in the clipboard
+        // and evict real messages from the transcript.
+        let lines = chat_lines(&self.snapshot.events, width.saturating_sub(2));
         let max_scroll = lines.len().saturating_sub(capacity);
         let eff = self.chat_scroll.min(max_scroll);
         self.chat_scroll = eff;

@@ -23,6 +23,14 @@ pub fn now_nanos() -> u128 {
         .unwrap_or(0)
 }
 
+/// The current time as an ISO-8601 string, for log files and wire timestamps.
+///
+/// Delegates to the tiny.place SDK's formatter so every timestamp this workspace
+/// emits has one shape.
+pub fn iso_now() -> String {
+    ::tinyplace::auth::timestamp()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

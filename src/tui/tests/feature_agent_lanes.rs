@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity};
@@ -75,6 +76,46 @@ fn agents_app(ids: &[&str], online: &[(&str, bool)]) -> App {
     app
 }
 
+fn dirty_report(paths: &[&str]) -> medulla::workspace::WorkspaceReport {
+    use medulla::workspace::{BranchState, FileChange, WorkspaceReport, WorkspaceSnapshot};
+    let root = std::path::PathBuf::from("/workspace/project");
+    WorkspaceReport {
+        root: root.clone(),
+        snapshot: Some(WorkspaceSnapshot {
+            root,
+            branch: BranchState {
+                name: "feat/claims".into(),
+                detached: false,
+                ahead: 0,
+                behind: 0,
+            },
+            files: paths
+                .iter()
+                .map(|path| FileChange {
+                    path: (*path).into(),
+                    original_path: None,
+                    index_status: ' ',
+                    worktree_status: 'M',
+                })
+                .collect(),
+            commits: vec![],
+        }),
+        error: None,
+    }
+}
+
+fn key(app: &mut App, code: KeyCode) {
+    let _ = app.on_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+}
+
+fn claim_selected_lane(app: &mut App, claim: &str) {
+    key(app, KeyCode::Char('C'));
+    for ch in claim.chars() {
+        key(app, KeyCode::Char(ch));
+    }
+    key(app, KeyCode::Enter);
+}
+
 #[test]
 fn an_online_peer_and_an_offline_peer_render_different_glyphs() {
     // The filled/hollow distinction is the whole signal — if both rendered the
@@ -111,4 +152,38 @@ fn the_lane_list_survives_a_roster_that_changes_under_it() {
         !out.contains("gone"),
         "a stale presence reading must not create a lane: {out}"
     );
+}
+
+#[test]
+fn manual_claim_overlap_badges_both_lanes_and_the_overview() {
+    let mut app = agents_app(&["up", "down"], &[]);
+    app.set_workspace_reports(vec![dirty_report(&["src/shared.rs"])]);
+
+    claim_selected_lane(&mut app, "src/**");
+    key(&mut app, KeyCode::Down);
+    claim_selected_lane(&mut app, "src/**/*.rs");
+
+    let agents = render(&mut app, 180, 44);
+    assert!(agents.contains("lanes 2/4"), "{agents}");
+    assert!(agents.matches("⚠ overlap").count() >= 2, "{agents}");
+    assert!(agents.contains("claim src/**/*.rs"), "{agents}");
+
+    app.tab_index = TABS.iter().position(|tab| *tab == "Overview").unwrap();
+    let overview = render(&mut app, 140, 40);
+    assert!(
+        overview.contains("⚠ lane overlap · 1 path(s)"),
+        "{overview}"
+    );
+}
+
+#[test]
+fn shared_path_claims_and_invalid_patterns_are_visible() {
+    let mut app = agents_app(&["up"], &[]);
+    app.set_workspace_reports(vec![dirty_report(&["Cargo.lock"])]);
+    claim_selected_lane(&mut app, "Cargo.lock");
+    let out = render(&mut app, 180, 44);
+    assert!(out.contains("⚠ shared-path"), "{out}");
+
+    claim_selected_lane(&mut app, "[");
+    assert!(app.status().contains("invalid lane-claim pattern"));
 }

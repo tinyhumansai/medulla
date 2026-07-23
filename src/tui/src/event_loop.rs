@@ -104,9 +104,13 @@ pub(crate) async fn run(
                     AppMsg::Contexts(c) => app.set_contexts(c),
                     AppMsg::WorkspacesLoaded(reports) => {
                         app.set_workspace_reports(reports);
-                        app.set_status("Repo · refreshed");
-                        if let Some(cmd) = app.selected_repo_diff_cmd() {
-                            run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
+                        if app.tab() == "Repo" {
+                            app.set_status("Repo · refreshed");
+                            if let Some(cmd) = app.selected_repo_diff_cmd() {
+                                run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
+                            }
+                        } else {
+                            app.set_status("Agents · path claims refreshed");
                         }
                     }
                     AppMsg::WorkspaceDiffLoaded { workspace, path, result } => {
@@ -180,7 +184,7 @@ pub(crate) async fn run(
                 }
             }
             _ = slow_tick.tick() => {
-                if app.tab() == "Repo" {
+                if matches!(app.tab(), "Agents" | "Repo") {
                     app.set_workspaces_loading();
                     run_cmd(
                         Cmd::LoadWorkspaces(app.loaded.workflow_workspaces()),

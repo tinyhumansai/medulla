@@ -49,6 +49,7 @@ impl App {
             memory_ingesting: false,
             feedback: Default::default(),
             repo: Default::default(),
+            lane_claims: Default::default(),
             prompt: None,
             frame: 0,
             mouse_capture: true,
@@ -287,7 +288,7 @@ impl App {
     pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
         match self.tab() {
             "Memory" => Some(Cmd::LoadMemory),
-            "Repo" => Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces())),
+            "Agents" | "Repo" => Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces())),
             "Settings" => match self.settings_index {
                 SP_USAGE => Some(Cmd::LoadUsage),
                 SP_CONTEXT => Some(Cmd::InspectContext),

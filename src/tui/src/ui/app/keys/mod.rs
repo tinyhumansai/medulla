@@ -207,6 +207,10 @@ impl App {
                 self.answer_selected_task();
                 return None;
             }
+            KeyCode::Char('C') if tab == "Agents" => {
+                self.open_lane_claim_prompt();
+                return None;
+            }
             // Repo ledger navigation and refresh.
             KeyCode::Char('r') if tab == "Repo" => {
                 self.set_workspaces_loading();

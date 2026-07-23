@@ -162,6 +162,11 @@ pub(super) enum MemoryEntry {
 
 /// The action a small inline prompt (Workers add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Set or clear the manual permitted-path claim for one visible lane.
+    LaneClaim {
+        /// Stable lane key.
+        lane_key: String,
+    },
     /// Add a worker from an address/@handle line.
     WorkerAdd,
     /// Edit the label of the worker with the given id.
@@ -308,6 +313,8 @@ pub struct App {
     pub(super) feedback: FeedbackState,
     /// Local Git ledger state for the Repo tab.
     pub(super) repo: RepoState,
+    /// Manual permitted-path globs keyed by stable Agents lane id.
+    pub(super) lane_claims: std::collections::BTreeMap<String, Vec<String>>,
     pub(super) prompt: Option<Prompt>,
     /// The animation frame counter (drives the spinner).
     pub frame: usize,

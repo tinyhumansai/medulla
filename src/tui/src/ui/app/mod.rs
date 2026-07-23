@@ -11,6 +11,7 @@
 //! are re-exported here so callers use `crate::ui::app::*`.
 
 mod account;
+mod claims;
 mod commands;
 mod feedback;
 mod input;

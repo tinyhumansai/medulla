@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::harness_contract::{VerificationEvidence, WorkerContract};
+
 /// Token accounting reported alongside an inference or task result.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Usage {
@@ -47,6 +49,12 @@ pub struct TaskDigest {
     /// The task's nesting depth in the cycle tree.
     #[serde(default)]
     pub depth: i64,
+    /// Advisory boundaries supplied at delegation time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<WorkerContract>,
+    /// Verification observations produced in this task's scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Vec<VerificationEvidence>>,
 }
 
 /// One node-execution trace entry for the Trace / Overview lists.
@@ -99,6 +107,7 @@ pub enum TuiEvent {
         instruction: String,
         depth: i64,
         agent_id: Option<String>,
+        contract: Option<WorkerContract>,
     },
     /// A task emitted an event (text, status, etc.).
     TaskEvent {

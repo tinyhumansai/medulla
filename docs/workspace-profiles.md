@@ -18,6 +18,10 @@ routing: |
 Payments service. Owns billing, invoices, and the Stripe integration.
 Decompose billing changes per bounded context and keep migrations in their
 own task.
+
+## Lessons
+
+- when a migration changes an index: compare the production query plan first
 ```
 
 The frontmatter preferences are **advisory**. medulla renders them into the
@@ -72,3 +76,29 @@ format change ships with a library upgrade rather than a client release.
 
 The `workspace` path must match what the roster reports for an agent
 (`metadata.workspace`) for the profile to be attributed to that agent.
+
+## Lessons ledger
+
+`## Lessons` is an append-only operator ledger for durable, workspace-specific
+rules. Each entry has one structured line:
+
+```markdown
+- when <trigger>: <rule>
+```
+
+Record a lesson from the TUI with:
+
+```text
+/lesson <trigger> -> <rule>
+```
+
+The same operation is available headlessly:
+
+```text
+medulla lessons add "<trigger> -> <rule>"
+medulla lessons list
+```
+
+Use `--workspace <dir>` when the profile is outside the current directory.
+Adding the same trigger and rule again is a successful no-op. Existing
+frontmatter, summary prose, and later sections remain unchanged.

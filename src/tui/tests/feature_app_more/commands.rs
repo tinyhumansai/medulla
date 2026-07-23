@@ -14,6 +14,26 @@ fn slash_resume_emits_list_chats_cmd() {
 }
 
 #[test]
+fn slash_review_refuses_silent_self_review() {
+    let (mut app, _rt) = demo_app();
+    let cmd = submit_line(&mut app, "/review task-1");
+    assert!(cmd.is_none());
+    assert!(
+        app.status().contains("no online agent other than 'dev-1'"),
+        "status: {}",
+        app.status()
+    );
+}
+
+#[test]
+fn slash_review_requires_a_known_target() {
+    let (mut app, _rt) = demo_app();
+    let cmd = submit_line(&mut app, "/review missing-task");
+    assert!(cmd.is_none());
+    assert!(app.status().contains("was not found"));
+}
+
+#[test]
 fn slash_new_and_abort_and_clear_set_status() {
     let (mut app, rt) = demo_app();
     let _ = submit_line(&mut app, "/new");

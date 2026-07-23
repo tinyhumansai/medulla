@@ -34,6 +34,21 @@ fn run(args: &[&str], cwd: &std::path::Path, home: &std::path::Path) -> Output {
         .expect("the medulla binary should run")
 }
 
+fn git(root: &std::path::Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
 #[test]
 fn version_help_and_sessions_are_available_without_a_tty() {
     let dir = TempDir::new().unwrap();
@@ -96,6 +111,58 @@ fn init_offline_writes_then_protects_a_workspace_profile() {
         dir.path(),
     );
     assert!(forced.status.success());
+}
+
+#[test]
+fn commit_command_creates_an_exact_conventional_commit() {
+    let dir = TempDir::new().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    git(dir.path(), &["config", "user.name", "CLI Test"]);
+    git(dir.path(), &["config", "user.email", "cli@example.invalid"]);
+    std::fs::write(dir.path().join("one.txt"), "one\n").unwrap();
+    git(dir.path(), &["add", "one.txt"]);
+    git(dir.path(), &["commit", "-qm", "initial"]);
+    std::fs::write(dir.path().join("one.txt"), "changed\n").unwrap();
+    std::fs::write(dir.path().join("two.txt"), "left dirty\n").unwrap();
+
+    let output = run(
+        &[
+            "commit",
+            "--workspace",
+            ".",
+            "-m",
+            "feat(cli): commit one path",
+            "one.txt",
+        ],
+        dir.path(),
+        &dir.path().join("home"),
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("feat(cli): commit one path"));
+    assert_eq!(
+        git(dir.path(), &["show", "--format=", "--name-only", "HEAD"]),
+        "one.txt"
+    );
+    assert!(git(dir.path(), &["status", "--porcelain"]).contains("two.txt"));
+
+    let invalid = run(
+        &[
+            "commit",
+            "--workspace",
+            ".",
+            "-m",
+            "not conventional",
+            "two.txt",
+        ],
+        dir.path(),
+        &dir.path().join("home"),
+    );
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("conventional commit"));
 }
 
 #[test]

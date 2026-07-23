@@ -31,9 +31,28 @@ pub enum Command {
     Update,
     /// Author a `MEDULLA.md` workspace profile for a directory.
     Init,
+    /// Create a guarded commit containing exactly the named paths.
+    Commit,
     /// Run the orchestrator hub: relay hosted-backend tasks to tiny.place
     /// workers over Signal DMs; carries the remaining args.
     Hub,
+}
+
+/// Parsed `medulla commit` flags and exact path boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CommitArgs {
+    /// Repository root supplied by `--workspace`.
+    pub workspace: String,
+    /// Conventional commit subject supplied by `-m`/`--message`.
+    pub subject: String,
+    /// Optional longer commit body.
+    pub body: Option<String>,
+    /// Explicit config path for `[workflow].sharedPathDenylist`.
+    pub config: Option<String>,
+    /// Override the shared-path denylist.
+    pub allow_shared: bool,
+    /// Repository-relative paths to stage and commit.
+    pub paths: Vec<String>,
 }
 
 /// Parsed `medulla init` flags.

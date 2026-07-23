@@ -7,7 +7,8 @@ use medulla::auth::Provider;
 use medulla::tinyplace::HarnessProvider;
 
 use super::types::{
-    Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs, UpdateArgs,
+    Command, CommitArgs, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs,
+    UpdateArgs,
 };
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -23,12 +24,68 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("memory") => Command::Memory,
         Some("update") => Command::Update,
         Some("init") => Command::Init,
+        Some("commit") => Command::Commit,
         Some("hub") => Command::Hub,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),
         _ => Command::Tui,
     }
+}
+
+/// Parse the exact-path headless committer.
+pub fn parse_commit_args(args: &[String]) -> Result<CommitArgs, String> {
+    let mut out = CommitArgs::default();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--workspace" => {
+                out.workspace = it
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| "commit: --workspace requires a directory".to_string())?;
+            }
+            "-m" | "--message" => {
+                out.subject = it
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| "commit: -m/--message requires a subject".to_string())?;
+            }
+            "--body" => {
+                out.body = Some(
+                    it.next()
+                        .cloned()
+                        .ok_or_else(|| "commit: --body requires text".to_string())?,
+                );
+            }
+            "--config" => {
+                out.config = Some(
+                    it.next()
+                        .cloned()
+                        .ok_or_else(|| "commit: --config requires a path".to_string())?,
+                );
+            }
+            "--allow-shared" => out.allow_shared = true,
+            "--" => {
+                out.paths.extend(it.by_ref().cloned());
+                break;
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("commit: unknown flag '{flag}'"));
+            }
+            path => out.paths.push(path.to_owned()),
+        }
+    }
+    if out.workspace.trim().is_empty() {
+        return Err("commit: --workspace is required".into());
+    }
+    if out.subject.trim().is_empty() {
+        return Err("commit: -m/--message is required".into());
+    }
+    if out.paths.is_empty() {
+        return Err("commit: name at least one changed path".into());
+    }
+    Ok(out)
 }
 
 /// Parse `medulla login` flags out of the args following `login`. Returns the
@@ -221,6 +278,7 @@ medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
 medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
+medulla commit [flags]  Commit exactly the named changed paths\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
@@ -241,6 +299,12 @@ Init flags:\n  \
 --force, -f             Overwrite an existing MEDULLA.md\n  \
 --offline               Skip the model call and write an editable stub\n  \
 --config <path>         Explicit config file (.toml or .json) for backend/model settings\n\n\
+Commit flags:\n  \
+--workspace <dir>       Repository root (required)\n  \
+-m, --message <text>    Conventional commit subject (required)\n  \
+--body <text>           Optional commit body\n  \
+--allow-shared          Permit paths matched by workflow.sharedPathDenylist\n  \
+--config <path>         Explicit config file for shared-path policy\n\n\
 Run flags:\n  \
 --core-socket <path>    medulla-serve unix socket to attach (else MEDULLA_CORE_SOCKET / [core] config)\n  \
 --config <path>         Explicit config file (.toml or .json) for the [core] section\n\n\

@@ -292,6 +292,61 @@ fn run_cmd(
                 });
             });
         }
+        Cmd::PrepareReview {
+            task_id,
+            implementer_id,
+            reviewer_id,
+            workspace,
+            contract,
+        } => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                let diff_workspace = workspace.clone();
+                let evidence = tokio::task::spawn_blocking(move || {
+                    let paths = medulla::workspace::diff_name_only(&diff_workspace)
+                        .map_err(|error| error.to_string())?;
+                    let mut sections = Vec::new();
+                    for path in &paths {
+                        let patch = medulla::workspace::diff(&diff_workspace, path)
+                            .map_err(|error| error.to_string())?;
+                        if !patch.is_empty() {
+                            sections.push(patch);
+                        }
+                    }
+                    Ok::<_, String>((paths, sections.join("\n")))
+                })
+                .await;
+                let (paths, diff) = match evidence {
+                    Ok(Ok(evidence)) => evidence,
+                    Ok(Err(error)) => {
+                        let _ = tx.send(AppMsg::Status(format!("Review · diff failed: {error}")));
+                        return;
+                    }
+                    Err(error) => {
+                        let _ = tx.send(AppMsg::Status(format!(
+                            "Review · diff task failed: {error}"
+                        )));
+                        return;
+                    }
+                };
+                let instruction =
+                    medulla::autoreview::compose_instruction(&medulla::autoreview::ReviewRequest {
+                        task_id,
+                        implementer_id,
+                        reviewer_id,
+                        workspace,
+                        touched_paths: paths,
+                        contract,
+                        diff,
+                    });
+                let status = match rt.submit(instruction).await {
+                    Ok(()) => "Review · delegated to a fresh reviewer".to_string(),
+                    Err(error) => format!("Review · delegation failed: {error}"),
+                };
+                let _ = tx.send(AppMsg::Status(status));
+            });
+        }
         // --- feedback board ---------------------------------------------
         Cmd::LoadFeedback(query) => {
             let rt = runtime.clone();

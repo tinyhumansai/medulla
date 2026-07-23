@@ -40,6 +40,8 @@ pub enum SlashCommand {
     /// `/memory [query]`, `/mem [query]` — load persona memory, or search it when
     /// a query is given (original case preserved).
     Memory(Option<String>),
+    /// `/review <lane|task-id>` — launch an independent fresh-context review.
+    Review(String),
     /// `/feedback` — open the feedback board tab.
     Feedback,
     /// `/mouse` — toggle mouse capture.

@@ -93,6 +93,14 @@ pub enum Cmd {
         /// Repository-relative changed path.
         path: std::path::PathBuf,
     },
+    /// Collect the lane-scoped Git diff and submit an independent review task.
+    PrepareReview {
+        task_id: String,
+        implementer_id: String,
+        reviewer_id: String,
+        workspace: std::path::PathBuf,
+        contract: medulla::autoreview::ReviewContract,
+    },
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
     /// Load the persona-memory status + directives for the Memory tab.

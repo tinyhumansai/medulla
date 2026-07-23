@@ -108,10 +108,6 @@ fn address_of_prefers_the_selected_worker_over_the_first() {
     assert_eq!(address_of(&workers, "unknown"), None);
 }
 
-/// A fake worker: on `send`, decodes the task frame and queues the daemon's
-/// `ack → status → (reply|error)` sequence (echoing `correlationId`), which the
-/// pump then drains. `Silent` queues nothing, to exercise the timeout path.
-
 #[test]
 fn adding_a_peer_requests_contact_unless_it_is_already_one() {
     use super::super::handle::should_request_contact;

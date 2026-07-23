@@ -85,6 +85,10 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
+            PromptKind::LaneClaim { lane_key } => {
+                self.submit_lane_claim(lane_key, &text);
+                None
+            }
             PromptKind::WorkerAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
                     self.set_status("Adding worker…");

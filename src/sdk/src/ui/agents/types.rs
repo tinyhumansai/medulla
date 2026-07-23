@@ -5,6 +5,66 @@
 //! accessors.
 
 use crate::runtime::AgentDescriptor;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+/// One dirty repository path attributed to a worker lane.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ClaimedPath {
+    /// Local workspace root that owns the path.
+    pub workspace: PathBuf,
+    /// Repository-relative path.
+    pub path: PathBuf,
+}
+
+/// A lane's permitted boundary and the dirty paths attributed to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaneClaim {
+    /// Stable lane key from [`AgentLane::key`].
+    pub lane_key: String,
+    /// Repository-relative glob patterns the lane may touch.
+    pub permitted_paths: Vec<String>,
+    /// Dirty paths observed for this lane.
+    pub touched_paths: Vec<ClaimedPath>,
+}
+
+/// A blast-radius warning attached to a lane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LaneGuardBadge {
+    /// At least one attributed path is outside the lane's permitted globs.
+    OutsideClaim,
+    /// At least one dirty path is attributed to multiple lanes.
+    Overlap,
+    /// At least one attributed path matches the workflow shared-path denylist.
+    SharedPath,
+}
+
+impl LaneGuardBadge {
+    /// Compact TUI label for this warning.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OutsideClaim => "⚠ outside-claim",
+            Self::Overlap => "⚠ overlap",
+            Self::SharedPath => "⚠ shared-path",
+        }
+    }
+}
+
+/// Pure lane-guard result keyed by stable lane id.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LaneGuardReport {
+    /// Warning badges for each evaluated lane.
+    pub lanes: BTreeMap<String, BTreeSet<LaneGuardBadge>>,
+    /// Dirty paths claimed by more than one lane.
+    pub overlaps: BTreeSet<ClaimedPath>,
+}
+
+impl LaneGuardReport {
+    /// Warning badges for `lane_key`, or an empty set for an unclaimed lane.
+    pub fn badges(&self, lane_key: &str) -> BTreeSet<LaneGuardBadge> {
+        self.lanes.get(lane_key).cloned().unwrap_or_default()
+    }
+}
 
 /// A cognitive tier / worker classification for a lane. Drives the lane colour
 /// and whether the lane is a delegatable agent or a graph-invoked function.

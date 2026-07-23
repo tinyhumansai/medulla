@@ -4,6 +4,7 @@
 
 use crate::ui::events::{EventEnvelope, TuiEvent};
 
+mod claims;
 mod fold;
 mod render;
 

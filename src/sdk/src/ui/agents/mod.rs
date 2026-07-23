@@ -10,6 +10,7 @@
 //! submodule. All public items are re-exported here so callers use
 //! `medulla::ui::agents::*`.
 
+mod claims;
 mod fmt;
 mod keys;
 mod lanes;
@@ -20,8 +21,14 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use claims::{
+    claimed_dirty_paths, evaluate_lane_claims, validate_claim_patterns, ClaimPatternError,
+};
 pub use keys::parse_task_key;
 pub use lanes::derive_agent_lanes;
 pub use lines::{lane_lines, task_lines};
 pub use rows::{agent_row_model, ordered_tasks};
-pub use types::{AgentLane, AgentRole, AgentRow, Line, TaskState, TaskStatus, TurnBlock};
+pub use types::{
+    AgentLane, AgentRole, AgentRow, ClaimedPath, LaneClaim, LaneGuardBadge, LaneGuardReport, Line,
+    TaskState, TaskStatus, TurnBlock,
+};

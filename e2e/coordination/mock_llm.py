@@ -25,6 +25,7 @@ import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 
 MODEL_ID = os.environ.get("MOCK_LLM_MODEL", "mock-model")
 MARKER = os.environ.get("MOCK_LLM_MARKER", "COORDINATION_OK")
@@ -178,9 +179,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    """Bind without HTTPServer's reverse-DNS lookup of the loopback address."""
+
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def main():
     port = int(os.environ.get("MOCK_LLM_PORT", "8080"))
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = LoopbackHTTPServer(("127.0.0.1", port), Handler)
     # Print the bound address so a wrapper script can capture the real port.
     sys.stdout.write(f"mock_llm listening on http://127.0.0.1:{server.server_address[1]}\n")
     sys.stdout.flush()

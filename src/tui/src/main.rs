@@ -205,8 +205,15 @@ fn claim_identity(
     config: &mut medulla::config::TinyplaceConfig,
 ) -> anyhow::Result<medulla::tinyplace::IdentityLock> {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    // Component-wise, not string or raw-`Path` equality: a hand-written
+    // `identityDir = ".../tinyplace/"` keeps its trailing separator, which a
+    // `Path`-value comparison treats as different and would route a default
+    // worker down the fail-loud named path — so a second one would see "already
+    // in use" instead of fanning out to `workers/2`.
+    let default_pool_dir = medulla::home::medulla_home(env).join("tinyplace");
     let pooled = std::path::Path::new(&config.identity_dir)
-        == medulla::home::medulla_home(env).join("tinyplace");
+        .components()
+        .eq(default_pool_dir.components());
     let acquired = if pooled {
         medulla::tinyplace::acquire_identity(env, &home)
     } else {

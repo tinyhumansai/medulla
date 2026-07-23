@@ -122,6 +122,11 @@ pub fn acquire_identity(
                 .join(IDENTITY_FILE)
         };
         if let Some(lock) = try_lock_slot(&path)? {
+            // A `finish` error (e.g. a slot with a malformed key) propagates out
+            // rather than advancing to the next slot: only a *busy* slot — the
+            // `None` above — means "try another". A slot we hold the lock on but
+            // cannot load from is a real fault to report, not a collision to work
+            // around. Covered by `a_bad_planted_key_is_reported_not_replaced`.
             return finish(path, slot, lock, env);
         }
     }

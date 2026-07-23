@@ -199,6 +199,11 @@ impl Runtime for MockRuntime {
         self.ping();
     }
 
+    fn answer_question(&self, cycle_id: String, question_id: String, body: String) {
+        self.record(&format!("answer_question:{cycle_id}:{question_id}:{body}"));
+        self.ping();
+    }
+
     // --- feedback board (scripted; see [`super::feedback`]) ----------------
 
     fn list_feedback(

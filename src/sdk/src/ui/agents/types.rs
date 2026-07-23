@@ -237,7 +237,7 @@ pub enum AgentRow {
         /// Index into the lanes slice.
         lane_index: usize,
         /// The task rendered by this sublane.
-        task: TaskState,
+        task: Box<TaskState>,
         /// Whether this is the last shown sublane.
         last: bool,
     },

@@ -29,7 +29,7 @@ impl App {
         let selected_row = rows.get(active);
         let active_lane_index = selected_row.and_then(|r| r.lane_index()).unwrap_or(0);
         let selected_task: Option<TaskState> = match selected_row {
-            Some(AgentRow::Sub { task, .. }) => Some(task.clone()),
+            Some(AgentRow::Sub { task, .. }) => Some(task.as_ref().clone()),
             _ => None,
         };
 

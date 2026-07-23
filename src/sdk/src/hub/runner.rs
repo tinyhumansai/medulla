@@ -33,6 +33,14 @@ const CONTACT_POLL: Duration = Duration::from_millis(500);
 /// `status`, `reply`, `error`) before treating the peer as unreachable and
 /// re-handshaking. Short: a live worker acks within a poll or two.
 const ACK_WINDOW: Duration = Duration::from_secs(12);
+
+/// How many idle budgets a task may span in total before it is given up on
+/// regardless of how much it is saying.
+///
+/// The idle deadline answers "is anyone home"; this answers "is this ever going
+/// to end". Without it a worker emitting a status frame every few seconds would
+/// hold its dispatch indefinitely.
+const MAX_IDLE_EXTENSIONS: u32 = 4;
 /// How many times to reset the Signal session + resend before giving up. Covers
 /// the common one-sided-session desync (worker restarted) in one extra round.
 const MAX_RESETS: u32 = 2;
@@ -55,7 +63,35 @@ type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
 /// to `taskId`). Any frame pokes the waiter's `activity` (sign of life);
 /// `reply`/`error` then settle and remove it; `status` forwards; `ack` just
 /// counted as activity.
-async fn route_frame(waiters: &Waiters, frame: TaskFrame) {
+async fn route_frame(
+    waiters: &Waiters,
+    frame: TaskFrame,
+    log: &Option<super::types::HubLog>,
+    activity: &Option<super::ActivityLog>,
+) {
+    // Recorded as well as logged: the log is for a human reading afterwards,
+    // this is what the Agents view renders live.
+    if let Some(activity) = activity {
+        activity.observed(
+            &frame.task_id,
+            frame.kind.as_str(),
+            &frame.text,
+            crate::clock::now_millis(),
+        );
+    }
+    // Every frame a worker sends, as it arrives. The hub used to report only the
+    // settled outcome, so a reply that never came and a reply that came back
+    // empty read the same from here — and neither said whether the worker had
+    // been talking at all.
+    if let Some(log) = log {
+        log(&format!(
+            "hub ← task {} {} · {} chars: {}",
+            frame.task_id,
+            frame.kind.as_str(),
+            frame.text.chars().count(),
+            crate::logging::preview(&frame.text),
+        ));
+    }
     let key = frame
         .correlation_id
         .clone()
@@ -97,11 +133,17 @@ async fn route_frame(waiters: &Waiters, frame: TaskFrame) {
 
 /// The pump: drain the inbox, decode each message, route it, then sleep. Runs
 /// until the owning [`TaskRunner`] is dropped (which aborts the task).
-async fn pump_loop(relay: Arc<dyn Relay>, waiters: Waiters, poll: Duration) {
+async fn pump_loop(
+    relay: Arc<dyn Relay>,
+    waiters: Waiters,
+    poll: Duration,
+    log: Option<super::types::HubLog>,
+    activity: Option<super::ActivityLog>,
+) {
     loop {
         for msg in relay.drain_inbox(DRAIN_LIMIT).await {
             if let Some(frame) = decode_task_frame(&msg.text) {
-                route_frame(&waiters, frame).await;
+                route_frame(&waiters, frame, &log, &activity).await;
             }
         }
         tokio::time::sleep(poll).await;
@@ -135,6 +177,31 @@ impl TaskRunner {
         Self::start_with_ack_window(relay, poll, ACK_WINDOW)
     }
 
+    /// Start a runner that narrates every inbound worker frame to `log`.
+    ///
+    /// The sink is passed at construction rather than attached afterwards: the
+    /// pump begins draining the moment it is spawned, and restarting it to add a
+    /// logger would leave a window in which a frame is consumed unlogged — and,
+    /// with no waiter registered yet, dropped.
+    pub fn start_with_log(
+        relay: Arc<dyn Relay>,
+        poll: Duration,
+        log: super::types::HubLog,
+    ) -> Self {
+        Self::build(relay, poll, ACK_WINDOW, Some(log), None)
+    }
+
+    /// Like [`start_with_log`](Self::start_with_log), also recording what each
+    /// worker does so the Agents view can render it.
+    pub fn start_with_log_and_activity(
+        relay: Arc<dyn Relay>,
+        poll: Duration,
+        log: super::types::HubLog,
+        activity: super::ActivityLog,
+    ) -> Self {
+        Self::build(relay, poll, ACK_WINDOW, Some(log), Some(activity))
+    }
+
     /// Like [`start`](Self::start) with an explicit ack window (tests use a short
     /// one to exercise the reset-and-resend recovery without real delays).
     pub fn start_with_ack_window(
@@ -142,8 +209,24 @@ impl TaskRunner {
         poll: Duration,
         ack_window: Duration,
     ) -> Self {
+        Self::build(relay, poll, ack_window, None, None)
+    }
+
+    fn build(
+        relay: Arc<dyn Relay>,
+        poll: Duration,
+        ack_window: Duration,
+        log: Option<super::types::HubLog>,
+        activity: Option<super::ActivityLog>,
+    ) -> Self {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
-        let pump = tokio::spawn(pump_loop(relay.clone(), waiters.clone(), poll));
+        let pump = tokio::spawn(pump_loop(
+            relay.clone(),
+            waiters.clone(),
+            poll,
+            log,
+            activity,
+        ));
         TaskRunner {
             relay,
             waiters,
@@ -224,20 +307,48 @@ impl TaskRunner {
                 biased;
                 terminal = &mut rx => return settle(terminal),
                 _ = activity.notified() => {
-                    // Peer is alive — await the terminal reply for the full timeout.
-                    return match tokio::time::timeout(req.timeout, rx).await {
-                        Ok(terminal) => settle(terminal),
-                        Err(_) => {
-                            self.waiters.lock().await.remove(&cid);
-                            Err(RunError::Timeout)
+                    // Alive. From here the deadline is IDLE, not wall-clock:
+                    // every frame resets it, so a worker streaming progress is
+                    // left to work and only a silent one is given up on. It used
+                    // to be a single wall-clock timeout, which killed a task
+                    // reporting `running Bash: …` every few seconds at exactly
+                    // the same moment as one that had died — and a real coding
+                    // task crosses that line routinely.
+                    //
+                    // A ceiling still bounds it, because a worker that chatters
+                    // without ever finishing must not hold the dispatch forever.
+                    let ceiling = tokio::time::Instant::now() + req.timeout * MAX_IDLE_EXTENSIONS;
+                    loop {
+                        tokio::select! {
+                            biased;
+                            terminal = &mut rx => return settle(terminal),
+                            // A frame: the peer is working. Reset the idle clock.
+                            _ = activity.notified() => continue,
+                            _ = tokio::time::sleep_until(ceiling) => {
+                                self.waiters.lock().await.remove(&cid);
+                                send_abort(
+                                    self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
+                                ).await;
+                                return Err(RunError::Timeout);
+                            }
+                            _ = tokio::time::sleep(req.timeout) => {
+                                self.waiters.lock().await.remove(&cid);
+                                send_abort(
+                                    self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
+                                ).await;
+                                return Err(RunError::Timeout);
+                            }
                         }
-                    };
+                    }
                 }
                 _ = tokio::time::sleep(self.ack_window) => {
                     // Silence — the peer likely can't decrypt (restarted / one-sided
                     // session). Reset and resend, or give up.
                     self.waiters.lock().await.remove(&cid);
                     if attempt >= MAX_RESETS {
+                        send_abort(
+                            self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
+                        ).await;
                         return Err(RunError::Timeout);
                     }
                     attempt += 1;
@@ -246,6 +357,27 @@ impl TaskRunner {
             }
         }
     }
+}
+
+/// Tell a worker to stop a task we have stopped waiting for.
+///
+/// Best-effort and fire-and-forget: we are already returning an error, and a
+/// failed abort must not replace it with a different one. Worth sending even
+/// so — an abandoned task keeps a harness busy *and* keeps its id live, and a
+/// responder refuses a later task whose id is already running. Unnamed tasks are
+/// named positionally, so that id is very often `t1`.
+async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) {
+    let body = encode_task_frame(EncodeFrameInput {
+        kind: TaskFrameKind::Abort,
+        task_id: task_id.to_string(),
+        text: "requester stopped waiting".to_string(),
+        ts: ::tinyplace::auth::timestamp(),
+        correlation_id: Some(cid.to_string()),
+        harness: None,
+        provider: None,
+        model: None,
+    });
+    let _ = relay.send(address, &body).await;
 }
 
 /// Map the oneshot outcome into a [`RunError`].

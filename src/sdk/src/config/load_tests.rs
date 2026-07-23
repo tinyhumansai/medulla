@@ -259,3 +259,41 @@ fn merge_value_is_recursive() {
         serde_json::json!({"a":{"x":1,"y":5,"z":3},"b":9,"c":7})
     );
 }
+
+#[test]
+fn a_synthesized_tinyplace_section_honours_the_staging_switch() {
+    // Regression. `medulla daemon --tui` synthesizes this section when the
+    // config file has none, and used to do it with `TinyplaceConfig::default()`
+    // — whose `base_url` is the *constant* prod relay, because a serde default
+    // cannot read the environment. Under `MEDULLA_STAGING=1` that put the worker
+    // on prod while the orchestrator's hub (which resolves from env) sat on
+    // staging: both started cleanly, published keys, and reported healthy, but a
+    // contact request sent on one relay does not exist on the other, so the
+    // worker's Requests tab stayed empty forever with nothing logged anywhere.
+    let staging = env(&[("MEDULLA_STAGING", "1"), ("MEDULLA_HOME", "/tmp/mh")]);
+    assert_eq!(
+        default_tinyplace_config(&staging).base_url,
+        "https://staging-api.tiny.place",
+        "the synthesized section must follow MEDULLA_STAGING, not a constant"
+    );
+    assert_ne!(
+        TinyplaceConfig::default().base_url,
+        default_tinyplace_config(&staging).base_url,
+        "if these ever agree this test has stopped proving anything"
+    );
+
+    // Absent the switch it is still prod, and the identity dir is home-derived
+    // either way — the same wallet `medulla daemon` would have used.
+    let prod = env(&[("MEDULLA_HOME", "/tmp/mh")]);
+    assert_eq!(
+        default_tinyplace_config(&prod).base_url,
+        "https://api.tiny.place"
+    );
+    // Built with `join` rather than written out: the value is a real path, so
+    // on Windows it comes back separated with a backslash.
+    let expected = std::path::Path::new("/tmp/mh")
+        .join("tinyplace")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(default_tinyplace_config(&prod).identity_dir, expected);
+}

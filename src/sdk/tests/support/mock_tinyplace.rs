@@ -6,6 +6,7 @@
 //!
 //! - `POST /presence/heartbeat`   → `PresenceStatus` (or a scripted 5xx)
 //! - `POST /presence/query`       → `PresenceQueryResponse`
+//! - `GET  /contacts`             → `ContactsResponse` (the accepted set)
 //! - `GET  /contacts/requests`    → `ContactRequestsResponse`
 //! - `POST /contacts/:id/accept`  → `Contact` (records the accepted id)
 //! - `GET  /messages`             → `{ messages: [...] }` (the pending queue)
@@ -233,6 +234,24 @@ fn route(method: &str, path: &str, query: &str, state: &Arc<MockState>) -> (&'st
             .map(|id| json!({ "cryptoId": id, "online": online.contains(id) }))
             .collect();
         return ("200 OK", json!({ "presence": presence }).to_string());
+    }
+
+    // Established contacts listing.
+    //
+    // Deliberately a separate listing from `/contacts/requests`, because that is
+    // how the real relay behaves: accepting a request moves the peer *out* of
+    // the request queue and into this one. A client that reads only the request
+    // queue therefore sees no contacts at all, which is the bug this route
+    // exists to keep caught.
+    if method == "GET" && path == "/contacts" {
+        let contacts: Vec<Value> = state
+            .accepted
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|id| json!({ "cryptoId": id, "status": "accepted" }))
+            .collect();
+        return ("200 OK", json!({ "contacts": contacts }).to_string());
     }
 
     // Contact requests listing.

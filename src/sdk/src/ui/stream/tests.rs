@@ -68,6 +68,8 @@ fn usage_fold_accumulates_tiers_and_tasks() {
                         output_tokens: 3,
                     }),
                     depth: 1,
+                    contract: None,
+                    evidence: None,
                 },
             },
         ),

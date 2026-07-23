@@ -170,6 +170,7 @@ pub fn app_with_selected_task() -> (App, Arc<MockRuntime>) {
         instruction: "needs a decision".into(),
         depth: 2,
         agent_id: Some("dev-1".into()),
+        contract: None,
     });
     rt.script_event(TuiEvent::TaskAttention {
         task_id: "cyc-9/t:q1".into(),

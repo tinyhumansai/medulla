@@ -81,6 +81,14 @@ impl Runtime for BackendRuntime {
     }
 
     /// The hub's live tiny.place worker roster (empty until a hub is attached).
+    fn worker_activity(&self) -> Vec<crate::hub::WorkerActivity> {
+        let handle = self.hub.lock().unwrap().clone();
+        match handle {
+            Some(h) => h.activity().snapshot(),
+            None => Vec::new(),
+        }
+    }
+
     fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
         let handle = self.hub.lock().unwrap().clone();
         match handle {
@@ -96,7 +104,13 @@ impl Runtime for BackendRuntime {
         Box::pin(async move {
             match handle {
                 Some(h) => apply_worker_op(&h, op).await,
-                None => Ok(()),
+                // Reading an empty roster is honest; silently succeeding at a
+                // *mutation* that did not happen is not. Without a hub there is
+                // nothing to add a worker to, and reporting "updated" leaves the
+                // operator watching for a peer that was never registered.
+                None => Err(anyhow!(
+                    "no orchestrator hub is attached — sign in and restart, or set MEDULLA_HUB_WORKERS"
+                )),
             }
         })
     }

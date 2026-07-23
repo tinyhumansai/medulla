@@ -85,6 +85,26 @@ pub struct RunTaskOptions {
     pub extra_args: Vec<String>,
     /// Whether to pass the provider's skip-permissions flag.
     pub skip_permissions: bool,
+    /// Who this run is for — the authenticated sender of the task, or an
+    /// operator label for a locally-opened one.
+    ///
+    /// The headless executor ignores it: a one-shot run is context-free by
+    /// construction. A session-backed executor cannot work without it, because
+    /// "which session serves this task" and "may these two tasks see each
+    /// other's context" are both questions about *whose* work it is. Empty means
+    /// unattributed, which routes as its own conversation rather than sharing
+    /// one.
+    pub conversation: String,
+    /// A previously captured harness session id to resume, giving this run the
+    /// conversation's prior context.
+    ///
+    /// Honored only for providers that can resume (see
+    /// [`can_resume`](crate::sessions::routing::can_resume)); ignored otherwise,
+    /// which degrades continuity but never correctness. The id must have been
+    /// *captured* from a prior run's stream — presetting an id of our own
+    /// choosing makes `claude` refuse the second start with "Session ID … is
+    /// already in use".
+    pub resume_session_id: Option<String>,
     /// The cooperative abort handle.
     pub abort: Abort,
     /// Fired for each parsed semantic event — drives periodic status frames.
@@ -104,6 +124,13 @@ pub struct RunTaskResult {
     pub events: usize,
     /// Latest token usage the child reported on its stream, if any.
     pub usage: Option<crate::tinyplace::TokenUsage>,
+    /// The harness's own session id, captured from this run's stream (claude
+    /// `session_id`, codex `thread_id`).
+    ///
+    /// Feeding it back as [`RunTaskOptions::resume_session_id`] is what gives a
+    /// one-shot transport continuity across turns. It is ephemeral —
+    /// observability and resume only, never a durable key.
+    pub session_id: Option<String>,
 }
 
 /// The injectable executor signature (the daemon runtime defaults to
@@ -129,5 +156,6 @@ pub(super) struct RunSpec {
     pub(super) agent: Option<String>,
     pub(super) extra_args: Vec<String>,
     pub(super) skip_permissions: bool,
+    pub(super) resume_session_id: Option<String>,
     pub(super) abort: Abort,
 }

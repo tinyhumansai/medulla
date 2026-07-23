@@ -99,6 +99,7 @@ fn lane_lines_groups_agent_tasks_with_headers() {
             instruction: "do the thing".into(),
             depth: 2,
             agent_id: Some("dev".into()),
+            contract: None,
         },
     )];
     let lanes = derive_agent_lanes(&events, "TINYPLACE", &roster);

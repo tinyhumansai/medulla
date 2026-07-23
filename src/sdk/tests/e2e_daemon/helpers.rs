@@ -117,6 +117,7 @@ pub fn blocking_runner(ready: mpsc::UnboundedSender<()>, gate: Arc<Notify>) -> R
             let _ = ready.send(());
             gate.notified().await;
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),
@@ -135,6 +136,7 @@ pub fn recording_model_run_task() -> (RunTaskFn, Arc<StdMutex<Vec<Option<String>
         sink.lock().unwrap().push(opts.model.clone());
         Box::pin(async move {
             Ok(RunTaskResult {
+                session_id: None,
                 provider: opts.provider,
                 reply: "ok".to_string(),
                 events: 0,

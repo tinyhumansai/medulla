@@ -185,6 +185,7 @@ pub fn derive_agent_lanes(
                 instruction,
                 depth,
                 agent_id,
+                ..
             } => {
                 if let Some(a) = agent_id {
                     task_agent.insert(task_id.clone(), a.clone());

@@ -119,6 +119,7 @@ fn tinyplace_observation_merges_into_snapshot() {
         },
     );
     let obs = TinyplaceObservation {
+        notice: None,
         identity: Some(TinyplaceIdentity {
             agent_id: "cid-xyz".into(),
             public_key: "pk".into(),
@@ -199,6 +200,7 @@ fn chat_thread_sidebar_shows_badges_and_indent() {
         instruction: "go".into(),
         depth: 2,
         agent_id: Some("dev-1".into()),
+        contract: None,
     });
     rt.script_event(TuiEvent::TaskAttention {
         task_id: "cyc-1/t:t9".into(),
@@ -256,6 +258,8 @@ fn overview_shows_active_model_calls_and_completed_task() {
                 output_tokens: 2,
             }),
             depth: 2,
+            contract: None,
+            evidence: None,
         },
     });
     app.refresh_snapshot();

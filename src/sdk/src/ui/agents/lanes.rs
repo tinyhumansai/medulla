@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use crate::harness_contract::WorkerContract;
 use crate::runtime::AgentDescriptor;
 use crate::ui::events::{EventEnvelope, TuiEvent};
 
@@ -78,6 +79,7 @@ fn touch_task(lane: &mut AgentLane, task_id: &str, at: i64, block: Option<TurnBl
                 turn_blocks: Vec::new(),
                 attention: None,
                 question_id: None,
+                contract: None,
             });
             lane.tasks.len() - 1
         }
@@ -89,6 +91,12 @@ fn touch_task(lane: &mut AgentLane, task_id: &str, at: i64, block: Option<TurnBl
         task.turn_blocks.push(b);
     }
     idx
+}
+
+fn retain_contract(lane: &mut AgentLane, task_index: usize, contract: &Option<WorkerContract>) {
+    if contract.is_some() {
+        lane.tasks[task_index].contract = contract.clone();
+    }
 }
 
 /// Fold the event stream into lanes. Tier turns come from `inference_end`;
@@ -185,7 +193,7 @@ pub fn derive_agent_lanes(
                 instruction,
                 depth,
                 agent_id,
-                ..
+                contract,
             } => {
                 if let Some(a) = agent_id {
                     task_agent.insert(task_id.clone(), a.clone());
@@ -231,7 +239,8 @@ pub fn derive_agent_lanes(
                 lane.turns.push(block.clone());
                 lane.last_at = at;
                 lane.active_tasks += 1;
-                touch_task(lane, task_id, at, Some(block));
+                let idx = touch_task(lane, task_id, at, Some(block));
+                retain_contract(lane, idx, contract);
             }
             TuiEvent::TaskEvent {
                 task_id,
@@ -315,6 +324,7 @@ pub fn derive_agent_lanes(
                     lane.context_tokens = Some(u.input_tokens);
                 }
                 let idx = touch_task(lane, &digest.task_id, at, Some(block));
+                retain_contract(lane, idx, &digest.contract);
                 lane.tasks[idx].status = status;
                 lane.tasks[idx].attention = None;
                 lane.tasks[idx].question_id = None;

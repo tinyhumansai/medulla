@@ -1,15 +1,32 @@
 //! Pure blast-radius analysis for worker-lane path claims.
 //!
-//! The TUI supplies live dirty paths and optional manual claims today. A later
-//! harness-contract revision can supply the same [`LaneClaim`] shape without
-//! changing overlap, outside-boundary, or shared-path evaluation.
+//! The TUI supplies live dirty paths while worker contracts provide permitted
+//! boundaries. Manual claims remain a fallback for older event streams.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use thiserror::Error;
 
-use super::types::{ClaimedPath, LaneClaim, LaneGuardBadge, LaneGuardReport};
+use super::types::{AgentLane, ClaimedPath, LaneClaim, LaneGuardBadge, LaneGuardReport};
+
+/// Collect the stable union of task-contract path boundaries for one lane.
+///
+/// `Some([])` is retained: an explicitly empty contract is different from an
+/// older task with no contract, for which the TUI may use a manual fallback.
+pub fn contract_permitted_paths(lane: &AgentLane) -> Option<Vec<String>> {
+    let mut saw_contract_paths = false;
+    let mut paths = BTreeSet::new();
+    for permitted in lane
+        .tasks
+        .iter()
+        .filter_map(|task| task.contract.as_ref()?.permitted_paths.as_ref())
+    {
+        saw_contract_paths = true;
+        paths.extend(permitted.iter().cloned());
+    }
+    saw_contract_paths.then(|| paths.into_iter().collect())
+}
 
 /// A malformed path-claim glob.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]

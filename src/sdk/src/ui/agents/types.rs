@@ -4,6 +4,7 @@
 //! the sibling logic modules; this file holds only the shapes and their trivial
 //! accessors.
 
+use crate::harness_contract::WorkerContract;
 use crate::runtime::AgentDescriptor;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -174,6 +175,8 @@ pub struct TaskState {
     /// The `questionId` of a pending `task_attention` — the handle `question.answer`
     /// needs. `None` when the task has no open question.
     pub question_id: Option<String>,
+    /// Advisory boundaries and completion criteria supplied at delegation.
+    pub contract: Option<WorkerContract>,
 }
 
 /// One lane in the Agents view: a cognitive tier, a roster/worker agent, an

@@ -5,8 +5,8 @@
 
 use crate::ui::events::{EventEnvelope, TuiEvent};
 
-mod claims;
 mod activity;
+mod claims;
 mod fold;
 mod render;
 mod roster;

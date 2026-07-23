@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
-use globset::{Glob, GlobSetBuilder};
+use globset::Glob;
 use regex::Regex;
 
 use super::types::{CommitError, CommitOptions, CommitOutcome};
@@ -77,26 +77,16 @@ fn validate_shared_paths(
         return Ok(());
     }
 
-    let mut builder = GlobSetBuilder::new();
     for pattern in &options.shared_path_denylist {
         let glob = Glob::new(pattern).map_err(|error| CommitError::InvalidPattern {
             pattern: pattern.clone(),
             message: error.to_string(),
         })?;
-        builder.add(glob);
-    }
-    let matcher = builder
-        .build()
-        .map_err(|error| CommitError::InvalidPattern {
-            pattern: options.shared_path_denylist.join(", "),
-            message: error.to_string(),
-        })?;
-
-    for path in paths {
-        if let Some(index) = matcher.matches(path).into_iter().next() {
+        let matcher = glob.compile_matcher();
+        if let Some(path) = paths.iter().find(|path| matcher.is_match(path)) {
             return Err(CommitError::SharedPath {
                 path: path.clone(),
-                pattern: options.shared_path_denylist[index].clone(),
+                pattern: pattern.clone(),
             });
         }
     }
@@ -200,7 +190,7 @@ pub fn commit(
     })
 }
 
-fn parse_changed_paths(output: &[u8]) -> BTreeSet<PathBuf> {
+pub(super) fn parse_changed_paths(output: &[u8]) -> BTreeSet<PathBuf> {
     let mut fields = output.split(|byte| *byte == 0);
     let mut paths = BTreeSet::new();
     while let Some(field) = fields.next() {

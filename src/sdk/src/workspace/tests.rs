@@ -5,6 +5,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+use super::commit::parse_changed_paths;
 use super::git::{parse_log, parse_status};
 use super::*;
 
@@ -425,4 +426,47 @@ fn exact_commit_reports_invalid_guard_patterns_and_git_errors() {
             ..
         })
     ));
+}
+
+#[test]
+fn exact_commit_restores_the_index_when_git_rejects_the_commit() {
+    let dir = repository();
+    std::fs::write(dir.path().join("tracked.txt"), "two\n").unwrap();
+    git(dir.path(), &["config", "user.name", ""]);
+
+    let error = commit(
+        dir.path(),
+        &[Path::new("tracked.txt").to_path_buf()],
+        "fix(repo): rejected commit",
+        &CommitOptions::default(),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        CommitError::Git {
+            operation: "commit",
+            ..
+        }
+    ));
+    assert!(git_output(dir.path(), &["diff", "--cached", "--name-only"]).is_empty());
+    assert_eq!(
+        git_output(dir.path(), &["log", "-1", "--format=%s"]),
+        "initial ledger"
+    );
+}
+
+#[test]
+fn changed_path_parser_handles_renames_and_malformed_records() {
+    let paths = parse_changed_paths(b"R  renamed.txt\0original.txt\0M  kept.txt\0bad\0\0");
+    assert_eq!(
+        paths,
+        [
+            Path::new("kept.txt").to_path_buf(),
+            Path::new("original.txt").to_path_buf(),
+            Path::new("renamed.txt").to_path_buf(),
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert!(parse_changed_paths(b"R  renamed.txt\0").contains(Path::new("renamed.txt")));
 }

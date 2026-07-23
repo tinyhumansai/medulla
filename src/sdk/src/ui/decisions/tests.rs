@@ -23,6 +23,8 @@ fn status() -> HarnessStatus {
             instruction_id: None,
             delegated_task_ids: vec!["cycle-1/t:task-1".into()],
             notes: vec![],
+            contract: None,
+            evidence: None,
         }],
         running_delegations: 1,
         usage: HarnessUsage::default(),

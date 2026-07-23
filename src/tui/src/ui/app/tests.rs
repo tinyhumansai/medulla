@@ -1,7 +1,7 @@
 //! Focused unit tests for the [`App`] screen: that every tab renders, the async
 //! header toggle shows, and the composer/slash-command dispatch behaves.
 
-use super::types::SP_FEEDBACK;
+use super::types::{tab_pos, SP_FEEDBACK};
 use super::*;
 use std::sync::Arc;
 
@@ -84,6 +84,141 @@ fn typing_inserts_into_draft() {
     assert_eq!(a.draft.text, "hi");
     a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
     assert_eq!(a.draft.text, "hi\n");
+}
+
+fn repository_report() -> medulla::workspace::WorkspaceReport {
+    use medulla::workspace::{
+        BranchState, CommitSummary, FileChange, WorkspaceReport, WorkspaceSnapshot,
+    };
+    let root = std::path::PathBuf::from("/workspace/project");
+    WorkspaceReport {
+        root: root.clone(),
+        snapshot: Some(WorkspaceSnapshot {
+            root,
+            branch: BranchState {
+                name: "feat/ledger".into(),
+                detached: false,
+                ahead: 2,
+                behind: 1,
+            },
+            files: vec![
+                FileChange {
+                    path: "src/ledger.rs".into(),
+                    original_path: None,
+                    index_status: ' ',
+                    worktree_status: 'M',
+                },
+                FileChange {
+                    path: "src/new.rs".into(),
+                    original_path: None,
+                    index_status: '?',
+                    worktree_status: '?',
+                },
+            ],
+            commits: vec![CommitSummary {
+                id: "0123456789abcdef".into(),
+                short_id: "0123456".into(),
+                author: "Ada".into(),
+                timestamp: 1,
+                subject: "feat: add ledger".into(),
+            }],
+        }),
+        error: None,
+    }
+}
+
+#[test]
+fn repo_tab_renders_branch_files_diff_and_history() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![repository_report()]);
+    a.set_workspace_diff(
+        "/workspace/project".into(),
+        "src/ledger.rs".into(),
+        Ok("--- WORKTREE ---\n+ledger line".into()),
+    );
+    let out = render(&mut a);
+    for expected in [
+        "Git ledger",
+        "feat/ledger",
+        "↑2 ↓1",
+        "src/ledger.rs",
+        "WORKTREE",
+        "ledger line",
+        "Recent commits",
+        "feat: add ledger",
+    ] {
+        assert!(out.contains(expected), "missing {expected}: {out}");
+    }
+}
+
+#[test]
+fn repo_keys_refresh_select_and_scroll_diff() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![repository_report()]);
+
+    let refresh = a.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    assert!(matches!(refresh, Some(Cmd::LoadWorkspaces(_))));
+    let next = a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert!(matches!(
+        next,
+        Some(Cmd::LoadWorkspaceDiff { path, .. }) if path == std::path::Path::new("src/new.rs")
+    ));
+    a.on_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    assert_eq!(a.repo.diff_scroll, 10);
+    a.on_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+    assert_eq!(a.repo.diff_scroll, 0);
+}
+
+#[test]
+fn repo_tab_keeps_typed_workspace_errors_visible() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![medulla::workspace::WorkspaceReport {
+        root: "/not-a-repo".into(),
+        snapshot: None,
+        error: Some("git repository discovery failed".into()),
+    }]);
+    let out = render(&mut a);
+    assert!(out.contains("/not-a-repo"), "{out}");
+    assert!(out.contains("repository discovery failed"), "{out}");
+}
+
+#[test]
+fn repo_tab_renders_loading_clean_detached_and_fallback_states() {
+    let mut loading = app();
+    loading.tab_index = tab_pos("Repo");
+    loading.set_workspaces_loading();
+    assert!(render(&mut loading).contains("Refreshing local repositories"));
+
+    let mut clean = repository_report();
+    let snapshot = clean.snapshot.as_mut().unwrap();
+    snapshot.branch.detached = true;
+    snapshot.files.clear();
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![clean]);
+    let out = render(&mut a);
+    assert!(out.contains("detached feat/ledger"), "{out}");
+    assert!(out.contains("✓ clean"), "{out}");
+
+    a.set_workspaces_loading();
+    assert!(render(&mut a).contains("Git ledger · refreshing"),);
+
+    a.set_workspace_diff(
+        "/workspace/project".into(),
+        "missing.rs".into(),
+        Err("diff unavailable".into()),
+    );
+    assert!(render(&mut a).contains("diff unavailable"));
+
+    a.set_workspace_reports(vec![medulla::workspace::WorkspaceReport {
+        root: "/broken".into(),
+        snapshot: None,
+        error: None,
+    }]);
+    assert!(render(&mut a).contains("inspection failed"));
 }
 
 // --- Feedback subpage (Settings > GENERAL > Feedback) ------------------------

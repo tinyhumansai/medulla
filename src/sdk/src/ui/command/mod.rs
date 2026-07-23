@@ -51,6 +51,10 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
         "settings" | "theme" => SlashCommand::Settings,
         "usage" => SlashCommand::Usage,
         "memory" | "mem" => SlashCommand::Memory(non_empty(arg)),
+        "review" => match non_empty(arg) {
+            Some(target) => SlashCommand::Review(target),
+            None => SlashCommand::BadUsage("Usage: /review <lane|task-id>"),
+        },
         "feedback" | "fb" => SlashCommand::Feedback,
         "mouse" => SlashCommand::ToggleMouse,
         "copy" => match flag.as_str() {

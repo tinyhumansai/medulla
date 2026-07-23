@@ -36,6 +36,44 @@ fn defaults_are_applied() {
     assert_eq!(cfg.backend.base_url, "https://api.tinyhumans.ai");
     assert_eq!(cfg.backend.token_env, "MEDULLA_TOKEN");
     assert_eq!(cfg.medulla.context_window(), 32_000);
+    assert_eq!(cfg.workflow.max_lanes, 4);
+    assert!(cfg.workflow.workspaces.is_empty());
+    assert!(cfg
+        .workflow
+        .shared_path_denylist
+        .contains(&"**/Cargo.lock".to_string()));
+}
+
+#[test]
+fn workflow_section_and_effective_workspace_roots() {
+    let cfg: TuiConfig = serde_json::from_str(
+        r#"{"workflow":{"workspaces":["/one","/two"],"maxLanes":3,"sharedPathDenylist":["schema/**"]}}"#,
+    )
+    .unwrap();
+    assert_eq!(cfg.workflow.max_lanes, 3);
+    assert_eq!(cfg.workflow.shared_path_denylist, vec!["schema/**"]);
+
+    let mut loaded = LoadedConfig::defaults("x".into());
+    assert_eq!(
+        loaded.workflow_workspaces(),
+        vec![std::path::PathBuf::from(".")]
+    );
+    loaded.config.opencode = Some(OpencodeConfig {
+        workspace: "/worker".into(),
+        ..Default::default()
+    });
+    assert_eq!(
+        loaded.workflow_workspaces(),
+        vec![std::path::PathBuf::from("/worker")]
+    );
+    loaded.config.workflow.workspaces = vec!["/one".into(), "/two".into()];
+    assert_eq!(
+        loaded.workflow_workspaces(),
+        vec![
+            std::path::PathBuf::from("/one"),
+            std::path::PathBuf::from("/two")
+        ]
+    );
 }
 
 #[test]

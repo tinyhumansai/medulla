@@ -93,6 +93,17 @@ pub enum Cmd {
         /// Repository-relative changed path.
         path: std::path::PathBuf,
     },
+    /// Commit an explicit set of paths from one workspace.
+    CommitPaths {
+        /// Local repository root.
+        workspace: std::path::PathBuf,
+        /// Repository-relative path boundary.
+        paths: Vec<std::path::PathBuf>,
+        /// Conventional commit subject.
+        subject: String,
+        /// Shared-path patterns from workflow configuration.
+        shared_path_denylist: Vec<String>,
+    },
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
     /// Load the persona-memory status + directives for the Memory tab.
@@ -162,6 +173,13 @@ pub(super) enum MemoryEntry {
 
 /// The action a small inline prompt (Workers add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Commit the marked paths in one repository with the entered subject.
+    CommitSubject {
+        /// Local repository root.
+        workspace: std::path::PathBuf,
+        /// Exact repository-relative paths.
+        paths: Vec<std::path::PathBuf>,
+    },
     /// Add a worker from an address/@handle line.
     WorkerAdd,
     /// Edit the label of the worker with the given id.
@@ -240,6 +258,8 @@ pub(super) struct RepoState {
     pub(super) reports: Vec<medulla::workspace::WorkspaceReport>,
     /// Selection in the flattened dirty-file list.
     pub(super) file_index: usize,
+    /// Explicit workspace/path selections for the next commit.
+    pub(super) marked: std::collections::BTreeSet<(std::path::PathBuf, std::path::PathBuf)>,
     /// Workspace/path the current patch belongs to.
     pub(super) diff_key: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// Current selected-file patch.

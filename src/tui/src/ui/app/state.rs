@@ -301,6 +301,12 @@ impl App {
     /// Replace Repo-tab reports and keep selection within the dirty-file list.
     pub fn set_workspace_reports(&mut self, reports: Vec<medulla::workspace::WorkspaceReport>) {
         self.repo.reports = reports;
+        let visible = self
+            .repo_files()
+            .into_iter()
+            .map(|(root, change)| (root, change.path))
+            .collect::<std::collections::BTreeSet<_>>();
+        self.repo.marked.retain(|key| visible.contains(key));
         self.repo.loading = false;
         self.repo.file_index = self
             .repo
@@ -374,6 +380,37 @@ impl App {
             (self.repo.file_index + 1).min(max)
         };
         self.selected_repo_diff_cmd()
+    }
+
+    /// Toggle the selected dirty path in the exact commit boundary.
+    pub(super) fn toggle_repo_mark(&mut self) {
+        let Some((workspace, change)) = self.repo_files().get(self.repo.file_index).cloned() else {
+            self.set_status("Repo · no changed path selected");
+            return;
+        };
+        let key = (workspace, change.path);
+        if !self.repo.marked.remove(&key) {
+            self.repo.marked.insert(key);
+        }
+        self.set_status(format!(
+            "Repo · {} path{} marked",
+            self.repo.marked.len(),
+            if self.repo.marked.len() == 1 { "" } else { "s" }
+        ));
+    }
+
+    /// Clear successfully committed marks.
+    pub fn finish_workspace_commit(&mut self, outcome: &medulla::workspace::CommitOutcome) {
+        self.repo
+            .marked
+            .retain(|(_, path)| !outcome.paths.contains(path));
+        self.set_status(format!(
+            "Repo · committed {} · {} path{}",
+            outcome.short_id,
+            outcome.paths.len(),
+            if outcome.paths.len() == 1 { "" } else { "s" }
+        ));
+        self.set_workspaces_loading();
     }
 
     /// Derive the current agent lanes from the snapshot, harness, and roster.

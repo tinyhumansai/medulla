@@ -172,6 +172,81 @@ fn repo_keys_refresh_select_and_scroll_diff() {
 }
 
 #[test]
+fn repo_marks_paths_and_builds_a_bounded_commit_command() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![repository_report()]);
+
+    a.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(render(&mut a).contains("[x]  M src/ledger.rs"));
+    a.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+    assert!(a
+        .prompt_state()
+        .is_some_and(|(title, _)| title.contains("conventional subject")));
+    for ch in "feat(repo): exact selection".chars() {
+        a.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    let command = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(
+        command,
+        Some(Cmd::CommitPaths {
+            workspace,
+            paths,
+            subject,
+            shared_path_denylist,
+        }) if workspace == std::path::Path::new("/workspace/project")
+            && paths == vec![std::path::PathBuf::from("src/ledger.rs")]
+            && subject == "feat(repo): exact selection"
+            && !shared_path_denylist.is_empty()
+    ));
+}
+
+#[test]
+fn repo_commit_requires_marks_from_one_workspace() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![repository_report()]);
+    a.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+    assert!(a.prompt_state().is_none());
+    assert!(a.status().contains("mark paths"));
+
+    let mut second = repository_report();
+    second.root = "/workspace/other".into();
+    second.snapshot.as_mut().unwrap().root = "/workspace/other".into();
+    a.set_workspace_reports(vec![repository_report(), second]);
+    a.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+    assert!(a.prompt_state().is_none());
+    assert!(a.status().contains("one workspace"));
+}
+
+#[test]
+fn repo_commit_success_clears_marks_and_refresh_prunes_stale_marks() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![repository_report()]);
+    a.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    a.finish_workspace_commit(&medulla::workspace::CommitOutcome {
+        id: "full".into(),
+        short_id: "abc1234".into(),
+        subject: "feat(repo): exact".into(),
+        paths: vec!["src/ledger.rs".into()],
+    });
+    assert!(a.status().contains("abc1234"));
+    assert!(!render(&mut a).contains("[x]  M src/ledger.rs"));
+
+    a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    let mut clean = repository_report();
+    clean.snapshot.as_mut().unwrap().files.clear();
+    a.set_workspace_reports(vec![clean]);
+    assert!(a.repo.marked.is_empty());
+}
+
+#[test]
 fn repo_tab_keeps_typed_workspace_errors_visible() {
     let mut a = app();
     a.tab_index = tab_pos("Repo");

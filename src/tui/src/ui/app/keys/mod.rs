@@ -213,6 +213,12 @@ impl App {
                 self.set_status("Repo · refreshing…");
                 return Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces()));
             }
+            KeyCode::Char(' ') if tab == "Repo" => {
+                self.toggle_repo_mark();
+            }
+            KeyCode::Char('c') if tab == "Repo" => {
+                self.open_repo_commit_prompt();
+            }
             KeyCode::Up if tab == "Repo" => return self.move_repo_file(true),
             KeyCode::Down if tab == "Repo" => return self.move_repo_file(false),
             KeyCode::PageUp if tab == "Repo" => {

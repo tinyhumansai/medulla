@@ -112,6 +112,18 @@ pub(crate) async fn run(
                     AppMsg::WorkspaceDiffLoaded { workspace, path, result } => {
                         app.set_workspace_diff(workspace, path, result);
                     }
+                    AppMsg::WorkspaceCommitDone(result) => match result {
+                        Ok(outcome) => {
+                            app.finish_workspace_commit(&outcome);
+                            run_cmd(
+                                Cmd::LoadWorkspaces(app.loaded.workflow_workspaces()),
+                                &runtime,
+                                app.memory_service(),
+                                &msg_tx,
+                            );
+                        }
+                        Err(error) => app.set_status(format!("Repo · commit failed: {error}")),
+                    },
                     AppMsg::UsageLoaded(data) => app.set_account_usage(data),
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
                     AppMsg::Resumed(s) => {
@@ -286,6 +298,28 @@ fn run_cmd(
                     path,
                     result,
                 });
+            });
+        }
+        Cmd::CommitPaths {
+            workspace,
+            paths,
+            subject,
+            shared_path_denylist,
+        } => {
+            let tx = msg_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let result = medulla::workspace::commit(
+                    &workspace,
+                    &paths,
+                    &subject,
+                    &medulla::workspace::CommitOptions {
+                        body: None,
+                        shared_path_denylist,
+                        allow_shared: false,
+                    },
+                )
+                .map_err(|error| error.to_string());
+                let _ = tx.send(AppMsg::WorkspaceCommitDone(result));
             });
         }
         // --- feedback board ---------------------------------------------

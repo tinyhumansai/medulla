@@ -16,6 +16,36 @@ use super::types::{
 };
 
 impl App {
+    /// Open the commit-subject prompt for marked paths in one repository.
+    pub(super) fn open_repo_commit_prompt(&mut self) {
+        let mut roots = self
+            .repo
+            .marked
+            .iter()
+            .map(|(root, _)| root.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let Some(workspace) = roots.pop_first() else {
+            self.set_status("Repo · mark paths with Space before committing");
+            return;
+        };
+        if !roots.is_empty() {
+            self.set_status("Repo · marked paths must belong to one workspace");
+            return;
+        }
+        let paths = self
+            .repo
+            .marked
+            .iter()
+            .map(|(_, path)| path.clone())
+            .collect();
+        self.prompt = Some(Prompt {
+            kind: PromptKind::CommitSubject { workspace, paths },
+            title: "Commit marked paths — conventional subject".into(),
+            draft: Draft::new(),
+        });
+        self.set_status("Repo · type subject · Enter commit · Esc cancel");
+    }
+
     /// The worker under the Workers-list cursor, if the fleet is non-empty.
     pub(super) fn selected_worker(&self) -> Option<WorkerInfo> {
         let ws = self.runtime.workers();
@@ -85,6 +115,19 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
+            PromptKind::CommitSubject { workspace, paths } => {
+                if text.is_empty() {
+                    self.set_status("Commit cancelled (empty subject)");
+                    return None;
+                }
+                self.set_status(format!("Repo · committing {} path(s)…", paths.len()));
+                Some(Cmd::CommitPaths {
+                    workspace,
+                    paths,
+                    subject: text,
+                    shared_path_denylist: self.loaded.config.workflow.shared_path_denylist.clone(),
+                })
+            }
             PromptKind::WorkerAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
                     self.set_status("Adding worker…");

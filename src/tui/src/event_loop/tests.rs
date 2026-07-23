@@ -19,6 +19,92 @@ async fn next(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppMsg>) -> AppMsg {
         .expect("dispatcher dropped its response channel")
 }
 
+fn git(root: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test]
+async fn dispatches_workspace_load_diff_and_exact_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    git(dir.path(), &["config", "user.name", "TUI Test"]);
+    git(dir.path(), &["config", "user.email", "tui@example.invalid"]);
+    std::fs::write(dir.path().join("file.txt"), "one\n").unwrap();
+    git(dir.path(), &["add", "file.txt"]);
+    git(dir.path(), &["commit", "-qm", "initial"]);
+    std::fs::write(dir.path().join("file.txt"), "two\n").unwrap();
+
+    let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::empty());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    run_cmd(
+        Cmd::LoadWorkspaces(vec![dir.path().to_path_buf()]),
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(matches!(
+        next(&mut rx).await,
+        AppMsg::WorkspacesLoaded(reports)
+            if reports.len() == 1 && reports[0].snapshot.is_some()
+    ));
+    run_cmd(
+        Cmd::LoadWorkspaceDiff {
+            workspace: dir.path().to_path_buf(),
+            path: "file.txt".into(),
+        },
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(matches!(
+        next(&mut rx).await,
+        AppMsg::WorkspaceDiffLoaded { result: Ok(diff), .. } if diff.contains("WORKTREE")
+    ));
+    run_cmd(
+        Cmd::CommitPaths {
+            workspace: dir.path().to_path_buf(),
+            paths: vec!["file.txt".into()],
+            subject: "feat(repo): commit from TUI".into(),
+            shared_path_denylist: Vec::new(),
+        },
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(matches!(
+        next(&mut rx).await,
+        AppMsg::WorkspaceCommitDone(Ok(outcome))
+            if outcome.subject == "feat(repo): commit from TUI"
+    ));
+
+    std::fs::write(dir.path().join("file.txt"), "three\n").unwrap();
+    run_cmd(
+        Cmd::CommitPaths {
+            workspace: dir.path().to_path_buf(),
+            paths: vec!["file.txt".into()],
+            subject: "invalid subject".into(),
+            shared_path_denylist: Vec::new(),
+        },
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(matches!(
+        next(&mut rx).await,
+        AppMsg::WorkspaceCommitDone(Err(error)) if error.contains("conventional")
+    ));
+}
+
 #[tokio::test]
 async fn dispatches_conversation_fleet_usage_and_context_commands() {
     let concrete = Arc::new(MockRuntime::demo());

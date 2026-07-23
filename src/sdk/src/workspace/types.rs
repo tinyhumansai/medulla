@@ -4,6 +4,85 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+/// Policy applied by the exact-path committer.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CommitOptions {
+    /// Optional body supplied as a second commit-message paragraph.
+    pub body: Option<String>,
+    /// Repository-relative glob patterns that require an explicit override.
+    pub shared_path_denylist: Vec<String>,
+    /// Permit paths matched by `shared_path_denylist`.
+    pub allow_shared: bool,
+}
+
+/// The commit created by [`super::commit`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitOutcome {
+    /// Full commit id.
+    pub id: String,
+    /// Abbreviated commit id.
+    pub short_id: String,
+    /// Validated first line supplied by the caller.
+    pub subject: String,
+    /// Paths included in the commit, sorted and deduplicated.
+    pub paths: Vec<PathBuf>,
+}
+
+/// A refusal or Git failure from an exact-path commit.
+#[derive(Debug, Error)]
+pub enum CommitError {
+    /// No paths were named.
+    #[error("commit refused: name at least one changed path")]
+    EmptyPaths,
+    /// A path was absolute or escaped the repository root.
+    #[error("commit refused: path must be repository-relative and cannot escape the root: {0}")]
+    UnsafePath(PathBuf),
+    /// A named path has no staged, unstaged, or untracked change.
+    #[error("commit refused: named path is not modified: {0}")]
+    Unmodified(PathBuf),
+    /// The index contains a staged path outside the requested boundary.
+    #[error("commit refused: another path is already staged: {0}")]
+    ForeignStaged(PathBuf),
+    /// The subject is not a conventional commit subject.
+    #[error("commit refused: subject must use conventional commit form, for example feat(scope): summary")]
+    InvalidSubject,
+    /// A guarded shared path was named without the explicit override.
+    #[error("commit refused: shared path requires --allow-shared: {path} (matched {pattern})")]
+    SharedPath {
+        /// Guarded repository-relative path.
+        path: PathBuf,
+        /// Configured pattern that matched it.
+        pattern: String,
+    },
+    /// A configured denylist pattern was invalid.
+    #[error("commit refused: invalid shared-path pattern {pattern}: {message}")]
+    InvalidPattern {
+        /// Invalid configured glob.
+        pattern: String,
+        /// Parser diagnostic.
+        message: String,
+    },
+    /// The configured Git executable could not be started.
+    #[error("could not run git for {operation}: {source}")]
+    Spawn {
+        /// Operation being attempted.
+        operation: &'static str,
+        /// Process-spawn failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// Git rejected an operation.
+    #[error("git {operation} failed in {workspace}: {message}")]
+    Git {
+        /// Operation being attempted.
+        operation: &'static str,
+        /// Repository root.
+        workspace: PathBuf,
+        /// Normalized Git stderr.
+        message: String,
+    },
+}
+
 /// A typed failure from a Git workspace operation.
 #[derive(Debug, Error)]
 pub enum WorkspaceError {

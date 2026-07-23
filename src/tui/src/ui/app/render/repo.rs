@@ -16,7 +16,11 @@ impl App {
     pub(super) fn draw_repo(&mut self, frame: &mut Frame, area: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(8), Constraint::Length(8)])
+            .constraints([
+                Constraint::Min(8),
+                Constraint::Length(11),
+                Constraint::Length(7),
+            ])
             .split(area);
         let columns = Layout::default()
             .direction(Direction::Horizontal)
@@ -137,6 +141,8 @@ impl App {
             columns[1],
         );
 
+        self.draw_ship(frame, rows[1]);
+
         let mut commits = Vec::new();
         for report in &self.repo.reports {
             let Some(snapshot) = &report.snapshot else {
@@ -166,7 +172,109 @@ impl App {
             Paragraph::new(commits)
                 .block(self.panel(" Recent commits "))
                 .wrap(Wrap { trim: false }),
-            rows[1],
+            rows[2],
+        );
+    }
+
+    /// Draw open pull requests, check/thread state, and the selected failure log.
+    fn draw_ship(&self, frame: &mut Frame, area: Rect) {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(area);
+        let mut lines = Vec::new();
+        let mut flat_index = 0;
+        if self.repo.ship_reports.is_empty() {
+            lines.push(Line::from(Span::styled(
+                if self.repo.ship_loading {
+                    "Checking GitHub pull requests…"
+                } else {
+                    "No Ship data yet · press r to refresh"
+                },
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
+        for report in &self.repo.ship_reports {
+            lines.push(Line::from(Span::styled(
+                clip(&report.root.to_string_lossy(), 38),
+                Style::default()
+                    .fg(self.theme.primary)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            match &report.state {
+                medulla::ship::ShipState::GhUnavailable(reason) => {
+                    lines.push(Line::from(Span::styled(
+                        format!("  gh unavailable · {}", clip(reason, 48)),
+                        Style::default().fg(Color::Yellow),
+                    )));
+                }
+                medulla::ship::ShipState::Ready(rows) if rows.is_empty() => {
+                    lines.push(Line::from(Span::styled(
+                        "  no open pull requests",
+                        Style::default().add_modifier(Modifier::DIM),
+                    )));
+                }
+                medulla::ship::ShipState::Ready(rows) => {
+                    for row in rows {
+                        let selected = flat_index == self.repo.ship_index;
+                        let glyph = match row.checks {
+                            medulla::ship::CheckState::Green => "✓",
+                            medulla::ship::CheckState::Failing => "✗",
+                            medulla::ship::CheckState::Pending => "◌",
+                        };
+                        let mut style = match row.checks {
+                            medulla::ship::CheckState::Green => Style::default().fg(Color::Green),
+                            medulla::ship::CheckState::Failing => Style::default().fg(Color::Red),
+                            medulla::ship::CheckState::Pending => {
+                                Style::default().fg(Color::Yellow)
+                            }
+                        };
+                        if selected {
+                            style = self.theme.selection();
+                        }
+                        lines.push(Line::from(Span::styled(
+                            format!(
+                                "{} #{:<4} {glyph} {:<7} threads:{} · {}",
+                                if selected { "▸" } else { " " },
+                                row.number,
+                                row.checks.label(),
+                                row.unresolved_threads,
+                                clip(&row.title, 34)
+                            ),
+                            style,
+                        )));
+                        flat_index += 1;
+                    }
+                }
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(self.panel(if self.repo.ship_loading {
+                    " Ship · refreshing… "
+                } else {
+                    " Ship · j/k PR · o open · p create · r refresh "
+                }))
+                .wrap(Wrap { trim: false }),
+            columns[0],
+        );
+
+        let log_title = self
+            .repo
+            .ship_log_key
+            .as_ref()
+            .map(|(_, number)| format!(" Failed check · PR #{number} "))
+            .unwrap_or_else(|| " Failed check ".into());
+        let log = if self.repo.ship_log.is_empty() {
+            "Select a PR to inspect its failed-check excerpt"
+        } else {
+            &self.repo.ship_log
+        };
+        frame.render_widget(
+            Paragraph::new(log)
+                .block(self.panel(log_title))
+                .wrap(Wrap { trim: false }),
+            columns[1],
         );
     }
 }

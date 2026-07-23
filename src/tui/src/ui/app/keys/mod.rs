@@ -210,11 +210,25 @@ impl App {
             // Repo ledger navigation and refresh.
             KeyCode::Char('r') if tab == "Repo" => {
                 self.set_workspaces_loading();
+                self.set_ship_loading();
                 self.set_status("Repo · refreshing…");
                 return Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces()));
             }
             KeyCode::Up if tab == "Repo" => return self.move_repo_file(true),
             KeyCode::Down if tab == "Repo" => return self.move_repo_file(false),
+            KeyCode::Char('k') if tab == "Repo" => return self.move_ship_pr(true),
+            KeyCode::Char('j') if tab == "Repo" => return self.move_ship_pr(false),
+            KeyCode::Char('o') if tab == "Repo" => {
+                let cmd = self.selected_ship_open_cmd();
+                if cmd.is_none() {
+                    self.set_status("Ship · no pull request selected");
+                }
+                return cmd;
+            }
+            KeyCode::Char('p') if tab == "Repo" => {
+                self.set_status("Ship · creating pull request against upstream…");
+                return self.ship_create_cmd();
+            }
             KeyCode::PageUp if tab == "Repo" => {
                 self.repo.diff_scroll = self.repo.diff_scroll.saturating_sub(10);
             }

@@ -19,6 +19,7 @@ use medulla_tui::ui::app::{App, Cmd, TABS};
 
 use crate::terminal::set_mouse_capture;
 
+mod repo;
 mod types;
 mod update_checker;
 
@@ -103,15 +104,18 @@ pub(crate) async fn run(
                     AppMsg::Status(s) => { app.set_status(s); app.refresh_snapshot(); }
                     AppMsg::Contexts(c) => app.set_contexts(c),
                     AppMsg::WorkspacesLoaded(reports) => {
-                        app.set_workspace_reports(reports);
-                        app.set_status("Repo · refreshed");
-                        if let Some(cmd) = app.selected_repo_diff_cmd() {
-                            run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
-                        }
+                        repo::apply_workspaces(&mut app, reports, msg_tx.clone());
                     }
                     AppMsg::WorkspaceDiffLoaded { workspace, path, result } => {
                         app.set_workspace_diff(workspace, path, result);
                     }
+                    AppMsg::ShipLoaded(reports) => {
+                        repo::apply_ship(&mut app, reports, msg_tx.clone());
+                    }
+                    AppMsg::ShipLogLoaded { workspace, number, result } => {
+                        app.set_ship_log(workspace, number, result);
+                    }
+                    AppMsg::ShipAction(status) => app.set_status(status),
                     AppMsg::UsageLoaded(data) => app.set_account_usage(data),
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
                     AppMsg::Resumed(s) => {
@@ -264,29 +268,22 @@ fn run_cmd(
             });
         }
         Cmd::LoadWorkspaces(roots) => {
-            let tx = msg_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let reports = roots
-                    .into_iter()
-                    .map(|root| {
-                        let result = medulla::workspace::inspect_workspace(&root);
-                        medulla::workspace::WorkspaceReport::from_result(root, result)
-                    })
-                    .collect();
-                let _ = tx.send(AppMsg::WorkspacesLoaded(reports));
-            });
+            repo::load_workspaces(roots, msg_tx.clone());
         }
         Cmd::LoadWorkspaceDiff { workspace, path } => {
-            let tx = msg_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let result =
-                    medulla::workspace::diff(&workspace, &path).map_err(|error| error.to_string());
-                let _ = tx.send(AppMsg::WorkspaceDiffLoaded {
-                    workspace,
-                    path,
-                    result,
-                });
-            });
+            repo::load_diff(workspace, path, msg_tx.clone());
+        }
+        Cmd::LoadShip(roots) => {
+            repo::load_ship(roots, msg_tx.clone());
+        }
+        Cmd::LoadShipLog { workspace, number } => {
+            repo::load_ship_log(workspace, number, msg_tx.clone());
+        }
+        Cmd::OpenShipPr { workspace, number } => {
+            repo::open_ship_pr(workspace, number, msg_tx.clone());
+        }
+        Cmd::CreateShipPr(workspace) => {
+            repo::create_ship_pr(workspace, msg_tx.clone());
         }
         // --- feedback board ---------------------------------------------
         Cmd::LoadFeedback(query) => {

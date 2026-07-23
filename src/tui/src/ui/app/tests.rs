@@ -221,6 +221,92 @@ fn repo_tab_renders_loading_clean_detached_and_fallback_states() {
     assert!(render(&mut a).contains("inspection failed"));
 }
 
+fn ship_rows(state: medulla::ship::ShipState) -> medulla::ship::WorkspaceShipReport {
+    medulla::ship::WorkspaceShipReport {
+        root: "/workspace/project".into(),
+        state,
+    }
+}
+
+fn pr(number: u64, checks: medulla::ship::CheckState, threads: usize) -> medulla::ship::PrSummary {
+    medulla::ship::PrSummary {
+        number,
+        title: format!("PR state {number}"),
+        head: format!("feat/{number}"),
+        url: format!("https://example/pr/{number}"),
+        checks,
+        unresolved_threads: threads,
+    }
+}
+
+#[test]
+fn ship_section_renders_every_check_state_and_failure_excerpt() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_ship_reports(vec![ship_rows(medulla::ship::ShipState::Ready(vec![
+        pr(11, medulla::ship::CheckState::Green, 0),
+        pr(12, medulla::ship::CheckState::Failing, 2),
+        pr(13, medulla::ship::CheckState::Pending, 1),
+    ]))]);
+    a.set_ship_log(
+        "/workspace/project".into(),
+        11,
+        Ok("compile failed at src/lib.rs:7".into()),
+    );
+    let out = render(&mut a);
+    for expected in [
+        "Ship · j/k PR",
+        "#11",
+        "green",
+        "failing",
+        "pending",
+        "threads:2",
+        "compile failed",
+    ] {
+        assert!(out.contains(expected), "missing {expected}: {out}");
+    }
+}
+
+#[test]
+fn ship_section_renders_unavailable_empty_and_loading_states() {
+    let mut unavailable = app();
+    unavailable.tab_index = tab_pos("Repo");
+    unavailable.set_ship_reports(vec![ship_rows(medulla::ship::ShipState::GhUnavailable(
+        "not logged in".into(),
+    ))]);
+    let out = render(&mut unavailable);
+    assert!(out.contains("gh unavailable"), "{out}");
+    assert!(out.contains("not logged in"), "{out}");
+
+    unavailable.set_ship_reports(vec![ship_rows(medulla::ship::ShipState::Ready(Vec::new()))]);
+    assert!(render(&mut unavailable).contains("no open pull requests"));
+
+    let mut loading = app();
+    loading.tab_index = tab_pos("Repo");
+    loading.set_ship_loading();
+    assert!(render(&mut loading).contains("Checking GitHub pull requests"));
+}
+
+#[test]
+fn ship_keys_select_open_create_and_never_merge() {
+    let mut a = app();
+    a.tab_index = tab_pos("Repo");
+    a.set_workspace_reports(vec![repository_report()]);
+    a.set_ship_reports(vec![ship_rows(medulla::ship::ShipState::Ready(vec![
+        pr(11, medulla::ship::CheckState::Green, 0),
+        pr(12, medulla::ship::CheckState::Failing, 1),
+    ]))]);
+
+    let next = a.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    assert!(matches!(next, Some(Cmd::LoadShipLog { number: 12, .. })));
+    let open = a.on_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE));
+    assert!(matches!(open, Some(Cmd::OpenShipPr { number: 12, .. })));
+    let create = a.on_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+    assert!(matches!(create, Some(Cmd::CreateShipPr(_))));
+    let merge = a.on_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
+    assert!(merge.is_none(), "the Ship surface must not expose merge");
+}
+
 // --- Feedback subpage (Settings > GENERAL > Feedback) ------------------------
 
 /// An app parked on the Feedback subpage with the mock board already loaded.

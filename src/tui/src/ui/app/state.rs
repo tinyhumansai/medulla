@@ -17,6 +17,8 @@ use super::types::{
     App, Cmd, MemoryEntry, ResumePicker, SETTINGS_SUBPAGES, SP_CONTEXT, SP_FEEDBACK, SP_USAGE, TABS,
 };
 
+mod ship;
+
 impl App {
     /// Build a fresh screen bound to `runtime` and `loaded`, starting on the
     /// Overview tab with an empty composer and the config-derived theme.

@@ -85,7 +85,10 @@ pub fn detect_providers(
         .collect()
 }
 
-/// Build the argv for a one-shot headless run of `provider`.
+/// Build the argv for a one-shot headless run of `provider`, starting a fresh
+/// session.
+///
+/// Thin wrapper over [`build_resumed_run_args`] with no session to resume.
 pub fn build_run_args(
     provider: HarnessProvider,
     prompt: &str,
@@ -93,6 +96,35 @@ pub fn build_run_args(
     agent: Option<&str>,
     extra_args: &[String],
     skip_permissions: bool,
+) -> Vec<String> {
+    build_resumed_run_args(
+        provider,
+        prompt,
+        model,
+        agent,
+        extra_args,
+        skip_permissions,
+        None,
+    )
+}
+
+/// Build the argv for a one-shot headless run of `provider`, optionally
+/// resuming a previously captured harness session.
+///
+/// `resume` is ignored for providers that cannot resume, so passing one is
+/// always safe. Note the shape difference the two CLIs impose: claude takes
+/// `--resume <id>` as a flag anywhere in the argv, while codex takes `resume
+/// <id>` as a **subcommand** that must directly follow `exec` — which is why
+/// resume cannot simply be passed through `extra_args`.
+#[allow(clippy::too_many_arguments)]
+pub fn build_resumed_run_args(
+    provider: HarnessProvider,
+    prompt: &str,
+    model: Option<&str>,
+    agent: Option<&str>,
+    extra_args: &[String],
+    skip_permissions: bool,
+    resume: Option<&str>,
 ) -> Vec<String> {
     // A prompt beginning with "-" would be parsed as a flag by the provider (an
     // injection vector since task text is remote-controlled); neutralize with a
@@ -102,10 +134,15 @@ pub fn build_run_args(
     } else {
         prompt.to_string()
     };
+    let resume = resume.filter(|id| !id.trim().is_empty() && can_resume(provider));
     let mut args: Vec<String> = Vec::new();
     match provider {
         HarnessProvider::Claude => {
             args.extend(["-p", "--output-format", "stream-json", "--verbose"].map(String::from));
+            if let Some(resume) = resume {
+                args.push("--resume".to_string());
+                args.push(resume.to_string());
+            }
             if skip_permissions {
                 args.push("--dangerously-skip-permissions".to_string());
             }
@@ -120,6 +157,11 @@ pub fn build_run_args(
         }
         HarnessProvider::Codex => {
             args.push("exec".to_string());
+            // `resume` is a subcommand and must sit directly after `exec`.
+            if let Some(resume) = resume {
+                args.push("resume".to_string());
+                args.push(resume.to_string());
+            }
             args.push("--json".to_string());
             if let Some(model) = model {
                 args.push("-m".to_string());
@@ -143,6 +185,43 @@ pub fn build_run_args(
         }
     }
     args
+}
+
+/// Whether a provider can resume a previously captured harness session id.
+///
+/// Re-exported from [`crate::sessions::routing`] so the argv builder can gate on
+/// it without the providers module depending on the sessions module.
+fn can_resume(provider: HarnessProvider) -> bool {
+    matches!(provider, HarnessProvider::Claude | HarnessProvider::Codex)
+}
+
+/// The stream field a provider announces its own session id on.
+///
+/// claude stamps `session_id` on **every** frame (the `system`/`init` one is
+/// merely the first); codex announces `thread_id` on `thread.started`.
+/// `opencode` announces nothing, so it has no session to capture.
+pub fn session_id_field(provider: HarnessProvider) -> Option<&'static str> {
+    match provider {
+        HarnessProvider::Claude => Some("session_id"),
+        HarnessProvider::Codex => Some("thread_id"),
+        HarnessProvider::Opencode => None,
+    }
+}
+
+/// Extract a provider's own session id from one raw stream line.
+///
+/// Returns `None` for a non-JSON line, a provider that announces none, or a
+/// blank value. Callers keep the **first** id they see: re-reading it on every
+/// frame would be waste, and a run reports exactly one session.
+pub fn extract_session_id(provider: HarnessProvider, raw: &str) -> Option<String> {
+    let field = session_id_field(provider)?;
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    parsed
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
 }
 
 /// Whether a provider accepts mid-run stdin input (`input` frames).

@@ -18,6 +18,7 @@ use super::types::{App, TABS};
 
 mod agents;
 mod chat;
+mod decisions;
 mod feedback;
 mod memory;
 mod overview;
@@ -78,11 +79,133 @@ pub(super) fn event_color(env: &EventEnvelope) -> Option<&'static str> {
 }
 
 /// Fold the chat event stream into a wrapped conversational transcript.
+/// One tool call being assembled from the stream.
+///
+/// The name and the arguments arrive as *separate* events — `tool_call_start`
+/// carries the name once, the deltas carry argument fragments — so a call can
+/// only be rendered after its fragments stop arriving. Held here until the next
+/// non-tool event flushes it.
+#[derive(Default)]
+struct PendingCall {
+    name: String,
+    args: String,
+}
+
+/// Render the assembled tool calls, newest last, and clear them.
+fn flush_calls(pending: &mut Vec<(i64, PendingCall)>, cols: usize, out: &mut Vec<StyledLine>) {
+    for (_, call) in pending.drain(..) {
+        // A one-line summary, not the payload: the arguments are frequently
+        // kilobytes of JSON, and a transcript that reproduces them whole buries
+        // the answer the user is reading for.
+        let name = if call.name.is_empty() {
+            "tool".to_string()
+        } else {
+            call.name.clone()
+        };
+        let args = compact_args(&call.args);
+        let text = if args.is_empty() {
+            format!("⏺ {name}")
+        } else {
+            format!("⏺ {name}({args})")
+        };
+        let text = truncate(&text, cols.saturating_sub(2));
+        out.push(StyledLine {
+            text,
+            color: Some("magenta".into()),
+            dim: true,
+        });
+    }
+}
+
+/// The interesting part of a tool call's JSON arguments, on one line.
+///
+/// Values only, keys dropped: `{"command":"ls -la"}` reads as `ls -la`, which is
+/// what an operator scanning the transcript actually wants. Falls back to the
+/// raw text when it is not the object this expects — a half-streamed fragment is
+/// normal, not an error.
+fn compact_args(raw: &str) -> String {
+    let flat: String = raw
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&flat)
+    else {
+        return flat;
+    };
+    map.values()
+        .map(|v| match v {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Clip to `max` display columns, marking that it was clipped.
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(max.saturating_sub(1)).collect();
+    format!("{head}…")
+}
+
 pub(super) fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLine> {
     let cols = width.max(20);
     let mut out = Vec::new();
+    // Tool calls are assembled across several events and flushed in stream
+    // order, so they appear between the turns they happened between.
+    let mut pending: Vec<(i64, PendingCall)> = Vec::new();
     for env in events {
+        if !matches!(
+            env.event,
+            TuiEvent::ToolCallDelta { .. } | TuiEvent::Unknown { .. }
+        ) {
+            flush_calls(&mut pending, cols, &mut out);
+        }
         match &env.event {
+            // The name arrives once, ahead of its argument fragments.
+            TuiEvent::Unknown { kind, data } if kind == "tool_call_start" => {
+                let index = data
+                    .get("index")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+                let name = data
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                match pending.iter_mut().find(|(i, _)| *i == index) {
+                    // A start re-announcing a live index is a *new* call taking
+                    // that slot — providers reuse indices across calls. Keeping
+                    // the args would render the new call with the old one's
+                    // arguments.
+                    Some((_, call)) => {
+                        call.name = name;
+                        call.args.clear();
+                    }
+                    None => pending.push((
+                        index,
+                        PendingCall {
+                            name,
+                            args: String::new(),
+                        },
+                    )),
+                }
+            }
+            TuiEvent::ToolCallDelta { index, args_delta } => {
+                match pending.iter_mut().find(|(i, _)| i == index) {
+                    Some((_, call)) => call.args.push_str(args_delta),
+                    None => pending.push((
+                        *index,
+                        PendingCall {
+                            name: String::new(),
+                            args: args_delta.clone(),
+                        },
+                    )),
+                }
+            }
             TuiEvent::User { body } => {
                 out.push(StyledLine::default());
                 for (i, row) in wrap(body, cols.saturating_sub(2)).into_iter().enumerate() {
@@ -122,6 +245,7 @@ pub(super) fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLi
             _ => {}
         }
     }
+    flush_calls(&mut pending, cols, &mut out);
     out
 }
 
@@ -153,6 +277,9 @@ impl App {
         self.draw_header(f, rows[0]);
         self.draw_tabs(f, rows[1]);
         self.draw_content(f, rows[2]);
+        if self.decision_open {
+            self.draw_decisions(f, rows[2]);
+        }
         if has_prompt {
             self.draw_prompt(f, rows[3]);
         } else if chat {

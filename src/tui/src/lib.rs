@@ -5,4 +5,6 @@
 
 pub mod cli;
 pub mod harness_pty;
+pub mod log;
 pub mod ui;
+pub mod worker;

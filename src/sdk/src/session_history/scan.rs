@@ -111,12 +111,20 @@ pub(crate) fn preexisting_session_files(
 /// Find the newest session file for `agent` anchored at `cwd`, ignoring any file
 /// in `ignored` and any older than `min_mtime_ms`. Mirrors the TS wrapper's
 /// `locateSession`: newest-first, `meta.cwd == cwd`, skipping pre-existing files.
-pub(crate) fn discover_newest_session_file(
+/// Locate a session transcript, optionally pinned to a known session id.
+///
+/// With `expect_session_id` set, **identity beats recency**: only the transcript
+/// whose own recorded id matches is accepted, however new the others are. That
+/// is what makes concurrent sessions in one working directory safe — matching by
+/// newest-mtime alone flip-flops between them on every poll, which would stream
+/// one peer's turns into another peer's reply.
+pub(crate) fn discover_session_file(
     env: &HashMap<String, String>,
     agent: SessionAgentKind,
     cwd: &str,
     min_mtime_ms: i64,
     ignored: &HashSet<PathBuf>,
+    expect_session_id: Option<&str>,
 ) -> Option<DiscoveredSession> {
     let here = safe_resolve(cwd);
     let mut files = collect_session_files(agent, &sessions_dir_for(env, agent));
@@ -133,6 +141,12 @@ pub(crate) fn discover_newest_session_file(
             Some(summary) => summary,
             None => continue,
         };
+        // A pinned id is a fact; everything else about the file is a hint.
+        if let Some(expected) = expect_session_id {
+            if summary.id != expected {
+                continue;
+            }
+        }
         // A session with a recorded cwd must match; one with no cwd is accepted
         // (some transcripts omit it in their head window).
         if let Some(session_cwd) = &summary.cwd {

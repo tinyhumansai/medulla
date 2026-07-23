@@ -172,6 +172,19 @@ impl DaemonRuntime {
             },
             usage,
         );
+        // Narrate the terminal frames only. Status and ack are throttled chatter
+        // whose whole point is that nobody reads them one by one; a reply or an
+        // error is the thing a peer waited for, and the one worth being able to
+        // prove was sent.
+        if matches!(kind, TaskFrameKind::Reply | TaskFrameKind::Error) {
+            self.log(&format!(
+                "task {task_id} → {to} {} · {} bytes on the wire, {} chars: {}",
+                kind.as_str(),
+                body.len(),
+                text.chars().count(),
+                crate::logging::preview(text),
+            ));
+        }
         self.send_raw(to, &body).await;
     }
 

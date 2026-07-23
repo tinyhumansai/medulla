@@ -6,7 +6,7 @@ members = ["src/sdk", "src/tui"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/medulla"
@@ -25,6 +25,12 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 portable-pty = "0.9"
+# Terminal emulator: parses a PTY's VT/ANSI stream into a screen grid so a live
+# harness CLI can be rendered inside a ratatui pane.
+vt100 = "0.15"
+# Minted session ids: a harness told which id to use writes a transcript we can
+# find by name, instead of one we have to guess by mtime.
+uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 tracing = "0.1"
 base64 = "0.22"

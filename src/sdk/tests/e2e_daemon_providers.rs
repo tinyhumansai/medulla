@@ -48,6 +48,8 @@ async fn run(
     let kinds = Arc::new(Mutex::new(Vec::<String>::new()));
     let sink = kinds.clone();
     let options = RunTaskOptions {
+        conversation: String::new(),
+        resume_session_id: None,
         provider: harness(provider),
         prompt: prompt.to_string(),
         cwd: ".".to_string(),
@@ -162,6 +164,8 @@ async fn spawn_failure_for_missing_binary() {
         "/nonexistent/definitely-not-here"
     );
     let options = RunTaskOptions {
+        conversation: String::new(),
+        resume_session_id: None,
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
         cwd: ".".to_string(),
@@ -189,6 +193,8 @@ async fn abort_before_start_returns_immediately() {
     let abort = Abort::new();
     abort.abort();
     let options = RunTaskOptions {
+        conversation: String::new(),
+        resume_session_id: None,
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
         cwd: ".".to_string(),
@@ -220,6 +226,8 @@ async fn abort_mid_run_kills_child() {
         abort_bg.abort();
     });
     let options = RunTaskOptions {
+        conversation: String::new(),
+        resume_session_id: None,
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
         cwd: ".".to_string(),
@@ -251,6 +259,8 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
             Arc::new(Mutex::new(None));
         let register = stdin_tx.clone();
         let options = RunTaskOptions {
+            conversation: String::new(),
+            resume_session_id: None,
             provider: harness(provider),
             prompt: "start".to_string(),
             cwd: ".".to_string(),
@@ -297,6 +307,8 @@ async fn opencode_stdin_is_immediate_eof() {
     let registered = Arc::new(Mutex::new(false));
     let register = registered.clone();
     let options = RunTaskOptions {
+        conversation: String::new(),
+        resume_session_id: None,
         provider: harness(provider),
         prompt: "start".to_string(),
         cwd: ".".to_string(),

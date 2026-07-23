@@ -31,6 +31,44 @@ pub enum TrackedTaskStatus {
     Cancelled,
 }
 
+/// Advisory boundaries and completion criteria for one delegated worker lane.
+/// Medulla transports this object verbatim; enforcement remains host-owned.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerContract {
+    /// The exact outcome the lane should produce.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// Workspace globs the lane is permitted to change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permitted_paths: Option<Vec<String>>,
+    /// Work explicitly excluded from this lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub non_goals: Option<Vec<String>>,
+    /// Focused verification commands the worker should run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_commands: Option<Vec<String>>,
+    /// Condition that ends the lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_condition: Option<String>,
+}
+
+/// One command or named gate outcome attributed to a task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationEvidence {
+    /// Exact verification command, mutually exclusive with `gate` by convention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Named library gate, mutually exclusive with `command` by convention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<String>,
+    /// Whether the verification passed.
+    pub ok: bool,
+    /// Bounded human-readable outcome.
+    pub summary: String,
+}
+
 /// One unit of intended work on the session task board. Mirrors the TS
 /// `TrackedTask`; `created_at`/`updated_at` are ISO-8601 strings and
 /// `delegated_task_ids`/`notes` are always-present arrays (never omitted).
@@ -59,6 +97,12 @@ pub struct TrackedTask {
     /// Append-only free-form notes.
     #[serde(default)]
     pub notes: Vec<String>,
+    /// Worker-lane boundaries associated with a linked delegation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<WorkerContract>,
+    /// Append-only per-task verification observations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Vec<VerificationEvidence>>,
 }
 
 /// The run state of the agent harness. Mirrors the TS `HarnessStatus["state"]`

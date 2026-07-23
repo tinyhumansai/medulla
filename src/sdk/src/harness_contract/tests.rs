@@ -29,11 +29,32 @@ fn tracked_task_round_trips_with_camel_case() {
         "updatedAt": "2026-07-20T00:05:00.000Z",
         "instructionId": "inst-agent-0",
         "delegatedTaskIds": ["deleg-1", "deleg-2"],
-        "notes": ["kicked off", "half done"]
+        "notes": ["kicked off", "half done"],
+        "contract": {
+            "outcome": "Decode the task",
+            "permittedPaths": ["src/sdk/**"],
+            "nonGoals": ["No TUI rendering"],
+            "verifyCommands": ["cargo test -p medulla harness_contract"],
+            "terminalCondition": "focused tests green"
+        },
+        "evidence": [
+            {"gate": "assert_coverage", "ok": true, "summary": "COVERED"},
+            {"command": "cargo test", "ok": true, "summary": "tests passed"}
+        ]
     });
     let task: TrackedTask = round_trip(literal);
     assert_eq!(task.status, TrackedTaskStatus::Active);
     assert_eq!(task.delegated_task_ids.len(), 2);
+    assert_eq!(
+        task.contract
+            .as_ref()
+            .unwrap()
+            .permitted_paths
+            .as_ref()
+            .unwrap(),
+        &["src/sdk/**"]
+    );
+    assert_eq!(task.evidence.as_ref().unwrap().len(), 2);
 }
 
 #[test]
@@ -51,10 +72,14 @@ fn tracked_task_omits_optionals_when_absent() {
     let task: TrackedTask = round_trip(literal);
     assert!(task.detail.is_none());
     assert!(task.instruction_id.is_none());
+    assert!(task.contract.is_none());
+    assert!(task.evidence.is_none());
     // The optionals must not leak into the serialized JSON.
     let out = serde_json::to_value(&task).unwrap();
     assert!(out.get("detail").is_none());
     assert!(out.get("instructionId").is_none());
+    assert!(out.get("contract").is_none());
+    assert!(out.get("evidence").is_none());
 }
 
 #[test]

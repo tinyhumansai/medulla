@@ -23,7 +23,8 @@ mod tests;
 
 pub use types::{
     AgentBudgetMetadata, HarnessEvent, HarnessState, HarnessStatus, HarnessUsage,
-    InstructionReceipt, SeatHeadroom, TrackedTask, TrackedTaskStatus, WindowHeadroom,
+    InstructionReceipt, SeatHeadroom, TrackedTask, TrackedTaskStatus, VerificationEvidence,
+    WindowHeadroom, WorkerContract,
 };
 
 /// The tool names the harness reserves for its built-in memory and task-tracker

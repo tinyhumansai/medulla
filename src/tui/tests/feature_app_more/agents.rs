@@ -248,6 +248,8 @@ fn tracked(
         instruction_id: None,
         delegated_task_ids: Vec::new(),
         notes: Vec::new(),
+        contract: None,
+        evidence: None,
     }
 }
 

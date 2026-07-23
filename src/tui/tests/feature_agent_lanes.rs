@@ -186,4 +186,12 @@ fn shared_path_claims_and_invalid_patterns_are_visible() {
 
     claim_selected_lane(&mut app, "[");
     assert!(app.status().contains("invalid lane-claim pattern"));
+
+    key(&mut app, KeyCode::Char('C'));
+    for _ in 0..32 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    key(&mut app, KeyCode::Enter);
+    assert!(app.status().contains("lane claim cleared"));
+    assert!(!render(&mut app, 180, 44).contains("claim Cargo.lock"));
 }

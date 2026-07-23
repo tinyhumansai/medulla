@@ -13,6 +13,7 @@ pub mod history_upload;
 pub mod home;
 pub mod hub;
 pub mod init;
+pub mod lessons;
 pub mod memory;
 pub mod onboarding;
 pub mod runtime;

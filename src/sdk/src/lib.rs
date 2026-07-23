@@ -21,4 +21,5 @@ pub mod tinyplace;
 pub mod ui;
 pub mod update;
 pub mod worker_profile;
+pub mod workspace;
 pub mod wrapper;

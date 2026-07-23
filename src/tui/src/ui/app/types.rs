@@ -25,8 +25,8 @@ use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 /// Trace, Context, and Feedback used to live here. They are secondary surfaces —
 /// two of them diagnostic — so they now sit under Settings, keeping the tab bar
 /// to the views a session is actually driven from.
-pub const TABS: [&str; 6] = [
-    "Overview", "Chat", "Agents", "Workers", "Memory", "Settings",
+pub const TABS: [&str; 7] = [
+    "Overview", "Chat", "Agents", "Repo", "Workers", "Memory", "Settings",
 ];
 
 /// The Settings tab's left-nav subpages, in order (number keys 1-8 jump to them).
@@ -84,6 +84,23 @@ pub enum Cmd {
     ListChats,
     /// Re-inspect the runtime's context chunks for the Context tab.
     InspectContext,
+    /// Refresh all configured local Git workspace summaries.
+    LoadWorkspaces(Vec<std::path::PathBuf>),
+    /// Load the patch for one selected repository-relative path.
+    LoadWorkspaceDiff {
+        /// Local repository root.
+        workspace: std::path::PathBuf,
+        /// Repository-relative changed path.
+        path: std::path::PathBuf,
+    },
+    /// Collect the lane-scoped Git diff and submit an independent review task.
+    PrepareReview {
+        task_id: String,
+        implementer_id: String,
+        reviewer_id: String,
+        workspace: std::path::PathBuf,
+        contract: medulla::autoreview::ReviewContract,
+    },
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
     /// Load the persona-memory status + directives for the Memory tab.
@@ -153,6 +170,11 @@ pub(super) enum MemoryEntry {
 
 /// The action a small inline prompt (Workers add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Set or clear the manual permitted-path claim for one visible lane.
+    LaneClaim {
+        /// Stable lane key.
+        lane_key: String,
+    },
     /// Add a worker from an address/@handle line.
     WorkerAdd,
     /// Edit the label of the worker with the given id.
@@ -162,6 +184,15 @@ pub(super) enum PromptKind {
         /// The cycle the question belongs to.
         cycle_id: String,
         /// The pending question's id.
+        question_id: String,
+    },
+    /// Answer a prepared decision and dismiss it locally once routed.
+    DecisionAnswer {
+        /// Stable decision id.
+        decision_id: String,
+        /// Cycle that owns the question.
+        cycle_id: String,
+        /// Harness question id.
         question_id: String,
     },
     /// Comment on the given feedback board item.
@@ -224,6 +255,25 @@ impl Default for FeedbackState {
     }
 }
 
+/// Repo-tab summaries, selection, and the lazily loaded selected patch.
+#[derive(Default)]
+pub(super) struct RepoState {
+    /// Best-effort report for every configured workspace.
+    pub(super) reports: Vec<medulla::workspace::WorkspaceReport>,
+    /// Selection in the flattened dirty-file list.
+    pub(super) file_index: usize,
+    /// Workspace/path the current patch belongs to.
+    pub(super) diff_key: Option<(std::path::PathBuf, std::path::PathBuf)>,
+    /// Current selected-file patch.
+    pub(super) diff: String,
+    /// Diff-pane error, kept separate so repository summaries stay visible.
+    pub(super) diff_error: Option<String>,
+    /// Vertical line offset in the patch pane.
+    pub(super) diff_scroll: usize,
+    /// Whether a workspace refresh is in flight.
+    pub(super) loading: bool,
+}
+
 /// A single-line inline input overlay, composer-styled, reused for the fleet and
 /// steering prompts.
 pub(super) struct Prompt {
@@ -278,6 +328,16 @@ pub struct App {
     pub(super) memory_ingesting: bool,
     /// Feedback-board tab state (lazily loaded on tab entry / refresh).
     pub(super) feedback: FeedbackState,
+    /// Local Git ledger state for the Repo tab.
+    pub(super) repo: RepoState,
+    /// Manual permitted-path globs keyed by stable Agents lane id.
+    pub(super) lane_claims: std::collections::BTreeMap<String, Vec<String>>,
+    /// Whether the prepared-decision modal is visible.
+    pub(super) decision_open: bool,
+    /// Highlighted decision row.
+    pub(super) decision_index: usize,
+    /// Session-local ids intentionally hidden by the operator.
+    pub(super) dismissed_decisions: std::collections::BTreeSet<String>,
     pub(super) prompt: Option<Prompt>,
     /// The animation frame counter (drives the spinner).
     pub frame: usize,

@@ -29,6 +29,7 @@ dirs = { workspace = true }
 fs2 = { workspace = true }
 regex = { workspace = true }
 sha2 = { workspace = true }
+globset = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

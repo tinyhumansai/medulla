@@ -18,10 +18,12 @@ use super::types::{App, TABS};
 
 mod agents;
 mod chat;
+mod decisions;
 mod feedback;
 mod memory;
 mod overview;
 mod prompt;
+mod repo;
 mod settings;
 mod workers;
 
@@ -276,6 +278,9 @@ impl App {
         self.draw_header(f, rows[0]);
         self.draw_tabs(f, rows[1]);
         self.draw_content(f, rows[2]);
+        if self.decision_open {
+            self.draw_decisions(f, rows[2]);
+        }
         if has_prompt {
             self.draw_prompt(f, rows[3]);
         } else if chat {
@@ -430,6 +435,7 @@ impl App {
             "Overview" => self.draw_overview(f, area),
             "Chat" => self.draw_chat(f, area),
             "Agents" => self.draw_agents(f, area),
+            "Repo" => self.draw_repo(f, area),
             "Workers" => self.draw_workers(f, area),
             "Memory" => self.draw_memory(f, area),
             // Trace, Context, and Feedback are Settings subpages, not tabs.

@@ -32,7 +32,7 @@ pub use persist::{clear_setting, persist_hub_workers, persist_setting, persist_w
 pub use types::{
     BackendConfig, CoreConfig, HubSection, HubWorkerConfig, LoadedConfig, MedullaConfig,
     MemoryConfigSection, OnboardingConfig, OpencodeConfig, Peer, ThemeConfig, TinyplaceConfig,
-    TuiConfig, UpdateConfig,
+    TuiConfig, UpdateConfig, WorkflowConfig,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, display_host, is_staging,

@@ -58,6 +58,32 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
 }
 
 #[tokio::test]
+async fn records_lessons_and_surfaces_duplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(medulla::init::PROFILE_FILE),
+        "Workspace\n\n## Lessons\n",
+    )
+    .unwrap();
+    let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::empty());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    for expected in ["recorded", "already present"] {
+        run_cmd(
+            Cmd::RecordLesson {
+                workspace: dir.path().to_path_buf(),
+                trigger: "CI fails".into(),
+                rule: "inspect the first error".into(),
+            },
+            &runtime,
+            None,
+            &tx,
+        );
+        assert!(matches!(next(&mut rx).await, AppMsg::Status(status) if status.contains(expected)));
+    }
+}
+
+#[tokio::test]
 async fn dispatches_every_feedback_action() {
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

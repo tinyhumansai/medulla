@@ -46,6 +46,21 @@ fn fork_and_memory_preserve_argument_case() {
 }
 
 #[test]
+fn lesson_parses_the_shared_trigger_rule_shape() {
+    assert_eq!(
+        parse("/lesson CI flakes -> rerun the focused test"),
+        Some(SlashCommand::Lesson {
+            trigger: "CI flakes".into(),
+            rule: "rerun the focused test".into(),
+        })
+    );
+    assert_eq!(
+        parse("/lesson missing delimiter"),
+        Some(SlashCommand::BadUsage("Usage: /lesson <trigger> -> <rule>"))
+    );
+}
+
+#[test]
 fn copy_validates_scope() {
     assert_eq!(parse("/copy"), Some(SlashCommand::Copy(CopyScope::All)));
     assert_eq!(parse("/copy all"), Some(SlashCommand::Copy(CopyScope::All)));

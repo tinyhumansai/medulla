@@ -463,6 +463,28 @@ fn run_cmd(
                 let _ = tx.send(AppMsg::MemoryIngestDone(status));
             });
         }
+        Cmd::RecordLesson {
+            workspace,
+            trigger,
+            rule,
+        } => {
+            let tx = msg_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let status = match medulla::lessons::add_lesson(
+                    &workspace,
+                    medulla::lessons::Lesson::new(trigger, rule),
+                ) {
+                    Ok(medulla::lessons::AddLessonOutcome::Added) => {
+                        "Lesson · recorded in MEDULLA.md".to_string()
+                    }
+                    Ok(medulla::lessons::AddLessonOutcome::AlreadyPresent) => {
+                        "Lesson · already present".to_string()
+                    }
+                    Err(error) => format!("Lesson · {error}"),
+                };
+                let _ = tx.send(AppMsg::Status(status));
+            });
+        }
     }
 }
 

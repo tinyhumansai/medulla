@@ -95,6 +95,20 @@ fn slash_async_explicit_on_off_and_bad_arg() {
 }
 
 #[test]
+fn slash_lesson_emits_a_record_command_and_validates_usage() {
+    let (mut app, _rt) = empty_app();
+    let cmd = submit_line(&mut app, "/lesson flaky test -> run it alone");
+    assert!(matches!(
+        cmd,
+        Some(Cmd::RecordLesson { trigger, rule, .. })
+            if trigger == "flaky test" && rule == "run it alone"
+    ));
+    let cmd = submit_line(&mut app, "/lesson no delimiter");
+    assert!(cmd.is_none());
+    assert!(app.status().contains("Usage: /lesson"));
+}
+
+#[test]
 fn empty_submission_is_ignored() {
     let (mut app, _rt) = empty_app();
     let cmd = submit_line(&mut app, "   ");

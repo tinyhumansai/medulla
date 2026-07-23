@@ -98,6 +98,12 @@ pub enum Cmd {
         /// Whether to walk everything rather than resuming from the cursor.
         backfill: bool,
     },
+    /// Append a durable lesson to a workspace profile.
+    RecordLesson {
+        workspace: std::path::PathBuf,
+        trigger: String,
+        rule: String,
+    },
     /// Load a page of the feedback board for the Feedback tab.
     LoadFeedback(FeedbackQuery),
     /// Load one board item's comments for the detail pane.

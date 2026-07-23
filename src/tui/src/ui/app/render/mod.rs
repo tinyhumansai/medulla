@@ -18,6 +18,7 @@ use super::types::{App, TABS};
 
 mod agents;
 mod chat;
+mod decisions;
 mod feedback;
 mod memory;
 mod overview;
@@ -153,6 +154,9 @@ impl App {
         self.draw_header(f, rows[0]);
         self.draw_tabs(f, rows[1]);
         self.draw_content(f, rows[2]);
+        if self.decision_open {
+            self.draw_decisions(f, rows[2]);
+        }
         if has_prompt {
             self.draw_prompt(f, rows[3]);
         } else if chat {

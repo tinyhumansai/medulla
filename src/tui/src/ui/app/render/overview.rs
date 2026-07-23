@@ -106,11 +106,18 @@ impl App {
             .as_ref()
             .map(|r| r.pass_count.to_string())
             .unwrap_or_else(|| "—".into());
-        let orch = vec![
+        let mut orch = vec![
             TLine::from(format!("passes {passes}")),
             TLine::from(format!("agents {completed}")),
             TLine::from(format!("active model calls {running_calls}")),
         ];
+        let decisions = self.decisions().len();
+        if decisions > 0 {
+            orch.push(TLine::from(Span::styled(
+                format!("decisions: {decisions} · E open"),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
         f.render_widget(
             Paragraph::new(Text::from(orch)).block(self.panel("Orchestration")),
             top[1],

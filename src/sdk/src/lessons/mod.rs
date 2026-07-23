@@ -103,8 +103,10 @@ fn section_bounds(document: &str) -> Option<(usize, usize)> {
             if content.trim() == HEADING {
                 start = Some(offset + line.len());
             }
-        } else if content.trim_start().starts_with("## ") {
-            return Some((start.expect("set above"), offset));
+        } else if let Some(section_start) = start {
+            if content.trim_start().starts_with("## ") {
+                return Some((section_start, offset));
+            }
         }
         offset += line.len();
     }

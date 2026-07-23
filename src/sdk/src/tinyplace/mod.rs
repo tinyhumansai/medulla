@@ -50,9 +50,9 @@ pub use frames::{
     TINYPLACE_PROTO,
 };
 pub use runtime::{
-    load_or_create_identity, spawn_contact_auto_accepter, spawn_mailbox_poll,
-    spawn_presence_heartbeat, FileSessionStore, MailboxItem, MailboxPoll, RuntimeError,
-    RuntimeResult,
+    acquire_identity, acquire_identity_at, load_or_create_identity, spawn_contact_auto_accepter,
+    spawn_mailbox_poll, spawn_presence_heartbeat, AcquiredIdentity, FileSessionStore, IdentityLock,
+    MailboxItem, MailboxPoll, RuntimeError, RuntimeResult, IDENTITY_FILE,
 };
 pub use status::{
     initial_status, reduce_status, tick_status, SemanticEvent, SessionStatusState, StatusStep,

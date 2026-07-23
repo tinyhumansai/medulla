@@ -26,6 +26,7 @@ base64 = { workspace = true }
 async-trait = { workspace = true }
 rust_socketio = { version = "0.6", features = ["async"] }
 dirs = { workspace = true }
+fs2 = { workspace = true }
 regex = { workspace = true }
 sha2 = { workspace = true }
 

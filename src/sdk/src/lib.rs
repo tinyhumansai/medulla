@@ -17,6 +17,7 @@ pub mod memory;
 pub mod onboarding;
 pub mod runtime;
 pub mod session_history;
+pub mod ship;
 pub mod tinyplace;
 pub mod ui;
 pub mod update;

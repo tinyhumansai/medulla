@@ -111,18 +111,20 @@ fn overview_badge_opens_prepared_context_and_answer_routes_to_runtime() {
 fn informational_escalations_dismiss_and_empty_queue_reports_cleanly() {
     let (mut app, _) = app();
     key(&mut app, KeyCode::Char('E'));
+    key(&mut app, KeyCode::Up);
+    key(&mut app, KeyCode::Char('x'));
     key(&mut app, KeyCode::Down);
     let overlay = render(&mut app);
     assert!(overlay.contains("Needs release approval"), "{overlay}");
     assert!(overlay.contains("informational escalation"), "{overlay}");
 
-    key(&mut app, KeyCode::Char('d'));
+    key(&mut app, KeyCode::Enter);
     assert_eq!(app.decisions().len(), 1);
-    key(&mut app, KeyCode::Esc);
 
-    // Remove the remaining worker question at its source, then prove E does not
-    // open a stale modal.
+    // Remove the remaining worker question at its source while the modal is
+    // open, then prove stale input safely closes it and E reports an empty queue.
     app.snapshot.events.clear();
+    key(&mut app, KeyCode::Char('d'));
     key(&mut app, KeyCode::Char('E'));
     assert_eq!(app.status(), "No prepared decisions");
 }

@@ -111,3 +111,20 @@ fn task_excerpt_falls_back_to_notes_then_title() {
         Some("Choose schema")
     );
 }
+
+#[test]
+fn tracked_tasks_match_full_ids_and_delegation_links() {
+    let mut full_id = status();
+    full_id.tasks[0].id = "cycle-1/t:task-1".into();
+    full_id.tasks[0].delegated_task_ids.clear();
+    assert_eq!(decision_items(Some(&full_id), &[lane(true)]).len(), 2);
+
+    let mut delegated = status();
+    delegated.tasks[0].id = "board-task".into();
+    assert_eq!(
+        decision_items(Some(&delegated), &[lane(true)])[0]
+            .contract_excerpt
+            .as_deref(),
+        Some("Do not change the public API")
+    );
+}

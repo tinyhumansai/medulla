@@ -170,6 +170,9 @@ pub struct HarnessStatus {
 /// `CycleEvent { event }` mirrors the TS `{ kind: "cycle_event"; event: CycleEvent }`
 /// and keeps the inner `CycleEvent` opaque (see the module doc).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Keep the public `task: TrackedTask` field source-compatible; boxing only this
+// wire variant would impose an unrelated API migration on an additive schema.
+#[allow(clippy::large_enum_variant)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",

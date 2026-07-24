@@ -283,24 +283,16 @@ fn kill_switch_suppresses_env_for_all_providers() {
     }
 }
 
-/// `cleanup_hook_tmpdir` must remove the temp dir that `attribution_env` created.
+/// `cleanup_hook_dir` must remove the temp dir that `generate_hook` created.
 #[cfg(unix)]
 #[test]
 fn cleanup_hook_tmpdir_removes_temp_dir() {
-    let env = super::attribution_env(HarnessProvider::Codex, &HashMap::new());
-    assert!(!env.is_empty(), "env must be non-empty");
-    // The hook dir exists before cleanup.
-    let hooks_path = env.get("GIT_CONFIG_VALUE_0").expect("hooksPath in env");
-    assert!(
-        std::path::Path::new(hooks_path).exists(),
-        "hook dir must exist before cleanup"
-    );
+    let (_env, hook_dir) =
+        super::prepare_commit_msg::generate_hook("Co-authored-by: Test <test@e.g>");
+    assert!(hook_dir.exists(), "hook dir must exist before cleanup");
 
-    super::cleanup_hook_tmpdir();
-    assert!(
-        !std::path::Path::new(hooks_path).exists(),
-        "hook dir must be removed after cleanup"
-    );
+    super::prepare_commit_msg::cleanup_hook_dir(&hook_dir);
+    assert!(!hook_dir.exists(), "hook dir must be removed after cleanup");
 }
 
 /// Calling cleanup when no hook was generated is a no-op, not a panic.

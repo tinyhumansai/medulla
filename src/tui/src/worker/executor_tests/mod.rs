@@ -19,12 +19,10 @@ use medulla::tinyplace::HarnessProvider;
 use super::executor::PtySessionExecutor;
 use super::pty::PtyManager;
 
-/// A shell script standing in for a coding agent.
-///
-/// It reads the injected prompt from its pty, echoes it (so the pane shows
 mod basic;
 mod sessions;
 
+/// A fake harness on the default session id, for tests that run only one.
 fn fake_harness_script(rollout: &str, cwd: &str, reply: &str) -> String {
     fake_harness_script_as(rollout, cwd, reply, "sess-fake-1")
 }

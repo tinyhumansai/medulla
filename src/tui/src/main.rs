@@ -124,11 +124,19 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
     // It must be `default_tinyplace_config`, not `TinyplaceConfig::default()`:
     // only the former reads `MEDULLA_STAGING`, and a worker on the prod relay
     // never sees a contact request sent on staging.
-    let tinyplace_config = loaded
+    let mut tinyplace_config = loaded
         .config
         .tinyplace
         .clone()
         .unwrap_or_else(|| medulla::config::default_tinyplace_config(&env));
+
+    // Claim the identity before anything binds it. `medulla daemon --tui` is a
+    // daemon — it publishes pre-keys, drains one inbox and drives one Signal
+    // ratchet — so two of them sharing a wallet would split a peer's messages
+    // between them and corrupt the ratchet for everyone. The guard is bound in
+    // this function, which lives as long as the process.
+    let _identity_lock = claim_identity(&env, &mut tinyplace_config)?;
+
     let service = match medulla::tinyplace::service::TinyplaceService::start(&tinyplace_config) {
         Ok(service) => Some(service),
         Err(err) => {
@@ -179,6 +187,43 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
     .await;
     drop(service); // aborts the background polls
     result
+}
+
+/// Acquire this worker's tiny.place identity exclusively, rewriting
+/// `config.identity_dir` to the slot that was actually claimed.
+///
+/// Two paths, matching the daemon's:
+///
+/// - the config left `identityDir` at its home-derived default, so this worker
+///   takes the first free slot of the identity pool — slot 1 (the address it has
+///   always had) when it is the only worker, `workers/<N>` when it is not; or
+/// - the operator named an identity, in `[tinyplace].identityDir` or in the
+///   environment, so that exact one is taken and a collision is an error rather
+///   than a silent move to an address the operator did not choose.
+fn claim_identity(
+    env: &std::collections::HashMap<String, String>,
+    config: &mut medulla::config::TinyplaceConfig,
+) -> anyhow::Result<medulla::tinyplace::IdentityLock> {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    // Component-wise, not string or raw-`Path` equality: a hand-written
+    // `identityDir = ".../tinyplace/"` keeps its trailing separator, which a
+    // `Path`-value comparison treats as different and would route a default
+    // worker down the fail-loud named path — so a second one would see "already
+    // in use" instead of fanning out to `workers/2`.
+    let default_pool_dir = medulla::home::medulla_home(env).join("tinyplace");
+    let pooled = std::path::Path::new(&config.identity_dir)
+        .components()
+        .eq(default_pool_dir.components());
+    let acquired = if pooled {
+        medulla::tinyplace::acquire_identity(env, &home)
+    } else {
+        let named =
+            std::path::Path::new(&config.identity_dir).join(medulla::tinyplace::IDENTITY_FILE);
+        medulla::tinyplace::acquire_identity_at(&named, env)
+    }
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    config.identity_dir = acquired.identity_dir.to_string_lossy().into_owned();
+    Ok(acquired.lock)
 }
 
 /// Read `--name <value>` out of an argument list.

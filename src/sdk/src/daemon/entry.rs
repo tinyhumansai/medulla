@@ -13,8 +13,8 @@ use std::sync::Arc;
 use crate::onboarding::OnboardingUi;
 
 use crate::tinyplace::{
-    config_path, decode_task_frame, load_or_create_identity, resolve_endpoint,
-    spawn_contact_auto_accepter, spawn_presence_heartbeat,
+    acquire_identity, decode_task_frame, resolve_endpoint, spawn_contact_auto_accepter,
+    spawn_presence_heartbeat,
 };
 use ::tinyplace::api::directory::DirectoryApi;
 use ::tinyplace::api::registry::RegisterRequest;
@@ -144,21 +144,33 @@ pub async fn run_daemon(
     });
 
     // Identity + client.
+    //
+    // The identity is *acquired*, not merely loaded: the daemon takes an
+    // exclusive OS lock on a slot in the identity pool and holds it for its whole
+    // life. Without that, a second daemon on this machine would load the same
+    // key, bind the same tiny.place address, and the two would split one inbox
+    // between them while both advanced the same Signal ratchet.
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let config_file = config_path(&env, &home);
-    let (signer, config) =
-        load_or_create_identity(&config_file, &env).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let acquired = acquire_identity(&env, &home).map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Held to the end of `run_daemon`, which is the process lifetime. Releasing
+    // it early would let another daemon claim an address this one is serving on.
+    let _identity_lock = acquired.lock;
+    if acquired.slot > 1 {
+        log(&format!(
+            "another daemon holds the primary identity; using pool slot {} ({})",
+            acquired.slot,
+            acquired.identity_dir.display()
+        ));
+    }
+    let config = acquired.config;
     let base_url = resolve_endpoint(&env, &config);
-    let signer = Arc::new(signer);
+    let signer = Arc::new(acquired.signer);
     let client = TinyPlaceClient::new(TinyPlaceClientOptions {
         base_url: base_url.clone(),
         signer: Some(signer.clone() as Arc<dyn Signer>),
         ..Default::default()
     });
-    let identity_dir = config_file
-        .parent()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".tinyplace"));
+    let identity_dir = acquired.identity_dir;
 
     let transport = SignalTransport::new(client.clone(), &signer, &identity_dir);
     let agent_id = transport.agent_id().to_string();

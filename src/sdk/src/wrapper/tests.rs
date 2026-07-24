@@ -103,3 +103,48 @@ async fn missing_binary_is_a_clear_error() {
     .unwrap_err();
     assert!(err.to_string().contains("not found on PATH"), "got: {err}");
 }
+
+/// Two pinned tailers, one directory, two transcripts — each latches only its
+/// own. This is the mechanism that makes **claude** immune to the concurrent
+/// swap that afflicts codex: claude is launched with a minted `--session-id`, so
+/// its tailer pins to that id and matches by identity, never by recency. A codex
+/// tailer cannot pin (codex self-mints), which is the open gap documented at the
+/// executor's claim set.
+#[test]
+fn pinned_tailers_latch_by_identity_never_swapping() {
+    use super::tail::SessionTailer;
+
+    let dir = tempfile::tempdir().unwrap();
+    let here = dir.path().to_string_lossy().into_owned();
+    let env: HashMap<String, String> = [("TINYPLACE_CODEX_SESSIONS_DIR".to_string(), here.clone())]
+        .into_iter()
+        .collect();
+
+    // Tailers are built before the transcripts exist, exactly as the executor
+    // builds them before the harness writes. Each is pinned to a different id,
+    // as claude's minted ids are.
+    let mut tail_a =
+        SessionTailer::new(env.clone(), SessionAgentKind::Codex, &here, 0).expecting("sess-a");
+    let mut tail_b = SessionTailer::new(env, SessionAgentKind::Codex, &here, 0).expecting("sess-b");
+
+    // Now both transcripts appear in the shared directory.
+    for (name, id) in [("rollout-a.jsonl", "sess-a"), ("rollout-b.jsonl", "sess-b")] {
+        let line = serde_json::json!({
+            "type": "session_meta",
+            "payload": { "session_id": id, "cwd": here }
+        });
+        std::fs::write(dir.path().join(name), format!("{line}\n")).unwrap();
+    }
+
+    let a = tail_a
+        .poll()
+        .located
+        .expect("tail_a locates its own transcript");
+    let b = tail_b
+        .poll()
+        .located
+        .expect("tail_b locates its own transcript");
+    assert_eq!(a.harness_session_id, "sess-a");
+    assert_eq!(b.harness_session_id, "sess-b");
+    assert_ne!(a.path, b.path, "pinned tailers never share a transcript");
+}

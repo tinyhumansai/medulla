@@ -7,7 +7,7 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::super::types::{SetupStep, WorkerApp, EXECUTION_MODES};
@@ -71,6 +71,12 @@ impl WorkerApp {
                 .map(|p| (p.display_name().to_string(), String::new()))
                 .collect(),
         };
+        self.hit_setup = Some(Rect::new(
+            inner.x,
+            inner.y.saturating_add(5),
+            inner.width,
+            options.len() as u16,
+        ));
         for (i, (label, blurb)) in options.iter().enumerate() {
             let selected = i == self.setup_index;
             let text = format!(
@@ -98,10 +104,16 @@ impl WorkerApp {
                 )));
             }
         }
-        lines.push(dim("↑↓ choose · 1-9 jump · Enter confirm · q quit"));
-        f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-            inner,
-        );
+        let mouse_hint = if self.mouse_capture {
+            "Ctrl-O select text"
+        } else {
+            "Ctrl-O enable mouse"
+        };
+        lines.push(dim(&format!(
+            "↑↓ choose · click/1-9 jump · Enter confirm · {mouse_hint} · q quit"
+        )));
+        // Keep one logical option per terminal row: hit-testing uses the same
+        // row geometry, and clipping is safer than selecting the wrong mode.
+        f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 }

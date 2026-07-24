@@ -19,6 +19,8 @@ mod setup;
 impl WorkerApp {
     /// Draw the whole screen.
     pub fn draw(&mut self, f: &mut Frame) {
+        self.hit_rows = None;
+        self.hit_setup = None;
         if self.screen == Screen::Setup {
             self.draw_setup(f, f.area());
             return;
@@ -103,9 +105,11 @@ impl WorkerApp {
     }
 
     /// The tab bar, with a pending-request badge.
-    fn draw_tabs(&self, f: &mut Frame, area: Rect) {
+    fn draw_tabs(&mut self, f: &mut Frame, area: Rect) {
         let pending = self.pending_requests().len();
         let mut spans = Vec::new();
+        let mut ranges = Vec::new();
+        let mut x = area.x;
         for (i, name) in TABS.iter().enumerate() {
             // In headless mode the first tab is the log, not a session list;
             // labelling it "Sessions" would promise something that never appears.
@@ -131,25 +135,40 @@ impl WorkerApp {
             } else {
                 Style::default().fg(Color::DarkGray)
             };
+            let end = x
+                .saturating_add(label.chars().count() as u16)
+                .saturating_sub(1);
+            ranges.push((x, end));
+            x = end.saturating_add(1);
             spans.push(Span::styled(label, style));
         }
+        self.hit_tabs = (area.y, ranges);
         f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     /// The status line, with the keys for the active context.
     fn draw_status(&self, f: &mut Frame, area: Rect) {
+        let mouse_hint = if self.mouse_capture {
+            "^O select text"
+        } else {
+            "^O enable mouse"
+        };
         let hints = if self.confirm.is_some() {
-            "y confirm · any other key cancels"
+            "y confirm · any other key cancels".to_string()
         } else {
             match self.tab {
-                TAB_SESSIONS if self.is_headless() => {
-                    "↑↓ scroll the log · y copy address · Tab tabs · q quit"
+                TAB_SESSIONS if self.is_headless() => format!(
+                    "↑↓ scroll · click tabs · y copy address · {mouse_hint} · q quit"
+                ),
+                TAB_SESSIONS => format!(
+                    "↑↓/click watch · K kill · d drop · y copy · {mouse_hint} · q quit"
+                ),
+                TAB_CONTACTS => {
+                    format!("↑↓/click select · p policy · y copy · {mouse_hint} · q quit")
                 }
-                TAB_SESSIONS => {
-                    "↑↓ watch a session · K kill · d drop · y copy address · Tab tabs · q quit"
-                }
-                TAB_CONTACTS => "↑↓ select · p policy · y copy address · Tab tabs · q quit",
-                _ => "↑↓ select · a accept · x decline · B block · r refresh · p policy · y copy · q quit",
+                _ => format!(
+                    "↑↓/click select · a accept · x decline · B block · r refresh · {mouse_hint} · q quit"
+                ),
             }
         };
         let line = Line::from(vec![
@@ -247,6 +266,7 @@ impl WorkerApp {
             let start = selected
                 .saturating_sub(visible / 2)
                 .min(rows.len().saturating_sub(visible));
+            self.hit_rows = Some((inner, start));
             for (i, row) in rows.iter().enumerate().skip(start).take(visible) {
                 lines.push(session_line(row, i == selected, self.now()));
             }
@@ -319,14 +339,14 @@ impl WorkerApp {
             lines.push(dim("Accept a request on the Requests tab to let a"));
             lines.push(dim("peer send work here."));
         } else {
+            self.hit_rows = Some((inner, 0));
             for (i, contact) in rows.iter().enumerate() {
                 lines.push(contact_line(contact, i == selected));
             }
         }
-        f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-            inner,
-        );
+        // Contact rows are clickable, so keep each model row on exactly one
+        // terminal row and clip long identities rather than wrapping them.
+        f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 
     /// The Requests tab: peers waiting on a decision.
@@ -360,6 +380,7 @@ impl WorkerApp {
         } else if rows.is_empty() {
             lines.push(dim("Nothing waiting."));
         } else {
+            self.hit_rows = Some((inner, 0));
             for (i, request) in rows.iter().enumerate() {
                 lines.push(request_line(request, i == selected));
             }

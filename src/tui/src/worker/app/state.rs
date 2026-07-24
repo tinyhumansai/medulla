@@ -74,6 +74,10 @@ impl WorkerApp {
             confirm: None,
             status,
             should_quit: false,
+            mouse_capture: true,
+            hit_tabs: (0, Vec::new()),
+            hit_rows: None,
+            hit_setup: None,
             terminal_area: ratatui::layout::Rect::new(0, 0, 0, 0),
             now: Arc::new(medulla::clock::now_millis),
             copy_capture: None,
@@ -204,10 +208,8 @@ impl WorkerApp {
 
     /// Copy this worker's address, so it can be handed to an orchestrator.
     ///
-    /// A key rather than a mouse drag: the screen holds the terminal's mouse
-    /// capture, so selecting text with the pointer does not reach the terminal's
-    /// own copy. Without this the address on screen is unreachable — readable,
-    /// but only by retyping it.
+    /// This remains the fastest way to copy the identity while mouse capture is
+    /// active; Ctrl-O releases capture when arbitrary on-screen text is needed.
     pub fn copy_address(&mut self) {
         let Some(address) = self.agent_id.clone() else {
             self.set_status("No tiny.place identity yet — nothing to copy");

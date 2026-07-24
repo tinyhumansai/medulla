@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use medulla::config::Peer;
 use medulla::contacts::{ContactDesk, ContactRequest, RequestState};
 use medulla::tinyplace::HarnessProvider;
 
@@ -23,6 +24,18 @@ pub struct WorkerWiring {
     pub startup_status: Option<String>,
     /// Where the daemon's log lines are captured.
     pub logs: LogBuffer,
+    /// Primary directory where inbound tasks execute.
+    pub primary_workspace: String,
+    /// Workspace roots approved for capability advertisement.
+    pub workspaces: Vec<String>,
+    /// Configured orchestrator/master peers.
+    pub masters: Vec<Peer>,
+    /// Config file this screen owns for persistence.
+    pub config_path: std::path::PathBuf,
+    /// Worker-local wallet directory; displayed as the credential boundary.
+    pub credential_dir: std::path::PathBuf,
+    /// Relay endpoint resolved at startup.
+    pub endpoint: Option<String>,
 }
 
 impl WorkerApp {
@@ -71,6 +84,15 @@ impl WorkerApp {
             session_index: 0,
             contact_index: 0,
             request_index: 0,
+            master_index: 0,
+            workspace_index: 0,
+            masters: wiring.masters,
+            workspaces: normalize_workspaces(wiring.primary_workspace.as_str(), wiring.workspaces),
+            primary_workspace: wiring.primary_workspace,
+            config_path: wiring.config_path,
+            credential_dir: wiring.credential_dir,
+            endpoint: wiring.endpoint,
+            prompt: None,
             confirm: None,
             status,
             should_quit: false,
@@ -173,6 +195,106 @@ impl WorkerApp {
         &self.providers
     }
 
+    /// Configured master peers.
+    pub fn masters(&self) -> &[Peer] {
+        &self.masters
+    }
+
+    /// Configured masters plus already-accepted peers learned from the relay.
+    ///
+    /// Older configurations may have established the relationship before the
+    /// explicit master roster existed. Showing those contacts keeps the daemon
+    /// controllable without asking the operator to pair the same identity twice.
+    pub fn master_rows(&self) -> Vec<Peer> {
+        let mut rows = self.masters.clone();
+        for contact in self.accepted_contacts() {
+            if rows.iter().any(|peer| {
+                peer.id == contact.agent_id
+                    || peer.address.as_deref() == Some(contact.agent_id.as_str())
+            }) {
+                continue;
+            }
+            rows.push(Peer {
+                id: contact.agent_id.clone(),
+                name: Some(contact.display_name().to_string()),
+                handle: contact.handle,
+                address: Some(contact.agent_id),
+                tags: Some(vec!["master".into()]),
+                description: Some("Accepted orchestrator peer".into()),
+                protocol: "task".into(),
+            });
+        }
+        rows
+    }
+
+    /// Workspace roots currently approved for capability advertisement.
+    pub fn workspaces(&self) -> &[String] {
+        &self.workspaces
+    }
+
+    /// File used for daemon settings.
+    pub fn config_path(&self) -> &std::path::Path {
+        &self.config_path
+    }
+
+    /// Worker-local wallet directory.
+    pub fn credential_dir(&self) -> &std::path::Path {
+        &self.credential_dir
+    }
+
+    /// Add or refresh a resolved master record.
+    pub fn add_master(&mut self, address: String, handle: Option<String>) {
+        if let Some(existing) = self
+            .masters
+            .iter_mut()
+            .find(|peer| peer.id == address || peer.address.as_deref() == Some(address.as_str()))
+        {
+            if handle.is_some() {
+                existing.handle = handle;
+            }
+            return;
+        }
+        self.masters.push(Peer {
+            id: address.clone(),
+            name: Some("Master".into()),
+            handle,
+            address: Some(address),
+            tags: Some(vec!["master".into()]),
+            description: Some("Medulla orchestrator controlling this worker".into()),
+            protocol: "task".into(),
+        });
+        self.master_index = self.masters.len().saturating_sub(1);
+    }
+
+    /// Selected master's address.
+    pub fn selected_master_address(&self) -> Option<String> {
+        let rows = self.master_rows();
+        rows.get(self.master_index.min(rows.len().saturating_sub(1)))
+            .map(|peer| peer.address.clone().unwrap_or_else(|| peer.id.clone()))
+    }
+
+    /// Add a canonical workspace if it is not already allowed.
+    pub fn add_workspace(&mut self, workspace: String) {
+        if !self.workspaces.contains(&workspace) {
+            self.workspaces.push(workspace);
+            self.workspace_index = self.workspaces.len().saturating_sub(1);
+        }
+    }
+
+    /// Remove a non-primary workspace from the allowlist.
+    pub fn remove_workspace(&mut self, workspace: &str) -> bool {
+        if workspace == self.primary_workspace {
+            self.set_status("The active workspace is always allowed");
+            return false;
+        }
+        let before = self.workspaces.len();
+        self.workspaces.retain(|item| item != workspace);
+        self.workspace_index = self
+            .workspace_index
+            .min(self.workspaces.len().saturating_sub(1));
+        self.workspaces.len() != before
+    }
+
     /// Answer the first setup question and move to the second.
     pub fn choose_mode(&mut self, mode: ExecutionMode) {
         self.mode = Some(mode);
@@ -249,4 +371,15 @@ impl WorkerApp {
     pub(super) fn disarm(&mut self) {
         self.confirm = None;
     }
+}
+
+/// Keep the active task directory first and deduplicate configured roots.
+fn normalize_workspaces(primary: &str, configured: Vec<String>) -> Vec<String> {
+    let mut out = vec![primary.to_string()];
+    for workspace in configured {
+        if !workspace.trim().is_empty() && !out.contains(&workspace) {
+            out.push(workspace);
+        }
+    }
+    out
 }

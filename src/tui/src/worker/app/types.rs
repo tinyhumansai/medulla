@@ -3,23 +3,29 @@
 
 use std::sync::Arc;
 
+use medulla::config::Peer;
 use medulla::contacts::ContactDesk;
 use medulla::tinyplace::HarnessProvider;
 
 use super::super::pty::PtyManager;
 
-/// The worker TUI's tabs, in order. Number keys 1-3 jump to them.
+/// The worker TUI's tabs, in order. Number keys 1-4 jump to them.
 ///
-/// Deliberately three: what the machine is *doing*, who it will *talk to*, and
-/// who is *asking*. Anything else belongs in the orchestrator TUI.
-pub const TABS: [&str; 3] = ["Sessions", "Contacts", "Requests"];
+/// This is intentionally a subset of the main TUI: the agents doing work, the
+/// master controlling them, the workspace permission boundary, and requests
+/// waiting for approval.
+pub const TABS: [&str; 4] = ["Agents", "Master", "Workspaces", "Requests"];
 
 /// Index of the Sessions tab.
 pub const TAB_SESSIONS: usize = 0;
-/// Index of the Contacts tab.
-pub const TAB_CONTACTS: usize = 1;
+/// Index of the Master tab.
+pub const TAB_MASTER: usize = 1;
+/// Backwards-compatible internal alias for the old Contacts tab.
+pub const TAB_CONTACTS: usize = TAB_MASTER;
+/// Index of the Workspaces tab.
+pub const TAB_WORKSPACES: usize = 2;
 /// Index of the Requests tab.
-pub const TAB_REQUESTS: usize = 2;
+pub const TAB_REQUESTS: usize = 3;
 
 /// How this worker runs the tasks peers send it.
 ///
@@ -55,7 +61,47 @@ impl ExecutionMode {
 
 /// Every mode, in the order the setup step offers them.
 pub const EXECUTION_MODES: [ExecutionMode; 2] =
-    [ExecutionMode::Headless, ExecutionMode::Interactive];
+    [ExecutionMode::Interactive, ExecutionMode::Headless];
+
+/// Text entry currently owned by the daemon UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Prompt {
+    /// Enter a master cryptoId or `@handle`.
+    ConnectMaster(String),
+    /// Send a plain instruction or note to the selected master.
+    MessageMaster { address: String, input: String },
+    /// Add a directory to the advertised workspace allowlist.
+    AddWorkspace(String),
+}
+
+impl Prompt {
+    /// Prompt title.
+    pub fn title(&self) -> &'static str {
+        match self {
+            Prompt::ConnectMaster(_) => "Connect a master",
+            Prompt::MessageMaster { .. } => "Message the master",
+            Prompt::AddWorkspace(_) => "Allow a workspace",
+        }
+    }
+
+    /// Editable text.
+    pub fn input(&self) -> &str {
+        match self {
+            Prompt::ConnectMaster(input)
+            | Prompt::AddWorkspace(input)
+            | Prompt::MessageMaster { input, .. } => input,
+        }
+    }
+
+    /// Editable text.
+    pub fn input_mut(&mut self) -> &mut String {
+        match self {
+            Prompt::ConnectMaster(input)
+            | Prompt::AddWorkspace(input)
+            | Prompt::MessageMaster { input, .. } => input,
+        }
+    }
+}
 
 /// Which question the launch setup step is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +164,19 @@ pub enum WorkerCmd {
     },
     /// Poll the relay now rather than waiting out the background interval.
     Refresh,
+    /// Resolve and request contact with a master, then persist it.
+    ConnectMaster(String),
+    /// Send a direct encrypted message to the selected master.
+    MessageMaster {
+        /// Resolved master cryptoId.
+        address: String,
+        /// Operator-authored text.
+        text: String,
+    },
+    /// Canonicalize, allow, persist, and advertise a workspace root.
+    AddWorkspace(String),
+    /// Stop advertising a workspace root and persist the reduced allowlist.
+    RemoveWorkspace(String),
     /// Setup is answered: build the daemon runtime and start serving peers.
     ///
     /// Emitted once, when the launch step completes. Nothing is listening to the
@@ -165,6 +224,24 @@ pub struct WorkerApp {
     pub(super) contact_index: usize,
     /// Cursor in the requests list.
     pub(super) request_index: usize,
+    /// Cursor in the configured master list.
+    pub(super) master_index: usize,
+    /// Cursor in the workspace allowlist.
+    pub(super) workspace_index: usize,
+    /// Public master records persisted in `[tinyplace].peers`.
+    pub(super) masters: Vec<Peer>,
+    /// Workspace roots this worker advertises to its orchestrator.
+    pub(super) workspaces: Vec<String>,
+    /// Primary working directory where inbound tasks execute.
+    pub(super) primary_workspace: String,
+    /// TOML file mutated by this screen.
+    pub(super) config_path: std::path::PathBuf,
+    /// Directory holding this worker's wallet-level credentials.
+    pub(super) credential_dir: std::path::PathBuf,
+    /// Resolved relay endpoint.
+    pub(super) endpoint: Option<String>,
+    /// Active text-entry prompt.
+    pub(super) prompt: Option<Prompt>,
     /// A pending destructive confirmation.
     pub(super) confirm: Option<Confirm>,
     /// The status line.

@@ -12,8 +12,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use medulla::contacts::ContactDecision;
 
 use super::types::{
-    Confirm, ExecutionMode, Screen, SetupStep, WorkerApp, WorkerCmd, EXECUTION_MODES, TABS,
-    TAB_CONTACTS, TAB_REQUESTS, TAB_SESSIONS,
+    Confirm, ExecutionMode, Prompt, Screen, SetupStep, WorkerApp, WorkerCmd, EXECUTION_MODES, TABS,
+    TAB_MASTER, TAB_REQUESTS, TAB_SESSIONS, TAB_WORKSPACES,
 };
 
 impl WorkerApp {
@@ -24,6 +24,10 @@ impl WorkerApp {
         // The launch step owns the keyboard until a harness is chosen.
         if self.screen == Screen::Setup {
             return self.on_setup_key(key, ctrl);
+        }
+
+        if self.prompt.is_some() {
+            return self.on_prompt_key(key, ctrl);
         }
 
         // A pending destructive confirmation owns the keyboard.
@@ -46,7 +50,7 @@ impl WorkerApp {
 
             KeyCode::Tab => self.set_tab((self.tab + 1) % TABS.len()),
             KeyCode::BackTab => self.set_tab((self.tab + TABS.len() - 1) % TABS.len()),
-            KeyCode::Char(c @ '1'..='3') => {
+            KeyCode::Char(c @ '1'..='4') => {
                 self.set_tab(c as usize - '1' as usize);
             }
 
@@ -116,7 +120,51 @@ impl WorkerApp {
         match self.tab {
             TAB_SESSIONS => self.on_sessions_key(key),
             TAB_REQUESTS => self.on_requests_key(key),
-            TAB_CONTACTS => self.on_contacts_key(key),
+            TAB_MASTER => self.on_master_key(key),
+            TAB_WORKSPACES => self.on_workspaces_key(key),
+            _ => None,
+        }
+    }
+
+    /// Text-entry prompts shared by master pairing, messages, and workspaces.
+    fn on_prompt_key(&mut self, key: KeyEvent, ctrl: bool) -> Option<WorkerCmd> {
+        if ctrl && key.code == KeyCode::Char('c') {
+            return Some(WorkerCmd::Quit);
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.prompt = None;
+                self.set_status("Cancelled");
+                None
+            }
+            KeyCode::Backspace => {
+                if let Some(prompt) = self.prompt.as_mut() {
+                    prompt.input_mut().pop();
+                }
+                None
+            }
+            KeyCode::Char(ch) => {
+                if let Some(prompt) = self.prompt.as_mut() {
+                    prompt.input_mut().push(ch);
+                }
+                None
+            }
+            KeyCode::Enter => {
+                let prompt = self.prompt.take()?;
+                let input = prompt.input().trim().to_string();
+                if input.is_empty() {
+                    self.set_status("Nothing entered");
+                    return None;
+                }
+                match prompt {
+                    Prompt::ConnectMaster(_) => Some(WorkerCmd::ConnectMaster(input)),
+                    Prompt::AddWorkspace(_) => Some(WorkerCmd::AddWorkspace(input)),
+                    Prompt::MessageMaster { address, .. } => Some(WorkerCmd::MessageMaster {
+                        address,
+                        text: input,
+                    }),
+                }
+            }
             _ => None,
         }
     }
@@ -191,12 +239,48 @@ impl WorkerApp {
         }
     }
 
-    /// Contacts tab: policy only — an accepted peer is revoked from Requests.
-    fn on_contacts_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
-        if key.code == KeyCode::Char('p') {
-            self.cycle_policy();
+    /// Master tab: pair a controller or send it an encrypted message.
+    fn on_master_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
+        match key.code {
+            KeyCode::Char('p') => {
+                self.cycle_policy();
+                None
+            }
+            KeyCode::Char('a') => {
+                self.prompt = Some(Prompt::ConnectMaster(String::new()));
+                None
+            }
+            KeyCode::Char('i') | KeyCode::Enter => {
+                let Some(address) = self.selected_master_address() else {
+                    self.set_status("No master configured — press a to connect one");
+                    return None;
+                };
+                self.prompt = Some(Prompt::MessageMaster {
+                    address,
+                    input: String::new(),
+                });
+                None
+            }
+            _ => None,
         }
-        None
+    }
+
+    /// Workspace tab: edit the advertised allowlist.
+    fn on_workspaces_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
+        match key.code {
+            KeyCode::Char('a') => {
+                self.prompt = Some(Prompt::AddWorkspace(String::new()));
+                None
+            }
+            KeyCode::Char('d') => {
+                let Some(workspace) = self.workspaces.get(self.workspace_index).cloned() else {
+                    self.set_status("No workspace selected");
+                    return None;
+                };
+                Some(WorkerCmd::RemoveWorkspace(workspace))
+            }
+            _ => None,
+        }
     }
 
     /// Answer a pending destructive confirmation.
@@ -250,9 +334,13 @@ impl WorkerApp {
     fn move_cursor(&mut self, up: bool) {
         let (index, len) = match self.tab {
             TAB_SESSIONS => (&mut self.session_index, self.sessions.rows().len()),
-            TAB_CONTACTS => {
-                let len = self.accepted_contacts().len();
-                (&mut self.contact_index, len)
+            TAB_MASTER => {
+                let len = self.master_rows().len();
+                (&mut self.master_index, len)
+            }
+            TAB_WORKSPACES => {
+                let len = self.workspaces.len();
+                (&mut self.workspace_index, len)
             }
             _ => {
                 let len = self.pending_requests().len();

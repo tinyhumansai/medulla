@@ -29,6 +29,9 @@ async fn main() -> anyhow::Result<()> {
     let raw: Vec<String> = std::env::args().skip(1).collect();
     match parse_command(&raw) {
         Command::Run => run_core(&raw[1..]).await,
+        Command::Daemon if daemon_uses_tui(io::stdout().is_terminal(), &raw) => {
+            run_worker_tui_command(&raw[1..]).await
+        }
         Command::Daemon => medulla::daemon::run_daemon(&raw[1..], onboarding_ui()).await,
         Command::DaemonTui => run_worker_tui_command(&raw[1..]).await,
         Command::Version => {
@@ -74,6 +77,15 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Whether `medulla daemon` should open its operator UI.
+///
+/// A real terminal gets the simplified TUI by default. Pipes and service
+/// managers remain headless, and `--headless` is the explicit opt-out for a
+/// person launching from a terminal.
+fn daemon_uses_tui(stdout_is_terminal: bool, args: &[String]) -> bool {
+    stdout_is_terminal && !args.iter().any(|arg| arg == "--headless")
+}
+
 /// Build the interactive onboarding callback when stdout is a TTY, else `None`
 /// so the daemon/wrapper first-run flow auto-registers headlessly. This is the
 /// app-side seam that keeps the SDK free of any terminal dependency.
@@ -109,7 +121,12 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
                 .unwrap_or(dir)
         })
         .unwrap_or_else(|| cwd.clone());
-    let loaded = medulla::config::load_config(None, &env, std::path::Path::new(&cwd))?;
+    let explicit_config = flag_value(args, "--config");
+    let loaded =
+        medulla::config::load_config(explicit_config.as_deref(), &env, std::path::Path::new(&cwd))?;
+    let config_path = explicit_config
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| medulla::home::medulla_home(&env).join("config.toml"));
 
     // The contact queue and this daemon's address both come from the tiny.place
     // service. Without a `[tinyplace]` section there is no identity, so the
@@ -129,6 +146,7 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         .tinyplace
         .clone()
         .unwrap_or_else(|| medulla::config::default_tinyplace_config(&env));
+    let masters = tinyplace_config.peers.clone();
 
     // Claim the identity before anything binds it. `medulla daemon --tui` is a
     // daemon — it publishes pre-keys, drains one inbox and drives one Signal
@@ -166,24 +184,39 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
             .and_then(|o| o.identity.as_ref().map(|i| i.agent_id.clone()))
     });
 
-    let result = worker_loop::run_worker_tui(
+    let workspaces = loaded
+        .config
+        .workflow
+        .workspaces
+        .iter()
+        .map(|path| {
+            std::fs::canonicalize(path)
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| path.clone())
+        })
+        .collect();
+    let result = worker_loop::run_worker_tui(worker_loop::WorkerTuiConfig {
         env,
         workspace,
+        workspaces,
+        masters,
+        config_path,
+        credential_dir: std::path::PathBuf::from(&tinyplace_config.identity_dir),
         contacts,
         agent_id,
         startup_status,
         transport,
-        service.as_ref().map(|s| s.endpoint().to_string()),
+        endpoint: service.as_ref().map(|s| s.endpoint().to_string()),
         // Claude gates a fresh directory behind a modal trust dialog that only
         // appears on a TTY, so the worker clears it up front — naming the
         // workspace at launch is the decision to run peer work there. This
         // declines that on the operator's behalf instead.
-        !args.iter().any(|a| a == "--no-trust-workspace"),
+        trust_workspace: !args.iter().any(|a| a == "--no-trust-workspace"),
         // Peer sessions run unattended, so they run with the harness's
         // permission bypass — nobody is in the pane to answer a prompt, and a
         // task that stops on one has hung until it times out.
-        !args.iter().any(|a| a == "--no-skip-permissions"),
-    )
+        skip_permissions: !args.iter().any(|a| a == "--no-skip-permissions"),
+    })
     .await;
     drop(service); // aborts the background polls
     result
@@ -241,4 +274,19 @@ fn flag_value(args: &[String], name: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod daemon_entry_tests {
+    use super::daemon_uses_tui;
+
+    #[test]
+    fn daemon_defaults_to_the_tui_only_on_a_terminal() {
+        assert!(daemon_uses_tui(true, &["daemon".into()]));
+        assert!(!daemon_uses_tui(false, &["daemon".into()]));
+        assert!(!daemon_uses_tui(
+            true,
+            &["daemon".into(), "--headless".into()]
+        ));
+    }
 }

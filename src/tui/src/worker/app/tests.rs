@@ -8,6 +8,7 @@
 mod helpers;
 
 mod contact_tests;
+mod control_tests;
 mod destructive_tests;
 mod nav_tests;
 mod render_tests;

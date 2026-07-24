@@ -11,10 +11,18 @@ use medulla::contacts::{ContactRequest, RequestState};
 
 use super::super::pty::{PtyState, SessionRow};
 use super::super::screen::screen_lines;
-use super::types::{Screen, WorkerApp, TABS, TAB_CONTACTS, TAB_REQUESTS, TAB_SESSIONS};
+use super::types::{
+    Screen, WorkerApp, TABS, TAB_MASTER, TAB_REQUESTS, TAB_SESSIONS, TAB_WORKSPACES,
+};
 
+#[path = "render_parts/master.rs"]
+mod master;
+#[path = "render_parts/prompt.rs"]
+mod prompt;
 #[path = "render_parts/setup.rs"]
 mod setup;
+#[path = "render_parts/workspaces.rs"]
+mod workspaces;
 
 impl WorkerApp {
     /// Draw the whole screen.
@@ -37,11 +45,15 @@ impl WorkerApp {
         self.draw_tabs(f, rows[1]);
         match self.tab {
             TAB_SESSIONS => self.draw_sessions(f, rows[2]),
-            TAB_CONTACTS => self.draw_contacts(f, rows[2]),
+            TAB_MASTER => self.draw_master(f, rows[2]),
+            TAB_WORKSPACES => self.draw_workspaces(f, rows[2]),
             TAB_REQUESTS => self.draw_requests(f, rows[2]),
             _ => {}
         }
         self.draw_status(f, rows[3]);
+        if self.prompt.is_some() {
+            self.draw_prompt(f, f.area());
+        }
     }
 
     /// A titled panel block.
@@ -148,8 +160,9 @@ impl WorkerApp {
                 TAB_SESSIONS => {
                     "↑↓ watch a session · K kill · d drop · y copy address · Tab tabs · q quit"
                 }
-                TAB_CONTACTS => "↑↓ select · p policy · y copy address · Tab tabs · q quit",
-                _ => "↑↓ select · a accept · x decline · B block · r refresh · p policy · y copy · q quit",
+                TAB_MASTER => "↑↓ select · a add master · i interact · y copy worker id · q quit",
+                TAB_WORKSPACES => "↑↓ select · a allow · d remove · Tab tabs · q quit",
+                _ => "↑↓ select · a accept · x decline · B block · r refresh · p policy · q quit",
             }
         };
         let line = Line::from(vec![
@@ -224,13 +237,13 @@ impl WorkerApp {
         };
         self.session_index = selected;
 
-        let block = self.panel(format!("Sessions · {}", rows.len()), true);
+        let block = self.panel(format!("Agents · {}", rows.len()), true);
         let inner = block.inner(area);
         f.render_widget(block, area);
 
         let mut lines: Vec<Line> = Vec::new();
         if rows.is_empty() {
-            lines.push(dim("No sessions running."));
+            lines.push(dim("No agents running."));
             lines.push(dim(""));
             if self.providers.is_empty() {
                 // A missing binary is a different problem from an empty list and
@@ -240,7 +253,7 @@ impl WorkerApp {
                     Style::default().fg(Color::Yellow),
                 )));
             } else {
-                lines.push(dim("Peer tasks open sessions here."));
+                lines.push(dim("Master tasks open agent lanes here."));
             }
         } else {
             let visible = inner.height as usize;
@@ -289,44 +302,6 @@ impl WorkerApp {
         f.render_widget(Paragraph::new(Text::from(screen_lines(&snapshot))), inner);
         // No cursor is drawn: this pane is a window, not a keyboard. A blinking
         // cursor here would imply typing goes somewhere it does not.
-    }
-
-    /// The Contacts tab: peers this daemon has accepted.
-    fn draw_contacts(&mut self, f: &mut Frame, area: Rect) {
-        let rows = self.accepted_contacts();
-        let selected = self.contact_index.min(rows.len().saturating_sub(1));
-        self.contact_index = selected;
-
-        let policy = self
-            .contacts
-            .as_ref()
-            .map(|d| d.policy().as_str())
-            .unwrap_or("—");
-        let block = self.panel(
-            format!("Contacts · {} · admission={policy}", rows.len()),
-            true,
-        );
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-
-        let mut lines: Vec<Line> = Vec::new();
-        if self.contacts.is_none() {
-            lines.push(dim("No tiny.place identity is configured, so this"));
-            lines.push(dim("daemon has no contact graph. Add a [tinyplace]"));
-            lines.push(dim("section to accept work from peers."));
-        } else if rows.is_empty() {
-            lines.push(dim("No accepted contacts."));
-            lines.push(dim("Accept a request on the Requests tab to let a"));
-            lines.push(dim("peer send work here."));
-        } else {
-            for (i, contact) in rows.iter().enumerate() {
-                lines.push(contact_line(contact, i == selected));
-            }
-        }
-        f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-            inner,
-        );
     }
 
     /// The Requests tab: peers waiting on a decision.
@@ -443,16 +418,6 @@ fn session_line(row: &SessionRow, selected: bool, now: i64) -> Line<'static> {
     };
     let text = format!("{} {}{}", row.state.glyph(), row.label, quiet);
     let mut style = Style::default().fg(state_color(row.state));
-    if selected {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    Line::from(Span::styled(text, style))
-}
-
-/// One row of the contacts list.
-fn contact_line(contact: &ContactRequest, selected: bool) -> Line<'static> {
-    let text = format!("✓ {}", contact.display_name());
-    let mut style = Style::default().fg(Color::Green);
     if selected {
         style = style.add_modifier(Modifier::REVERSED);
     }

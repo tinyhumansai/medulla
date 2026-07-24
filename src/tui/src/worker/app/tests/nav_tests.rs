@@ -15,15 +15,17 @@ use medulla::tinyplace::HarnessProvider;
 #[test]
 fn tab_and_number_keys_move_between_tabs() {
     let mut app = app_with(PtyManager::new(), None);
-    assert_eq!(app.tab(), "Sessions");
+    assert_eq!(app.tab(), "Agents");
     app.on_key(key(KeyCode::Tab));
-    assert_eq!(app.tab(), "Contacts");
+    assert_eq!(app.tab(), "Master");
+    app.on_key(key(KeyCode::Tab));
+    assert_eq!(app.tab(), "Workspaces");
     app.on_key(key(KeyCode::Tab));
     assert_eq!(app.tab(), "Requests");
     app.on_key(key(KeyCode::Tab));
-    assert_eq!(app.tab(), "Sessions", "wraps");
+    assert_eq!(app.tab(), "Agents", "wraps");
     app.on_key(key(KeyCode::Char('3')));
-    assert_eq!(app.tab(), "Requests");
+    assert_eq!(app.tab(), "Workspaces");
 }
 
 #[test]
@@ -31,7 +33,7 @@ fn backtab_walks_the_tabs_the_other_way() {
     // Shift-Tab is the only way back a step; without it the operator has to wrap
     // all the way round.
     let mut app = app_with(PtyManager::new(), None);
-    assert_eq!(app.tab(), "Sessions");
+    assert_eq!(app.tab(), "Agents");
     app.on_key(key(KeyCode::BackTab));
     assert_eq!(
         app.tab(),
@@ -39,7 +41,7 @@ fn backtab_walks_the_tabs_the_other_way() {
         "back-tab from the first tab wraps to the last"
     );
     app.on_key(key(KeyCode::BackTab));
-    assert_eq!(app.tab(), "Contacts");
+    assert_eq!(app.tab(), "Workspaces");
 }
 
 #[test]
@@ -60,17 +62,17 @@ async fn the_contacts_cursor_moves_and_clamps() {
     app.set_tab(TAB_CONTACTS);
 
     // Two accepted contacts; the cursor starts on the first.
-    assert_eq!(app.selected_contact().unwrap().agent_id, "alice");
+    assert_eq!(app.selected_master_address().as_deref(), Some("alice"));
     app.on_key(key(KeyCode::Down));
-    assert_eq!(app.selected_contact().unwrap().agent_id, "bob");
+    assert_eq!(app.selected_master_address().as_deref(), Some("bob"));
     app.on_key(key(KeyCode::Down));
     assert_eq!(
-        app.selected_contact().unwrap().agent_id,
-        "bob",
+        app.selected_master_address().as_deref(),
+        Some("bob"),
         "clamps at the end"
     );
     app.on_key(key(KeyCode::Up));
-    assert_eq!(app.selected_contact().unwrap().agent_id, "alice");
+    assert_eq!(app.selected_master_address().as_deref(), Some("alice"));
 }
 
 #[tokio::test]

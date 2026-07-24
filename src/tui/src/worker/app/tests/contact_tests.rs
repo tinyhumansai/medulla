@@ -71,7 +71,7 @@ async fn the_contacts_tab_shows_accepted_peers_only() {
     app.set_tab(TAB_CONTACTS);
     let out = render(&mut app, 110, 16);
     assert!(out.contains("alice"));
-    assert!(out.contains("Contacts · 1"));
+    assert!(out.contains("Master · 1"));
 }
 
 #[tokio::test]
@@ -169,11 +169,8 @@ async fn the_contacts_tab_with_no_accepted_peers_says_how_to_get_one() {
     let mut app = app_with(PtyManager::new(), Some(desk));
     app.set_tab(TAB_CONTACTS);
     let out = render(&mut app, 110, 16);
-    assert!(out.contains("No accepted contacts"), "got: {out}");
-    assert!(
-        out.contains("Requests tab"),
-        "it points at where to accept: {out}"
-    );
+    assert!(out.contains("No master connected"), "got: {out}");
+    assert!(out.contains("Press a"), "it explains pairing: {out}");
 }
 
 #[test]
@@ -261,5 +258,5 @@ async fn the_contacts_tab_lists_peers_this_process_never_saw_ask() {
     app.set_tab(TAB_CONTACTS);
     let out = render(&mut app, 110, 16);
     assert!(out.contains("alice"), "got: {out}");
-    assert!(out.contains("Contacts · 1"), "got: {out}");
+    assert!(out.contains("Master · 1"), "got: {out}");
 }

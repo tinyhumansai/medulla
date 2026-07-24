@@ -15,6 +15,8 @@ use super::types::{Screen, WorkerApp, TABS, TAB_CONTACTS, TAB_REQUESTS, TAB_SESS
 
 #[path = "render_parts/setup.rs"]
 mod setup;
+#[path = "render_parts/status.rs"]
+mod status;
 
 impl WorkerApp {
     /// Draw the whole screen.
@@ -144,41 +146,6 @@ impl WorkerApp {
         }
         self.hit_tabs = (area.y, ranges);
         f.render_widget(Paragraph::new(Line::from(spans)), area);
-    }
-
-    /// The status line, with the keys for the active context.
-    fn draw_status(&self, f: &mut Frame, area: Rect) {
-        let mouse_hint = if self.mouse_capture {
-            "^O select text"
-        } else {
-            "^O enable mouse"
-        };
-        let hints = if self.confirm.is_some() {
-            "y confirm · any other key cancels".to_string()
-        } else {
-            match self.tab {
-                TAB_SESSIONS if self.is_headless() => format!(
-                    "↑↓ scroll · click tabs · y copy address · {mouse_hint} · q quit"
-                ),
-                TAB_SESSIONS => format!(
-                    "↑↓/click watch · K kill · d drop · y copy · {mouse_hint} · q quit"
-                ),
-                TAB_CONTACTS => {
-                    format!("↑↓/click select · p policy · y copy · {mouse_hint} · q quit")
-                }
-                _ => format!(
-                    "↑↓/click select · a accept · x decline · B block · r refresh · {mouse_hint} · q quit"
-                ),
-            }
-        };
-        let line = Line::from(vec![
-            Span::styled(
-                format!(" {} ", self.status),
-                Style::default().fg(Color::White),
-            ),
-            Span::styled(hints, Style::default().fg(Color::DarkGray)),
-        ]);
-        f.render_widget(Paragraph::new(line), area);
     }
 
     /// The Sessions tab.

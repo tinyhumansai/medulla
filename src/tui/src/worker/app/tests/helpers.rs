@@ -143,6 +143,20 @@ pub(super) fn render(app: &mut WorkerApp, w: u16, h: u16) -> String {
     buf.content().iter().map(|c| c.symbol()).collect()
 }
 
+/// Draw and return one string per terminal row so narrow-layout tests can
+/// distinguish clipping from wrapping.
+pub(super) fn render_lines(app: &mut WorkerApp, w: u16, h: u16) -> Vec<String> {
+    let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+    terminal.draw(|f| app.draw(f)).unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .chunks(w as usize)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+        .collect()
+}
+
 pub(super) fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {

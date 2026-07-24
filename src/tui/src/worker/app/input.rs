@@ -12,9 +12,7 @@ impl WorkerApp {
     /// Route a terminal event to the worker's keyboard or pointer handler.
     pub fn on_event(&mut self, event: Event) -> Option<WorkerCmd> {
         match event {
-            Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-                self.on_key(key)
-            }
+            Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
             Event::Mouse(mouse) => self.on_mouse(mouse),
             _ => None,
         }
@@ -22,6 +20,9 @@ impl WorkerApp {
 
     /// Handle click and wheel events using hit boxes recorded by the last draw.
     fn on_mouse(&mut self, mouse: MouseEvent) -> Option<WorkerCmd> {
+        if !self.mouse_capture {
+            return None;
+        }
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => self.handle_click(mouse.column, mouse.row),
             MouseEventKind::ScrollUp => {

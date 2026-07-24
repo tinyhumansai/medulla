@@ -148,18 +148,27 @@ impl WorkerApp {
 
     /// The status line, with the keys for the active context.
     fn draw_status(&self, f: &mut Frame, area: Rect) {
+        let mouse_hint = if self.mouse_capture {
+            "^O select text"
+        } else {
+            "^O enable mouse"
+        };
         let hints = if self.confirm.is_some() {
-            "y confirm · any other key cancels"
+            "y confirm · any other key cancels".to_string()
         } else {
             match self.tab {
-                TAB_SESSIONS if self.is_headless() => {
-                    "↑↓ scroll · click tabs · y copy address · ^O select text · q quit"
+                TAB_SESSIONS if self.is_headless() => format!(
+                    "↑↓ scroll · click tabs · y copy address · {mouse_hint} · q quit"
+                ),
+                TAB_SESSIONS => format!(
+                    "↑↓/click watch · K kill · d drop · y copy · {mouse_hint} · q quit"
+                ),
+                TAB_CONTACTS => {
+                    format!("↑↓/click select · p policy · y copy · {mouse_hint} · q quit")
                 }
-                TAB_SESSIONS => {
-                    "↑↓/click watch · K kill · d drop · y copy · ^O select text · q quit"
-                }
-                TAB_CONTACTS => "↑↓/click select · p policy · y copy · ^O select text · q quit",
-                _ => "↑↓/click select · a accept · x decline · B block · r refresh · ^O select text · q quit",
+                _ => format!(
+                    "↑↓/click select · a accept · x decline · B block · r refresh · {mouse_hint} · q quit"
+                ),
             }
         };
         let line = Line::from(vec![
@@ -335,10 +344,9 @@ impl WorkerApp {
                 lines.push(contact_line(contact, i == selected));
             }
         }
-        f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-            inner,
-        );
+        // Contact rows are clickable, so keep each model row on exactly one
+        // terminal row and clip long identities rather than wrapping them.
+        f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 
     /// The Requests tab: peers waiting on a decision.

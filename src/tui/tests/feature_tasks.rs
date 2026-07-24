@@ -82,6 +82,15 @@ fn create_and_edit_prompts_emit_task_saves() {
     };
     assert_eq!(edited.id, "task-1");
     assert_eq!(edited.title, "New title");
+
+    app.set_tasks(TaskDocument {
+        tasks: vec![task("removed", "Removed task")],
+        sources: vec![],
+    });
+    assert!(app.on_event(key(KeyCode::Char('e'))).is_none());
+    app.set_tasks(TaskDocument::default());
+    assert!(app.on_event(key(KeyCode::Enter)).is_none());
+    assert_eq!(app.status(), "Tasks · task no longer exists");
 }
 
 #[test]

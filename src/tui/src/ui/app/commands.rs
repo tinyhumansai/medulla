@@ -200,7 +200,11 @@ impl App {
                     self.set_status("Tasks · title is required");
                     return None;
                 }
-                let mut task = self.tasks.tasks.iter().find(|task| task.id == id)?.clone();
+                let Some(mut task) = self.tasks.tasks.iter().find(|task| task.id == id).cloned()
+                else {
+                    self.set_status("Tasks · task no longer exists");
+                    return None;
+                };
                 task.title = text;
                 task.updated_at = medulla::tasks::now_timestamp();
                 Some(Cmd::SaveTask(Box::new(task)))

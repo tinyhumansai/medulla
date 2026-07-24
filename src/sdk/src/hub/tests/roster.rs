@@ -55,6 +55,39 @@ fn capacity_strategies_choose_different_workers() {
 }
 
 #[test]
+fn balanced_strategy_preserves_sub_gib_memory_differences() {
+    let workers = vec![
+        worker("smaller", "addr-small"),
+        worker("larger", "addr-large"),
+    ];
+    let details = std::collections::HashMap::from([
+        (
+            "smaller".into(),
+            WorkerSystemInfo {
+                cpu_cores: 4,
+                memory_total_bytes: None,
+                memory_available_bytes: Some(128 * 1024 * 1024),
+                ip_address: "10.0.0.1".into(),
+            },
+        ),
+        (
+            "larger".into(),
+            WorkerSystemInfo {
+                cpu_cores: 4,
+                memory_total_bytes: None,
+                memory_available_bytes: Some(896 * 1024 * 1024),
+                ip_address: "10.0.0.2".into(),
+            },
+        ),
+    ]);
+
+    assert_eq!(
+        worker_for_strategy(&workers, &details, RoutingStrategy::Balanced).as_deref(),
+        Some("larger")
+    );
+}
+
+#[test]
 fn register_payload_advertises_id_address_and_harness() {
     let payload = register_payload(&[worker("w1", "GRVaddr")]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();

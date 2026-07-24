@@ -133,7 +133,9 @@ pub(super) fn worker_for_strategy(
             let memory = info.memory_available_bytes.unwrap_or(0);
             let key = match strategy {
                 RoutingStrategy::Balanced => (
-                    info.cpu_cores as u64 + memory / (1024 * 1024 * 1024),
+                    (info.cpu_cores as u64)
+                        .saturating_mul(1024 * 1024 * 1024)
+                        .saturating_add(memory),
                     info.cpu_cores as u64,
                 ),
                 RoutingStrategy::CpuFirst => (info.cpu_cores as u64, memory),

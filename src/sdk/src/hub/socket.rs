@@ -8,7 +8,6 @@
 //! added at runtime is targetable and re-advertised immediately.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures::FutureExt;
 use rust_socketio::asynchronous::{Client, ClientBuilder};
@@ -19,10 +18,6 @@ use tokio::sync::mpsc;
 use super::roster::{address_of, register_payload, SharedRoster};
 use super::runner::TaskRunner;
 use super::types::{RunError, TaskRequest};
-
-/// Margin subtracted from the backend's own per-task deadline so the hub replies
-/// with a real error just before the backend times out blind.
-const BACKEND_MARGIN: Duration = Duration::from_secs(5);
 
 /// Monotonic suffix making each dispatch's worker-facing task id unique.
 static DISPATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -65,15 +60,16 @@ fn str_field(obj: &Value, key: &str) -> Option<String> {
 /// Connect to the backend harness plane and wire every down-event to the runner.
 ///
 /// Authenticates with `jwt` in the Socket.IO handshake, advertises `roster` on
-/// every (re)connect, and dispatches `medulla:task_run` frames through `runner`
-/// with a `task_timeout` deadline. Returns the connected client (which the
-/// [`HubHandle`](super::HubHandle) re-emits through); drop it to disconnect.
+/// every (re)connect, and dispatches `medulla:task_run` frames through `runner`.
+/// The hub owns no task deadline — the backend does — so nothing here bounds how
+/// long a task may run; `runner` only reaps a dispatch that goes silent. Returns
+/// the connected client (which the [`HubHandle`](super::HubHandle) re-emits
+/// through); drop it to disconnect.
 pub async fn connect_harness(
     backend_url: &str,
     jwt: &str,
     roster: SharedRoster,
     runner: Arc<TaskRunner>,
-    task_timeout: Duration,
     log: super::types::HubLog,
     activity: Option<super::ActivityLog>,
 ) -> anyhow::Result<Client> {
@@ -82,6 +78,8 @@ pub async fn connect_harness(
     let run_activity = activity.clone();
     let run_roster = roster.clone();
     let cap_roster = roster.clone();
+    let abort_runner = runner.clone();
+    let abort_log = log.clone();
 
     let client = ClientBuilder::new(backend_url.to_string())
         .auth(json!({ "token": jwt }))
@@ -111,7 +109,6 @@ pub async fn connect_harness(
                     socket,
                     runner,
                     roster,
-                    task_timeout,
                     run_log,
                     run_activity,
                 ));
@@ -132,6 +129,24 @@ pub async fn connect_harness(
                 let log = log.clone();
                 async move { log("hub: socket closed — reconnecting") }.boxed()
             }
+        })
+        // The backend owns the task deadline and cancels a running task by
+        // emitting `medulla:task_abort` ({ taskId }) — on its own deadline or an
+        // explicit `/abort`. Relay it to the in-flight dispatch so it stops the
+        // worker and reaps its correlation entry. This is the only path that
+        // cancels a healthy worker still reporting progress; a silent or dead one
+        // is caught by the runner's own liveness bounds. Cheap and non-blocking (a
+        // registry lookup + `notify`), so it runs inline rather than spawned.
+        .on("medulla:task_abort", move |payload, _socket| {
+            let runner = abort_runner.clone();
+            let log = abort_log.clone();
+            async move {
+                if let Some(task_id) = first_obj(payload).and_then(|o| str_field(&o, "taskId")) {
+                    log(&format!("hub: task_abort {task_id} — stopping the worker"));
+                    runner.abort_task(&task_id);
+                }
+            }
+            .boxed()
         })
         // Capability probe: answer from the roster metadata.
         .on("medulla:capabilities_request", move |payload, socket| {
@@ -158,7 +173,6 @@ async fn handle_task_run(
     socket: Client,
     runner: Arc<TaskRunner>,
     roster: SharedRoster,
-    timeout: Duration,
     log: super::types::HubLog,
     activity: Option<super::ActivityLog>,
 ) {
@@ -171,18 +185,10 @@ async fn handle_task_run(
     let instruction = str_field(&obj, "instruction").unwrap_or_default();
     let cycle_id = str_field(&obj, "cycleId");
     let agent_id = str_field(&obj, "agentId").unwrap_or_default();
-    // The backend puts ITS OWN deadline on the frame (`timeoutMs`, its
-    // `DEFAULT_TASK_TIMEOUT_MS` clamped by `MAX_TASK_TIMEOUT_MS`). Honor it minus
-    // a margin so the hub always reports a real error just BEFORE the backend
-    // gives up with a blind "subagent task timeout" — and never exceed the
-    // locally-configured cap. Falls back to the cap when the field is absent.
-    let timeout = obj
-        .get("timeoutMs")
-        .and_then(|v| v.as_u64())
-        .map(Duration::from_millis)
-        .map(|d| d.saturating_sub(BACKEND_MARGIN).min(timeout))
-        .filter(|d| !d.is_zero())
-        .unwrap_or(timeout);
+    // The frame's own `timeoutMs` is deliberately ignored: that is the BACKEND's
+    // task deadline, and the backend now enforces it (aborting a running task via
+    // `medulla:task_abort`, which the hub relays). The hub owns no task deadline —
+    // it only reaps a dispatch that goes silent (see `TaskRunner`'s idle window).
 
     // Resolve the address, then drop the lock before any await (the std guard is
     // not held across suspension points). An empty roster ⇒ nothing to run.
@@ -254,22 +260,24 @@ async fn handle_task_run(
     // again at `t1` — or the same work emitted twice. Those call for opposite
     // fixes, and the id alone cannot tell them apart.
     log(&format!(
-        "hub: task_run {} (as {}) → {} (timeout {}s) · {}",
+        "hub: task_run {} (as {}) → {} · {}",
         task_id,
         wire_task_id,
         worker_address,
-        timeout.as_secs(),
         crate::logging::preview(&instruction),
     ));
 
     let req = TaskRequest {
         task_id: wire_task_id.clone(),
+        // The backend aborts by the ORIGINAL task id (`medulla:task_abort.taskId`),
+        // not the per-dispatch wire id, so the runner registers its abort signal
+        // under this.
+        abort_id: task_id.clone(),
         cycle_id,
         instruction,
         worker_address,
         provider: None,
         model: None,
-        timeout,
     };
 
     let outcome = runner.run(req, Some(tx)).await;

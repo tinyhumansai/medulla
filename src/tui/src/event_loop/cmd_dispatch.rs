@@ -12,6 +12,8 @@ use medulla_tui::ui::app::Cmd;
 
 use super::AppMsg;
 
+mod tasks;
+
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so
 /// they run on `spawn_blocking` off the UI thread.
@@ -21,148 +23,17 @@ pub(super) fn run_cmd(
     memory: Option<Arc<medulla::memory::MemoryService>>,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
+    let cmd = match tasks::run_task_cmd(cmd, msg_tx) {
+        Some(cmd) => *cmd,
+        None => return,
+    };
     match cmd {
         Cmd::Quit => {}
-        Cmd::LoadTasks => {
-            let home = std::env::var_os("MEDULLA_HOME")
-                .map(std::path::PathBuf::from)
-                .or_else(|| {
-                    std::env::var_os("HOME").map(|p| std::path::PathBuf::from(p).join(".medulla"))
-                });
-            let tx = msg_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let result = home.map_or_else(
-                    || Err("Medulla home is unavailable".into()),
-                    |home| {
-                        medulla::tasks::TaskRepository::in_home(home)
-                            .map(|repo| repo.document().clone())
-                            .map_err(|e| e.to_string())
-                    },
-                );
-                match result {
-                    Ok(document) => {
-                        let _ = tx.send(AppMsg::TasksLoaded(document));
-                    }
-                    Err(error) => {
-                        let _ = tx.send(AppMsg::Status(format!("Tasks · {error}")));
-                    }
-                }
-            });
-        }
-        Cmd::SaveTask(task) => {
-            let tx = msg_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let task = *task;
-                let home = std::env::var_os("MEDULLA_HOME")
-                    .map(std::path::PathBuf::from)
-                    .or_else(|| {
-                        std::env::var_os("HOME")
-                            .map(|p| std::path::PathBuf::from(p).join(".medulla"))
-                    });
-                let result = home.map_or_else(
-                    || Err("Medulla home is unavailable".into()),
-                    |home| {
-                        let mut repo = medulla::tasks::TaskRepository::in_home(home)
-                            .map_err(|e| e.to_string())?;
-                        repo.document_mut().tasks.retain(|old| old.id != task.id);
-                        repo.document_mut().tasks.push(task);
-                        repo.save().map_err(|e| e.to_string())
-                    },
-                );
-                let _ = tx.send(match result {
-                    Ok(()) => AppMsg::Status("Tasks · saved".into()),
-                    Err(error) => AppMsg::Status(format!("Tasks · {error}")),
-                });
-            });
-        }
-        Cmd::SaveTasks(document) => {
-            let tx = msg_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let home = std::env::var_os("MEDULLA_HOME")
-                    .map(std::path::PathBuf::from)
-                    .or_else(|| {
-                        std::env::var_os("HOME")
-                            .map(|p| std::path::PathBuf::from(p).join(".medulla"))
-                    });
-                let result = home.map_or_else(
-                    || Err("Medulla home is unavailable".into()),
-                    |home| {
-                        let mut repo = medulla::tasks::TaskRepository::in_home(home)
-                            .map_err(|e| e.to_string())?;
-                        *repo.document_mut() = *document;
-                        repo.save().map_err(|e| e.to_string())
-                    },
-                );
-                let _ = tx.send(match result {
-                    Ok(()) => AppMsg::Status("Sources · saved".into()),
-                    Err(error) => AppMsg::Status(format!("Sources · {error}")),
-                });
-            });
-        }
-        Cmd::DeleteTask(id) => {
-            let tx = msg_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let home = std::env::var_os("MEDULLA_HOME")
-                    .map(std::path::PathBuf::from)
-                    .or_else(|| {
-                        std::env::var_os("HOME")
-                            .map(|p| std::path::PathBuf::from(p).join(".medulla"))
-                    });
-                let result = home.map_or_else(
-                    || Err("Medulla home is unavailable".into()),
-                    |home| {
-                        let mut repo = medulla::tasks::TaskRepository::in_home(home)
-                            .map_err(|e| e.to_string())?;
-                        repo.document_mut().tasks.retain(|task| task.id != id);
-                        repo.save().map_err(|e| e.to_string())
-                    },
-                );
-                let _ = tx.send(match result {
-                    Ok(()) => AppMsg::Status("Tasks · deleted".into()),
-                    Err(error) => AppMsg::Status(format!("Tasks · {error}")),
-                });
-            });
-        }
-        Cmd::SyncTasks(id) => {
-            let tx = msg_tx.clone();
-            tokio::spawn(async move {
-                let home = std::env::var_os("MEDULLA_HOME")
-                    .map(std::path::PathBuf::from)
-                    .or_else(|| {
-                        std::env::var_os("HOME")
-                            .map(|p| std::path::PathBuf::from(p).join(".medulla"))
-                    });
-                let result = match home {
-                    Some(home) => match medulla::tasks::TaskRepository::in_home(home) {
-                        Ok(mut repo) => {
-                            let source = repo
-                                .document()
-                                .sources
-                                .iter()
-                                .find(|source| source.id == id)
-                                .cloned();
-                            match source {
-                                Some(source) => {
-                                    use medulla::tasks::github::TaskSourceProvider;
-                                    medulla::tasks::github::GitHubProvider::default()
-                                        .sync(&source, &mut repo)
-                                        .await;
-                                    repo.save()
-                                        .map(|_| "Tasks · synchronized".to_string())
-                                        .map_err(|e| e.to_string())
-                                }
-                                None => Err("source not found".into()),
-                            }
-                        }
-                        Err(e) => Err(e.to_string()),
-                    },
-                    None => Err("Medulla home is unavailable".into()),
-                };
-                let _ = tx.send(AppMsg::Status(
-                    result.unwrap_or_else(|e| format!("Tasks · sync failed: {e}")),
-                ));
-            });
-        }
+        Cmd::LoadTasks
+        | Cmd::SaveTask(_)
+        | Cmd::SaveTasks(_)
+        | Cmd::DeleteTask(_)
+        | Cmd::SyncTasks(_) => unreachable!("task commands return before main dispatch"),
         Cmd::Submit(input) => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

@@ -11,6 +11,7 @@ use super::fold::summary_from_session;
 use super::types::{State, Thread, CHAT_CAP, EVENT_CAP};
 use super::worker_ops::{hub_worker_to_info, label_from_patch};
 use crate::hub::HubWorker;
+use crate::tinyplace::WorkerSystemInfo;
 
 fn client_env(session: &str, seq: Option<u64>, event: Value) -> ClientEnvelope {
     let mut raw = json!({
@@ -256,6 +257,26 @@ fn selection_carries_through_to_the_row() {
     let info = hub_worker_to_info(w, None);
     assert!(info.selected);
     assert_eq!(info.label, None);
+}
+
+#[test]
+fn captured_worker_details_map_to_the_runtime_row() {
+    let details = WorkerSystemInfo {
+        cpu_cores: 12,
+        memory_total_bytes: Some(32 * 1024 * 1024 * 1024),
+        memory_available_bytes: Some(19 * 1024 * 1024 * 1024),
+        ip_address: "10.0.0.24".to_string(),
+    };
+
+    let info = hub_worker_to_info(hub_worker("GRV1worker"), Some(details));
+
+    assert_eq!(info.cpu_cores, Some(12));
+    assert_eq!(info.memory_total_bytes, Some(32 * 1024 * 1024 * 1024));
+    assert_eq!(
+        info.memory_available_bytes,
+        Some(19 * 1024 * 1024 * 1024)
+    );
+    assert_eq!(info.ip_address.as_deref(), Some("10.0.0.24"));
 }
 
 #[test]

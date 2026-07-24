@@ -29,7 +29,7 @@ impl App {
         let selected_row = rows.get(active);
         let active_lane_index = selected_row.and_then(|r| r.lane_index()).unwrap_or(0);
         let selected_task: Option<TaskState> = match selected_row {
-            Some(AgentRow::Sub { task, .. }) => Some(task.clone()),
+            Some(AgentRow::Sub { task, .. }) => Some(task.as_ref().clone()),
             _ => None,
         };
 
@@ -131,9 +131,13 @@ impl App {
                     Style::default().fg(Color::Red),
                 )));
             }
-            if let Some(patterns) = self.lane_claims().get(&lane.key) {
+            if let Some((patterns, from_contract)) = self.effective_lane_claim(lane) {
                 header.push(TLine::from(Span::styled(
-                    format!("claim {}", patterns.join(", ")),
+                    format!(
+                        "{} {}",
+                        if from_contract { "contract" } else { "claim" },
+                        patterns.join(", ")
+                    ),
                     Style::default().fg(Color::DarkGray),
                 )));
             }

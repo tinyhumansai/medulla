@@ -10,10 +10,12 @@ use std::sync::{Arc, Mutex};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use medulla::config::{LoadedConfig, TinyplaceConfig};
+use medulla::harness_contract::WorkerContract;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity, WorkerInfo};
 use medulla::tinyplace::service::TinyplaceObservation;
 use medulla_tui::ui::app::{App, TABS};
+use medulla_tui::ui::events::TuiEvent;
 
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -73,6 +75,26 @@ fn agents_app(ids: &[&str], online: &[(&str, bool)]) -> App {
         roster: ids.iter().map(|id| peer(id)).collect(),
         presence,
     })));
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
+    app
+}
+
+fn contracted_agents_app(ids: &[&str], paths: &[&str]) -> App {
+    let rt = Arc::new(MockRuntime::empty());
+    for id in ids {
+        rt.script_event(TuiEvent::TaskStart {
+            task_id: format!("task-{id}"),
+            instruction: format!("work assigned to {id}"),
+            depth: 1,
+            agent_id: Some((*id).into()),
+            contract: Some(WorkerContract {
+                permitted_paths: Some(paths.iter().map(|path| (*path).into()).collect()),
+                ..Default::default()
+            }),
+        });
+    }
+    let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
+    app.refresh_snapshot();
     app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
     app
 }
@@ -259,4 +281,27 @@ fn shared_path_claims_and_invalid_patterns_are_visible() {
     key(&mut app, KeyCode::Enter);
     assert!(app.status().contains("lane claim cleared"));
     assert!(!render(&mut app, 180, 44).contains("claim Cargo.lock"));
+}
+
+#[test]
+fn worker_contract_claims_overlap_and_override_manual_fallbacks() {
+    let mut app = contracted_agents_app(&["up", "down"], &["src/**"]);
+    app.set_workspace_reports(vec![dirty_report(&["src/shared.rs", "Cargo.lock"])]);
+
+    // A manual claim remains editable, but a live contract is authoritative.
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Down);
+    claim_selected_lane(&mut app, "Cargo.lock");
+    let agents = render(&mut app, 180, 44);
+    assert!(agents.contains("contract src/**"), "{agents}");
+    assert!(!agents.contains("claim Cargo.lock"), "{agents}");
+    assert!(agents.matches("⚠ overlap").count() >= 2, "{agents}");
+    assert!(!agents.contains("⚠ shared-path"), "{agents}");
+
+    app.tab_index = TABS.iter().position(|tab| *tab == "Overview").unwrap();
+    let overview = render(&mut app, 140, 40);
+    assert!(
+        overview.contains("⚠ lane overlap · 1 path(s)"),
+        "{overview}"
+    );
 }

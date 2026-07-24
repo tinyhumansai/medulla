@@ -40,7 +40,7 @@ pub fn agent_row_model(lanes: &[AgentLane], max_subtasks: usize) -> Vec<AgentRow
             for (i, task) in ordered.iter().take(shown).enumerate() {
                 rows.push(AgentRow::Sub {
                     lane_index,
-                    task: task.clone(),
+                    task: Box::new(task.clone()),
                     last: hidden == 0 && i == shown - 1,
                 });
             }

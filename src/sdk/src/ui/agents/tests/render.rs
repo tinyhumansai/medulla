@@ -60,6 +60,7 @@ fn ordered_tasks_puts_running_first_then_recency() {
         turn_blocks: Vec::new(),
         attention: None,
         question_id: None,
+        contract: None,
         review: None,
     };
     let tasks = vec![
@@ -122,6 +123,7 @@ fn task_lines_empty_and_populated() {
         turn_blocks: Vec::new(),
         attention: None,
         question_id: None,
+        contract: None,
         review: None,
     };
     let lines = task_lines(&empty, 40);
@@ -168,6 +170,7 @@ fn lane_lines_agent_task_with_no_turns_shows_placeholder() {
             turn_blocks: Vec::new(),
             attention: None,
             question_id: None,
+            contract: None,
             review: None,
         }],
         context_tokens: None,
@@ -208,6 +211,7 @@ fn task_lines_truncate_long_header_and_default_color() {
         }],
         attention: None,
         question_id: None,
+        contract: None,
         review: None,
     };
     let lines = task_lines(&task, 30);

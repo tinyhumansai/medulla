@@ -4,6 +4,7 @@
 //! the sibling logic modules; this file holds only the shapes and their trivial
 //! accessors.
 
+use crate::harness_contract::WorkerContract;
 use crate::runtime::AgentDescriptor;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -176,6 +177,8 @@ pub struct TaskState {
     /// The `questionId` of a pending `task_attention` — the handle `question.answer`
     /// needs. `None` when the task has no open question.
     pub question_id: Option<String>,
+    /// Advisory boundaries and completion criteria supplied at delegation.
+    pub contract: Option<WorkerContract>,
     /// Independent review verdict attributed to this task, when one completed.
     pub review: Option<crate::autoreview::ReviewVerdict>,
 }
@@ -238,7 +241,7 @@ pub enum AgentRow {
         /// Index into the lanes slice.
         lane_index: usize,
         /// The task rendered by this sublane.
-        task: TaskState,
+        task: Box<TaskState>,
         /// Whether this is the last shown sublane.
         last: bool,
     },

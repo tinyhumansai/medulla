@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use crate::harness_contract::WorkerContract;
 use crate::runtime::AgentDescriptor;
 use crate::ui::events::{EventEnvelope, TuiEvent};
 
@@ -80,6 +81,7 @@ fn touch_task(lane: &mut AgentLane, task_id: &str, at: i64, block: Option<TurnBl
                 turn_blocks: Vec::new(),
                 attention: None,
                 question_id: None,
+                contract: None,
                 review: None,
             });
             lane.tasks.len() - 1
@@ -92,6 +94,12 @@ fn touch_task(lane: &mut AgentLane, task_id: &str, at: i64, block: Option<TurnBl
         task.turn_blocks.push(b);
     }
     idx
+}
+
+fn retain_contract(lane: &mut AgentLane, task_index: usize, contract: &Option<WorkerContract>) {
+    if contract.is_some() {
+        lane.tasks[task_index].contract = contract.clone();
+    }
 }
 
 /// Fold the event stream into lanes. Tier turns come from `inference_end`;
@@ -189,7 +197,7 @@ pub fn derive_agent_lanes(
                 instruction,
                 depth,
                 agent_id,
-                ..
+                contract,
             } => {
                 reviews.record_start(task_id, instruction);
                 if let Some(a) = agent_id {
@@ -237,6 +245,7 @@ pub fn derive_agent_lanes(
                 lane.last_at = at;
                 lane.active_tasks += 1;
                 let idx = touch_task(lane, task_id, at, Some(block));
+                retain_contract(lane, idx, contract);
                 lane.tasks[idx].instruction = Some(instruction.clone());
             }
             TuiEvent::TaskEvent {
@@ -323,6 +332,7 @@ pub fn derive_agent_lanes(
                     lane.context_tokens = Some(u.input_tokens);
                 }
                 let idx = touch_task(lane, &digest.task_id, at, Some(block));
+                retain_contract(lane, idx, &digest.contract);
                 lane.tasks[idx].status = status;
                 lane.tasks[idx].attention = None;
                 lane.tasks[idx].question_id = None;

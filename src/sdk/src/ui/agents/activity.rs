@@ -77,6 +77,7 @@ fn fold_tasks(records: &[&WorkerActivity]) -> Vec<TaskState> {
                 turn_blocks: Vec::new(),
                 attention: None,
                 question_id: None,
+                contract: None,
                 review: None,
             }
         });

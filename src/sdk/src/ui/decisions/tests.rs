@@ -53,6 +53,7 @@ fn lane(question: bool) -> AgentLane {
             turn_blocks: vec![],
             attention: question.then(|| "confirm: use v2?".into()),
             question_id: question.then(|| "q1".into()),
+            contract: None,
             review: None,
         }],
         context_tokens: None,

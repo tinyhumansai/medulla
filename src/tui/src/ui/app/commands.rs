@@ -120,7 +120,7 @@ impl App {
     pub(super) fn selected_agent_task(&self) -> Option<TaskState> {
         let rows = self.agent_rows();
         match rows.get(self.agent_index) {
-            Some(AgentRow::Sub { task, .. }) => Some(task.clone()),
+            Some(AgentRow::Sub { task, .. }) => Some(task.as_ref().clone()),
             _ => None,
         }
     }

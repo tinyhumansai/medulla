@@ -1,14 +1,12 @@
-//! Manual lane-claim state and its projection onto the SDK blast-radius fold.
+//! Worker-contract and manual lane claims projected onto the SDK blast-radius fold.
 //!
 //! This is the temporary pre-contract bridge: operators attach permitted globs
 //! to visible lanes, live repository status supplies matching dirty paths, and
 //! the SDK remains the sole owner of warning semantics.
 
-use std::collections::BTreeMap;
-
 use crate::ui::agents::{
-    claimed_dirty_paths, evaluate_lane_claims, validate_claim_patterns, AgentLane, AgentRow,
-    ClaimedPath, LaneClaim, LaneGuardReport,
+    claimed_dirty_paths, contract_permitted_paths, evaluate_lane_claims, validate_claim_patterns,
+    AgentLane, AgentRow, ClaimedPath, LaneClaim, LaneGuardReport,
 };
 use crate::ui::composer::Draft;
 
@@ -79,28 +77,36 @@ impl App {
             .collect()
     }
 
-    /// Evaluate all configured manual claims against the latest repository view.
+    /// Contract paths take precedence; manual claims support older task events.
+    pub(super) fn effective_lane_claim(&self, lane: &AgentLane) -> Option<(Vec<String>, bool)> {
+        contract_permitted_paths(lane)
+            .map(|paths| (paths, true))
+            .or_else(|| {
+                self.lane_claims
+                    .get(&lane.key)
+                    .cloned()
+                    .map(|paths| (paths, false))
+            })
+    }
+
+    /// Evaluate every visible contract/manual claim against live repository state.
     pub(super) fn lane_guard_report(&self) -> LaneGuardReport {
         let dirty = self.dirty_claim_paths();
         let claims = self
-            .lane_claims
+            .lanes()
             .iter()
-            .filter_map(|(lane_key, permitted_paths)| {
-                claimed_dirty_paths(permitted_paths, &dirty)
+            .filter_map(|lane| {
+                let (permitted_paths, _) = self.effective_lane_claim(lane)?;
+                claimed_dirty_paths(&permitted_paths, &dirty)
                     .ok()
                     .map(|touched_paths| LaneClaim {
-                        lane_key: lane_key.clone(),
-                        permitted_paths: permitted_paths.clone(),
+                        lane_key: lane.key.clone(),
+                        permitted_paths,
                         touched_paths,
                     })
             })
             .collect::<Vec<_>>();
         evaluate_lane_claims(&claims, &self.loaded.config.workflow.shared_path_denylist)
             .unwrap_or_default()
-    }
-
-    /// Read-only manual claim map for rendering and focused tests.
-    pub(super) fn lane_claims(&self) -> &BTreeMap<String, Vec<String>> {
-        &self.lane_claims
     }
 }

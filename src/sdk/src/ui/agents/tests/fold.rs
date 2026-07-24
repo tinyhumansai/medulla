@@ -1,6 +1,7 @@
 //! Tests for the event fold and the Agents-list row model.
 
 use super::env;
+use crate::harness_contract::WorkerContract;
 use crate::runtime::AgentDescriptor;
 use crate::ui::agents::*;
 use crate::ui::events::{TaskDigest, TuiEvent, Usage};
@@ -100,6 +101,36 @@ fn anonymous_task_lane_and_completion() {
     assert_eq!(worker.active_tasks, 0);
     assert_eq!(worker.context_tokens, Some(500));
     assert_eq!(worker.tasks[0].status, TaskStatus::Done);
+}
+
+#[test]
+fn task_contract_survives_the_event_fold_and_supplies_lane_paths() {
+    let contract = WorkerContract {
+        permitted_paths: Some(vec!["src/**".into(), "docs/**".into()]),
+        terminal_condition: Some("tests pass".into()),
+        ..Default::default()
+    };
+    let events = vec![env(
+        1,
+        TuiEvent::TaskStart {
+            task_id: "bounded".into(),
+            instruction: "work inside the boundary".into(),
+            depth: 1,
+            agent_id: None,
+            contract: Some(contract.clone()),
+        },
+    )];
+
+    let lanes = derive_agent_lanes(&events, "OPENCODE", &[]);
+    let worker = lanes
+        .iter()
+        .find(|lane| lane.key == "worker:bounded")
+        .unwrap();
+    assert_eq!(worker.tasks[0].contract.as_ref(), Some(&contract));
+    assert_eq!(
+        contract_permitted_paths(worker),
+        Some(vec!["docs/**".into(), "src/**".into()])
+    );
 }
 
 #[test]

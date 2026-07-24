@@ -268,7 +268,7 @@ fn each_tab_renders_its_signature() {
     let signatures = [
         ("Chat", "Threads"),
         ("Agents", "Agents ·"),
-        ("Workers", "Workers"),
+        ("Routing", "Routing"),
         ("Settings", "Settings"),
     ];
     for (name, sig) in signatures {

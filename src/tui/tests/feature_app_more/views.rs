@@ -1,4 +1,4 @@
-//! Workers-tab, Context navigation, mouse routing, and resume-picker coverage:
+//! Routing fleet, Context navigation, mouse routing, and resume-picker coverage:
 //! the add-worker prompt forms, empty-registry no-ops, j/k and wheel scrolling,
 //! tab-bar and row clicks, and resume-modal navigation.
 
@@ -9,7 +9,8 @@ use crate::helpers::*;
 #[test]
 fn workers_add_prompt_emits_add_cmd_for_address() {
     let (mut app, _rt) = empty_app();
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("Add Worker");
     let _ = app.on_event(key(KeyCode::Char('a')));
     let (title, _) = app.prompt_state().expect("add prompt open");
     assert!(title.starts_with("Add worker"));
@@ -28,7 +29,8 @@ fn workers_add_prompt_emits_add_cmd_for_address() {
 #[test]
 fn workers_add_prompt_handle_form() {
     let (mut app, _rt) = empty_app();
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("Add Worker");
     let _ = app.on_event(key(KeyCode::Char('a')));
     type_str(&mut app, "@dev-2");
     let cmd = app.on_event(key(KeyCode::Enter));
@@ -46,7 +48,8 @@ fn workers_add_prompt_handle_form() {
 #[test]
 fn workers_add_prompt_empty_is_cancelled() {
     let (mut app, _rt) = empty_app();
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("Add Worker");
     let _ = app.on_event(key(KeyCode::Char('a')));
     let cmd = app.on_event(key(KeyCode::Enter));
     assert!(cmd.is_none());
@@ -60,7 +63,8 @@ fn workers_add_prompt_empty_is_cancelled() {
 #[test]
 fn workers_select_and_remove_no_op_when_empty() {
     let (mut app, _rt) = empty_app();
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("List Workers");
     // No workers → select/remove produce no command.
     assert!(app.on_event(key(KeyCode::Enter)).is_none());
     assert!(app.on_event(key(KeyCode::Char('d'))).is_none());
@@ -241,7 +245,8 @@ fn resume_picker_navigates_and_loads() {
 #[test]
 fn workers_render_with_harness_and_stream_health() {
     let mut app = fleet_app();
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("List Workers");
     let out = render(&mut app, 120, 40);
     assert!(out.contains("CLAUDE"), "worker harness badge upper-cased");
     assert!(out.contains("primary"), "worker label renders");

@@ -1,5 +1,5 @@
-//! The data model for the interactive TUI screen: the tab list and Settings
-//! subpage constants, the [`Cmd`] the event loop runs on the app's behalf, the
+//! The data model for the interactive TUI screen: the tab list, multi-pane
+//! navigation constants, the [`Cmd`] the event loop runs on the app's behalf, the
 //! small overlay/state types ([`ResumePicker`], [`Prompt`], [`PromptKind`],
 //! [`MemoryEntry`]), and the central [`App`] struct itself.
 //!
@@ -26,8 +26,16 @@ use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 /// two of them diagnostic — so they now sit under Settings, keeping the tab bar
 /// to the views a session is actually driven from.
 pub const TABS: [&str; 7] = [
-    "Overview", "Chat", "Agents", "Repo", "Workers", "Memory", "Settings",
+    "Overview", "Chat", "Agents", "Repo", "Routing", "Memory", "Settings",
 ];
+
+/// The Routing tab's left-nav pages.
+pub const ROUTING_SUBPAGES: [&str; 4] = ["List Workers", "Add Worker", "Manage Keys", "Strategies"];
+
+pub(super) const RP_WORKERS: usize = 0;
+pub(super) const RP_ADD_WORKER: usize = 1;
+pub(super) const RP_KEYS: usize = 2;
+pub(super) const RP_STRATEGIES: usize = 3;
 
 /// The Settings tab's left-nav subpages, in order (number keys 1-8 jump to them).
 ///
@@ -309,6 +317,10 @@ pub struct App {
     pub(super) agent_scroll: usize,
     pub(super) chat_scroll: usize,
     pub(super) worker_index: usize,
+    /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
+    pub(super) routing_index: usize,
+    /// Whether keyboard focus is inside the Routing content pane.
+    pub(super) routing_focused: bool,
     // Persona-memory tab state (lazily loaded on tab entry / search).
     pub(super) memory_status: Option<MemoryStatus>,
     pub(super) memory_hits: Vec<MemoryHit>,

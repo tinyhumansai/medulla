@@ -1,4 +1,4 @@
-//! Feature-level tests for the Workers fleet tab and the header stream-health
+//! Feature-level tests for the Routing fleet view and header stream-health
 //! indicator. These need a `Runtime` that actually surfaces workers and a stream
 //! state, so a thin `FleetRuntime` wraps `MockRuntime`, delegating everything but
 //! `workers()` / `worker_op()` / `stream_state()`.
@@ -124,9 +124,10 @@ fn render(app: &mut App, w: u16, h: u16) -> String {
 #[test]
 fn workers_tab_lists_registered_peers() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("List Workers");
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Workers · 3"), "worker count in title");
+    assert!(out.contains("List Workers · 3"), "worker count in title");
     assert!(out.contains("@w1"));
     assert!(out.contains("CODEX"));
     assert!(out.contains("a add · Enter/s select"));
@@ -135,7 +136,8 @@ fn workers_tab_lists_registered_peers() {
 #[test]
 fn workers_up_down_moves_selection() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("List Workers");
     assert_eq!(app.worker_index(), 0);
     let _ = app.on_event(key(KeyCode::Down));
     assert_eq!(app.worker_index(), 1);
@@ -151,7 +153,8 @@ fn workers_up_down_moves_selection() {
 #[test]
 fn workers_enter_selects_and_d_removes() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("List Workers");
     let _ = app.on_event(key(KeyCode::Down)); // select w2
     let cmd = app.on_event(key(KeyCode::Enter));
     match cmd {
@@ -168,7 +171,8 @@ fn workers_enter_selects_and_d_removes() {
 #[test]
 fn workers_s_and_x_are_select_and_remove_aliases() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("List Workers");
     let cmd = app.on_event(key(KeyCode::Char('s')));
     assert!(matches!(cmd, Some(Cmd::WorkerOp(_))));
     let cmd = app.on_event(key(KeyCode::Char('x')));
@@ -178,7 +182,8 @@ fn workers_s_and_x_are_select_and_remove_aliases() {
 #[test]
 fn workers_e_opens_edit_label_prompt_prefilled() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Workers");
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("List Workers");
     let _ = app.on_event(key(KeyCode::Char('e')));
     let (title, draft) = app.prompt_state().expect("edit prompt open");
     assert!(title.starts_with("Edit label"));

@@ -16,7 +16,8 @@ use medulla::memory::{MemoryHit, MemoryStatus};
 use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
-    App, Cmd, MemoryEntry, ResumePicker, SETTINGS_SUBPAGES, SP_CONTEXT, SP_FEEDBACK, SP_USAGE, TABS,
+    App, Cmd, MemoryEntry, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT,
+    SP_FEEDBACK, SP_USAGE, TABS,
 };
 
 impl App {
@@ -42,6 +43,8 @@ impl App {
             agent_scroll: 0,
             chat_scroll: 0,
             worker_index: 0,
+            routing_index: 0,
+            routing_focused: false,
             memory_status: None,
             memory_hits: Vec::new(),
             memory_directives: Vec::new(),
@@ -180,6 +183,26 @@ impl App {
     /// The active worker-selection index. Test/inspection seam.
     pub fn worker_index(&self) -> usize {
         self.worker_index
+    }
+
+    /// The active Routing subpage name. Test/inspection seam.
+    pub fn routing_subpage(&self) -> &'static str {
+        ROUTING_SUBPAGES[self.routing_index.min(ROUTING_SUBPAGES.len() - 1)]
+    }
+
+    /// Whether Routing focus is inside the active content pane.
+    pub fn routing_focused(&self) -> bool {
+        self.routing_focused
+    }
+
+    /// Focus Routing on a named subpage and enter its content pane.
+    pub fn focus_routing_subpage(&mut self, name: &str) {
+        self.tab_index = super::types::tab_pos("Routing");
+        self.routing_index = ROUTING_SUBPAGES
+            .iter()
+            .position(|page| *page == name)
+            .unwrap_or(0);
+        self.routing_focused = true;
     }
 
     /// Route `copy_chat` into a captured sink instead of the OS clipboard, and

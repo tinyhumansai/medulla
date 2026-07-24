@@ -3,19 +3,19 @@
 //! leans on helpers defined in [`super::input`], [`super::commands`], and
 //! [`super::state`].
 //!
-//! The Settings tab now hosts seven subpages with bindings of their own, so its
-//! handling lives in [`settings`] rather than inline here.
+//! The Settings and Routing tabs host subpages with bindings of their own, so
+//! their handling lives in focused sibling modules rather than inline here.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::types::{tab_pos, App, Cmd, TABS};
 use crate::ui::command::CopyScope;
 use crate::ui::composer::{delete_before, insert_at, move_caret_row, Draft};
-use medulla::runtime::WorkerOp;
 
-use super::types::{tab_pos, App, Cmd, Prompt, PromptKind, TABS};
-
+mod routing;
 mod settings;
 
+use routing::RoutingKey;
 use settings::SettingsKey;
 
 impl App {
@@ -160,6 +160,11 @@ impl App {
                 return cmd;
             }
         }
+        if tab == "Routing" {
+            if let RoutingKey::Handled(cmd) = self.on_routing_key(k.code) {
+                return cmd;
+            }
+        }
 
         match k.code {
             KeyCode::Char('E') if tab == "Overview" => {
@@ -238,54 +243,6 @@ impl App {
             }
             KeyCode::PageDown if tab == "Repo" => {
                 self.repo.diff_scroll = self.repo.diff_scroll.saturating_add(10);
-            }
-            // Workers fleet ops.
-            KeyCode::Up if tab == "Workers" => {
-                self.worker_index = self.worker_index.saturating_sub(1);
-            }
-            KeyCode::Down if tab == "Workers" => {
-                let max = self.runtime.workers().len().saturating_sub(1);
-                self.worker_index = (self.worker_index + 1).min(max);
-            }
-            KeyCode::Char('a') if tab == "Workers" => {
-                self.prompt = Some(Prompt {
-                    kind: PromptKind::WorkerAdd,
-                    title: "Add worker — address or @handle, optional label".into(),
-                    draft: Draft::new(),
-                });
-                self.set_status("Add worker · Enter save · Esc cancel");
-            }
-            KeyCode::Char('s') | KeyCode::Enter if tab == "Workers" => {
-                if let Some(w) = self.selected_worker() {
-                    self.set_status(format!(
-                        "Selecting {}",
-                        w.label.as_deref().unwrap_or(&w.address)
-                    ));
-                    return Some(Cmd::WorkerOp(WorkerOp::Select { id: w.id }));
-                }
-            }
-            KeyCode::Char('d') | KeyCode::Char('x') if tab == "Workers" => {
-                if let Some(w) = self.selected_worker() {
-                    self.set_status(format!(
-                        "Removing {}",
-                        w.label.as_deref().unwrap_or(&w.address)
-                    ));
-                    return Some(Cmd::WorkerOp(WorkerOp::Remove { id: w.id }));
-                }
-            }
-            KeyCode::Char('e') if tab == "Workers" => {
-                if let Some(w) = self.selected_worker() {
-                    let mut draft = Draft::new();
-                    if let Some(l) = &w.label {
-                        draft = insert_at("", 0, l);
-                    }
-                    self.prompt = Some(Prompt {
-                        kind: PromptKind::WorkerEditLabel(w.id.clone()),
-                        title: format!("Edit label — {}", w.address),
-                        draft,
-                    });
-                    self.set_status("Edit label · Enter save · Esc cancel");
-                }
             }
             // Memory browse.
             KeyCode::Up if tab == "Memory" => {

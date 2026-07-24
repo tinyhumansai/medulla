@@ -24,8 +24,8 @@ mod memory;
 mod overview;
 mod prompt;
 mod repo;
+mod routing;
 mod settings;
-mod workers;
 
 /// Map a named color from the agent-lane model to a ratatui [`Color`].
 pub(super) fn color(name: &str) -> Color {
@@ -436,7 +436,7 @@ impl App {
             "Chat" => self.draw_chat(f, area),
             "Agents" => self.draw_agents(f, area),
             "Repo" => self.draw_repo(f, area),
-            "Workers" => self.draw_workers(f, area),
+            "Routing" => self.draw_routing(f, area),
             "Memory" => self.draw_memory(f, area),
             // Trace, Context, and Feedback are Settings subpages, not tabs.
             "Settings" => self.draw_settings(f, area),

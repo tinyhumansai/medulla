@@ -93,12 +93,14 @@ fn slash_review_explains_missing_workspace_contract_and_implementer() {
         instruction: "   ".into(),
         depth: 2,
         agent_id: Some("dev-1".into()),
+        contract: None,
     });
     rt.script_event(TuiEvent::TaskStart {
         task_id: "no-agent".into(),
         instruction: "Outcome: inspect the diff".into(),
         depth: 2,
         agent_id: None,
+        contract: None,
     });
     app.refresh_snapshot();
     app.snapshot.roster.push(review_agent("reviewer-2"));

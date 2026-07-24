@@ -233,6 +233,7 @@ fn fresh_review_verdict_is_attributed_to_the_implementation_task() {
                 instruction: "Outcome: fix it\nVerify:\n- cargo test".into(),
                 depth: 0,
                 agent_id: Some("dev-1".into()),
+                contract: None,
             },
         ),
         env(
@@ -242,6 +243,7 @@ fn fresh_review_verdict_is_attributed_to_the_implementation_task() {
                 instruction: "MEDULLA_AUTOREVIEW target=task-1\nReview it".into(),
                 depth: 0,
                 agent_id: Some("dev-2".into()),
+                contract: None,
             },
         ),
         env(

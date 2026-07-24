@@ -93,11 +93,16 @@ jobs:
       # connect/boot/relay/handle IO drivers and the TUI hub wiring are excluded.
       # Ship parsers/state/rendering stay counted; its `gh` process boundary and
       # the TUI's extracted blocking repo/ship jobs are manual integration seams.
+      # `worker_loop` joins them for the same reason `app_loop`/`event_loop` are
+      # there: it is the worker TUI's entry point and tick loop, driving a real
+      # terminal and real PTYs, and it is covered by the E2E suite instead.
+      # `main` is the binary entry point — the thin dispatcher that wires the
+      # four already-excluded drivers together — so it is excluded with them.
       - name: Coverage gate
         timeout-minutes: 35
         run: >-
           cargo llvm-cov --locked
-          --ignore-filename-regex 'src/tui/src/(app_loop|commands|event_loop[^.]*|terminal|hub_relay)\.rs|src/tui/src/ui/onboarding/run\.rs|src/sdk/src/hub/(boot|socket|relay|handle)\.rs|src/sdk/src/ship/client\.rs'
+          --ignore-filename-regex 'src/tui/src/(app_loop|commands|event_loop[^.]*|main|terminal|hub_relay|worker_loop)\.rs|src/tui/src/ui/onboarding/run\.rs|src/sdk/src/hub/(boot|socket|relay|handle)\.rs|src/sdk/src/ship/client\.rs'
           --fail-under-lines 95
           --summary-only
 

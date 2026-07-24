@@ -1,146 +1,19 @@
-//! The frame- and task-handling half of [`DaemonRuntime`]: routing decoded task
-//! frames, the cached capability probe, mid-run input delivery, the slot-limited
-//! task execution with throttled status forwarding, plain-text fallback, and
-//! provider selection. Lifecycle/dispatch/reply glue lives in [`super::runtime`].
+//! Executing one delegated task: slots, status forwarding, fallback.
 
 use std::sync::atomic::Ordering;
 
 use tokio::sync::mpsc;
 
-use crate::tinyplace::{AgentCapabilities, HarnessProvider, TaskFrame, TaskFrameKind};
+use crate::tinyplace::{TaskFrame, TaskFrameKind};
 
-use super::capabilities::{probe_capabilities, ProbeOptions};
-use super::mappers;
-use super::providers::{self, Abort, RunTaskOptions};
-use super::status::status_detail;
-use super::types::{DaemonRuntime, RunningTask, DEFAULT_CAPABILITY_TIMEOUT_MS};
+use super::super::mappers;
+use super::super::providers::{Abort, RunTaskOptions};
+use super::super::status::status_detail;
+use super::super::types::{DaemonRuntime, RunningTask};
 
 impl DaemonRuntime {
-    /// Route a decoded task frame to its handler; responses are ignored.
-    pub(super) async fn handle_frame(&self, from: String, frame: TaskFrame) {
-        match frame.kind {
-            TaskFrameKind::Task => self.handle_task(from, frame).await,
-            TaskFrameKind::Input => self.handle_input(from, frame).await,
-            TaskFrameKind::Capabilities => self.handle_capabilities(from, frame).await,
-            // status/reply/error/ack/capabilities_result are responses; ignore.
-            _ => {}
-        }
-    }
-
-    /// Answer a `capabilities` probe with the cached [`AgentCapabilities`].
-    async fn handle_capabilities(&self, from: String, frame: TaskFrame) {
-        let capabilities = self.get_capabilities().await;
-        let text = serde_json::to_string(&capabilities).unwrap_or_else(|_| "{}".to_string());
-        self.reply(
-            &from,
-            TaskFrameKind::CapabilitiesResult,
-            &frame.task_id,
-            &text,
-            frame.correlation_id.as_deref(),
-            Some(self.inner.config.default_provider),
-        )
-        .await;
-    }
-
-    /// Return the capabilities, probing once and caching the result.
-    async fn get_capabilities(&self) -> AgentCapabilities {
-        // Single cached probe shared across askers: holding the async mutex across
-        // the probe means concurrent callers wait for the one run, then serve from
-        // cache. Deliberately NOT counted against maxPending.
-        let mut guard = self.inner.capabilities.lock().await;
-        if let Some(capabilities) = guard.as_ref() {
-            return capabilities.clone();
-        }
-        let provider = self
-            .select_provider(None)
-            .unwrap_or(self.inner.config.default_provider);
-        self.log(&format!("capability probe → {}", provider.as_str()));
-        let abort = Abort::new();
-        let controller_id = self.register_controller(abort.clone());
-        // Compete for the concurrency budget like a task.
-        let permit = self
-            .inner
-            .slots
-            .acquire()
-            .await
-            .expect("semaphore is never closed");
-        let capabilities = probe_capabilities(ProbeOptions {
-            provider,
-            run_task: self.inner.run_task.clone(),
-            workspace: self.inner.config.workspace.clone(),
-            env: self.inner.config.env.clone(),
-            providers: self.inner.config.providers.clone(),
-            timeout_ms: self
-                .inner
-                .config
-                .capability_timeout_ms
-                .or(Some(DEFAULT_CAPABILITY_TIMEOUT_MS)),
-            model: self.inner.config.model.clone(),
-            agent: self.inner.config.agent.clone(),
-            skip_permissions: self.inner.config.skip_permissions,
-            abort,
-        })
-        .await;
-        drop(permit);
-        self.unregister_controller(controller_id);
-        *guard = Some(capabilities.clone());
-        capabilities
-    }
-
-    /// Deliver an `input` frame to the matching running task (or reject it).
-    async fn handle_input(&self, from: String, frame: TaskFrame) {
-        let key = Self::task_key(&from, &frame.task_id);
-        let no_match = (
-            TaskFrameKind::Ack,
-            "no matching running task for input",
-            self.inner.config.default_provider,
-        );
-        let (kind, text, harness) = {
-            let mut running = self.inner.running.lock().unwrap();
-            match running.get_mut(&key) {
-                Some(task) => {
-                    // A correlationId mismatch means a different dispatch reused
-                    // the taskId — treat as no match rather than crossing sessions.
-                    let mismatch = matches!(
-                        (&frame.correlation_id, &task.correlation_id),
-                        (Some(a), Some(b)) if a != b
-                    );
-                    if mismatch {
-                        no_match
-                    } else if !providers::supports_stdin(task.provider) {
-                        // The child has a null stdin; buffering would silently
-                        // discard the guidance, so reject it honestly instead.
-                        (
-                            TaskFrameKind::Error,
-                            "provider does not accept mid-run input",
-                            task.provider,
-                        )
-                    } else {
-                        match &task.stdin {
-                            Some(stdin) => {
-                                let _ = stdin.send(frame.text.clone());
-                            }
-                            None => task.pending_input.push(frame.text.clone()),
-                        }
-                        (TaskFrameKind::Ack, "input received", task.provider)
-                    }
-                }
-                None => no_match,
-            }
-        };
-        self.reply(
-            &from,
-            kind,
-            &frame.task_id,
-            text,
-            frame.correlation_id.as_deref(),
-            Some(harness),
-        )
-        .await;
-    }
-
     /// Admit, execute, and reply to a `task` frame, forwarding throttled status.
-    async fn handle_task(&self, from: String, frame: TaskFrame) {
+    pub(super) async fn handle_task(&self, from: String, frame: TaskFrame) {
         let correlation = frame.correlation_id.clone();
         let provider = match self.select_provider(frame.provider) {
             Some(provider) => provider,
@@ -211,6 +84,7 @@ impl DaemonRuntime {
             key.clone(),
             RunningTask {
                 provider,
+                abort: abort.clone(),
                 correlation_id: correlation.clone(),
                 stdin: None,
                 pending_input: Vec::new(),
@@ -277,6 +151,11 @@ impl DaemonRuntime {
         };
 
         let options = RunTaskOptions {
+            // The *authenticated* sender, never anything from the frame body: a
+            // frame cannot be trusted to name its own author, and this value
+            // decides which session serves the task and whose context it may see.
+            conversation: from.clone(),
+            resume_session_id: None,
             provider,
             prompt: frame.text.clone(),
             cwd: self.inner.config.workspace.clone(),
@@ -334,7 +213,18 @@ impl DaemonRuntime {
                     run.usage,
                 )
                 .await;
-                self.log(&format!("task {} ✓ ({} events)", frame.task_id, run.events));
+                // The captured turn content, as it was read out of the harness's
+                // own transcript. Logged next to the send below so "the harness
+                // answered" and "the peer was told" stop being one fact: an
+                // empty reply here and a failed send there look identical from
+                // the outside, and only one of them is the harness's fault.
+                self.log(&format!(
+                    "task {} ✓ ({} events) · captured {} chars: {}",
+                    frame.task_id,
+                    run.events,
+                    run.reply.chars().count(),
+                    crate::logging::preview(&run.reply),
+                ));
             }
             Err(message) => {
                 self.reply(
@@ -357,7 +247,7 @@ impl DaemonRuntime {
     }
 
     /// Run a plain-text DM through the default provider, replying with raw text.
-    pub(super) async fn handle_plain_text(&self, from: String, text: String) {
+    pub(in crate::daemon) async fn handle_plain_text(&self, from: String, text: String) {
         let provider = self.inner.config.default_provider;
         if !self.inner.config.providers.contains(&provider) {
             self.send_raw(&from, "No coding agent is available on this daemon.")
@@ -387,6 +277,8 @@ impl DaemonRuntime {
             .expect("semaphore is never closed");
         self.log(&format!("plaintext DM → {}", provider.as_str()));
         let options = RunTaskOptions {
+            conversation: from.clone(),
+            resume_session_id: None,
             provider,
             prompt: text,
             cwd: self.inner.config.workspace.clone(),
@@ -411,21 +303,5 @@ impl DaemonRuntime {
         drop(permit);
         self.unregister_controller(controller_id);
         self.inner.admitted.fetch_sub(1, Ordering::SeqCst);
-    }
-
-    /// Choose a provider: the requested one if offered, else the default, else
-    /// the first offered.
-    fn select_provider(&self, requested: Option<HarnessProvider>) -> Option<HarnessProvider> {
-        let providers = &self.inner.config.providers;
-        match requested {
-            Some(requested) => providers.contains(&requested).then_some(requested),
-            None => {
-                if providers.contains(&self.inner.config.default_provider) {
-                    Some(self.inner.config.default_provider)
-                } else {
-                    providers.first().copied()
-                }
-            }
-        }
     }
 }

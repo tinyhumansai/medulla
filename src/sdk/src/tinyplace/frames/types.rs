@@ -12,7 +12,7 @@ use std::fmt;
 pub const TINYPLACE_PROTO: &str = "medulla-tinyplace/1";
 
 /// The coding-agent CLI that ran (or should run) a task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessProvider {
     /// Anthropic's `claude` CLI harness.
@@ -64,6 +64,10 @@ pub enum TaskFrameKind {
     Task,
     /// Follow-up input for an in-flight task.
     Input,
+    /// Stop an in-flight task. Sent when the requester has given up waiting, so
+    /// the responder is not left running work nobody will read — and, because a
+    /// responder refuses a second task with a live id, so that id is freed.
+    Abort,
     /// A progress update for a running task.
     Status,
     /// A terminal successful result.
@@ -84,6 +88,7 @@ impl TaskFrameKind {
         match self {
             TaskFrameKind::Task => "task",
             TaskFrameKind::Input => "input",
+            TaskFrameKind::Abort => "abort",
             TaskFrameKind::Status => "status",
             TaskFrameKind::Reply => "reply",
             TaskFrameKind::Error => "error",
@@ -98,6 +103,7 @@ impl TaskFrameKind {
         match value {
             "task" => Some(TaskFrameKind::Task),
             "input" => Some(TaskFrameKind::Input),
+            "abort" => Some(TaskFrameKind::Abort),
             "status" => Some(TaskFrameKind::Status),
             "reply" => Some(TaskFrameKind::Reply),
             "error" => Some(TaskFrameKind::Error),

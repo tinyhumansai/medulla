@@ -13,8 +13,34 @@ use serde_json::Value;
 
 use crate::home::medulla_home;
 
-use super::types::{LoadedConfig, TuiConfig};
+use super::types::{LoadedConfig, TinyplaceConfig, TuiConfig};
 use super::urls::{resolve_backend_base_url, resolve_tinyplace_base_url};
+
+/// The `[tinyplace]` section to use when the config file has none.
+///
+/// [`load_config`] env-resolves `base_url` and the identity dir only for a
+/// section that is actually *present*. A caller that synthesizes its own with
+/// [`TinyplaceConfig::default`] therefore gets the **prod** relay even under
+/// `MEDULLA_STAGING=1`, because that field's serde default is a constant and
+/// constants cannot read the environment.
+///
+/// That divergence is not cosmetic: a worker pointed at one relay and an
+/// orchestrator pointed at another both start cleanly, publish keys, and report
+/// healthy — they simply never see each other, because a contact request
+/// delivered to one relay does not exist on the other. Use this instead of
+/// `Default::default()` anywhere a missing section is filled in, so running
+/// without a `[tinyplace]` section cannot strand a peer on a different relay
+/// than the rest of the deployment.
+pub fn default_tinyplace_config(env: &HashMap<String, String>) -> TinyplaceConfig {
+    TinyplaceConfig {
+        base_url: resolve_tinyplace_base_url(env, None),
+        identity_dir: medulla_home(env)
+            .join("tinyplace")
+            .to_string_lossy()
+            .into_owned(),
+        ..TinyplaceConfig::default()
+    }
+}
 
 /// Turn a path into a canonical (or best-effort) absolute-ish display string.
 fn display_path(path: &Path) -> String {

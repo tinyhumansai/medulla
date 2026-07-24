@@ -184,6 +184,7 @@ fn blocking_runner(ready: mpsc::UnboundedSender<()>, gate: Arc<Notify>) -> RunTa
             let _ = ready.send(());
             gate.notified().await;
             Ok(RunTaskResult {
+                session_id: None,
                 usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),

@@ -4,19 +4,23 @@
 //! app that consumes this crate is the sibling `medulla-tui` crate.
 
 pub mod auth;
+pub mod autoreview;
 pub mod client;
 pub mod clock;
 pub mod config;
+pub mod contacts;
 pub mod daemon;
 pub mod harness_contract;
 pub mod history_upload;
 pub mod home;
 pub mod hub;
 pub mod init;
+pub mod logging;
 pub mod memory;
 pub mod onboarding;
 pub mod runtime;
 pub mod session_history;
+pub mod sessions;
 pub mod ship;
 pub mod tinyplace;
 pub mod ui;

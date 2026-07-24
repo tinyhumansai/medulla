@@ -19,9 +19,9 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::task::JoinHandle;
 
+use crate::contacts::{AdmissionPolicy, ClientContacts, ContactDesk};
 use crate::tinyplace::{
-    load_or_create_identity, resolve_endpoint, spawn_contact_auto_accepter,
-    spawn_presence_heartbeat, TinyplaceFileConfig,
+    load_or_create_identity, resolve_endpoint, spawn_presence_heartbeat, TinyplaceFileConfig,
 };
 use ::tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 
@@ -40,6 +40,14 @@ pub struct TinyplaceObservation {
     pub roster: Vec<AgentDescriptor>,
     /// Latest presence per peer agent id.
     pub presence: HashMap<String, AgentPresence>,
+    /// A problem the operator needs to know about, such as a failed pre-key
+    /// publish — which leaves the identity reachable in the directory but unable
+    /// to receive any DM.
+    ///
+    /// Carried here rather than printed: the consumers of this service own a
+    /// terminal screen, and anything written to stdout or stderr under one lands
+    /// on top of the UI and never clears.
+    pub notice: Option<String>,
 }
 
 impl TinyplaceObservation {
@@ -67,6 +75,9 @@ impl TinyplaceObservation {
 /// A running tiny.place background service. Dropping it aborts its loops.
 pub struct TinyplaceService {
     observation: Arc<Mutex<TinyplaceObservation>>,
+    contacts: ContactDesk,
+    transport: crate::daemon::transport::SignalTransport,
+    endpoint: String,
     handles: Vec<JoinHandle<()>>,
 }
 
@@ -84,6 +95,33 @@ impl TinyplaceService {
         self.observation.clone()
     }
 
+    /// The encrypted Signal transport bound to this machine's wallet.
+    ///
+    /// Shared rather than rebuilt: a second transport on the same wallet would
+    /// be a second writer to one Signal session store, and the double ratchet
+    /// does not survive that.
+    pub fn transport(&self) -> crate::daemon::transport::SignalTransport {
+        self.transport.clone()
+    }
+
+    /// The tiny.place relay this service actually resolved to.
+    ///
+    /// Worth stating out loud at startup: two peers on different relays both
+    /// start cleanly and report healthy, and the only symptom is that neither
+    /// ever hears from the other. Printing it makes that one glance instead of
+    /// an afternoon.
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    /// The incoming contact-request desk this service keeps current.
+    ///
+    /// The Sessions tab renders its queue and dispatches the operator's
+    /// accept/decline/block decisions through it.
+    pub fn contacts(&self) -> ContactDesk {
+        self.contacts.clone()
+    }
+
     /// Start the service from a `[tinyplace]` config section. Loads the identity,
     /// builds the client, seeds the roster, and spawns the presence/contact
     /// loops. Returns an error only if the identity cannot be established.
@@ -94,13 +132,20 @@ impl TinyplaceService {
         let (signer, tp_config) = load_or_create_identity(&config_path, &env)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-        let base_url = resolve_endpoint_with_config(&env, &tp_config, &config.base_url);
+        let endpoint = resolve_endpoint_with_config(&env, &tp_config, &config.base_url);
         let signer = Arc::new(signer);
         let client = TinyPlaceClient::new(TinyPlaceClientOptions {
-            base_url,
+            base_url: endpoint.clone(),
             signer: Some(signer.clone() as Arc<dyn Signer>),
             ..Default::default()
         });
+
+        let identity_dir_path = identity_dir.clone();
+        let transport = crate::daemon::transport::SignalTransport::new(
+            client.clone(),
+            &signer,
+            &identity_dir_path,
+        );
 
         let identity = TinyplaceIdentity {
             agent_id: signer.agent_id(),
@@ -114,19 +159,46 @@ impl TinyplaceService {
             identity: Some(identity),
             roster,
             presence: HashMap::new(),
+            notice: None,
         }));
 
         let mut handles = Vec::new();
+
+        // Publish Signal pre-keys. Without a published bundle a peer cannot run
+        // X3DH against this identity, so every DM to it fails to establish a
+        // session — the agent is reachable in the directory but unable to
+        // receive anything, which looks from both ends like the message simply
+        // vanished. The headless daemon has always done this as part of
+        // onboarding; anything else holding an identity needs it too.
+        handles.push({
+            let transport = transport.clone();
+            let signer = signer.clone();
+            let observation = observation.clone();
+            tokio::spawn(async move {
+                if let Err(err) = transport.publish_keys(&signer).await {
+                    if let Ok(mut obs) = observation.lock() {
+                        obs.notice = Some(format!(
+                            "pre-key publish failed ({err}) — peers cannot open an encrypted channel to this agent"
+                        ));
+                    }
+                }
+            })
+        });
+
         handles.push(spawn_presence_heartbeat(client.clone(), CONTACT_POLL));
 
-        // Auto-accept only the configured peers (fail-closed allowlist).
-        let allowed: HashSet<String> = peer_ids.iter().cloned().collect();
-        let accept_all = config.accept_contacts == "all";
-        handles.push(spawn_contact_auto_accepter(
-            client.clone(),
-            CONTACT_POLL,
-            move |agent_id: &str| accept_all || allowed.contains(agent_id),
-        ));
+        // Contact admission. `accept_contacts` maps onto the admission policy
+        // directly — the shipped default `"peers"` is the same fail-closed
+        // allowlist as before, and `"all"` the same open one. What is new is
+        // that requests policy does *not* admit are now queued for the operator
+        // in the Sessions tab instead of being silently ignored, and that an
+        // unrecognised value closes to `manual` rather than falling through.
+        let contacts = ContactDesk::new(
+            Arc::new(ClientContacts::new(client.clone())),
+            AdmissionPolicy::parse(&config.accept_contacts),
+            peer_ids.iter().cloned().collect::<HashSet<_>>(),
+        );
+        handles.push(contacts.spawn_poll(CONTACT_POLL));
 
         // Presence poll: refresh peer online status into the observation.
         if !peer_ids.is_empty() {
@@ -155,6 +227,9 @@ impl TinyplaceService {
 
         Ok(TinyplaceService {
             observation,
+            contacts,
+            transport,
+            endpoint,
             handles,
         })
     }

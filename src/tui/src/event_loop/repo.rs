@@ -5,21 +5,6 @@ use std::path::PathBuf;
 use super::types::AppMsg;
 use medulla_tui::ui::app::{App, Cmd};
 
-/// Fold fresh local reports, then launch their selected diff and Ship probes.
-pub(super) fn apply_workspaces(
-    app: &mut App,
-    reports: Vec<medulla::workspace::WorkspaceReport>,
-    tx: tokio::sync::mpsc::UnboundedSender<AppMsg>,
-) {
-    app.set_workspace_reports(reports);
-    app.set_status("Repo · refreshed");
-    if let Some(Cmd::LoadWorkspaceDiff { workspace, path }) = app.selected_repo_diff_cmd() {
-        load_diff(workspace, path, tx.clone());
-    }
-    app.set_ship_loading();
-    load_ship(app.loaded.workflow_workspaces(), tx);
-}
-
 /// Fold fresh Ship rows, then load the selected PR's failure excerpt.
 pub(super) fn apply_ship(
     app: &mut App,
@@ -30,36 +15,6 @@ pub(super) fn apply_ship(
     if let Some(Cmd::LoadShipLog { workspace, number }) = app.selected_ship_log_cmd() {
         load_ship_log(workspace, number, tx);
     }
-}
-
-/// Inspect configured repositories without blocking terminal redraw.
-pub(super) fn load_workspaces(roots: Vec<PathBuf>, tx: tokio::sync::mpsc::UnboundedSender<AppMsg>) {
-    tokio::task::spawn_blocking(move || {
-        let reports = roots
-            .into_iter()
-            .map(|root| {
-                let result = medulla::workspace::inspect_workspace(&root);
-                medulla::workspace::WorkspaceReport::from_result(root, result)
-            })
-            .collect();
-        let _ = tx.send(AppMsg::WorkspacesLoaded(reports));
-    });
-}
-
-/// Load one local patch.
-pub(super) fn load_diff(
-    workspace: PathBuf,
-    path: PathBuf,
-    tx: tokio::sync::mpsc::UnboundedSender<AppMsg>,
-) {
-    tokio::task::spawn_blocking(move || {
-        let result = medulla::workspace::diff(&workspace, &path).map_err(|error| error.to_string());
-        let _ = tx.send(AppMsg::WorkspaceDiffLoaded {
-            workspace,
-            path,
-            result,
-        });
-    });
 }
 
 /// Probe open PRs and their check/thread state.

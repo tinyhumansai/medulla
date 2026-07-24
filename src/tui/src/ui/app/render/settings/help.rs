@@ -22,6 +22,7 @@ impl App {
             TLine::from("Chat pins to the latest reply; the composer is shown only on this view"),
             TLine::from("Enter sends · Shift-Enter inserts a newline (Option-Enter if Shift-Enter sends)"),
             TLine::from("PageUp / PageDown scrolls the Chat and Agents transcripts"),
+            TLine::from("Overview: E prepared decisions"),
             TLine::from("Agents: ↑↓ pick an agent · j / k scroll · X cancel task · A answer a question"),
             TLine::from("Workers: a add peer · Enter/s select · e edit label · d/x remove"),
             TLine::from("Memory: ↑↓ / j k browse directives, facets & hits · /memory <query> to search"),

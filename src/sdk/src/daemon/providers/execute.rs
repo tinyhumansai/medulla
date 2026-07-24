@@ -15,7 +15,9 @@ use tokio::time::Instant;
 use crate::tinyplace::HarnessProvider;
 
 use super::super::mappers::HarnessLineMapper;
-use super::detect::{build_run_args, provider_bin, provider_name, supports_stdin};
+use super::detect::{
+    build_resumed_run_args, extract_session_id, provider_bin, provider_name, supports_stdin,
+};
 use super::types::{OnEvent, OnStdin, RunSpec, RunTaskOptions, RunTaskResult};
 
 /// A record that never terminates in a newline is dropped past this size.
@@ -66,6 +68,7 @@ pub async fn run_provider_task(options: RunTaskOptions) -> Result<RunTaskResult,
         agent: options.agent,
         extra_args: options.extra_args,
         skip_permissions: options.skip_permissions,
+        resume_session_id: options.resume_session_id,
         abort: options.abort,
     };
     let mut attempt: u32 = 1;
@@ -127,13 +130,14 @@ async fn run_provider_attempt(
         &spec.env,
     ));
     extra_args.extend(spec.extra_args.iter().cloned());
-    let args = build_run_args(
+    let args = build_resumed_run_args(
         spec.provider,
         &spec.prompt,
         spec.model.as_deref(),
         spec.agent.as_deref(),
         &extra_args,
         spec.skip_permissions,
+        spec.resume_session_id.as_deref(),
     );
     let bin = provider_bin(spec.provider, &spec.env);
 
@@ -228,6 +232,8 @@ async fn run_provider_attempt(
     let mut mapper = HarnessLineMapper::new(provider_name(spec.provider));
     let mut messages: Vec<String> = Vec::new();
     let mut claude_result: Option<String> = None;
+    // First announcement wins — a run reports exactly one session.
+    let mut session_id: Option<String> = None;
     let mut events: usize = 0;
     let mut line_no: i64 = 0;
     let mut stdout_tail = String::new();
@@ -268,6 +274,9 @@ async fn run_provider_attempt(
                         stdout_tail.push_str(raw);
                         stdout_tail.push('\n');
                         stdout_tail = tail_bytes(&stdout_tail);
+                        if session_id.is_none() {
+                            session_id = extract_session_id(spec.provider, raw);
+                        }
                         let produced = consume_line(
                             spec.provider,
                             raw,
@@ -337,6 +346,7 @@ async fn run_provider_attempt(
         reply,
         events,
         usage: mapper.usage(),
+        session_id,
     })
 }
 

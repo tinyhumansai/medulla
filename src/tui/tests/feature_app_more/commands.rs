@@ -14,6 +14,111 @@ fn slash_resume_emits_list_chats_cmd() {
 }
 
 #[test]
+fn slash_review_refuses_silent_self_review() {
+    let (mut app, _rt) = demo_app();
+    let cmd = submit_line(&mut app, "/review task-1");
+    assert!(cmd.is_none());
+    assert!(
+        app.status().contains("no online agent other than 'dev-1'"),
+        "status: {}",
+        app.status()
+    );
+}
+
+#[test]
+fn slash_review_requires_a_known_target() {
+    let (mut app, _rt) = demo_app();
+    let cmd = submit_line(&mut app, "/review missing-task");
+    assert!(cmd.is_none());
+    assert!(app.status().contains("was not found"));
+}
+
+fn review_agent(id: &str) -> medulla::runtime::AgentDescriptor {
+    medulla::runtime::AgentDescriptor {
+        id: id.into(),
+        name: id.into(),
+        description: "review fixture".into(),
+        availability: "online".into(),
+        tags: Vec::new(),
+        metadata: serde_json::Map::new(),
+    }
+}
+
+#[test]
+fn slash_review_prepares_an_independent_review_from_task_or_lane() {
+    let (mut app, _rt) = demo_app();
+    app.snapshot.roster[0].metadata.insert(
+        "workspace".into(),
+        serde_json::json!("/tmp/review-workspace"),
+    );
+    app.snapshot.roster.push(review_agent("reviewer-2"));
+
+    for target in ["task-1", "dev-1"] {
+        let cmd = submit_line(&mut app, &format!("/review {target}"));
+        let Some(Cmd::PrepareReview {
+            task_id,
+            implementer_id,
+            reviewer_id,
+            workspace,
+            contract,
+        }) = cmd
+        else {
+            panic!("expected review preparation command for {target}");
+        };
+        assert_eq!(task_id, "task-1");
+        assert_eq!(implementer_id, "dev-1");
+        assert_eq!(reviewer_id, "reviewer-2");
+        assert_eq!(workspace, std::path::PathBuf::from("/tmp/review-workspace"));
+        assert_eq!(contract.outcome, "Refactor the auth module for clarity.");
+    }
+    assert!(app.status().contains("task-1 → reviewer-2"));
+}
+
+#[test]
+fn slash_review_explains_missing_workspace_contract_and_implementer() {
+    let rt = Arc::new(MockRuntime::demo());
+    let mut no_workspace = loaded();
+    no_workspace.config.workflow.workspaces = vec![String::new()];
+    let mut app = App::new(rt.clone(), no_workspace);
+    app.snapshot.roster.push(review_agent("reviewer-2"));
+    assert!(submit_line(&mut app, "/review task-1").is_none());
+    assert!(
+        app.status().contains("has no local workspace"),
+        "status: {}",
+        app.status()
+    );
+
+    rt.script_event(TuiEvent::TaskStart {
+        task_id: "no-contract".into(),
+        instruction: "   ".into(),
+        depth: 2,
+        agent_id: Some("dev-1".into()),
+    });
+    rt.script_event(TuiEvent::TaskStart {
+        task_id: "no-agent".into(),
+        instruction: "Outcome: inspect the diff".into(),
+        depth: 2,
+        agent_id: None,
+    });
+    app.refresh_snapshot();
+    app.snapshot.roster.push(review_agent("reviewer-2"));
+
+    assert!(submit_line(&mut app, "/review no-contract").is_none());
+    assert!(
+        app.status()
+            .contains("has no recorded instruction contract"),
+        "status: {}",
+        app.status()
+    );
+    assert!(submit_line(&mut app, "/review no-agent").is_none());
+    assert!(
+        app.status().contains("has no implementing agent"),
+        "status: {}",
+        app.status()
+    );
+}
+
+#[test]
 fn slash_new_and_abort_and_clear_set_status() {
     let (mut app, rt) = demo_app();
     let _ = submit_line(&mut app, "/new");

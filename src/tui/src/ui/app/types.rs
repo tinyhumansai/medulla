@@ -111,6 +111,14 @@ pub enum Cmd {
     },
     /// Create a pull request for the current branch against `upstream`.
     CreateShipPr(std::path::PathBuf),
+    /// Collect the lane-scoped Git diff and submit an independent review task.
+    PrepareReview {
+        task_id: String,
+        implementer_id: String,
+        reviewer_id: String,
+        workspace: std::path::PathBuf,
+        contract: medulla::autoreview::ReviewContract,
+    },
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
     /// Load the persona-memory status + directives for the Memory tab.
@@ -180,6 +188,11 @@ pub(super) enum MemoryEntry {
 
 /// The action a small inline prompt (Workers add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Set or clear the manual permitted-path claim for one visible lane.
+    LaneClaim {
+        /// Stable lane key.
+        lane_key: String,
+    },
     /// Add a worker from an address/@handle line.
     WorkerAdd,
     /// Edit the label of the worker with the given id.
@@ -189,6 +202,15 @@ pub(super) enum PromptKind {
         /// The cycle the question belongs to.
         cycle_id: String,
         /// The pending question's id.
+        question_id: String,
+    },
+    /// Answer a prepared decision and dismiss it locally once routed.
+    DecisionAnswer {
+        /// Stable decision id.
+        decision_id: String,
+        /// Cycle that owns the question.
+        cycle_id: String,
+        /// Harness question id.
         question_id: String,
     },
     /// Comment on the given feedback board item.
@@ -336,6 +358,14 @@ pub struct App {
     pub(super) feedback: FeedbackState,
     /// Local Git ledger state for the Repo tab.
     pub(super) repo: RepoState,
+    /// Manual permitted-path globs keyed by stable Agents lane id.
+    pub(super) lane_claims: std::collections::BTreeMap<String, Vec<String>>,
+    /// Whether the prepared-decision modal is visible.
+    pub(super) decision_open: bool,
+    /// Highlighted decision row.
+    pub(super) decision_index: usize,
+    /// Session-local ids intentionally hidden by the operator.
+    pub(super) dismissed_decisions: std::collections::BTreeSet<String>,
     pub(super) prompt: Option<Prompt>,
     /// The animation frame counter (drives the spinner).
     pub frame: usize,

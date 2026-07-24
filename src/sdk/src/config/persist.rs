@@ -96,3 +96,30 @@ pub fn persist_welcome_completed(path: &Path, completed: bool) -> anyhow::Result
         toml::Value::Boolean(completed),
     )
 }
+
+/// Write the orchestrator's worker roster to the `[hub]` table.
+///
+/// Replaces the list wholesale rather than merging: the roster in memory is the
+/// operator's current intent, and a merge would resurrect a worker they had just
+/// removed. An empty roster writes an empty array, which is how "I removed the
+/// last one" survives a restart.
+pub fn persist_hub_workers(
+    path: &Path,
+    workers: &[crate::config::HubWorkerConfig],
+) -> anyhow::Result<()> {
+    let rows: Vec<toml::Value> = workers
+        .iter()
+        .map(|w| {
+            let mut row = toml::Table::new();
+            row.insert("id".into(), toml::Value::String(w.id.clone()));
+            row.insert("address".into(), toml::Value::String(w.address.clone()));
+            row.insert("harness".into(), toml::Value::String(w.harness.clone()));
+            if let Some(label) = &w.label {
+                row.insert("label".into(), toml::Value::String(label.clone()));
+            }
+            row.insert("selected".into(), toml::Value::Boolean(w.selected));
+            toml::Value::Table(row)
+        })
+        .collect();
+    persist_setting(path, "hub", "workers", toml::Value::Array(rows))
+}

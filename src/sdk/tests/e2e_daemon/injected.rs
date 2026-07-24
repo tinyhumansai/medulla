@@ -149,6 +149,7 @@ async fn idle_drains_all_dispatched_messages() {
             Box::pin(async move {
                 seen.fetch_add(1, Ordering::SeqCst);
                 Ok(RunTaskResult {
+                    session_id: None,
                     usage: None,
                     provider: opts.provider,
                     reply: format!("echo:{}", opts.prompt),

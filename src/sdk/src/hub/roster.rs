@@ -147,7 +147,7 @@ pub(super) fn worker_for_strategy(
             let memory = info.memory_available_bytes.unwrap_or(0);
             let key = match strategy {
                 RoutingStrategy::Balanced => (info.cpu_cores as u64, memory),
-                RoutingStrategy::CpuFirst => (info.cpu_cores as u64, memory),
+                RoutingStrategy::CpuFirst => (info.cpu_cores as u64, 0),
                 RoutingStrategy::MemoryFirst => (memory, info.cpu_cores as u64),
                 RoutingStrategy::Manual => unreachable!("handled above"),
             };

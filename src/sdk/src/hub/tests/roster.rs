@@ -56,10 +56,10 @@ fn capacity_strategies_choose_different_workers() {
 }
 
 #[test]
-fn balanced_strategy_preserves_sub_gib_memory_differences() {
+fn balanced_uses_memory_to_break_cpu_ties_while_cpu_first_does_not() {
     let workers = vec![
-        worker("smaller", "addr-small"),
         worker("larger", "addr-large"),
+        worker("smaller", "addr-small"),
     ];
     let details = std::collections::HashMap::from([
         (
@@ -85,6 +85,11 @@ fn balanced_strategy_preserves_sub_gib_memory_differences() {
     assert_eq!(
         worker_for_strategy(&workers, &details, RoutingStrategy::Balanced).as_deref(),
         Some("larger")
+    );
+    assert_eq!(
+        worker_for_strategy(&workers, &details, RoutingStrategy::CpuFirst).as_deref(),
+        Some("smaller"),
+        "CPU First ignores RAM, so a CPU tie follows roster order"
     );
 }
 

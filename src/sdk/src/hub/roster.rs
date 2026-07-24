@@ -116,8 +116,8 @@ pub(super) fn remove_conflicting(
 ) -> Vec<String> {
     let mut removed_ids = Vec::new();
     workers.retain(|worker| {
-        let conflicts = worker.id == incoming.id
-            || same_destination(&worker.address, &incoming.address);
+        let conflicts =
+            worker.id == incoming.id || same_destination(&worker.address, &incoming.address);
         if conflicts {
             removed_ids.push(worker.id.clone());
         }

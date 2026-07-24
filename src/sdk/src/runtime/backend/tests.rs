@@ -272,10 +272,7 @@ fn captured_worker_details_map_to_the_runtime_row() {
 
     assert_eq!(info.cpu_cores, Some(12));
     assert_eq!(info.memory_total_bytes, Some(32 * 1024 * 1024 * 1024));
-    assert_eq!(
-        info.memory_available_bytes,
-        Some(19 * 1024 * 1024 * 1024)
-    );
+    assert_eq!(info.memory_available_bytes, Some(19 * 1024 * 1024 * 1024));
     assert_eq!(info.ip_address.as_deref(), Some("10.0.0.24"));
 }
 

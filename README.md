@@ -25,6 +25,14 @@ medulla         # bare invocation starts the TUI
 
 With no credentials, `medulla` opens a login screen. Press `m` there to explore offline against the mock runtime. See [For developers](#for-developers) to build from source or embed the SDK.
 
+To offer this machine as a worker, run:
+
+```sh
+medulla daemon
+```
+
+On a terminal this opens the reduced daemon TUI. Choose the execution mode and installed harness, then use its four tabs to watch agent lanes, connect and message a master, manage the workspace roots advertised to that master, and approve incoming requests. The daemon creates and stores a worker-level tiny.place wallet locally; it does not need the master's backend token. Workspace and master choices are saved to the Medulla config, so the usual setup does not require environment variables. Use `medulla daemon --headless` for a service process; non-terminal launches select headless mode automatically.
+
 Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
 ## What It Does

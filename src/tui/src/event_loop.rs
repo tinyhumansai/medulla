@@ -96,7 +96,7 @@ pub(crate) async fn run(
             recv = sub.recv() => {
                 if recv.is_ok() {
                     app.refresh_snapshot();
-                    if app.tab() == "Context" && app.events_changed() {
+                    if should_refresh_context(&mut app) {
                         run_cmd(Cmd::InspectContext, &runtime, app.memory_service(), &msg_tx);
                     }
                 }
@@ -205,4 +205,9 @@ pub(crate) async fn run(
     } else {
         SessionExit::Quit
     })
+}
+
+/// Detect a changed event stream while the nested Context surface is visible.
+fn should_refresh_context(app: &mut App) -> bool {
+    app.tab() == "Settings" && app.settings_subpage() == "Context" && app.events_changed()
 }

@@ -4,11 +4,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use medulla::client::{FeedbackQuery, FeedbackType};
+use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{Runtime, WorkerOp};
-use medulla_tui::ui::app::Cmd;
+use medulla_tui::ui::app::{App, Cmd};
 
 use super::cmd_dispatch::{read_memory, run_cmd};
+use super::should_refresh_context;
 use super::types::AppMsg;
 use super::update_checker::spawn_update_checker;
 
@@ -57,6 +59,18 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
 
     run_cmd(Cmd::LoadUsage, &runtime, None, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::UsageLoaded(None)));
+}
+
+#[test]
+fn context_refresh_tracks_the_nested_settings_page() {
+    let runtime = Arc::new(MockRuntime::demo());
+    let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
+
+    let _ = app.focus_settings_subpage("Usage");
+    assert!(!should_refresh_context(&mut app));
+    let _ = app.focus_settings_subpage("Context");
+    assert!(should_refresh_context(&mut app));
+    assert!(!should_refresh_context(&mut app));
 }
 
 #[tokio::test]

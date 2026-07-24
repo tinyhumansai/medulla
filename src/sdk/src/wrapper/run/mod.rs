@@ -104,6 +104,9 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
         config.provider,
         &config.env,
     ));
+    // For providers that need git-hook-based attribution (Codex, Opencode),
+    // inject the prepare-commit-msg hook env vars; Claude Code gets empty.
+    merge_attribution_env_into_config(&mut config);
     child_args.extend(config.child_args.iter().cloned());
 
     let ChildSession {
@@ -173,7 +176,21 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
         bridge.lifecycle("session_end").await;
     }
 
+    // Clean up any git hook temp directory created by attribution_env.
+    crate::tinyplace::attribution::cleanup_hook_tmpdir();
+
     Ok(code)
+}
+
+/// Merge the git-hook attribution env vars (for Codex / Opencode) into
+/// `config.env`. Claude Code gets no additional env vars.
+fn merge_attribution_env_into_config(config: &mut WrapperConfig) {
+    config
+        .env
+        .extend(crate::tinyplace::attribution::attribution_env(
+            config.provider,
+            &config.env,
+        ));
 }
 
 /// A future that resolves on SIGINT/SIGTERM (Unix) or Ctrl-C (elsewhere).

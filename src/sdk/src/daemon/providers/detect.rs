@@ -226,13 +226,14 @@ pub fn extract_session_id(provider: HarnessProvider, raw: &str) -> Option<String
 
 /// Whether a provider accepts mid-run stdin input (`input` frames).
 ///
-/// `opencode run` treats a non-TTY stdin as prompt content and blocks at
-/// startup reading it until EOF; it has no interactive mid-run stdin channel.
-/// Piping (and holding) its stdin open therefore deadlocks the run, so it gets
-/// an immediate-EOF null stdin and `input` frames must be rejected up front.
-/// Claude/Codex accept forwarded `input` frames over a live stdin pipe.
+/// `opencode run` and `codex exec` both treat a non-TTY stdin as prompt content
+/// and block at startup reading it until EOF; neither has an interactive mid-run
+/// stdin channel. Piping (and holding) their stdin open therefore deadlocks the
+/// run, so they get an immediate-EOF null stdin and `input` frames are rejected
+/// up front. Only `claude -p` accepts forwarded `input` frames over a live stdin
+/// pipe.
 pub fn supports_stdin(provider: HarnessProvider) -> bool {
-    provider != HarnessProvider::Opencode
+    matches!(provider, HarnessProvider::Claude)
 }
 
 /// The wire name for a provider.

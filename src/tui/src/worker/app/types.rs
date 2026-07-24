@@ -171,6 +171,14 @@ pub struct WorkerApp {
     pub(super) status: String,
     /// Whether the loop should exit.
     pub should_quit: bool,
+    /// Whether terminal mouse reporting is enabled.
+    pub(super) mouse_capture: bool,
+    /// Row and horizontal ranges occupied by the rendered tab labels.
+    pub(super) hit_tabs: (u16, Vec<(u16, u16)>),
+    /// Rendered list rows and the model index represented by their first row.
+    pub(super) hit_rows: Option<(ratatui::layout::Rect, usize)>,
+    /// Rendered setup choices.
+    pub(super) hit_setup: Option<ratatui::layout::Rect>,
     /// The pane the watched terminal was last drawn into, so its PTY is resized
     /// to what the operator is actually looking at.
     pub(super) terminal_area: ratatui::layout::Rect,
@@ -216,6 +224,11 @@ impl WorkerApp {
     /// The status line text. Test/inspection seam.
     pub fn status(&self) -> &str {
         &self.status
+    }
+
+    /// Whether the event loop should ask the terminal to report mouse input.
+    pub fn mouse_capture(&self) -> bool {
+        self.mouse_capture
     }
 
     /// The pending confirmation, if any. Test/inspection seam.

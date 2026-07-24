@@ -248,10 +248,10 @@ async fn abort_mid_run_kills_child() {
 
 #[tokio::test]
 async fn stdin_input_reaches_child_and_echoes_in_reply() {
-    // Opencode is excluded: `opencode run` treats a non-TTY stdin as prompt
-    // content and blocks until EOF, so the daemon gives it a null stdin and has
-    // no mid-run stdin channel for it (see opencode_stdin_is_immediate_eof).
-    for provider in [MockProvider::Claude, MockProvider::Codex] {
+    // Only claude forwards mid-run stdin. Opencode and codex both read a non-TTY
+    // stdin as prompt content and block until EOF, so the daemon gives them a null
+    // stdin and has no mid-run channel (see stdin_is_immediate_eof_for_batch_cli).
+    for provider in [MockProvider::Claude] {
         let dir = MockDir::new();
         let mock = MockCli::new(provider).stdin_echo();
         let env = dir.env_for(&mock);
@@ -295,43 +295,48 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
 }
 
 #[tokio::test]
-async fn opencode_stdin_is_immediate_eof() {
-    // The daemon spawns opencode with a null stdin (piping would deadlock the
-    // real CLI, which reads a non-TTY stdin as prompt content until EOF). The
-    // stdin-echo mock's `read` must therefore see instant EOF — an empty line —
-    // and no stdin sender is ever registered for `input` forwarding.
-    let provider = MockProvider::Opencode;
-    let dir = MockDir::new();
-    let mock = MockCli::new(provider).stdin_echo();
-    let env = dir.env_for(&mock);
-    let registered = Arc::new(Mutex::new(false));
-    let register = registered.clone();
-    let options = RunTaskOptions {
-        conversation: String::new(),
-        resume_session_id: None,
-        provider: harness(provider),
-        prompt: "start".to_string(),
-        cwd: ".".to_string(),
-        env,
-        timeout_ms: 5_000,
-        model: None,
-        agent: None,
-        extra_args: Vec::new(),
-        skip_permissions: false,
-        abort: Abort::new(),
-        on_event: None,
-        on_stdin: Some(Box::new(move |_tx| {
-            *register.lock().unwrap() = true;
-        })),
-    };
-    let run = run_provider_task(options)
-        .await
-        .unwrap_or_else(|e| panic!("opencode failed: {e}"));
-    assert_eq!(run.reply, "got:", "stdin was not immediate-EOF");
-    assert!(
-        !*registered.lock().unwrap(),
-        "no stdin sender should be registered for opencode"
-    );
+async fn stdin_is_immediate_eof_for_batch_cli() {
+    // The daemon spawns opencode AND codex with a null stdin: both `opencode run`
+    // and `codex exec` read a non-TTY stdin as prompt content and block until EOF,
+    // so piping would deadlock the real CLI. The stdin-echo mock's `read` must
+    // therefore see instant EOF — an empty line — and no stdin sender is ever
+    // registered for `input` forwarding.
+    for provider in [MockProvider::Opencode, MockProvider::Codex] {
+        let dir = MockDir::new();
+        let mock = MockCli::new(provider).stdin_echo();
+        let env = dir.env_for(&mock);
+        let registered = Arc::new(Mutex::new(false));
+        let register = registered.clone();
+        let options = RunTaskOptions {
+            conversation: String::new(),
+            resume_session_id: None,
+            provider: harness(provider),
+            prompt: "start".to_string(),
+            cwd: ".".to_string(),
+            env,
+            timeout_ms: 5_000,
+            model: None,
+            agent: None,
+            extra_args: Vec::new(),
+            skip_permissions: false,
+            abort: Abort::new(),
+            on_event: None,
+            on_stdin: Some(Box::new(move |_tx| {
+                *register.lock().unwrap() = true;
+            })),
+        };
+        let run = run_provider_task(options)
+            .await
+            .unwrap_or_else(|e| panic!("{provider:?} failed: {e}"));
+        assert_eq!(
+            run.reply, "got:",
+            "{provider:?} stdin was not immediate-EOF"
+        );
+        assert!(
+            !*registered.lock().unwrap(),
+            "no stdin sender should be registered for {provider:?}"
+        );
+    }
 }
 
 #[tokio::test]

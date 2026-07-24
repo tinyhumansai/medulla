@@ -108,6 +108,100 @@ async fn a_session_showing_a_startup_dialog_is_not_typed_at() {
 }
 
 #[tokio::test]
+async fn codexs_trust_dialog_is_dismissed_so_the_prompt_lands() {
+    // The end-to-end proof of the dismissal path: a session sitting on codex's
+    // trust dialog must not be reported as a wall (as claude's are) but
+    // *answered* — the worker presses Enter to confirm the highlighted "Yes,
+    // continue" default and then types the prompt into the composer it was hiding.
+    //
+    // The child paints the trust dialog, then consumes exactly the one dismissal
+    // byte (Enter = CR), clears the screen the way codex leaves the prompt, and
+    // finally `cat` echoes the paste — so the prompt shows up only if the Enter
+    // cleared the dialog first. `stty -echo -icanon` makes the echo
+    // application-driven, matching a real TUI.
+    let manager = PtyManager::new();
+    let id = manager
+        .open(sh("stty -echo -icanon min 1; printf '\\033[?2004h'; \
+             printf 'Do you trust the contents of this directory?\\r\\n\
+             1. Yes, continue\\r\\n2. No, quit\\r\\n'; \
+             head -c 1 > /dev/null; printf '\\033[2J\\033[H'; cat"))
+        .unwrap();
+    wait_for("trust dialog painted", || {
+        screen_text(&manager, &id).contains("trust the contents of this directory")
+    });
+
+    super::super::inject::inject_prompt(&manager, &id, "ship the fix please")
+        .await
+        .expect("the trust dialog must be dismissed, not reported");
+    wait_for("prompt reached the composer", || {
+        screen_text(&manager, &id).contains("ship the fix please")
+    });
+    assert!(
+        !screen_text(&manager, &id).contains("trust the contents of this directory"),
+        "the dialog must be gone once dismissed, not still on screen"
+    );
+    manager.close(&id);
+}
+
+#[tokio::test]
+async fn codexs_update_prompt_is_skipped_so_the_prompt_lands() {
+    // Proof the interactive update prompt is always *skipped*, not reported: the
+    // worker sends Down, Down, Enter to land on "Skip until next version" and then
+    // types into the composer behind it. The child paints the modal, consumes the
+    // seven skip bytes (ESC[B ESC[B CR), clears the screen, and `cat` echoes the
+    // paste — so the prompt appears only if the skip cleared the modal first.
+    let manager = PtyManager::new();
+    let id = manager
+        .open(sh("stty -echo -icanon min 1; printf '\\033[?2004h'; \
+             printf '1. Update now\\r\\n2. Not now\\r\\n3. Skip until next version\\r\\n'; \
+             head -c 7 > /dev/null; printf '\\033[2J\\033[H'; cat"))
+        .unwrap();
+    wait_for("update prompt painted", || {
+        screen_text(&manager, &id).contains("Skip until next version")
+    });
+
+    super::super::inject::inject_prompt(&manager, &id, "ship the fix please")
+        .await
+        .expect("the update prompt must be skipped, not reported");
+    wait_for("prompt reached the composer", || {
+        screen_text(&manager, &id).contains("ship the fix please")
+    });
+    assert!(
+        !screen_text(&manager, &id).contains("Skip until next version"),
+        "the modal must be gone once skipped, not still on screen"
+    );
+    manager.close(&id);
+}
+
+#[tokio::test]
+async fn a_dismissable_dialog_that_will_not_clear_is_reported_not_typed_at() {
+    // The give-up path: a dialog the worker knows how to answer, whose dismissal
+    // keystrokes do not in fact clear it (a wedged or unexpected variant). After a
+    // bounded number of attempts the worker reports it by name rather than typing
+    // a prompt into a modal still on screen. The child paints codex's trust
+    // dialog, then swallows every keystroke without ever clearing it, so the
+    // dismissal never takes.
+    let manager = PtyManager::new();
+    let id = manager
+        .open(sh("stty -echo -icanon min 1; printf '\\033[?2004h'; \
+                  printf 'Do you trust the contents of this directory?\\r\\n\
+                  1. Yes, continue\\r\\n'; cat > /dev/null"))
+        .unwrap();
+    wait_for("trust dialog painted", || {
+        screen_text(&manager, &id).contains("trust the contents of this directory")
+    });
+
+    let error = super::super::inject::inject_prompt(&manager, &id, "ship the fix")
+        .await
+        .expect_err("a dialog the dismissal cannot clear must be reported");
+    assert!(
+        error.contains("dismissal did not clear it"),
+        "the error must say the dismissal failed: {error}"
+    );
+    manager.close(&id);
+}
+
+#[tokio::test]
 async fn a_dialog_painted_after_the_terminal_modes_is_still_caught() {
     // Regression, measured against a real cold start: Claude Code sets
     // bracketed-paste mode ~0.3s in and paints its first screen *after* that.

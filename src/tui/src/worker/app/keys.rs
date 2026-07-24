@@ -21,6 +21,13 @@ impl WorkerApp {
     pub fn on_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
+        // Mouse reporting and native terminal selection are mutually exclusive.
+        // Keep the release chord reachable from setup and confirmation screens.
+        if ctrl && key.code == KeyCode::Char('o') {
+            self.toggle_mouse();
+            return None;
+        }
+
         // The launch step owns the keyboard until a harness is chosen.
         if self.screen == Screen::Setup {
             return self.on_setup_key(key, ctrl);
@@ -88,7 +95,7 @@ impl WorkerApp {
     ///
     /// Returns [`WorkerCmd::Start`] once both are answered — that is the moment
     /// the worker begins listening for peer work.
-    fn answer_setup(&mut self, index: usize) -> Option<WorkerCmd> {
+    pub(super) fn answer_setup(&mut self, index: usize) -> Option<WorkerCmd> {
         match self.setup_step {
             SetupStep::Mode => {
                 let mode = *EXECUTION_MODES.get(index)?;
@@ -247,7 +254,7 @@ impl WorkerApp {
     }
 
     /// Move the active tab's list cursor.
-    fn move_cursor(&mut self, up: bool) {
+    pub(super) fn move_cursor(&mut self, up: bool) {
         let (index, len) = match self.tab {
             TAB_SESSIONS => (&mut self.session_index, self.sessions.rows().len()),
             TAB_CONTACTS => {

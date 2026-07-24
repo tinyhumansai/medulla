@@ -32,5 +32,6 @@ sha2 = { workspace = true }
 globset = { workspace = true }
 uuid = { workspace = true }
 
-[dev-dependencies]
 tempfile = { workspace = true }
+
+[dev-dependencies]

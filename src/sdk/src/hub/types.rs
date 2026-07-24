@@ -1,8 +1,6 @@
 //! Data types for the tiny.place task-sender hub: a dispatch request, its
 //! terminal outcome, and the error a dispatch can fail with.
 
-use std::time::Duration;
-
 use crate::tinyplace::{HarnessProvider, TokenUsage};
 
 /// A line sink for hub diagnostics.
@@ -29,8 +27,15 @@ pub fn stderr_log() -> HubLog {
 /// A single task to dispatch to a remote tiny.place worker.
 #[derive(Debug, Clone)]
 pub struct TaskRequest {
-    /// Cycle-scoped task id (echoed on the frame; the worker returns it).
+    /// Worker-facing task id (echoed on the frame; the worker returns it). This
+    /// is the wire id, made unique per dispatch so a worker never dedupes two
+    /// different pieces of work that happen to share a name.
     pub task_id: String,
+    /// The orchestrator-facing task id the backend aborts by
+    /// (`medulla:task_abort.taskId`). The runner registers this dispatch's abort
+    /// signal under it, so a `task_abort` for this id cancels the dispatch.
+    /// Distinct from [`task_id`](Self::task_id), which is the worker-facing wire id.
+    pub abort_id: String,
     /// Correlates every frame in one cycle; `None` uses the literal `"cyc"`.
     pub cycle_id: Option<String>,
     /// The instruction/prompt the worker runs.
@@ -42,8 +47,6 @@ pub struct TaskRequest {
     /// Optional model hint (the worker maps it to `--model`/`-m`, else its
     /// configured default).
     pub model: Option<String>,
-    /// How long to wait for a terminal `reply`/`error` before giving up.
-    pub timeout: Duration,
 }
 
 /// The terminal result of a dispatched task.
@@ -60,8 +63,15 @@ pub struct TaskOutcome {
 /// Why a dispatch failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunError {
-    /// No terminal frame arrived before the request's `timeout`.
+    /// A liveness bound reaped the dispatch: either the peer never showed any
+    /// sign of life within the ack window across every reset+resend attempt, or
+    /// it acked and then went silent past the no-progress (idle) window. Not a
+    /// task deadline — that belongs to the orchestrator, which aborts separately.
     Timeout,
+    /// The orchestrator aborted the task (`medulla:task_abort`): the hub told the
+    /// worker to stop and gave up waiting. Terminal and NOT retryable — the
+    /// backend deliberately cancelled it, so re-running would undo its intent.
+    Aborted,
     /// The worker returned an `error` frame (carrying its message).
     Worker(String),
     /// The send itself failed, or the waiter was dropped (transport-shaped).
@@ -72,6 +82,7 @@ impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RunError::Timeout => write!(f, "tiny.place task timed out"),
+            RunError::Aborted => write!(f, "task aborted by orchestrator"),
             RunError::Worker(m) => write!(f, "worker error: {m}"),
             RunError::Transport(m) => write!(f, "transport error: {m}"),
         }

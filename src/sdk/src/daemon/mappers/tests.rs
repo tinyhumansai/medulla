@@ -165,6 +165,137 @@ fn codex_marks_error_result() {
 }
 
 #[test]
+fn codex_new_exec_json_stream_maps_message_command_and_usage() {
+    // Real codex >= 0.140 `exec --json` shapes: a thread/turn/item event stream
+    // with the detail on a nested `item` (not the older `event_msg`/`payload`),
+    // captured verbatim from codex-cli 0.142.
+    let mut mapper = HarnessLineMapper::new("codex");
+    let lines = [
+        r#"{"type":"thread.started","thread_id":"019f-abc"}"#,
+        r#"{"type":"turn.started"}"#,
+        r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"BANANA"}}"#,
+        r#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat note.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}"#,
+        r#"{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat note.txt'","aggregated_output":"hello\n","exit_code":0,"status":"completed"}}"#,
+        r#"{"type":"turn.completed","usage":{"input_tokens":24659,"cached_input_tokens":19200,"output_tokens":76}}"#,
+    ];
+    let mut events = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        events.extend(mapper.map_line(line, index as i64));
+    }
+
+    // thread.started yields no event; the rest map in order.
+    let kinds: Vec<&str> = events.iter().map(kind_of).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "status",
+            "agent_message",
+            "tool_call",
+            "tool_result",
+            "status"
+        ]
+    );
+
+    // The agent message is the reply source.
+    assert_eq!(events[1].event.payload["text"], "BANANA");
+    // The shell command becomes a tool_call (display = the command) then a
+    // tool_result carrying its exit status and output.
+    assert_eq!(events[2].event.payload["tool_kind"], "shell");
+    assert_eq!(
+        events[2].event.payload["display"],
+        "/bin/zsh -lc 'cat note.txt'"
+    );
+    assert_eq!(events[2].event.payload["call_id"], "item_1");
+    assert_eq!(events[3].event.payload["ok"], true);
+    assert_eq!(events[3].event.payload["output"], "hello\n");
+    // turn.started/completed bracket the turn as running/idle status.
+    assert_eq!(events[0].event.payload["state"], "running");
+    assert_eq!(events[4].event.payload["state"], "idle");
+
+    // Usage is scanned off the `turn.completed` record.
+    assert_eq!(
+        mapper.usage(),
+        Some(TokenUsage {
+            input_tokens: 24659,
+            output_tokens: 76
+        })
+    );
+}
+
+#[test]
+fn codex_new_command_nonzero_exit_is_an_error() {
+    let events = map_all(
+        "codex",
+        &[
+            r#"{"type":"item.completed","item":{"id":"c9","type":"command_execution","command":"false","aggregated_output":"nope","exit_code":2,"status":"completed"}}"#,
+        ],
+    );
+    assert_eq!(kind_of(&events[0]), "tool_result");
+    assert_eq!(events[0].event.payload["is_error"], true);
+    assert_eq!(events[0].event.payload["ok"], false);
+}
+
+#[test]
+fn codex_new_reasoning_item_uses_text_then_summary_fallback() {
+    // A `reasoning` item surfaces as agent_thinking. It prefers its own `text`,
+    // and falls back to the `summary` content when `text` is absent — codex emits
+    // one shape or the other depending on the model.
+    let direct = map_all(
+        "codex",
+        &[
+            r#"{"type":"item.completed","item":{"id":"r1","type":"reasoning","text":"thinking hard"}}"#,
+        ],
+    );
+    assert_eq!(kind_of(&direct[0]), "agent_thinking");
+    assert_eq!(direct[0].event.payload["text"], "thinking hard");
+
+    let via_summary = map_all(
+        "codex",
+        &[
+            r#"{"type":"item.completed","item":{"id":"r2","type":"reasoning","summary":[{"type":"summary_text","text":"a plan"}]}}"#,
+        ],
+    );
+    assert_eq!(kind_of(&via_summary[0]), "agent_thinking");
+    assert_eq!(via_summary[0].event.payload["text"], "a plan");
+}
+
+#[test]
+fn codex_new_stream_ignores_empty_and_unactionable_items() {
+    // Items that carry no text we would surface produce nothing rather than an
+    // empty event: a reasoning/message item with no text, an item.started message
+    // (the reply is emitted once, on completion), an item type we do not map, and
+    // a record whose `item` object is missing entirely.
+    let events = map_all(
+        "codex",
+        &[
+            r#"{"type":"item.completed","item":{"id":"r3","type":"reasoning"}}"#,
+            r#"{"type":"item.completed","item":{"id":"a1","type":"agent_message","text":""}}"#,
+            r#"{"type":"item.started","item":{"id":"a2","type":"agent_message","text":"partial"}}"#,
+            r#"{"type":"item.completed","item":{"id":"x1","type":"file_change"}}"#,
+            r#"{"type":"item.completed"}"#,
+        ],
+    );
+    assert!(
+        events.is_empty(),
+        "none of these items should map: {events:?}"
+    );
+}
+
+#[test]
+fn codex_legacy_response_item_reasoning_falls_back_to_content() {
+    // The older `response_item` reasoning path: when `summary` is empty, the text
+    // comes from `content` (reasoning_text), still surfaced as agent_thinking.
+    let events = map_all(
+        "codex",
+        &[
+            r#"{"type":"response_item","payload":{"type":"reasoning","summary":[],"content":[{"type":"reasoning_text","text":"old reasoning"}]}}"#,
+        ],
+    );
+    assert_eq!(kind_of(&events[0]), "agent_thinking");
+    assert_eq!(events[0].event.payload["text"], "old reasoning");
+}
+
+#[test]
 fn opencode_flat_text_tool_and_error() {
     let text = r#"{"type":"text","part":{"type":"text","text":"working on it"}}"#;
     let tool_call = r#"{"type":"tool","part":{"type":"tool","tool":"read","callID":"r1","state":{"status":"running","input":{"file_path":"/a/b.rs"}}}}"#;

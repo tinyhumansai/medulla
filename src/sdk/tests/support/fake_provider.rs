@@ -108,6 +108,43 @@ pub fn opencode_script(reply_text: &str) -> String {
     )
 }
 
+/// A codex `exec --json` script that echoes its prompt (the last argv) back as
+/// the agent message — so the reply is *derived from the instruction* — and
+/// appends that prompt to `marker_path`, one line per invocation.
+///
+/// The marker file lets a test count how many codex sessions the worker actually
+/// spun up (one child process per dispatched task). Reply text is
+/// `"codex: <prompt>"`; a `task_started` event precedes it (so the run emits a
+/// status frame) and a `token_count` event reports `input_tokens: 42,
+/// output_tokens: 17` (so the reply carries usage). Uses only `/bin/sh`
+/// builtins, so it needs no PATH tools.
+pub fn codex_echo_script(marker_path: &str) -> String {
+    // A placeholder (rather than `format!`) keeps the JSON braces literal.
+    const TEMPLATE: &str = r#"#!/bin/sh
+for a in "$@"; do prompt="$a"; done
+printf '%s\n' "$prompt" >> '__MARKER__'
+printf '%s\n' '{"type":"event_msg","timestamp":"2026-07-05T00:00:00Z","payload":{"type":"task_started"}}'
+printf '%s\n' '{"type":"event_msg","timestamp":"2026-07-05T00:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":42,"output_tokens":17}}}}'
+printf '{"type":"event_msg","timestamp":"2026-07-05T00:00:00Z","payload":{"type":"agent_message","message":"codex: %s"}}\n' "$prompt"
+"#;
+    TEMPLATE.replace("__MARKER__", marker_path)
+}
+
+/// A codex `exec --json` script that records its prompt, holds ~1s, then replies
+/// — long enough for a test to send a mid-run `input` frame while the task is
+/// still running. It never reads stdin: codex `exec` is one-shot with no mid-run
+/// input channel, so the daemon gives it a null stdin and rejects `input` frames.
+pub fn codex_slow_script(marker_path: &str) -> String {
+    const TEMPLATE: &str = r#"#!/bin/sh
+for a in "$@"; do prompt="$a"; done
+printf '%s\n' "$prompt" >> '__MARKER__'
+printf '%s\n' '{"type":"event_msg","timestamp":"2026-07-05T00:00:00Z","payload":{"type":"task_started"}}'
+sleep 1
+printf '{"type":"event_msg","timestamp":"2026-07-05T00:00:00Z","payload":{"type":"agent_message","message":"codex: %s"}}\n' "$prompt"
+"#;
+    TEMPLATE.replace("__MARKER__", marker_path)
+}
+
 /// A claude script that echoes a strict-JSON capability self-report as its
 /// result (used by the capabilities probe).
 pub fn claude_capabilities_script() -> String {

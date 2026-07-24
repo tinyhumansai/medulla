@@ -1,6 +1,5 @@
-//! Construction, state accessors/setters, snapshot refresh, and the small
-//! tab/lane helpers for [`App`]. This is the observable-state surface: the
-//! test/inspection seams and the mutators the event loop calls between ticks.
+//! Construction, state accessors, snapshot refresh, and tab/lane helpers for
+//! [`App`], including inspection seams and event-loop mutators.
 
 use std::sync::Arc;
 
@@ -56,6 +55,7 @@ impl App {
             memory_ingesting: false,
             feedback: Default::default(),
             repo: Default::default(),
+            tasks: medulla::tasks::TaskDocument::default(),
             lane_claims: Default::default(),
             decision_open: false,
             decision_index: 0,
@@ -92,17 +92,26 @@ impl App {
         &self.status
     }
 
-    /// Point appearance persistence at a config file (the user-global
-    /// `config.toml`). Wiring seam so feature tests avoid the real home.
+    /// Point appearance persistence at the user-global `config.toml`; injectable
+    /// so feature tests avoid the real home.
     pub fn set_config_path(&mut self, path: std::path::PathBuf) {
         self.config_path = Some(path);
     }
 
-    /// Point the Account subpage's logout at a Medulla home directory. Wiring
-    /// seam so feature tests never clear the real credential store. Without it,
-    /// logout reports that it has nowhere to write rather than guessing.
+    /// Configure Account logout with a testable home; without it, logout reports no writable location.
     pub fn set_medulla_home(&mut self, home: std::path::PathBuf) {
         self.medulla_home = Some(home);
+        if let Some(home) = &self.medulla_home {
+            if let Ok(repository) = medulla::tasks::TaskRepository::in_home(home) {
+                self.tasks = repository.document().clone();
+            }
+        }
+    }
+
+    /// Replace the task document returned by background persistence/sync work.
+    pub fn set_tasks(&mut self, document: medulla::tasks::TaskDocument) {
+        self.tasks = document;
+        self.selected = self.selected.min(self.tasks.tasks.len().saturating_sub(1));
     }
 
     /// The active Settings subpage name. Test/inspection seam.
@@ -319,6 +328,7 @@ impl App {
     pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
         match self.tab() {
             "Memory" => Some(Cmd::LoadMemory),
+            "Tasks" => Some(Cmd::LoadTasks),
             "Agents" | "Repo" => Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces())),
             "Settings" => match self.settings_index {
                 SP_USAGE => Some(Cmd::LoadUsage),

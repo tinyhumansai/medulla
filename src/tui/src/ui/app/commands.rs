@@ -176,6 +176,55 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
+            PromptKind::TaskCreate => {
+                if text.is_empty() {
+                    self.set_status("Tasks · title is required");
+                    return None;
+                }
+                let now = medulla::tasks::now_timestamp();
+                Some(Cmd::SaveTask(Box::new(medulla::tasks::Task {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    title: text,
+                    description: String::new(),
+                    status: Default::default(),
+                    source: None,
+                    recurrence: None,
+                    created_at: now.clone(),
+                    updated_at: now,
+                    last_synced_at: None,
+                    dispatch: serde_json::Value::Null,
+                })))
+            }
+            PromptKind::TaskEdit(id) => {
+                if text.is_empty() {
+                    self.set_status("Tasks · title is required");
+                    return None;
+                }
+                let mut task = self.tasks.tasks.iter().find(|task| task.id == id)?.clone();
+                task.title = text;
+                task.updated_at = medulla::tasks::now_timestamp();
+                Some(Cmd::SaveTask(Box::new(task)))
+            }
+            PromptKind::SourceAdd => {
+                let repository = text.trim().to_string();
+                if repository.is_empty() {
+                    self.set_status("Sources · repository is required");
+                    return None;
+                }
+                let source = medulla::tasks::SourceConfig {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    provider: "github".into(),
+                    enabled: true,
+                    repository,
+                    state: "open".into(),
+                    labels: Vec::new(),
+                    filter: None,
+                    token: std::env::var("GITHUB_TOKEN").ok(),
+                };
+                let mut document = self.tasks.clone();
+                document.sources.push(source);
+                Some(Cmd::SaveTasks(Box::new(document)))
+            }
             PromptKind::LaneClaim { lane_key } => {
                 self.submit_lane_claim(lane_key, &text);
                 None

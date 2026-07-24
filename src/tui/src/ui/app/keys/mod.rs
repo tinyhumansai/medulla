@@ -8,7 +8,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::types::{tab_pos, App, Cmd, TABS};
+use super::types::{tab_pos, App, Cmd, Prompt, PromptKind, TABS};
 use crate::ui::command::CopyScope;
 use crate::ui::composer::{delete_before, insert_at, move_caret_row, Draft};
 
@@ -243,6 +243,49 @@ impl App {
             }
             KeyCode::PageDown if tab == "Repo" => {
                 self.repo.diff_scroll = self.repo.diff_scroll.saturating_add(10);
+            }
+            // Local task CRUD and explicit provider synchronization.
+            KeyCode::Up if tab == "Tasks" => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Down if tab == "Tasks" => {
+                self.selected = (self.selected + 1).min(self.tasks.tasks.len().saturating_sub(1))
+            }
+            KeyCode::Char('a') if tab == "Tasks" => {
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::TaskCreate,
+                    title: "New task title".into(),
+                    draft: Draft::new(),
+                });
+                self.set_status("Tasks · Enter save · Esc cancel");
+            }
+            KeyCode::Char('e') if tab == "Tasks" => {
+                if let Some(task) = self.tasks.tasks.get(self.selected).cloned() {
+                    self.prompt = Some(Prompt {
+                        kind: PromptKind::TaskEdit(task.id),
+                        title: "Edit task title".into(),
+                        draft: insert_at("", 0, &task.title),
+                    });
+                    self.set_status("Tasks · Enter save · Esc cancel");
+                }
+            }
+            KeyCode::Char('d') if tab == "Tasks" => {
+                if let Some(task) = self.tasks.tasks.get(self.selected).cloned() {
+                    return Some(Cmd::DeleteTask(task.id));
+                }
+            }
+            KeyCode::Char('s') if tab == "Tasks" => {
+                if let Some(source) = self.tasks.sources.iter().find(|source| source.enabled) {
+                    return Some(Cmd::SyncTasks(source.id.clone()));
+                } else {
+                    self.set_status("Sources · none configured");
+                }
+            }
+            KeyCode::Char('S') if tab == "Tasks" => {
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::SourceAdd,
+                    title: "GitHub repository (owner/name)".into(),
+                    draft: Draft::new(),
+                });
+                self.set_status("Sources · Enter save · Esc cancel");
             }
             // Memory browse.
             KeyCode::Up if tab == "Memory" => {

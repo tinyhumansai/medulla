@@ -26,8 +26,8 @@ use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 /// Trace, Context, and Feedback used to live here. They are secondary surfaces —
 /// two of them diagnostic — so they now sit under Settings, keeping the tab bar
 /// to the views a session is actually driven from.
-pub const TABS: [&str; 7] = [
-    "Overview", "Chat", "Agents", "Repo", "Routing", "Memory", "Settings",
+pub const TABS: [&str; 8] = [
+    "Overview", "Chat", "Agents", "Repo", "Tasks", "Routing", "Memory", "Settings",
 ];
 
 /// The Routing tab's left-nav pages.
@@ -132,6 +132,16 @@ pub enum Cmd {
         /// Whether to walk everything rather than resuming from the cursor.
         backfill: bool,
     },
+    /// Reload the local task document.
+    LoadTasks,
+    /// Persist a new or edited local task.
+    SaveTask(Box<medulla::tasks::Task>),
+    /// Persist the complete local task document.
+    SaveTasks(Box<medulla::tasks::TaskDocument>),
+    /// Remove a local task by id.
+    DeleteTask(String),
+    /// Synchronize one configured task source.
+    SyncTasks(String),
     /// Load a page of the feedback board for the Feedback tab.
     LoadFeedback(FeedbackQuery),
     /// Load one board item's comments for the detail pane.
@@ -187,6 +197,12 @@ pub(super) enum MemoryEntry {
 
 /// The action a small inline prompt (Workers add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Create a task from a title line.
+    TaskCreate,
+    /// Edit the selected task title.
+    TaskEdit(String),
+    /// Add a GitHub source from `owner/repository`.
+    SourceAdd,
     /// Set or clear the manual permitted-path claim for one visible lane.
     LaneClaim {
         /// Stable lane key.
@@ -365,6 +381,8 @@ pub struct App {
     pub(super) feedback: FeedbackState,
     /// Local Git ledger state for the Repo tab.
     pub(super) repo: RepoState,
+    /// Durable local task document displayed by the Tasks tab.
+    pub(super) tasks: medulla::tasks::TaskDocument,
     /// Manual permitted-path globs keyed by stable Agents lane id.
     pub(super) lane_claims: std::collections::BTreeMap<String, Vec<String>>,
     /// Whether the prepared-decision modal is visible.

@@ -21,6 +21,7 @@ impl DaemonRuntime {
     /// lock-serialized `send`.
     pub fn new(config: DaemonConfig, run_task: RunTaskFn, send: SendFn) -> Self {
         let concurrency = config.concurrency.max(1);
+        let accessible_dirs = config.accessible_dirs.clone();
         DaemonRuntime {
             inner: Arc::new(Inner {
                 config,
@@ -36,6 +37,7 @@ impl DaemonRuntime {
                 inflight_count: AtomicUsize::new(0),
                 inflight_idle: Notify::new(),
                 capabilities: TokioMutex::new(None),
+                accessible_dirs: StdMutex::new(accessible_dirs),
             }),
         }
     }
@@ -106,6 +108,15 @@ impl DaemonRuntime {
         for abort in self.inner.controllers.lock().unwrap().values() {
             abort.abort();
         }
+    }
+
+    /// Replace the workspace roots advertised to orchestrators.
+    ///
+    /// Clears the cached capability probe so the next request observes the
+    /// change immediately. The task working directory itself is unchanged.
+    pub async fn set_accessible_dirs(&self, dirs: Vec<String>) {
+        *self.inner.accessible_dirs.lock().unwrap() = dirs;
+        *self.inner.capabilities.lock().await = None;
     }
 
     /// Emit a diagnostic line if a sink is attached.

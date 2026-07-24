@@ -37,6 +37,7 @@ impl DaemonRuntime {
         self.log(&format!("capability probe → {}", provider.as_str()));
         let abort = Abort::new();
         let controller_id = self.register_controller(abort.clone());
+        let accessible_dirs = self.inner.accessible_dirs.lock().unwrap().clone();
         // Compete for the concurrency budget like a task.
         let permit = self
             .inner
@@ -48,7 +49,7 @@ impl DaemonRuntime {
             provider,
             run_task: self.inner.run_task.clone(),
             workspace: self.inner.config.workspace.clone(),
-            accessible_dirs: self.inner.config.accessible_dirs.clone(),
+            accessible_dirs,
             env: self.inner.config.env.clone(),
             providers: self.inner.config.providers.clone(),
             timeout_ms: self

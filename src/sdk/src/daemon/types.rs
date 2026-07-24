@@ -116,6 +116,11 @@ pub(super) struct Inner {
     pub(super) inflight_idle: Notify,
     /// Cached capability probe result.
     pub(super) capabilities: TokioMutex<Option<AgentCapabilities>>,
+    /// Workspace roots currently approved for capability advertisement.
+    ///
+    /// Kept outside the immutable config so the daemon TUI can change the
+    /// allowlist without restarting the worker.
+    pub(super) accessible_dirs: StdMutex<Vec<String>>,
 }
 
 /// The provider-agnostic daemon task state machine. Cheap to clone (an `Arc`),

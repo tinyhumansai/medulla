@@ -193,3 +193,71 @@ fn clear_setting_on_a_missing_file_is_a_no_op() {
     super::clear_setting(&path, "medulla", "maxPasses").expect("no-op");
     assert!(!path.exists(), "clearing must not create the file");
 }
+
+#[test]
+fn the_hub_roster_round_trips_through_the_config_file() {
+    // The whole point: a worker added in the Workers tab must still be there on
+    // the next launch. It used to live only in memory, seeded from the
+    // environment at boot, so the tab was empty every time however many peers
+    // were reachable.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[onboarding]\nwelcomeCompleted = true\n").expect("seed");
+
+    let workers = vec![
+        crate::config::HubWorkerConfig {
+            id: "alpha".into(),
+            address: "3Hob1FxUwsy1K2rweppbmCkuPef6unAr5Amj6kQ2fM3A".into(),
+            harness: "claude".into(),
+            label: Some("laptop".into()),
+            selected: true,
+        },
+        crate::config::HubWorkerConfig {
+            id: "beta".into(),
+            address: "@someone".into(),
+            harness: "codex".into(),
+            label: None,
+            selected: false,
+        },
+    ];
+    super::persist_hub_workers(&path, &workers).expect("write");
+
+    let parsed: crate::config::TuiConfig =
+        toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
+    assert_eq!(
+        parsed.hub.workers, workers,
+        "the roster must survive a save"
+    );
+    assert!(
+        parsed.onboarding.welcome_completed,
+        "an unrelated section must not be trampled"
+    );
+}
+
+#[test]
+fn removing_the_last_worker_is_remembered_as_removal() {
+    // A merge would resurrect what the operator just deleted, so the list is
+    // replaced wholesale — including replacing it with nothing.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    super::persist_hub_workers(
+        &path,
+        &[crate::config::HubWorkerConfig {
+            id: "alpha".into(),
+            address: "addr".into(),
+            harness: "claude".into(),
+            label: None,
+            selected: false,
+        }],
+    )
+    .expect("write");
+    super::persist_hub_workers(&path, &[]).expect("write empty");
+
+    let parsed: crate::config::TuiConfig =
+        toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
+    assert!(
+        parsed.hub.workers.is_empty(),
+        "got {:?}",
+        parsed.hub.workers
+    );
+}

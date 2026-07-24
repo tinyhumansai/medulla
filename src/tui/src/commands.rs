@@ -90,7 +90,8 @@ pub(crate) fn run_logout() -> anyhow::Result<()> {
 pub(crate) async fn run_hub(_args: &[String]) -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let home = medulla::home::medulla_home(&env);
-    match crate::hub_relay::build_hub_config(&env, &home) {
+    // The standalone `medulla hub` owns its terminal, so stderr is right there.
+    match crate::hub_relay::build_hub_config_with_log(&env, &home, medulla::hub::stderr_log()) {
         Some(config) => medulla::hub::run_hub(config).await,
         None => anyhow::bail!(
             "hub: nothing to run — set MEDULLA_TINYPLACE_PEER (or MEDULLA_HUB_WORKERS) and run \

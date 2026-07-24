@@ -33,8 +33,8 @@ pub type SendFn =
 /// A clock, in epoch ms (injectable for tests).
 pub type NowFn = Arc<dyn Fn() -> i64 + Send + Sync>;
 
-/// A line sink for daemon diagnostics.
-pub type LogFn = Arc<dyn Fn(&str) + Send + Sync>;
+/// A line sink for daemon diagnostics. See [`crate::logging::LineSink`].
+pub type LogFn = crate::logging::LineSink;
 
 /// Non-callback daemon configuration.
 #[derive(Clone)]
@@ -77,6 +77,9 @@ pub(super) struct RunningTask {
     pub(super) stdin: Option<mpsc::UnboundedSender<String>>,
     /// Input buffered before the child's stdin became available.
     pub(super) pending_input: Vec<String>,
+    /// Stops this task. Held per-task rather than only in the global controller
+    /// map so an `abort` frame can cancel exactly the task it names.
+    pub(super) abort: super::providers::Abort,
 }
 
 /// Shared, `Arc`-wrapped runtime state behind [`DaemonRuntime`].

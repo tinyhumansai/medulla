@@ -9,6 +9,7 @@ use crate::runtime::AgentDescriptor;
 use crate::ui::events::{EventEnvelope, TuiEvent};
 
 use super::fmt::{event_kind_color, tokens_suffix, tool_line};
+use super::review::ReviewTracker;
 use super::types::{AgentLane, AgentRole, TaskState, TaskStatus, TurnBlock};
 
 /// Insertion-ordered lane collection.
@@ -72,12 +73,14 @@ fn touch_task(lane: &mut AgentLane, task_id: &str, at: i64, block: Option<TurnBl
         None => {
             lane.tasks.push(TaskState {
                 task_id: task_id.to_string(),
+                instruction: None,
                 status: TaskStatus::Running,
                 turns: 0,
                 last_at: at,
                 turn_blocks: Vec::new(),
                 attention: None,
                 question_id: None,
+                review: None,
             });
             lane.tasks.len() - 1
         }
@@ -107,6 +110,7 @@ pub fn derive_agent_lanes(
     let mut tier_tokens: HashMap<usize, i64> = HashMap::new();
     let mut workers = Lanes::new();
     let mut task_agent: HashMap<String, String> = HashMap::new();
+    let mut reviews = ReviewTracker::default();
 
     // Seed one lane per connected roster agent (roster order).
     for agent in roster {
@@ -186,6 +190,7 @@ pub fn derive_agent_lanes(
                 depth,
                 agent_id,
             } => {
+                reviews.record_start(task_id, instruction);
                 if let Some(a) = agent_id {
                     task_agent.insert(task_id.clone(), a.clone());
                 }
@@ -230,7 +235,8 @@ pub fn derive_agent_lanes(
                 lane.turns.push(block.clone());
                 lane.last_at = at;
                 lane.active_tasks += 1;
-                touch_task(lane, task_id, at, Some(block));
+                let idx = touch_task(lane, task_id, at, Some(block));
+                lane.tasks[idx].instruction = Some(instruction.clone());
             }
             TuiEvent::TaskEvent {
                 task_id,
@@ -238,6 +244,7 @@ pub fn derive_agent_lanes(
                 content,
                 harness: h,
             } => {
+                reviews.record_note(task_id, content);
                 let key = lane_key_for(task_id, &task_agent);
                 ensure_lane(&mut workers, &key, task_id, &task_agent, at);
                 let lane = workers.get_mut(&key).unwrap();
@@ -278,6 +285,7 @@ pub fn derive_agent_lanes(
                 lane.tasks[idx].question_id = question_id.clone();
             }
             TuiEvent::TaskComplete { digest } => {
+                reviews.record_note(&digest.task_id, &digest.digest);
                 // §3.3(4): tolerate a `task_complete` whose `task_start` was never seen
                 // (or was evicted) — ensure the lane exists rather than dropping the
                 // completion, the exact fold bug the contract flags.
@@ -390,6 +398,7 @@ pub fn derive_agent_lanes(
 
     // Tag worker lanes with their harness.
     let mut worker_lanes = workers.into_ordered();
+    reviews.apply(&mut worker_lanes);
     for lane in &mut worker_lanes {
         let tag = lane
             .harness_label

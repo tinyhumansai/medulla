@@ -15,6 +15,11 @@ use super::types::{
 pub fn parse_command(args: &[String]) -> Command {
     match args.first().map(String::as_str) {
         Some("run") => Command::Run,
+        // `--tui` selects the worker-daemon screen instead of the headless
+        // daemon. It is one process either way: the TUI *is* the daemon, so the
+        // flag chooses a face, not a second program. Must precede the bare
+        // `daemon` arm, which would otherwise match first and swallow the flag.
+        Some("daemon") if args.iter().any(|a| a == "--tui") => Command::DaemonTui,
         Some("daemon") => Command::Daemon,
         Some("version") | Some("--version") | Some("-v") => Command::Version,
         Some("help") | Some("--help") | Some("-h") => Command::Help,
@@ -270,6 +275,9 @@ Usage:\n  \
 medulla                 Start the interactive chat TUI (default)\n  \
 medulla run <text>      Submit one instruction to a local medulla-serve socket and stream events (JSON lines)\n  \
 medulla daemon [flags]  Run the headless coding-agent daemon (serves tasks over tiny.place)\n  \
+medulla daemon --tui    Run the daemon with its operator screen\n  \
+                        --workspace <dir>      where peer tasks run\n  \
+                        --no-trust-workspace   don't pre-trust it with claude\n  \
 medulla sessions        List recent claude/codex sessions as JSON\n  \
 medulla codex [args]    Run Codex in your terminal, bridged to tiny.place\n  \
 medulla claude [args]   Run Claude Code in your terminal, bridged to tiny.place\n  \
@@ -282,6 +290,16 @@ medulla commit [flags]  Commit exactly the named changed paths\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
+Daemon flags:\n  \
+--tui                   Show the operator screen: sessions/log, contacts, requests\n  \
+--providers <a,b>       Restrict to these coding agents (default: all found on PATH)\n  \
+--workspace <dir>       Directory tasks run in (default: cwd)\n  \
+--handle <name>         Register this tiny.place handle on startup\n  \
+--model <name>          Default model hint passed to the harness\n  \
+--concurrency <n>       Maximum tasks running at once\n  \
+--once                  Drain the inbox once and exit (probe)\n  \
+--no-onboard            Skip key publishing and directory registration\n  \
+--dangerously-skip-permissions  Pass the harness its skip-permissions flag\n\n\
 Wrapper flags:\n  \
 --no-bridge             Run the CLI as a plain passthrough (no tiny.place bridge)\n  \
 --                      Pass all following arguments to the CLI verbatim\n\n\

@@ -8,6 +8,9 @@ use std::process::{Command, Output};
 use super::types::{BranchState, CommitSummary, FileChange, WorkspaceError, WorkspaceSnapshot};
 
 /// Run Git in `workspace`, preserving every argument as a separate process arg.
+///
+/// Sets `GIT_OPTIONAL_LOCKS=0` so that read-only commands never compete with a
+/// concurrent `git add` or `git commit` for the index lock.
 fn run_git<I, S>(
     workspace: &Path,
     operation: &'static str,
@@ -21,6 +24,7 @@ where
         .arg("-C")
         .arg(workspace)
         .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .output()
         .map_err(|source| WorkspaceError::Spawn { operation, source })?;
     if output.status.success() {
@@ -165,7 +169,9 @@ pub(super) fn parse_status(
     Ok(changes)
 }
 
-/// Return paths changed in either the index or worktree, without duplicates.
+/// Return paths changed in the index, worktree, or untracked fileset, without
+/// duplicates. Untracked files are included so that a review request for newly
+/// created files carries complete evidence.
 pub fn diff_name_only(workspace: &Path) -> Result<Vec<PathBuf>, WorkspaceError> {
     let mut paths = BTreeSet::new();
     for args in [
@@ -177,6 +183,19 @@ pub fn diff_name_only(workspace: &Path) -> Result<Vec<PathBuf>, WorkspaceError> 
             if !field.is_empty() {
                 paths.insert(PathBuf::from(String::from_utf8_lossy(field).into_owned()));
             }
+        }
+    }
+    // Include untracked (but not ignored) files that `git diff` alone does not
+    // cover — a newly created file that has never been staged shows as `??` in
+    // status but is absent from both `git diff` and `git diff --cached`.
+    let output = run_git(
+        workspace,
+        "untracked",
+        ["ls-files", "--others", "--exclude-standard", "-z"],
+    )?;
+    for field in output.stdout.split(|byte| *byte == 0) {
+        if !field.is_empty() {
+            paths.insert(PathBuf::from(String::from_utf8_lossy(field).into_owned()));
         }
     }
     Ok(paths.into_iter().collect())
@@ -221,9 +240,13 @@ pub fn diff(workspace: &Path, path: &Path) -> Result<String, WorkspaceError> {
 }
 
 /// Return up to `limit` recent commits, newest first.
+///
+/// An initialized repository that has no commits yet (an "unborn" repository)
+/// returns an empty list rather than failing — `git log` exits 128 for that
+/// case, which is not an inspection error.
 pub fn log_recent(workspace: &Path, limit: usize) -> Result<Vec<CommitSummary>, WorkspaceError> {
     let format = "%H%x1f%h%x1f%an%x1f%at%x1f%s%x00";
-    let output = run_git(
+    let output = try_git(
         workspace,
         "log",
         [
@@ -232,6 +255,17 @@ pub fn log_recent(workspace: &Path, limit: usize) -> Result<Vec<CommitSummary>, 
             format!("--format={format}"),
         ],
     )?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("does not have any commits yet") {
+            return Ok(Vec::new());
+        }
+        return Err(WorkspaceError::Git {
+            operation: "log",
+            workspace: workspace.to_path_buf(),
+            message: stderr.split_whitespace().collect::<Vec<_>>().join(" "),
+        });
+    }
     parse_log(workspace, &output.stdout)
 }
 

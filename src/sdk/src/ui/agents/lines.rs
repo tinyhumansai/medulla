@@ -116,12 +116,35 @@ pub fn lane_lines(lane: Option<&AgentLane>, width: usize) -> Vec<Line> {
 /// The per-task transcript for a task-focused view.
 pub fn task_lines(task: &TaskState, width: usize) -> Vec<Line> {
     let cols = width.max(20);
+    let mut review_lines = match &task.review {
+        Some(crate::autoreview::ReviewVerdict::Approve) => vec![Line {
+            text: "✓ reviewed".into(),
+            color: Some("green".into()),
+            dim: false,
+        }],
+        Some(crate::autoreview::ReviewVerdict::Findings(findings)) => {
+            let mut lines = vec![Line {
+                text: format!("✗ findings({})", findings.len()),
+                color: Some("red".into()),
+                dim: false,
+            }];
+            lines.extend(findings.iter().map(|finding| Line {
+                text: format!("- {finding}"),
+                color: Some("red".into()),
+                dim: false,
+            }));
+            lines
+        }
+        None => Vec::new(),
+    };
     if task.turn_blocks.is_empty() {
-        return vec![Line {
+        review_lines.push(Line {
             text: "No turns yet.".into(),
             dim: true,
             ..Default::default()
-        }];
+        });
+        return review_lines;
     }
-    blocks_to_lines(&task.turn_blocks, cols)
+    review_lines.extend(blocks_to_lines(&task.turn_blocks, cols));
+    review_lines
 }

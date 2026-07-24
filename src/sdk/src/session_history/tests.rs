@@ -187,12 +187,13 @@ fn discover_newest_session_file_matches_cwd_and_skips_old_and_ignored() {
     );
 
     let ignored = std::collections::HashSet::new();
-    let found = discover_newest_session_file(
+    let found = discover_session_file(
         &env,
         SessionAgentKind::Claude,
         "/does/not/matter",
         0,
         &ignored,
+        None,
     )
     .expect("a cwd-less session should be discovered");
     assert_eq!(found.id, "match-1");
@@ -201,16 +202,17 @@ fn discover_newest_session_file_matches_cwd_and_skips_old_and_ignored() {
     let mut ignored = std::collections::HashSet::new();
     ignored.insert(std::fs::canonicalize(&matching).unwrap());
     assert!(
-        discover_newest_session_file(&env, SessionAgentKind::Claude, "/x", 0, &ignored).is_none()
+        discover_session_file(&env, SessionAgentKind::Claude, "/x", 0, &ignored, None).is_none()
     );
 
     // A min_mtime far in the future skips every file.
-    assert!(discover_newest_session_file(
+    assert!(discover_session_file(
         &env,
         SessionAgentKind::Claude,
         "/x",
         i64::MAX,
-        &std::collections::HashSet::new()
+        &std::collections::HashSet::new(),
+        None,
     )
     .is_none());
 }
@@ -366,4 +368,81 @@ fn dedupe_keeps_the_freshest_file_for_an_id() {
     let sessions = list_recent_sessions(&env, "/tmp", None, None);
     assert_eq!(sessions.len(), 1, "the two files dedupe to one session");
     let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn a_pinned_session_id_beats_recency() {
+    // The bug this prevents: two sessions running in one working directory. With
+    // recency alone the newest file wins every poll, so a tailer following
+    // session A silently starts reading session B — and the peer waiting on A
+    // receives B's answer.
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    );
+
+    // `wanted` is written first, so `rival` is strictly newer.
+    write_session(
+        dir.path(),
+        "wanted.jsonl",
+        &serde_json::json!({"sessionId":"wanted-1","type":"user","message":{"role":"user","content":"a"}})
+            .to_string(),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    write_session(
+        dir.path(),
+        "rival.jsonl",
+        &serde_json::json!({"sessionId":"rival-9","type":"user","message":{"role":"user","content":"b"}})
+            .to_string(),
+    );
+
+    let ignored = std::collections::HashSet::new();
+
+    // Unpinned: recency wins, which is the pre-existing single-session contract.
+    let newest =
+        discover_session_file(&env, SessionAgentKind::Claude, "/any", 0, &ignored, None).unwrap();
+    assert_eq!(newest.id, "rival-9");
+
+    // Pinned: identity wins, however new the rival is.
+    let pinned = discover_session_file(
+        &env,
+        SessionAgentKind::Claude,
+        "/any",
+        0,
+        &ignored,
+        Some("wanted-1"),
+    )
+    .expect("the pinned session must be found");
+    assert_eq!(pinned.id, "wanted-1");
+}
+
+#[test]
+fn a_pin_that_matches_nothing_stays_unlocated_rather_than_taking_the_newest() {
+    // Falling back to "newest" on a miss would reintroduce the very ambiguity
+    // the pin exists to remove, at exactly the moment it matters.
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    );
+    write_session(
+        dir.path(),
+        "other.jsonl",
+        &serde_json::json!({"sessionId":"other-1","type":"user","message":{"role":"user","content":"x"}})
+            .to_string(),
+    );
+
+    let ignored = std::collections::HashSet::new();
+    assert!(discover_session_file(
+        &env,
+        SessionAgentKind::Claude,
+        "/any",
+        0,
+        &ignored,
+        Some("not-present"),
+    )
+    .is_none());
 }

@@ -47,11 +47,15 @@ impl App {
                     .count()
             })
             .sum();
-        let agent_count = lanes.iter().filter(|l| !l.role.is_function()).count();
+        let lane_count = lanes
+            .iter()
+            .filter(|lane| lane.role == AgentRole::Worker)
+            .count();
+        let max_lanes = self.loaded.config.workflow.max_lanes;
         let title = if running_tasks > 0 {
-            format!("Agents · {agent_count} · {running_tasks} running")
+            format!("Agents · lanes {lane_count}/{max_lanes} · {running_tasks} running")
         } else {
-            format!("Agents · {agent_count}")
+            format!("Agents · lanes {lane_count}/{max_lanes}")
         };
         let block = self.panel(title);
         let inner = block.inner(cols[0]);
@@ -113,6 +117,26 @@ impl App {
                     Color::Magenta
                 }),
             )));
+        }
+        if let Some(lane) = lane {
+            let report = self.lane_guard_report();
+            let badges = report.badges(&lane.key);
+            if !badges.is_empty() {
+                header.push(TLine::from(Span::styled(
+                    badges
+                        .into_iter()
+                        .map(|badge| badge.label())
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                    Style::default().fg(Color::Red),
+                )));
+            }
+            if let Some(patterns) = self.lane_claims().get(&lane.key) {
+                header.push(TLine::from(Span::styled(
+                    format!("claim {}", patterns.join(", ")),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
         }
         // Context bar.
         if let Some(l) = lane {
@@ -190,6 +214,13 @@ impl App {
                     Span::styled(format!("   {branch} {} · ", task.task_id), style),
                     Span::styled(task.status.label().to_string(), status_style),
                     Span::styled(format!(" · {} turns", task.turns), style),
+                    Span::styled(
+                        task.review
+                            .as_ref()
+                            .map(|verdict| format!(" · {}", verdict.badge()))
+                            .unwrap_or_default(),
+                        style,
+                    ),
                 ])
             }
             AgentRow::Lane { lane_index } => {
@@ -212,6 +243,12 @@ impl App {
                 };
                 let marker = self.lane_marker(item, is_fn);
                 let state = self.lane_state(item);
+                let badges = self
+                    .lane_guard_report()
+                    .badges(&item.key)
+                    .into_iter()
+                    .map(|badge| format!(" · {}", badge.label()))
+                    .collect::<String>();
                 let sessions_note = if let Some(aid) = &item.agent_id {
                     let list = self.snapshot.sessions.get(aid).cloned().unwrap_or_default();
                     if list.is_empty() {
@@ -231,7 +268,7 @@ impl App {
                     style = self.theme.selection();
                 }
                 let text = format!(
-                    "{marker} {} · {}{ctx}{state}{sessions_note}",
+                    "{marker} {} · {}{ctx}{state}{sessions_note}{badges}",
                     item.label,
                     item.turns.len()
                 );

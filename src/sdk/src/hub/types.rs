@@ -5,6 +5,27 @@ use std::time::Duration;
 
 use crate::tinyplace::{HarnessProvider, TokenUsage};
 
+/// A line sink for hub diagnostics.
+///
+/// The hub used to write these straight to stderr, which is fine for
+/// `medulla hub` but corrupts the orchestrator TUI: ratatui owns the alternate
+/// screen and only repaints the cells it manages, so anything else written to
+/// the terminal lands on top and is never cleared. Injecting the sink lets a
+/// caller that owns the screen route the lines somewhere it can render them.
+pub type HubLog = crate::logging::LineSink;
+
+/// Where roster changes are written so they survive a restart.
+///
+/// A callback rather than a config-file write inside the handle: the hub should
+/// not have to know where an embedding host keeps its settings, and a test needs
+/// to observe the roster without touching a disk.
+pub type RosterSink = std::sync::Arc<dyn Fn(&[super::HubWorker]) + Send + Sync>;
+
+/// The default sink: stderr, as before, for callers that own the terminal.
+pub fn stderr_log() -> HubLog {
+    crate::logging::stderr_sink()
+}
+
 /// A single task to dispatch to a remote tiny.place worker.
 #[derive(Debug, Clone)]
 pub struct TaskRequest {

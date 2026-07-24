@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use ratatui::layout::Rect;
 
-use crate::ui::agents::{derive_agent_lanes, AgentLane};
+use crate::ui::agents::{
+    derive_agent_lanes, merge_worker_activity, merge_worker_roster, AgentLane,
+};
 use crate::ui::composer::Draft;
 use crate::ui::theme::Theme;
 use medulla::config::LoadedConfig;
@@ -49,6 +51,10 @@ impl App {
             memory_ingesting: false,
             feedback: Default::default(),
             repo: Default::default(),
+            lane_claims: Default::default(),
+            decision_open: false,
+            decision_index: 0,
+            dismissed_decisions: Default::default(),
             prompt: None,
             frame: 0,
             mouse_capture: true,
@@ -287,7 +293,7 @@ impl App {
     pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
         match self.tab() {
             "Memory" => Some(Cmd::LoadMemory),
-            "Repo" => Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces())),
+            "Agents" | "Repo" => Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces())),
             "Settings" => match self.settings_index {
                 SP_USAGE => Some(Cmd::LoadUsage),
                 SP_CONTEXT => Some(Cmd::InspectContext),
@@ -326,12 +332,25 @@ impl App {
     }
 
     /// Store the selected path's patch or its typed error.
+    ///
+    /// Guards against stale responses: if the operator has moved to a different
+    /// file while a diff load was in flight, the now-irrelevant result is
+    /// discarded so the pane does not briefly flash the wrong patch.
     pub fn set_workspace_diff(
         &mut self,
         workspace: std::path::PathBuf,
         path: std::path::PathBuf,
         result: Result<String, String>,
     ) {
+        // Drop responses that arrive after the selection has moved on to a
+        // different file. Accept any response when no file is currently selected
+        // (the list may be empty or the index may be stale).
+        let files = self.repo_files();
+        if let Some((current_ws, current_change)) = files.get(self.repo.file_index) {
+            if *current_ws != workspace || current_change.path != path {
+                return;
+            }
+        }
         self.repo.diff_key = Some((workspace, path));
         self.repo.diff_scroll = 0;
         match result {
@@ -414,12 +433,20 @@ impl App {
     }
 
     /// Derive the current agent lanes from the snapshot, harness, and roster.
+    ///
+    /// The roster is the snapshot's (what the backend advertises, plus any
+    /// tiny.place peers the observation overlays) merged with the runtime's own
+    /// worker registry. Both are needed: a worker added at runtime lives only in
+    /// the registry — which is what resolves a delegated task's address — so
+    /// reading the snapshot alone left a live, dispatchable worker off this tab.
     pub(super) fn lanes(&self) -> Vec<AgentLane> {
-        derive_agent_lanes(
-            &self.snapshot.events,
-            &self.loaded.harness(),
-            &self.snapshot.roster,
-        )
+        let roster = merge_worker_roster(&self.snapshot.roster, &self.runtime.workers());
+        let mut lanes = derive_agent_lanes(&self.snapshot.events, &self.loaded.harness(), &roster);
+        // The snapshot's events come from the backend, whose vocabulary says
+        // nothing about delegated tasks — so a busy worker renders idle unless
+        // the activity the hub observed locally is folded in.
+        merge_worker_activity(&mut lanes, &self.runtime.worker_activity());
+        lanes
     }
 
     /// The index of the active thread in the snapshot's thread list.

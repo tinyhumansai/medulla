@@ -295,6 +295,43 @@ fn help_text_documents_the_mock_flag() {
     assert!(help_text().contains("--mock"));
 }
 
+// The worker screen parses `--workspace` itself, because the daemon's flag
+// types are private to the SDK. Pinned here because it decides which directory
+// a *remote peer's* harness is allowed to edit.
+#[test]
+fn worker_flag_values_parse_in_both_spellings() {
+    fn flag_value(args: &[String], name: &str) -> Option<String> {
+        let mut it = args.iter();
+        while let Some(arg) = it.next() {
+            if arg == name {
+                return it.next().cloned().filter(|v| !v.is_empty());
+            }
+            if let Some(rest) = arg.strip_prefix(name).and_then(|r| r.strip_prefix('=')) {
+                return (!rest.is_empty()).then(|| rest.to_string());
+            }
+        }
+        None
+    }
+    let spaced: Vec<String> = ["--tui", "--workspace", "/repo"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(flag_value(&spaced, "--workspace").as_deref(), Some("/repo"));
+
+    let equals: Vec<String> = ["--tui", "--workspace=/repo"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(flag_value(&equals, "--workspace").as_deref(), Some("/repo"));
+
+    // Absent, or present with nothing after it, both mean "use the default" —
+    // never an empty workspace, which would resolve to the filesystem root.
+    let bare: Vec<String> = vec!["--tui".to_string()];
+    assert_eq!(flag_value(&bare, "--workspace"), None);
+    let dangling: Vec<String> = vec!["--workspace".to_string()];
+    assert_eq!(flag_value(&dangling, "--workspace"), None);
+}
+
 #[test]
 fn run_args_join_the_instruction_and_read_flags() {
     let a = parse_run_args(&argv(&[

@@ -165,6 +165,77 @@ fn codex_marks_error_result() {
 }
 
 #[test]
+fn codex_new_exec_json_stream_maps_message_command_and_usage() {
+    // Real codex >= 0.140 `exec --json` shapes: a thread/turn/item event stream
+    // with the detail on a nested `item` (not the older `event_msg`/`payload`),
+    // captured verbatim from codex-cli 0.142.
+    let mut mapper = HarnessLineMapper::new("codex");
+    let lines = [
+        r#"{"type":"thread.started","thread_id":"019f-abc"}"#,
+        r#"{"type":"turn.started"}"#,
+        r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"BANANA"}}"#,
+        r#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat note.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}"#,
+        r#"{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat note.txt'","aggregated_output":"hello\n","exit_code":0,"status":"completed"}}"#,
+        r#"{"type":"turn.completed","usage":{"input_tokens":24659,"cached_input_tokens":19200,"output_tokens":76}}"#,
+    ];
+    let mut events = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        events.extend(mapper.map_line(line, index as i64));
+    }
+
+    // thread.started yields no event; the rest map in order.
+    let kinds: Vec<&str> = events.iter().map(kind_of).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "status",
+            "agent_message",
+            "tool_call",
+            "tool_result",
+            "status"
+        ]
+    );
+
+    // The agent message is the reply source.
+    assert_eq!(events[1].event.payload["text"], "BANANA");
+    // The shell command becomes a tool_call (display = the command) then a
+    // tool_result carrying its exit status and output.
+    assert_eq!(events[2].event.payload["tool_kind"], "shell");
+    assert_eq!(
+        events[2].event.payload["display"],
+        "/bin/zsh -lc 'cat note.txt'"
+    );
+    assert_eq!(events[2].event.payload["call_id"], "item_1");
+    assert_eq!(events[3].event.payload["ok"], true);
+    assert_eq!(events[3].event.payload["output"], "hello\n");
+    // turn.started/completed bracket the turn as running/idle status.
+    assert_eq!(events[0].event.payload["state"], "running");
+    assert_eq!(events[4].event.payload["state"], "idle");
+
+    // Usage is scanned off the `turn.completed` record.
+    assert_eq!(
+        mapper.usage(),
+        Some(TokenUsage {
+            input_tokens: 24659,
+            output_tokens: 76
+        })
+    );
+}
+
+#[test]
+fn codex_new_command_nonzero_exit_is_an_error() {
+    let events = map_all(
+        "codex",
+        &[
+            r#"{"type":"item.completed","item":{"id":"c9","type":"command_execution","command":"false","aggregated_output":"nope","exit_code":2,"status":"completed"}}"#,
+        ],
+    );
+    assert_eq!(kind_of(&events[0]), "tool_result");
+    assert_eq!(events[0].event.payload["is_error"], true);
+    assert_eq!(events[0].event.payload["ok"], false);
+}
+
+#[test]
 fn opencode_flat_text_tool_and_error() {
     let text = r#"{"type":"text","part":{"type":"text","text":"working on it"}}"#;
     let tool_call = r#"{"type":"tool","part":{"type":"tool","tool":"read","callID":"r1","state":{"status":"running","input":{"file_path":"/a/b.rs"}}}}"#;

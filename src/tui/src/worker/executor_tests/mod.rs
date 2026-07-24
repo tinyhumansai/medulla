@@ -20,6 +20,7 @@ use super::executor::PtySessionExecutor;
 use super::pty::PtyManager;
 
 mod basic;
+mod live;
 mod sessions;
 
 /// A fake harness on the default session id, for tests that run only one.

@@ -28,7 +28,7 @@
 
 use std::time::Duration;
 
-use super::dialog::blocking_dialog;
+use super::dialog::{blocking_dialog, BlockingDialog};
 use super::launch::{bracket_paste, submit_sequence};
 use super::manager::PtyManager;
 
@@ -68,6 +68,22 @@ const NEEDLE_CHARS: usize = 24;
 /// How often the readiness conditions are re-checked.
 const TICK: Duration = Duration::from_millis(25);
 
+/// How many stacked startup dialogs to clear before giving up.
+///
+/// A launch can raise more than one modal in sequence (an update notice, then a
+/// trust prompt); a small bound clears a short stack while still stopping us
+/// looping forever on a dialog our keystrokes are not, in fact, dismissing.
+const MAX_DIALOGS: u32 = 3;
+
+/// Pause after each dismissal keystroke, so an arrow move lands and the cursor
+/// settles before the next key — the difference between selecting the Skip row
+/// and confirming whatever was highlighted first.
+const KEY_PACING: Duration = Duration::from_millis(120);
+
+/// How long to wait for a dismissed dialog to leave the screen before deciding
+/// the keystrokes did not clear it.
+const DIALOG_CLEAR_BUDGET: Duration = Duration::from_millis(3_000);
+
 /// Type `text` into a session and submit it, as a human at that terminal would.
 ///
 /// Waits for the harness to be ready, encodes the paste the way the child asked
@@ -78,11 +94,11 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
 
     // Modes set and screen painted does not mean "ready for a prompt". A
     // harness sitting on a startup dialog discards the paste and reads the
-    // Return as an answer to whatever it is asking — so refuse to type at all
-    // and say what is in the way, rather than pressing a button nobody chose.
-    if let Some(dialog) = blocking_dialog(&screen_text(sessions, id)) {
-        return Err(format!("{} — {}", dialog.what, dialog.remedy));
-    }
+    // Return as an answer to whatever it is asking. A dialog we know how to
+    // answer (codex's update notice) is dismissed here; one we can only name
+    // (claude's trust / bypass modals, which preflight should have cleared) is
+    // reported — never typed a prompt into.
+    clear_startup_dialogs(sessions, id).await?;
 
     if !bracketed {
         // No composer to commit to: a line-oriented reader takes the bytes and
@@ -121,6 +137,57 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
     // paste block still being committed.
     await_still(sessions, id).await;
     sessions.write(id, submit_sequence())
+}
+
+/// Clear any startup dialog standing between the session and its composer.
+///
+/// A dialog the worker knows how to answer (codex's update notice) is dismissed
+/// with its safe keystroke sequence and we move on; one it can only recognise
+/// (claude's trust / bypass disclaimer, which the startup preflight should have
+/// cleared) is reported as an error, because typing a prompt into it would paste
+/// into a live modal and read the Return as an answer to whatever it asks.
+///
+/// Loops so a short stack of dialogs is cleared in turn, and gives up — with the
+/// dialog named — if one it thought it could dismiss is still on screen after
+/// [`MAX_DIALOGS`] attempts.
+async fn clear_startup_dialogs(sessions: &PtyManager, id: &str) -> Result<(), String> {
+    for _ in 0..MAX_DIALOGS {
+        let Some(dialog) = blocking_dialog(&screen_text(sessions, id)) else {
+            return Ok(());
+        };
+        let Some(keys) = dialog.dismissal else {
+            return Err(format!("{} — {}", dialog.what, dialog.remedy));
+        };
+        for chunk in keys {
+            sessions.write(id, chunk)?;
+            tokio::time::sleep(KEY_PACING).await;
+        }
+        await_dialog_cleared(sessions, id, dialog).await;
+    }
+    // Still on a dialog after the bounded attempts: the keystrokes did not clear
+    // it, so name it rather than type a prompt into a modal that is still up.
+    match blocking_dialog(&screen_text(sessions, id)) {
+        Some(dialog) => Err(format!(
+            "{} — {} (dismissal did not clear it)",
+            dialog.what, dialog.remedy
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Wait for `dialog` to leave the screen after its dismissal keys were sent.
+///
+/// Returns once the recognised dialog is no longer the one on screen — either it
+/// is gone, or a different dialog has taken its place, which the caller's loop
+/// then handles in the next pass. Bounded by [`DIALOG_CLEAR_BUDGET`].
+async fn await_dialog_cleared(sessions: &PtyManager, id: &str, dialog: &BlockingDialog) {
+    let started = tokio::time::Instant::now();
+    while started.elapsed() < DIALOG_CLEAR_BUDGET {
+        if blocking_dialog(&screen_text(sessions, id)) != Some(dialog) {
+            return;
+        }
+        tokio::time::sleep(TICK).await;
+    }
 }
 
 /// The screen fragment that shows a prompt reached the composer.

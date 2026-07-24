@@ -215,82 +215,11 @@ impl TaskRepository {
 pub fn now_timestamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "0".into())
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    fn task(source: Option<TaskSourceRef>) -> Task {
-        Task {
-            id: "local".into(),
-            title: "local".into(),
-            description: "edit".into(),
-            status: TaskStatus::InProgress,
-            source,
-            recurrence: None,
-            created_at: "1".into(),
-            updated_at: "2".into(),
-            last_synced_at: None,
-            dispatch: serde_json::Value::Null,
-        }
-    }
-
-    #[test]
-    fn round_trip_and_missing_file_are_tolerant() {
-        let d = tempdir().unwrap();
-        let path = d.path().join("nested/tasks.json");
-        let mut r = TaskRepository::open(&path).unwrap();
-        r.document_mut().tasks.push(task(None));
-        r.save().unwrap();
-        assert_eq!(
-            TaskRepository::open(path).unwrap().document().tasks.len(),
-            1
-        );
-    }
-    #[test]
-    fn malformed_file_is_clear() {
-        let d = tempdir().unwrap();
-        let p = d.path().join("tasks.json");
-        std::fs::write(&p, "{").unwrap();
-        assert!(matches!(
-            TaskRepository::open(&p),
-            Err(TaskRepositoryError::Parse { .. })
-        ));
-    }
-    #[test]
-    fn sync_deduplicates_and_preserves_local_edits() {
-        let source = TaskSourceRef {
-            provider: "github".into(),
-            source_id: "repo#1".into(),
-            url: None,
-        };
-        let mut r = TaskRepository {
-            path: PathBuf::new(),
-            document: TaskDocument {
-                tasks: vec![task(Some(source.clone()))],
-                sources: vec![],
-            },
-        };
-        let mut incoming = task(Some(source));
-        incoming.title = "remote".into();
-        incoming.description = "remote body".into();
-        assert!(!r.upsert_synced(incoming));
-        assert_eq!(r.document.tasks[0].title, "local");
-    }
-    #[test]
-    fn recurring_instance_is_open_and_non_recurring() {
-        let mut t = task(None);
-        t.recurrence = Some(RecurringTask {
-            recurrence: Recurrence::Daily,
-            next_at: "tomorrow".into(),
-        });
-        let i = TaskRepository::recurring_instance(&t).unwrap();
-        assert_eq!(i.status, TaskStatus::Open);
-        assert!(i.recurrence.is_none());
-        assert_ne!(i.id, t.id);
-    }
-}
+#[path = "tasks/tests.rs"]
+mod tests;

@@ -21,6 +21,8 @@ pub(super) enum AppMsg {
         /// Patch or displayable failure.
         result: Result<String, String>,
     },
+    /// Completion of a guarded exact-path commit.
+    WorkspaceCommitDone(Result<medulla::workspace::CommitOutcome, String>),
     /// Chats to display in the resume picker.
     OpenResume(Vec<medulla::ui::chat_store::MainChatSummary>),
     /// Confirmation that a chat was resumed.

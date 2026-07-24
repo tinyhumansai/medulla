@@ -101,6 +101,28 @@ pub(super) fn run_cmd(
                 });
             });
         }
+        Cmd::CommitPaths {
+            workspace,
+            paths,
+            subject,
+            shared_path_denylist,
+        } => {
+            let tx = msg_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let result = medulla::workspace::commit(
+                    &workspace,
+                    &paths,
+                    &subject,
+                    &medulla::workspace::CommitOptions {
+                        body: None,
+                        shared_path_denylist,
+                        allow_shared: false,
+                    },
+                )
+                .map_err(|error| error.to_string());
+                let _ = tx.send(AppMsg::WorkspaceCommitDone(result));
+            });
+        }
         Cmd::PrepareReview {
             task_id,
             implementer_id,

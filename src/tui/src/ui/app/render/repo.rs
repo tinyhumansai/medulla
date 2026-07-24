@@ -65,6 +65,10 @@ impl App {
                 }
                 for change in &snapshot.files {
                     let selected = flat_index == self.repo.file_index;
+                    let marked = self
+                        .repo
+                        .marked
+                        .contains(&(snapshot.root.clone(), change.path.clone()));
                     let mut style = Style::default();
                     if selected {
                         style = self.theme.selection();
@@ -76,8 +80,9 @@ impl App {
                         .unwrap_or_default();
                     ledger.push(Line::from(Span::styled(
                         format!(
-                            "{} {} {}{}",
+                            "{} {} {} {}{}",
                             if selected { "▸" } else { " " },
+                            if marked { "[x]" } else { "[ ]" },
                             change.marker(),
                             change.path.display(),
                             rename
@@ -105,7 +110,7 @@ impl App {
                 .block(self.panel(if self.repo.loading {
                     " Git ledger · refreshing… "
                 } else {
-                    " Git ledger · r refresh · ↑↓ select "
+                    " Git ledger · ↑↓ select · Space mark · c commit · r refresh "
                 }))
                 .wrap(Wrap { trim: false }),
             columns[0],

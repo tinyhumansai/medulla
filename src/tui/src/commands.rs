@@ -22,7 +22,8 @@ use medulla::auth::{
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
 use medulla_tui::cli::{
-    parse_init_args, parse_login_args, parse_memory_args, LoginArgs, MemoryAction,
+    parse_commit_args, parse_init_args, parse_login_args, parse_memory_args, LoginArgs,
+    MemoryAction,
 };
 use medulla_tui::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
 
@@ -207,6 +208,38 @@ pub(crate) async fn run_init(args: &[String]) -> anyhow::Result<()> {
         println!("Wrote {} (stub)", outcome.path.display());
         println!("Fill in the summary and routing hints, then it is ready to use.");
     }
+    Ok(())
+}
+
+/// `medulla commit` — create a conventional commit from exactly named paths.
+pub(crate) fn run_commit(args: &[String]) -> anyhow::Result<()> {
+    let parsed = parse_commit_args(args).map_err(anyhow::Error::msg)?;
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let workspace = cwd.join(&parsed.workspace);
+    let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
+    let paths = parsed
+        .paths
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    let outcome = medulla::workspace::commit(
+        &workspace,
+        &paths,
+        &parsed.subject,
+        &medulla::workspace::CommitOptions {
+            body: parsed.body,
+            shared_path_denylist: loaded.config.workflow.shared_path_denylist,
+            allow_shared: parsed.allow_shared,
+        },
+    )?;
+    println!(
+        "{} {} ({} path{})",
+        outcome.short_id,
+        outcome.subject,
+        outcome.paths.len(),
+        if outcome.paths.len() == 1 { "" } else { "s" }
+    );
     Ok(())
 }
 

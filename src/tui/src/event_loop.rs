@@ -119,6 +119,18 @@ pub(crate) async fn run(
                     AppMsg::WorkspaceDiffLoaded { workspace, path, result } => {
                         app.set_workspace_diff(workspace, path, result);
                     }
+                    AppMsg::WorkspaceCommitDone(result) => match result {
+                        Ok(outcome) => {
+                            app.finish_workspace_commit(&outcome);
+                            run_cmd(
+                                Cmd::LoadWorkspaces(app.loaded.workflow_workspaces()),
+                                &runtime,
+                                app.memory_service(),
+                                &msg_tx,
+                            );
+                        }
+                        Err(error) => app.set_status(format!("Repo · commit failed: {error}")),
+                    },
                     AppMsg::UsageLoaded(data) => app.set_account_usage(data),
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
                     AppMsg::Resumed(s) => {

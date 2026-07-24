@@ -39,12 +39,57 @@ fn dispatches_subcommands() {
     assert_eq!(parse_command(&argv(&["update"])), Command::Update);
     assert_eq!(parse_command(&argv(&["init"])), Command::Init);
     assert_eq!(parse_command(&argv(&["init", "some/dir"])), Command::Init);
+    assert_eq!(parse_command(&argv(&["commit"])), Command::Commit);
     assert_eq!(
         parse_command(&argv(&["update", "--check"])),
         Command::Update
     );
     assert_eq!(parse_command(&argv(&["--config", "x.json"])), Command::Tui);
     assert_eq!(parse_command(&argv(&["run", "do", "it"])), Command::Run);
+}
+
+#[test]
+fn commit_args_define_an_exact_boundary() {
+    let parsed = parse_commit_args(&argv(&[
+        "--workspace",
+        "/repo",
+        "-m",
+        "feat(repo): exact commit",
+        "--body",
+        "Details",
+        "--config",
+        "medulla.toml",
+        "--allow-shared",
+        "--",
+        "one.txt",
+        "-literal-name",
+    ]))
+    .unwrap();
+    assert_eq!(parsed.workspace, "/repo");
+    assert_eq!(parsed.subject, "feat(repo): exact commit");
+    assert_eq!(parsed.body.as_deref(), Some("Details"));
+    assert_eq!(parsed.config.as_deref(), Some("medulla.toml"));
+    assert!(parsed.allow_shared);
+    assert_eq!(parsed.paths, vec!["one.txt", "-literal-name"]);
+}
+
+#[test]
+fn commit_args_require_workspace_subject_and_paths() {
+    assert!(parse_commit_args(&argv(&["-m", "feat: x", "x"])).is_err());
+    assert!(parse_commit_args(&argv(&["--workspace", ".", "x"])).is_err());
+    assert!(parse_commit_args(&argv(&["--workspace", ".", "-m", "feat: x"])).is_err());
+    assert!(parse_commit_args(&argv(&["--workspace", ".", "-m", "feat: x", "--bad"])).is_err());
+    assert!(parse_commit_args(&argv(&["--workspace"])).is_err());
+}
+
+#[test]
+fn parsers_ignore_documented_unknown_inputs_and_dangling_optional_values() {
+    assert_eq!(
+        parse_login_args(&argv(&["--unknown"])).unwrap(),
+        LoginArgs::default()
+    );
+    assert_eq!(parse_memory_args(&argv(&["status", "--k"])).unwrap().k, 5);
+    assert_eq!(parse_tui_args(&argv(&["--unknown"])), TuiArgs::default());
 }
 
 #[test]
@@ -226,6 +271,14 @@ fn help_lists_init() {
     let help = help_text();
     assert!(help.contains("medulla init"));
     assert!(help.contains("--offline"));
+}
+
+#[test]
+fn help_lists_exact_commit() {
+    let help = help_text();
+    assert!(help.contains("medulla commit"));
+    assert!(help.contains("--workspace"));
+    assert!(help.contains("--allow-shared"));
 }
 
 #[test]

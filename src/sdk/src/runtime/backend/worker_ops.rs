@@ -69,11 +69,7 @@ pub(super) async fn apply_worker_op(
         WorkerOp::RefreshDetails { id } => handle.refresh_system_info(&id).await,
         WorkerOp::ApplyStrategy { strategy } => handle.apply_strategy(strategy),
         WorkerOp::Update { id, patch } => {
-            let label = patch
-                .get("label")
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-                .filter(|value| !value.is_empty());
+            let label = label_from_patch(&patch)?;
             handle.set_label(&id, label).await
         }
         WorkerOp::Select { id } => {
@@ -81,4 +77,15 @@ pub(super) async fn apply_worker_op(
             Ok(())
         }
     }
+}
+
+/// Validate the only supported worker patch, preserving `""` as explicit clear.
+pub(super) fn label_from_patch(
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> anyhow::Result<Option<String>> {
+    let label = patch
+        .get("label")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow!("worker update requires a string label"))?;
+    Ok((!label.is_empty()).then(|| label.to_string()))
 }

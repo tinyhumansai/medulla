@@ -9,7 +9,7 @@ use crate::ui::events::TuiEvent;
 
 use super::fold::summary_from_session;
 use super::types::{State, Thread, CHAT_CAP, EVENT_CAP};
-use super::worker_ops::hub_worker_to_info;
+use super::worker_ops::{hub_worker_to_info, label_from_patch};
 use crate::hub::HubWorker;
 
 fn client_env(session: &str, seq: Option<u64>, event: Value) -> ClientEnvelope {
@@ -256,4 +256,23 @@ fn selection_carries_through_to_the_row() {
     let info = hub_worker_to_info(w, None);
     assert!(info.selected);
     assert_eq!(info.label, None);
+}
+
+#[test]
+fn worker_label_patches_require_the_supported_string_field() {
+    let label = json!({"label": "builder"});
+    assert_eq!(
+        label_from_patch(label.as_object().unwrap()).unwrap(),
+        Some("builder".into())
+    );
+    let clear = json!({"label": ""});
+    assert_eq!(label_from_patch(clear.as_object().unwrap()).unwrap(), None);
+    for patch in [json!({}), json!({"other": "value"}), json!({"label": 3})] {
+        assert_eq!(
+            label_from_patch(patch.as_object().unwrap())
+                .unwrap_err()
+                .to_string(),
+            "worker update requires a string label"
+        );
+    }
 }

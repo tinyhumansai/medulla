@@ -65,7 +65,6 @@ pub(crate) async fn run(
     let mut sub = runtime.subscribe();
     let mut reader = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(90));
-    let mut slow_tick = tokio::time::interval(Duration::from_secs(5));
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
     let mut mouse_on = true;
 
@@ -105,20 +104,6 @@ pub(crate) async fn run(
                 match msg {
                     AppMsg::Status(s) => { app.set_status(s); app.refresh_snapshot(); }
                     AppMsg::Contexts(c) => app.set_contexts(c),
-                    AppMsg::WorkspacesLoaded(reports) => {
-                        app.set_workspace_reports(reports);
-                        if app.tab() == "Repo" {
-                            app.set_status("Repo · refreshed");
-                            if let Some(cmd) = app.selected_repo_diff_cmd() {
-                                run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
-                            }
-                        } else {
-                            app.set_status("Agents · path claims refreshed");
-                        }
-                    }
-                    AppMsg::WorkspaceDiffLoaded { workspace, path, result } => {
-                        app.set_workspace_diff(workspace, path, result);
-                    }
                     AppMsg::UsageLoaded(data) => app.set_account_usage(data),
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
                     AppMsg::Resumed(s) => {
@@ -185,17 +170,6 @@ pub(crate) async fn run(
             _ = tick.tick() => {
                 if app.snapshot.running {
                     app.frame = app.frame.wrapping_add(1);
-                }
-            }
-            _ = slow_tick.tick() => {
-                if matches!(app.tab(), "Agents" | "Repo") {
-                    app.set_workspaces_loading();
-                    run_cmd(
-                        Cmd::LoadWorkspaces(app.loaded.workflow_workspaces()),
-                        &runtime,
-                        app.memory_service(),
-                        &msg_tx,
-                    );
                 }
             }
         }

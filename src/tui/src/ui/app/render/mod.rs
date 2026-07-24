@@ -23,7 +23,6 @@ mod feedback;
 mod memory;
 mod overview;
 mod prompt;
-mod repo;
 mod routing;
 mod settings;
 mod tasks;
@@ -436,7 +435,6 @@ impl App {
             "Overview" => self.draw_overview(f, area),
             "Chat" => self.draw_chat(f, area),
             "Agents" => self.draw_agents(f, area),
-            "Repo" => self.draw_repo(f, area),
             "Tasks" => self.draw_tasks(f, area),
             "Routing" => self.draw_routing(f, area),
             "Memory" => self.draw_memory(f, area),

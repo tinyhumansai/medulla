@@ -48,7 +48,7 @@ fn type_text(app: &mut App, text: &str) {
 #[test]
 fn entering_tasks_requests_the_local_document() {
     let mut app = app();
-    app.tab_index = TABS.iter().position(|tab| *tab == "Repo").unwrap();
+    app.tab_index = TABS.iter().position(|tab| *tab == "Agents").unwrap();
     assert!(matches!(
         app.on_event(key(KeyCode::Tab)),
         Some(Cmd::LoadTasks)

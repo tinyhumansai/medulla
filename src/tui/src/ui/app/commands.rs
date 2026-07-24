@@ -3,7 +3,7 @@
 //! dispatch, and the Settings/Appearance mutators. These turn resolved input
 //! into runtime calls and follow-up [`Cmd`]s.
 
-use crate::ui::agents::{AgentRow, TaskState};
+use crate::ui::agents::{ordered_tasks, AgentLane, AgentRow, TaskState};
 use crate::ui::clipboard::{copy_to_clipboard, current_platform, OSC_52};
 use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::Draft;
@@ -16,6 +16,97 @@ use super::types::{
 };
 
 impl App {
+    /// Resolve a task/lane target and enforce fresh-review eligibility.
+    fn prepare_review(&mut self, target: &str) -> Option<Cmd> {
+        let lanes = self.lanes();
+        let found: Option<(AgentLane, TaskState)> = lanes
+            .iter()
+            .find_map(|lane| {
+                lane.tasks
+                    .iter()
+                    .find(|task| task.task_id == target)
+                    .cloned()
+                    .map(|task| (lane.clone(), task))
+            })
+            .or_else(|| {
+                lanes
+                    .iter()
+                    .find(|lane| {
+                        lane.key == target
+                            || lane.label == target
+                            || lane.agent_id.as_deref() == Some(target)
+                    })
+                    .and_then(|lane| {
+                        ordered_tasks(&lane.tasks)
+                            .into_iter()
+                            .next()
+                            .map(|task| (lane.clone(), task))
+                    })
+            });
+        let Some((lane, task)) = found else {
+            self.set_status(
+                medulla::autoreview::ReviewError::UnknownTarget(target.into()).to_string(),
+            );
+            return None;
+        };
+        let Some(implementer_id) = lane.agent_id.clone() else {
+            self.set_status(
+                medulla::autoreview::ReviewError::MissingImplementer(target.into()).to_string(),
+            );
+            return None;
+        };
+        let reviewer =
+            match medulla::autoreview::select_reviewer(&self.snapshot.roster, &implementer_id) {
+                Ok(reviewer) => reviewer.id.clone(),
+                Err(error) => {
+                    self.set_status(error.to_string());
+                    return None;
+                }
+            };
+        let Some(instruction) = task.instruction.as_deref() else {
+            self.set_status(
+                medulla::autoreview::ReviewError::MissingContract(target.into()).to_string(),
+            );
+            return None;
+        };
+        let Some(contract) = medulla::autoreview::contract_from_instruction(instruction) else {
+            self.set_status(
+                medulla::autoreview::ReviewError::MissingContract(target.into()).to_string(),
+            );
+            return None;
+        };
+        let workspace = lane
+            .descriptor
+            .as_ref()
+            .and_then(|descriptor| descriptor.metadata.get("workspace"))
+            .and_then(serde_json::Value::as_str)
+            .map(std::path::PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+            .or_else(|| {
+                self.loaded
+                    .workflow_workspaces()
+                    .into_iter()
+                    .find(|path| !path.as_os_str().is_empty())
+            });
+        let Some(workspace) = workspace else {
+            self.set_status(
+                medulla::autoreview::ReviewError::MissingWorkspace(target.into()).to_string(),
+            );
+            return None;
+        };
+        self.set_status(format!(
+            "Review · collecting diff for {} → {}",
+            task.task_id, reviewer
+        ));
+        Some(Cmd::PrepareReview {
+            task_id: task.task_id,
+            implementer_id,
+            reviewer_id: reviewer,
+            workspace,
+            contract,
+        })
+    }
+
     /// The worker under the Workers-list cursor, if the fleet is non-empty.
     pub(super) fn selected_worker(&self) -> Option<WorkerInfo> {
         let ws = self.runtime.workers();
@@ -85,6 +176,10 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
+            PromptKind::LaneClaim { lane_key } => {
+                self.submit_lane_claim(lane_key, &text);
+                None
+            }
             PromptKind::WorkerAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
                     self.set_status("Adding worker…");
@@ -289,6 +384,7 @@ impl App {
                     rule,
                 });
             }
+            SlashCommand::Review(target) => return self.prepare_review(&target),
             SlashCommand::ToggleMouse => self.toggle_mouse(),
             SlashCommand::Copy(scope) => self.copy_chat(scope),
             SlashCommand::Async(setting) => {

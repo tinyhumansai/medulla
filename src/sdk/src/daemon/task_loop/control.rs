@@ -6,7 +6,6 @@ use super::super::providers::{self};
 use super::super::types::DaemonRuntime;
 
 impl DaemonRuntime {
-    /// Deliver an `input` frame to the matching running task (or reject it).
     /// Stop a running task the requester has given up on.
     ///
     /// Two things are being freed, and the second is the one that bites: the
@@ -62,6 +61,7 @@ impl DaemonRuntime {
         .await;
     }
 
+    /// Deliver an `input` frame to the matching running task (or reject it).
     pub(super) async fn handle_input(&self, from: String, frame: TaskFrame) {
         let key = Self::task_key(&from, &frame.task_id);
         let no_match = (

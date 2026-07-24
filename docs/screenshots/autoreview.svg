@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <rect width="1200" height="720" rx="18" fill="#07111f"/>
+  <rect x="20" y="20" width="1160" height="680" rx="12" fill="#0b1728" stroke="#26364d" stroke-width="2"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">
+    <text x="42" y="58" fill="#22d3ee" font-weight="700">MEDULLA</text>
+    <text x="168" y="58" fill="#94a3b8">Overview   Chat  </text>
+    <text x="354" y="58" fill="#f8fafc" font-weight="700">Agents</text>
+    <text x="420" y="58" fill="#94a3b8">  Workers   Memory   Repo   Settings</text>
+    <text x="1048" y="58" fill="#22c55e">● live</text>
+
+    <rect x="42" y="84" width="500" height="548" rx="8" fill="#0e1c30" stroke="#334155"/>
+    <text x="62" y="118" fill="#f8fafc" font-weight="700">Agents · 5</text>
+    <line x1="58" y1="132" x2="526" y2="132" stroke="#334155"/>
+    <text x="68" y="172" fill="#facc15">● orchestrator · idle</text>
+    <text x="68" y="214" fill="#e879f9">◌ dev-1 · idle</text>
+    <rect x="58" y="232" width="468" height="36" rx="5" fill="#164e63"/>
+    <text x="72" y="256" fill="#f8fafc">└ task-17 · done · 4 turns · ✗ findings(2)</text>
+    <text x="68" y="302" fill="#e879f9">◌ dev-2 · idle</text>
+    <text x="72" y="342" fill="#22c55e">└ review-17 · done · 2 turns</text>
+    <text x="68" y="390" fill="#64748b">── functions ──</text>
+    <text x="68" y="430" fill="#60a5fa">ƒ summarizer · idle</text>
+    <text x="68" y="598" fill="#64748b">/review &lt;lane|task-id&gt; · ↑↓ select</text>
+
+    <rect x="560" y="84" width="598" height="548" rx="8" fill="#0e1c30" stroke="#334155"/>
+    <text x="582" y="118" fill="#f8fafc" font-weight="700">dev-1 › task-17 · 4 turns</text>
+    <line x1="576" y1="132" x2="1142" y2="132" stroke="#334155"/>
+    <text x="584" y="172" fill="#ef4444" font-weight="700">✗ findings(2)</text>
+    <text x="584" y="208" fill="#ef4444">- missing regression test for detached HEAD</text>
+    <text x="584" y="240" fill="#ef4444">- verification output was not attached</text>
+    <text x="584" y="294" fill="#e879f9">12:04  dispatched · depth 1</text>
+    <text x="602" y="328" fill="#cbd5e1">Outcome: make branch detection deterministic</text>
+    <text x="584" y="378" fill="#60a5fa">12:07  complete · done</text>
+    <text x="602" y="412" fill="#cbd5e1">Implementation finished; independent review required.</text>
+    <text x="584" y="470" fill="#22c55e">fresh reviewer: dev-2 · implementer excluded</text>
+
+    <rect x="42" y="650" width="1116" height="30" rx="5" fill="#111f33"/>
+    <text x="58" y="671" fill="#22c55e">Review · delegated to a fresh reviewer</text>
+    <text x="1020" y="671" fill="#94a3b8">Ready</text>
+  </g>
+</svg>

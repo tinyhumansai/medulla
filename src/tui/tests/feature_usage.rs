@@ -81,6 +81,8 @@ fn script_usage(rt: &Arc<MockRuntime>) {
                 output_tokens: 700,
             }),
             depth: 2,
+            contract: None,
+            evidence: None,
         },
     });
 }

@@ -58,6 +58,10 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
             },
             Err(_) => SlashCommand::BadUsage("Usage: /lesson <trigger> -> <rule>"),
         },
+        "review" => match non_empty(arg) {
+            Some(target) => SlashCommand::Review(target),
+            None => SlashCommand::BadUsage("Usage: /review <lane|task-id>"),
+        },
         "feedback" | "fb" => SlashCommand::Feedback,
         "mouse" => SlashCommand::ToggleMouse,
         "copy" => match flag.as_str() {

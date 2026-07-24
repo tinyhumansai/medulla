@@ -98,6 +98,7 @@ fn one_of_each() -> Vec<(&'static str, TuiEvent)> {
                 instruction: "do".into(),
                 depth: 2,
                 agent_id: Some("dev".into()),
+                contract: None,
             },
         ),
         (
@@ -131,6 +132,8 @@ fn one_of_each() -> Vec<(&'static str, TuiEvent)> {
                         output_tokens: 2,
                     }),
                     depth: 2,
+                    contract: None,
+                    evidence: None,
                 },
             },
         ),
@@ -283,4 +286,43 @@ fn tool_call_defaults_args_to_null() {
     let tc: ToolCall = serde_json::from_str(r#"{"name":"grep"}"#).unwrap();
     assert_eq!(tc.name, "grep");
     assert!(tc.args.is_null());
+}
+
+#[test]
+fn worker_contract_and_evidence_round_trip_on_task_events() {
+    let start = json!({
+        "kind": "task_start",
+        "taskId": "lane-1",
+        "instruction": "Implement.",
+        "depth": 2,
+        "contract": {
+            "outcome": "Ship the parser",
+            "permittedPaths": ["src/parser/**"],
+            "nonGoals": ["No UI"],
+            "verifyCommands": ["cargo test parser"],
+            "terminalCondition": "tests green"
+        }
+    });
+    let event: TuiEvent = serde_json::from_value(start.clone()).unwrap();
+    assert_eq!(serde_json::to_value(event).unwrap(), start);
+
+    let complete = json!({
+        "kind": "task_complete",
+        "digest": {
+            "taskId": "lane-1",
+            "status": "done",
+            "digest": "implemented",
+            "depth": 2,
+            "contract": {
+                "outcome": "Ship the parser",
+                "permittedPaths": ["src/parser/**"]
+            },
+            "evidence": [
+                {"gate": "verify_examples", "ok": true, "summary": "VERIFIED"},
+                {"command": "cargo test parser", "ok": true, "summary": "12 passed"}
+            ]
+        }
+    });
+    let event: TuiEvent = serde_json::from_value(complete.clone()).unwrap();
+    assert_eq!(serde_json::to_value(event).unwrap(), complete);
 }

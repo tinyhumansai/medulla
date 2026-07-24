@@ -77,6 +77,7 @@ impl MockRuntime {
                 instruction: "Refactor the auth module for clarity.".into(),
                 depth: 2,
                 agent_id: Some("dev-1".into()),
+                contract: None,
             });
             s.emit(TuiEvent::TaskEvent {
                 task_id: "task-1".into(),
@@ -95,6 +96,8 @@ impl MockRuntime {
                         output_tokens: 420,
                     }),
                     depth: 2,
+                    contract: None,
+                    evidence: None,
                 },
             });
             let reply = "Done — I mapped the repo and delegated the auth refactor to dev-1.";
@@ -121,6 +124,8 @@ impl MockRuntime {
                         output_tokens: 420,
                     }),
                     depth: 2,
+                    contract: None,
+                    evidence: None,
                 },
             );
             s.active_mut().last_result = Some(CycleResultSummary {

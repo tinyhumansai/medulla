@@ -45,8 +45,9 @@ impl TuiEvent {
                 instruction,
                 depth,
                 agent_id,
+                contract,
             } => {
-                json!({ "taskId": task_id, "instruction": instruction, "depth": depth, "agentId": agent_id })
+                json!({ "taskId": task_id, "instruction": instruction, "depth": depth, "agentId": agent_id, "contract": contract })
             }
             TuiEvent::TaskEvent {
                 task_id,
@@ -177,6 +178,7 @@ impl<'de> Deserialize<'de> for TuiEvent {
                 instruction: get_str(map, "instruction"),
                 depth: get_i64(map, "depth"),
                 agent_id: opt_str(map, "agentId"),
+                contract: from_field(map, "contract"),
             },
             "task_event" => TuiEvent::TaskEvent {
                 task_id: get_str(map, "taskId"),

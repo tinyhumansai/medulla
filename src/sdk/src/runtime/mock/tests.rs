@@ -136,6 +136,7 @@ fn thread_summaries_count_running_tasks_and_attention() {
         instruction: "go".into(),
         depth: 2,
         agent_id: None,
+        contract: None,
     });
     rt.script_event(TuiEvent::TaskAttention {
         task_id: "t1".into(),

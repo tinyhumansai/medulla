@@ -61,6 +61,18 @@ fn lesson_parses_the_shared_trigger_rule_shape() {
 }
 
 #[test]
+fn review_requires_and_preserves_a_target() {
+    assert_eq!(
+        parse("/review Task-42"),
+        Some(SlashCommand::Review("Task-42".into()))
+    );
+    assert_eq!(
+        parse("/review"),
+        Some(SlashCommand::BadUsage("Usage: /review <lane|task-id>"))
+    );
+}
+
+#[test]
 fn copy_validates_scope() {
     assert_eq!(parse("/copy"), Some(SlashCommand::Copy(CopyScope::All)));
     assert_eq!(parse("/copy all"), Some(SlashCommand::Copy(CopyScope::All)));

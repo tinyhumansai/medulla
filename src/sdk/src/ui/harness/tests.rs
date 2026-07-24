@@ -15,6 +15,8 @@ fn task(id: &str, title: &str, status: TrackedTaskStatus) -> TrackedTask {
         instruction_id: None,
         delegated_task_ids: Vec::new(),
         notes: Vec::new(),
+        contract: None,
+        evidence: None,
     }
 }
 

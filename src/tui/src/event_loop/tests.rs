@@ -8,7 +8,9 @@ use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{Runtime, WorkerOp};
 use medulla_tui::ui::app::Cmd;
 
-use super::{read_memory, run_cmd, spawn_update_checker, AppMsg};
+use super::cmd_dispatch::{read_memory, run_cmd};
+use super::types::AppMsg;
+use super::update_checker::spawn_update_checker;
 
 /// Receive the next dispatcher result without allowing a broken task to hang
 /// the entire test suite.
@@ -81,6 +83,62 @@ async fn records_lessons_and_surfaces_duplicates() {
         );
         assert!(matches!(next(&mut rx).await, AppMsg::Status(status) if status.contains(expected)));
     }
+}
+
+#[tokio::test]
+async fn prepares_exact_diff_and_submits_fresh_review_instruction() {
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "test@example.com"]);
+    git(&["config", "user.name", "Test"]);
+    std::fs::write(dir.path().join("file.txt"), "before\n").unwrap();
+    git(&["add", "file.txt"]);
+    git(&["commit", "-qm", "base"]);
+    std::fs::write(dir.path().join("file.txt"), "after\n").unwrap();
+
+    let concrete = Arc::new(MockRuntime::empty());
+    let runtime: Arc<dyn Runtime> = concrete.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    run_cmd(
+        Cmd::PrepareReview {
+            task_id: "task-1".into(),
+            implementer_id: "dev-1".into(),
+            reviewer_id: "dev-2".into(),
+            workspace: dir.path().to_path_buf(),
+            contract: medulla::autoreview::ReviewContract {
+                outcome: "Change the file".into(),
+                non_goals: vec!["No rename".into()],
+                verify: vec!["test -f file.txt".into()],
+            },
+        },
+        &runtime,
+        None,
+        &tx,
+    );
+    assert!(
+        matches!(next(&mut rx).await, AppMsg::Status(status) if status.contains("fresh reviewer"))
+    );
+    let message = concrete
+        .snapshot()
+        .messages
+        .iter()
+        .find(|message| message.content.contains("MEDULLA_AUTOREVIEW"))
+        .unwrap()
+        .content
+        .clone();
+    assert!(message.contains("MEDULLA_AUTOREVIEW target=task-1"));
+    assert!(message.contains("-before"));
+    assert!(message.contains("+after"));
+    assert!(message.contains("reviewer") || message.contains("dev-2"));
 }
 
 #[tokio::test]

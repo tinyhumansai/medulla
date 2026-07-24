@@ -44,6 +44,7 @@ fn app() -> (App, Arc<MockRuntime>) {
                 instruction: "choose the schema".into(),
                 depth: 1,
                 agent_id: Some("dev".into()),
+                contract: None,
             },
         },
         EventEnvelope {
@@ -72,6 +73,8 @@ fn app() -> (App, Arc<MockRuntime>) {
             instruction_id: None,
             delegated_task_ids: vec!["cycle-1/t:task-1".into()],
             notes: vec![],
+            contract: None,
+            evidence: None,
         }],
         running_delegations: 1,
         usage: HarnessUsage::default(),

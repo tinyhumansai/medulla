@@ -42,6 +42,8 @@ pub enum SlashCommand {
     Memory(Option<String>),
     /// `/lesson <trigger> -> <rule>` — append a durable workspace lesson.
     Lesson { trigger: String, rule: String },
+    /// `/review <lane|task-id>` — launch an independent fresh-context review.
+    Review(String),
     /// `/feedback` — open the feedback board tab.
     Feedback,
     /// `/mouse` — toggle mouse capture.

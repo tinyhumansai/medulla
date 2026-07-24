@@ -50,6 +50,8 @@ impl App {
             memory_service: None,
             memory_ingesting: false,
             feedback: Default::default(),
+            repo: Default::default(),
+            lane_claims: Default::default(),
             decision_open: false,
             decision_index: 0,
             dismissed_decisions: Default::default(),
@@ -291,6 +293,7 @@ impl App {
     pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
         match self.tab() {
             "Memory" => Some(Cmd::LoadMemory),
+            "Agents" | "Repo" => Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces())),
             "Settings" => match self.settings_index {
                 SP_USAGE => Some(Cmd::LoadUsage),
                 SP_CONTEXT => Some(Cmd::InspectContext),
@@ -299,6 +302,97 @@ impl App {
             },
             _ => None,
         }
+    }
+
+    /// Replace Repo-tab reports and keep selection within the dirty-file list.
+    pub fn set_workspace_reports(&mut self, reports: Vec<medulla::workspace::WorkspaceReport>) {
+        self.repo.reports = reports;
+        self.repo.loading = false;
+        self.repo.file_index = self
+            .repo
+            .file_index
+            .min(self.repo_files().len().saturating_sub(1));
+        if self.repo_files().is_empty() {
+            self.repo.diff_key = None;
+            self.repo.diff.clear();
+            self.repo.diff_error = None;
+            self.repo.diff_scroll = 0;
+        }
+    }
+
+    /// Mark the Repo tab as refreshing without discarding its last good view.
+    pub fn set_workspaces_loading(&mut self) {
+        self.repo.loading = true;
+    }
+
+    /// Store the selected path's patch or its typed error.
+    ///
+    /// Guards against stale responses: if the operator has moved to a different
+    /// file while a diff load was in flight, the now-irrelevant result is
+    /// discarded so the pane does not briefly flash the wrong patch.
+    pub fn set_workspace_diff(
+        &mut self,
+        workspace: std::path::PathBuf,
+        path: std::path::PathBuf,
+        result: Result<String, String>,
+    ) {
+        // Drop responses that arrive after the selection has moved on to a
+        // different file. Accept any response when no file is currently selected
+        // (the list may be empty or the index may be stale).
+        let files = self.repo_files();
+        if let Some((current_ws, current_change)) = files.get(self.repo.file_index) {
+            if *current_ws != workspace || current_change.path != path {
+                return;
+            }
+        }
+        self.repo.diff_key = Some((workspace, path));
+        self.repo.diff_scroll = 0;
+        match result {
+            Ok(diff) => {
+                self.repo.diff = diff;
+                self.repo.diff_error = None;
+            }
+            Err(error) => {
+                self.repo.diff.clear();
+                self.repo.diff_error = Some(error);
+            }
+        }
+    }
+
+    /// Flatten workspace dirty paths into selection order.
+    pub(super) fn repo_files(&self) -> Vec<(std::path::PathBuf, medulla::workspace::FileChange)> {
+        self.repo
+            .reports
+            .iter()
+            .filter_map(|report| report.snapshot.as_ref())
+            .flat_map(|snapshot| {
+                snapshot
+                    .files
+                    .iter()
+                    .cloned()
+                    .map(|change| (snapshot.root.clone(), change))
+            })
+            .collect()
+    }
+
+    /// Command to load the currently selected dirty path's patch.
+    pub fn selected_repo_diff_cmd(&self) -> Option<Cmd> {
+        let (workspace, change) = self.repo_files().get(self.repo.file_index)?.clone();
+        Some(Cmd::LoadWorkspaceDiff {
+            workspace,
+            path: change.path,
+        })
+    }
+
+    /// Move the dirty-file cursor and request the newly selected patch.
+    pub(super) fn move_repo_file(&mut self, up: bool) -> Option<Cmd> {
+        let max = self.repo_files().len().saturating_sub(1);
+        self.repo.file_index = if up {
+            self.repo.file_index.saturating_sub(1)
+        } else {
+            (self.repo.file_index + 1).min(max)
+        };
+        self.selected_repo_diff_cmd()
     }
 
     /// Derive the current agent lanes from the snapshot, harness, and roster.

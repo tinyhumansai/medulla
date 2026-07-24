@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{Event, EventStream};
+use crossterm::event::EventStream;
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -28,7 +28,7 @@ use medulla_tui::worker::app::{ExecutionMode, WorkerApp, WorkerCmd, WorkerWiring
 use medulla_tui::worker::executor::PtySessionExecutor;
 use medulla_tui::worker::pty::PtyManager;
 
-use crate::terminal::TermGuard;
+use crate::terminal::{set_mouse_capture, TermGuard};
 
 /// Redraw cadence. Fast enough that a harness's own cursor blink and spinner
 /// look native, slow enough to bound the cost of a full repaint.
@@ -269,34 +269,28 @@ async fn drive(
 ) -> anyhow::Result<()> {
     let mut reader = EventStream::new();
     let mut tick = tokio::time::interval(TICK);
+    let mut mouse_on = true;
 
     loop {
         terminal.draw(|f| app.draw(f))?;
         if app.should_quit {
             return Ok(());
         }
+        if app.mouse_capture() != mouse_on {
+            mouse_on = app.mouse_capture();
+            set_mouse_capture(mouse_on);
+        }
 
         tokio::select! {
             maybe_event = reader.next() => {
                 if let Some(Ok(event)) = maybe_event {
-                    if let Some(cmd) = on_event(app, event) {
+                    if let Some(cmd) = app.on_event(event) {
                         run_cmd(app, cmd, start, inbox).await;
                     }
                 }
             }
             _ = tick.tick() => {}
         }
-    }
-}
-
-/// Route one terminal event.
-fn on_event(app: &mut WorkerApp, event: Event) -> Option<WorkerCmd> {
-    match event {
-        Event::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => app.on_key(key),
-        // A resize is handled by the next draw, which re-measures the pane and
-        // resizes the PTY to match.
-        Event::Resize(_, _) => None,
-        _ => None,
     }
 }
 

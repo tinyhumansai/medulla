@@ -71,6 +71,12 @@ impl WorkerApp {
                 .map(|p| (p.display_name().to_string(), String::new()))
                 .collect(),
         };
+        self.hit_setup = Some(Rect::new(
+            inner.x,
+            inner.y.saturating_add(5),
+            inner.width,
+            options.len() as u16,
+        ));
         for (i, (label, blurb)) in options.iter().enumerate() {
             let selected = i == self.setup_index;
             let text = format!(
@@ -98,7 +104,9 @@ impl WorkerApp {
                 )));
             }
         }
-        lines.push(dim("↑↓ choose · 1-9 jump · Enter confirm · q quit"));
+        lines.push(dim(
+            "↑↓ choose · click/1-9 jump · Enter confirm · Ctrl-O select text · q quit",
+        ));
         f.render_widget(
             Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
             inner,

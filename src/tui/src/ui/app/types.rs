@@ -25,8 +25,8 @@ use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 /// Trace, Context, and Feedback used to live here. They are secondary surfaces —
 /// two of them diagnostic — so they now sit under Settings, keeping the tab bar
 /// to the views a session is actually driven from.
-pub const TABS: [&str; 7] = [
-    "Overview", "Chat", "Agents", "Repo", "Workers", "Memory", "Settings",
+pub const TABS: [&str; 8] = [
+    "Overview", "Chat", "Agents", "Repo", "Tasks", "Workers", "Memory", "Settings",
 ];
 
 /// The Settings tab's left-nav subpages, in order (number keys 1-8 jump to them).
@@ -330,6 +330,8 @@ pub struct App {
     pub(super) feedback: FeedbackState,
     /// Local Git ledger state for the Repo tab.
     pub(super) repo: RepoState,
+    /// Durable local task document displayed by the Tasks tab.
+    pub(super) tasks: medulla::tasks::TaskDocument,
     /// Manual permitted-path globs keyed by stable Agents lane id.
     pub(super) lane_claims: std::collections::BTreeMap<String, Vec<String>>,
     /// Whether the prepared-decision modal is visible.

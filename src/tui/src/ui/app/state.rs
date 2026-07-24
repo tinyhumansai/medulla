@@ -51,6 +51,7 @@ impl App {
             memory_ingesting: false,
             feedback: Default::default(),
             repo: Default::default(),
+            tasks: medulla::tasks::TaskDocument::default(),
             lane_claims: Default::default(),
             decision_open: false,
             decision_index: 0,
@@ -98,6 +99,11 @@ impl App {
     /// logout reports that it has nowhere to write rather than guessing.
     pub fn set_medulla_home(&mut self, home: std::path::PathBuf) {
         self.medulla_home = Some(home);
+        if let Some(home) = &self.medulla_home {
+            if let Ok(repository) = medulla::tasks::TaskRepository::in_home(home) {
+                self.tasks = repository.document().clone();
+            }
+        }
     }
 
     /// The active Settings subpage name. Test/inspection seam.

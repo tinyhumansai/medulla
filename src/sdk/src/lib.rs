@@ -22,6 +22,7 @@ pub mod runtime;
 pub mod session_history;
 pub mod sessions;
 pub mod tinyplace;
+pub mod tasks;
 pub mod ui;
 pub mod update;
 pub mod worker_profile;

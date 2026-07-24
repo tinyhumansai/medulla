@@ -9,9 +9,17 @@ pub(super) fn run_task_cmd(
     cmd: Cmd,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) -> Option<Box<Cmd>> {
+    run_task_cmd_at(cmd, medulla_home(), msg_tx)
+}
+
+/// Dispatch a task command against an explicitly resolved Medulla home.
+fn run_task_cmd_at(
+    cmd: Cmd,
+    home: Option<std::path::PathBuf>,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) -> Option<Box<Cmd>> {
     match cmd {
         Cmd::LoadTasks => {
-            let home = medulla_home();
             let tx = msg_tx.clone();
             tokio::task::spawn_blocking(move || {
                 let result = home.map_or_else(
@@ -33,7 +41,7 @@ pub(super) fn run_task_cmd(
             let tx = msg_tx.clone();
             tokio::task::spawn_blocking(move || {
                 let task = *task;
-                let result = medulla_home().map_or_else(
+                let result = home.map_or_else(
                     || Err("Medulla home is unavailable".into()),
                     |home| {
                         let mut repository = medulla::tasks::TaskRepository::in_home(home)
@@ -55,12 +63,18 @@ pub(super) fn run_task_cmd(
         Cmd::SaveTasks(document) => {
             let tx = msg_tx.clone();
             tokio::task::spawn_blocking(move || {
-                let result = medulla_home().map_or_else(
+                let result = home.map_or_else(
                     || Err("Medulla home is unavailable".into()),
                     |home| {
                         let mut repository = medulla::tasks::TaskRepository::in_home(home)
                             .map_err(|error| error.to_string())?;
-                        *repository.document_mut() = *document;
+                        for source in document.sources {
+                            repository
+                                .document_mut()
+                                .sources
+                                .retain(|existing| existing.id != source.id);
+                            repository.document_mut().sources.push(source);
+                        }
                         repository.save().map_err(|error| error.to_string())
                     },
                 );
@@ -73,7 +87,7 @@ pub(super) fn run_task_cmd(
         Cmd::DeleteTask(id) => {
             let tx = msg_tx.clone();
             tokio::task::spawn_blocking(move || {
-                let result = medulla_home().map_or_else(
+                let result = home.map_or_else(
                     || Err("Medulla home is unavailable".into()),
                     |home| {
                         let mut repository = medulla::tasks::TaskRepository::in_home(home)
@@ -91,8 +105,8 @@ pub(super) fn run_task_cmd(
         Cmd::SyncTasks(id) => {
             let tx = msg_tx.clone();
             tokio::spawn(async move {
-                let result = match medulla_home() {
-                    Some(home) => match medulla::tasks::TaskRepository::in_home(home) {
+                let result = match home {
+                    Some(home) => match open_repository(home).await {
                         Ok(mut repository) => {
                             let source = repository
                                 .document()
@@ -129,6 +143,16 @@ pub(super) fn run_task_cmd(
     None
 }
 
+/// Acquire the repository lock off the async executor before a provider sync.
+async fn open_repository(
+    home: std::path::PathBuf,
+) -> Result<medulla::tasks::TaskRepository, String> {
+    tokio::task::spawn_blocking(move || medulla::tasks::TaskRepository::in_home(home))
+        .await
+        .map_err(|error| format!("task repository worker failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
 /// Resolve the configured Medulla home without inventing another fallback.
 fn medulla_home() -> Option<std::path::PathBuf> {
     std::env::var_os("MEDULLA_HOME")
@@ -137,3 +161,7 @@ fn medulla_home() -> Option<std::path::PathBuf> {
             std::env::var_os("HOME").map(|path| std::path::PathBuf::from(path).join(".medulla"))
         })
 }
+
+#[cfg(test)]
+#[path = "tasks/tests.rs"]
+mod tests;

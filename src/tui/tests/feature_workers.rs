@@ -103,10 +103,14 @@ fn worker(id: &str, selected: bool) -> WorkerInfo {
 }
 
 fn app_with_workers(stream: Option<StreamState>) -> App {
-    let rt: Arc<dyn Runtime> = Arc::new(FleetRuntime::new(
+    app_with_roster(
         vec![worker("w1", true), worker("w2", false), worker("w3", false)],
         stream,
-    ));
+    )
+}
+
+fn app_with_roster(workers: Vec<WorkerInfo>, stream: Option<StreamState>) -> App {
+    let rt: Arc<dyn Runtime> = Arc::new(FleetRuntime::new(workers, stream));
     App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()))
 }
 
@@ -168,10 +172,104 @@ fn routing_nav_exposes_all_four_subpages() {
 }
 
 #[test]
+fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Routing");
+    assert!(!app.routing_focused());
+
+    assert!(app.on_event(key(KeyCode::Down)).is_none());
+    assert_eq!(app.routing_subpage(), "Add Worker");
+    assert!(app.on_event(key(KeyCode::Enter)).is_none());
+    assert!(app.routing_focused());
+    assert!(app.on_event(key(KeyCode::Esc)).is_none());
+    assert!(!app.routing_focused());
+
+    assert!(app.on_event(key(KeyCode::Char('4'))).is_none());
+    assert_eq!(app.routing_subpage(), "Strategies");
+    assert!(app.routing_focused());
+}
+
+#[test]
+fn routing_pages_leave_unbound_keys_for_global_handling() {
+    let mut app = app_with_workers(None);
+    for page in ["Add Worker", "Manage Keys", "Strategies"] {
+        app.focus_routing_subpage(page);
+        assert!(app.on_event(key(KeyCode::Char('z'))).is_none());
+    }
+}
+
+#[test]
+fn add_worker_page_renders_guidance_and_opens_the_prompt() {
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("Add Worker");
+
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("Connect a tiny.place worker"));
+    assert!(out.contains("@build-box Primary build worker"));
+
+    assert!(app.on_event(key(KeyCode::Enter)).is_none());
+    let (title, draft) = app.prompt_state().expect("add prompt");
+    assert!(title.starts_with("Add worker"));
+    assert!(draft.is_empty());
+}
+
+#[test]
+fn worker_list_add_shortcut_opens_the_shared_prompt() {
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("List Workers");
+
+    assert!(app.on_event(key(KeyCode::Char('a'))).is_none());
+    assert_eq!(app.routing_subpage(), "Add Worker");
+    assert!(app.prompt_state().is_some());
+}
+
+#[test]
+fn empty_worker_list_explains_the_state_and_roster_actions_are_noops() {
+    let mut app = app_with_roster(Vec::new(), None);
+    app.focus_routing_subpage("List Workers");
+
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("No workers registered"));
+    for code in [
+        KeyCode::Enter,
+        KeyCode::Char('d'),
+        KeyCode::Char('e'),
+        KeyCode::Char('r'),
+    ] {
+        assert!(app.on_event(key(code)).is_none());
+    }
+}
+
+#[test]
+fn worker_list_formats_missing_details_and_megabytes() {
+    let mut missing = worker("w1", true);
+    missing.ip_address = None;
+    missing.cpu_cores = None;
+    missing.memory_available_bytes = None;
+    missing.memory_total_bytes = None;
+    missing.handle = None;
+    missing.label = None;
+    missing.harness = None;
+
+    let mut small = worker("w2", false);
+    small.memory_available_bytes = Some(512 * 1024 * 1024);
+    small.memory_total_bytes = Some(768 * 1024 * 1024);
+
+    let mut app = app_with_roster(vec![missing, small], None);
+    app.focus_routing_subpage("List Workers");
+    let out = render(&mut app, 120, 40);
+
+    assert!(out.contains("details not captured"));
+    assert!(out.contains("512 MiB available / 768 MiB total"));
+}
+
+#[test]
 fn strategies_choose_and_apply_a_capacity_policy() {
     let mut app = app_with_workers(None);
     app.focus_routing_subpage("Strategies");
     let _ = app.on_event(key(KeyCode::Down));
+    let _ = app.on_event(key(KeyCode::Down));
+    let _ = app.on_event(key(KeyCode::Up));
     let _ = app.on_event(key(KeyCode::Down));
     let out = render(&mut app, 120, 40);
     assert!(out.contains("CPU First"));

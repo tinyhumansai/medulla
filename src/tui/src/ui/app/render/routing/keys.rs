@@ -83,3 +83,6 @@ fn credential_line<'a>(label: &str, present: bool, absent_hint: &str) -> TLine<'
     };
     TLine::from(Span::styled(format!("{glyph} {label:<12} {status}"), style))
 }
+
+#[cfg(test)]
+mod tests;

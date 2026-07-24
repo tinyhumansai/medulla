@@ -6,6 +6,9 @@
 //! caller — correlated by a per-dispatch `correlationId`, because the inbox is
 //! shared across concurrent dispatches (draining it acknowledges every message,
 //! so one pump must fan each frame out to the right waiter).
+//!
+//! The inbound routing lives in [`pump`]; this module owns dispatch, the liveness
+//! bounds, and orchestrator-driven abort.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,15 +17,12 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
-use crate::tinyplace::{
-    decode_task_frame, encode_task_frame, EncodeFrameInput, TaskFrame, TaskFrameKind, TokenUsage,
-};
+use crate::tinyplace::{encode_task_frame, EncodeFrameInput, TaskFrameKind};
 
 use super::relay::Relay;
 use super::types::{RunError, TaskOutcome, TaskRequest};
 
-/// How many inbound messages to drain per pump tick.
-const DRAIN_LIMIT: i64 = 50;
+mod pump;
 
 /// How long to wait for a peer to accept our contact request before sending.
 const CONTACT_WAIT: Duration = Duration::from_secs(20);
@@ -34,13 +34,19 @@ const CONTACT_POLL: Duration = Duration::from_millis(500);
 /// re-handshaking. Short: a live worker acks within a poll or two.
 const ACK_WINDOW: Duration = Duration::from_secs(12);
 
-/// How many idle budgets a task may span in total before it is given up on
-/// regardless of how much it is saying.
+/// The no-progress (liveness) window, applied only AFTER the peer is alive: how
+/// long a dispatch may receive NO inbound frame before the hub treats the worker
+/// as dead, reaps the correlation entry, and gives up. Reset by every frame, so a
+/// worker that keeps emitting `status` is never given up on however long it runs.
 ///
-/// The idle deadline answers "is anyone home"; this answers "is this ever going
-/// to end". Without it a worker emitting a status frame every few seconds would
-/// hold its dispatch indefinitely.
-const MAX_IDLE_EXTENSIONS: u32 = 4;
+/// This is a liveness bound, NOT a task deadline. The orchestrator owns the
+/// deadline — "how long may this task take" — and aborts a running task in sync
+/// mode via `medulla:task_abort`. The hub's only job here is to make sure a
+/// crashed or vanished worker (which stops sending frames) cannot pin its
+/// correlation entry and spawned handler forever: without this bound, a worker
+/// that acks and then dies before sending a terminal frame would leak.
+const IDLE_WINDOW: Duration = Duration::from_secs(240);
+
 /// How many times to reset the Signal session + resend before giving up. Covers
 /// the common one-sided-session desync (worker restarted) in one extra round.
 const MAX_RESETS: u32 = 2;
@@ -59,94 +65,37 @@ struct Waiter {
 /// Shared registry of in-flight dispatches, keyed by `correlationId`.
 type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
 
-/// Route one decoded frame to its waiter, keyed by `correlationId` (falling back
-/// to `taskId`). Any frame pokes the waiter's `activity` (sign of life);
-/// `reply`/`error` then settle and remove it; `status` forwards; `ack` just
-/// counted as activity.
-async fn route_frame(
-    waiters: &Waiters,
-    frame: TaskFrame,
-    log: &Option<super::types::HubLog>,
-    activity: &Option<super::ActivityLog>,
-) {
-    // Recorded as well as logged: the log is for a human reading afterwards,
-    // this is what the Agents view renders live.
-    if let Some(activity) = activity {
-        activity.observed(
-            &frame.task_id,
-            frame.kind.as_str(),
-            &frame.text,
-            crate::clock::now_millis(),
-        );
-    }
-    // Every frame a worker sends, as it arrives. The hub used to report only the
-    // settled outcome, so a reply that never came and a reply that came back
-    // empty read the same from here — and neither said whether the worker had
-    // been talking at all.
-    if let Some(log) = log {
-        log(&format!(
-            "hub ← task {} {} · {} chars: {}",
-            frame.task_id,
-            frame.kind.as_str(),
-            frame.text.chars().count(),
-            crate::logging::preview(&frame.text),
-        ));
-    }
-    let key = frame
-        .correlation_id
-        .clone()
-        .unwrap_or_else(|| frame.task_id.clone());
-    // One lock for the whole routing — every op below is synchronous.
-    let mut map = waiters.lock().await;
-    if let Some(w) = map.get(&key) {
-        w.activity.notify_one();
-    }
-    match frame.kind {
-        TaskFrameKind::Reply => {
-            if let Some(w) = map.remove(&key) {
-                let _ = w.reply.send(Ok(TaskOutcome {
-                    reply: frame.text,
-                    usage: frame.usage.unwrap_or(TokenUsage {
-                        input_tokens: 0,
-                        output_tokens: 0,
-                    }),
-                    harness: frame.harness,
-                }));
-            }
-        }
-        TaskFrameKind::Error => {
-            if let Some(w) = map.remove(&key) {
-                let _ = w.reply.send(Err(frame.text));
-            }
-        }
-        TaskFrameKind::Status => {
-            if let Some(w) = map.get(&key) {
-                if let Some(tx) = &w.status {
-                    let _ = tx.send(frame.text);
-                }
-            }
-        }
-        // ack / task / input / capabilities* — activity already recorded.
-        _ => {}
-    }
+/// Shared registry of abort signals, keyed by the orchestrator-facing task id
+/// (`medulla:task_abort.taskId`). One entry per in-flight [`TaskRunner::run`],
+/// registered for the whole call; notifying it makes that call stop the worker,
+/// reap its correlation entry, and return [`RunError::Aborted`].
+///
+/// A `std::sync::Mutex` (not tokio's), because the [`AbortGuard`] that removes an
+/// entry runs in `Drop`, which cannot await — and the lock is only ever held for
+/// a synchronous get/insert/remove, never across a suspension point.
+type Aborts = Arc<std::sync::Mutex<HashMap<String, Arc<Notify>>>>;
+
+/// Removes a `run` call's abort signal from the [`Aborts`] registry when the call
+/// returns (by any path), so a settled dispatch leaves nothing behind for a later
+/// `task_abort` to match. Removes only its OWN signal (identity-compared), so a
+/// concurrent re-dispatch that reused the same id and overwrote the slot is left
+/// intact.
+struct AbortGuard {
+    aborts: Aborts,
+    key: String,
+    signal: Arc<Notify>,
 }
 
-/// The pump: drain the inbox, decode each message, route it, then sleep. Runs
-/// until the owning [`TaskRunner`] is dropped (which aborts the task).
-async fn pump_loop(
-    relay: Arc<dyn Relay>,
-    waiters: Waiters,
-    poll: Duration,
-    log: Option<super::types::HubLog>,
-    activity: Option<super::ActivityLog>,
-) {
-    loop {
-        for msg in relay.drain_inbox(DRAIN_LIMIT).await {
-            if let Some(frame) = decode_task_frame(&msg.text) {
-                route_frame(&waiters, frame, &log, &activity).await;
+impl Drop for AbortGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = self.aborts.lock() {
+            if map
+                .get(&self.key)
+                .is_some_and(|s| Arc::ptr_eq(s, &self.signal))
+            {
+                map.remove(&self.key);
             }
         }
-        tokio::time::sleep(poll).await;
     }
 }
 
@@ -158,9 +107,14 @@ async fn pump_loop(
 pub struct TaskRunner {
     relay: Arc<dyn Relay>,
     waiters: Waiters,
+    /// Abort signals for in-flight dispatches, keyed by orchestrator-facing task
+    /// id; [`abort_task`](Self::abort_task) notifies one to cancel its dispatch.
+    aborts: Aborts,
     counter: AtomicU64,
     /// How long a dispatch waits for the first sign of life before re-handshaking.
     ack_window: Duration,
+    /// The no-progress window applied once the peer is alive (see [`IDLE_WINDOW`]).
+    idle_window: Duration,
     pump: tokio::task::JoinHandle<()>,
 }
 
@@ -188,7 +142,7 @@ impl TaskRunner {
         poll: Duration,
         log: super::types::HubLog,
     ) -> Self {
-        Self::build(relay, poll, ACK_WINDOW, Some(log), None)
+        Self::build(relay, poll, ACK_WINDOW, IDLE_WINDOW, Some(log), None)
     }
 
     /// Like [`start_with_log`](Self::start_with_log), also recording what each
@@ -199,7 +153,14 @@ impl TaskRunner {
         log: super::types::HubLog,
         activity: super::ActivityLog,
     ) -> Self {
-        Self::build(relay, poll, ACK_WINDOW, Some(log), Some(activity))
+        Self::build(
+            relay,
+            poll,
+            ACK_WINDOW,
+            IDLE_WINDOW,
+            Some(log),
+            Some(activity),
+        )
     }
 
     /// Like [`start`](Self::start) with an explicit ack window (tests use a short
@@ -209,18 +170,30 @@ impl TaskRunner {
         poll: Duration,
         ack_window: Duration,
     ) -> Self {
-        Self::build(relay, poll, ack_window, None, None)
+        Self::build(relay, poll, ack_window, IDLE_WINDOW, None, None)
+    }
+
+    /// Like [`start`](Self::start) with an explicit no-progress window (tests use
+    /// a short one to exercise the liveness watchdog — a worker that acks then
+    /// goes silent — without real delays).
+    pub fn start_with_idle_window(
+        relay: Arc<dyn Relay>,
+        poll: Duration,
+        idle_window: Duration,
+    ) -> Self {
+        Self::build(relay, poll, ACK_WINDOW, idle_window, None, None)
     }
 
     fn build(
         relay: Arc<dyn Relay>,
         poll: Duration,
         ack_window: Duration,
+        idle_window: Duration,
         log: Option<super::types::HubLog>,
         activity: Option<super::ActivityLog>,
     ) -> Self {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
-        let pump = tokio::spawn(pump_loop(
+        let pump = tokio::spawn(pump::pump_loop(
             relay.clone(),
             waiters.clone(),
             poll,
@@ -230,9 +203,30 @@ impl TaskRunner {
         TaskRunner {
             relay,
             waiters,
+            aborts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             counter: AtomicU64::new(0),
             ack_window,
+            idle_window,
             pump,
+        }
+    }
+
+    /// Cancel the in-flight dispatch for `task_id` (the orchestrator-facing id the
+    /// backend aborts by, `medulla:task_abort.taskId`).
+    ///
+    /// Wakes that dispatch's [`run`](Self::run) so it tells the worker to stop,
+    /// reaps its correlation entry, and returns [`RunError::Aborted`]. A no-op if
+    /// no dispatch is in flight for that id — it already settled, or was never
+    /// dispatched here. Best-effort: a lost signal (poisoned lock) just leaves the
+    /// dispatch to its own liveness bound.
+    pub fn abort_task(&self, task_id: &str) {
+        let signal = self
+            .aborts
+            .lock()
+            .ok()
+            .and_then(|map| map.get(task_id).cloned());
+        if let Some(signal) = signal {
+            signal.notify_one();
         }
     }
 
@@ -242,28 +236,64 @@ impl TaskRunner {
     /// Requests a contact first (idempotent; a peer refuses a DM before one
     /// exists). Then, per attempt: encode a `task` frame under a fresh
     /// `correlationId`, send it, and wait an `ACK_WINDOW` for the FIRST sign of
-    /// life. If the peer answers (any frame), await the terminal reply for the
-    /// full `req.timeout`. If the peer is silent — the classic one-sided session
-    /// after a worker restart, where our `CIPHERTEXT` is undecryptable and
-    /// dropped — reset the Signal session (forcing a fresh X3DH) and resend, up
-    /// to `MAX_RESETS`. `status` frames are forwarded to `status` throughout.
+    /// life. If the peer answers (any frame), forward its terminal `reply`/`error`
+    /// whenever it arrives — the hub owns no *deadline*, so a worker that keeps
+    /// making progress is left to finish however long it runs. If the peer is
+    /// silent — the classic one-sided session after a worker restart, where our
+    /// `CIPHERTEXT` is undecryptable and dropped — reset the Signal session
+    /// (forcing a fresh X3DH) and resend, up to `MAX_RESETS`. `status` frames are
+    /// forwarded to `status` throughout.
+    ///
+    /// The hub is a relay for the task *deadline*: the backend owns "how long may
+    /// this take" and aborts a running task in sync mode via `medulla:task_abort`,
+    /// which [`abort_task`](Self::abort_task) delivers here — stopping the worker
+    /// and returning [`RunError::Aborted`], even while the task is actively
+    /// reporting progress (the one path that cancels a healthy, chatty worker).
+    /// Beyond that the runner enforces only two *liveness* bounds, so a dead
+    /// dispatch can never pin its correlation entry: the [`ACK_WINDOW`] on a
+    /// never-answering peer, and — once alive — the [`IDLE_WINDOW`] no-progress
+    /// watchdog, which reaps a worker that acks then stops emitting frames
+    /// (crashed / vanished). Neither is a wall-clock cap on a working peer.
     pub async fn run(
         &self,
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<TaskOutcome, RunError> {
+        // Register this dispatch's abort signal FIRST — before the contact wait —
+        // so a `task_abort` that arrives during contact negotiation (up to
+        // `CONTACT_WAIT` for a first-time worker) is honored, not silently dropped
+        // by finding nothing in the registry. Keyed by the orchestrator-facing id
+        // the backend aborts by, and held for the whole call (spanning any
+        // reset+resend retries). The guard removes it on every return path, so a
+        // settled dispatch leaves nothing for a later `task_abort` to match.
+        let abort = Arc::new(Notify::new());
+        self.aborts
+            .lock()
+            .expect("aborts lock")
+            .insert(req.abort_id.clone(), abort.clone());
+        let _abort_guard = AbortGuard {
+            aborts: self.aborts.clone(),
+            key: req.abort_id.clone(),
+            signal: abort.clone(),
+        };
+
         // Establish the contact and WAIT for acceptance. A request only creates a
         // `pending` edge, and the relay refuses a DM to a non-contact
         // (`403 not_a_contact`) — sending immediately races the peer's
         // auto-accepter. Bounded, so a peer that never accepts surfaces as a
-        // normal task error instead of hanging.
+        // normal task error instead of hanging. An abort here bails immediately:
+        // nothing has been dispatched yet, so there is no worker to stop.
         if !self.relay.contact_accepted(&req.worker_address).await {
             let _ = self.relay.request_contact(&req.worker_address).await;
             let deadline = std::time::Instant::now() + CONTACT_WAIT;
             while std::time::Instant::now() < deadline
                 && !self.relay.contact_accepted(&req.worker_address).await
             {
-                tokio::time::sleep(CONTACT_POLL).await;
+                tokio::select! {
+                    biased;
+                    _ = abort.notified() => return Err(RunError::Aborted),
+                    _ = tokio::time::sleep(CONTACT_POLL) => {}
+                }
             }
         }
 
@@ -302,36 +332,52 @@ impl TaskRunner {
                 return Err(RunError::Transport(e));
             }
 
-            // Ack window: first sign of life, an early terminal, or silence.
+            // Ack window: first sign of life, an early terminal, an orchestrator
+            // abort, or silence.
             tokio::select! {
                 biased;
                 terminal = &mut rx => return settle(terminal),
+                // The backend aborted the task (deadline or `/abort`). Stop the
+                // worker and give up, even before it has acked.
+                _ = abort.notified() => {
+                    self.waiters.lock().await.remove(&cid);
+                    send_abort(
+                        self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
+                    ).await;
+                    return Err(RunError::Aborted);
+                }
                 _ = activity.notified() => {
-                    // Alive. From here the deadline is IDLE, not wall-clock:
-                    // every frame resets it, so a worker streaming progress is
-                    // left to work and only a silent one is given up on. It used
-                    // to be a single wall-clock timeout, which killed a task
-                    // reporting `running Bash: …` every few seconds at exactly
-                    // the same moment as one that had died — and a real coding
-                    // task crosses that line routinely.
+                    // Alive. From here the bound is IDLE, not wall-clock: every
+                    // frame resets it, so a worker streaming progress is left to
+                    // work for as long as it takes and only a SILENT one is given
+                    // up on. There is deliberately no hard ceiling — the hub owns
+                    // no task deadline. The backend owns "how long may this take"
+                    // and aborts a running task via `medulla:task_abort` (handled
+                    // below); a hub ceiling here used to kill a task reporting
+                    // `running Bash: …` every few seconds at the same moment as one
+                    // that had died, and a real coding task crosses that routinely.
                     //
-                    // A ceiling still bounds it, because a worker that chatters
-                    // without ever finishing must not hold the dispatch forever.
-                    let ceiling = tokio::time::Instant::now() + req.timeout * MAX_IDLE_EXTENSIONS;
+                    // The idle window still fires, because a worker that acks and
+                    // then goes silent (crashed / vanished) must not pin its
+                    // correlation entry and spawned handler forever — the terminal
+                    // frame that would settle this waiter is never coming.
                     loop {
                         tokio::select! {
                             biased;
                             terminal = &mut rx => return settle(terminal),
-                            // A frame: the peer is working. Reset the idle clock.
-                            _ = activity.notified() => continue,
-                            _ = tokio::time::sleep_until(ceiling) => {
+                            // The backend aborted while the worker was working —
+                            // the one case no liveness bound catches, since frames
+                            // keep resetting the idle clock. Stop it and give up.
+                            _ = abort.notified() => {
                                 self.waiters.lock().await.remove(&cid);
                                 send_abort(
                                     self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
                                 ).await;
-                                return Err(RunError::Timeout);
+                                return Err(RunError::Aborted);
                             }
-                            _ = tokio::time::sleep(req.timeout) => {
+                            // A frame: the peer is working. Reset the idle clock.
+                            _ = activity.notified() => continue,
+                            _ = tokio::time::sleep(self.idle_window) => {
                                 self.waiters.lock().await.remove(&cid);
                                 send_abort(
                                     self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,

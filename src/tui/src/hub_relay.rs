@@ -19,38 +19,6 @@ use medulla::hub::{start_hub, HubConfig, HubHandle, HubSession, WorkerSpec};
 
 /// Default inbox poll interval when `MEDULLA_HUB_POLL_MS` is unset.
 const DEFAULT_POLL_MS: u64 = 1500;
-/// Default per-task deadline when `MEDULLA_HUB_TASK_TIMEOUT_S` is unset.
-///
-/// Must stay BELOW the backend's own `DEFAULT_TASK_TIMEOUT_MS` (300s): if the
-/// hub outlives it, the backend gives up first and reports a blind
-/// "subagent task timeout" instead of the hub's real error.
-const DEFAULT_TASK_TIMEOUT_S: u64 = 240;
-
-/// Hard ceiling for `MEDULLA_HUB_TASK_TIMEOUT_S`. The hub MUST expire before the
-/// backend's 300s deadline so its real worker error wins the race; a configured
-/// value of 300+ (or 0) is rejected in favour of this cap.
-const MAX_TASK_TIMEOUT_S: u64 = 290;
-
-/// Resolve the per-task timeout from `MEDULLA_HUB_TASK_TIMEOUT_S`, clamping to
-/// `[1, MAX_TASK_TIMEOUT_S]`. An unparseable, zero, or above-ceiling value falls
-/// back to a safe bound (default when unset/garbage, the cap when too large) so
-/// the hub can never be configured to outlive the backend.
-fn resolve_timeout_s(env: &HashMap<String, String>, log: &medulla::hub::HubLog) -> u64 {
-    match env
-        .get("MEDULLA_HUB_TASK_TIMEOUT_S")
-        .and_then(|s| s.trim().parse::<u64>().ok())
-    {
-        None => DEFAULT_TASK_TIMEOUT_S,
-        Some(0) => DEFAULT_TASK_TIMEOUT_S,
-        Some(v) if v > MAX_TASK_TIMEOUT_S => {
-            log(&format!(
-                "hub: MEDULLA_HUB_TASK_TIMEOUT_S={v} exceeds the {MAX_TASK_TIMEOUT_S}s ceiling (must expire before the backend's 300s) — capping at {MAX_TASK_TIMEOUT_S}s"
-            ));
-            MAX_TASK_TIMEOUT_S
-        }
-        Some(v) => v,
-    }
-}
 
 /// The shared slot a [`BackendRuntime`](medulla::runtime::backend::BackendRuntime)
 /// reads for its live worker roster; filled once the hub connects.
@@ -200,7 +168,6 @@ pub(crate) fn build_hub_config_with_log(
         .get("MEDULLA_HUB_POLL_MS")
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_MS);
-    let timeout_s = resolve_timeout_s(env, &log);
     Some(HubConfig {
         persist: Some(roster_sink(home, log.clone())),
         log,
@@ -209,7 +176,6 @@ pub(crate) fn build_hub_config_with_log(
         identity_dir,
         workers,
         poll: Duration::from_millis(poll_ms),
-        task_timeout: Duration::from_secs(timeout_s),
     })
 }
 

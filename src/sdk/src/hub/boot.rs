@@ -51,8 +51,6 @@ pub struct HubConfig {
     pub workers: Vec<WorkerSpec>,
     /// How often the runner drains the encrypted inbox.
     pub poll: Duration,
-    /// Per-task deadline for a worker's terminal reply.
-    pub task_timeout: Duration,
     /// Where diagnostics go. Defaults to stderr; a TUI supplies its own so the
     /// hub never writes over a screen it does not own.
     pub log: super::types::HubLog,
@@ -145,7 +143,6 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         &config.jwt,
         roster.clone(),
         runner.clone(),
-        config.task_timeout,
         config.log.clone(),
         Some(activity.clone()),
     )

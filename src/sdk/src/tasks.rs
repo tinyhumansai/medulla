@@ -159,6 +159,7 @@ impl TaskRepository {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(&lock_path)
             .map_err(|source| TaskRepositoryError::Lock {
                 path: lock_path.clone(),

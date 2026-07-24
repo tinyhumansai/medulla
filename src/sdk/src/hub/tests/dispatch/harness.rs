@@ -45,6 +45,8 @@ pub(in crate::hub::tests) enum Mode {
     GarbageThenReply(String),
     /// Answers a lightweight capacity probe without starting a task.
     SystemInfo(WorkerSystemInfo),
+    /// Answers a capacity probe only after the sender repairs the session.
+    SystemInfoAfterReset(WorkerSystemInfo),
     /// Answers a capacity probe with malformed JSON.
     InvalidSystemInfo,
 }
@@ -100,8 +102,11 @@ impl Relay for FakeWorker {
         if frame.kind == TaskFrameKind::SystemInfo {
             let text = match &self.mode {
                 Mode::SystemInfo(info) => serde_json::to_string(info).unwrap(),
+                Mode::SystemInfoAfterReset(info) if self.resets.load(Ordering::Relaxed) > 0 => {
+                    serde_json::to_string(info).unwrap()
+                }
                 Mode::InvalidSystemInfo => "{not-json".to_string(),
-                Mode::Silent => return Ok(()),
+                Mode::Silent | Mode::SystemInfoAfterReset(_) => return Ok(()),
                 _ => return Ok(()),
             };
             self.inbox.lock().await.push_back(InboundMessage {
@@ -183,7 +188,7 @@ impl Relay for FakeWorker {
             }
             // Ack + status already queued above; no terminal frame follows.
             Mode::Silent | Mode::AckOnly => {}
-            Mode::SystemInfo(_) | Mode::InvalidSystemInfo => {}
+            Mode::SystemInfo(_) | Mode::SystemInfoAfterReset(_) | Mode::InvalidSystemInfo => {}
         }
         Ok(())
     }

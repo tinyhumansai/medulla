@@ -1,5 +1,6 @@
 //! Tests for lightweight worker capacity probes over the encrypted relay.
 
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::hub::tests::dispatch::harness::{FakeWorker, Mode};
@@ -28,6 +29,25 @@ async fn capacity_probe_returns_the_correlated_worker_details() {
 
     assert_eq!(result, info());
     assert_eq!(worker.sent_kinds().await, vec!["system_info"]);
+}
+
+#[tokio::test]
+async fn capacity_probe_repairs_a_desynchronized_session_and_retries() {
+    let worker = FakeWorker::new(Mode::SystemInfoAfterReset(info()));
+    let runner = TaskRunner::start_with_ack_window(
+        worker.clone(),
+        Duration::from_millis(5),
+        Duration::from_millis(20),
+    );
+
+    let result = runner.system_info("worker").await.expect("retry succeeds");
+
+    assert_eq!(result, info());
+    assert_eq!(worker.resets.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        worker.sent_kinds().await,
+        vec!["system_info", "system_info"]
+    );
 }
 
 #[tokio::test]

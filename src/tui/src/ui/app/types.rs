@@ -93,6 +93,14 @@ pub enum Cmd {
         /// Repository-relative changed path.
         path: std::path::PathBuf,
     },
+    /// Collect the lane-scoped Git diff and submit an independent review task.
+    PrepareReview {
+        task_id: String,
+        implementer_id: String,
+        reviewer_id: String,
+        workspace: std::path::PathBuf,
+        contract: medulla::autoreview::ReviewContract,
+    },
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
     /// Load the persona-memory status + directives for the Memory tab.
@@ -176,6 +184,15 @@ pub(super) enum PromptKind {
         /// The cycle the question belongs to.
         cycle_id: String,
         /// The pending question's id.
+        question_id: String,
+    },
+    /// Answer a prepared decision and dismiss it locally once routed.
+    DecisionAnswer {
+        /// Stable decision id.
+        decision_id: String,
+        /// Cycle that owns the question.
+        cycle_id: String,
+        /// Harness question id.
         question_id: String,
     },
     /// Comment on the given feedback board item.
@@ -315,6 +332,12 @@ pub struct App {
     pub(super) repo: RepoState,
     /// Manual permitted-path globs keyed by stable Agents lane id.
     pub(super) lane_claims: std::collections::BTreeMap<String, Vec<String>>,
+    /// Whether the prepared-decision modal is visible.
+    pub(super) decision_open: bool,
+    /// Highlighted decision row.
+    pub(super) decision_index: usize,
+    /// Session-local ids intentionally hidden by the operator.
+    pub(super) dismissed_decisions: std::collections::BTreeSet<String>,
     pub(super) prompt: Option<Prompt>,
     /// The animation frame counter (drives the spinner).
     pub frame: usize,

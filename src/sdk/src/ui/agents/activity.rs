@@ -70,6 +70,7 @@ fn fold_tasks(records: &[&WorkerActivity]) -> Vec<TaskState> {
             order.push(record.task_id.clone());
             TaskState {
                 task_id: record.task_id.clone(),
+                instruction: None,
                 status: TaskStatus::Running,
                 turns: 0,
                 last_at: record.at,
@@ -77,6 +78,7 @@ fn fold_tasks(records: &[&WorkerActivity]) -> Vec<TaskState> {
                 attention: None,
                 question_id: None,
                 contract: None,
+                review: None,
             }
         });
         state.last_at = record.at;

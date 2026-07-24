@@ -6,6 +6,15 @@ use crate::runtime::AgentDescriptor;
 use crate::ui::agents::*;
 use crate::ui::events::{TaskDigest, TuiEvent, Usage};
 
+fn agent(id: &str, name: &str) -> AgentDescriptor {
+    AgentDescriptor {
+        id: id.into(),
+        name: name.into(),
+        availability: "online".into(),
+        ..Default::default()
+    }
+}
+
 #[test]
 fn tier_lanes_always_present_in_order() {
     let lanes = derive_agent_lanes(&[], "OPENCODE", &[]);
@@ -242,6 +251,62 @@ fn task_attention_sets_question_and_completion_clears_it() {
     assert_eq!(worker.tasks[0].status, TaskStatus::Cancelled);
     assert!(worker.tasks[0].attention.is_none());
     assert!(worker.tasks[0].question_id.is_none());
+}
+
+#[test]
+fn fresh_review_verdict_is_attributed_to_the_implementation_task() {
+    let roster = vec![agent("dev-1", "Implementer"), agent("dev-2", "Reviewer")];
+    let events = vec![
+        env(
+            1,
+            TuiEvent::TaskStart {
+                task_id: "task-1".into(),
+                instruction: "Outcome: fix it\nVerify:\n- cargo test".into(),
+                depth: 0,
+                agent_id: Some("dev-1".into()),
+                contract: None,
+            },
+        ),
+        env(
+            2,
+            TuiEvent::TaskStart {
+                task_id: "review-1".into(),
+                instruction: "MEDULLA_AUTOREVIEW target=task-1\nReview it".into(),
+                depth: 0,
+                agent_id: Some("dev-2".into()),
+                contract: None,
+            },
+        ),
+        env(
+            3,
+            TuiEvent::TaskEvent {
+                task_id: "review-1".into(),
+                event_kind: "note".into(),
+                content: "FINDINGS:\n- missing regression test".into(),
+                harness: None,
+            },
+        ),
+    ];
+
+    let lanes = derive_agent_lanes(&events, "codex", &roster);
+    let implementation = lanes
+        .iter()
+        .find(|lane| lane.agent_id.as_deref() == Some("dev-1"))
+        .unwrap()
+        .tasks
+        .iter()
+        .find(|task| task.task_id == "task-1")
+        .unwrap();
+    assert_eq!(
+        implementation.review,
+        Some(crate::autoreview::ReviewVerdict::Findings(vec![
+            "missing regression test".into()
+        ]))
+    );
+    let rendered = task_lines(implementation, 80);
+    assert!(rendered
+        .iter()
+        .any(|line| line.text.contains("missing regression test")));
 }
 
 #[test]

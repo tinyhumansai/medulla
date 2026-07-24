@@ -1,7 +1,9 @@
 //! Pure blast-radius analysis for worker-lane path claims.
 //!
 //! The TUI supplies live dirty paths while worker contracts provide permitted
-//! boundaries. Manual claims remain a fallback for older event streams.
+//! boundaries. Manual claims remain a fallback for older event streams. A later
+//! harness-contract revision can supply the same [`LaneClaim`] shape without
+//! changing overlap, outside-boundary, or shared-path evaluation.
 
 use std::collections::{BTreeMap, BTreeSet};
 

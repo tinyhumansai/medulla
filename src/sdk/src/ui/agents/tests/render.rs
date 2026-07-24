@@ -53,6 +53,7 @@ fn parse_task_key_splits_cycle_and_bare() {
 fn ordered_tasks_puts_running_first_then_recency() {
     let mk = |id: &str, status: TaskStatus, at: i64| TaskState {
         task_id: id.into(),
+        instruction: None,
         status,
         turns: 0,
         last_at: at,
@@ -60,6 +61,7 @@ fn ordered_tasks_puts_running_first_then_recency() {
         attention: None,
         question_id: None,
         contract: None,
+        review: None,
     };
     let tasks = vec![
         mk("done-old", TaskStatus::Done, 10),
@@ -114,6 +116,7 @@ fn lane_lines_groups_agent_tasks_with_headers() {
 fn task_lines_empty_and_populated() {
     let empty = TaskState {
         task_id: "t1".into(),
+        instruction: None,
         status: TaskStatus::Running,
         turns: 0,
         last_at: 0,
@@ -121,6 +124,7 @@ fn task_lines_empty_and_populated() {
         attention: None,
         question_id: None,
         contract: None,
+        review: None,
     };
     let lines = task_lines(&empty, 40);
     assert_eq!(lines.len(), 1);
@@ -159,6 +163,7 @@ fn lane_lines_agent_task_with_no_turns_shows_placeholder() {
         last_at: 0,
         tasks: vec![TaskState {
             task_id: "t1".into(),
+            instruction: None,
             status: TaskStatus::Running,
             turns: 0,
             last_at: 0,
@@ -166,6 +171,7 @@ fn lane_lines_agent_task_with_no_turns_shows_placeholder() {
             attention: None,
             question_id: None,
             contract: None,
+            review: None,
         }],
         context_tokens: None,
         harness_label: None,
@@ -191,6 +197,7 @@ fn task_lines_truncate_long_header_and_default_color() {
     // falls back to cyan.
     let task = TaskState {
         task_id: "t".into(),
+        instruction: None,
         status: TaskStatus::Running,
         turns: 1,
         last_at: 0,
@@ -205,6 +212,7 @@ fn task_lines_truncate_long_header_and_default_color() {
         attention: None,
         question_id: None,
         contract: None,
+        review: None,
     };
     let lines = task_lines(&task, 30);
     assert!(lines[0].text.ends_with('…'));

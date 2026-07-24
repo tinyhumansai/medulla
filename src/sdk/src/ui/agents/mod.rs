@@ -17,6 +17,7 @@ mod fmt;
 mod keys;
 mod lanes;
 mod lines;
+mod review;
 mod roster;
 mod rows;
 mod types;

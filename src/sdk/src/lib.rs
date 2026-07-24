@@ -4,6 +4,7 @@
 //! app that consumes this crate is the sibling `medulla-tui` crate.
 
 pub mod auth;
+pub mod autoreview;
 pub mod client;
 pub mod clock;
 pub mod config;

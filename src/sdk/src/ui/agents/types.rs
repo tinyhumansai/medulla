@@ -162,6 +162,8 @@ pub struct TurnBlock {
 pub struct TaskState {
     /// The wire task id.
     pub task_id: String,
+    /// Original implementation instruction, retained as the review contract.
+    pub instruction: Option<String>,
     /// Current status.
     pub status: TaskStatus,
     /// Number of folded turns.
@@ -177,6 +179,8 @@ pub struct TaskState {
     pub question_id: Option<String>,
     /// Advisory boundaries and completion criteria supplied at delegation.
     pub contract: Option<WorkerContract>,
+    /// Independent review verdict attributed to this task, when one completed.
+    pub review: Option<crate::autoreview::ReviewVerdict>,
 }
 
 /// One lane in the Agents view: a cognitive tier, a roster/worker agent, an

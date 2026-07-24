@@ -52,6 +52,9 @@ impl App {
             feedback: Default::default(),
             repo: Default::default(),
             lane_claims: Default::default(),
+            decision_open: false,
+            decision_index: 0,
+            dismissed_decisions: Default::default(),
             prompt: None,
             frame: 0,
             mouse_capture: true,
@@ -323,12 +326,25 @@ impl App {
     }
 
     /// Store the selected path's patch or its typed error.
+    ///
+    /// Guards against stale responses: if the operator has moved to a different
+    /// file while a diff load was in flight, the now-irrelevant result is
+    /// discarded so the pane does not briefly flash the wrong patch.
     pub fn set_workspace_diff(
         &mut self,
         workspace: std::path::PathBuf,
         path: std::path::PathBuf,
         result: Result<String, String>,
     ) {
+        // Drop responses that arrive after the selection has moved on to a
+        // different file. Accept any response when no file is currently selected
+        // (the list may be empty or the index may be stale).
+        let files = self.repo_files();
+        if let Some((current_ws, current_change)) = files.get(self.repo.file_index) {
+            if *current_ws != workspace || current_change.path != path {
+                return;
+            }
+        }
         self.repo.diff_key = Some((workspace, path));
         self.repo.diff_scroll = 0;
         match result {

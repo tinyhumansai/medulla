@@ -51,6 +51,7 @@ impl App {
             memory_ingesting: false,
             feedback: Default::default(),
             repo: Default::default(),
+            tasks: medulla::tasks::TaskDocument::default(),
             lane_claims: Default::default(),
             decision_open: false,
             decision_index: 0,
@@ -98,6 +99,17 @@ impl App {
     /// logout reports that it has nowhere to write rather than guessing.
     pub fn set_medulla_home(&mut self, home: std::path::PathBuf) {
         self.medulla_home = Some(home);
+        if let Some(home) = &self.medulla_home {
+            if let Ok(repository) = medulla::tasks::TaskRepository::in_home(home) {
+                self.tasks = repository.document().clone();
+            }
+        }
+    }
+
+    /// Replace the task document returned by background persistence/sync work.
+    pub fn set_tasks(&mut self, document: medulla::tasks::TaskDocument) {
+        self.tasks = document;
+        self.selected = self.selected.min(self.tasks.tasks.len().saturating_sub(1));
     }
 
     /// The active Settings subpage name. Test/inspection seam.
@@ -293,6 +305,7 @@ impl App {
     pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
         match self.tab() {
             "Memory" => Some(Cmd::LoadMemory),
+            "Tasks" => Some(Cmd::LoadTasks),
             "Agents" | "Repo" => Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces())),
             "Settings" => match self.settings_index {
                 SP_USAGE => Some(Cmd::LoadUsage),

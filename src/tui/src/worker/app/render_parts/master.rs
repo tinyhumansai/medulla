@@ -33,6 +33,7 @@ impl WorkerApp {
                 "This worker requests contact; approval stays explicit.",
             ));
         } else {
+            self.hit_rows = Some((inner, 0));
             for (index, peer) in masters.iter().enumerate() {
                 let address = peer.address.as_deref().unwrap_or(&peer.id);
                 let online = accepted.iter().any(|contact| contact.agent_id == address);
@@ -47,16 +48,12 @@ impl WorkerApp {
                     style = style.add_modifier(Modifier::REVERSED);
                 }
                 lines.push(Line::from(Span::styled(
-                    format!("{} {label}", if online { "●" } else { "◌" }),
+                    format!("{} {label} · {address}", if online { "●" } else { "◌" }),
                     style,
                 )));
-                lines.push(dim(&format!("  {address}")));
             }
         }
-        f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-            inner,
-        );
+        f.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         let block = self.panel("Worker identity", false);
         let inner = block.inner(columns[1]);

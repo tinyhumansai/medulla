@@ -28,6 +28,9 @@ impl WorkerApp {
         let inner = block.inner(columns[0]);
         f.render_widget(block, columns[0]);
         let mut lines = Vec::new();
+        if !self.workspaces.is_empty() {
+            self.hit_rows = Some((inner, 0));
+        }
         for (index, workspace) in self.workspaces.iter().enumerate() {
             let primary = workspace == &self.primary_workspace;
             let mut style = Style::default().fg(if primary { Color::Green } else { Color::White });
@@ -39,10 +42,7 @@ impl WorkerApp {
                 style,
             )));
         }
-        f.render_widget(
-            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-            inner,
-        );
+        f.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         let block = self.panel("Permission boundary", false);
         let inner = block.inner(columns[1]);

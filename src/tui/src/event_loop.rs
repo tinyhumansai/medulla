@@ -132,6 +132,7 @@ pub(crate) async fn run(
                     AppMsg::MemoryIngestDone(status) => {
                         app.set_memory_ingest_done(status);
                     }
+                    AppMsg::TasksLoaded(document) => app.set_tasks(document),
                     AppMsg::MemoryResults { hits, query } => {
                         let n = hits.len();
                         app.set_memory_results(hits, query);

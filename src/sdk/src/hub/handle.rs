@@ -6,7 +6,8 @@
 //! pure, offline-testable roster data and address resolution. This driver is
 //! exercised by the live staging E2E rather than unit tests.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use super::relay::Relay;
 use super::roster::{register_payload, remove_conflicting, HubWorker, SharedRoster};
@@ -24,6 +25,10 @@ pub struct HubHandle {
     /// The encrypted transport, used to open a contact edge with a peer the
     /// moment it is added rather than at first dispatch.
     relay: Arc<dyn Relay>,
+    /// Sender/receiver correlation used for lightweight worker probes.
+    runner: Arc<super::runner::TaskRunner>,
+    /// Latest capacity details keyed by stable worker id.
+    system_info: Arc<Mutex<HashMap<String, crate::tinyplace::WorkerSystemInfo>>>,
     /// Where roster mutations are narrated. An add that quietly does nothing is
     /// the hardest kind of failure to chase.
     log: super::types::HubLog,
@@ -85,6 +90,8 @@ pub(super) struct HandleWiring {
     pub public_key: String,
     /// The encrypted transport, for opening contact edges.
     pub relay: Arc<dyn Relay>,
+    /// Runner used to request lightweight details from workers.
+    pub runner: Arc<super::runner::TaskRunner>,
     /// Where roster mutations are narrated.
     pub log: super::types::HubLog,
     /// Where the roster is saved, when it is saved at all.
@@ -102,6 +109,8 @@ impl HubHandle {
             address: wiring.address,
             public_key: wiring.public_key,
             relay: wiring.relay,
+            runner: wiring.runner,
+            system_info: Arc::new(Mutex::new(HashMap::new())),
             log: wiring.log,
             persist: wiring.persist,
             activity: wiring.activity,
@@ -139,6 +148,34 @@ impl HubHandle {
     /// A snapshot of the current roster.
     pub fn list(&self) -> Vec<HubWorker> {
         self.roster.lock().expect("roster lock").clone()
+    }
+
+    /// Latest captured system details for a worker, if it has been refreshed.
+    pub fn system_info(&self, id: &str) -> Option<crate::tinyplace::WorkerSystemInfo> {
+        self.system_info
+            .lock()
+            .expect("system info lock")
+            .get(id)
+            .cloned()
+    }
+
+    /// Refresh and cache one worker's CPU, RAM, and IP details.
+    pub async fn refresh_system_info(&self, id: &str) -> anyhow::Result<()> {
+        let worker = self
+            .list()
+            .into_iter()
+            .find(|worker| worker.id == id)
+            .ok_or_else(|| anyhow::anyhow!("no worker {id} to refresh"))?;
+        let info = self
+            .runner
+            .system_info(&worker.address)
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        self.system_info
+            .lock()
+            .expect("system info lock")
+            .insert(id.to_string(), info);
+        Ok(())
     }
 
     /// Add (or replace, by id) a worker, open a contact edge, and re-register.
@@ -244,6 +281,10 @@ impl HubHandle {
             before != r.len()
         };
         if removed {
+            self.system_info
+                .lock()
+                .expect("system info lock")
+                .remove(id);
             (self.log)(&format!("hub: worker {id} removed"));
         } else {
             (self.log)(&format!("hub: no worker {id} to remove"));

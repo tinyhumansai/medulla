@@ -92,7 +92,14 @@ impl Runtime for BackendRuntime {
     fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
         let handle = self.hub.lock().unwrap().clone();
         match handle {
-            Some(h) => h.list().into_iter().map(hub_worker_to_info).collect(),
+            Some(h) => h
+                .list()
+                .into_iter()
+                .map(|worker| {
+                    let details = h.system_info(&worker.id);
+                    hub_worker_to_info(worker, details)
+                })
+                .collect(),
             None => Vec::new(),
         }
     }
@@ -442,7 +449,20 @@ impl Runtime for BackendRuntime {
 ///
 /// `pub(super)` so the module's sibling test module can pin the mapping without
 /// standing up a live hub handle.
-pub(super) fn hub_worker_to_info(w: crate::hub::HubWorker) -> crate::runtime::WorkerInfo {
+pub(super) fn hub_worker_to_info(
+    w: crate::hub::HubWorker,
+    details: Option<crate::tinyplace::WorkerSystemInfo>,
+) -> crate::runtime::WorkerInfo {
+    let (cpu_cores, memory_total_bytes, memory_available_bytes, ip_address) = details
+        .map(|details| {
+            (
+                Some(details.cpu_cores),
+                details.memory_total_bytes,
+                details.memory_available_bytes,
+                Some(details.ip_address),
+            )
+        })
+        .unwrap_or_default();
     crate::runtime::WorkerInfo {
         handle: w.address.starts_with('@').then(|| w.address.clone()),
         id: w.id,
@@ -450,6 +470,10 @@ pub(super) fn hub_worker_to_info(w: crate::hub::HubWorker) -> crate::runtime::Wo
         label: w.label,
         harness: Some(w.harness),
         peer_id: None,
+        cpu_cores,
+        memory_total_bytes,
+        memory_available_bytes,
+        ip_address,
         selected: w.selected,
     }
 }
@@ -481,6 +505,7 @@ async fn apply_worker_op(
                 .await
         }
         WorkerOp::Remove { id } => handle.remove(&id).await,
+        WorkerOp::RefreshDetails { id } => handle.refresh_system_info(&id).await,
         WorkerOp::Update { id, patch } => {
             let label = patch
                 .get("label")

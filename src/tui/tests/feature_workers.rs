@@ -94,6 +94,10 @@ fn worker(id: &str, selected: bool) -> WorkerInfo {
         label: Some(format!("{id} label")),
         harness: Some("codex".into()),
         peer_id: Some(format!("peer-{id}")),
+        cpu_cores: Some(8),
+        memory_total_bytes: Some(32 * 1024 * 1024 * 1024),
+        memory_available_bytes: Some(18 * 1024 * 1024 * 1024),
+        ip_address: Some(format!("10.0.0.{}", id.trim_start_matches('w'))),
         selected,
     }
 }
@@ -130,7 +134,27 @@ fn workers_tab_lists_registered_peers() {
     assert!(out.contains("List Workers · 3"), "worker count in title");
     assert!(out.contains("@w1"));
     assert!(out.contains("CODEX"));
+    assert!(out.contains("IP 10.0.0.1"));
+    assert!(out.contains("CPU 8 cores"));
+    assert!(out.contains("RAM 18.0 GiB available / 32.0 GiB total"));
     assert!(out.contains("a add · Enter/s select"));
+}
+
+#[test]
+fn workers_r_refreshes_selected_machine_details() {
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Routing");
+    app.focus_routing_subpage("List Workers");
+    let _ = app.on_event(key(KeyCode::Down));
+    let cmd = app.on_event(key(KeyCode::Char('r')));
+    match cmd {
+        Some(Cmd::WorkerOp(op)) => {
+            let debug = format!("{op:?}");
+            assert!(debug.contains("RefreshDetails"));
+            assert!(debug.contains("w2"));
+        }
+        other => panic!("expected details refresh, got {other:?}"),
+    }
 }
 
 #[test]

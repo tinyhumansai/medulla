@@ -56,6 +56,27 @@ impl App {
                     ),
                     style,
                 )));
+                let details = match (
+                    worker.ip_address.as_deref(),
+                    worker.cpu_cores,
+                    worker.memory_available_bytes,
+                    worker.memory_total_bytes,
+                ) {
+                    (None, None, None, None) => {
+                        "  details not captured · press r to refresh".into()
+                    }
+                    (ip, cpu, available, total) => format!(
+                        "  IP {} · CPU {} · RAM {} available / {} total",
+                        ip.unwrap_or("unknown"),
+                        cpu.map(|cores| format!("{cores} cores"))
+                            .unwrap_or_else(|| "unknown".into()),
+                        available
+                            .map(format_bytes)
+                            .unwrap_or_else(|| "unknown".into()),
+                        total.map(format_bytes).unwrap_or_else(|| "unknown".into()),
+                    ),
+                };
+                lines.push(TLine::from(Span::styled(details, dim())));
             }
         }
         if let Some(identity) = &self.snapshot.tinyplace {
@@ -66,9 +87,25 @@ impl App {
             ]));
         }
         lines.push(TLine::from(Span::styled(
-            "↑↓/jk browse · a add · Enter/s select · e edit label · d/x remove",
+            "↑↓/jk browse · r refresh details · a add · Enter/s select · e edit · d/x remove",
             Style::default().add_modifier(Modifier::DIM),
         )));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
+}
+
+/// Format a byte count for a compact worker-capacity row.
+fn format_bytes(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    if bytes >= GIB as u64 {
+        format!("{:.1} GiB", bytes as f64 / GIB)
+    } else {
+        format!("{:.0} MiB", bytes as f64 / MIB)
+    }
+}
+
+/// Shared subdued style for worker detail rows.
+fn dim() -> Style {
+    Style::default().add_modifier(Modifier::DIM)
 }

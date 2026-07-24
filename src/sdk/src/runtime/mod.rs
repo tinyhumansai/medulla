@@ -98,6 +98,14 @@ pub struct WorkerInfo {
     pub label: Option<String>,
     pub harness: Option<String>,
     pub peer_id: Option<String>,
+    /// Logical CPU cores reported by the worker.
+    pub cpu_cores: Option<u32>,
+    /// Total physical memory reported by the worker, in bytes.
+    pub memory_total_bytes: Option<u64>,
+    /// Currently available memory reported by the worker, in bytes.
+    pub memory_available_bytes: Option<u64>,
+    /// Primary IPv4 address reported by the worker.
+    pub ip_address: Option<String>,
     pub selected: bool,
 }
 
@@ -120,6 +128,10 @@ pub enum WorkerOp {
         patch: Map<String, Value>,
     },
     Remove {
+        id: String,
+    },
+    /// Ask a worker for current CPU, RAM, and IP details.
+    RefreshDetails {
         id: String,
     },
 }

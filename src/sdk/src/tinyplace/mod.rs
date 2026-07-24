@@ -27,6 +27,7 @@ pub mod frames;
 pub mod runtime;
 pub mod service;
 pub mod status;
+pub mod system_info;
 
 /// The published tinyplace Rust SDK, re-exported so downstream code depends on a
 /// single tinyplace surface.
@@ -59,6 +60,7 @@ pub use status::{
     DEFAULT_IDLE_AFTER_MS, STATE_ERRORED, STATE_IDLE, STATE_RUNNING, STATE_RUNNING_TOOL,
     STATE_STOPPED, STATE_WAITING_APPROVAL,
 };
+pub use system_info::{capture_system_info, WorkerSystemInfo};
 
 // Harness session-envelope + typed-event model, owned by the SDK. Re-exported so
 // callers work with the same types the fold and status machine operate on.

@@ -1,9 +1,9 @@
 //! The frame- and task-handling half of [`DaemonRuntime`], split by what each
 //! kind of frame asks for so no file exceeds the repo's 500-line ceiling:
-//! [`probe`] answers the cached capability probe, [`control`] delivers mid-run
-//! input and stops a task the requester has given up on, and [`run`] executes a
-//! task with its slot limit, throttled status forwarding, and plain-text
-//! fallback.
+//! [`probe`] answers the cached capability probe, [`system_info`] reports cheap
+//! host capacity, [`control`] delivers mid-run input and stops a task the
+//! requester has given up on, and [`run`] executes a task with its slot limit,
+//! throttled status forwarding, and plain-text fallback.
 //!
 //! Routing and provider selection stay here: they are the seam the three share.
 //! Lifecycle/dispatch/reply glue lives in [`super::runtime`].
@@ -11,6 +11,7 @@
 mod control;
 mod probe;
 mod run;
+mod system_info;
 
 use crate::tinyplace::{HarnessProvider, TaskFrame, TaskFrameKind};
 
@@ -24,7 +25,8 @@ impl DaemonRuntime {
             TaskFrameKind::Input => self.handle_input(from, frame).await,
             TaskFrameKind::Abort => self.handle_abort(from, frame).await,
             TaskFrameKind::Capabilities => self.handle_capabilities(from, frame).await,
-            // status/reply/error/ack/capabilities_result are responses; ignore.
+            TaskFrameKind::SystemInfo => self.handle_system_info(from, frame).await,
+            // status/reply/error/ack/*_result are responses; ignore.
             _ => {}
         }
     }

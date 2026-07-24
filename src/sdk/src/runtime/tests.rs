@@ -156,6 +156,10 @@ fn value_types_are_debug_clone_eq() {
         label: None,
         harness: None,
         peer_id: None,
+        cpu_cores: None,
+        memory_total_bytes: None,
+        memory_available_bytes: None,
+        ip_address: None,
         selected: false,
     };
     assert_eq!(worker.clone(), worker);

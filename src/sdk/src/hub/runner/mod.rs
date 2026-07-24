@@ -17,12 +17,13 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
-use crate::tinyplace::{encode_task_frame, EncodeFrameInput, TaskFrameKind};
+use crate::tinyplace::{encode_task_frame, EncodeFrameInput, TaskFrameKind, WorkerSystemInfo};
 
 use super::relay::Relay;
 use super::types::{RunError, TaskOutcome, TaskRequest};
 
 mod pump;
+mod system_info;
 
 /// How long to wait for a peer to accept our contact request before sending.
 const CONTACT_WAIT: Duration = Duration::from_secs(20);
@@ -64,6 +65,10 @@ struct Waiter {
 
 /// Shared registry of in-flight dispatches, keyed by `correlationId`.
 type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
+
+/// In-flight lightweight system probes, keyed by correlation id.
+type SystemInfoWaiters =
+    Arc<Mutex<HashMap<String, oneshot::Sender<Result<WorkerSystemInfo, String>>>>>;
 
 /// Shared registry of abort signals, keyed by the orchestrator-facing task id
 /// (`medulla:task_abort.taskId`). One entry per in-flight [`TaskRunner::run`],
@@ -107,6 +112,8 @@ impl Drop for AbortGuard {
 pub struct TaskRunner {
     relay: Arc<dyn Relay>,
     waiters: Waiters,
+    /// System-information probes waiting for a worker response.
+    system_info_waiters: SystemInfoWaiters,
     /// Abort signals for in-flight dispatches, keyed by orchestrator-facing task
     /// id; [`abort_task`](Self::abort_task) notifies one to cancel its dispatch.
     aborts: Aborts,
@@ -193,9 +200,11 @@ impl TaskRunner {
         activity: Option<super::ActivityLog>,
     ) -> Self {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
+        let system_info_waiters: SystemInfoWaiters = Arc::new(Mutex::new(HashMap::new()));
         let pump = tokio::spawn(pump::pump_loop(
             relay.clone(),
             waiters.clone(),
+            system_info_waiters.clone(),
             poll,
             log,
             activity,
@@ -203,6 +212,7 @@ impl TaskRunner {
         TaskRunner {
             relay,
             waiters,
+            system_info_waiters,
             aborts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             counter: AtomicU64::new(0),
             ack_window,

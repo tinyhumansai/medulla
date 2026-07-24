@@ -80,6 +80,10 @@ pub enum TaskFrameKind {
     Capabilities,
     /// The answer to a `Capabilities` request, carrying [`AgentCapabilities`] JSON.
     CapabilitiesResult,
+    /// A lightweight request for CPU, memory, and IP details.
+    SystemInfo,
+    /// The answer to a `SystemInfo` request, carrying worker system-info JSON.
+    SystemInfoResult,
 }
 
 impl TaskFrameKind {
@@ -95,6 +99,8 @@ impl TaskFrameKind {
             TaskFrameKind::Ack => "ack",
             TaskFrameKind::Capabilities => "capabilities",
             TaskFrameKind::CapabilitiesResult => "capabilities_result",
+            TaskFrameKind::SystemInfo => "system_info",
+            TaskFrameKind::SystemInfoResult => "system_info_result",
         }
     }
 
@@ -110,6 +116,8 @@ impl TaskFrameKind {
             "ack" => Some(TaskFrameKind::Ack),
             "capabilities" => Some(TaskFrameKind::Capabilities),
             "capabilities_result" => Some(TaskFrameKind::CapabilitiesResult),
+            "system_info" => Some(TaskFrameKind::SystemInfo),
+            "system_info_result" => Some(TaskFrameKind::SystemInfoResult),
             _ => None,
         }
     }

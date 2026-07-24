@@ -108,6 +108,10 @@ pub fn fleet_app() -> App {
             label: Some("primary".into()),
             harness: Some("claude".into()),
             peer_id: None,
+            cpu_cores: Some(8),
+            memory_total_bytes: Some(32 * 1024 * 1024 * 1024),
+            memory_available_bytes: Some(18 * 1024 * 1024 * 1024),
+            ip_address: Some("10.0.0.8".into()),
             selected: true,
         }],
     });

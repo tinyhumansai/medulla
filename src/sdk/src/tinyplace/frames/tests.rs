@@ -63,6 +63,8 @@ fn round_trips_every_kind() {
         (TaskFrameKind::Ack, "ack"),
         (TaskFrameKind::Capabilities, "capabilities"),
         (TaskFrameKind::CapabilitiesResult, "capabilities_result"),
+        (TaskFrameKind::SystemInfo, "system_info"),
+        (TaskFrameKind::SystemInfoResult, "system_info_result"),
     ] {
         let body = encode_task_frame(EncodeFrameInput {
             kind,

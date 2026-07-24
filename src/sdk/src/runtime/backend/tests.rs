@@ -226,7 +226,7 @@ fn hub_worker(address: &str) -> HubWorker {
 
 #[test]
 fn a_plain_address_maps_to_a_row_without_a_handle() {
-    let info = hub_worker_to_info(hub_worker("GRV1worker"));
+    let info = hub_worker_to_info(hub_worker("GRV1worker"), None);
 
     assert_eq!(info.id, "w1");
     assert_eq!(info.address, "GRV1worker");
@@ -241,7 +241,7 @@ fn a_plain_address_maps_to_a_row_without_a_handle() {
 #[test]
 fn an_at_handle_address_is_surfaced_as_the_handle_too() {
     // `@name` addresses are shown in both columns so the roster reads naturally.
-    let info = hub_worker_to_info(hub_worker("@builder"));
+    let info = hub_worker_to_info(hub_worker("@builder"), None);
 
     assert_eq!(info.address, "@builder");
     assert_eq!(info.handle.as_deref(), Some("@builder"));
@@ -253,7 +253,7 @@ fn selection_carries_through_to_the_row() {
     w.selected = true;
     w.label = None;
 
-    let info = hub_worker_to_info(w);
+    let info = hub_worker_to_info(w, None);
     assert!(info.selected);
     assert_eq!(info.label, None);
 }

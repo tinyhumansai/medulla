@@ -155,6 +155,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         address: hub_address,
         public_key: hub_public_key,
         relay,
+        runner: runner.clone(),
         log: config.log.clone(),
         persist: config.persist.clone(),
         activity,

@@ -96,6 +96,13 @@ impl App {
                 }
                 RoutingKey::Handled(None)
             }
+            KeyCode::Char('r') => {
+                let cmd = self.selected_worker().map(|worker| {
+                    self.set_status(format!("Refreshing {} details…", worker.id));
+                    Cmd::WorkerOp(WorkerOp::RefreshDetails { id: worker.id })
+                });
+                RoutingKey::Handled(cmd)
+            }
             _ => RoutingKey::Unhandled,
         }
     }

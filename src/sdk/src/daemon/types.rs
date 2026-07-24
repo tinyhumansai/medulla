@@ -45,6 +45,12 @@ pub struct DaemonConfig {
     pub default_provider: HarnessProvider,
     /// Absolute working directory tasks run in.
     pub workspace: String,
+    /// Workspace roots the operator explicitly allows this worker to advertise.
+    ///
+    /// The primary [`workspace`](Self::workspace) is always included even when
+    /// this list is empty. These paths are capability metadata for routing; a
+    /// peer still cannot select an arbitrary working directory in a task frame.
+    pub accessible_dirs: Vec<String>,
     /// Environment passed to spawned provider processes.
     pub env: HashMap<String, String>,
     /// Per-task execution timeout, in ms.

@@ -155,6 +155,7 @@ fn worker_runtime(
         // The operator's choice is the fallback for a frame that names none.
         default_provider: provider,
         workspace: workspace.to_string(),
+        accessible_dirs: vec![workspace.to_string()],
         env: env.clone(),
         // The executor settles a turn when the harness says it is done, so this
         // is only the outer bound on a wedged one.

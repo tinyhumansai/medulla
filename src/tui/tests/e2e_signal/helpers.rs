@@ -119,6 +119,7 @@ pub fn daemon_config(
     DaemonConfig {
         providers: vec![provider],
         default_provider: provider,
+        accessible_dirs: vec![workspace.clone()],
         workspace,
         env,
         task_timeout_ms: 10_000,

@@ -231,6 +231,7 @@ pub async fn run_daemon(
         providers: providers.clone(),
         default_provider,
         workspace: workspace.clone(),
+        accessible_dirs: vec![workspace.clone()],
         env: env.clone(),
         task_timeout_ms,
         capability_timeout_ms: None,

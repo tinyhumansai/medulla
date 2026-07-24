@@ -48,6 +48,7 @@ impl DaemonRuntime {
             provider,
             run_task: self.inner.run_task.clone(),
             workspace: self.inner.config.workspace.clone(),
+            accessible_dirs: self.inner.config.accessible_dirs.clone(),
             env: self.inner.config.env.clone(),
             providers: self.inner.config.providers.clone(),
             timeout_ms: self

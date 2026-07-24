@@ -21,6 +21,19 @@ pub(super) enum AppMsg {
         /// Patch or displayable failure.
         result: Result<String, String>,
     },
+    /// Best-effort pull-request/CI reports for configured workspaces.
+    ShipLoaded(Vec<medulla::ship::WorkspaceShipReport>),
+    /// Failed-check excerpt for one selected pull request.
+    ShipLogLoaded {
+        /// Local repository root.
+        workspace: std::path::PathBuf,
+        /// Pull-request number.
+        number: u64,
+        /// Excerpt, no-log note, or typed failure.
+        result: Result<String, String>,
+    },
+    /// Result of an explicit browser/create ship action.
+    ShipAction(String),
     /// Chats to display in the resume picker.
     OpenResume(Vec<medulla::ui::chat_store::MainChatSummary>),
     /// Confirmation that a chat was resumed.

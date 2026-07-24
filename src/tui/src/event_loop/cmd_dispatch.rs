@@ -10,6 +10,7 @@ use std::sync::Arc;
 use medulla::runtime::Runtime;
 use medulla_tui::ui::app::Cmd;
 
+use super::repo;
 use super::AppMsg;
 
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
@@ -155,6 +156,19 @@ pub(super) fn run_cmd(
                 };
                 let _ = tx.send(AppMsg::Status(status));
             });
+        }
+        // --- ship panel (PR/CI) -----------------------------------------
+        Cmd::LoadShip(roots) => {
+            repo::load_ship(roots, msg_tx.clone());
+        }
+        Cmd::LoadShipLog { workspace, number } => {
+            repo::load_ship_log(workspace, number, msg_tx.clone());
+        }
+        Cmd::OpenShipPr { workspace, number } => {
+            repo::open_ship_pr(workspace, number, msg_tx.clone());
+        }
+        Cmd::CreateShipPr(workspace) => {
+            repo::create_ship_pr(workspace, msg_tx.clone());
         }
         // --- feedback board ---------------------------------------------
         Cmd::LoadFeedback(query) => {

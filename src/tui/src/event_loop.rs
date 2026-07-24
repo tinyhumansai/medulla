@@ -20,6 +20,7 @@ use medulla_tui::ui::app::{App, Cmd, TABS};
 use crate::terminal::set_mouse_capture;
 
 mod cmd_dispatch;
+mod repo;
 mod types;
 mod update_checker;
 
@@ -115,10 +116,21 @@ pub(crate) async fn run(
                         } else {
                             app.set_status("Agents · path claims refreshed");
                         }
+                        // Refresh the PR/CI panel alongside workspace snapshots
+                        // so the ship state stays current on every refresh tick.
+                        app.set_ship_loading();
+                        repo::load_ship(app.loaded.workflow_workspaces(), msg_tx.clone());
                     }
                     AppMsg::WorkspaceDiffLoaded { workspace, path, result } => {
                         app.set_workspace_diff(workspace, path, result);
                     }
+                    AppMsg::ShipLoaded(reports) => {
+                        repo::apply_ship(&mut app, reports, msg_tx.clone());
+                    }
+                    AppMsg::ShipLogLoaded { workspace, number, result } => {
+                        app.set_ship_log(workspace, number, result);
+                    }
+                    AppMsg::ShipAction(status) => app.set_status(status),
                     AppMsg::UsageLoaded(data) => app.set_account_usage(data),
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
                     AppMsg::Resumed(s) => {

@@ -209,6 +209,7 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
         .env("MEDULLA_HOME", dir.path())
         .env("MEDULLA_STATE_DIR", dir.path().join("state"))
         .env("MEDULLA_NO_UPDATE_CHECK", "1")
+        .env("MEDULLA_GH_BIN", dir.path().join("missing-gh"))
         .env_remove("MEDULLA_TOKEN")
         .stdin(Stdio::from(slave.try_clone().unwrap()))
         .stdout(Stdio::from(slave.try_clone().unwrap()))

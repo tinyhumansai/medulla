@@ -93,6 +93,24 @@ pub enum Cmd {
         /// Repository-relative changed path.
         path: std::path::PathBuf,
     },
+    /// Refresh open pull requests and checks for configured workspaces.
+    LoadShip(Vec<std::path::PathBuf>),
+    /// Load a failed-check log excerpt for one selected pull request.
+    LoadShipLog {
+        /// Local repository root.
+        workspace: std::path::PathBuf,
+        /// Pull-request number.
+        number: u64,
+    },
+    /// Open one pull request in the platform browser through `gh`.
+    OpenShipPr {
+        /// Local repository root.
+        workspace: std::path::PathBuf,
+        /// Pull-request number.
+        number: u64,
+    },
+    /// Create a pull request for the current branch against `upstream`.
+    CreateShipPr(std::path::PathBuf),
     /// Collect the lane-scoped Git diff and submit an independent review task.
     PrepareReview {
         task_id: String,
@@ -272,6 +290,16 @@ pub(super) struct RepoState {
     pub(super) diff_scroll: usize,
     /// Whether a workspace refresh is in flight.
     pub(super) loading: bool,
+    /// Best-effort PR/CI reports for each workspace.
+    pub(super) ship_reports: Vec<medulla::ship::WorkspaceShipReport>,
+    /// Selection in the flattened open-PR list.
+    pub(super) ship_index: usize,
+    /// Workspace/PR the current failed-check excerpt belongs to.
+    pub(super) ship_log_key: Option<(std::path::PathBuf, u64)>,
+    /// Failed-check excerpt, no-log note, or displayable error.
+    pub(super) ship_log: String,
+    /// Whether a ship refresh is in flight.
+    pub(super) ship_loading: bool,
 }
 
 /// A single-line inline input overlay, composer-styled, reused for the fleet and

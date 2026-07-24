@@ -155,7 +155,7 @@ impl App {
                 RoutingKey::Handled(None)
             }
             KeyCode::Enter => {
-                let strategy = ROUTING_STRATEGIES[self.routing_strategy_index];
+                let strategy = ROUTING_STRATEGIES[self.routing_strategy_index].strategy;
                 self.set_status(format!("Applying {strategy:?} routing strategy…"));
                 RoutingKey::Handled(Some(Cmd::WorkerOp(WorkerOp::ApplyStrategy { strategy })))
             }

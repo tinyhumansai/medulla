@@ -38,12 +38,39 @@ pub(super) const RP_ADD_WORKER: usize = 1;
 pub(super) const RP_KEYS: usize = 2;
 pub(super) const RP_STRATEGIES: usize = 3;
 
-/// Routing strategies in the order shown by the chooser.
-pub(super) const ROUTING_STRATEGIES: [RoutingStrategy; 4] = [
-    RoutingStrategy::Manual,
-    RoutingStrategy::Balanced,
-    RoutingStrategy::CpuFirst,
-    RoutingStrategy::MemoryFirst,
+/// Display metadata coupled to the routing strategy it applies.
+#[derive(Clone, Copy)]
+pub(super) struct RoutingStrategyOption {
+    /// Runtime strategy sent when the option is applied.
+    pub(super) strategy: RoutingStrategy,
+    /// Short label rendered in the strategy chooser.
+    pub(super) label: &'static str,
+    /// Operator-facing explanation of the selection rule.
+    pub(super) description: &'static str,
+}
+
+/// Routing strategy options in the order shown by the chooser.
+pub(super) const ROUTING_STRATEGIES: [RoutingStrategyOption; 4] = [
+    RoutingStrategyOption {
+        strategy: RoutingStrategy::Manual,
+        label: "Manual",
+        description: "Keep the worker explicitly selected in List Workers.",
+    },
+    RoutingStrategyOption {
+        strategy: RoutingStrategy::Balanced,
+        label: "Balanced",
+        description: "Choose the most CPU cores, breaking ties by available RAM.",
+    },
+    RoutingStrategyOption {
+        strategy: RoutingStrategy::CpuFirst,
+        label: "CPU First",
+        description: "Choose the worker with the most logical CPU cores.",
+    },
+    RoutingStrategyOption {
+        strategy: RoutingStrategy::MemoryFirst,
+        label: "Memory First",
+        description: "Choose the worker with the most currently available RAM.",
+    },
 ];
 
 /// The Settings tab's left-nav subpages, in order (number keys 1-8 jump to them).

@@ -416,12 +416,16 @@ fn session_line(row: &SessionRow, selected: bool, now: i64) -> Line<'static> {
     } else {
         String::new()
     };
-    let text = format!("{} {}{}", row.state.glyph(), row.label, quiet);
     let mut style = Style::default().fg(state_color(row.state));
     if selected {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    Line::from(Span::styled(text, style))
+    crate::ui::agent_lane::line(
+        row.state.glyph().to_string(),
+        row.label.clone(),
+        quiet,
+        style,
+    )
 }
 
 /// One row of the pending-request list.

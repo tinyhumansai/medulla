@@ -267,12 +267,12 @@ impl App {
                 if active {
                     style = self.theme.selection();
                 }
-                let text = format!(
-                    "{marker} {} · {}{ctx}{state}{sessions_note}{badges}",
-                    item.label,
-                    item.turns.len()
-                );
-                TLine::from(Span::styled(text, style))
+                crate::ui::agent_lane::line(
+                    marker,
+                    item.label.clone(),
+                    format!(" · {}{ctx}{state}{sessions_note}{badges}", item.turns.len()),
+                    style,
+                )
             }
         }
     }

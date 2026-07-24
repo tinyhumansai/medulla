@@ -174,6 +174,34 @@ async fn codexs_update_prompt_is_skipped_so_the_prompt_lands() {
 }
 
 #[tokio::test]
+async fn a_dismissable_dialog_that_will_not_clear_is_reported_not_typed_at() {
+    // The give-up path: a dialog the worker knows how to answer, whose dismissal
+    // keystrokes do not in fact clear it (a wedged or unexpected variant). After a
+    // bounded number of attempts the worker reports it by name rather than typing
+    // a prompt into a modal still on screen. The child paints codex's trust
+    // dialog, then swallows every keystroke without ever clearing it, so the
+    // dismissal never takes.
+    let manager = PtyManager::new();
+    let id = manager
+        .open(sh("stty -echo -icanon min 1; printf '\\033[?2004h'; \
+                  printf 'Do you trust the contents of this directory?\\r\\n\
+                  1. Yes, continue\\r\\n'; cat > /dev/null"))
+        .unwrap();
+    wait_for("trust dialog painted", || {
+        screen_text(&manager, &id).contains("trust the contents of this directory")
+    });
+
+    let error = super::super::inject::inject_prompt(&manager, &id, "ship the fix")
+        .await
+        .expect_err("a dialog the dismissal cannot clear must be reported");
+    assert!(
+        error.contains("dismissal did not clear it"),
+        "the error must say the dismissal failed: {error}"
+    );
+    manager.close(&id);
+}
+
+#[tokio::test]
 async fn a_dialog_painted_after_the_terminal_modes_is_still_caught() {
     // Regression, measured against a real cold start: Claude Code sets
     // bracketed-paste mode ~0.3s in and paints its first screen *after* that.

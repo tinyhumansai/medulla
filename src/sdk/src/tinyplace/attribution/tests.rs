@@ -110,3 +110,128 @@ fn kill_switch_suppresses_args_for_every_provider() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// prepare_commit_msg hook generator tests
+// ---------------------------------------------------------------------------
+
+/// On Unix, `generate_hook` returns env vars carrying the attribution trailer
+/// and the `core.hooksPath` git-config overrides.
+#[cfg(unix)]
+#[test]
+fn generate_hook_returns_env_vars() {
+    let (env, _hook_dir) =
+        super::prepare_commit_msg::generate_hook("Co-authored-by: Medulla <medulla@tinyhumans.ai>");
+    assert_eq!(
+        env.get("MEDULLA_ATTRIBUTION"),
+        Some(&"Co-authored-by: Medulla <medulla@tinyhumans.ai>".to_string()),
+    );
+    assert_eq!(env.get("GIT_CONFIG_COUNT"), Some(&"1".to_string()));
+    assert_eq!(
+        env.get("GIT_CONFIG_KEY_0"),
+        Some(&"core.hooksPath".to_string())
+    );
+    assert!(
+        env.contains_key("GIT_CONFIG_VALUE_0"),
+        "hooksPath must be set"
+    );
+}
+
+/// The hook script must be an executable file at the expected path.
+#[cfg(unix)]
+#[test]
+fn hook_script_is_executable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_env, hook_dir) = super::prepare_commit_msg::generate_hook("test");
+    let hook_path = hook_dir.join("prepare-commit-msg");
+    assert!(hook_path.exists(), "hook script must exist: {hook_path:?}");
+
+    let metadata = std::fs::metadata(&hook_path).expect("hook metadata");
+    let perms = metadata.permissions();
+    assert_eq!(perms.mode() & 0o111, 0o111, "hook must be executable");
+}
+
+/// The hook script appends a blank line followed by the trailer to the commit
+/// message file when `MEDULLA_ATTRIBUTION` is set.
+#[cfg(unix)]
+#[test]
+fn hook_script_appends_trailer() {
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let (_env, hook_dir) = super::prepare_commit_msg::generate_hook(trailer);
+
+    // Simulate what git does: create a temp commit message file with some
+    // content, then run the hook against it with MEDULLA_ATTRIBUTION set.
+    let msg_file = hook_dir.join("COMMIT_EDITMSG");
+    let original = "summary line\n\nbody text\n";
+    std::fs::write(&msg_file, original).unwrap();
+
+    let hook_path = hook_dir.join("prepare-commit-msg");
+    let output = std::process::Command::new("sh")
+        .arg(&hook_path)
+        .arg(&msg_file)
+        .env("MEDULLA_ATTRIBUTION", trailer)
+        .output()
+        .expect("hook execution");
+
+    assert!(
+        output.status.success(),
+        "hook exited non-zero: {:?}",
+        output
+    );
+
+    let result = String::from_utf8_lossy(&std::fs::read(&msg_file).unwrap()).into_owned();
+    assert!(result.contains(original), "original content preserved");
+    assert!(
+        result.ends_with(&format!("\n{trailer}\n")) || result.ends_with(&format!("\n{trailer}")),
+        "trailer appended: {result:?}"
+    );
+}
+
+/// When `MEDULLA_ATTRIBUTION` is empty, the hook must not modify the commit
+/// message.
+#[cfg(unix)]
+#[test]
+fn hook_is_noop_when_attribution_env_is_empty() {
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let (_env, hook_dir) = super::prepare_commit_msg::generate_hook(trailer);
+
+    let msg_file = hook_dir.join("COMMIT_EDITMSG");
+    let original = "just a message\n";
+    std::fs::write(&msg_file, original).unwrap();
+
+    let hook_path = hook_dir.join("prepare-commit-msg");
+    let output = std::process::Command::new("sh")
+        .arg(&hook_path)
+        .arg(&msg_file)
+        .env_remove("MEDULLA_ATTRIBUTION")
+        .output()
+        .expect("hook execution");
+
+    assert!(output.status.success());
+    let result = String::from_utf8_lossy(&std::fs::read(&msg_file).unwrap()).into_owned();
+    assert_eq!(result, original, "message unchanged");
+}
+
+/// Cleanup must remove the hook directory and its contents.
+#[cfg(unix)]
+#[test]
+fn cleanup_removes_hook_dir() {
+    let (_env, hook_dir) = super::prepare_commit_msg::generate_hook("test");
+    assert!(hook_dir.exists(), "hook dir exists before cleanup");
+
+    super::prepare_commit_msg::cleanup_hook_dir(&hook_dir);
+    assert!(!hook_dir.exists(), "hook dir removed after cleanup");
+}
+
+/// On non-Unix, the generator returns an empty env map and no cleanup path.
+#[cfg(not(unix))]
+#[test]
+fn non_unix_returns_empty() {
+    let (env, hook_dir) = super::prepare_commit_msg::generate_hook("test");
+    assert!(env.is_empty(), "non-Unix returns empty env");
+    assert!(
+        hook_dir.as_os_str().is_empty(),
+        "non-Unix returns empty path"
+    );
+}

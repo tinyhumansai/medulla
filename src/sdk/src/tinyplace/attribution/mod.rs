@@ -37,6 +37,11 @@ use crate::tinyplace::HarnessProvider;
 #[cfg(test)]
 mod tests;
 
+/// Generator for `prepare-commit-msg` git hooks that inject the Medulla
+/// `Co-authored-by` trailer via environment variables. Used for providers
+/// (Codex, Opencode) whose CLI has no built-in attribution knob.
+pub mod prepare_commit_msg;
+
 /// Kill-switch env var. Any value other than `1` / `true` / `yes` / `on`
 /// disables attribution.
 pub const ATTRIBUTION_ENV_KEY: &str = "TINYPLACE_GIT_ATTRIBUTION";

@@ -4,8 +4,6 @@
 //! to visible lanes, live repository status supplies matching dirty paths, and
 //! the SDK remains the sole owner of warning semantics.
 
-use std::collections::BTreeMap;
-
 use crate::ui::agents::{
     claimed_dirty_paths, contract_permitted_paths, evaluate_lane_claims, validate_claim_patterns,
     AgentLane, AgentRow, ClaimedPath, LaneClaim, LaneGuardReport,
@@ -110,10 +108,5 @@ impl App {
             .collect::<Vec<_>>();
         evaluate_lane_claims(&claims, &self.loaded.config.workflow.shared_path_denylist)
             .unwrap_or_default()
-    }
-
-    /// Read-only manual claim map for rendering and focused tests.
-    pub(super) fn lane_claims(&self) -> &BTreeMap<String, Vec<String>> {
-        &self.lane_claims
     }
 }

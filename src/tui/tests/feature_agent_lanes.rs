@@ -99,7 +99,6 @@ fn contracted_agents_app(ids: &[&str], paths: &[&str]) -> App {
     app
 }
 
-
 fn dirty_report(paths: &[&str]) -> medulla::workspace::WorkspaceReport {
     use medulla::workspace::{BranchState, FileChange, WorkspaceReport, WorkspaceSnapshot};
     let root = std::path::PathBuf::from("/workspace/project");

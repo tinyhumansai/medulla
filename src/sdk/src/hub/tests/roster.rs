@@ -221,9 +221,10 @@ fn one_peer_never_occupies_two_roster_slots() {
     // address in the TUI uses the address as the id. Same wallet, two names.
     let mut roster = vec![hw("alpha", "So1anaAddr")];
     let incoming = hw("So1anaAddr", "So1anaAddr");
-    remove_conflicting(&mut roster, &incoming);
+    let removed = remove_conflicting(&mut roster, &incoming);
     roster.push(incoming);
 
+    assert_eq!(removed, vec!["alpha"]);
     assert_eq!(roster.len(), 1, "one destination, one entry");
     assert_eq!(roster[0].id, "So1anaAddr", "the newest naming wins");
 }
@@ -234,9 +235,10 @@ fn re_adding_the_same_id_still_replaces() {
 
     let mut roster = vec![hw("w1", "addr-a")];
     let incoming = hw("w1", "addr-b");
-    remove_conflicting(&mut roster, &incoming);
+    let removed = remove_conflicting(&mut roster, &incoming);
     roster.push(incoming);
 
+    assert_eq!(removed, vec!["w1"]);
     assert_eq!(roster.len(), 1);
     assert_eq!(roster[0].address, "addr-b", "an id can be repointed");
 }
@@ -247,9 +249,10 @@ fn distinct_peers_are_left_alone() {
 
     let mut roster = vec![hw("w1", "addr-a"), hw("w2", "addr-b")];
     let incoming = hw("w3", "addr-c");
-    remove_conflicting(&mut roster, &incoming);
+    let removed = remove_conflicting(&mut roster, &incoming);
     roster.push(incoming);
 
+    assert!(removed.is_empty());
     assert_eq!(roster.len(), 3, "deduping must not collapse real peers");
 }
 

@@ -241,9 +241,9 @@ impl HubHandle {
             }
         }
         let address = worker.address.clone();
-        {
+        let replaced_ids = {
             let mut r = self.roster.lock().expect("roster lock");
-            remove_conflicting(&mut r, &worker);
+            let replaced_ids = remove_conflicting(&mut r, &worker);
             // Give it an id the orchestrator can actually reproduce. Done after
             // conflict removal so a re-add reuses the freed name rather than
             // colliding with the entry it is replacing.
@@ -253,6 +253,13 @@ impl HubHandle {
                     super::roster::worker_id(worker.label.as_deref(), &worker.harness, &taken);
             }
             r.push(worker);
+            replaced_ids
+        };
+        if !replaced_ids.is_empty() {
+            let mut details = self.system_info.lock().expect("system info lock");
+            for id in replaced_ids {
+                details.remove(&id);
+            }
         }
         let accepted = if address.is_empty() {
             false

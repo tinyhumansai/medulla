@@ -108,8 +108,22 @@ pub(super) fn same_destination(a: &str, b: &str) -> bool {
 /// Ids diverge easily in practice — `MEDULLA_HUB_WORKERS="alpha=<addr>"` seeds
 /// `alpha`, while adding the same address in the TUI uses the address itself,
 /// and an `@handle` differs from the cryptoId it resolves to.
-pub(super) fn remove_conflicting(workers: &mut Vec<HubWorker>, incoming: &HubWorker) {
-    workers.retain(|w| w.id != incoming.id && !same_destination(&w.address, &incoming.address));
+///
+/// Returns the removed ids so callers can invalidate state cached by roster id.
+pub(super) fn remove_conflicting(
+    workers: &mut Vec<HubWorker>,
+    incoming: &HubWorker,
+) -> Vec<String> {
+    let mut removed_ids = Vec::new();
+    workers.retain(|worker| {
+        let conflicts = worker.id == incoming.id
+            || same_destination(&worker.address, &incoming.address);
+        if conflicts {
+            removed_ids.push(worker.id.clone());
+        }
+        !conflicts
+    });
+    removed_ids
 }
 
 /// Choose a worker id from captured capacity details.

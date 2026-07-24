@@ -3,9 +3,12 @@
 //! The repository is deliberately independent from the runtime/orchestrator:
 //! tasks are records an operator can edit and synchronize, not work to dispatch.
 
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -103,6 +106,13 @@ pub struct SyncResult {
 /// Errors raised while loading or persisting the task document.
 #[derive(Debug, Error)]
 pub enum TaskRepositoryError {
+    #[error("could not lock task repository {path}: {source}")]
+    Lock {
+        /// Lock file that could not be opened or acquired.
+        path: PathBuf,
+        /// Underlying filesystem error.
+        source: std::io::Error,
+    },
     #[error("could not read task repository {path}: {source}")]
     Read {
         path: PathBuf,
@@ -122,17 +132,43 @@ pub enum TaskRepositoryError {
     Serialize(serde_json::Error),
 }
 
-/// JSON-backed repository with atomic replacement on save.
+/// JSON-backed repository with exclusive lifetime locking and atomic saves.
+///
+/// Public constructors acquire a sibling lock file before reading and retain it
+/// until every clone is dropped, serializing the complete read-mutate-save
+/// lifecycle across threads and processes.
 #[derive(Debug, Clone)]
 pub struct TaskRepository {
     path: PathBuf,
     document: TaskDocument,
+    _lock: Option<Arc<File>>,
 }
 
 impl TaskRepository {
     /// Open an existing document, or return an empty repository when absent.
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, TaskRepositoryError> {
         let path = path.into();
+        let lock_path = path.with_extension("json.lock");
+        if let Some(parent) = lock_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| TaskRepositoryError::Lock {
+                path: lock_path.clone(),
+                source,
+            })?;
+        }
+        let lock = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|source| TaskRepositoryError::Lock {
+                path: lock_path.clone(),
+                source,
+            })?;
+        lock.lock_exclusive()
+            .map_err(|source| TaskRepositoryError::Lock {
+                path: lock_path,
+                source,
+            })?;
         let document = match std::fs::read_to_string(&path) {
             Ok(text) => {
                 serde_json::from_str(&text).map_err(|source| TaskRepositoryError::Parse {
@@ -143,7 +179,11 @@ impl TaskRepository {
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => TaskDocument::default(),
             Err(source) => return Err(TaskRepositoryError::Read { path, source }),
         };
-        Ok(Self { path, document })
+        Ok(Self {
+            path,
+            document,
+            _lock: Some(Arc::new(lock)),
+        })
     }
     /// Open `<home>/tasks.json`.
     pub fn in_home(home: impl AsRef<Path>) -> Result<Self, TaskRepositoryError> {

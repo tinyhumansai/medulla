@@ -25,9 +25,50 @@ fn round_trip_and_missing_file_are_tolerant() {
     let mut r = TaskRepository::open(&path).unwrap();
     r.document_mut().tasks.push(task(None));
     r.save().unwrap();
+    drop(r);
     assert_eq!(
         TaskRepository::open(path).unwrap().document().tasks.len(),
         1
+    );
+}
+
+#[test]
+fn repositories_serialize_the_read_mutate_save_lifecycle() {
+    let d = tempdir().unwrap();
+    let path = d.path().join("tasks.json");
+    let mut first = TaskRepository::open(&path).unwrap();
+    first.document_mut().tasks.push(task(None));
+
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let second_path = path.clone();
+    let writer = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        let mut second = TaskRepository::open(second_path).unwrap();
+        let mut second_task = task(None);
+        second_task.id = "second".into();
+        second.document_mut().tasks.push(second_task);
+        second.save().unwrap();
+        done_tx.send(()).unwrap();
+    });
+
+    started_rx.recv().unwrap();
+    assert!(
+        done_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "a second repository must wait for the first lifecycle to finish"
+    );
+    first.save().unwrap();
+    drop(first);
+    done_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    writer.join().unwrap();
+
+    assert_eq!(
+        TaskRepository::open(path).unwrap().document().tasks.len(),
+        2
     );
 }
 
@@ -68,6 +109,7 @@ fn save_reports_directory_creation_write_and_rename_failures() {
     let create_error = TaskRepository {
         path: blocker.join("tasks.json"),
         document: TaskDocument::default(),
+        _lock: None,
     };
     assert!(matches!(
         create_error.save(),
@@ -79,6 +121,7 @@ fn save_reports_directory_creation_write_and_rename_failures() {
     let write_error = TaskRepository {
         path: write_target,
         document: TaskDocument::default(),
+        _lock: None,
     };
     assert!(matches!(
         write_error.save(),
@@ -90,6 +133,7 @@ fn save_reports_directory_creation_write_and_rename_failures() {
     let rename_error = TaskRepository {
         path: rename_target,
         document: TaskDocument::default(),
+        _lock: None,
     };
     assert!(matches!(
         rename_error.save(),
@@ -110,6 +154,7 @@ fn sync_deduplicates_and_preserves_local_edits() {
             tasks: vec![task(Some(source.clone()))],
             sources: vec![],
         },
+        _lock: None,
     };
     let mut incoming = task(Some(source));
     incoming.title = "remote".into();
@@ -134,6 +179,7 @@ fn sync_fills_blank_local_fields_and_inserts_new_records() {
             tasks: vec![local],
             sources: vec![],
         },
+        _lock: None,
     };
     let mut incoming = task(Some(source));
     incoming.title = "remote".into();

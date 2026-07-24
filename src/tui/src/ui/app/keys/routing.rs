@@ -3,6 +3,7 @@
 use crossterm::event::KeyCode;
 
 use crate::ui::composer::{insert_at, Draft};
+use crate::ui::multi_pane::{self, NavAction};
 use medulla::runtime::WorkerOp;
 
 use super::super::types::{
@@ -12,41 +13,34 @@ use super::super::types::{
 impl App {
     /// Handle Routing navigation and the active pane's actions.
     pub(super) fn on_routing_key(&mut self, code: KeyCode) -> RoutingKey {
-        if let KeyCode::Char(d @ '1'..='4') = code {
-            self.routing_index = d as usize - '1' as usize;
-            self.routing_focused = true;
-            return RoutingKey::Handled(None);
-        }
-
-        if !self.routing_focused {
-            return match code {
-                KeyCode::Up => {
-                    self.routing_index = self.routing_index.saturating_sub(1);
-                    RoutingKey::Handled(None)
-                }
-                KeyCode::Down => {
-                    self.routing_index = (self.routing_index + 1).min(ROUTING_SUBPAGES.len() - 1);
-                    RoutingKey::Handled(None)
-                }
-                KeyCode::Enter => {
-                    self.routing_focused = true;
-                    RoutingKey::Handled(None)
-                }
-                KeyCode::Char(_) => RoutingKey::Handled(None),
-                _ => RoutingKey::Unhandled,
-            };
-        }
-
-        if code == KeyCode::Esc {
-            self.routing_focused = false;
-            self.set_status("Routing · menu");
-            return RoutingKey::Handled(None);
+        match multi_pane::navigate(
+            code,
+            ROUTING_SUBPAGES.len(),
+            &mut self.routing_index,
+            &mut self.routing_focused,
+            true,
+        ) {
+            NavAction::SelectionChanged | NavAction::Consumed => {
+                return RoutingKey::Handled(None);
+            }
+            NavAction::Entered => {
+                self.set_status(format!(
+                    "{} · Esc to go back to the menu",
+                    self.routing_subpage()
+                ));
+                return RoutingKey::Handled(None);
+            }
+            NavAction::Left => {
+                self.set_status("Routing · menu");
+                return RoutingKey::Handled(None);
+            }
+            NavAction::Unhandled => {}
         }
 
         match self.routing_index {
             RP_WORKERS => self.workers_key(code),
             RP_ADD_WORKER => self.add_worker_key(code),
-            _ => RoutingKey::Handled(None),
+            _ => RoutingKey::Unhandled,
         }
     }
 
@@ -102,7 +96,7 @@ impl App {
                 }
                 RoutingKey::Handled(None)
             }
-            _ => RoutingKey::Handled(None),
+            _ => RoutingKey::Unhandled,
         }
     }
 
@@ -110,8 +104,10 @@ impl App {
     fn add_worker_key(&mut self, code: KeyCode) -> RoutingKey {
         if matches!(code, KeyCode::Enter | KeyCode::Char('a')) {
             self.open_add_worker_prompt();
+            RoutingKey::Handled(None)
+        } else {
+            RoutingKey::Unhandled
         }
-        RoutingKey::Handled(None)
     }
 
     /// Build the worker-add prompt shared by the list shortcut and Add Worker page.

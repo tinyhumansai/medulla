@@ -16,6 +16,7 @@
 
 use crossterm::event::KeyCode;
 
+use crate::ui::multi_pane::{self, NavAction};
 use crate::ui::theme::THEME_ROLES;
 use medulla::client::FeedbackType;
 
@@ -30,61 +31,35 @@ impl App {
     /// Returns `None` when the key is not one Settings claims, so the caller can
     /// fall through to the global bindings.
     pub(super) fn on_settings_key(&mut self, code: KeyCode) -> SettingsKey {
-        // Digit jumps work from either focus. They are menu selections — "take
-        // me to Appearance" — so they land *inside* the page, the same as
-        // `/appearance` does. Reaching the nav is what Esc is for.
-        if let KeyCode::Char(d @ '1'..='9') = code {
-            let index = d as usize - '1' as usize;
-            if index < SETTINGS_SUBPAGES.len() {
-                return SettingsKey::Handled(self.enter_settings_subpage(index));
+        let allow_leave = !self.logout_armed();
+        match multi_pane::navigate(
+            code,
+            SETTINGS_SUBPAGES.len(),
+            &mut self.settings_index,
+            &mut self.settings_focused,
+            allow_leave,
+        ) {
+            NavAction::SelectionChanged => {
+                self.disarm_logout();
+                return SettingsKey::Handled(self.tab_enter_cmd());
             }
-            return SettingsKey::Unhandled;
-        }
-
-        if !self.settings_focused {
-            // Nav focus: arrows walk the subpage list, Enter steps into the page.
-            match code {
-                KeyCode::Up | KeyCode::Down => {
-                    let up = matches!(code, KeyCode::Up);
-                    self.disarm_logout();
-                    self.settings_index = if up {
-                        self.settings_index.saturating_sub(1)
-                    } else {
-                        (self.settings_index + 1).min(SETTINGS_SUBPAGES.len() - 1)
-                    };
-                    return SettingsKey::Handled(self.tab_enter_cmd());
-                }
-                // Enter alone opens a page: `→` is already the "increase this
-                // value" key on Appearance and Config, and overloading it would
-                // make the first press mean something different from the rest.
-                KeyCode::Enter => {
-                    self.settings_focused = true;
-                    self.set_status(format!(
-                        "{} · Esc to go back to the menu",
-                        self.settings_subpage()
-                    ));
-                    return SettingsKey::Handled(None);
-                }
-                // A letter would be a content-pane action, and the pane does not
-                // have focus — swallow it rather than letting a stray keystroke
-                // vote or open a prompt from the nav.
-                KeyCode::Char(_) => return SettingsKey::Handled(None),
-                // Everything else is structural (Tab/BackTab above all) and must
-                // reach the global bindings: swallowing them here trapped the
-                // keyboard inside Settings, since the nav is where you land on
-                // entering the tab.
-                _ => return SettingsKey::Unhandled,
+            NavAction::Entered => {
+                self.set_status(format!(
+                    "{} · Esc to go back to the menu",
+                    self.settings_subpage()
+                ));
+                return SettingsKey::Handled(None);
             }
-        }
-
-        // Content focus: Esc leaves, arrows browse, everything else is the
-        // subpage's own binding.
-        match code {
-            KeyCode::Esc if !self.logout_armed() => {
-                self.settings_focused = false;
+            NavAction::Left => {
                 self.set_status("Settings · menu");
                 return SettingsKey::Handled(None);
             }
+            NavAction::Consumed => return SettingsKey::Handled(None),
+            NavAction::Unhandled => {}
+        }
+
+        // Content focus: arrows browse, everything else is the subpage's binding.
+        match code {
             KeyCode::Up | KeyCode::Down => {
                 let up = matches!(code, KeyCode::Up);
                 return self.settings_content_scroll(up);

@@ -14,6 +14,7 @@ pub mod app;
 pub mod clipboard;
 pub mod composer;
 pub mod login;
+pub(crate) mod multi_pane;
 pub mod onboarding;
 pub mod theme;
 pub mod welcome;

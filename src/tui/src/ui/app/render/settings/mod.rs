@@ -9,8 +9,10 @@
 //! Each subpage's body lives in its own submodule; this one owns only the split,
 //! the nav, and the dispatch.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::Frame;
+
+use crate::ui::multi_pane;
 
 use super::super::types::{
     App, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_FEEDBACK, SP_TRACE, SP_USAGE,
@@ -23,29 +25,22 @@ mod debug;
 mod help;
 mod nav;
 
-/// The left-nav width. Wide enough for the indented rows under their headings.
-const NAV_WIDTH: u16 = 20;
-
 impl App {
     /// Draw the Settings tab: the grouped subpage nav on the left, the active
     /// subpage on the right.
     pub(super) fn draw_settings(&mut self, f: &mut Frame, area: Rect) {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(NAV_WIDTH), Constraint::Min(0)])
-            .split(area);
-
-        self.draw_settings_nav(f, cols[0]);
+        let (nav, content) = multi_pane::split(area);
+        self.draw_settings_nav(f, nav);
 
         match self.settings_index {
-            SP_USAGE => self.draw_usage(f, cols[1]),
-            SP_APPEARANCE => self.draw_appearance(f, cols[1]),
-            SP_CONFIG => self.draw_config(f, cols[1]),
-            SP_FEEDBACK => self.draw_feedback(f, cols[1]),
-            SP_TRACE => self.draw_trace(f, cols[1]),
-            SP_CONTEXT => self.draw_context(f, cols[1]),
-            SP_ACCOUNT => self.draw_account(f, cols[1]),
-            _ => self.draw_help(f, cols[1]),
+            SP_USAGE => self.draw_usage(f, content),
+            SP_APPEARANCE => self.draw_appearance(f, content),
+            SP_CONFIG => self.draw_config(f, content),
+            SP_FEEDBACK => self.draw_feedback(f, content),
+            SP_TRACE => self.draw_trace(f, content),
+            SP_CONTEXT => self.draw_context(f, content),
+            SP_ACCOUNT => self.draw_account(f, content),
+            _ => self.draw_help(f, content),
         }
     }
 }

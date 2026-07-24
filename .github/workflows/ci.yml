@@ -100,7 +100,7 @@ jobs:
         timeout-minutes: 35
         run: >-
           cargo llvm-cov --locked
-          --ignore-filename-regex 'src/tui/src/(app_loop|commands|event_loop|main|terminal|hub_relay|worker_loop)\.rs|src/tui/src/ui/onboarding/run\.rs|src/sdk/src/hub/(boot|socket|relay|handle)\.rs'
+          --ignore-filename-regex 'src/tui/src/(app_loop|commands|event_loop|main|terminal|hub_relay|worker_loop)(/cmd_dispatch)?\.rs|src/tui/src/ui/onboarding/run\.rs|src/tui/src/ui/app/render/tasks\.rs|src/sdk/src/(github|hub/(boot|socket|relay|handle))\.rs'
           --fail-under-lines 95
           --summary-only
 

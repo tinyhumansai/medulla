@@ -46,7 +46,8 @@ fn capacity_strategies_choose_different_workers() {
     );
     assert_eq!(
         worker_for_strategy(&workers, &details, RoutingStrategy::Balanced).as_deref(),
-        Some("ram")
+        Some("cpu"),
+        "balanced routing is CPU-first even when another worker has much more RAM"
     );
     assert_eq!(
         worker_for_strategy(&workers, &details, RoutingStrategy::Manual),

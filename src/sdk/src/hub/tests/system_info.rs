@@ -1,10 +1,12 @@
 //! Tests for lightweight worker capacity probes over the encrypted relay.
 
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::hub::tests::dispatch::harness::{FakeWorker, Mode};
-use crate::hub::{RunError, TaskRunner};
+use crate::hub::{HubWorker, RunError, TaskRunner};
 use crate::tinyplace::WorkerSystemInfo;
 
 fn info() -> WorkerSystemInfo {
@@ -14,6 +16,34 @@ fn info() -> WorkerSystemInfo {
         memory_available_bytes: Some(40 * 1024 * 1024 * 1024),
         ip_address: "10.20.30.40".to_string(),
     }
+}
+
+#[test]
+fn capacity_details_are_cached_only_for_the_peer_that_was_probed() {
+    use super::super::handle::cache_system_info_if_current;
+
+    let roster = Arc::new(Mutex::new(vec![HubWorker {
+        id: "worker".to_string(),
+        address: "address-new".to_string(),
+        harness: "claude".to_string(),
+        label: None,
+        selected: false,
+    }]));
+    let cache = Mutex::new(HashMap::new());
+
+    assert!(
+        !cache_system_info_if_current(&roster, &cache, "worker", "address-old", info()),
+        "a refresh started against the replaced peer must be discarded"
+    );
+    assert!(cache.lock().unwrap().is_empty());
+    assert!(cache_system_info_if_current(
+        &roster,
+        &cache,
+        "worker",
+        "address-new",
+        info()
+    ));
+    assert_eq!(cache.lock().unwrap().get("worker"), Some(&info()));
 }
 
 #[tokio::test]

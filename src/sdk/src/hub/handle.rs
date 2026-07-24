@@ -73,6 +73,32 @@ pub(super) fn should_request_contact(address: &str, accepted: bool) -> bool {
     !address.trim().is_empty() && !accepted
 }
 
+/// Cache a probe result only while the roster id still names the probed peer.
+///
+/// The roster lock stays held through the cache insert. This makes the check
+/// atomic with add/remove operations, which mutate the roster before clearing
+/// cached details for the affected ids.
+pub(super) fn cache_system_info_if_current(
+    roster: &SharedRoster,
+    system_info: &Mutex<HashMap<String, crate::tinyplace::WorkerSystemInfo>>,
+    id: &str,
+    address: &str,
+    info: crate::tinyplace::WorkerSystemInfo,
+) -> bool {
+    let workers = roster.lock().expect("roster lock");
+    if !workers
+        .iter()
+        .any(|worker| worker.id == id && worker.address == address)
+    {
+        return false;
+    }
+    system_info
+        .lock()
+        .expect("system info lock")
+        .insert(id.to_string(), info);
+    true
+}
+
 /// Everything a [`HubHandle`] is built from.
 ///
 /// A struct rather than a parameter list: the handle needs the roster, the
@@ -171,10 +197,10 @@ impl HubHandle {
             .system_info(&worker.address)
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        self.system_info
-            .lock()
-            .expect("system info lock")
-            .insert(id.to_string(), info);
+        if !cache_system_info_if_current(&self.roster, &self.system_info, id, &worker.address, info)
+        {
+            anyhow::bail!("worker {id} changed while details were refreshed");
+        }
         Ok(())
     }
 

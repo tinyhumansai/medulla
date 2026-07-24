@@ -18,6 +18,7 @@ use crate::ui::theme::Theme;
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackQuery, FeedbackType};
 use medulla::config::LoadedConfig;
 use medulla::memory::{MemoryHit, MemoryStatus};
+use medulla::runtime::RoutingStrategy;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 
 /// The ordered top-level tab names. The tab index selects into this array.
@@ -36,6 +37,14 @@ pub(super) const RP_WORKERS: usize = 0;
 pub(super) const RP_ADD_WORKER: usize = 1;
 pub(super) const RP_KEYS: usize = 2;
 pub(super) const RP_STRATEGIES: usize = 3;
+
+/// Routing strategies in the order shown by the chooser.
+pub(super) const ROUTING_STRATEGIES: [RoutingStrategy; 4] = [
+    RoutingStrategy::Manual,
+    RoutingStrategy::Balanced,
+    RoutingStrategy::CpuFirst,
+    RoutingStrategy::MemoryFirst,
+];
 
 /// The Settings tab's left-nav subpages, in order (number keys 1-8 jump to them).
 ///
@@ -321,6 +330,8 @@ pub struct App {
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.
     pub(super) routing_focused: bool,
+    /// Selected row on the Routing strategy page.
+    pub(super) routing_strategy_index: usize,
     // Persona-memory tab state (lazily loaded on tab entry / search).
     pub(super) memory_status: Option<MemoryStatus>,
     pub(super) memory_hits: Vec<MemoryHit>,

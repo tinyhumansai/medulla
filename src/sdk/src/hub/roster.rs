@@ -9,6 +9,7 @@
 //! runtime. Every mutation re-emits `medulla:register_agents` so the backend's
 //! roster tracks the change.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
@@ -109,6 +110,40 @@ pub(super) fn same_destination(a: &str, b: &str) -> bool {
 /// and an `@handle` differs from the cryptoId it resolves to.
 pub(super) fn remove_conflicting(workers: &mut Vec<HubWorker>, incoming: &HubWorker) {
     workers.retain(|w| w.id != incoming.id && !same_destination(&w.address, &incoming.address));
+}
+
+/// Choose a worker id from captured capacity details.
+///
+/// Manual routing deliberately returns `None`: preserving the current selection
+/// is an action in itself, not an automatic re-selection.
+pub(super) fn worker_for_strategy(
+    workers: &[HubWorker],
+    details: &HashMap<String, crate::tinyplace::WorkerSystemInfo>,
+    strategy: crate::runtime::RoutingStrategy,
+) -> Option<String> {
+    use crate::runtime::RoutingStrategy;
+
+    if strategy == RoutingStrategy::Manual {
+        return None;
+    }
+    workers
+        .iter()
+        .filter_map(|worker| {
+            let info = details.get(&worker.id)?;
+            let memory = info.memory_available_bytes.unwrap_or(0);
+            let key = match strategy {
+                RoutingStrategy::Balanced => (
+                    info.cpu_cores as u64 + memory / (1024 * 1024 * 1024),
+                    info.cpu_cores as u64,
+                ),
+                RoutingStrategy::CpuFirst => (info.cpu_cores as u64, memory),
+                RoutingStrategy::MemoryFirst => (memory, info.cpu_cores as u64),
+                RoutingStrategy::Manual => unreachable!("handled above"),
+            };
+            Some((key, worker.id.clone()))
+        })
+        .max_by_key(|(key, _)| *key)
+        .map(|(_, id)| id)
 }
 
 /// A short, stable, human-scale id for a worker.

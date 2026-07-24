@@ -178,6 +178,24 @@ impl HubHandle {
         Ok(())
     }
 
+    /// Choose the current default worker from cached capacity details.
+    pub fn apply_strategy(&self, strategy: crate::runtime::RoutingStrategy) -> anyhow::Result<()> {
+        use crate::runtime::RoutingStrategy;
+
+        if strategy == RoutingStrategy::Manual {
+            return Ok(());
+        }
+        let roster = self.list();
+        let details = self.system_info.lock().expect("system info lock");
+        let selected =
+            super::roster::worker_for_strategy(&roster, &details, strategy).ok_or_else(|| {
+                anyhow::anyhow!("refresh worker details before applying an automatic strategy")
+            })?;
+        drop(details);
+        self.select(&selected);
+        Ok(())
+    }
+
     /// Add (or replace, by id) a worker, open a contact edge, and re-register.
     ///
     /// The contact request is sent here rather than only at first dispatch.

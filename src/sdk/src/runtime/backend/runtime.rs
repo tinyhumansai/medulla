@@ -506,6 +506,7 @@ async fn apply_worker_op(
         }
         WorkerOp::Remove { id } => handle.remove(&id).await,
         WorkerOp::RefreshDetails { id } => handle.refresh_system_info(&id).await,
+        WorkerOp::ApplyStrategy { strategy } => handle.apply_strategy(strategy),
         WorkerOp::Update { id, patch } => {
             let label = patch
                 .get("label")

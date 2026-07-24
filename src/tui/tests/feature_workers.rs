@@ -158,6 +158,45 @@ fn workers_r_refreshes_selected_machine_details() {
 }
 
 #[test]
+fn routing_nav_exposes_all_four_subpages() {
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Routing");
+    let out = render(&mut app, 120, 40);
+    for page in ["List Workers", "Add Worker", "Manage Keys", "Strategies"] {
+        assert!(out.contains(page), "missing {page}: {out}");
+    }
+}
+
+#[test]
+fn strategies_choose_and_apply_a_capacity_policy() {
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("Strategies");
+    let _ = app.on_event(key(KeyCode::Down));
+    let _ = app.on_event(key(KeyCode::Down));
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("CPU First"));
+    assert!(out.contains("most logical CPU cores"));
+    let cmd = app.on_event(key(KeyCode::Enter));
+    match cmd {
+        Some(Cmd::WorkerOp(op)) => assert!(format!("{op:?}").contains("CpuFirst")),
+        other => panic!("expected strategy command, got {other:?}"),
+    }
+}
+
+#[test]
+fn manage_keys_names_subscriptions_and_api_sources_without_values() {
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("Manage Keys");
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("Provider subscriptions"));
+    assert!(out.contains("Claude Code"));
+    assert!(out.contains("Codex"));
+    assert!(out.contains("Anthropic"));
+    assert!(out.contains("OpenRouter"));
+    assert!(out.contains("Secret values are never rendered"));
+}
+
+#[test]
 fn workers_up_down_moves_selection() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");

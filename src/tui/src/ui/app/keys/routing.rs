@@ -7,7 +7,8 @@ use crate::ui::multi_pane::{self, NavAction};
 use medulla::runtime::WorkerOp;
 
 use super::super::types::{
-    App, Cmd, Prompt, PromptKind, ROUTING_SUBPAGES, RP_ADD_WORKER, RP_WORKERS,
+    App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_WORKER,
+    RP_STRATEGIES, RP_WORKERS,
 };
 
 impl App {
@@ -40,6 +41,7 @@ impl App {
         match self.routing_index {
             RP_WORKERS => self.workers_key(code),
             RP_ADD_WORKER => self.add_worker_key(code),
+            RP_STRATEGIES => self.strategies_key(code),
             _ => RoutingKey::Unhandled,
         }
     }
@@ -125,6 +127,27 @@ impl App {
             draft: Draft::new(),
         });
         self.set_status("Add worker · Enter save · Esc cancel");
+    }
+
+    /// Browse and apply an automatic default-worker strategy.
+    fn strategies_key(&mut self, code: KeyCode) -> RoutingKey {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.routing_strategy_index = self.routing_strategy_index.saturating_sub(1);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.routing_strategy_index =
+                    (self.routing_strategy_index + 1).min(ROUTING_STRATEGIES.len() - 1);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Enter => {
+                let strategy = ROUTING_STRATEGIES[self.routing_strategy_index];
+                self.set_status(format!("Applying {strategy:?} routing strategy…"));
+                RoutingKey::Handled(Some(Cmd::WorkerOp(WorkerOp::ApplyStrategy { strategy })))
+            }
+            _ => RoutingKey::Unhandled,
+        }
     }
 }
 

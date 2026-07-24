@@ -45,6 +45,7 @@ impl App {
             worker_index: 0,
             routing_index: 0,
             routing_focused: false,
+            routing_strategy_index: 0,
             memory_status: None,
             memory_hits: Vec::new(),
             memory_directives: Vec::new(),

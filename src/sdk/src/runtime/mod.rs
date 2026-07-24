@@ -109,6 +109,19 @@ pub struct WorkerInfo {
     pub selected: bool,
 }
 
+/// How the hub chooses a default worker from captured capacity details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingStrategy {
+    /// Preserve the operator's explicit worker selection.
+    Manual,
+    /// Prefer CPU, using available memory as the tie-breaker.
+    Balanced,
+    /// Prefer the worker with the most logical CPU cores.
+    CpuFirst,
+    /// Prefer the worker with the most currently available memory.
+    MemoryFirst,
+}
+
 /// A mutation on the worker-peer registry (`worker.add`/`select`/`update`/`remove`).
 #[derive(Debug, Clone)]
 pub enum WorkerOp {
@@ -133,6 +146,10 @@ pub enum WorkerOp {
     /// Ask a worker for current CPU, RAM, and IP details.
     RefreshDetails {
         id: String,
+    },
+    /// Choose the default worker according to captured capacity details.
+    ApplyStrategy {
+        strategy: RoutingStrategy,
     },
 }
 

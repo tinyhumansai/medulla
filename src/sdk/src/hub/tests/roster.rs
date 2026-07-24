@@ -5,7 +5,10 @@
 //! and a tiny.place address, so these pin the resolution rules rather than the
 //! transport — dispatch itself is covered in [`super::super::dispatch`].
 
+use super::super::roster::worker_for_strategy;
 use super::super::roster::{address_of, register_payload, HubWorker};
+use crate::runtime::RoutingStrategy;
+use crate::tinyplace::WorkerSystemInfo;
 
 fn worker(id: &str, addr: &str) -> HubWorker {
     HubWorker {
@@ -15,6 +18,40 @@ fn worker(id: &str, addr: &str) -> HubWorker {
         label: None,
         selected: false,
     }
+}
+
+fn details(cpu: u32, available_gib: u64) -> WorkerSystemInfo {
+    WorkerSystemInfo {
+        cpu_cores: cpu,
+        memory_total_bytes: None,
+        memory_available_bytes: Some(available_gib * 1024 * 1024 * 1024),
+        ip_address: "10.0.0.1".into(),
+    }
+}
+
+#[test]
+fn capacity_strategies_choose_different_workers() {
+    let workers = vec![worker("cpu", "addr-cpu"), worker("ram", "addr-ram")];
+    let details = std::collections::HashMap::from([
+        ("cpu".into(), details(16, 4)),
+        ("ram".into(), details(4, 64)),
+    ]);
+    assert_eq!(
+        worker_for_strategy(&workers, &details, RoutingStrategy::CpuFirst).as_deref(),
+        Some("cpu")
+    );
+    assert_eq!(
+        worker_for_strategy(&workers, &details, RoutingStrategy::MemoryFirst).as_deref(),
+        Some("ram")
+    );
+    assert_eq!(
+        worker_for_strategy(&workers, &details, RoutingStrategy::Balanced).as_deref(),
+        Some("ram")
+    );
+    assert_eq!(
+        worker_for_strategy(&workers, &details, RoutingStrategy::Manual),
+        None
+    );
 }
 
 #[test]

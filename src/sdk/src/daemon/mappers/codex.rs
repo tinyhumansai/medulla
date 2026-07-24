@@ -16,11 +16,28 @@ pub(super) fn codex_events_from_line(raw: &str, line: i64) -> Vec<HarnessSemanti
         None => return Vec::new(),
     };
     let ts = parse_timestamp_ms(record.get("timestamp"));
+    let record_type = record.get("type").and_then(Value::as_str);
+
+    // codex >= ~0.140 `exec --json` is a thread/turn/item event stream, with the
+    // detail on a nested `item` rather than the older `payload`. Handle it first;
+    // the legacy `event_msg`/`response_item` path follows for older codex.
+    match record_type {
+        // `thread_id` is captured by the session-id extractor, not as an event.
+        Some("thread.started") => return Vec::new(),
+        Some("turn.started") => return vec![codex_status(line, ts, "turn.started", "running")],
+        Some("turn.completed") | Some("turn.failed") => {
+            return vec![codex_status(line, ts, record_type.unwrap(), "idle")]
+        }
+        Some("item.started") | Some("item.completed") => {
+            return codex_item(&record, record_type.unwrap(), ts, line)
+        }
+        _ => {}
+    }
+
     let payload = match record.get("payload").and_then(Value::as_object) {
         Some(payload) => payload,
         None => return Vec::new(),
     };
-    let record_type = record.get("type").and_then(Value::as_str);
     let payload_type = payload.get("type").and_then(Value::as_str);
 
     if record_type == Some("event_msg") && payload_type == Some("user_message") {
@@ -163,6 +180,116 @@ pub(super) fn codex_events_from_line(raw: &str, line: i64) -> Vec<HarnessSemanti
     }
 
     Vec::new()
+}
+
+/// A codex turn-lifecycle status event (`turn.started` → running, `turn.*ed` →
+/// idle), mirroring the `task_started`/`task_complete` mapping of older codex.
+fn codex_status(line: i64, ts: i64, source: &str, state: &str) -> HarnessSemanticEvent {
+    let detail = if state == "running" {
+        "working"
+    } else {
+        "idle"
+    };
+    semantic(
+        line,
+        ts,
+        &format!("event:{source}"),
+        "status",
+        "agent",
+        serde_json::json!({ "state": state, "detail": detail }),
+    )
+}
+
+/// Map a codex `item.started`/`item.completed` record to semantic events.
+///
+/// `agent_message` is the reply (emitted once, on completion); `reasoning` is
+/// chain-of-thought; `command_execution` becomes a `tool_call` when it starts and
+/// a `tool_result` when it ends. Item kinds we do not surface text for (file
+/// changes, mcp calls, todo lists) are ignored rather than guessed at.
+fn codex_item(
+    record: &serde_json::Map<String, Value>,
+    record_type: &str,
+    ts: i64,
+    line: i64,
+) -> Vec<HarnessSemanticEvent> {
+    let item = match record.get("item").and_then(Value::as_object) {
+        Some(item) => item,
+        None => return Vec::new(),
+    };
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
+    let id = item.get("id").and_then(Value::as_str).unwrap_or("");
+    let completed = record_type == "item.completed";
+    match item_type {
+        "agent_message" if completed => {
+            let text = item.get("text").and_then(Value::as_str).unwrap_or("");
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![semantic(
+                    line,
+                    ts,
+                    "item.completed:agent_message",
+                    "agent_message",
+                    "agent",
+                    serde_json::json!({ "text": text }),
+                )]
+            }
+        }
+        "reasoning" if completed => {
+            let text = item
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| {
+                    text_from_content(item.get("summary"), &["summary_text", "text"])
+                });
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![semantic(
+                    line,
+                    ts,
+                    "item.completed:reasoning",
+                    "agent_thinking",
+                    "agent",
+                    serde_json::json!({ "text": text }),
+                )]
+            }
+        }
+        "command_execution" => {
+            let command = item.get("command").and_then(Value::as_str).unwrap_or("");
+            if completed {
+                let output = item
+                    .get("aggregated_output")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let is_error = item
+                    .get("exit_code")
+                    .and_then(Value::as_i64)
+                    .map(|code| code != 0)
+                    .unwrap_or(false);
+                vec![semantic(
+                    line,
+                    ts,
+                    "item.completed:command_execution",
+                    "tool_result",
+                    "agent",
+                    tool_result_payload(id, is_error, output),
+                )]
+            } else {
+                vec![semantic(
+                    line,
+                    ts,
+                    "item.started:command_execution",
+                    "tool_call",
+                    "agent",
+                    tool_call_payload(id, "shell", &Value::String(command.to_string())),
+                )]
+            }
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Extract the text from a codex tool output (string, or object nesting the text

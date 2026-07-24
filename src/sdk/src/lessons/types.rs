@@ -55,9 +55,10 @@ pub enum LessonError {
     /// slash-command syntax.
     #[error("expected a lesson in the form <trigger> -> <rule>")]
     InvalidLessonFormat,
-    /// The trigger or rule contains the `->` token, which is reserved as the
-    /// delimiter and cannot appear literally in either field.
-    #[error("lesson trigger and rule must not contain the '->' delimiter")]
+    /// The trigger contains `: `, or the trigger or rule contains `->`, which
+    /// are reserved as the CLI and on-disk delimiters and cannot appear
+    /// literally in those fields.
+    #[error("lesson trigger must not contain ': ' delimiter; neither field may contain '->'")]
     DelimiterInField,
     /// The trigger or rule contains an embedded line break and cannot be stored
     /// safely in the single-line `- when …: …` format.

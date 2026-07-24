@@ -143,8 +143,20 @@ fn display_formatting_on_errors() {
     assert!(missing.to_string().contains("workspace/MEDULLA.md"));
 
     let delim = LessonError::DelimiterInField;
-    assert!(delim.to_string().contains("->"));
+    assert!(delim.to_string().contains(": ") || delim.to_string().contains("->"));
 
     let multiline = LessonError::MultilineField;
     assert!(multiline.to_string().contains("line break"));
+}
+
+#[test]
+fn normalize_rejects_reserved_ledger_separator_in_trigger() {
+    assert!(matches!(
+        normalize(Lesson::new("CI fails: check log", "rerun")),
+        Err(LessonError::DelimiterInField)
+    ));
+    assert!(matches!(
+        normalize(Lesson::new("config: reload", "restart")),
+        Err(LessonError::DelimiterInField)
+    ));
 }

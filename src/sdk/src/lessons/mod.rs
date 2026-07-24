@@ -99,6 +99,9 @@ pub fn add_lesson(workspace: &Path, lesson: Lesson) -> Result<AddLessonOutcome, 
 /// * A trigger or rule that contains the `->` token, which is the
 ///   CLI/slash-command delimiter and would break round-trip fidelity
 ///   ([`LessonError::DelimiterInField`]).
+/// * A trigger that contains `: `, which is the on-disk separator in
+///   `- when <trigger>: <rule>` and would corrupt round-trip parsing
+///   ([`LessonError::DelimiterInField`]).
 /// * A trigger or rule that contains embedded line breaks (`\r` or `\n`),
 ///   which cannot be stored in the single-line `- when …: …` format
 ///   ([`LessonError::MultilineField`]).
@@ -109,6 +112,9 @@ fn normalize(lesson: Lesson) -> Result<Lesson, LessonError> {
         return Err(LessonError::EmptyLesson);
     }
     if trigger.contains("->") || rule.contains("->") {
+        return Err(LessonError::DelimiterInField);
+    }
+    if trigger.contains(": ") {
         return Err(LessonError::DelimiterInField);
     }
     if trigger.contains('\n') || trigger.contains('\r') {

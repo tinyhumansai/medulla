@@ -57,7 +57,9 @@ pub struct InitArgs {
 /// The `medulla lessons` action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LessonsAction {
+    /// Print every lesson in the current workspace profile.
     List,
+    /// Append a new lesson (parsed trigger + rule).
     Add { trigger: String, rule: String },
 }
 
@@ -66,6 +68,7 @@ pub enum LessonsAction {
 pub struct LessonsArgs {
     /// Workspace directory. `None` means the current working directory.
     pub workspace: Option<String>,
+    /// The sub-action to perform.
     pub action: LessonsAction,
 }
 

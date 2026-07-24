@@ -74,6 +74,9 @@ fn parses_lessons_args() {
     assert!(parse_lessons_args(&argv(&["list", "extra"])).is_err());
     assert!(parse_lessons_args(&argv(&["add", "missing arrow"])).is_err());
     assert!(parse_lessons_args(&argv(&["unknown"])).is_err());
+    // --workspace without a value is a hard error, not a silent CWD default.
+    assert!(parse_lessons_args(&argv(&["list", "--workspace"])).is_err());
+    assert!(parse_lessons_args(&argv(&["list", "--workspace", "--other"])).is_err());
 }
 
 #[test]

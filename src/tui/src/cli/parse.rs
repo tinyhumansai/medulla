@@ -52,7 +52,21 @@ pub fn parse_lessons_args(args: &[String]) -> Result<LessonsArgs, String> {
     let mut it = args.iter().skip(1);
     while let Some(arg) = it.next() {
         if arg == "--workspace" {
-            workspace = it.next().cloned();
+            match it.next() {
+                Some(v) if !v.starts_with('-') => workspace = Some(v.clone()),
+                Some(v) => {
+                    return Err(format!(
+                        "lessons {}: expected a value after --workspace, got '{v}'",
+                        action_word
+                    ))
+                }
+                None => {
+                    return Err(format!(
+                        "lessons {}: expected a value after --workspace",
+                        action_word
+                    ))
+                }
+            }
         } else {
             text.push(arg.as_str());
         }

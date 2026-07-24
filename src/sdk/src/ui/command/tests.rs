@@ -58,17 +58,17 @@ fn lesson_parses_the_shared_trigger_rule_shape() {
         parse("/lesson missing delimiter"),
         Some(SlashCommand::BadUsage("Usage: /lesson <trigger> -> <rule>"))
     );
-}
-
-#[test]
-fn review_requires_and_preserves_a_target() {
     assert_eq!(
-        parse("/review Task-42"),
-        Some(SlashCommand::Review("Task-42".into()))
+        parse("/lesson a -> b -> c"),
+        Some(SlashCommand::BadUsage(
+            "Lesson: -> is reserved; avoid it in trigger and rule"
+        ))
     );
     assert_eq!(
-        parse("/review"),
-        Some(SlashCommand::BadUsage("Usage: /review <lane|task-id>"))
+        parse("/lesson multi\nline -> rule"),
+        Some(SlashCommand::BadUsage(
+            "Lesson: trigger and rule must be a single line"
+        ))
     );
 }
 

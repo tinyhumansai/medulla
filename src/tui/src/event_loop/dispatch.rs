@@ -1,16 +1,16 @@
-//! Translate a [`Cmd`] into a spawned async task whose result is reported back
-//! over the [`AppMsg`] channel. Memory queries touch SQLite so they run on
-//! `spawn_blocking` off the UI thread.
+//! Background-task dispatch: translates a [`Cmd`] into a spawned async task and
+//! reports its outcome back to the main event loop over the [`AppMsg`] channel.
 //!
-//! Extracted from the main [`super::event_loop`] module so it stays under the
-//! repository's 500-line ceiling.
+//! [`run_cmd`] is the single entry point the select loop calls. Memory queries
+//! touch SQLite so they run on `spawn_blocking` off the UI thread; runtime
+//! calls are regular `tokio::spawn` tasks.
 
 use std::sync::Arc;
 
 use medulla::runtime::Runtime;
 use medulla_tui::ui::app::Cmd;
 
-use super::AppMsg;
+use super::types::AppMsg;
 
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so

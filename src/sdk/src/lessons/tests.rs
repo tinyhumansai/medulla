@@ -100,3 +100,51 @@ fn command_spec_parser_normalizes_and_rejects_bad_shapes() {
         Err(LessonError::EmptyLesson)
     ));
 }
+
+#[test]
+fn normalize_rejects_reserved_delimiter_in_field() {
+    assert!(matches!(
+        normalize(Lesson::new("a -> b", "rule")),
+        Err(LessonError::DelimiterInField)
+    ));
+    assert!(matches!(
+        normalize(Lesson::new("trigger", "a -> b")),
+        Err(LessonError::DelimiterInField)
+    ));
+}
+
+#[test]
+fn normalize_rejects_embedded_line_breaks() {
+    assert!(matches!(
+        normalize(Lesson::new("multi\nline", "rule")),
+        Err(LessonError::MultilineField)
+    ));
+    assert!(matches!(
+        normalize(Lesson::new("trigger", "multi\rline")),
+        Err(LessonError::MultilineField)
+    ));
+}
+
+#[test]
+fn parse_lesson_spec_rejects_arrow_in_fields() {
+    assert!(matches!(
+        parse_lesson_spec("a -> b -> c"),
+        Err(LessonError::DelimiterInField)
+    ));
+    assert!(matches!(
+        parse_lesson_spec("trigger -> rule\nwith newline"),
+        Err(LessonError::MultilineField)
+    ));
+}
+
+#[test]
+fn display_formatting_on_errors() {
+    let missing = LessonError::MissingProfile(std::path::PathBuf::from("workspace/MEDULLA.md"));
+    assert!(missing.to_string().contains("workspace/MEDULLA.md"));
+
+    let delim = LessonError::DelimiterInField;
+    assert!(delim.to_string().contains("->"));
+
+    let multiline = LessonError::MultilineField;
+    assert!(multiline.to_string().contains("line break"));
+}

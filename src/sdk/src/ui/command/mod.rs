@@ -56,11 +56,13 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
                 trigger: lesson.trigger,
                 rule: lesson.rule,
             },
+            Err(crate::lessons::LessonError::DelimiterInField) => {
+                SlashCommand::BadUsage("Lesson: -> is reserved; avoid it in trigger and rule")
+            }
+            Err(crate::lessons::LessonError::MultilineField) => {
+                SlashCommand::BadUsage("Lesson: trigger and rule must be a single line")
+            }
             Err(_) => SlashCommand::BadUsage("Usage: /lesson <trigger> -> <rule>"),
-        },
-        "review" => match non_empty(arg) {
-            Some(target) => SlashCommand::Review(target),
-            None => SlashCommand::BadUsage("Usage: /review <lane|task-id>"),
         },
         "feedback" | "fb" => SlashCommand::Feedback,
         "mouse" => SlashCommand::ToggleMouse,

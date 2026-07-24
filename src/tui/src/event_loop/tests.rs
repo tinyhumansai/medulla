@@ -8,9 +8,9 @@ use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{Runtime, WorkerOp};
 use medulla_tui::ui::app::Cmd;
 
-use super::cmd_dispatch::{read_memory, run_cmd};
+use super::dispatch::{read_memory, run_cmd};
+use super::spawn_update_checker;
 use super::types::AppMsg;
-use super::update_checker::spawn_update_checker;
 
 /// Receive the next dispatcher result without allowing a broken task to hang
 /// the entire test suite.

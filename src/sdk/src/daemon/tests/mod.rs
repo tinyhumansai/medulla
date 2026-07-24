@@ -24,6 +24,7 @@ use super::*;
 
 mod capability_tests;
 mod provider_tests;
+mod system_info_tests;
 mod task_tests;
 
 /// Recorded `(recipient, body)` pairs captured by [`recording_send`].

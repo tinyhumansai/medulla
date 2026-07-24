@@ -7,3 +7,4 @@
 mod activity;
 mod dispatch;
 mod roster;
+mod system_info;

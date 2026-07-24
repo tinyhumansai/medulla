@@ -11,7 +11,7 @@ use super::super::types::RunError;
 use super::super::ActivityLog;
 use super::super::TaskRunner;
 
-mod harness;
+pub(super) mod harness;
 use harness::{req, FakeWorker, Mode};
 
 #[tokio::test]

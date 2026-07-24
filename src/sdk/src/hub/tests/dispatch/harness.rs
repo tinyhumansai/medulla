@@ -16,10 +16,11 @@ use crate::daemon::transport::InboundMessage;
 use crate::hub::{Relay, TaskRequest};
 use crate::tinyplace::{
     decode_task_frame, encode_task_frame_with_usage, EncodeFrameInput, TaskFrameKind, TokenUsage,
+    WorkerSystemInfo,
 };
 
 /// How the fake worker responds to a dispatched task.
-pub(super) enum Mode {
+pub(in crate::hub::tests) enum Mode {
     Reply(String),
     Error(String),
     Silent,
@@ -42,36 +43,40 @@ pub(super) enum Mode {
     /// pump's skip-and-continue path for a frame it cannot parse (a stray DM or a
     /// corrupt payload landing in the shared inbox).
     GarbageThenReply(String),
+    /// Answers a lightweight capacity probe without starting a task.
+    SystemInfo(WorkerSystemInfo),
+    /// Answers a capacity probe with malformed JSON.
+    InvalidSystemInfo,
 }
 
-pub(super) struct FakeWorker {
+pub(in crate::hub::tests) struct FakeWorker {
     /// The kind of every frame the runner sent us, in order.
     sent: Mutex<Vec<String>>,
     inbox: Mutex<VecDeque<InboundMessage>>,
     mode: Mode,
     /// How many times the sender has reset the session with us.
-    pub(super) resets: AtomicU32,
+    pub(in crate::hub::tests) resets: AtomicU32,
     /// When true, every `send` fails — exercises the transport-error path.
     fail_send: bool,
     /// `contact_accepted` returns false until it has been polled this many times,
     /// simulating a peer whose auto-accepter settles a few polls later.
     accept_after: u32,
     /// How many times `contact_accepted` has been polled.
-    pub(super) contact_checks: AtomicU32,
+    pub(in crate::hub::tests) contact_checks: AtomicU32,
 }
 
 impl FakeWorker {
     /// The kinds of frame the runner has sent us, in order.
-    pub(super) async fn sent_kinds(&self) -> Vec<String> {
+    pub(in crate::hub::tests) async fn sent_kinds(&self) -> Vec<String> {
         self.sent.lock().await.clone()
     }
 
-    pub(super) fn new(mode: Mode) -> Arc<Self> {
+    pub(in crate::hub::tests) fn new(mode: Mode) -> Arc<Self> {
         Self::with(mode, false, 0)
     }
 
     /// A worker with explicit send-failure and contact-acceptance-delay knobs.
-    pub(super) fn with(mode: Mode, fail_send: bool, accept_after: u32) -> Arc<Self> {
+    pub(in crate::hub::tests) fn with(mode: Mode, fail_send: bool, accept_after: u32) -> Arc<Self> {
         Arc::new(Self {
             sent: Mutex::new(Vec::new()),
             inbox: Mutex::new(VecDeque::new()),
@@ -92,6 +97,31 @@ impl Relay for FakeWorker {
         }
         let frame = decode_task_frame(body).expect("runner sends a valid task frame");
         self.sent.lock().await.push(frame.kind.as_str().to_string());
+        if frame.kind == TaskFrameKind::SystemInfo {
+            let text = match &self.mode {
+                Mode::SystemInfo(info) => serde_json::to_string(info).unwrap(),
+                Mode::InvalidSystemInfo => "{not-json".to_string(),
+                Mode::Silent => return Ok(()),
+                _ => return Ok(()),
+            };
+            self.inbox.lock().await.push_back(InboundMessage {
+                from: "worker".to_string(),
+                text: encode_task_frame_with_usage(
+                    EncodeFrameInput {
+                        kind: TaskFrameKind::SystemInfoResult,
+                        task_id: frame.task_id,
+                        text,
+                        ts: "T".to_string(),
+                        correlation_id: frame.correlation_id,
+                        harness: None,
+                        provider: None,
+                        model: None,
+                    },
+                    None,
+                ),
+            });
+            return Ok(());
+        }
         // Only a `task` frame starts work. An `abort` is the runner telling us to
         // stop one, and queues nothing.
         if frame.kind != TaskFrameKind::Task {
@@ -153,6 +183,7 @@ impl Relay for FakeWorker {
             }
             // Ack + status already queued above; no terminal frame follows.
             Mode::Silent | Mode::AckOnly => {}
+            Mode::SystemInfo(_) | Mode::InvalidSystemInfo => {}
         }
         Ok(())
     }

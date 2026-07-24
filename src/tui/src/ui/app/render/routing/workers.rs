@@ -24,7 +24,15 @@ impl App {
                 Style::default().add_modifier(Modifier::DIM),
             )));
         } else {
-            let visible = self.visible_count();
+            // Each worker consumes a summary row plus a capacity-details row.
+            // Reserve the footer (and optional hub identity) before choosing the
+            // worker window so the selected row and action hints stay visible.
+            let footer_rows = 1 + usize::from(self.snapshot.tinyplace.is_some()) * 2;
+            let visible = usize::from(inner.height)
+                .saturating_sub(footer_rows)
+                .checked_div(2)
+                .unwrap_or(0)
+                .max(1);
             let start = selected
                 .saturating_sub(visible / 2)
                 .min(workers.len().saturating_sub(visible));

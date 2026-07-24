@@ -264,6 +264,25 @@ fn worker_list_formats_missing_details_and_megabytes() {
 }
 
 #[test]
+fn worker_list_paginates_by_two_line_rows() {
+    let workers = (1..=12)
+        .map(|index| worker(&format!("w{index}"), index == 1))
+        .collect();
+    let mut app = app_with_roster(workers, None);
+    app.focus_routing_subpage("List Workers");
+    for _ in 1..12 {
+        let _ = app.on_event(key(KeyCode::Down));
+    }
+
+    let out = render(&mut app, 120, 24);
+    assert!(out.contains("w12"), "selected worker should remain visible");
+    assert!(
+        out.contains("refresh details"),
+        "action footer should remain visible"
+    );
+}
+
+#[test]
 fn strategies_choose_and_apply_a_capacity_policy() {
     let mut app = app_with_workers(None);
     app.focus_routing_subpage("Strategies");

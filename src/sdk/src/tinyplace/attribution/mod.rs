@@ -31,11 +31,18 @@
 //! rather than silently misattributed.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
 
 use crate::tinyplace::HarnessProvider;
 
 #[cfg(test)]
 mod tests;
+
+/// Generator for `prepare-commit-msg` git hooks that inject the Medulla
+/// `Co-authored-by` trailer via environment variables. Used for providers
+/// (Codex, Opencode) whose CLI has no built-in attribution knob.
+pub mod prepare_commit_msg;
 
 /// Kill-switch env var. Any value other than `1` / `true` / `yes` / `on`
 /// disables attribution.
@@ -97,4 +104,48 @@ fn claude_settings_json() -> String {
         "attribution": { "commit": attribution_trailer() },
     });
     value.to_string()
+}
+
+/// Module-level storage for the temporary hook directory, so
+/// [`cleanup_hook_tmpdir`] can remove it after the harness exits without the
+/// caller needing to carry a [`PathBuf`] through every spawn path.
+static HOOK_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Environment variables that make a harness attribute its commits to Medulla
+/// via the `prepare-commit-msg` git hook.
+///
+/// Claude Code receives CLI flags instead ([`attribution_args`]), so this
+/// returns empty for it. Codex and Opencode get their attribution through a
+/// temporary `prepare-commit-msg` hook gated by `MEDULLA_ATTRIBUTION`.
+///
+/// The hook directory is stored in module-level state and must be cleaned up
+/// after the harness exits by calling [`cleanup_hook_tmpdir`].
+///
+/// Returns an empty map when attribution is disabled for *any* provider.
+pub fn attribution_env(
+    provider: HarnessProvider,
+    env: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    if !attribution_enabled(env) {
+        return HashMap::new();
+    }
+    match provider {
+        HarnessProvider::Claude => HashMap::new(),
+        HarnessProvider::Codex | HarnessProvider::Opencode => {
+            let (hook_env, hook_dir) = prepare_commit_msg::generate_hook(&attribution_trailer());
+            *HOOK_DIR.lock().unwrap() = Some(hook_dir);
+            hook_env
+        }
+    }
+}
+
+/// Remove the temporary hook directory that [`attribution_env`] created.
+///
+/// Safe to call even when no hook was generated — this is a no-op in that
+/// case. Idempotent: a second call after cleanup does nothing.
+pub fn cleanup_hook_tmpdir() {
+    let mut guard = HOOK_DIR.lock().unwrap();
+    if let Some(path) = guard.take() {
+        prepare_commit_msg::cleanup_hook_dir(&path);
+    }
 }

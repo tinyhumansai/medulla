@@ -129,6 +129,13 @@ async fn run_provider_attempt(
         spec.provider,
         &spec.env,
     ));
+    // For providers that use the git-hook path (Codex, Opencode), merge the
+    // prepare-commit-msg hook env vars into the child's environment.
+    let mut merged_env = spec.env.clone();
+    merged_env.extend(crate::tinyplace::attribution::attribution_env(
+        spec.provider,
+        &merged_env,
+    ));
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_resumed_run_args(
         spec.provider,
@@ -151,7 +158,7 @@ async fn run_provider_attempt(
         .args(&args)
         .current_dir(&spec.cwd)
         .env_clear()
-        .envs(&spec.env)
+        .envs(&merged_env)
         .stdin(stdin_mode)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -303,6 +310,8 @@ async fn run_provider_attempt(
     // child the pipe may not be drained yet, and a lost stderr tail hides the
     // transient-lock marker the retry loop keys on.
     let _ = tokio::time::timeout(Duration::from_millis(500), stderr_task).await;
+    // Clean up any git hook temp directory created by attribution_env.
+    crate::tinyplace::attribution::cleanup_hook_tmpdir();
     if spec.abort.is_aborted() {
         return Err(format!("{} task aborted", provider_name(spec.provider)));
     }

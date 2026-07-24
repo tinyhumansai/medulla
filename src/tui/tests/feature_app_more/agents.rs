@@ -17,6 +17,7 @@ fn agents_renders_subtask_rows_more_overflow_and_task_transcript() {
             instruction: format!("job number {n}"),
             depth: 2,
             agent_id: Some("dev-1".into()),
+            contract: None,
         });
     }
     // One completes with usage, which lights the lane's context-token bar.
@@ -31,6 +32,8 @@ fn agents_renders_subtask_rows_more_overflow_and_task_transcript() {
                 output_tokens: 300,
             }),
             depth: 2,
+            contract: None,
+            evidence: None,
         },
     });
     app.refresh_snapshot();
@@ -182,6 +185,7 @@ fn agents_lane_context_bar_reflects_high_and_mid_usage() {
             instruction: "big job".into(),
             depth: 2,
             agent_id: Some("dev-1".into()),
+            contract: None,
         });
         rt.script_event(TuiEvent::TaskComplete {
             digest: TaskDigest {
@@ -194,6 +198,8 @@ fn agents_lane_context_bar_reflects_high_and_mid_usage() {
                     output_tokens: 100,
                 }),
                 depth: 2,
+                contract: None,
+                evidence: None,
             },
         });
         app.refresh_snapshot();
@@ -248,6 +254,8 @@ fn tracked(
         instruction_id: None,
         delegated_task_ids: Vec::new(),
         notes: Vec::new(),
+        contract: None,
+        evidence: None,
     }
 }
 
@@ -340,6 +348,7 @@ fn cancel_task_without_cycle_prefix_reports_no_cycle() {
         instruction: "go".into(),
         depth: 2,
         agent_id: Some("dev-1".into()),
+        contract: None,
     });
     app.refresh_snapshot();
     tab(&mut app, "Agents");

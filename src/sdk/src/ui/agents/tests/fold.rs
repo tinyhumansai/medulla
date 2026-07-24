@@ -62,6 +62,7 @@ fn anonymous_task_lane_and_completion() {
                 instruction: "do the thing".into(),
                 depth: 2,
                 agent_id: None,
+                contract: None,
             },
         ),
         env(
@@ -86,6 +87,8 @@ fn anonymous_task_lane_and_completion() {
                         output_tokens: 50,
                     }),
                     depth: 2,
+                    contract: None,
+                    evidence: None,
                 },
             },
         ),
@@ -118,6 +121,7 @@ fn agent_lane_stacks_tasks_with_row_model() {
                 instruction: "x".into(),
                 depth: 2,
                 agent_id: Some("dev".into()),
+                contract: None,
             },
         ));
     }
@@ -173,6 +177,7 @@ fn task_attention_sets_question_and_completion_clears_it() {
                 instruction: "work".into(),
                 depth: 2,
                 agent_id: None,
+                contract: None,
             },
         ),
         env(
@@ -205,6 +210,8 @@ fn task_attention_sets_question_and_completion_clears_it() {
                 result_ref: None,
                 usage: None,
                 depth: 2,
+                contract: None,
+                evidence: None,
             },
         },
     ));
@@ -226,6 +233,7 @@ fn fresh_review_verdict_is_attributed_to_the_implementation_task() {
                 instruction: "Outcome: fix it\nVerify:\n- cargo test".into(),
                 depth: 0,
                 agent_id: Some("dev-1".into()),
+                contract: None,
             },
         ),
         env(
@@ -235,6 +243,7 @@ fn fresh_review_verdict_is_attributed_to_the_implementation_task() {
                 instruction: "MEDULLA_AUTOREVIEW target=task-1\nReview it".into(),
                 depth: 0,
                 agent_id: Some("dev-2".into()),
+                contract: None,
             },
         ),
         env(
@@ -282,6 +291,8 @@ fn task_complete_without_start_still_builds_a_lane() {
                 result_ref: None,
                 usage: None,
                 depth: 2,
+                contract: None,
+                evidence: None,
             },
         },
     )];

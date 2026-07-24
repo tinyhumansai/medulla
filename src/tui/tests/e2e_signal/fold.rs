@@ -26,6 +26,7 @@ fn frames_to_events(worker_id: &str, task_id: &str, frames: &[TaskFrame]) -> Vec
             instruction: "do the thing".to_string(),
             depth: 2,
             agent_id: Some(worker_id.to_string()),
+            contract: None,
         },
     }];
     let mut seq = 1u64;
@@ -56,6 +57,8 @@ fn frames_to_events(worker_id: &str, task_id: &str, frames: &[TaskFrame]) -> Vec
                             result_ref: None,
                             usage: None,
                             depth: 2,
+                            contract: None,
+                            evidence: None,
                         },
                     },
                 });

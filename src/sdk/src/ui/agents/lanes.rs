@@ -189,6 +189,7 @@ pub fn derive_agent_lanes(
                 instruction,
                 depth,
                 agent_id,
+                ..
             } => {
                 reviews.record_start(task_id, instruction);
                 if let Some(a) = agent_id {

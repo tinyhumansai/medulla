@@ -235,3 +235,76 @@ fn non_unix_returns_empty() {
         "non-Unix returns empty path"
     );
 }
+
+// ---------------------------------------------------------------------------
+// attribution_env / cleanup_hook_tmpdir tests
+// ---------------------------------------------------------------------------
+
+/// Claude uses CLI args, so `attribution_env` must return empty — never both
+/// env vars and CLI args for the same session.
+#[test]
+fn claude_attribution_env_is_empty() {
+    assert!(super::attribution_env(HarnessProvider::Claude, &HashMap::new()).is_empty());
+}
+
+/// Codex and Opencode get their attribution through the git-hook env vars.
+#[cfg(unix)]
+#[test]
+fn codex_and_opencode_get_env_attribution() {
+    for provider in [HarnessProvider::Codex, HarnessProvider::Opencode] {
+        let env = super::attribution_env(provider, &HashMap::new());
+        assert!(!env.is_empty(), "{provider:?} should receive env vars");
+        assert!(
+            env.contains_key("MEDULLA_ATTRIBUTION"),
+            "{provider:?} missing MEDULLA_ATTRIBUTION"
+        );
+        assert!(
+            env.contains_key("GIT_CONFIG_VALUE_0"),
+            "{provider:?} missing hooksPath"
+        );
+        // Clean up the temp dir created by this test.
+        super::cleanup_hook_tmpdir();
+    }
+}
+
+/// The kill-switch suppresses env vars for every provider.
+#[test]
+fn kill_switch_suppresses_env_for_all_providers() {
+    let env = env_with("0");
+    for provider in [
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+    ] {
+        assert!(
+            super::attribution_env(provider, &env).is_empty(),
+            "{provider:?} should receive no env when disabled"
+        );
+    }
+}
+
+/// `cleanup_hook_tmpdir` must remove the temp dir that `attribution_env` created.
+#[cfg(unix)]
+#[test]
+fn cleanup_hook_tmpdir_removes_temp_dir() {
+    let env = super::attribution_env(HarnessProvider::Codex, &HashMap::new());
+    assert!(!env.is_empty(), "env must be non-empty");
+    // The hook dir exists before cleanup.
+    let hooks_path = env.get("GIT_CONFIG_VALUE_0").expect("hooksPath in env");
+    assert!(
+        std::path::Path::new(hooks_path).exists(),
+        "hook dir must exist before cleanup"
+    );
+
+    super::cleanup_hook_tmpdir();
+    assert!(
+        !std::path::Path::new(hooks_path).exists(),
+        "hook dir must be removed after cleanup"
+    );
+}
+
+/// Calling cleanup when no hook was generated is a no-op, not a panic.
+#[test]
+fn cleanup_is_noop_before_any_call() {
+    super::cleanup_hook_tmpdir(); // must not panic
+}

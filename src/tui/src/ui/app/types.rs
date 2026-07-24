@@ -302,6 +302,16 @@ pub(super) struct Prompt {
     pub(super) draft: Draft,
 }
 
+/// Cached credential-presence flags displayed by Routing's Manage Keys pane.
+#[derive(Default)]
+pub(super) struct CredentialStatus {
+    pub(super) claude_subscription: bool,
+    pub(super) codex_subscription: bool,
+    pub(super) anthropic_api_key: bool,
+    pub(super) openai_api_key: bool,
+    pub(super) openrouter_api_key: bool,
+}
+
 /// The interactive TUI screen: all tab state, input focus, and render geometry.
 pub struct App {
     /// The runtime this screen drives.
@@ -332,6 +342,8 @@ pub struct App {
     pub(super) routing_focused: bool,
     /// Selected row on the Routing strategy page.
     pub(super) routing_strategy_index: usize,
+    /// Credential presence captured on startup and refreshed when its pane opens.
+    pub(super) credential_status: CredentialStatus,
     // Persona-memory tab state (lazily loaded on tab entry / search).
     pub(super) memory_status: Option<MemoryStatus>,
     pub(super) memory_hits: Vec<MemoryHit>,

@@ -46,6 +46,7 @@ impl App {
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index: 0,
+            credential_status: super::credentials::detect_credential_status(),
             memory_status: None,
             memory_hits: Vec::new(),
             memory_directives: Vec::new(),
@@ -204,6 +205,7 @@ impl App {
             .position(|page| *page == name)
             .unwrap_or(0);
         self.routing_focused = true;
+        self.refresh_credential_status_if_needed();
     }
 
     /// Route `copy_chat` into a captured sink instead of the OS clipboard, and

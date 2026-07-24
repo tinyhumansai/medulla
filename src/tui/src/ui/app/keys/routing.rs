@@ -7,7 +7,7 @@ use crate::ui::multi_pane::{self, NavAction};
 use medulla::runtime::WorkerOp;
 
 use super::super::types::{
-    App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_WORKER,
+    App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_WORKER, RP_KEYS,
     RP_STRATEGIES, RP_WORKERS,
 };
 
@@ -25,6 +25,7 @@ impl App {
                 return RoutingKey::Handled(None);
             }
             NavAction::Entered => {
+                self.refresh_credential_status_if_needed();
                 self.set_status(format!(
                     "{} · Esc to go back to the menu",
                     self.routing_subpage()
@@ -41,6 +42,7 @@ impl App {
         match self.routing_index {
             RP_WORKERS => self.workers_key(code),
             RP_ADD_WORKER => self.add_worker_key(code),
+            RP_KEYS => self.manage_keys_key(code),
             RP_STRATEGIES => self.strategies_key(code),
             _ => RoutingKey::Unhandled,
         }
@@ -127,6 +129,17 @@ impl App {
             draft: Draft::new(),
         });
         self.set_status("Add worker · Enter save · Esc cancel");
+    }
+
+    /// Refresh cached subscription and API-key presence on demand.
+    fn manage_keys_key(&mut self, code: KeyCode) -> RoutingKey {
+        if code == KeyCode::Char('r') {
+            self.refresh_credential_status_if_needed();
+            self.set_status("Credential status refreshed");
+            RoutingKey::Handled(None)
+        } else {
+            RoutingKey::Unhandled
+        }
     }
 
     /// Browse and apply an automatic default-worker strategy.

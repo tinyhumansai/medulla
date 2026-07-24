@@ -13,6 +13,7 @@
 mod account;
 mod claims;
 mod commands;
+mod credentials;
 mod decisions;
 mod feedback;
 mod input;

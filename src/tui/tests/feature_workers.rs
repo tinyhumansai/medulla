@@ -291,7 +291,10 @@ fn manage_keys_names_subscriptions_and_api_sources_without_values() {
     assert!(out.contains("Codex"));
     assert!(out.contains("Anthropic"));
     assert!(out.contains("OpenRouter"));
+    assert!(out.contains("Press r to refresh"));
     assert!(out.contains("Secret values are never rendered"));
+    assert!(app.on_event(key(KeyCode::Char('r'))).is_none());
+    assert_eq!(app.status(), "Credential status refreshed");
 }
 
 #[test]

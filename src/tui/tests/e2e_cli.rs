@@ -99,6 +99,55 @@ fn init_offline_writes_then_protects_a_workspace_profile() {
 }
 
 #[test]
+fn lessons_add_and_list_share_the_workspace_ledger() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("MEDULLA.md"),
+        "Example workspace.\n\n## Lessons\n",
+    )
+    .unwrap();
+
+    let added = run(
+        &[
+            "lessons",
+            "add",
+            "CI fails",
+            "->",
+            "inspect the first error",
+        ],
+        dir.path(),
+        dir.path(),
+    );
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    assert!(String::from_utf8_lossy(&added.stdout).contains("Added lesson"));
+
+    let duplicate = run(
+        &[
+            "lessons",
+            "add",
+            "CI fails",
+            "->",
+            "inspect the first error",
+        ],
+        dir.path(),
+        dir.path(),
+    );
+    assert!(duplicate.status.success());
+    assert!(String::from_utf8_lossy(&duplicate.stdout).contains("already present"));
+
+    let listed = run(&["lessons", "list"], dir.path(), dir.path());
+    assert!(listed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout).trim(),
+        "- when CI fails: inspect the first error"
+    );
+}
+
+#[test]
 fn memory_status_search_and_compile_run_fully_offline() {
     let dir = TempDir::new().unwrap();
 
@@ -149,6 +198,10 @@ fn invalid_cli_inputs_and_non_tty_tui_exit_cleanly() {
     let bad_memory = run(&["memory", "unknown"], dir.path(), dir.path());
     assert_eq!(bad_memory.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&bad_memory.stderr).contains("unknown memory subcommand"));
+
+    let bad_lesson = run(&["lessons", "add", "missing-arrow"], dir.path(), dir.path());
+    assert_eq!(bad_lesson.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad_lesson.stderr).contains("<trigger> -> <rule>"));
 
     let tui = run(&[], dir.path(), dir.path());
     assert_eq!(tui.status.code(), Some(1));

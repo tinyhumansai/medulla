@@ -51,9 +51,18 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
         "settings" | "theme" => SlashCommand::Settings,
         "usage" => SlashCommand::Usage,
         "memory" | "mem" => SlashCommand::Memory(non_empty(arg)),
-        "review" => match non_empty(arg) {
-            Some(target) => SlashCommand::Review(target),
-            None => SlashCommand::BadUsage("Usage: /review <lane|task-id>"),
+        "lesson" => match crate::lessons::parse_lesson_spec(arg) {
+            Ok(lesson) => SlashCommand::Lesson {
+                trigger: lesson.trigger,
+                rule: lesson.rule,
+            },
+            Err(crate::lessons::LessonError::DelimiterInField) => {
+                SlashCommand::BadUsage("Lesson: -> is reserved; avoid it in trigger and rule")
+            }
+            Err(crate::lessons::LessonError::MultilineField) => {
+                SlashCommand::BadUsage("Lesson: trigger and rule must be a single line")
+            }
+            Err(_) => SlashCommand::BadUsage("Usage: /lesson <trigger> -> <rule>"),
         },
         "feedback" | "fb" => SlashCommand::Feedback,
         "mouse" => SlashCommand::ToggleMouse,

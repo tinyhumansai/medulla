@@ -38,6 +38,7 @@ fn dispatches_subcommands() {
     assert_eq!(parse_command(&argv(&["memory", "status"])), Command::Memory);
     assert_eq!(parse_command(&argv(&["update"])), Command::Update);
     assert_eq!(parse_command(&argv(&["init"])), Command::Init);
+    assert_eq!(parse_command(&argv(&["lessons", "list"])), Command::Lessons);
     assert_eq!(parse_command(&argv(&["init", "some/dir"])), Command::Init);
     assert_eq!(
         parse_command(&argv(&["update", "--check"])),
@@ -45,6 +46,37 @@ fn dispatches_subcommands() {
     );
     assert_eq!(parse_command(&argv(&["--config", "x.json"])), Command::Tui);
     assert_eq!(parse_command(&argv(&["run", "do", "it"])), Command::Run);
+}
+
+#[test]
+fn parses_lessons_args() {
+    assert_eq!(
+        parse_lessons_args(&argv(&["list", "--workspace", "repo"])).unwrap(),
+        LessonsArgs {
+            workspace: Some("repo".into()),
+            action: LessonsAction::List,
+        }
+    );
+    assert_eq!(
+        parse_lessons_args(&argv(&[
+            "add", "CI", "fails", "->", "run", "focused", "tests"
+        ]))
+        .unwrap(),
+        LessonsArgs {
+            workspace: None,
+            action: LessonsAction::Add {
+                trigger: "CI fails".into(),
+                rule: "run focused tests".into(),
+            },
+        }
+    );
+    assert!(parse_lessons_args(&argv(&[])).is_err());
+    assert!(parse_lessons_args(&argv(&["list", "extra"])).is_err());
+    assert!(parse_lessons_args(&argv(&["add", "missing arrow"])).is_err());
+    assert!(parse_lessons_args(&argv(&["unknown"])).is_err());
+    // --workspace without a value is a hard error, not a silent CWD default.
+    assert!(parse_lessons_args(&argv(&["list", "--workspace"])).is_err());
+    assert!(parse_lessons_args(&argv(&["list", "--workspace", "--other"])).is_err());
 }
 
 #[test]
@@ -226,6 +258,7 @@ fn help_lists_init() {
     let help = help_text();
     assert!(help.contains("medulla init"));
     assert!(help.contains("--offline"));
+    assert!(help.contains("medulla lessons"));
 }
 
 #[test]

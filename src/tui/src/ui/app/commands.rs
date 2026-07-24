@@ -374,6 +374,16 @@ impl App {
                     }
                 }
             }
+            SlashCommand::Lesson { trigger, rule } => {
+                let workspace =
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                self.set_status("Lesson · recording…");
+                return Some(Cmd::RecordLesson {
+                    workspace,
+                    trigger,
+                    rule,
+                });
+            }
             SlashCommand::Review(target) => return self.prepare_review(&target),
             SlashCommand::ToggleMouse => self.toggle_mouse(),
             SlashCommand::Copy(scope) => self.copy_chat(scope),

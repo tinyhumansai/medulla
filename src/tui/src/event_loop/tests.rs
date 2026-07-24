@@ -8,9 +8,9 @@ use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{Runtime, WorkerOp};
 use medulla_tui::ui::app::Cmd;
 
-use super::cmd_dispatch::{read_memory, run_cmd};
+use super::dispatch::{read_memory, run_cmd};
+use super::spawn_update_checker;
 use super::types::AppMsg;
-use super::update_checker::spawn_update_checker;
 
 /// Receive the next dispatcher result without allowing a broken task to hang
 /// the entire test suite.
@@ -57,6 +57,32 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
 
     run_cmd(Cmd::LoadUsage, &runtime, None, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::UsageLoaded(None)));
+}
+
+#[tokio::test]
+async fn records_lessons_and_surfaces_duplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(medulla::init::PROFILE_FILE),
+        "Workspace\n\n## Lessons\n",
+    )
+    .unwrap();
+    let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::empty());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    for expected in ["recorded", "already present"] {
+        run_cmd(
+            Cmd::RecordLesson {
+                workspace: dir.path().to_path_buf(),
+                trigger: "CI fails".into(),
+                rule: "inspect the first error".into(),
+            },
+            &runtime,
+            None,
+            &tx,
+        );
+        assert!(matches!(next(&mut rx).await, AppMsg::Status(status) if status.contains(expected)));
+    }
 }
 
 #[tokio::test]

@@ -33,6 +33,8 @@ pub enum Command {
     Update,
     /// Author a `MEDULLA.md` workspace profile for a directory.
     Init,
+    /// List or add durable workspace lessons in `MEDULLA.md`.
+    Lessons,
     /// Run the orchestrator hub: relay hosted-backend tasks to tiny.place
     /// workers over Signal DMs; carries the remaining args.
     Hub,
@@ -50,6 +52,24 @@ pub struct InitArgs {
     pub force: bool,
     /// `--offline`: skip the model call and write the editable stub.
     pub offline: bool,
+}
+
+/// The `medulla lessons` action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LessonsAction {
+    /// Print every lesson in the current workspace profile.
+    List,
+    /// Append a new lesson (parsed trigger + rule).
+    Add { trigger: String, rule: String },
+}
+
+/// Parsed `medulla lessons` arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LessonsArgs {
+    /// Workspace directory. `None` means the current working directory.
+    pub workspace: Option<String>,
+    /// The sub-action to perform.
+    pub action: LessonsAction,
 }
 
 /// Parsed `medulla login` flags.

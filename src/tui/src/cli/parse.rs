@@ -7,7 +7,8 @@ use medulla::auth::Provider;
 use medulla::tinyplace::HarnessProvider;
 
 use super::types::{
-    Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs, UpdateArgs,
+    Command, InitArgs, LessonsAction, LessonsArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs,
+    TuiArgs, UpdateArgs,
 };
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -28,12 +29,63 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("memory") => Command::Memory,
         Some("update") => Command::Update,
         Some("init") => Command::Init,
+        Some("lessons") => Command::Lessons,
         Some("hub") => Command::Hub,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),
         _ => Command::Tui,
     }
+}
+
+/// Parse `medulla lessons <list|add> [--workspace <dir>]`.
+///
+/// `add` joins its free-text arguments and splits them at the first `->`, the
+/// same shape accepted by the interactive `/lesson` command.
+pub fn parse_lessons_args(args: &[String]) -> Result<LessonsArgs, String> {
+    let action_word = args
+        .first()
+        .map(String::as_str)
+        .ok_or_else(|| "expected a subcommand: list|add".to_string())?;
+    let mut workspace = None;
+    let mut text = Vec::new();
+    let mut it = args.iter().skip(1);
+    while let Some(arg) = it.next() {
+        if arg == "--workspace" {
+            match it.next() {
+                Some(v) if !v.starts_with('-') => workspace = Some(v.clone()),
+                Some(v) => {
+                    return Err(format!(
+                        "lessons {}: expected a value after --workspace, got '{v}'",
+                        action_word
+                    ))
+                }
+                None => {
+                    return Err(format!(
+                        "lessons {}: expected a value after --workspace",
+                        action_word
+                    ))
+                }
+            }
+        } else {
+            text.push(arg.as_str());
+        }
+    }
+    let action = match action_word {
+        "list" if text.is_empty() => LessonsAction::List,
+        "list" => return Err("lessons list: unexpected arguments".to_string()),
+        "add" => {
+            let joined = text.join(" ");
+            let lesson = medulla::lessons::parse_lesson_spec(&joined)
+                .map_err(|_| "lessons add: expected <trigger> -> <rule>".to_string())?;
+            LessonsAction::Add {
+                trigger: lesson.trigger,
+                rule: lesson.rule,
+            }
+        }
+        other => return Err(format!("unknown lessons subcommand '{other}'")),
+    };
+    Ok(LessonsArgs { workspace, action })
 }
 
 /// Parse `medulla login` flags out of the args following `login`. Returns the
@@ -229,6 +281,7 @@ medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
 medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
+medulla lessons <cmd>   Workspace lessons: list|add <trigger> -> <rule>\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
@@ -259,6 +312,8 @@ Init flags:\n  \
 --force, -f             Overwrite an existing MEDULLA.md\n  \
 --offline               Skip the model call and write an editable stub\n  \
 --config <path>         Explicit config file (.toml or .json) for backend/model settings\n\n\
+Lessons flags:\n  \
+--workspace <dir>       Workspace containing MEDULLA.md (default: current directory)\n\n\
 Run flags:\n  \
 --core-socket <path>    medulla-serve unix socket to attach (else MEDULLA_CORE_SOCKET / [core] config)\n  \
 --config <path>         Explicit config file (.toml or .json) for the [core] section\n\n\

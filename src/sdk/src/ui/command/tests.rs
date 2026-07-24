@@ -46,14 +46,29 @@ fn fork_and_memory_preserve_argument_case() {
 }
 
 #[test]
-fn review_requires_and_preserves_a_target() {
+fn lesson_parses_the_shared_trigger_rule_shape() {
     assert_eq!(
-        parse("/review Task-42"),
-        Some(SlashCommand::Review("Task-42".into()))
+        parse("/lesson CI flakes -> rerun the focused test"),
+        Some(SlashCommand::Lesson {
+            trigger: "CI flakes".into(),
+            rule: "rerun the focused test".into(),
+        })
     );
     assert_eq!(
-        parse("/review"),
-        Some(SlashCommand::BadUsage("Usage: /review <lane|task-id>"))
+        parse("/lesson missing delimiter"),
+        Some(SlashCommand::BadUsage("Usage: /lesson <trigger> -> <rule>"))
+    );
+    assert_eq!(
+        parse("/lesson a -> b -> c"),
+        Some(SlashCommand::BadUsage(
+            "Lesson: -> is reserved; avoid it in trigger and rule"
+        ))
+    );
+    assert_eq!(
+        parse("/lesson multi\nline -> rule"),
+        Some(SlashCommand::BadUsage(
+            "Lesson: trigger and rule must be a single line"
+        ))
     );
 }
 

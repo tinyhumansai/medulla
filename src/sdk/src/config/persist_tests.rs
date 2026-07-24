@@ -261,3 +261,68 @@ fn removing_the_last_worker_is_remembered_as_removal() {
         parsed.hub.workers
     );
 }
+
+#[test]
+fn daemon_workspace_allowlist_replaces_only_workflow_workspaces() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[workflow]\nmaxLanes = 8\nworkspaces = [\"/old\"]\n\n[theme]\nprimary = \"cyan\"\n",
+    )
+    .unwrap();
+
+    super::persist_workflow_workspaces(&path, &["/one".into(), "/two".into()]).unwrap();
+
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["workflow"]["maxLanes"].as_integer(), Some(8));
+    assert_eq!(saved["theme"]["primary"].as_str(), Some("cyan"));
+    assert_eq!(
+        saved["workflow"]["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .collect::<Vec<_>>(),
+        vec!["/one", "/two"]
+    );
+}
+
+#[test]
+fn daemon_master_roster_persists_public_peer_data_without_identity_secrets() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[tinyplace]\nidentityDir = \"/worker-wallet\"\nbaseUrl = \"https://relay\"\n",
+    )
+    .unwrap();
+    let peer = super::Peer {
+        id: "master-id".into(),
+        name: Some("Primary master".into()),
+        handle: Some("@master".into()),
+        address: Some("master-id".into()),
+        tags: Some(vec!["master".into()]),
+        description: Some("Orchestrator".into()),
+        protocol: "task".into(),
+    };
+
+    super::persist_tinyplace_peers(&path, &[peer]).unwrap();
+
+    let text = std::fs::read_to_string(path).unwrap();
+    let saved: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(
+        saved["tinyplace"]["identityDir"].as_str(),
+        Some("/worker-wallet")
+    );
+    assert_eq!(
+        saved["tinyplace"]["baseUrl"].as_str(),
+        Some("https://relay")
+    );
+    assert_eq!(
+        saved["tinyplace"]["peers"][0]["id"].as_str(),
+        Some("master-id")
+    );
+    assert!(!text.contains("private"));
+    assert!(!text.contains("token"));
+}

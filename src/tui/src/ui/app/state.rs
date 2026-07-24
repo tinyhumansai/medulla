@@ -106,6 +106,12 @@ impl App {
         }
     }
 
+    /// Replace the task document returned by background persistence/sync work.
+    pub fn set_tasks(&mut self, document: medulla::tasks::TaskDocument) {
+        self.tasks = document;
+        self.selected = self.selected.min(self.tasks.tasks.len().saturating_sub(1));
+    }
+
     /// The active Settings subpage name. Test/inspection seam.
     pub fn settings_subpage(&self) -> &'static str {
         SETTINGS_SUBPAGES[self.settings_index.min(SETTINGS_SUBPAGES.len() - 1)]
@@ -299,6 +305,7 @@ impl App {
     pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
         match self.tab() {
             "Memory" => Some(Cmd::LoadMemory),
+            "Tasks" => Some(Cmd::LoadTasks),
             "Agents" | "Repo" => Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces())),
             "Settings" => match self.settings_index {
                 SP_USAGE => Some(Cmd::LoadUsage),

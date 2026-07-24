@@ -58,6 +58,8 @@ pub(super) enum AppMsg {
     FeedbackChanged(String),
     /// A memory ingest finished; clear the in-flight flag and report the outcome.
     MemoryIngestDone(String),
+    /// Current local task document.
+    TasksLoaded(medulla::tasks::TaskDocument),
 }
 
 /// Why the event loop stopped.

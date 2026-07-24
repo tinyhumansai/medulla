@@ -115,6 +115,16 @@ pub enum Cmd {
         /// Whether to walk everything rather than resuming from the cursor.
         backfill: bool,
     },
+    /// Reload the local task document.
+    LoadTasks,
+    /// Persist a new or edited local task.
+    SaveTask(medulla::tasks::Task),
+    /// Persist the complete local task document.
+    SaveTasks(medulla::tasks::TaskDocument),
+    /// Remove a local task by id.
+    DeleteTask(String),
+    /// Synchronize one configured task source.
+    SyncTasks(String),
     /// Load a page of the feedback board for the Feedback tab.
     LoadFeedback(FeedbackQuery),
     /// Load one board item's comments for the detail pane.
@@ -170,6 +180,12 @@ pub(super) enum MemoryEntry {
 
 /// The action a small inline prompt (Workers add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Create a task from a title line.
+    TaskCreate,
+    /// Edit the selected task title.
+    TaskEdit(String),
+    /// Add a GitHub source from `owner/repository`.
+    SourceAdd,
     /// Set or clear the manual permitted-path claim for one visible lane.
     LaneClaim {
         /// Stable lane key.

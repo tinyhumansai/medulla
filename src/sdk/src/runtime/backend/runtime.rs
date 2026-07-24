@@ -97,7 +97,7 @@ impl Runtime for BackendRuntime {
                 .into_iter()
                 .map(|worker| {
                     let details = h.system_info(&worker.id);
-                    hub_worker_to_info(worker, details)
+                    super::worker_ops::hub_worker_to_info(worker, details)
                 })
                 .collect(),
             None => Vec::new(),
@@ -110,7 +110,7 @@ impl Runtime for BackendRuntime {
         let handle = self.hub.lock().unwrap().clone();
         Box::pin(async move {
             match handle {
-                Some(h) => apply_worker_op(&h, op).await,
+                Some(h) => super::worker_ops::apply_worker_op(&h, op).await,
                 // Reading an empty roster is honest; silently succeeding at a
                 // *mutation* that did not happen is not. Without a hub there is
                 // nothing to add a worker to, and reporting "updated" leaves the
@@ -441,83 +441,5 @@ impl Runtime for BackendRuntime {
             }
         }
         Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Map a hub roster entry to the UI's [`WorkerInfo`](crate::runtime::WorkerInfo)
-/// row. An `@handle` address is surfaced as the `handle` field too.
-///
-/// `pub(super)` so the module's sibling test module can pin the mapping without
-/// standing up a live hub handle.
-pub(super) fn hub_worker_to_info(
-    w: crate::hub::HubWorker,
-    details: Option<crate::tinyplace::WorkerSystemInfo>,
-) -> crate::runtime::WorkerInfo {
-    let (cpu_cores, memory_total_bytes, memory_available_bytes, ip_address) = details
-        .map(|details| {
-            (
-                Some(details.cpu_cores),
-                details.memory_total_bytes,
-                details.memory_available_bytes,
-                Some(details.ip_address),
-            )
-        })
-        .unwrap_or_default();
-    crate::runtime::WorkerInfo {
-        handle: w.address.starts_with('@').then(|| w.address.clone()),
-        id: w.id,
-        address: w.address,
-        label: w.label,
-        harness: Some(w.harness),
-        peer_id: None,
-        cpu_cores,
-        memory_total_bytes,
-        memory_available_bytes,
-        ip_address,
-        selected: w.selected,
-    }
-}
-
-/// Translate a [`WorkerOp`](crate::runtime::WorkerOp) into a hub-handle mutation.
-async fn apply_worker_op(
-    handle: &crate::hub::HubHandle,
-    op: crate::runtime::WorkerOp,
-) -> anyhow::Result<()> {
-    use crate::runtime::WorkerOp;
-    match op {
-        WorkerOp::Add {
-            address,
-            handle: h,
-            label,
-            harness,
-        } => {
-            let addr = address
-                .or(h)
-                .ok_or_else(|| anyhow!("a worker needs an address or @handle"))?;
-            handle
-                .add(crate::hub::HubWorker {
-                    id: addr.clone(),
-                    address: addr,
-                    harness: harness.unwrap_or_else(|| "claude".to_string()),
-                    label,
-                    selected: false,
-                })
-                .await
-        }
-        WorkerOp::Remove { id } => handle.remove(&id).await,
-        WorkerOp::RefreshDetails { id } => handle.refresh_system_info(&id).await,
-        WorkerOp::ApplyStrategy { strategy } => handle.apply_strategy(strategy),
-        WorkerOp::Update { id, patch } => {
-            let label = patch
-                .get("label")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .filter(|s| !s.is_empty());
-            handle.set_label(&id, label).await
-        }
-        WorkerOp::Select { id } => {
-            handle.select(&id);
-            Ok(())
-        }
     }
 }

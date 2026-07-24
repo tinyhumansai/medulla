@@ -8,8 +8,8 @@ use crate::client::{EventEnvelope as ClientEnvelope, SessionSummary};
 use crate::ui::events::TuiEvent;
 
 use super::fold::summary_from_session;
-use super::runtime::hub_worker_to_info;
 use super::types::{State, Thread, CHAT_CAP, EVENT_CAP};
+use super::worker_ops::hub_worker_to_info;
 use crate::hub::HubWorker;
 
 fn client_env(session: &str, seq: Option<u64>, event: Value) -> ClientEnvelope {

@@ -21,15 +21,17 @@
 //!
 //! Split by responsibility: [`types`] holds the local thread/session state model
 //! and the [`BackendRuntime`] handle, [`fold`] folds backend events into that
-//! state, [`stream`] wires the per-thread SSE tasks, and [`runtime`] implements
-//! the [`Runtime`](crate::runtime::Runtime) trait over a live client. The only
-//! public item, [`BackendRuntime`], is re-exported here so callers use
+//! state, [`stream`] wires the per-thread SSE tasks, [`worker_ops`] adapts hub
+//! workers and mutations, and [`runtime`] implements the
+//! [`Runtime`](crate::runtime::Runtime) trait over a live client. The only public
+//! item, [`BackendRuntime`], is re-exported here so callers use
 //! `medulla::runtime::backend::BackendRuntime`.
 
 mod fold;
 mod runtime;
 mod stream;
 mod types;
+mod worker_ops;
 
 #[cfg(test)]
 mod tests;

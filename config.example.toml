@@ -79,6 +79,24 @@ tokenEnv = "MEDULLA_TOKEN"
 # stateDir = "/absolute/path/to/state"
 
 # ---------------------------------------------------------------------------
+# workflow — local coding-workflow repositories and lane policy
+# ---------------------------------------------------------------------------
+# [workflow]
+# Repository roots shown in the Repo tab. Empty defaults to the `[opencode]`
+# worker workspace, then the current directory.
+# workspaces = ["/absolute/path/to/repository"]
+# Advisory lane capacity shown in the Agents view. Default: 4
+# maxLanes = 4
+# Paths that should not be edited concurrently without explicit coordination.
+# sharedPathDenylist = [
+#   "**/Cargo.lock",
+#   "**/package-lock.json",
+#   "**/pnpm-lock.yaml",
+#   "**/yarn.lock",
+#   "**/generated/**",
+# ]
+
+# ---------------------------------------------------------------------------
 # tinyplace — background presence + peer bridging (optional)
 # ---------------------------------------------------------------------------
 # [tinyplace]

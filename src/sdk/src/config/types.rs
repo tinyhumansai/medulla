@@ -7,6 +7,7 @@
 //! [`load_config`](super::load_config), not here.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -54,6 +55,18 @@ fn d_token_env() -> String {
 }
 fn d_task_protocol() -> String {
     "task".into()
+}
+fn d_max_lanes() -> u32 {
+    4
+}
+fn d_shared_path_denylist() -> Vec<String> {
+    vec![
+        "**/Cargo.lock".into(),
+        "**/package-lock.json".into(),
+        "**/pnpm-lock.yaml".into(),
+        "**/yarn.lock".into(),
+        "**/generated/**".into(),
+    ]
 }
 
 // --- config sections -------------------------------------------------------
@@ -187,6 +200,32 @@ pub struct OpencodeConfig {
     pub workspace: String,
     #[serde(default = "d_concurrency")]
     pub max_concurrency: u32,
+}
+
+/// Local coding-workflow workspaces and advisory lane policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WorkflowConfig {
+    /// Explicit local repository roots. An empty list falls back to the worker
+    /// workspace configured under `[opencode]`, then the current directory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<String>,
+    /// Advisory maximum visible worker lanes. Engine limits remain authoritative.
+    #[serde(default = "d_max_lanes")]
+    pub max_lanes: u32,
+    /// Glob-like paths that require coordination before concurrent edits.
+    #[serde(default = "d_shared_path_denylist")]
+    pub shared_path_denylist: Vec<String>,
+}
+
+impl Default for WorkflowConfig {
+    fn default() -> Self {
+        Self {
+            workspaces: Vec::new(),
+            max_lanes: d_max_lanes(),
+            shared_path_denylist: d_shared_path_denylist(),
+        }
+    }
 }
 
 impl Default for OpencodeConfig {
@@ -352,6 +391,9 @@ pub struct TuiConfig {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub onboarding: OnboardingConfig,
+    /// Local repository views and lane-coordination policy.
+    #[serde(default)]
+    pub workflow: WorkflowConfig,
     #[serde(default)]
     pub hub: HubSection,
 }
@@ -369,6 +411,7 @@ impl Default for TuiConfig {
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),
             onboarding: OnboardingConfig::default(),
+            workflow: WorkflowConfig::default(),
             hub: HubSection::default(),
         }
     }
@@ -409,6 +452,29 @@ impl LoadedConfig {
         } else {
             "WORKER".into()
         }
+    }
+
+    /// Effective local workspace roots for workflow tooling.
+    ///
+    /// Explicit `[workflow].workspaces` win. Otherwise the configured worker
+    /// workspace is used, falling back to the process current directory.
+    pub fn workflow_workspaces(&self) -> Vec<PathBuf> {
+        if !self.config.workflow.workspaces.is_empty() {
+            return self
+                .config
+                .workflow
+                .workspaces
+                .iter()
+                .map(PathBuf::from)
+                .collect();
+        }
+        vec![PathBuf::from(
+            self.config
+                .opencode
+                .as_ref()
+                .map(|config| config.workspace.as_str())
+                .unwrap_or("."),
+        )]
     }
 
     /// Pretty-printed config JSON for the Config tab, with `backend.tokenEnv`

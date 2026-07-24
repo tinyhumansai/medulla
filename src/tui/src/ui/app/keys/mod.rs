@@ -221,6 +221,24 @@ impl App {
                 self.answer_selected_task();
                 return None;
             }
+            KeyCode::Char('C') if tab == "Agents" => {
+                self.open_lane_claim_prompt();
+                return None;
+            }
+            // Repo ledger navigation and refresh.
+            KeyCode::Char('r') if tab == "Repo" => {
+                self.set_workspaces_loading();
+                self.set_status("Repo · refreshing…");
+                return Some(Cmd::LoadWorkspaces(self.loaded.workflow_workspaces()));
+            }
+            KeyCode::Up if tab == "Repo" => return self.move_repo_file(true),
+            KeyCode::Down if tab == "Repo" => return self.move_repo_file(false),
+            KeyCode::PageUp if tab == "Repo" => {
+                self.repo.diff_scroll = self.repo.diff_scroll.saturating_sub(10);
+            }
+            KeyCode::PageDown if tab == "Repo" => {
+                self.repo.diff_scroll = self.repo.diff_scroll.saturating_add(10);
+            }
             // Workers fleet ops.
             KeyCode::Up if tab == "Workers" => {
                 self.worker_index = self.worker_index.saturating_sub(1);

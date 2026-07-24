@@ -111,6 +111,13 @@ impl App {
             TLine::from(format!("agents {completed}")),
             TLine::from(format!("active model calls {running_calls}")),
         ];
+        let overlap_count = self.lane_guard_report().overlaps.len();
+        if overlap_count > 0 {
+            orch.push(TLine::from(Span::styled(
+                format!("⚠ lane overlap · {overlap_count} path(s)"),
+                Style::default().fg(Color::Red),
+            )));
+        }
         let decisions = self.decisions().len();
         if decisions > 0 {
             orch.push(TLine::from(Span::styled(

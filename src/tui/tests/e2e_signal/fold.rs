@@ -145,6 +145,9 @@ async fn decrypted_frames_fold_into_agent_lane_states() {
         name: "worker".to_string(),
         description: String::new(),
         availability: "online".to_string(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
         tags: vec![],
         metadata: serde_json::Map::new(),
     }];

@@ -38,6 +38,9 @@ fn peer(id: &str) -> AgentDescriptor {
         name: id.into(),
         description: "a peer".into(),
         availability: "online".into(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
         tags: vec![],
         metadata,
     }

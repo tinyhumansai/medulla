@@ -100,6 +100,9 @@ fn agent_lane_stacks_tasks_with_row_model() {
         name: "Dev".into(),
         description: String::new(),
         availability: "online".into(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
         tags: vec![],
         metadata: serde_json::Map::new(),
     }];
@@ -244,6 +247,9 @@ fn session_event_folds_into_grouped_session_lane() {
         name: "Machine".into(),
         description: String::new(),
         availability: "online".into(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
         tags: vec![],
         metadata: serde_json::Map::new(),
     }];
@@ -282,6 +288,9 @@ fn roster_harness_metadata_tags_lane_label() {
         name: "Dev".into(),
         description: String::new(),
         availability: "online".into(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
         tags: vec![],
         metadata: meta,
     }];

@@ -31,6 +31,9 @@ impl MockRuntime {
                 name: "dev-1".into(),
                 description: "A remote coding agent for delegated implementation work.".into(),
                 availability: "online".into(),
+                workspace_id: None,
+                host_id: None,
+                template_id: None,
                 tags: vec!["code".into()],
                 metadata: meta,
             }];

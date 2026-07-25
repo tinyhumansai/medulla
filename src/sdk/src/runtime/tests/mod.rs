@@ -8,6 +8,26 @@ use crate::runtime::mock::MockRuntime;
 use types::BareRuntime;
 
 #[test]
+fn agent_descriptor_round_trips_v314_placement_and_template_links() {
+    let descriptor = AgentDescriptor {
+        id: "reviewer-1".into(),
+        workspace_id: Some("workspace:codex:repo".into()),
+        host_id: None,
+        template_id: Some("reviewer".into()),
+        ..AgentDescriptor::default()
+    };
+
+    let wire = serde_json::to_value(&descriptor).unwrap();
+    assert_eq!(wire["workspaceId"], "workspace:codex:repo");
+    assert_eq!(wire["templateId"], "reviewer");
+    assert!(wire.get("hostId").is_none());
+    assert_eq!(
+        serde_json::from_value::<AgentDescriptor>(wire).unwrap(),
+        descriptor
+    );
+}
+
+#[test]
 fn worker_op_parse_add_classifies_handle_address_and_label() {
     // A leading @ marks a tiny.place handle; the remainder is the label.
     match WorkerOp::parse_add("@alice friendly worker") {

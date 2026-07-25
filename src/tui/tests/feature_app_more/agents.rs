@@ -303,6 +303,9 @@ fn agents_renders_read_only_seat_budget_for_a_budgeted_lane() {
         name: "budgeted".into(),
         description: "a seat-backed agent".into(),
         availability: "online".into(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
         tags: Vec::new(),
         metadata: serde_json::Map::new(),
     };

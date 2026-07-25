@@ -232,6 +232,9 @@ fn roster_from_peers(config: &TinyplaceConfig) -> Vec<AgentDescriptor> {
                     .unwrap_or_else(|| peer.id.clone()),
                 description: peer.description.clone().unwrap_or_default(),
                 availability: String::new(),
+                workspace_id: None,
+                host_id: None,
+                template_id: None,
                 tags: peer.tags.clone().unwrap_or_default(),
                 metadata,
             }

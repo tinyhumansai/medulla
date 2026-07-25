@@ -89,6 +89,9 @@ fn lane_lines_groups_agent_tasks_with_headers() {
         name: "Dev".into(),
         description: String::new(),
         availability: "online".into(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
         tags: vec![],
         metadata: serde_json::Map::new(),
     }];

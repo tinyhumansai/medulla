@@ -4,15 +4,38 @@ use super::*;
 /// A connected agent medulla can delegate to.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AgentDescriptor {
+    /// Stable roster identity.
     pub id: String,
+    /// Model-facing display name.
     #[serde(default)]
     pub name: String,
+    /// Prompt-facing description of the agent's role.
     #[serde(default)]
     pub description: String,
+    /// Open-vocabulary liveness; only `offline` prevents delegation.
     #[serde(default)]
     pub availability: String,
+    /// The workspace this harness-backed agent is deployed into.
+    #[serde(
+        default,
+        rename = "workspaceId",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workspace_id: Option<String>,
+    /// The host for a local agent that has no workspace parent.
+    #[serde(default, rename = "hostId", skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    /// Provisioning template provenance, when the agent was spawned from one.
+    #[serde(
+        default,
+        rename = "templateId",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub template_id: Option<String>,
+    /// Model-facing capability tags.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Opaque harness-owned metadata, never interpreted by medulla-v1.
     #[serde(default)]
     pub metadata: Map<String, Value>,
 }

@@ -84,6 +84,9 @@ pub fn worker_descriptor(worker: &WorkerInfo) -> AgentDescriptor {
             .map(|h| format!("{h} daemon"))
             .unwrap_or_default(),
         availability: String::new(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
         tags: Vec::new(),
         metadata,
     }

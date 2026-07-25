@@ -188,6 +188,58 @@ fn each_settings_subpage_renders_its_signature() {
 }
 
 #[test]
+fn config_subpage_shows_effective_router_without_the_key_value() {
+    // Step 4: the Config subpage surfaces the effective router — the endpoint each
+    // harness routes to and the key env-var NAME with its set/missing state — so an
+    // operator can confirm routing without reading harness configs. The key VALUE
+    // must never render.
+    const KEY_ENV: &str = "MEDULLA_FEATURE_ROUTER_KEY";
+    const SECRET: &str = "sk-feature-secret-must-not-render-7c1";
+    std::env::set_var(KEY_ENV, SECRET);
+
+    let mut l = loaded();
+    let mut providers = std::collections::HashMap::new();
+    providers.insert(
+        "claude".to_string(),
+        medulla::config::RouterProviderConfig {
+            base_url: Some("https://gw.example/anthropic".into()),
+        },
+    );
+    l.config.router = Some(medulla::config::RouterConfig {
+        base_url: Some("https://gw.example/v1".into()),
+        api_key_env: Some(KEY_ENV.into()),
+        models: std::collections::HashMap::new(),
+        providers,
+    });
+
+    let rt = Arc::new(MockRuntime::demo());
+    let mut app = App::new(rt, l);
+    app.tab_index = TABS.iter().position(|t| *t == "Settings").unwrap();
+    let _ = app.focus_settings_subpage("Config");
+    let out = text_of(&draw(&mut app, 160, 60));
+
+    assert!(out.contains("Router (effective)"), "router block: {out}");
+    // codex/opencode inherit the top-level endpoint; claude uses its override.
+    assert!(
+        out.contains("https://gw.example/v1"),
+        "top-level endpoint shown: {out}"
+    );
+    assert!(
+        out.contains("https://gw.example/anthropic"),
+        "claude override shown: {out}"
+    );
+    // The key is referenced by NAME and marked set — never the value.
+    assert!(out.contains(KEY_ENV), "key env var name shown: {out}");
+    assert!(out.contains("(set)"), "key presence shown: {out}");
+    assert!(
+        !out.contains(SECRET),
+        "the key VALUE must never render in the diagnostic"
+    );
+
+    std::env::remove_var(KEY_ENV);
+}
+
+#[test]
 fn the_settings_nav_groups_its_subpages() {
     let mut app = settings_app();
     let _ = app.focus_settings_subpage("Usage");

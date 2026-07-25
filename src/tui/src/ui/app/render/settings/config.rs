@@ -90,6 +90,37 @@ impl App {
         );
     }
 
+    /// A read-only summary of the effective router: the endpoint each harness
+    /// would be pointed at, plus the NAME of the env var its API key resolves from
+    /// and whether that var is currently set — never the key value.
+    ///
+    /// Lets an operator confirm routing without reading each harness's on-disk
+    /// config. Returns `None` when no `[router]` is configured, so the block is
+    /// absent exactly when routing is off. The key is referenced by name and
+    /// checked for presence only; its value is never read into the UI.
+    fn router_diagnostic(&self) -> Option<String> {
+        let router = self.loaded.config.router.as_ref()?;
+        // Per-provider endpoint via the documented precedence; the key is bound
+        // only where an endpoint exists, matching the spawn seam.
+        let key_note = match router.api_key_env.as_deref().filter(|n| !n.is_empty()) {
+            Some(name) => {
+                let set = std::env::var(name).ok().filter(|v| !v.is_empty()).is_some();
+                format!("key: {name} ({})", if set { "set" } else { "missing" })
+            }
+            None => "key: harness credentials (no apiKeyEnv)".to_string(),
+        };
+        let mut out = String::from("Router (effective)\n");
+        for provider in ["claude", "codex", "opencode"] {
+            match router.base_url_for(provider) {
+                Some(endpoint) => {
+                    out.push_str(&format!("  {provider:<9}→ {endpoint}   {key_note}\n"))
+                }
+                None => out.push_str(&format!("  {provider:<9}→ (unrouted)\n")),
+            }
+        }
+        Some(out)
+    }
+
     /// Draw the read-only effective configuration and the files it came from.
     fn draw_config_effective(&mut self, f: &mut Frame, area: Rect) {
         let sources = if self.loaded.sources.is_empty() {
@@ -97,7 +128,16 @@ impl App {
         } else {
             self.loaded.sources.join(" < ")
         };
-        let body = format!("Sources: {sources}\n\n{}", self.loaded.pretty_json());
+        // The router diagnostic (when routing is on) rides above the config dump
+        // so the effective endpoints are the first thing an operator sees.
+        let router = self
+            .router_diagnostic()
+            .map(|block| format!("{block}\n"))
+            .unwrap_or_default();
+        let body = format!(
+            "{router}Sources: {sources}\n\n{}",
+            self.loaded.pretty_json()
+        );
         let block = self.panel(format!("Effective configuration · {}", self.loaded.path));
         f.render_widget(
             Paragraph::new(body).wrap(Wrap { trim: false }).block(block),

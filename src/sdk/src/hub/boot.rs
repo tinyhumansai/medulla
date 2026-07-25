@@ -13,6 +13,7 @@ use std::time::Duration;
 use ::tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 use rust_socketio::asynchronous::Client;
 
+use crate::bridge::TinyplaceBridge;
 use crate::daemon::transport::SignalTransport;
 use crate::tinyplace::{load_or_create_identity, resolve_endpoint};
 
@@ -107,7 +108,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
     // One transport, shared: the runner dispatches through it and the handle
     // opens contact edges through it. A second on the same wallet would be a
     // second writer to one Signal session store.
-    let relay: Arc<dyn super::relay::Relay> = Arc::new(transport);
+    let relay: Arc<dyn super::relay::Relay> = Arc::new(TinyplaceBridge::new(transport));
     // One activity log, shared by the pump that observes frames and the socket
     // that dispatches them — the Agents view reads what both write.
     let activity = super::ActivityLog::new();

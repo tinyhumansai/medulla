@@ -128,9 +128,19 @@ fn dim() -> Style {
     Style::default().add_modifier(Modifier::DIM)
 }
 
+/// Strip control characters from probe-supplied text before it reaches a ratatui
+/// span. Readiness reasons arrive from a remote worker over tiny.place, so a
+/// compromised or malicious peer could otherwise smuggle terminal escape/OSC
+/// sequences (cursor moves, title rewrites) into the operator's terminal.
+fn inline_text(value: &str) -> String {
+    value.chars().filter(|c| !c.is_control()).collect()
+}
+
 /// A compact per-harness readiness line, e.g.
 /// `ready claude · not-ready codex (not authenticated)`. `None` when the worker
 /// advertised no readiness. Display-only; readiness is heuristic and advisory.
+/// The reason is untrusted peer text, so it is sanitized before rendering and a
+/// reason that sanitizes to empty is dropped.
 fn readiness_summary(items: &[HarnessReadiness]) -> Option<String> {
     if items.is_empty() {
         return None;
@@ -141,7 +151,12 @@ fn readiness_summary(items: &[HarnessReadiness]) -> Option<String> {
             let provider = r.provider.as_str();
             if r.ready {
                 format!("ready {provider}")
-            } else if let Some(reason) = &r.reason {
+            } else if let Some(reason) = r
+                .reason
+                .as_deref()
+                .map(inline_text)
+                .filter(|s| !s.is_empty())
+            {
                 format!("not-ready {provider} ({reason})")
             } else {
                 format!("not-ready {provider}")
@@ -200,7 +215,14 @@ fn fmt_tokens(tokens: i64) -> String {
     if tokens >= 1_000_000 {
         format!("{:.1}M", tokens as f64 / 1_000_000.0)
     } else if tokens >= 1_000 {
-        format!("{}k", (tokens as f64 / 1_000.0).round() as u64)
+        // Keep one fractional digit so `1_500` reads `1.5k`, not a rounded `2k`
+        // that would overstate remaining headroom; drop it for whole thousands.
+        let thousands = tokens as f64 / 1_000.0;
+        if thousands.fract() == 0.0 {
+            format!("{}k", thousands as u64)
+        } else {
+            format!("{thousands:.1}k")
+        }
     } else {
         tokens.to_string()
     }

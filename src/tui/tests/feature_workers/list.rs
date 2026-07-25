@@ -79,6 +79,47 @@ fn worker_row_shows_probe_readiness_and_budget_lines() {
 }
 
 #[test]
+fn worker_row_sanitizes_probe_text_and_keeps_fractional_budget() {
+    // Readiness reasons and budgets are untrusted peer-supplied data. Terminal
+    // control/escape sequences in a reason must be stripped before rendering, and
+    // sub-million headroom must keep one fractional digit (1.5k, not a rounded 2k).
+    let mut w = worker("w1", true);
+    w.readiness = vec![HarnessReadiness {
+        provider: HarnessProvider::Claude,
+        ready: false,
+        // Control bytes (ESC introducer + BEL terminator) smuggled between the
+        // printable letters of "denied"; stripping them leaves plain "denied".
+        reason: Some("den\u{1b}i\u{7}ed".into()),
+    }];
+    w.budgets = vec![HarnessBudget {
+        provider: HarnessProvider::Codex,
+        seat: None,
+        window: BudgetWindow::Daily,
+        limit_tokens: Some(4_000),
+        used_tokens: Some(2_500),
+        remaining_tokens: Some(1_500),
+        cooldown_until: None,
+        source: BudgetSource::Configured,
+    }];
+
+    let mut app = app_with_roster(vec![w], None);
+    app.focus_routing_subpage("List Workers");
+    let out = render(&mut app, 200, 40);
+
+    // The escape/OSC bytes are gone; only the printable tail survives.
+    assert!(
+        out.contains("not-ready claude (denied)"),
+        "sanitized reason: {out:?}"
+    );
+    assert!(
+        !out.contains('\u{1b}') && !out.contains('\u{7}'),
+        "control bytes must not reach the terminal: {out:?}"
+    );
+    // Fractional thousands preserved.
+    assert!(out.contains("codex 1.5k left (daily)"), "budget: {out}");
+}
+
+#[test]
 fn workers_r_refreshes_selected_machine_details() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");

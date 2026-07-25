@@ -21,6 +21,10 @@ pub struct WorkerTuiConfig {
     /// into every peer task's spawn environment so the worker TUI routes exactly
     /// like the headless daemon. `None` means routing is off.
     pub router: Option<medulla::config::RouterConfig>,
+    /// Operator-declared per-provider token budgets from the `[budget]` config,
+    /// advertised on the capability probe as `source: configured`. `None` means
+    /// estimates only.
+    pub budget: Option<medulla::config::BudgetConfig>,
 }
 /// The select loop.
 /// What building the daemon runtime needs, once the launch step is answered.
@@ -41,4 +45,7 @@ pub(in super::super) struct StartWiring {
     /// Custom OpenAI-compatible router from the loaded config, layered into each
     /// peer task's spawn environment. `None` means routing is off.
     pub(in super::super) router: Option<medulla::config::RouterConfig>,
+    /// Operator-declared per-provider token budgets from the loaded config,
+    /// advertised on the capability probe. `None` means estimates only.
+    pub(in super::super) budget: Option<medulla::config::BudgetConfig>,
 }

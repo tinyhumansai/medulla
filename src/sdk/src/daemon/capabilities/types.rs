@@ -14,6 +14,10 @@ pub struct ProbeOptions {
     pub agent: Option<String>,
     pub skip_permissions: bool,
     pub abort: Abort,
+    /// Operator-declared `[budget]` config. When set, matching providers advertise
+    /// `source: configured` budgets instead of estimates. `None` leaves every
+    /// harness on a best-effort estimate.
+    pub budget: Option<crate::config::BudgetConfig>,
 }
 pub(super) struct ReportedCapabilities {
     pub(super) accessible_dirs: Vec<String>,

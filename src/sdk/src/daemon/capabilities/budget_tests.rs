@@ -89,6 +89,7 @@ fn configured_numbers_are_authoritative_with_clamped_remaining() {
         window: Some(BudgetWindow::Weekly),
         limit_tokens: Some(1_000),
         used_tokens: Some(1_200),
+        remaining_tokens: None,
         cooldown_until: None,
     });
     let (_, budget) = evaluate_provider(&probe);
@@ -200,6 +201,69 @@ fn driver_threads_configured_numbers() {
     assert_eq!(budgets[0].source, BudgetSource::Configured);
     assert_eq!(budgets[0].remaining_tokens, Some(1_500));
     assert_eq!(budgets[0].window, BudgetWindow::Daily);
+}
+
+#[test]
+fn with_configured_promotes_matching_provider_from_config() {
+    // The `[budget]` config seam: a configured provider advertises
+    // `source: configured`; a provider absent from the config keeps its estimate.
+    use crate::config::{BudgetConfig, ProviderBudgetConfig};
+
+    let mut providers = HashMap::new();
+    providers.insert(
+        "codex".to_string(),
+        ProviderBudgetConfig {
+            window: Some(BudgetWindow::Weekly),
+            limit_tokens: Some(9_000),
+            used_tokens: Some(1_000),
+            ..Default::default()
+        },
+    );
+    let budget = BudgetConfig { providers };
+
+    // Start from an all-installed, no-configured seam, then layer the config on.
+    let base = seams(vec![HarnessProvider::Codex, HarnessProvider::Claude], None);
+    let seams = base.with_configured(budget);
+    let (_, budgets) = probe_budgets(&[HarnessProvider::Codex, HarnessProvider::Claude], &seams);
+
+    let codex = budgets
+        .iter()
+        .find(|b| b.provider == HarnessProvider::Codex)
+        .expect("codex budget");
+    assert_eq!(codex.source, BudgetSource::Configured);
+    assert_eq!(codex.window, BudgetWindow::Weekly);
+    assert_eq!(codex.remaining_tokens, Some(8_000));
+
+    let claude = budgets
+        .iter()
+        .find(|b| b.provider == HarnessProvider::Claude)
+        .expect("claude budget");
+    assert_eq!(
+        claude.source,
+        BudgetSource::Estimate,
+        "an unconfigured provider stays on an estimate"
+    );
+}
+
+#[test]
+fn configured_from_config_prefers_explicit_remaining() {
+    // A ProviderBudgetConfig with an explicit remaining wins over the derivation.
+    use crate::config::ProviderBudgetConfig;
+    let cfg = ConfiguredBudget::from_config(&ProviderBudgetConfig {
+        limit_tokens: Some(1_000),
+        used_tokens: Some(100),
+        remaining_tokens: Some(7),
+        ..Default::default()
+    });
+    let mut probe = input(HarnessProvider::Opencode);
+    probe.configured = Some(cfg);
+    let (_, budget) = evaluate_provider(&probe);
+    let budget = budget.expect("configured budget");
+    assert_eq!(
+        budget.remaining_tokens,
+        Some(7),
+        "explicit remaining beats limit - used"
+    );
 }
 
 #[test]

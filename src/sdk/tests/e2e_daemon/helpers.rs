@@ -81,6 +81,7 @@ pub fn config(
         extra_args: Vec::new(),
         skip_permissions: false,
         router: None,
+        budget: None,
     }
 }
 

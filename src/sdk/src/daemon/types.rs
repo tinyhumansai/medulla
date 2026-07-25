@@ -76,6 +76,10 @@ pub struct DaemonConfig {
     /// resolved from [`env`](Self::env) by name) layered into the spawn
     /// environment. `None` means routing is off.
     pub router: Option<crate::config::RouterConfig>,
+    /// Operator-declared per-provider token budgets from the `[budget]` config.
+    /// When set, the capability probe advertises `source: configured` budgets for
+    /// matching providers instead of estimates. `None` means estimates only.
+    pub budget: Option<crate::config::BudgetConfig>,
 }
 
 /// Bookkeeping for a single in-flight task keyed by `sender + taskId`.

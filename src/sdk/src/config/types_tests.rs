@@ -3,6 +3,7 @@
 //! [`super::core_socket_tests`].
 
 use super::*;
+use crate::tinyplace::BudgetWindow;
 use std::collections::HashMap;
 
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -240,6 +241,69 @@ fn router_base_url_precedence_provider_over_top_level() {
     // With neither top-level nor provider baseUrl set, resolution is empty.
     let empty = RouterConfig::default();
     assert_eq!(empty.base_url_for("codex"), None);
+}
+
+#[test]
+fn budget_absent_by_default_and_omitted_from_output() {
+    // No [budget] section → estimates only, and it never appears in output.
+    let cfg: TuiConfig = serde_json::from_str("{}").unwrap();
+    assert!(cfg.budget.is_none());
+    let json = serde_json::to_value(&cfg).unwrap();
+    assert!(
+        json.get("budget").is_none(),
+        "absent budget must be omitted"
+    );
+}
+
+#[test]
+fn budget_section_round_trips_camel_case() {
+    // Operator-declared per-provider budgets, camelCase on the wire with
+    // snake_case BudgetWindow values (`five_hour`).
+    let cfg: TuiConfig = serde_json::from_str(
+        r#"{"budget":{"providers":{
+            "claude":{"seat":"team-a","window":"five_hour","limitTokens":500000,
+                      "usedTokens":120000,"cooldownUntil":1234567890},
+            "codex":{"window":"weekly","remainingTokens":42}
+        }}}"#,
+    )
+    .unwrap();
+    let budget = cfg.budget.clone().unwrap();
+    let claude = budget.for_provider("claude").expect("claude budget");
+    assert_eq!(claude.seat.as_deref(), Some("team-a"));
+    assert_eq!(claude.window, Some(BudgetWindow::FiveHour));
+    assert_eq!(claude.limit_tokens, Some(500_000));
+    assert_eq!(claude.used_tokens, Some(120_000));
+    assert_eq!(claude.cooldown_until, Some(1_234_567_890));
+    let codex = budget.for_provider("codex").expect("codex budget");
+    assert_eq!(codex.remaining_tokens, Some(42));
+    assert!(budget.for_provider("opencode").is_none());
+
+    // Re-serialize and confirm camelCase keys survive (never snake_case).
+    let out = serde_json::to_string(&cfg).unwrap();
+    assert!(out.contains("\"limitTokens\""));
+    assert!(out.contains("\"cooldownUntil\""));
+    assert!(!out.contains("limit_tokens"));
+    assert!(!out.contains("cooldown_until"));
+    // The window value is the snake_case provider-enum wire form.
+    assert!(out.contains("five_hour"));
+
+    // Full round-trip preserves equality.
+    let reparsed: TuiConfig = serde_json::from_str(&out).unwrap();
+    assert_eq!(reparsed.budget, cfg.budget);
+}
+
+#[test]
+fn budget_tolerates_unknown_fields() {
+    // Permissive parsing: unknown keys inside a provider budget must not fail.
+    let cfg: TuiConfig = serde_json::from_str(
+        r#"{"budget":{"providers":{"opencode":{"limitTokens":10,"futureKnob":true}}}}"#,
+    )
+    .unwrap();
+    let budget = cfg.budget.unwrap();
+    assert_eq!(
+        budget.for_provider("opencode").unwrap().limit_tokens,
+        Some(10)
+    );
 }
 
 #[test]

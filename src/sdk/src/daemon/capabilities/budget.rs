@@ -16,8 +16,8 @@
 //! the real machine.
 //!
 //! Operator-configured budget numbers arrive through the [`BudgetSeams::configured`]
-//! seam. The concrete `[budget]` config section that would populate it is a
-//! follow-up for the config/integration wave; until it is wired, the default
+//! seam. [`BudgetSeams::with_configured`] backs it with the `[budget]` config
+//! section (`config::BudgetConfig`); without a `[budget.providers.<p>]` entry the
 //! seam returns `None` and every installed, usable harness advertises an
 //! `estimate` with no invented numbers.
 
@@ -45,8 +45,28 @@ pub struct ConfiguredBudget {
     pub limit_tokens: Option<i64>,
     /// Consumption recorded so far in the window.
     pub used_tokens: Option<i64>,
+    /// Remaining allowance, when the operator records it directly. Preferred over
+    /// the `limit - used` derivation when set.
+    pub remaining_tokens: Option<i64>,
     /// Unix seconds until which the seat is parked.
     pub cooldown_until: Option<i64>,
+}
+
+impl ConfiguredBudget {
+    /// Build from the operator's `[budget.providers.<p>]` config for one provider.
+    ///
+    /// A pure field-for-field copy: the config type mirrors this one exactly, so
+    /// no credential or derived value is invented here.
+    pub fn from_config(cfg: &crate::config::ProviderBudgetConfig) -> Self {
+        ConfiguredBudget {
+            seat: cfg.seat.clone(),
+            window: cfg.window,
+            limit_tokens: cfg.limit_tokens,
+            used_tokens: cfg.used_tokens,
+            remaining_tokens: cfg.remaining_tokens,
+            cooldown_until: cfg.cooldown_until,
+        }
+    }
 }
 
 /// The already-gathered facts for one provider — the pure core's whole input.
@@ -126,10 +146,14 @@ pub fn evaluate_provider(input: &ProviderProbeInput) -> (HarnessReadiness, Optio
             window: cfg.window.unwrap_or(BudgetWindow::Unknown),
             limit_tokens: cfg.limit_tokens,
             used_tokens: cfg.used_tokens,
-            remaining_tokens: match (cfg.limit_tokens, cfg.used_tokens) {
-                (Some(limit), Some(used)) => Some((limit - used).max(0)),
-                _ => None,
-            },
+            // The operator's explicit remaining wins; otherwise derive it from
+            // limit - used when both are known, clamped at zero.
+            remaining_tokens: cfg
+                .remaining_tokens
+                .or(match (cfg.limit_tokens, cfg.used_tokens) {
+                    (Some(limit), Some(used)) => Some((limit - used).max(0)),
+                    _ => None,
+                }),
             cooldown_until,
             source: BudgetSource::Configured,
         }),
@@ -174,8 +198,9 @@ impl BudgetSeams {
     ///
     /// Fails open throughout: a missing `PATH`, absent credential file, or unset
     /// env var yields "not installed" / "unknown auth", never an error. The
-    /// cooldown and configured seams have no real source yet and return `None`
-    /// (a follow-up for the config/integration wave).
+    /// cooldown seam has no real source yet and returns `None`; the configured
+    /// seam defaults to `None` too and is populated by [`Self::with_configured`]
+    /// when an operator sets a `[budget]` section.
     pub fn from_env(env: &HashMap<String, String>) -> Self {
         let lookup = make_path_lookup(env);
         let env_for_bin = env.clone();
@@ -189,6 +214,19 @@ impl BudgetSeams {
             configured: Box::new(|_| None),
             now_unix: Box::new(now_unix_seconds),
         }
+    }
+
+    /// Replace the `configured` seam with one backed by the operator's `[budget]`
+    /// config section, so a `[budget.providers.<p>]` entry promotes that
+    /// provider's advertised descriptor to `source: configured`. Providers absent
+    /// from the config keep returning `None` (an honest estimate).
+    pub fn with_configured(mut self, budget: crate::config::BudgetConfig) -> Self {
+        self.configured = Box::new(move |provider| {
+            budget
+                .for_provider(provider.as_str())
+                .map(ConfiguredBudget::from_config)
+        });
+        self
     }
 }
 

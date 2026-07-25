@@ -221,6 +221,9 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         // The custom OpenAI-compatible router from the layered config. Absent
         // `[router]` leaves this `None` and every harness spawns unrouted.
         router: loaded.config.router.clone(),
+        // Operator-declared per-provider budgets from the layered `[budget]`
+        // config. Absent leaves every harness advertising an estimate.
+        budget: loaded.config.budget.clone(),
     })
     .await;
     drop(service); // aborts the background polls

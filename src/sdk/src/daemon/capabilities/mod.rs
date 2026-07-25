@@ -37,8 +37,11 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
     // Best-effort budget/readiness for the offered harnesses. Fails open: this
     // never errors and only reports installed providers, so an unusable machine
     // simply advertises fewer (or no) budgets rather than blocking the report.
-    let (readiness, budgets) =
-        probe_budgets(&options.providers, &BudgetSeams::from_env(&options.env));
+    let mut seams = BudgetSeams::from_env(&options.env);
+    if let Some(budget) = &options.budget {
+        seams = seams.with_configured(budget.clone());
+    }
+    let (readiness, budgets) = probe_budgets(&options.providers, &seams);
 
     let base = AgentCapabilities {
         cwd: Some(cwd.clone()),

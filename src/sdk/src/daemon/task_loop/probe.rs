@@ -61,6 +61,7 @@ impl DaemonRuntime {
             agent: self.inner.config.agent.clone(),
             skip_permissions: self.inner.config.skip_permissions,
             abort,
+            budget: self.inner.config.budget.clone(),
         })
         .await;
         drop(permit);

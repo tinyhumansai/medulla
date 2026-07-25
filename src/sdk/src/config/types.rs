@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
+use crate::tinyplace::BudgetWindow;
 
 // --- serde default helpers -------------------------------------------------
 
@@ -375,6 +376,64 @@ impl RouterConfig {
     }
 }
 
+/// Operator-declared budget numbers for one provider in the `[budget]` section.
+///
+/// Mirrors the daemon's `ConfiguredBudget`: every field is optional, and when
+/// present it makes the advertised `HarnessBudget` authoritative
+/// (`source: configured`) instead of a best-effort estimate. camelCase on the
+/// wire; `window` reuses the snake_case [`BudgetWindow`] values (`daily` /
+/// `weekly` / `five_hour` / `unknown`) so one document round-trips across all
+/// three modules.
+///
+/// No credential material lives here: `seat` is an opaque label only, never a
+/// key or token, matching the frame contract that excludes secrets from budgets.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ProviderBudgetConfig {
+    /// Opaque seat/subscription label the operator recorded (never a credential).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seat: Option<String>,
+    /// The metering window the allowance renews on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<BudgetWindow>,
+    /// The configured allowance for the window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_tokens: Option<i64>,
+    /// Consumption recorded so far in the window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_tokens: Option<i64>,
+    /// Remaining allowance, when the operator records it directly rather than
+    /// leaving it to be derived from `limitTokens - usedTokens`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_tokens: Option<i64>,
+    /// Unix seconds until which the seat is parked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cooldown_until: Option<i64>,
+}
+
+/// The optional `[budget]` section: operator-declared per-provider token budgets.
+///
+/// Absent entirely (the default) means every installed, usable harness advertises
+/// a best-effort `estimate` with no invented numbers. A `[budget.providers.<p>]`
+/// entry promotes that provider's advertised descriptor to `source: configured`
+/// with the operator's exact numbers, so a hosted orchestrator can size tasks
+/// against a real allowance. Keyed by provider id (`claude` / `codex` /
+/// `opencode`), mirroring `[router.providers.<p>]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BudgetConfig {
+    /// Per-provider configured budgets, keyed by provider id.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub providers: HashMap<String, ProviderBudgetConfig>,
+}
+
+impl BudgetConfig {
+    /// The operator's configured numbers for `provider` (its wire id), if any.
+    pub fn for_provider(&self, provider: &str) -> Option<&ProviderBudgetConfig> {
+        self.providers.get(provider)
+    }
+}
+
 /// The optional `[theme]` config section: named ratatui colors (case-insensitive)
 /// or `#rrggbb` hex strings. Missing fields fall back to the default theme. The
 /// Appearance settings subpage persists these keys.
@@ -434,6 +493,10 @@ pub struct TuiConfig {
     /// Custom OpenAI-compatible router. Absent means routing is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub router: Option<RouterConfig>,
+    /// Operator-declared per-provider token budgets. Absent means every harness
+    /// advertises a best-effort estimate instead of configured numbers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetConfig>,
 }
 
 impl Default for TuiConfig {
@@ -452,6 +515,7 @@ impl Default for TuiConfig {
             workflow: WorkflowConfig::default(),
             hub: HubSection::default(),
             router: None,
+            budget: None,
         }
     }
 }

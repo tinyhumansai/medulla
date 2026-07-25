@@ -245,15 +245,18 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // grant. Only runs against a real authenticated backend — never on the mock.
     let home_config_path = home.join("config.toml");
     // Every write-back (onboarding flag, routing strategy, …) must target the
-    // file config is *read* from. With an explicit --config, discovery is bypassed
-    // entirely, so persisting to the home config would leave the value unread and
-    // the change silently lost on the next launch — the flow reappears, the saved
-    // strategy reverts. Resolve the active config path once and use it for all
-    // persistence.
+    // file whose value *wins on the next launch*, or the change is silently lost —
+    // the welcome flow reappears, the saved strategy reverts. That target is:
+    //   1. the explicit --config file when one was passed (discovery is bypassed);
+    //   2. otherwise the highest-precedence file that actually contributed to the
+    //      layered load (`sources` is ordered low → high, so `.last()`), which is
+    //      the project-local `.medulla/config.toml` / `medulla.toml` when present;
+    //   3. otherwise the home config (nothing was discovered to layer).
     let active_config_path = args
         .config
         .as_deref()
         .map(std::path::PathBuf::from)
+        .or_else(|| loaded.sources.last().map(std::path::PathBuf::from))
         .unwrap_or_else(|| home_config_path.clone());
     // A consented upload outlives the welcome screen; the event loop reports its
     // progress and result on the status line while the user works.

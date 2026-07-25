@@ -206,6 +206,19 @@ fn load_config_layers_global_project_env_flag() {
     assert_eq!(loaded.config.backend.base_url, "http://project:2");
     assert_eq!(loaded.config.backend.token_env, "GLOBAL_TOK");
     assert_eq!(loaded.sources.len(), 2);
+    // `sources` is ordered low → high precedence: global first, project-local
+    // last. Write-backs (routing strategy, onboarding) target `sources.last()`,
+    // so the file that wins on reload is the one written — pin that ordering.
+    assert!(
+        loaded.sources[0].ends_with("config.toml") && loaded.sources[0].contains("layer-home"),
+        "sources[0] is the global config: {:?}",
+        loaded.sources
+    );
+    assert!(
+        loaded.sources[1].contains(".medulla"),
+        "sources.last() is the highest-precedence project-local config: {:?}",
+        loaded.sources
+    );
 
     // Env beats both files.
     let loaded = load_config(

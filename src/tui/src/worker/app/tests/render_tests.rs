@@ -43,6 +43,37 @@ fn an_empty_fleet_says_what_fills_it() {
 }
 
 #[test]
+fn workspace_tab_renders_the_allowlist_and_permission_boundary() {
+    let mut app = app_with(PtyManager::new(), None);
+    app.add_workspace("/another".into());
+    app.set_tab(super::super::types::TAB_WORKSPACES);
+
+    let out = render(&mut app, 120, 18);
+
+    assert!(out.contains("Allowed workspaces · 2"), "got: {out}");
+    assert!(out.contains("/workspace"), "got: {out}");
+    assert!(out.contains("/another"), "got: {out}");
+    assert!(out.contains("Permission boundary"), "got: {out}");
+    assert!(out.contains("medulla-test-config.toml"), "got: {out}");
+}
+
+#[test]
+fn workspace_prompt_renders_the_input_and_controls() {
+    let mut app = app_with(PtyManager::new(), None);
+    app.set_tab(super::super::types::TAB_WORKSPACES);
+    app.on_key(key(KeyCode::Char('a')));
+    for ch in "/new-root".chars() {
+        app.on_key(key(KeyCode::Char(ch)));
+    }
+
+    let out = render(&mut app, 120, 18);
+
+    assert!(out.contains("Allow a workspace"), "got: {out}");
+    assert!(out.contains("/new-root"), "got: {out}");
+    assert!(out.contains("Enter confirm · Esc cancel"), "got: {out}");
+}
+
+#[test]
 fn a_missing_harness_is_reported_as_such_not_as_an_empty_list() {
     let mut app = WorkerApp::new(WorkerWiring {
         logs: crate::log::LogBuffer::new(),

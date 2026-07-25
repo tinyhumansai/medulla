@@ -22,27 +22,10 @@ pub use types::*;
 
 use futures::stream::Stream;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
 use serde_json::Value;
 
 /// Default backend base URL.
 pub const DEFAULT_BASE_URL: &str = "http://localhost:5000";
-
-/// Client for the Medulla backend HTTP + SSE API.
-#[derive(Debug, Clone)]
-pub struct MedullaClient {
-    base_url: String,
-    jwt: String,
-    http: reqwest::Client,
-}
-
-/// Builder for [`MedullaClient`].
-#[derive(Debug, Default)]
-pub struct MedullaClientBuilder {
-    base_url: Option<String>,
-    jwt: Option<String>,
-    http: Option<reqwest::Client>,
-}
 
 impl MedullaClientBuilder {
     /// Set the backend base URL (default [`DEFAULT_BASE_URL`]).
@@ -128,16 +111,12 @@ impl MedullaClient {
     /// Exchange a one-time login token for a JWT
     /// (`POST /auth/login-token/consume`).
     pub async fn consume_login_token(&self, token: impl Into<String>) -> Result<String> {
-        #[derive(serde::Serialize)]
-        struct Body {
-            token: String,
-        }
-        let req = self
-            .http
-            .post(self.url("/auth/login-token/consume"))
-            .json(&Body {
-                token: token.into(),
-            });
+        let req =
+            self.http
+                .post(self.url("/auth/login-token/consume"))
+                .json(&ConsumeLoginTokenBody {
+                    token: token.into(),
+                });
         let out: LoginTokenResult = self.send(req).await?;
         Ok(out.jwt)
     }
@@ -218,14 +197,9 @@ impl MedullaClient {
 
     /// Create a durable session (`POST /medulla/v1/sessions`).
     pub async fn create_session(&self, title: Option<&str>) -> Result<SessionCreated> {
-        #[derive(serde::Serialize)]
-        struct Body<'a> {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            title: Option<&'a str>,
-        }
         let req = self
             .authed(self.http.post(self.url("/medulla/v1/sessions")))
-            .json(&Body { title });
+            .json(&CreateSessionBody { title });
         self.send(req).await
     }
 
@@ -263,10 +237,6 @@ impl MedullaClient {
         body: &str,
         sync: bool,
     ) -> Result<SendResult> {
-        #[derive(serde::Serialize)]
-        struct Body<'a> {
-            body: &'a str,
-        }
         let sync_flag = if sync { "1" } else { "0" };
         let req = self
             .authed(
@@ -274,7 +244,7 @@ impl MedullaClient {
                     .post(self.url(&format!("/medulla/v1/sessions/{session_id}/messages")))
                     .query(&[("sync", sync_flag)]),
             )
-            .json(&Body { body });
+            .json(&SendMessageBody { body });
         self.send(req).await
     }
 
@@ -345,15 +315,9 @@ impl MedullaClient {
     /// Without tools the backend returns a final reply; with tools it returns
     /// the first [`LoopEvent`].
     pub async fn run(&self, input: &str, options: RunOptions) -> Result<RunResult> {
-        #[derive(serde::Serialize)]
-        struct Body<'a> {
-            input: &'a str,
-            #[serde(flatten)]
-            options: &'a RunOptions,
-        }
         let req = self
             .authed(self.http.post(self.url("/orchestration/v1/run")))
-            .json(&Body {
+            .json(&RunBody {
                 input,
                 options: &options,
             });
@@ -369,15 +333,9 @@ impl MedullaClient {
         cycle_id: &str,
         tool_results: Vec<ToolResult>,
     ) -> Result<LoopEvent> {
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Body<'a> {
-            cycle_id: &'a str,
-            tool_results: Vec<ToolResult>,
-        }
         let req = self
             .authed(self.http.post(self.url("/orchestration/v1/run/continue")))
-            .json(&Body {
+            .json(&ContinueRunBody {
                 cycle_id,
                 tool_results,
             });
@@ -396,21 +354,6 @@ fn parse_run_result(value: Value) -> Result<RunResult> {
             serde_json::from_value(value).map_err(|e| ClientError::Decode(e.to_string()))?;
         Ok(RunResult::Reply(reply))
     }
-}
-
-/// Raw response envelope shared by every endpoint.
-#[derive(Debug, Deserialize)]
-struct RawEnvelope {
-    #[serde(default)]
-    success: bool,
-    #[serde(default)]
-    data: Option<Value>,
-    #[serde(default)]
-    error: Option<String>,
-    #[serde(rename = "errorCode", default)]
-    error_code: Option<String>,
-    #[serde(default)]
-    details: Option<Value>,
 }
 
 /// Unwrap a `{success, data}` envelope into `T`, mapping failures and non-2xx
@@ -466,3 +409,4 @@ pub(crate) fn urlencode(s: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+use types::RawEnvelope;

@@ -52,45 +52,6 @@ const IDLE_WINDOW: Duration = Duration::from_secs(240);
 /// the common one-sided-session desync (worker restarted) in one extra round.
 const MAX_RESETS: u32 = 2;
 
-/// A registered dispatch awaiting its terminal frame.
-struct Waiter {
-    /// Resolved with the terminal outcome (`reply`) or the worker's error text.
-    reply: oneshot::Sender<Result<TaskOutcome, String>>,
-    /// Optional progress sink fed by `status` frames while the task runs.
-    status: Option<mpsc::UnboundedSender<String>>,
-    /// Notified on ANY inbound frame for this dispatch — the "peer is alive"
-    /// signal the runner's ack window waits on.
-    activity: Arc<Notify>,
-}
-
-/// Shared registry of in-flight dispatches, keyed by `correlationId`.
-type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
-
-/// In-flight lightweight system probes, keyed by correlation id.
-type SystemInfoWaiters =
-    Arc<Mutex<HashMap<String, oneshot::Sender<Result<WorkerSystemInfo, String>>>>>;
-
-/// Shared registry of abort signals, keyed by the orchestrator-facing task id
-/// (`medulla:task_abort.taskId`). One entry per in-flight [`TaskRunner::run`],
-/// registered for the whole call; notifying it makes that call stop the worker,
-/// reap its correlation entry, and return [`RunError::Aborted`].
-///
-/// A `std::sync::Mutex` (not tokio's), because the [`AbortGuard`] that removes an
-/// entry runs in `Drop`, which cannot await — and the lock is only ever held for
-/// a synchronous get/insert/remove, never across a suspension point.
-type Aborts = Arc<std::sync::Mutex<HashMap<String, Arc<Notify>>>>;
-
-/// Removes a `run` call's abort signal from the [`Aborts`] registry when the call
-/// returns (by any path), so a settled dispatch leaves nothing behind for a later
-/// `task_abort` to match. Removes only its OWN signal (identity-compared), so a
-/// concurrent re-dispatch that reused the same id and overwrote the slot is left
-/// intact.
-struct AbortGuard {
-    aborts: Aborts,
-    key: String,
-    signal: Arc<Notify>,
-}
-
 impl Drop for AbortGuard {
     fn drop(&mut self) {
         if let Ok(mut map) = self.aborts.lock() {
@@ -102,27 +63,6 @@ impl Drop for AbortGuard {
             }
         }
     }
-}
-
-/// Sends tasks over a bridge and correlates their replies.
-///
-/// Holds a shared [`Relay`] and a background pump that drains its inbox and fans
-/// decoded frames to per-dispatch waiters. Wrap in `Arc` to share across
-/// dispatches; dropping it aborts the pump.
-pub struct TaskRunner {
-    relay: Arc<dyn Relay>,
-    waiters: Waiters,
-    /// System-information probes waiting for a worker response.
-    system_info_waiters: SystemInfoWaiters,
-    /// Abort signals for in-flight dispatches, keyed by orchestrator-facing task
-    /// id; [`abort_task`](Self::abort_task) notifies one to cancel its dispatch.
-    aborts: Aborts,
-    counter: AtomicU64,
-    /// How long a dispatch waits for the first sign of life before re-handshaking.
-    ack_window: Duration,
-    /// The no-progress window applied once the peer is alive (see [`IDLE_WINDOW`]).
-    idle_window: Duration,
-    pump: tokio::task::JoinHandle<()>,
 }
 
 impl Drop for TaskRunner {
@@ -446,3 +386,10 @@ fn settle(
         Err(_) => Err(RunError::Transport("dispatch waiter dropped".into())),
     }
 }
+
+mod types;
+use types::AbortGuard;
+use types::SystemInfoWaiters;
+pub use types::TaskRunner;
+use types::Waiter;
+use types::Waiters;

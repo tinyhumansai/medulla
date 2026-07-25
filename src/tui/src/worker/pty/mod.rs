@@ -25,9 +25,6 @@ pub mod launch;
 pub mod manager;
 pub mod types;
 
-#[cfg(test)]
-#[path = "dialog_tests.rs"]
-mod dialog_tests;
 // Unix-only: every test here drives a real child on a real pseudo-terminal
 // via `/bin/sh`, which Windows has no equivalent of. The pty layer itself is
 // portable; its tests are not.

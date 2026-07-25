@@ -32,25 +32,6 @@ const OPENPTY_ATTEMPTS: u32 = 20;
 /// Pause between `openpty` retries.
 const OPENPTY_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_millis(25);
 
-/// A clock in epoch ms (injectable for tests).
-pub type NowFn = Arc<dyn Fn() -> i64 + Send + Sync>;
-
-/// Owns the live harness sessions the worker TUI renders.
-///
-/// Cheap to clone (an `Arc`), so the daemon's inbound-frame path and the render
-/// loop share one.
-#[derive(Clone)]
-pub struct PtyManager {
-    inner: Arc<Inner>,
-}
-
-struct Inner {
-    /// Sessions in open order, so the list does not reshuffle under the cursor.
-    sessions: Mutex<Vec<PtySession>>,
-    next_id: AtomicU64,
-    now: NowFn,
-}
-
 /// Kill every surviving child when the last handle goes away.
 ///
 /// A pty and its harness outlive the manager otherwise, because neither
@@ -113,3 +94,8 @@ mod screen;
 mod session;
 
 pub use screen::{ScreenCell, ScreenSnapshot};
+
+mod types;
+use types::Inner;
+pub use types::NowFn;
+pub use types::PtyManager;

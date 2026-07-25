@@ -20,8 +20,5 @@ mod executor_tests;
 pub mod pty;
 pub mod screen;
 pub mod trust;
-#[cfg(test)]
-#[path = "trust_tests.rs"]
-mod trust_tests;
 
 pub use app::{WorkerApp, WorkerWiring};

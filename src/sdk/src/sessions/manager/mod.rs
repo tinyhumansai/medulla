@@ -30,27 +30,6 @@ pub use types::{OpenSession, SessionConfig, TranscriptLine, TranscriptRole};
 
 use types::{SessionEntry, TRANSCRIPT_CAP};
 
-/// A clock in epoch ms (injectable for tests).
-pub type NowFn = Arc<dyn Fn() -> i64 + Send + Sync>;
-
-pub(super) struct Inner {
-    pub(super) config: SessionConfig,
-    pub(super) registry: SessionRegistry,
-    pub(super) run_task: RunTaskFn,
-    pub(super) now: NowFn,
-    pub(super) sessions: Mutex<Vec<SessionEntry>>,
-    pub(super) next_id: AtomicU64,
-    pub(super) changed: broadcast::Sender<()>,
-}
-
-/// Spins up and manages coding-agent sessions in both lifetime classes.
-///
-/// Cheap to clone (an `Arc`), so the daemon, the hub, and the TUI can share one.
-#[derive(Clone)]
-pub struct SessionManager {
-    pub(super) inner: Arc<Inner>,
-}
-
 impl SessionManager {
     /// Build a manager over `config`, using `run_task` for the one-shot
     /// transport.
@@ -372,3 +351,6 @@ pub(super) fn push_line(
         transcript.drain(0..overflow);
     }
 }
+pub(super) use types::Inner;
+pub use types::NowFn;
+pub use types::SessionManager;

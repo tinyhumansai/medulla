@@ -86,8 +86,11 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         extra_args: Vec::new(),
         skip_permissions: options.skip_permissions,
         abort: options.abort.clone(),
-        // The probe self-reports about this machine; it is not a routed task.
-        router: None,
+        // The probe spawns a real harness inference, so it routes exactly like a
+        // delegated task: when a gateway is configured the spawn must carry it, or
+        // the probe leaks this machine's context to the direct provider (or fails
+        // when the only credential is bound to the gateway via `apiKeyEnv`).
+        router: options.router.clone(),
         on_event: None,
         on_stdin: None,
     };

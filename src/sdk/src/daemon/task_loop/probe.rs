@@ -62,6 +62,7 @@ impl DaemonRuntime {
             skip_permissions: self.inner.config.skip_permissions,
             abort,
             budget: self.inner.config.budget.clone(),
+            router: self.inner.config.router.clone(),
         })
         .await;
         drop(permit);

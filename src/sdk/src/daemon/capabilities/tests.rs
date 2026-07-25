@@ -77,6 +77,7 @@ fn probe_options_in(run_task: RunTaskFn, workspace: &str) -> ProbeOptions {
         skip_permissions: false,
         abort: Abort::new(),
         budget: None,
+        router: None,
     }
 }
 
@@ -187,6 +188,39 @@ async fn failed_probe_falls_back_to_dir_digest() {
     assert_eq!(
         caps.summary.as_deref(),
         Some("README.md: Widget — A widget library.")
+    );
+}
+
+#[tokio::test]
+async fn probe_threads_the_configured_router_into_the_spawn() {
+    // A probe spawns a real harness inference, so a configured gateway must reach
+    // the spawn — otherwise it bypasses the router (leaking context to the direct
+    // provider, or failing when the only credential is bound via apiKeyEnv).
+    let seen_router: Arc<std::sync::Mutex<Option<crate::config::RouterConfig>>> = Arc::default();
+    let captured = seen_router.clone();
+    let run_task: RunTaskFn = Arc::new(move |opts| {
+        *captured.lock().unwrap() = opts.router.clone();
+        Box::pin(async move {
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: opts.provider,
+                reply: r#"{"tools":[]}"#.to_string(),
+                events: 0,
+            })
+        })
+    });
+    let router: crate::config::RouterConfig = serde_json::from_str(
+        r#"{"baseUrl":"https://gw/anthropic","apiKeyEnv":"MEDULLA_ROUTER_KEY"}"#,
+    )
+    .unwrap();
+    let mut options = probe_options(run_task);
+    options.router = Some(router.clone());
+    let _ = probe_capabilities(options).await;
+    assert_eq!(
+        seen_router.lock().unwrap().as_ref(),
+        Some(&router),
+        "the probe must spawn the harness with the configured router"
     );
 }
 

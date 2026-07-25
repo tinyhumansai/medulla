@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::config::RouterConfig;
 use crate::tinyplace::HarnessProvider;
 
 /// Default wrapper session-file poll interval (ms).
@@ -125,6 +126,94 @@ pub fn provider_args(provider: HarnessProvider, env: &HashMap<String, String>) -
         Some(raw) => raw.split_whitespace().map(str::to_string).collect(),
         None => Vec::new(),
     }
+}
+
+/// What the router injects into one provider's spawn environment.
+///
+/// Produced by [`router_env`] as a pure function of the [`RouterConfig`] and the
+/// target provider — it performs no I/O and never reads a secret. The API key is
+/// carried as a *name* to resolve, never a value: [`secret_env`](Self::secret_env)
+/// maps a child env var to the name of the daemon env var holding the key, and
+/// the spawn layer resolves it at launch. Everything here is safe to log except
+/// the resolved key, which never enters this struct.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RouterInjection {
+    /// Literal env vars to set on the child (e.g. `OPENAI_BASE_URL`,
+    /// `ANTHROPIC_BASE_URL`) — the endpoint, never a secret.
+    pub env: Vec<(String, String)>,
+    /// `(child_var, source_env_name)`: the child's key variable and the name of
+    /// the daemon env var whose value must be copied into it at spawn. The value
+    /// is resolved by the spawn layer, never here.
+    pub secret_env: Vec<(String, String)>,
+    /// Extra CLI args to prepend to the child argv. Empty for the env-based
+    /// (`*_BASE_URL`) mechanism used today; reserved for the codex
+    /// `--config model_provider=<id>` route, whose on-disk `model_providers`
+    /// block is out of scope for this repo (IP boundary: env injection only).
+    pub args: Vec<String>,
+}
+
+impl RouterInjection {
+    /// Whether the router leaves this provider's environment untouched — i.e.
+    /// nothing to inject (no effective endpoint configured).
+    pub fn is_empty(&self) -> bool {
+        self.env.is_empty() && self.secret_env.is_empty() && self.args.is_empty()
+    }
+}
+
+/// The child env var names a provider uses to reach a custom endpoint:
+/// `(base_url_var, api_key_var)`.
+///
+/// - claude speaks the Anthropic wire format: `ANTHROPIC_BASE_URL` +
+///   `ANTHROPIC_AUTH_TOKEN` (an OpenAI-compatible endpoint needs a translating
+///   proxy, configured as the provider's Anthropic-passthrough `baseUrl`).
+/// - codex and opencode are natively OpenAI-compatible: `OPENAI_BASE_URL` +
+///   `OPENAI_API_KEY`. opencode's native "provider block" mechanism is realized
+///   here through its OpenAI-compatible env, since writing the harness's on-disk
+///   config is out of scope (IP boundary: env injection at the spawn seam only).
+fn router_env_vars(provider: HarnessProvider) -> (&'static str, &'static str) {
+    match provider {
+        HarnessProvider::Claude => ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"),
+        HarnessProvider::Codex => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
+        HarnessProvider::Opencode => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
+    }
+}
+
+/// Resolve, purely, what a `RouterConfig` injects into `provider`'s spawn
+/// environment.
+///
+/// Precedence for the endpoint is `providers.<p>.baseUrl`, then top-level
+/// `baseUrl`, then unset (the harness's own on-disk config), via
+/// [`RouterConfig::base_url_for`]. The key is bound only when the provider has an
+/// effective endpoint *and* an `apiKeyEnv` name is configured: without an
+/// endpoint the router is not routing this provider anywhere, so swapping its
+/// credentials would be wrong. When there is no endpoint the result is empty and
+/// the child spawns exactly as it would with no `[router]` at all.
+///
+/// This function is side-effect-free: it never reads `process.env`, never reads
+/// the daemon environment, and never returns the API key value — only its
+/// env-var name, for the spawn layer to resolve.
+pub fn router_env(provider: HarnessProvider, router: &RouterConfig) -> RouterInjection {
+    let mut injection = RouterInjection::default();
+    let Some(base_url) = router.base_url_for(provider.as_str()) else {
+        // No endpoint for this provider → nothing to inject (feature off here).
+        return injection;
+    };
+    let (base_var, key_var) = router_env_vars(provider);
+    injection
+        .env
+        .push((base_var.to_string(), base_url.to_string()));
+    // Bind the key by NAME, never by value. Skipped when unset/empty so the
+    // harness keeps its own credentials against the routed endpoint.
+    if let Some(key_env) = router
+        .api_key_env
+        .as_deref()
+        .filter(|name| !name.is_empty())
+    {
+        injection
+            .secret_env
+            .push((key_var.to_string(), key_env.to_string()));
+    }
+    injection
 }
 
 /// The provider's default session-transcript directory.

@@ -202,3 +202,136 @@ fn timings_defaults_and_numeric_fallback() {
     let e = env(&[("TINYPLACE_CODEX_STATUS_IDLE_MS", " 12345 ")]);
     assert_eq!(status_idle_ms(HarnessProvider::Codex, &e), 12_345);
 }
+
+/// Deserialize a `RouterConfig` from a JSON literal for the resolver tests.
+fn router(json: &str) -> RouterConfig {
+    serde_json::from_str(json).expect("valid router config")
+}
+
+#[test]
+fn router_env_no_config_is_empty_for_every_provider() {
+    // An empty router (no baseUrl anywhere) injects nothing — the child spawns
+    // exactly as it would with no [router] section at all.
+    let cfg = RouterConfig::default();
+    for provider in [
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+    ] {
+        let injection = router_env(provider, &cfg);
+        assert!(injection.is_empty(), "{provider:?} must inject nothing");
+        assert!(injection.env.is_empty());
+        assert!(injection.secret_env.is_empty());
+        assert!(injection.args.is_empty());
+    }
+}
+
+#[test]
+fn router_env_codex_emits_openai_base_and_key_by_name() {
+    let cfg = router(r#"{"baseUrl":"https://gw/v1","apiKeyEnv":"MEDULLA_ROUTER_KEY"}"#);
+    let injection = router_env(HarnessProvider::Codex, &cfg);
+    assert_eq!(
+        injection.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://gw/v1".to_string())]
+    );
+    // The key is referenced by env-var NAME, never the value.
+    assert_eq!(
+        injection.secret_env,
+        vec![(
+            "OPENAI_API_KEY".to_string(),
+            "MEDULLA_ROUTER_KEY".to_string()
+        )]
+    );
+    assert!(injection.args.is_empty());
+}
+
+#[test]
+fn router_env_opencode_uses_openai_compatible_env() {
+    let cfg = router(r#"{"baseUrl":"https://gw/v1","apiKeyEnv":"OC_KEY"}"#);
+    let injection = router_env(HarnessProvider::Opencode, &cfg);
+    assert_eq!(
+        injection.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://gw/v1".to_string())]
+    );
+    assert_eq!(
+        injection.secret_env,
+        vec![("OPENAI_API_KEY".to_string(), "OC_KEY".to_string())]
+    );
+}
+
+#[test]
+fn router_env_claude_emits_anthropic_base_and_auth_token() {
+    // Claude speaks the Anthropic wire format: base URL + AUTH_TOKEN (by name).
+    let cfg = router(r#"{"baseUrl":"https://gw/anthropic","apiKeyEnv":"MEDULLA_ROUTER_KEY"}"#);
+    let injection = router_env(HarnessProvider::Claude, &cfg);
+    assert_eq!(
+        injection.env,
+        vec![(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://gw/anthropic".to_string()
+        )]
+    );
+    assert_eq!(
+        injection.secret_env,
+        vec![(
+            "ANTHROPIC_AUTH_TOKEN".to_string(),
+            "MEDULLA_ROUTER_KEY".to_string()
+        )]
+    );
+}
+
+#[test]
+fn router_env_provider_override_beats_top_level() {
+    // providers.claude.baseUrl (Anthropic-passthrough) wins for claude, while
+    // codex inherits the top-level OpenAI-compatible endpoint.
+    let cfg = router(
+        r#"{
+            "baseUrl":"https://top/v1",
+            "apiKeyEnv":"K",
+            "providers":{"claude":{"baseUrl":"https://gw/anthropic"}}
+        }"#,
+    );
+    let claude = router_env(HarnessProvider::Claude, &cfg);
+    assert_eq!(
+        claude.env,
+        vec![(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://gw/anthropic".to_string()
+        )]
+    );
+    let codex = router_env(HarnessProvider::Codex, &cfg);
+    assert_eq!(
+        codex.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://top/v1".to_string())]
+    );
+}
+
+#[test]
+fn router_env_without_api_key_env_injects_endpoint_only() {
+    // A router with an endpoint but no apiKeyEnv steers the base URL and leaves
+    // the harness's own credentials in place (no secret_env binding).
+    let cfg = router(r#"{"baseUrl":"https://gw/v1"}"#);
+    let injection = router_env(HarnessProvider::Codex, &cfg);
+    assert_eq!(
+        injection.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://gw/v1".to_string())]
+    );
+    assert!(
+        injection.secret_env.is_empty(),
+        "no apiKeyEnv → no key binding"
+    );
+
+    // An empty apiKeyEnv name is treated as unset.
+    let blank = router(r#"{"baseUrl":"https://gw/v1","apiKeyEnv":""}"#);
+    assert!(router_env(HarnessProvider::Codex, &blank)
+        .secret_env
+        .is_empty());
+}
+
+#[test]
+fn router_env_key_without_base_url_injects_nothing() {
+    // apiKeyEnv set but no baseUrl (for this provider) → the router is not
+    // routing here, so nothing is injected and the child keeps its own endpoint.
+    let cfg = router(r#"{"apiKeyEnv":"K"}"#);
+    assert!(router_env(HarnessProvider::Codex, &cfg).is_empty());
+}

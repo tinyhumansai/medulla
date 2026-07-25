@@ -12,6 +12,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::oneshot;
 
@@ -20,6 +21,160 @@ use crate::runtime::event_log::ThreadEventLog;
 use crate::runtime::{CycleResultSummary, StreamState};
 use crate::ui::chat_store::{now_millis, ChatMessage};
 use crate::ui::events::{EventEnvelope, TuiEvent};
+
+/// Resources declared for one host in the manager placement graph.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HostResources {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_cores: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_memory_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_memory_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_free_bytes: Option<u64>,
+}
+
+/// A machine on which one or more harnesses run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HostDescriptor {
+    pub id: String,
+    pub name: String,
+    pub availability: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<HostResources>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub metadata: serde_json::Map<String, Value>,
+}
+
+/// A token budget declared on a harness.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessBudget {
+    pub provider: String,
+    pub window: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cooldown_until: Option<u64>,
+    pub source: String,
+}
+
+/// An installed agent runtime on a host.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessDescriptor {
+    pub id: String,
+    pub host_id: String,
+    pub kind: String,
+    pub availability: String,
+    pub ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ready_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub template_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub budgets: Vec<HarnessBudget>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub metadata: serde_json::Map<String, Value>,
+}
+
+/// Parsed, advisory `MEDULLA.md` profile attached to a workspace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceProfile {
+    #[serde(default)]
+    pub instructions: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub harnesses: Vec<String>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub models: serde_json::Map<String, Value>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub metadata: serde_json::Map<String, Value>,
+}
+
+/// A folder exposed by exactly one harness.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDescriptor {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub harness_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<WorkspaceProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub template_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub metadata: serde_json::Map<String, Value>,
+}
+
+/// Harness-specific overrides for one agent template.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTemplateHarnessOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub params: serde_json::Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+}
+
+/// Operator-declared kind of agent that a manager may provision.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTemplate {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub params: serde_json::Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub metadata: serde_json::Map<String, Value>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub harnesses: std::collections::BTreeMap<String, AgentTemplateHarnessOverride>,
+}
+
+/// Static declarations supplied when attaching to `medulla-serve`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CoreDeclarations {
+    pub hosts: Vec<HostDescriptor>,
+    pub harnesses: Vec<HarnessDescriptor>,
+    pub workspaces: Vec<WorkspaceDescriptor>,
+    pub agents: Vec<crate::runtime::AgentDescriptor>,
+    pub agent_templates: Vec<AgentTemplate>,
+}
 
 /// The NDJSON wire version this runtime speaks. The host bails on a `ready`
 /// banner whose `protocol` differs (serve-protocol §3 handshake).

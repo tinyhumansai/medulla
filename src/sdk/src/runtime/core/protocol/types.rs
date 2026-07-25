@@ -36,6 +36,8 @@ pub(in super::super) enum Inbound {
         id: String,
         /// The port name (`inference`, `tools`, …).
         port: String,
+        /// Method name within the port.
+        method: String,
     },
     /// An unsolicited event-stream frame (serve-protocol §6).
     Event {

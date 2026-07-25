@@ -34,3 +34,7 @@ mod stub_server;
 mod tests;
 
 pub use client::CoreRuntime;
+pub use types::{
+    AgentTemplate, AgentTemplateHarnessOverride, CoreDeclarations, HarnessBudget,
+    HarnessDescriptor, HostDescriptor, HostResources, WorkspaceDescriptor, WorkspaceProfile,
+};

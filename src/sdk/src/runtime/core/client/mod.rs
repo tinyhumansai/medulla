@@ -20,10 +20,12 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use super::protocol::{
-    check_ready, fold_event, hello_params, parse_line, port_unavailable_ret, req_line, Inbound,
-    ReadyCheck,
+    check_ready, fold_event, hello_params, parse_line, port_unavailable_ret, req_line, success_ret,
+    Inbound, ReadyCheck,
 };
-use super::types::{Command, ConnState, CoreError, CoreState, HANDSHAKE_TIMEOUT, RECONNECT_DELAY};
+use super::types::{
+    Command, ConnState, CoreDeclarations, CoreError, CoreState, HANDSHAKE_TIMEOUT, RECONNECT_DELAY,
+};
 
 impl CoreRuntime {
     /// Attach to a `medulla-serve` process already listening at `socket_path`.
@@ -34,7 +36,14 @@ impl CoreRuntime {
     /// [`describe`](crate::runtime::Runtime::describe). Must be called from
     /// within a Tokio runtime.
     pub fn attach(socket_path: PathBuf) -> Self {
+        Self::attach_with_declarations(socket_path, CoreDeclarations::default())
+    }
+
+    /// Attach while declaring the manager placement graph, static roster, and
+    /// agent-template catalog exposed by this client.
+    pub fn attach_with_declarations(socket_path: PathBuf, declarations: CoreDeclarations) -> Self {
         let state = Arc::new(Mutex::new(CoreState::new()));
+        let declarations = Arc::new(declarations);
         let (tx, _rx) = broadcast::channel(256);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let driver = tokio::spawn(driver_loop(
@@ -42,6 +51,7 @@ impl CoreRuntime {
             state.clone(),
             tx.clone(),
             cmd_rx,
+            declarations,
         ));
         CoreRuntime {
             state,
@@ -73,10 +83,20 @@ async fn driver_loop(
     state: Arc<Mutex<CoreState>>,
     tx: broadcast::Sender<()>,
     mut cmd_rx: mpsc::UnboundedReceiver<Command>,
+    declarations: Arc<CoreDeclarations>,
 ) {
     let mut attempt: u64 = 0;
     loop {
-        match serve_connection(&path, &state, &tx, &mut cmd_rx, attempt).await {
+        match serve_connection(
+            &path,
+            &state,
+            &tx,
+            &mut cmd_rx,
+            attempt,
+            declarations.clone(),
+        )
+        .await
+        {
             ConnOutcome::Shutdown => return,
             ConnOutcome::Fatal(reason) => {
                 set_conn(&state, &tx, ConnState::Unavailable(reason));
@@ -114,6 +134,7 @@ async fn serve_connection(
     tx: &broadcast::Sender<()>,
     cmd_rx: &mut mpsc::UnboundedReceiver<Command>,
     attempt: u64,
+    declarations: Arc<CoreDeclarations>,
 ) -> ConnOutcome {
     // Race the connect attempt against `cmd_rx` too: the socket may not exist
     // yet (serve still coming up) and `connect` can sit there, so a caller's
@@ -144,7 +165,7 @@ async fn serve_connection(
 
     let hello_ok = match tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
-        handshake(&mut reader, &mut write_half),
+        handshake(&mut reader, &mut write_half, &declarations),
     )
     .await
     {
@@ -210,7 +231,14 @@ async fn serve_connection(
             frame = in_rx.recv() => match frame {
                 None => break ConnOutcome::Dropped, // reader ended → socket dropped
                 Some(inbound) => {
-                    if handle_inbound(inbound, &mut pending, state, tx, &mut write_half)
+                    if handle_inbound(
+                        inbound,
+                        &mut pending,
+                        state,
+                        tx,
+                        &mut write_half,
+                        &declarations,
+                    )
                         .await
                         .is_err()
                     {
@@ -281,6 +309,7 @@ fn handle_disconnected_command(cmd: Option<Command>) -> ConnOutcome {
 async fn handshake(
     reader: &mut BufReader<tokio::net::unix::OwnedReadHalf>,
     writer: &mut OwnedWriteHalf,
+    declarations: &CoreDeclarations,
 ) -> Result<HelloOk, HandshakeError> {
     // 1. Read lines until the `ready` banner (serve writes it first).
     let (serve, session_id) = match read_until_ready(reader).await? {
@@ -289,7 +318,7 @@ async fn handshake(
     };
 
     // 2. Send `hello`.
-    let hello = req_line("h1", "hello", &hello_params());
+    let hello = req_line("h1", "hello", &hello_params(declarations));
     writer
         .write_all(hello.as_bytes())
         .await
@@ -364,6 +393,7 @@ async fn handle_inbound(
     state: &Arc<Mutex<CoreState>>,
     tx: &broadcast::Sender<()>,
     writer: &mut OwnedWriteHalf,
+    declarations: &CoreDeclarations,
 ) -> Result<(), ()> {
     match inbound {
         Inbound::Ready {
@@ -399,10 +429,21 @@ async fn handle_inbound(
                 let _ = tx.send(());
             }
         }
-        Inbound::Call { id, port } => {
-            // Port hosting (reverse-RPC) is a later milestone; refuse for now so
-            // serve never hangs on the missing `ret` (serve-protocol §5/§7).
-            let line = port_unavailable_ret(&id, &port);
+        Inbound::Call { id, port, method } => {
+            let line = if port == "hosts" && method == "snapshot" {
+                success_ret(
+                    &id,
+                    serde_json::json!({
+                        "hosts": declarations.hosts,
+                        "harnesses": declarations.harnesses,
+                        "workspaces": declarations.workspaces,
+                    }),
+                )
+            } else {
+                // Refuse every port this client does not yet host so serve never
+                // hangs on a missing `ret` (serve-protocol §5/§7).
+                port_unavailable_ret(&id, &port)
+            };
             writer.write_all(line.as_bytes()).await.map_err(|_| ())?;
         }
     }

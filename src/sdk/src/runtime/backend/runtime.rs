@@ -34,6 +34,23 @@ impl BackendRuntime {
         Self::connect_with_hub(client, Arc::new(Mutex::new(None))).await
     }
 
+    /// Like [`connect_with_hub`](Self::connect_with_hub) but also collects the
+    /// authored `MEDULLA.md` profiles for `workspace_roots` and attaches them to
+    /// every session mint (`workspaceProfiles` on `POST /medulla/v1/sessions`).
+    ///
+    /// Roots without a `MEDULLA.md` are skipped, so passing every active workspace
+    /// is safe. Each profile's `workspace` is the root path as given, which must
+    /// match what the roster reports (`metadata.workspace`) for the backend to
+    /// attribute it to that agent.
+    pub async fn connect_with_workspaces(
+        client: MedullaClient,
+        hub: Arc<Mutex<Option<crate::hub::HubHandle>>>,
+        workspace_roots: Vec<std::path::PathBuf>,
+    ) -> anyhow::Result<Self> {
+        let profiles = crate::init::collect_profile_inputs(&workspace_roots);
+        Self::connect_inner(client, hub, profiles).await
+    }
+
     /// Like [`connect`](Self::connect) but attaches a shared hub slot. The caller
     /// fills the slot once the orchestrator hub connects, so `workers()` /
     /// `worker_op()` manage the hub's tiny.place peers instead of being no-ops.
@@ -47,8 +64,19 @@ impl BackendRuntime {
         client: MedullaClient,
         hub: Arc<Mutex<Option<crate::hub::HubHandle>>>,
     ) -> anyhow::Result<Self> {
+        Self::connect_inner(client, hub, Vec::new()).await
+    }
+
+    /// Shared connect body: mint the initial session (attaching `profiles`) and
+    /// attach its stream. `profiles` are retained and re-attached to every later
+    /// mint (`new_session`, `fork`).
+    async fn connect_inner(
+        client: MedullaClient,
+        hub: Arc<Mutex<Option<crate::hub::HubHandle>>>,
+        profiles: Vec<crate::client::WorkspaceProfileInput>,
+    ) -> anyhow::Result<Self> {
         let created = client
-            .create_session(None)
+            .create_session_with(None, &profiles)
             .await
             .map_err(|e| anyhow!(e.to_string()))?;
         let (tx, _rx) = broadcast::channel(256);
@@ -64,6 +92,7 @@ impl BackendRuntime {
             state,
             tx,
             hub,
+            workspace_profiles: Arc::new(profiles),
         };
         start_stream_on(&rt.client, &rt.state, &rt.tx, "t1", None);
         Ok(rt)
@@ -273,8 +302,9 @@ impl Runtime for BackendRuntime {
         let client = self.client.clone();
         let state = self.state.clone();
         let tx = self.tx.clone();
+        let profiles = self.workspace_profiles.clone();
         tokio::spawn(async move {
-            if let Ok(created) = client.create_session(None).await {
+            if let Ok(created) = client.create_session_with(None, &profiles).await {
                 {
                     let mut s = state.lock().unwrap();
                     if let Some(t) = s.by_id(&thread_id) {
@@ -320,8 +350,9 @@ impl Runtime for BackendRuntime {
         let state = self.state.clone();
         let tx = self.tx.clone();
         let thread_id = new_id.clone();
+        let profiles = self.workspace_profiles.clone();
         tokio::spawn(async move {
-            if let Ok(created) = client.create_session(None).await {
+            if let Ok(created) = client.create_session_with(None, &profiles).await {
                 {
                     let mut s = state.lock().unwrap();
                     if let Some(t) = s.by_id(&thread_id) {

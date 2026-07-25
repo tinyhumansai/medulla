@@ -197,9 +197,27 @@ impl MedullaClient {
 
     /// Create a durable session (`POST /medulla/v1/sessions`).
     pub async fn create_session(&self, title: Option<&str>) -> Result<SessionCreated> {
+        self.create_session_with(title, &[]).await
+    }
+
+    /// Create a durable session, attaching authored workspace profiles to the mint
+    /// (`POST /medulla/v1/sessions` with `workspaceProfiles`).
+    ///
+    /// Each profile is one workspace root's verbatim `MEDULLA.md`, collected via
+    /// [`crate::init::collect_profile_inputs`]. An empty slice mints a plain
+    /// session (the `workspaceProfiles` key is omitted). The backend validates the
+    /// shape and rejects a malformed profile with a 400.
+    pub async fn create_session_with(
+        &self,
+        title: Option<&str>,
+        workspace_profiles: &[WorkspaceProfileInput],
+    ) -> Result<SessionCreated> {
         let req = self
             .authed(self.http.post(self.url("/medulla/v1/sessions")))
-            .json(&CreateSessionBody { title });
+            .json(&CreateSessionBody {
+                title,
+                workspace_profiles,
+            });
         self.send(req).await
     }
 

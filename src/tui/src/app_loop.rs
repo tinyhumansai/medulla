@@ -56,6 +56,16 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // read by `BackendRuntime::workers()`/`worker_op()` so the Workers tab manages
     // the hub's tiny.place peers live.
     let hub_slot: crate::hub_relay::HubSlot = Arc::new(Mutex::new(None));
+    // Active workspace roots whose `MEDULLA.md` profiles ride every backend
+    // session mint (`workspaceProfiles`). Roots without a profile are skipped by
+    // the collector, so passing every configured workspace is safe.
+    let workspace_roots: Vec<std::path::PathBuf> = loaded
+        .config
+        .workflow
+        .workspaces
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
     // The hub narrates itself; those lines must not reach the terminal while the
     // TUI owns the screen, so they are captured here instead.
     let hub_logs = medulla_tui::log::LogBuffer::new();
@@ -143,8 +153,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 let client = MedullaClient::new(backend.base_url.clone(), tok);
                 match client.me().await {
                     Ok(_) => {
-                        match BackendRuntime::connect_with_hub(client.clone(), hub_slot.clone())
-                            .await
+                        match BackendRuntime::connect_with_workspaces(
+                            client.clone(),
+                            hub_slot.clone(),
+                            workspace_roots.clone(),
+                        )
+                        .await
                         {
                             Ok(rt) => {
                                 backend_client = Some(client);
@@ -200,7 +214,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             }
             LoginOutcome::Token(jwt) => {
                 let client = MedullaClient::new(base_url.clone(), jwt.clone());
-                match BackendRuntime::connect_with_hub(client.clone(), hub_slot.clone()).await {
+                match BackendRuntime::connect_with_workspaces(
+                    client.clone(),
+                    hub_slot.clone(),
+                    workspace_roots.clone(),
+                )
+                .await
+                {
                     Ok(rt) => {
                         runtime = Some(Arc::new(rt));
                         backend_client = Some(client);
@@ -345,7 +365,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             }
             LoginOutcome::Token(jwt) => {
                 let client = MedullaClient::new(base_url.clone(), jwt.clone());
-                match BackendRuntime::connect_with_hub(client.clone(), hub_slot.clone()).await {
+                match BackendRuntime::connect_with_workspaces(
+                    client.clone(),
+                    hub_slot.clone(),
+                    workspace_roots.clone(),
+                )
+                .await
+                {
                     Ok(rt) => {
                         runtime = Arc::new(rt);
                         status = save_credentials(&home, &base_url, &jwt);

@@ -149,4 +149,8 @@ pub struct BackendRuntime {
     /// present, `workers()`/`worker_op()` manage the hub's tiny.place peers; an
     /// empty slot means no worker surface (the default).
     pub(super) hub: Arc<Mutex<Option<crate::hub::HubHandle>>>,
+    /// Authored `MEDULLA.md` profiles for the active workspace roots, collected
+    /// once at connect and attached to every session mint so the orchestrator gets
+    /// the workspace context. Empty when no root has a `MEDULLA.md`.
+    pub(super) workspace_profiles: Arc<Vec<crate::client::WorkspaceProfileInput>>,
 }

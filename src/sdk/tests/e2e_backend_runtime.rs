@@ -40,6 +40,69 @@ async fn connects_with_one_active_thread_and_describes_itself() {
 }
 
 #[tokio::test]
+async fn session_mint_carries_workspace_profiles_from_roots() {
+    // Step 8: the backend runtime collects each active workspace root's authored
+    // MEDULLA.md and attaches them to the session mint as `workspaceProfiles`. A
+    // root without a MEDULLA.md is silently skipped.
+    use std::sync::{Arc, Mutex};
+
+    let backend = MockBackend::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let profiled = dir.path().join("proj");
+    std::fs::create_dir_all(&profiled).unwrap();
+    std::fs::write(profiled.join("MEDULLA.md"), "# Proj\nrouting hints here").unwrap();
+    let bare = dir.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+
+    let client = MedullaClient::new(backend.base_url.clone(), "test-jwt");
+    let _rt = BackendRuntime::connect_with_workspaces(
+        client,
+        Arc::new(Mutex::new(None)),
+        vec![profiled.clone(), bare],
+    )
+    .await
+    .expect("connect");
+
+    let mint = backend
+        .requests()
+        .into_iter()
+        .find(|r| r.method == "POST" && r.path == "/medulla/v1/sessions")
+        .expect("a session mint request");
+    let body: serde_json::Value = serde_json::from_str(&mint.body).expect("json body");
+    let profiles = body
+        .get("workspaceProfiles")
+        .and_then(|v| v.as_array())
+        .expect("workspaceProfiles present on the mint");
+    assert_eq!(profiles.len(), 1, "only the profiled root contributes");
+    // camelCase wire keys; `workspace` matches the root path as given.
+    assert_eq!(
+        profiles[0]["workspace"],
+        json!(profiled.display().to_string())
+    );
+    assert_eq!(
+        profiles[0]["medullaMd"],
+        json!("# Proj\nrouting hints here")
+    );
+}
+
+#[tokio::test]
+async fn plain_connect_omits_workspace_profiles_from_the_mint() {
+    // No workspace roots → a plain session mint with no `workspaceProfiles` key.
+    let backend = MockBackend::start().await;
+    let _rt = runtime(&backend).await;
+    let mint = backend
+        .requests()
+        .into_iter()
+        .find(|r| r.method == "POST" && r.path == "/medulla/v1/sessions")
+        .expect("a session mint request");
+    let body: serde_json::Value = serde_json::from_str(&mint.body).expect("json body");
+    assert!(
+        body.get("workspaceProfiles").is_none(),
+        "an unprofiled mint omits the key entirely: {body}"
+    );
+}
+
+#[tokio::test]
 async fn forking_adds_a_thread_and_switching_changes_the_active_one() {
     let backend = MockBackend::start().await;
     let runtime = runtime(&backend).await;

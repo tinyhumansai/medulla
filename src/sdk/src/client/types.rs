@@ -520,10 +520,19 @@ pub(super) struct ConsumeLoginTokenBody {
 }
 
 /// Request body for creating a durable session.
+///
+/// `workspaceProfiles` carries the authored `MEDULLA.md` for each active
+/// workspace root; the backend session-mint accepts and distils them. Omitted
+/// entirely when no workspace has a profile, so a plain session mint is unchanged.
 #[derive(serde::Serialize)]
 pub(super) struct CreateSessionBody<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) title: Option<&'a str>,
+    #[serde(
+        rename = "workspaceProfiles",
+        skip_serializing_if = "<[WorkspaceProfileInput]>::is_empty"
+    )]
+    pub(super) workspace_profiles: &'a [WorkspaceProfileInput],
 }
 
 /// Request body for adding a message to a session.

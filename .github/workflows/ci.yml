@@ -91,6 +91,9 @@ jobs:
       # and data types remain counted. The orchestrator-hub split keeps the
       # dispatch runner + roster resolution + data types counted; only the
       # connect/boot/relay/handle IO drivers and the TUI hub wiring are excluded.
+      # Daemon entry/transport, backend worker operations, wrapper run/bridge,
+      # and the harness PTY module are likewise process or network adapters;
+      # their reusable types and helpers remain counted in their sibling modules.
       # `worker_loop` joins them for the same reason `app_loop`/`event_loop` are
       # there: it is the worker TUI's entry point and tick loop, driving a real
       # terminal and real PTYs, and it is covered by the E2E suite instead.
@@ -104,7 +107,7 @@ jobs:
         timeout-minutes: 35
         run: >-
           cargo llvm-cov --locked
-          --ignore-filename-regex 'src/tui/src/(app_loop|commands|main)\.rs|src/tui/src/(event_loop|terminal|hub_relay|worker_loop)(/.*)?\.rs|src/tui/src/ui/onboarding/run(/.*)?\.rs|src/tui/src/ui/app/render/tasks\.rs|src/tui/src/worker/executor_tests/live\.rs|src/sdk/src/hub/(socket|relay)\.rs|src/sdk/src/hub/(boot|handle)(/.*)?\.rs'
+          --ignore-filename-regex 'src/tui/src/(app_loop|commands|main)\.rs|src/tui/src/(event_loop|terminal|hub_relay|worker_loop)(/.*)?\.rs|src/tui/src/harness_pty/mod\.rs|src/tui/src/ui/onboarding/run(/.*)?\.rs|src/tui/src/ui/app/render/tasks\.rs|src/tui/src/worker/executor_tests/live\.rs|src/sdk/src/daemon/(entry\.rs|transport/mod\.rs)|src/sdk/src/runtime/backend/worker_ops\.rs|src/sdk/src/wrapper/(run|bridge)/mod\.rs|src/sdk/src/hub/(socket|relay)\.rs|src/sdk/src/hub/(boot|handle)(/.*)?\.rs'
           --fail-under-lines 95
           --summary-only
 

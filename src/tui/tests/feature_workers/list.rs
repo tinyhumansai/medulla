@@ -76,6 +76,14 @@ fn worker_row_shows_probe_readiness_and_budget_lines() {
         out.contains("codex 1.2M left (weekly)"),
         "codex budget: {out}"
     );
+    // Assert the drop, don't just claim it: "claude" appears once (its readiness
+    // reason) and never a second time as a budget segment. A regression that
+    // rendered the bare estimate would add a "claude" token to the budget line.
+    assert_eq!(
+        out.matches("claude").count(),
+        1,
+        "bare claude estimate must not render a budget segment: {out}"
+    );
 }
 
 #[test]

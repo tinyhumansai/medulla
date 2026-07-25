@@ -33,9 +33,10 @@ Use standard `rustfmt` output (four-space indentation). Name modules, functions,
 
 These rules are mandatory for all new and edited Rust source. Split proactively rather than letting a file grow past the limit.
 
-- **500-line ceiling.** No `.rs` file should exceed 500 lines. When a file approaches the limit, split it into a directory module (`foo.rs` → `foo/mod.rs` plus focused submodules). `mod.rs` stays thin: module docs, `mod`/`pub use` wiring, and only glue that fits no more specific submodule.
-- **Types in `types.rs`.** A module's data types (structs, enums, type aliases) and their trivial `impl`s live in a `types.rs` submodule, re-exported from `mod.rs`. Behaviour-heavy `impl`s may live beside the logic that uses them when that reads more clearly.
-- **Tests in `tests.rs`.** Unit tests for a module live in a sibling `tests.rs` (declared `#[cfg(test)] mod tests;`), not inline at the bottom of the logic file. Cross-module and end-to-end tests stay in the crate's `tests/` directory.
+- **500-line ceiling.** No `.rs` file should exceed 500 lines of code, excluding comments. When a file approaches the limit, split it into focused submodules before adding more code.
+- **Canonical directory modules.** A leaf module may use `foo.rs` only while it remains a single file. As soon as it needs any child file, move its implementation to `foo/mod.rs` and place the children under `foo/`. Never keep `foo.rs` beside a `foo/` directory or use `#[path = "foo/..."]` as a substitute for the canonical layout. Keep `mod.rs` focused on module docs, `mod`/`pub use` wiring, and glue that fits no more specific submodule.
+- **Types in `types.rs`.** A module's data types (structs, enums, type aliases) and their trivial `impl`s live in `foo/types.rs`, re-exported from `foo/mod.rs`. Behaviour-heavy `impl`s may live beside the logic that uses them when that reads more clearly.
+- **Tests in `tests.rs`.** Unit tests for a directory module live in `foo/tests.rs`, declared from `foo/mod.rs` with `#[cfg(test)] mod tests;`, not inline at the bottom of a logic file. A single-file leaf module's tests use a dedicated sibling `_tests.rs` file until the module becomes a directory. Cross-module and end-to-end tests stay in the crate's `tests/` directory.
 - **Split by responsibility.** Group submodules by cohesive purpose (parsing, resolution, rendering, persistence), not arbitrary line count. Each submodule states its single purpose in its module doc.
 
 ## Documentation

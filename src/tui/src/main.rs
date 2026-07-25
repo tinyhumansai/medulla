@@ -279,16 +279,5 @@ fn flag_value(args: &[String], name: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod daemon_entry_tests {
-    use super::daemon_uses_tui;
-
-    #[test]
-    fn daemon_defaults_to_the_tui_only_on_a_terminal() {
-        assert!(daemon_uses_tui(true, &["daemon".into()]));
-        assert!(!daemon_uses_tui(false, &["daemon".into()]));
-        assert!(!daemon_uses_tui(
-            true,
-            &["daemon".into(), "--headless".into()]
-        ));
-    }
-}
+#[path = "main_tests.rs"]
+mod daemon_entry_tests;

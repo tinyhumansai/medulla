@@ -224,3 +224,27 @@ impl Default for FeedbackQuery {
         }
     }
 }
+
+/// Request body for changing the caller's vote on a feedback item.
+#[derive(serde::Serialize)]
+pub(super) struct VoteFeedbackBody {
+    pub(super) value: i8,
+}
+
+/// Request body for adding a comment to a feedback item.
+#[derive(serde::Serialize)]
+pub(super) struct CommentFeedbackBody<'a> {
+    pub(super) body: &'a str,
+}
+
+/// Request body for submitting feedback through the shared hub.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SubmitFeedbackBody<'a> {
+    #[serde(rename = "type")]
+    pub(super) kind: &'a str,
+    pub(super) title: &'a str,
+    pub(super) body: &'a str,
+    pub(super) product: &'a str,
+    pub(super) origin: &'a str,
+}

@@ -5,7 +5,10 @@
 //! endpoint. Admin triage endpoints are deliberately not modelled here — they
 //! are gated to operators and have no place in the TUI.
 
-use super::types::{FeedbackDetail, FeedbackPage, FeedbackQuery, FeedbackSubmission, FeedbackType};
+use super::types::{
+    CommentFeedbackBody, FeedbackDetail, FeedbackPage, FeedbackQuery, FeedbackSubmission,
+    FeedbackType, SubmitFeedbackBody, VoteFeedbackBody,
+};
 use crate::client::{urlencode, MedullaClient, Result};
 
 /// The source product this client submits feedback as. Drives which repository
@@ -60,16 +63,12 @@ impl MedullaClient {
     /// vote. Returns the item with recomputed tallies. Values outside that set
     /// are rejected by the backend with a 400.
     pub async fn vote_feedback(&self, id: &str, value: i8) -> Result<super::types::FeedbackItem> {
-        #[derive(serde::Serialize)]
-        struct Body {
-            value: i8,
-        }
         let req = self
             .authed(
                 self.http
                     .post(self.url(&format!("/feedback/{}/vote", urlencode(id)))),
             )
-            .json(&Body { value });
+            .json(&VoteFeedbackBody { value });
         self.send(req).await
     }
 
@@ -81,16 +80,12 @@ impl MedullaClient {
         id: &str,
         body: &str,
     ) -> Result<super::types::FeedbackComment> {
-        #[derive(serde::Serialize)]
-        struct Body<'a> {
-            body: &'a str,
-        }
         let req = self
             .authed(
                 self.http
                     .post(self.url(&format!("/feedback/{}/comments", urlencode(id)))),
             )
-            .json(&Body { body });
+            .json(&CommentFeedbackBody { body });
         self.send(req).await
     }
 
@@ -111,19 +106,9 @@ impl MedullaClient {
         title: &str,
         body: &str,
     ) -> Result<FeedbackSubmission> {
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Body<'a> {
-            #[serde(rename = "type")]
-            kind: &'a str,
-            title: &'a str,
-            body: &'a str,
-            product: &'a str,
-            origin: &'a str,
-        }
         let req = self
             .authed(self.http.post(self.url("/feedback/ingest")))
-            .json(&Body {
+            .json(&SubmitFeedbackBody {
                 kind: kind.as_str(),
                 title,
                 body,

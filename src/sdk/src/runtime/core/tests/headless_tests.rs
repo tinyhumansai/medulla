@@ -284,7 +284,7 @@ async fn headless_driver_reports_an_unavailable_runtime() {
     // A protocol mismatch latches the runtime unavailable; the driver reports it
     // instead of hanging on the never-arriving cycle.
     let server = StubServer::start(StubConfig {
-        protocol: 2,
+        protocol: 1,
         ..StubConfig::default()
     });
     let runtime: Arc<dyn Runtime> = Arc::new(CoreRuntime::attach(server.path.clone()));

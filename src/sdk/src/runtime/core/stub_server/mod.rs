@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 impl Default for StubConfig {
     fn default() -> Self {
         StubConfig {
-            protocol: 1,
+            protocol: 2,
             hello_ok: true,
             drop_after_instruct: false,
             instruct_fail: false,
@@ -155,7 +155,7 @@ async fn serve_op(
         "hello" => {
             let res = if cfg.hello_ok {
                 json!({"t":"res","id":id,"ok":true,"result":{
-                    "protocol":1,"sessionId":"agent","ports":["inference","tools","subagents"]
+                    "protocol":2,"sessionId":"agent","ports":["inference","tools","subagents"]
                 }})
             } else {
                 json!({"t":"res","id":id,"ok":false,

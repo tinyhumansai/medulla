@@ -23,7 +23,7 @@ use crate::ui::events::{EventEnvelope, TuiEvent};
 
 /// The NDJSON wire version this runtime speaks. The host bails on a `ready`
 /// banner whose `protocol` differs (serve-protocol §3 handshake).
-pub(super) const PROTOCOL_VERSION: i64 = 1;
+pub(super) const PROTOCOL_VERSION: i64 = 2;
 
 /// How long the host waits for the `ready` banner + `hello` ack before treating
 /// the connection as unavailable (serve-protocol §7, `HANDSHAKE_TIMEOUT`).

@@ -12,7 +12,7 @@ use super::super::types::PROTOCOL_VERSION;
 #[test]
 fn parse_line_decodes_each_serve_to_host_frame() {
     match parse_line(
-        r#"{"t":"ready","protocol":1,"serve":"3.12.0","sessionId":"agent","error":null}"#,
+        r#"{"t":"ready","protocol":2,"serve":"3.14.1","sessionId":"agent","error":null}"#,
     ) {
         Some(Inbound::Ready {
             protocol,
@@ -20,8 +20,8 @@ fn parse_line_decodes_each_serve_to_host_frame() {
             session_id,
             error,
         }) => {
-            assert_eq!(protocol, 1);
-            assert_eq!(serve.as_deref(), Some("3.12.0"));
+            assert_eq!(protocol, 2);
+            assert_eq!(serve.as_deref(), Some("3.14.1"));
             assert_eq!(session_id.as_deref(), Some("agent"));
             assert!(error.is_none());
         }
@@ -92,7 +92,7 @@ fn check_ready_flags_mismatch_and_startup_error() {
         ReadyCheck::Ok { .. }
     ));
     assert!(matches!(
-        check_ready(2, None, None, None),
+        check_ready(1, None, None, None),
         ReadyCheck::Fatal(_)
     ));
     assert!(matches!(
@@ -118,7 +118,7 @@ fn outbound_frames_are_well_formed() {
 
     let hello = hello_params();
     assert_eq!(hello["protocol"], PROTOCOL_VERSION);
-    assert!(hello["host"]
+    assert!(hello["client"]
         .as_str()
         .unwrap()
         .starts_with("medulla-public/"));

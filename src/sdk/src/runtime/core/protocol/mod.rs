@@ -78,12 +78,12 @@ pub(super) fn port_unavailable_ret(id: &str, port: &str) -> String {
     format!("{frame}\n")
 }
 
-/// Build the `hello` params (serve-protocol §3): the negotiated protocol, host
-/// identity, and the ports the host offers to answer.
+/// Build the `hello` params (serve-protocol §3): the negotiated protocol, client
+/// identity, and the ports the client offers to answer.
 pub(super) fn hello_params() -> Value {
     json!({
         "protocol": PROTOCOL_VERSION,
-        "host": format!("medulla-public/{}", env!("CARGO_PKG_VERSION")),
+        "client": format!("medulla-public/{}", env!("CARGO_PKG_VERSION")),
         "ports": HOST_PORTS,
     })
 }

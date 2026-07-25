@@ -89,7 +89,7 @@ async fn submit_with_receipt_reports_the_instruct_ids() {
 #[tokio::test]
 async fn version_mismatch_marks_unavailable() {
     let server = StubServer::start(StubConfig {
-        protocol: 2,
+        protocol: 1,
         ..StubConfig::default()
     });
     let rt = CoreRuntime::attach(server.path.clone());

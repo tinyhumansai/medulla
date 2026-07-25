@@ -430,19 +430,23 @@ async fn handle_inbound(
             }
         }
         Inbound::Call { id, port, method } => {
-            let line = if port == "hosts" && method == "snapshot" {
-                success_ret(
+            let line = match (port.as_str(), method.as_str()) {
+                ("hosts", "snapshot") => success_ret(
                     &id,
                     serde_json::json!({
                         "hosts": declarations.hosts,
                         "harnesses": declarations.harnesses,
                         "workspaces": declarations.workspaces,
                     }),
-                )
-            } else {
-                // Refuse every port this client does not yet host so serve never
-                // hangs on a missing `ret` (serve-protocol §5/§7).
-                port_unavailable_ret(&id, &port)
+                ),
+                ("roster", "list") => {
+                    success_ret(&id, serde_json::json!({ "agents": declarations.agents }))
+                }
+                _ => {
+                    // Refuse every port this client does not yet host so serve
+                    // never hangs on a missing `ret` (serve-protocol §5/§7).
+                    port_unavailable_ret(&id, &port)
+                }
             };
             writer.write_all(line.as_bytes()).await.map_err(|_| ())?;
         }

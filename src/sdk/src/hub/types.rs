@@ -1,4 +1,4 @@
-//! Data types for the tiny.place task-sender hub: a dispatch request, its
+//! Data types for the bridge-independent task sender: a dispatch request, its
 //! terminal outcome, and the error a dispatch can fail with.
 
 use crate::tinyplace::{HarnessProvider, TokenUsage};
@@ -24,7 +24,7 @@ pub fn stderr_log() -> HubLog {
     crate::logging::stderr_sink()
 }
 
-/// A single task to dispatch to a remote tiny.place worker.
+/// A single task to dispatch to a local or remote worker.
 #[derive(Debug, Clone)]
 pub struct TaskRequest {
     /// Worker-facing task id (echoed on the frame; the worker returns it). This
@@ -40,7 +40,7 @@ pub struct TaskRequest {
     pub cycle_id: Option<String>,
     /// The instruction/prompt the worker runs.
     pub instruction: String,
-    /// The worker's tiny.place address (base58 cryptoId or `@handle`).
+    /// The worker's bridge address: a local endpoint name or tiny.place id.
     pub worker_address: String,
     /// Optional harness hint (`claude`/`codex`/`opencode`).
     pub provider: Option<HarnessProvider>,
@@ -81,7 +81,7 @@ pub enum RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RunError::Timeout => write!(f, "tiny.place task timed out"),
+            RunError::Timeout => write!(f, "bridge task timed out"),
             RunError::Aborted => write!(f, "task aborted by orchestrator"),
             RunError::Worker(m) => write!(f, "worker error: {m}"),
             RunError::Transport(m) => write!(f, "transport error: {m}"),

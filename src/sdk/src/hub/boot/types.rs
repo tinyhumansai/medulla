@@ -15,7 +15,7 @@ pub struct WorkerSpec {
     /// The coding-agent harness the worker runs (`claude`/`codex`/`opencode`).
     pub harness: String,
 }
-/// Everything [`start_hub`] needs to bridge the backend to tiny.place workers.
+/// Everything [`start_hub`] needs to bridge the backend to remote workers.
 /// Not `Debug`: the log sink is a boxed closure with no useful representation,
 /// and the JWT should not be printable by accident either.
 #[derive(Clone)]

@@ -1,13 +1,12 @@
-//! The tiny.place task-sender hub — the outbound half of the harness plane.
+//! The task-sender hub — the outbound half of the harness plane.
 //!
 //! The [`daemon`](crate::daemon) (worker) only ever *receives* task frames; this
-//! module *sends* them. [`TaskRunner`] dispatches a `task` frame to a remote
-//! worker over Signal DMs and routes the worker's reply back, so a hosted
-//! orchestrator can drive tiny.place workers it does not run locally. The
-//! [`Relay`] seam abstracts the encrypted transport — production uses
-//! [`SignalTransport`](crate::daemon::transport::SignalTransport); tests use a
-//! fake — and the runner correlates concurrent dispatches by `correlationId`
-//! over the one shared, destructively-drained inbox.
+//! module *sends* them. [`TaskRunner`] dispatches a `task` frame over a
+//! [`Bridge`](crate::bridge::Bridge) and routes the worker's reply back. A
+//! [`LocalBridge`](crate::bridge::LocalBridge) keeps traffic in-process, while a
+//! [`TinyplaceBridge`](crate::bridge::TinyplaceBridge) reaches remote workers
+//! over encrypted tiny.place DMs. The runner correlates concurrent dispatches by
+//! `correlationId` over the one shared, destructively-drained inbox.
 
 mod activity;
 mod boot;

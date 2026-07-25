@@ -35,11 +35,11 @@ pub(super) struct AbortGuard {
     pub(super) key: String,
     pub(super) signal: Arc<Notify>,
 }
-/// Sends tasks to remote tiny.place workers and correlates their replies.
+/// Sends tasks over a bridge and correlates their replies.
 ///
-/// Holds a shared [`Relay`] and a background pump that drains the encrypted
-/// inbox and fans decoded frames to per-dispatch waiters. Wrap in `Arc` to share
-/// across dispatches; dropping it aborts the pump.
+/// Holds a shared [`Relay`] and a background pump that drains its inbox and fans
+/// decoded frames to per-dispatch waiters. Wrap in `Arc` to share across
+/// dispatches; dropping it aborts the pump.
 pub struct TaskRunner {
     pub(super) relay: Arc<dyn Relay>,
     pub(super) waiters: Waiters,

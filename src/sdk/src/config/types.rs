@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
+use crate::runtime::RoutingStrategy;
 use crate::tinyplace::BudgetWindow;
 
 // --- serde default helpers -------------------------------------------------
@@ -497,6 +498,11 @@ pub struct TuiConfig {
     /// advertises a best-effort estimate instead of configured numbers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget: Option<BudgetConfig>,
+    /// The operator's persisted worker routing strategy (camelCase on the wire).
+    /// Loaded on start and reconciled with the backend's routing-strategy config
+    /// when present. Absent means no local preference (defaults to `manual`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub routing_strategy: Option<RoutingStrategy>,
 }
 
 impl Default for TuiConfig {
@@ -516,6 +522,7 @@ impl Default for TuiConfig {
             hub: HubSection::default(),
             router: None,
             budget: None,
+            routing_strategy: None,
         }
     }
 }

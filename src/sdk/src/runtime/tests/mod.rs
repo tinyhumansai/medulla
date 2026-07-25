@@ -325,3 +325,43 @@ async fn every_feedback_mutation_fails_loudly_without_a_backend() {
         );
     }
 }
+
+#[test]
+fn routing_strategy_wire_round_trips_and_reconciles() {
+    use crate::runtime::RoutingStrategy;
+
+    // camelCase wire tokens round-trip.
+    for strategy in [
+        RoutingStrategy::Manual,
+        RoutingStrategy::Balanced,
+        RoutingStrategy::CpuFirst,
+        RoutingStrategy::MemoryFirst,
+    ] {
+        assert_eq!(
+            RoutingStrategy::from_wire(strategy.as_wire()),
+            Some(strategy)
+        );
+    }
+    assert_eq!(RoutingStrategy::from_wire("nonsense"), None);
+    assert_eq!(RoutingStrategy::CpuFirst.as_wire(), "cpuFirst");
+
+    // Reconciliation: the backend wins when present; else local; else Manual.
+    assert_eq!(
+        RoutingStrategy::reconcile(
+            Some(RoutingStrategy::Manual),
+            Some(RoutingStrategy::CpuFirst)
+        ),
+        RoutingStrategy::CpuFirst,
+        "backend wins as configuration"
+    );
+    assert_eq!(
+        RoutingStrategy::reconcile(Some(RoutingStrategy::Balanced), None),
+        RoutingStrategy::Balanced,
+        "local config applies without a backend value"
+    );
+    assert_eq!(
+        RoutingStrategy::reconcile(None, None),
+        RoutingStrategy::Manual,
+        "absent both, Manual preserves the operator's selection"
+    );
+}

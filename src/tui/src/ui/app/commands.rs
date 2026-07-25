@@ -397,6 +397,31 @@ impl App {
         self.persist_theme_now(THEME_ROLES[role]);
     }
 
+    /// Persist the operator's routing strategy to config and remember it on the
+    /// loaded config, so the selection survives a restart and reloads highlighted.
+    ///
+    /// Mirrors the theme editor: a `None` config path applies live (the strategy is
+    /// still sent to the runtime) but is not written to disk.
+    pub(super) fn persist_routing_strategy_now(
+        &mut self,
+        strategy: medulla::runtime::RoutingStrategy,
+    ) {
+        self.loaded.config.routing_strategy = Some(strategy);
+        match &self.config_path {
+            Some(path) => {
+                match medulla::config::persist_routing_strategy(path, strategy.as_wire()) {
+                    Ok(()) => {
+                        self.set_status(format!("Applying {strategy:?} routing strategy… (saved)"))
+                    }
+                    Err(e) => self.set_status(format!("Routing strategy save failed: {e}")),
+                }
+            }
+            None => self.set_status(format!(
+                "Applying {strategy:?} routing strategy… (not persisted)"
+            )),
+        }
+    }
+
     /// Write the current theme to the injected config path, surfacing a status
     /// note on success or failure. A `None` path applies live but does not save.
     pub(super) fn persist_theme_now(&mut self, role: &str) {

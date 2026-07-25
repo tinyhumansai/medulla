@@ -163,7 +163,9 @@ impl App {
             }
             KeyCode::Enter => {
                 let strategy = ROUTING_STRATEGIES[self.routing_strategy_index].strategy;
-                self.set_status(format!("Applying {strategy:?} routing strategy…"));
+                // Persist the operator's selection (and set the status) before
+                // applying it to the runtime, so it reloads highlighted next start.
+                self.persist_routing_strategy_now(strategy);
                 RoutingKey::Handled(Some(Cmd::WorkerOp(WorkerOp::ApplyStrategy { strategy })))
             }
             _ => RoutingKey::Unhandled,

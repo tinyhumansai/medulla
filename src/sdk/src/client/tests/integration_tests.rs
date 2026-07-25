@@ -126,6 +126,44 @@ async fn upload_capabilities_posts_budget_decorated_advertisement() {
 }
 
 #[tokio::test]
+async fn routing_strategy_get_and_put_round_trip_camel_case() {
+    use crate::runtime::RoutingStrategy;
+
+    // GET decodes the camelCase strategy; an unknown value degrades to None.
+    let (base, req) = spawn_stub_capture(ok_envelope(
+        "HTTP/1.1 200 OK",
+        json!({ "strategy": "memoryFirst" }),
+    ))
+    .await;
+    let client = MedullaClient::new(base, "jwt-abc");
+    let got = client.get_routing_strategy().await.unwrap();
+    assert_eq!(got, Some(RoutingStrategy::MemoryFirst));
+    let sent = req.await.unwrap();
+    assert!(
+        sent.starts_with("GET /medulla/v1/routing/strategy"),
+        "{sent}"
+    );
+
+    // PUT sends `{ "strategy": <camelCase> }`.
+    let (base, req) = spawn_stub_capture(ok_envelope(
+        "HTTP/1.1 200 OK",
+        json!({ "strategy": "cpuFirst" }),
+    ))
+    .await;
+    let client = MedullaClient::new(base, "jwt-abc");
+    client
+        .set_routing_strategy(RoutingStrategy::CpuFirst)
+        .await
+        .unwrap();
+    let sent = req.await.unwrap();
+    assert!(
+        sent.starts_with("PUT /medulla/v1/routing/strategy"),
+        "{sent}"
+    );
+    assert!(sent.contains("\"strategy\":\"cpuFirst\""), "{sent}");
+}
+
+#[tokio::test]
 async fn me_carries_bearer_and_unwraps() {
     let (base, req) =
         spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", json!({ "sub": "user-1" }))).await;

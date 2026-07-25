@@ -244,6 +244,23 @@ fn router_base_url_precedence_provider_over_top_level() {
 }
 
 #[test]
+fn routing_strategy_round_trips_camel_case() {
+    use crate::runtime::RoutingStrategy;
+    // camelCase wire value matching the backend's routing-strategy contract.
+    let cfg: TuiConfig = serde_json::from_str(r#"{"routingStrategy":"cpuFirst"}"#).unwrap();
+    assert_eq!(cfg.routing_strategy, Some(RoutingStrategy::CpuFirst));
+
+    let out = serde_json::to_string(&cfg).unwrap();
+    assert!(out.contains("\"routingStrategy\":\"cpuFirst\""), "{out}");
+
+    // Absent by default and omitted from output.
+    let empty: TuiConfig = serde_json::from_str("{}").unwrap();
+    assert!(empty.routing_strategy.is_none());
+    let json = serde_json::to_value(&empty).unwrap();
+    assert!(json.get("routingStrategy").is_none());
+}
+
+#[test]
 fn budget_absent_by_default_and_omitted_from_output() {
     // No [budget] section → estimates only, and it never appears in output.
     let cfg: TuiConfig = serde_json::from_str("{}").unwrap();

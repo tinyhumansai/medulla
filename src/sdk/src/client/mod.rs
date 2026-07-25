@@ -325,6 +325,34 @@ impl MedullaClient {
         Ok(())
     }
 
+    /// Read the backend's configured worker routing strategy
+    /// (`GET /medulla/v1/routing/strategy`).
+    ///
+    /// Returns `None` when the backend has no strategy configured or the value is
+    /// unrecognized, so an absent/garbled strategy degrades to "no backend
+    /// preference" rather than an error — the operator's local config still wins.
+    pub async fn get_routing_strategy(&self) -> Result<Option<crate::runtime::RoutingStrategy>> {
+        let req = self.authed(self.http.get(self.url("/medulla/v1/routing/strategy")));
+        let value: Value = self.send(req).await?;
+        Ok(value
+            .get("strategy")
+            .and_then(|v| v.as_str())
+            .and_then(crate::runtime::RoutingStrategy::from_wire))
+    }
+
+    /// Persist the operator's worker routing strategy to the backend
+    /// (`PUT /medulla/v1/routing/strategy`) as `{ "strategy": <camelCase> }`.
+    pub async fn set_routing_strategy(
+        &self,
+        strategy: crate::runtime::RoutingStrategy,
+    ) -> Result<()> {
+        let req = self
+            .authed(self.http.put(self.url("/medulla/v1/routing/strategy")))
+            .json(&serde_json::json!({ "strategy": strategy.as_wire() }));
+        let _: Value = self.send(req).await?;
+        Ok(())
+    }
+
     // --- SSE -------------------------------------------------------------
 
     /// Open a reconnecting SSE stream of events for a session

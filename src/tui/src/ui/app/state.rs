@@ -25,6 +25,17 @@ impl App {
     pub fn new(runtime: Arc<dyn Runtime>, loaded: LoadedConfig) -> Self {
         let snapshot = runtime.snapshot();
         let theme = Theme::from_config(&loaded.config.theme);
+        // Load the persisted routing strategy onto the chooser so the operator's
+        // saved selection is highlighted on start rather than always Manual.
+        let routing_strategy_index = loaded
+            .config
+            .routing_strategy
+            .and_then(|strategy| {
+                super::types::ROUTING_STRATEGIES
+                    .iter()
+                    .position(|option| option.strategy == strategy)
+            })
+            .unwrap_or(0);
         App {
             runtime,
             loaded,
@@ -44,7 +55,7 @@ impl App {
             worker_index: 0,
             routing_index: 0,
             routing_focused: false,
-            routing_strategy_index: 0,
+            routing_strategy_index,
             credential_status: super::credentials::detect_credential_status(),
             tasks_index: 0,
             tasks_focused: false,

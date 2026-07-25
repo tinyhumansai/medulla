@@ -5,7 +5,7 @@
 //! [`LocalBridgeNetwork`], and tests remain isolated from one another.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
 
@@ -18,7 +18,7 @@ type Inbox = Arc<Mutex<VecDeque<InboundMessage>>>;
 /// An isolated collection of device-local bridge endpoints.
 #[derive(Clone, Default)]
 pub struct LocalBridgeNetwork {
-    endpoints: Arc<Mutex<HashMap<String, Inbox>>>,
+    endpoints: Arc<Mutex<HashMap<String, Weak<Mutex<VecDeque<InboundMessage>>>>>>,
 }
 
 impl LocalBridgeNetwork {
@@ -43,11 +43,11 @@ impl LocalBridgeNetwork {
             .endpoints
             .lock()
             .map_err(|_| "local bridge registry is unavailable".to_string())?;
-        if endpoints.contains_key(&address) {
+        if endpoints.get(&address).and_then(Weak::upgrade).is_some() {
             return Err(format!("local bridge address is already bound: {address}"));
         }
         let inbox = Arc::new(Mutex::new(VecDeque::new()));
-        endpoints.insert(address.clone(), inbox.clone());
+        endpoints.insert(address.clone(), Arc::downgrade(&inbox));
         Ok(LocalBridge {
             address,
             inbox,
@@ -59,8 +59,9 @@ impl LocalBridgeNetwork {
     fn contains(&self, address: &str) -> bool {
         self.endpoints
             .lock()
-            .map(|endpoints| endpoints.contains_key(address))
-            .unwrap_or(false)
+            .ok()
+            .and_then(|endpoints| endpoints.get(address).and_then(Weak::upgrade))
+            .is_some()
     }
 
     /// Look up a target inbox without exposing the registry lock across awaits.
@@ -68,7 +69,7 @@ impl LocalBridgeNetwork {
         self.endpoints
             .lock()
             .ok()
-            .and_then(|endpoints| endpoints.get(address).cloned())
+            .and_then(|endpoints| endpoints.get(address).and_then(Weak::upgrade))
     }
 }
 
@@ -87,23 +88,6 @@ impl LocalBridge {
     /// This local endpoint's address.
     pub fn address(&self) -> &str {
         &self.address
-    }
-}
-
-impl Drop for LocalBridge {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.inbox) != 2 {
-            return;
-        }
-        if let Ok(mut endpoints) = self.network.endpoints.lock() {
-            let is_ours = endpoints
-                .get(&self.address)
-                .map(|inbox| Arc::ptr_eq(inbox, &self.inbox))
-                .unwrap_or(false);
-            if is_ours {
-                endpoints.remove(&self.address);
-            }
-        }
     }
 }
 

@@ -227,19 +227,25 @@ pub async fn run_daemon(
             })
         })
     };
-    // The custom OpenAI-compatible router, read from the same layered config the
-    // TUI loads (`--config` override, else project-local/user-global discovery).
-    // A malformed or missing config leaves routing off rather than failing the
-    // daemon: routing is an optional overlay, not a boot dependency.
     // The custom OpenAI-compatible router and operator budget config, both read
-    // from the layered config. A malformed or missing config leaves both off.
-    let loaded_config = crate::config::load_config(
+    // from the same layered config the TUI loads (`--config` override, else
+    // project-local/user-global discovery). A malformed or missing config leaves
+    // both off rather than failing the daemon — routing is an optional overlay,
+    // not a boot dependency — but the failure is narrated so "my [router] does
+    // nothing" is answerable even when `--config` was passed explicitly.
+    let loaded_config = match crate::config::load_config(
         flags.string("config").as_deref(),
         &env,
         std::path::Path::new(&workspace),
-    )
-    .ok()
-    .map(|loaded| loaded.config);
+    ) {
+        Ok(loaded) => Some(loaded.config),
+        Err(err) => {
+            log(&format!(
+                "config load failed ({err}); routing and budgets are off"
+            ));
+            None
+        }
+    };
     let router = loaded_config.as_ref().and_then(|c| c.router.clone());
     let budget = loaded_config.as_ref().and_then(|c| c.budget.clone());
     let config = DaemonConfig {

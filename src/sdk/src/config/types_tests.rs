@@ -244,6 +244,30 @@ fn router_base_url_precedence_provider_over_top_level() {
 }
 
 #[test]
+fn router_blank_base_url_is_unset_at_both_levels() {
+    // A blank provider override must not shadow a valid top-level endpoint...
+    let shadowed: RouterConfig = serde_json::from_str(
+        r#"{"baseUrl":"https://top.example/v1","providers":{"claude":{"baseUrl":""}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        shadowed.base_url_for("claude"),
+        Some("https://top.example/v1"),
+        "blank provider override falls through to the top-level"
+    );
+
+    // ...and a blank top-level value must not enable routing with an empty
+    // *_BASE_URL (which would break otherwise-normal spawns) → resolves to None.
+    let blank_top: RouterConfig = serde_json::from_str(r#"{"baseUrl":""}"#).unwrap();
+    assert_eq!(blank_top.base_url_for("codex"), None);
+
+    // Blank at both levels is also None.
+    let blank_both: RouterConfig =
+        serde_json::from_str(r#"{"baseUrl":"","providers":{"codex":{"baseUrl":""}}}"#).unwrap();
+    assert_eq!(blank_both.base_url_for("codex"), None);
+}
+
+#[test]
 fn routing_strategy_round_trips_camel_case() {
     use crate::runtime::RoutingStrategy;
     // camelCase wire value matching the backend's routing-strategy contract.

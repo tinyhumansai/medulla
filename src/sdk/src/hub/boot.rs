@@ -1,5 +1,5 @@
-//! Hub bootstrap: construct the tiny.place transport + sender-runner, connect the
-//! Socket.IO harness client, and expose a live [`HubHandle`].
+//! Hub bootstrap: construct the remote tiny.place bridge + sender-runner,
+//! connect the Socket.IO harness client, and expose a live [`HubHandle`].
 //!
 //! [`start_hub`] wires everything and returns a [`HubSession`] (holding the
 //! handle plus the keep-alive client/runner) so an embedding host can manage the
@@ -37,7 +37,7 @@ pub struct WorkerSpec {
     pub harness: String,
 }
 
-/// Everything [`start_hub`] needs to bridge the backend to tiny.place workers.
+/// Everything [`start_hub`] needs to bridge the backend to remote workers.
 /// Not `Debug`: the log sink is a boxed closure with no useful representation,
 /// and the JWT should not be printable by accident either.
 #[derive(Clone)]

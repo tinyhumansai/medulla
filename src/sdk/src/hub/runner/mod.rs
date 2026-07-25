@@ -1,11 +1,11 @@
-//! The tiny.place task-sender runner — the outbound half of the harness plane.
+//! The bridge-independent task sender — the outbound half of the harness plane.
 //!
-//! `SignalTransport`/the daemon only ever RECEIVE task frames; this runner SENDS
-//! them. It dispatches a `task` frame to a worker over Signal DMs, then routes
-//! the worker's `ack`/`status`/`reply`/`error` frames back to the awaiting
-//! caller — correlated by a per-dispatch `correlationId`, because the inbox is
-//! shared across concurrent dispatches (draining it acknowledges every message,
-//! so one pump must fan each frame out to the right waiter).
+//! The daemon only ever receives task frames; this runner sends them. It
+//! dispatches a `task` frame over the selected local or tiny.place bridge, then
+//! routes the worker's `ack`/`status`/`reply`/`error` frames back to the awaiting
+//! caller. Frames are correlated by a per-dispatch `correlationId`, because the
+//! inbox is shared across concurrent dispatches and one pump must fan each frame
+//! out to the right waiter.
 //!
 //! The inbound routing lives in [`pump`]; this module owns dispatch, the liveness
 //! bounds, and orchestrator-driven abort.
@@ -104,11 +104,11 @@ impl Drop for AbortGuard {
     }
 }
 
-/// Sends tasks to remote tiny.place workers and correlates their replies.
+/// Sends tasks over a bridge and correlates their replies.
 ///
-/// Holds a shared [`Relay`] and a background pump that drains the encrypted
-/// inbox and fans decoded frames to per-dispatch waiters. Wrap in `Arc` to share
-/// across dispatches; dropping it aborts the pump.
+/// Holds a shared [`Relay`] and a background pump that drains its inbox and fans
+/// decoded frames to per-dispatch waiters. Wrap in `Arc` to share across
+/// dispatches; dropping it aborts the pump.
 pub struct TaskRunner {
     relay: Arc<dyn Relay>,
     waiters: Waiters,

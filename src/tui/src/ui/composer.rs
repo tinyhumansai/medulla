@@ -264,4 +264,14 @@ mod tests {
             PromptAction::Cancel
         );
     }
+
+    #[test]
+    fn prefilled_prompt_places_the_caret_after_unicode_text() {
+        let prompt = TextPrompt::with_text("edit", "Worker label", "café");
+
+        assert_eq!(prompt.kind, "edit");
+        assert_eq!(prompt.title, "Worker label");
+        assert_eq!(prompt.draft.text, "café");
+        assert_eq!(prompt.draft.cursor, 4);
+    }
 }

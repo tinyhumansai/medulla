@@ -89,30 +89,7 @@ pub fn load_config(path: &Path) -> TinyplaceFileConfig {
 /// parent directory is created if missing. Mirrors the tinyplace CLI config
 /// model so the file stays interoperable with the SDK/CLI.
 pub fn write_config(path: &Path, config: &TinyplaceFileConfig) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut json = serde_json::to_string_pretty(config)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    json.push('\n');
-
-    let pid = std::process::id();
-    let tmp = path.with_extension(format!("json.tmp.{pid}"));
-    std::fs::write(&tmp, json.as_bytes())?;
-    set_owner_only(&tmp)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_owner_only(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn set_owner_only(_path: &Path) -> io::Result<()> {
-    Ok(())
+    crate::persistence::write_private_json(path, config, true)
 }
 
 /// Resolve the API endpoint. Order: `TINYPLACE_ENDPOINT` > `TINYPLACE_API_URL` >

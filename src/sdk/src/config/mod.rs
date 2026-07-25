@@ -29,7 +29,7 @@ mod urls_tests;
 pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
 pub use load::{default_tinyplace_config, load_config};
 pub use persist::{
-    clear_setting, persist_hub_workers, persist_setting, persist_tinyplace_peers,
+    clear_setting, persist_hub_workers, persist_section, persist_setting, persist_tinyplace_peers,
     persist_welcome_completed, persist_workflow_workspaces,
 };
 pub use types::{

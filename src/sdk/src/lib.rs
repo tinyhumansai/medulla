@@ -17,6 +17,7 @@ pub mod init;
 pub mod logging;
 pub mod memory;
 pub mod onboarding;
+pub(crate) mod persistence;
 pub mod runtime;
 pub mod session_history;
 pub mod sessions;

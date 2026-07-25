@@ -41,6 +41,16 @@ pub fn persist_setting(
     write_document(path, &doc)
 }
 
+/// Replace one complete TOML section while preserving every other section.
+///
+/// This is the reusable boundary for components such as the theme editor whose
+/// values naturally form one coherent table rather than independent settings.
+pub fn persist_section(path: &Path, section: &str, values: toml::Table) -> anyhow::Result<()> {
+    let mut doc = read_document(path)?;
+    doc.insert(section.to_string(), toml::Value::Table(values));
+    write_document(path, &doc)
+}
+
 /// Removes `key` from the `[section]` table, leaving the section in place.
 ///
 /// Used to clear an optional setting back to "unset" so the layered default
@@ -66,17 +76,11 @@ fn read_document(path: &Path) -> anyhow::Result<toml::Table> {
     }
 }
 
-/// Render `doc` and write it to `path`, creating the parent directory if needed.
+/// Render `doc` and atomically write it to `path`.
 fn write_document(path: &Path, doc: &toml::Table) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| anyhow::anyhow!("Cannot create {}: {e}", parent.display()))?;
-        }
-    }
     let rendered =
         toml::to_string_pretty(doc).map_err(|e| anyhow::anyhow!("Cannot serialize config: {e}"))?;
-    std::fs::write(path, rendered)
+    crate::persistence::write_atomic(path, rendered.as_bytes())
         .map_err(|e| anyhow::anyhow!("Cannot write {}: {e}", path.display()))
 }
 

@@ -193,13 +193,6 @@ pub fn color_to_string(color: Color) -> String {
 pub fn persist_theme(path: &Path, theme: &Theme) -> anyhow::Result<()> {
     use toml::Value;
 
-    let mut doc: toml::Table = match std::fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("Cannot parse {}: {e}", path.display()))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
-        Err(e) => return Err(anyhow::anyhow!("Cannot read {}: {e}", path.display())),
-    };
-
     let mut section = toml::Table::new();
     section.insert(
         "primary".into(),
@@ -217,19 +210,7 @@ pub fn persist_theme(path: &Path, theme: &Theme) -> anyhow::Result<()> {
         "dimBorder".into(),
         Value::String(color_to_string(theme.dim_border)),
     );
-    doc.insert("theme".into(), Value::Table(section));
-
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| anyhow::anyhow!("Cannot create {}: {e}", parent.display()))?;
-        }
-    }
-    let rendered =
-        toml::to_string_pretty(&doc).map_err(|e| anyhow::anyhow!("Cannot serialize theme: {e}"))?;
-    std::fs::write(path, rendered)
-        .map_err(|e| anyhow::anyhow!("Cannot write {}: {e}", path.display()))?;
-    Ok(())
+    medulla::config::persist_section(path, "theme", section)
 }
 
 #[cfg(test)]

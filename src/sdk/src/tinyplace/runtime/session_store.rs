@@ -80,30 +80,9 @@ impl FileSessionStore {
 
     /// Atomically rewrite the on-disk document (temp file + rename, `0600`).
     fn flush(&self, state: &PersistShape) -> RuntimeResult<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let json = serde_json::to_string(state)?;
-        let pid = std::process::id();
-        let tmp = self.path.with_extension(format!("json.tmp.{pid}"));
-        std::fs::write(&tmp, json.as_bytes())?;
-        set_owner_only(&tmp)?;
-        std::fs::rename(&tmp, &self.path)?;
+        crate::persistence::write_private_json(&self.path, state, false)?;
         Ok(())
     }
-}
-
-/// Restrict a file to owner-only read/write (`0600`) on Unix.
-#[cfg(unix)]
-fn set_owner_only(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-}
-
-/// No-op on platforms without Unix permission bits.
-#[cfg(not(unix))]
-fn set_owner_only(_path: &Path) -> std::io::Result<()> {
-    Ok(())
 }
 
 // serde <-> signal-type conversions.

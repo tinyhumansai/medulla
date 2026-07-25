@@ -173,6 +173,26 @@ fn persist_setting_preserves_unrelated_sections() {
 }
 
 #[test]
+fn persist_section_replaces_only_the_named_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[theme]\nprimary = \"red\"\nstale = true\n\n[memory]\nenabled = true\n",
+    )
+    .unwrap();
+    let mut theme = toml::Table::new();
+    theme.insert("primary".into(), toml::Value::String("cyan".into()));
+
+    super::persist_section(&path, "theme", theme).unwrap();
+
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["theme"]["primary"].as_str(), Some("cyan"));
+    assert!(saved["theme"].get("stale").is_none());
+    assert_eq!(saved["memory"]["enabled"].as_bool(), Some(true));
+}
+
+#[test]
 fn clear_setting_removes_only_its_key() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");

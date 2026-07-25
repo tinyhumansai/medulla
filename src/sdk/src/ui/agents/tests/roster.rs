@@ -24,6 +24,8 @@ fn worker(id: &str, address: &str) -> WorkerInfo {
         memory_available_bytes: None,
         ip_address: None,
         selected: false,
+        budgets: Vec::new(),
+        readiness: Vec::new(),
     }
 }
 

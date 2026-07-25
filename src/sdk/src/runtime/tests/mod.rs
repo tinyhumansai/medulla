@@ -164,6 +164,8 @@ fn value_types_are_debug_clone_eq() {
         memory_available_bytes: None,
         ip_address: None,
         selected: false,
+        budgets: Vec::new(),
+        readiness: Vec::new(),
     };
     assert_eq!(worker.clone(), worker);
 

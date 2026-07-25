@@ -113,6 +113,8 @@ pub fn fleet_app() -> App {
             memory_available_bytes: Some(18 * 1024 * 1024 * 1024),
             ip_address: Some("10.0.0.8".into()),
             selected: true,
+            budgets: Vec::new(),
+            readiness: Vec::new(),
         }],
     });
     App::new(rt, loaded())

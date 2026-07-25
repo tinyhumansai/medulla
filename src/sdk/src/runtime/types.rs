@@ -77,6 +77,12 @@ pub struct WorkerInfo {
     /// Primary IPv4 address reported by the worker.
     pub ip_address: Option<String>,
     pub selected: bool,
+    /// Per-harness token budgets the worker advertised on its capability probe.
+    /// Empty when none were reported. Display-only; the orchestrator sizes tasks.
+    pub budgets: Vec<crate::tinyplace::HarnessBudget>,
+    /// Per-harness readiness the worker advertised on its capability probe. Empty
+    /// when none were reported. Display-only.
+    pub readiness: Vec<crate::tinyplace::HarnessReadiness>,
 }
 /// How the hub chooses a default worker from captured capacity details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

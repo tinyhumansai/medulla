@@ -116,6 +116,8 @@ fn local_worker(address: &str, label: Option<&str>) -> WorkerInfo {
         memory_available_bytes: None,
         ip_address: None,
         selected: true,
+        budgets: Vec::new(),
+        readiness: Vec::new(),
     }
 }
 

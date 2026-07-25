@@ -14,6 +14,9 @@ use tokio::sync::broadcast;
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, StreamState, WorkerInfo, WorkerOp};
+use medulla::tinyplace::{
+    BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider, HarnessReadiness,
+};
 use medulla_tui::ui::app::{App, Cmd, TABS};
 use medulla_tui::ui::chat_store::MainChatSummary;
 
@@ -99,6 +102,8 @@ fn worker(id: &str, selected: bool) -> WorkerInfo {
         memory_available_bytes: Some(18 * 1024 * 1024 * 1024),
         ip_address: Some(format!("10.0.0.{}", id.trim_start_matches('w'))),
         selected,
+        budgets: Vec::new(),
+        readiness: Vec::new(),
     }
 }
 
@@ -142,6 +147,65 @@ fn workers_tab_lists_registered_peers() {
     assert!(out.contains("CPU 8 cores"));
     assert!(out.contains("RAM 18.0 GiB available / 32.0 GiB total"));
     assert!(out.contains("a add · Enter/s select"));
+}
+
+#[test]
+fn worker_row_shows_probe_readiness_and_budget_lines() {
+    // Step 7: the roster row folds the probe's per-harness readiness (ready/reason)
+    // and budget headroom (remaining, window, cooldown) onto the capacity line.
+    let mut w = worker("w1", true);
+    w.readiness = vec![
+        HarnessReadiness {
+            provider: HarnessProvider::Codex,
+            ready: true,
+            reason: None,
+        },
+        HarnessReadiness {
+            provider: HarnessProvider::Claude,
+            ready: false,
+            reason: Some("not authenticated".into()),
+        },
+    ];
+    w.budgets = vec![
+        HarnessBudget {
+            provider: HarnessProvider::Codex,
+            seat: None,
+            window: BudgetWindow::Weekly,
+            limit_tokens: Some(2_000_000),
+            used_tokens: Some(800_000),
+            remaining_tokens: Some(1_200_000),
+            cooldown_until: None,
+            source: BudgetSource::Configured,
+        },
+        // A bare estimate (no numbers, no window, no cooldown) is omitted.
+        HarnessBudget {
+            provider: HarnessProvider::Claude,
+            seat: None,
+            window: BudgetWindow::Unknown,
+            limit_tokens: None,
+            used_tokens: None,
+            remaining_tokens: None,
+            cooldown_until: None,
+            source: BudgetSource::Estimate,
+        },
+    ];
+
+    let mut app = app_with_roster(vec![w], None);
+    app.focus_routing_subpage("List Workers");
+    // Wide enough that the folded readiness + budget segments are not clipped.
+    let out = render(&mut app, 200, 40);
+
+    // Readiness for both harnesses, with the reason on the not-ready one.
+    assert!(out.contains("ready codex"), "codex readiness: {out}");
+    assert!(
+        out.contains("not-ready claude (not authenticated)"),
+        "claude readiness + reason: {out}"
+    );
+    // Budget headroom + window for codex; the bare claude estimate is dropped.
+    assert!(
+        out.contains("codex 1.2M left (weekly)"),
+        "codex budget: {out}"
+    );
 }
 
 #[test]

@@ -36,6 +36,10 @@ pub(super) fn hub_worker_to_info(
         memory_available_bytes,
         ip_address,
         selected: worker.selected,
+        // Budgets/readiness ride the capability probe, not the roster mapping;
+        // the hub projection carries none, so they default empty here.
+        budgets: Vec::new(),
+        readiness: Vec::new(),
     }
 }
 

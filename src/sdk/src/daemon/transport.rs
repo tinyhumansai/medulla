@@ -52,13 +52,6 @@ pub(super) fn describe_error(err: &::tinyplace::Error) -> String {
     }
 }
 
-/// One decrypted inbound DM.
-#[derive(Debug, Clone)]
-pub struct InboundMessage {
-    pub from: String,
-    pub text: String,
-}
-
 /// Mint a directory-unique message id.
 ///
 /// The directory rejects an envelope with an empty `id` (`400 message id, from,
@@ -74,18 +67,6 @@ fn next_message_id() -> String {
         .unwrap_or(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
     format!("msg_{millis}_{n}")
-}
-
-/// Encrypted transport bound to one machine wallet.
-#[derive(Clone)]
-pub struct SignalTransport {
-    client: TinyPlaceClient,
-    session: Arc<SignalSession>,
-    store: Arc<FileSessionStore>,
-    our_agent_id: String,
-    our_ed25519_pub: [u8; 32],
-    /// Serializes ratchet-touching ops (encrypt/decrypt) on this wallet.
-    lock: Arc<Mutex<()>>,
 }
 
 impl SignalTransport {
@@ -415,3 +396,7 @@ pub fn is_session_error(message: &str) -> bool {
 #[cfg(test)]
 #[path = "transport_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::InboundMessage;
+pub use types::SignalTransport;

@@ -13,32 +13,6 @@ use super::relay::Relay;
 use super::roster::{register_payload, remove_conflicting, HubWorker, SharedRoster};
 use rust_socketio::asynchronous::Client;
 
-/// A live control handle over the hub's roster, held by the TUI. Mutations
-/// re-register the roster with the backend so a newly-added worker becomes a
-/// delegation target (and a removed one stops being one) without a restart.
-#[derive(Clone)]
-pub struct HubHandle {
-    roster: SharedRoster,
-    socket: Client,
-    address: String,
-    public_key: String,
-    /// The encrypted transport, used to open a contact edge with a peer the
-    /// moment it is added rather than at first dispatch.
-    relay: Arc<dyn Relay>,
-    /// Sender/receiver correlation used for lightweight worker probes.
-    runner: Arc<super::runner::TaskRunner>,
-    /// Latest capacity details keyed by stable worker id.
-    system_info: Arc<Mutex<HashMap<String, crate::tinyplace::WorkerSystemInfo>>>,
-    /// Where roster mutations are narrated. An add that quietly does nothing is
-    /// the hardest kind of failure to chase.
-    log: super::types::HubLog,
-    /// Where the roster is written so it outlives the process. `None` keeps the
-    /// old behaviour: in memory only, gone at exit.
-    persist: Option<super::types::RosterSink>,
-    /// What the workers are doing, for the Agents view.
-    activity: super::ActivityLog,
-}
-
 /// Whether `address` is a directory alias rather than a cryptoId.
 pub(super) fn is_handle(address: &str) -> bool {
     address.trim_start().starts_with('@')
@@ -97,33 +71,6 @@ pub(super) fn cache_system_info_if_current(
         .expect("system info lock")
         .insert(id.to_string(), info);
     true
-}
-
-/// Everything a [`HubHandle`] is built from.
-///
-/// A struct rather than a parameter list: the handle needs the roster, the
-/// uplink, the hub's own identity and three side-channels, and eight positional
-/// arguments is a place where two of the same type get silently transposed.
-pub(super) struct HandleWiring {
-    /// The shared roster this handle mutates.
-    pub roster: SharedRoster,
-    /// The uplink to re-register through.
-    pub socket: Client,
-    /// The hub's own tiny.place address — surfaced to the operator because every
-    /// worker must trust it before it will accept a task.
-    pub address: String,
-    /// The hub's own identity public key.
-    pub public_key: String,
-    /// The encrypted transport, for opening contact edges.
-    pub relay: Arc<dyn Relay>,
-    /// Runner used to request lightweight details from workers.
-    pub runner: Arc<super::runner::TaskRunner>,
-    /// Where roster mutations are narrated.
-    pub log: super::types::HubLog,
-    /// Where the roster is saved, when it is saved at all.
-    pub persist: Option<super::types::RosterSink>,
-    /// What the workers are doing, for the Agents view.
-    pub activity: super::ActivityLog,
 }
 
 impl HubHandle {
@@ -377,3 +324,8 @@ impl HubHandle {
             .map_err(|e| anyhow::anyhow!("re-register failed: {e}"))
     }
 }
+
+#[path = "handle/types.rs"]
+mod types;
+pub(super) use types::HandleWiring;
+pub use types::HubHandle;

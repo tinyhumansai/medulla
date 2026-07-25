@@ -43,23 +43,6 @@ const INBOX_POLL: Duration = Duration::from_millis(1_000);
 /// Peer work admitted at once before the daemon sheds load.
 const MAX_PENDING: usize = 16;
 
-/// Everything the daemon TUI needs after identity/bootstrap resolution.
-pub struct WorkerTuiConfig {
-    pub env: HashMap<String, String>,
-    pub workspace: String,
-    pub workspaces: Vec<String>,
-    pub masters: Vec<medulla::config::Peer>,
-    pub config_path: std::path::PathBuf,
-    pub credential_dir: std::path::PathBuf,
-    pub contacts: Option<ContactDesk>,
-    pub agent_id: Option<String>,
-    pub startup_status: Option<String>,
-    pub transport: Option<SignalTransport>,
-    pub endpoint: Option<String>,
-    pub trust_workspace: bool,
-    pub skip_permissions: bool,
-}
-
 /// Run the worker TUI to exit.
 ///
 /// `env` is the process environment harness sessions inherit; `workspace` is the
@@ -249,24 +232,6 @@ pub(super) fn spawn_inbox_drain(
     })
 }
 
-/// The select loop.
-/// What building the daemon runtime needs, once the launch step is answered.
-pub(super) struct StartWiring {
-    pub(super) env: HashMap<String, String>,
-    pub(super) workspace: String,
-    pub(super) workspaces: Vec<String>,
-    pub(super) providers: Vec<HarnessProvider>,
-    pub(super) sessions: PtyManager,
-    pub(super) transport: Option<SignalTransport>,
-    pub(super) logs: LogBuffer,
-    /// Whether to pre-trust the workspace with claude. `--no-trust-workspace`
-    /// clears it for an operator who would rather answer the dialog themselves.
-    pub(super) trust_workspace: bool,
-    /// Whether peer sessions run with the harness's permission-bypass flag.
-    /// `--no-skip-permissions` clears it.
-    pub(super) skip_permissions: bool,
-}
-
 /// Pre-trust the workspace so claude does not open on its trust dialog.
 ///
 /// Narrated to the log and the status line: silently editing somebody's claude
@@ -329,3 +294,7 @@ async fn drive(
         }
     }
 }
+
+mod types;
+pub(super) use types::StartWiring;
+pub use types::WorkerTuiConfig;

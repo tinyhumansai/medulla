@@ -43,17 +43,6 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-/// What ensuring trust did.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TrustOutcome {
-    /// The workspace (or an ancestor) was already trusted; nothing was written.
-    AlreadyTrusted,
-    /// Trust was granted, in the config file at this path.
-    Granted(PathBuf),
-    /// Nothing was done, for this reason.
-    Skipped(String),
-}
-
 impl TrustOutcome {
     /// A line for the operator's log, or `None` when there is nothing worth
     /// saying — the already-settled case is the normal one and narrating it
@@ -241,3 +230,7 @@ fn write_atomic(path: &Path, config: &Value) -> std::io::Result<()> {
     std::fs::write(&temp, text)?;
     std::fs::rename(&temp, path)
 }
+
+#[path = "trust/types.rs"]
+mod types;
+pub use types::TrustOutcome;

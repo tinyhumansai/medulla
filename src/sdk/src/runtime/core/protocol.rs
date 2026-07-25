@@ -12,51 +12,6 @@ use crate::ui::events::TuiEvent;
 
 use super::types::{CoreState, WireError, HOST_PORTS, PROTOCOL_VERSION};
 
-/// A parsed serve→host frame. Only the four serve→host frame kinds are
-/// represented (`ready`, `res`, `call`, `event`); host→serve frames (`req`,
-/// `ret`, `emit`) are never received. A malformed line yields `None` and is
-/// skipped by the caller (serve-protocol §1 "parse-fail is skipped, never fatal").
-#[derive(Debug)]
-pub(super) enum Inbound {
-    /// The handshake banner (serve-protocol §3).
-    Ready {
-        /// Wire version; the host bails on a mismatch.
-        protocol: i64,
-        /// The serve build version.
-        serve: Option<String>,
-        /// The session id serve owns.
-        session_id: Option<String>,
-        /// Non-null when startup failed; the host treats serve as unavailable.
-        error: Option<String>,
-    },
-    /// A correlated response to a host `req`.
-    Res {
-        /// The `req` id this answers.
-        id: String,
-        /// Whether the request succeeded.
-        ok: bool,
-        /// The success payload (`null` on failure).
-        result: Value,
-        /// The failure detail, when `ok` is false.
-        error: Option<WireError>,
-    },
-    /// A reverse-RPC port callback (serve→host). Not hosted yet in this
-    /// milestone; the driver refuses it `port_unavailable`.
-    Call {
-        /// The callback id serve minted.
-        id: String,
-        /// The port name (`inference`, `tools`, …).
-        port: String,
-    },
-    /// An unsolicited event-stream frame (serve-protocol §6).
-    Event {
-        /// The contiguous per-connection sequence.
-        seq: u64,
-        /// The wrapped `HarnessEvent` (or serve-level frame) payload.
-        event: Value,
-    },
-}
-
 /// Parse one NDJSON line into an [`Inbound`], or `None` when the line is blank,
 /// not an object, or missing/holding an unknown `t` discriminant.
 pub(super) fn parse_line(line: &str) -> Option<Inbound> {
@@ -291,19 +246,6 @@ fn status_mut(state: &mut CoreState) -> &mut HarnessStatus {
     })
 }
 
-/// Classify a `ready` frame into the handshake outcome the driver acts on.
-pub(super) enum ReadyCheck {
-    /// Handshake may proceed; carries the serve version + session id.
-    Ok {
-        /// The serve build version.
-        serve: Option<String>,
-        /// The session id serve owns.
-        session_id: Option<String>,
-    },
-    /// A fatal handshake outcome; carries the operator-facing reason.
-    Fatal(String),
-}
-
 /// Validate a `ready` banner: a non-null `error` or a protocol mismatch is fatal
 /// (serve-protocol §3); otherwise the handshake may proceed.
 pub(super) fn check_ready(
@@ -322,3 +264,8 @@ pub(super) fn check_ready(
     }
     ReadyCheck::Ok { serve, session_id }
 }
+
+#[path = "protocol/types.rs"]
+mod types;
+pub(super) use types::Inbound;
+pub(super) use types::ReadyCheck;

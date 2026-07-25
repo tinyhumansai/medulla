@@ -33,29 +33,6 @@ const MAX_RECORD_BYTES: usize = 1_048_576;
 /// This grace window is the fallback for a transport that never emits one.
 const INTERRUPT_GRACE: Duration = Duration::from_millis(2_000);
 
-/// How a session's child process should be started.
-#[derive(Debug, Clone)]
-pub struct InteractiveSpec {
-    /// Which CLI to spawn. Only [`HarnessProvider::Claude`] supports this
-    /// transport today; see
-    /// [`can_run_interactive`](super::super::routing::can_run_interactive).
-    pub provider: HarnessProvider,
-    /// The resolved binary name or path.
-    pub bin: String,
-    /// Working directory for the child.
-    pub cwd: String,
-    /// The full environment the child runs with (the parent env is cleared).
-    pub env: std::collections::HashMap<String, String>,
-    /// Optional model override.
-    pub model: Option<String>,
-    /// Optional system-prompt suffix.
-    pub append_system_prompt: Option<String>,
-    /// Whether to pass the provider's skip-permissions flag.
-    pub skip_permissions: bool,
-    /// Extra argv appended to the built base args.
-    pub extra_args: Vec<String>,
-}
-
 /// Build the argv for an interactive session.
 ///
 /// The prompt is *not* an argument here — turns arrive on stdin, which is the
@@ -85,18 +62,6 @@ pub fn build_interactive_args(spec: &InteractiveSpec) -> Vec<String> {
     }
     args.extend(spec.extra_args.iter().cloned());
     args
-}
-
-/// A live interactive harness process.
-pub struct InteractiveSession {
-    child: Mutex<Option<Child>>,
-    stdin: AsyncMutex<Option<ChildStdin>>,
-    /// Semantic events from the reader task. Held behind a mutex so exactly one
-    /// turn consumes the stream at a time.
-    events: AsyncMutex<mpsc::UnboundedReceiver<StreamEvent>>,
-    /// The harness's own session id, once announced. Observability only.
-    harness_session_id: Mutex<Option<String>>,
-    interrupt_seq: AtomicU64,
 }
 
 impl InteractiveSession {
@@ -305,3 +270,8 @@ impl InteractiveSession {
         }
     }
 }
+
+#[path = "session/types.rs"]
+mod types;
+pub use types::InteractiveSession;
+pub use types::InteractiveSpec;

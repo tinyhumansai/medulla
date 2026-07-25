@@ -15,15 +15,6 @@ use tokio::task::JoinHandle;
 use super::book::ContactBook;
 use super::types::ContactDecision;
 
-/// One observed incoming request, as the relay reports it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct IncomingRequest {
-    /// The requesting peer's cryptoId.
-    pub agent_id: String,
-    /// The peer's directory handle, when known.
-    pub handle: Option<String>,
-}
-
 /// The relay operations contact management needs.
 pub trait ContactRelay: Send + Sync {
     /// List pending incoming requests.
@@ -43,11 +34,6 @@ pub trait ContactRelay: Send + Sync {
     fn decline(&self, agent_id: String) -> BoxFuture<'_, Result<(), String>>;
     /// Block `agent_id`, refusing this and future requests.
     fn block(&self, agent_id: String) -> BoxFuture<'_, Result<(), String>>;
-}
-
-/// A [`ContactRelay`] backed by the tiny.place SDK client.
-pub struct ClientContacts {
-    client: ::tinyplace::TinyPlaceClient,
 }
 
 impl ClientContacts {
@@ -130,9 +116,6 @@ impl ContactRelay for ClientContacts {
         })
     }
 }
-
-/// A clock in epoch ms (injectable for tests).
-pub type NowFn = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 /// Poll `relay` for incoming requests, record them in `book`, and auto-settle
 /// the ones policy admits.
@@ -244,3 +227,9 @@ pub fn spawn_contact_poll(
         }
     })
 }
+
+#[path = "service/types.rs"]
+mod types;
+pub use types::ClientContacts;
+pub use types::IncomingRequest;
+pub use types::NowFn;

@@ -11,18 +11,6 @@ use serde::{Deserialize, Serialize};
 /// Wire version tag stamped on every control frame body.
 pub const HARNESS_CONTROL_VERSION: &str = "tinyplace.harness.control.v1";
 
-/// A decoded control frame. `input` types `text` into the addressed session's
-/// agent as a prompt.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnessControlFrame {
-    pub control_version: String,
-    pub kind: String,
-    /// Target session (wrapper or harness session id). Absent targets the primary.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub session_id: Option<String>,
-    pub text: String,
-}
-
 impl HarnessControlFrame {
     /// Serialize this control frame for an encrypted DM body.
     pub fn encode(&self) -> String {
@@ -75,3 +63,6 @@ pub fn parse_harness_control_frame(body: &str) -> Option<HarnessControlFrame> {
 #[cfg(test)]
 #[path = "control_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::HarnessControlFrame;

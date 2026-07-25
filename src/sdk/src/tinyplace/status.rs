@@ -25,34 +25,6 @@ pub const STATE_IDLE: &str = "idle";
 pub const STATE_STOPPED: &str = "stopped";
 pub const STATE_ERRORED: &str = "errored";
 
-/// The running state of the status machine.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionStatusState {
-    /// `HarnessSessionState` wire string (see the `STATE_*` constants).
-    pub state: String,
-    pub detail: String,
-    pub active_call_id: Option<String>,
-    /// Timestamp of the last event that moved the machine (ms since epoch).
-    pub last_event_at_ms: i64,
-}
-
-/// The result of a reduction/tick: the next state and, when something should be
-/// published, the payload to emit.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatusStep {
-    pub next: SessionStatusState,
-    pub emit: Option<StatusPayload>,
-}
-
-/// A semantic event fed to [`reduce_status`]: the typed event kind plus the
-/// wall-clock time it occurred (ms since epoch). `None` or `0` means "unknown
-/// time", which falls back to the machine's last activity clock.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SemanticEvent {
-    pub timestamp_ms: Option<i64>,
-    pub event: HarnessEventKind,
-}
-
 /// Default: the session exists but nothing has happened yet.
 pub fn initial_status(now_ms: i64) -> SessionStatusState {
     SessionStatusState {
@@ -126,12 +98,6 @@ pub fn tick_status(
         next: prev.clone(),
         emit: None,
     }
-}
-
-struct Derived {
-    state: String,
-    detail: String,
-    active_call_id: Option<String>,
 }
 
 fn derive_from_event(event: &HarnessEventKind) -> Option<Derived> {
@@ -259,3 +225,9 @@ fn time_to_ms(timestamp_ms: Option<i64>, fallback: i64) -> i64 {
 #[cfg(test)]
 #[path = "status_tests.rs"]
 mod tests;
+
+mod types;
+use types::Derived;
+pub use types::SemanticEvent;
+pub use types::SessionStatusState;
+pub use types::StatusStep;

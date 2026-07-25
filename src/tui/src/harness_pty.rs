@@ -40,10 +40,6 @@ pub fn spawner() -> PtySpawner {
     Box::new(spawn)
 }
 
-/// Restores cooked mode on drop, so a panic between here and the wrapper's
-/// teardown still leaves the operator with a usable terminal.
-struct RawGuard;
-
 impl RawGuard {
     /// Enter raw mode. Failure is not fatal: the PTY session still works, the
     /// operator just gets local echo, so we degrade rather than refuse to run.
@@ -216,3 +212,7 @@ fn spawn_resize_forwarder(master: Box<dyn portable_pty::MasterPty + Send>) {
 /// No `SIGWINCH` equivalent off Unix; the child keeps its initial geometry.
 #[cfg(not(unix))]
 fn spawn_resize_forwarder(_master: Box<dyn portable_pty::MasterPty + Send>) {}
+
+#[path = "harness_pty/types.rs"]
+mod types;
+use types::RawGuard;

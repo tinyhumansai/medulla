@@ -11,12 +11,6 @@ use crate::ui::events::{EventEnvelope, TuiEvent};
 use super::fmt::{event_kind_color, tokens_suffix, tool_line};
 use super::types::{AgentLane, AgentRole, TaskState, TaskStatus, TurnBlock};
 
-/// Insertion-ordered lane collection.
-struct Lanes {
-    order: Vec<String>,
-    map: HashMap<String, AgentLane>,
-}
-
 impl Lanes {
     fn new() -> Self {
         Lanes {
@@ -490,3 +484,7 @@ fn ensure_session_lane(workers: &mut Lanes, key: &str, agent_id: &str, session_i
         workers.insert(lane);
     }
 }
+
+#[path = "lanes/types.rs"]
+mod types;
+use types::Lanes;

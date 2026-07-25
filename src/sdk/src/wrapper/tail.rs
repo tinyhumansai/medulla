@@ -20,65 +20,6 @@ use crate::session_history::{discover_session_file, preexisting_session_files, S
 /// launch still counts as this run's, matching the TS wrapper's `start - 2000`.
 const DISCOVER_MTIME_GRACE_MS: i64 = 2_000;
 
-/// One appended transcript line and its 1-based line number.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TailLine {
-    pub line_no: i64,
-    pub text: String,
-}
-
-/// The outcome of one poll: any newly-located transcript (first sighting) plus
-/// the lines appended since the previous poll.
-#[derive(Debug, Default)]
-pub struct TailPoll {
-    /// Set on the poll that first locates the transcript.
-    pub located: Option<LocatedSession>,
-    pub lines: Vec<TailLine>,
-}
-
-/// The transcript the tailer latched onto.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocatedSession {
-    pub path: PathBuf,
-    /// The harness's own session id, read from the transcript head.
-    pub harness_session_id: String,
-    pub cwd: Option<String>,
-}
-
-struct Active {
-    path: PathBuf,
-    byte_offset: u64,
-    line_no: i64,
-    pending: String,
-}
-
-/// A polling tailer for one wrapped session.
-pub struct SessionTailer {
-    env: HashMap<String, String>,
-    agent: SessionAgentKind,
-    cwd: String,
-    start_ms: i64,
-    ignored: HashSet<PathBuf>,
-    active: Option<Active>,
-    /// When set, only the transcript recording this session id is accepted.
-    expect_session_id: Option<String>,
-    /// Start reading at the transcript's current end rather than at byte zero.
-    from_end: bool,
-    /// Transcripts already latched onto by another tailer in this process.
-    ///
-    /// Only consulted for *unpinned* discovery, which is the ambiguous case: a
-    /// codex session mints its own id, so a new one has nothing to pin to and
-    /// discovery falls back to "the newest transcript that appeared after we
-    /// launched". Two sessions starting together both match the first rollout to
-    /// appear, and both tails then settle on it — one task's answer, returned
-    /// twice. A claim makes the first tailer's choice exclusive.
-    ///
-    /// A pinned tailer ignores claims entirely: identity already decides, and a
-    /// resumed session must be able to re-latch the transcript it claimed on its
-    /// previous turn.
-    claims: Option<Arc<Mutex<HashSet<PathBuf>>>>,
-}
-
 impl SessionTailer {
     /// Build a tailer for `agent` anchored at `cwd`. `start_ms` is the launch
     /// instant; pre-existing transcripts are snapshotted now and ignored.
@@ -274,3 +215,10 @@ impl SessionTailer {
 #[cfg(test)]
 #[path = "tail_tests.rs"]
 mod tests;
+
+mod types;
+use types::Active;
+pub use types::LocatedSession;
+pub use types::SessionTailer;
+pub use types::TailLine;
+pub use types::TailPoll;

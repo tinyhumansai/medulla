@@ -103,12 +103,6 @@ fn dispatch(
     }
 }
 
-/// A minimal raw-mode + alt-screen guard for the pre-run onboarding loop. Unlike
-/// the main TUI it needs no mouse capture or kitty flags — it is keyboard-only.
-struct OnboardTermGuard {
-    active: bool,
-}
-
 impl OnboardTermGuard {
     /// Enter raw mode + the alternate screen, restoring on drop.
     fn setup() -> io::Result<Self> {
@@ -137,3 +131,7 @@ impl Drop for OnboardTermGuard {
         self.restore();
     }
 }
+
+#[path = "run/types.rs"]
+mod types;
+use types::OnboardTermGuard;

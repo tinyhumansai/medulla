@@ -20,10 +20,6 @@ use medulla::hub::{start_hub, HubConfig, HubHandle, HubSession, WorkerSpec};
 /// Default inbox poll interval when `MEDULLA_HUB_POLL_MS` is unset.
 const DEFAULT_POLL_MS: u64 = 1500;
 
-/// The shared slot a [`BackendRuntime`](medulla::runtime::backend::BackendRuntime)
-/// reads for its live worker roster; filled once the hub connects.
-pub(crate) type HubSlot = Arc<Mutex<Option<HubHandle>>>;
-
 /// The config file the roster is remembered in.
 ///
 /// Home-derived to match the rest of this module (identity dir, credentials).
@@ -208,3 +204,7 @@ pub(crate) async fn start(
 
 #[cfg(test)]
 mod tests;
+
+#[path = "hub_relay/types.rs"]
+mod types;
+pub(crate) use types::HubSlot;

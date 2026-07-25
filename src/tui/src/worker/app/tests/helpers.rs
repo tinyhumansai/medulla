@@ -19,12 +19,6 @@ use super::super::types::WorkerApp;
 
 // ------------------------------------------------------------------ stubs ---
 
-pub(super) struct FakeRelay {
-    incoming: Vec<IncomingRequest>,
-    /// Peers the relay already holds as contacts, independent of any request.
-    contacts: Vec<IncomingRequest>,
-}
-
 impl ContactRelay for FakeRelay {
     fn incoming(&self) -> BoxFuture<'_, Result<Vec<IncomingRequest>, String>> {
         Box::pin(async move { Ok(self.incoming.clone()) })
@@ -173,3 +167,7 @@ pub(super) fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
     }
     panic!("timed out after 30s waiting for: {what}");
 }
+
+#[path = "helpers/types.rs"]
+mod types;
+pub(super) use types::FakeRelay;

@@ -74,24 +74,6 @@ pub(super) fn now_ms() -> i64 {
     crate::clock::now_millis()
 }
 
-/// The tiny.place bridge for one wrapped session: encrypted transport plus the
-/// per-session envelope/status/tailer state. Absent when running passthrough.
-pub(super) struct Bridge {
-    pub(super) transport: SignalTransport,
-    pub(super) recipient: Option<String>,
-    pub(super) receive_from: Option<String>,
-    pub(super) receive_active: bool,
-    pub(super) builder: EnvelopeBuilder,
-    pub(super) status: SessionStatusState,
-    pub(super) last_status_ms: i64,
-    pub(super) mapper: HarnessLineMapper,
-    pub(super) tailer: Option<SessionTailer>,
-    pub(super) wrapper_session_id: String,
-    pub(super) harness_session_id: String,
-    pub(super) status_throttle_ms: i64,
-    pub(super) status_idle_ms: i64,
-}
-
 impl Bridge {
     /// Serialize and send `envelope` to the configured recipient (no-op when the
     /// bridge has no recipient or serialization fails).
@@ -356,3 +338,7 @@ fn classify_inbound(
     }
     Some(message.text.clone())
 }
+
+#[path = "bridge/types.rs"]
+mod types;
+pub(super) use types::Bridge;

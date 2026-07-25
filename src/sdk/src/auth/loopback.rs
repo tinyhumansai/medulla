@@ -18,22 +18,6 @@ use super::url::{login_url, parse_target, random_state_nonce};
 const READ_BUFFER_BYTES: usize = 8 * 1024;
 const PER_CONNECTION_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Outcome of classifying one HTTP request received by the loopback accept loop.
-/// Extracted as a pure function so routing can be unit-tested without a socket.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum RequestOutcome {
-    /// `GET /auth` with a matching `state=` nonce. The caller extracts the
-    /// `token`/`error` params from `callback_url` and finishes.
-    AuthCallback { callback_url: String },
-    /// `/auth` matched but `state=` was missing or wrong. Caller sends 400 and
-    /// keeps waiting.
-    StateMismatch,
-    /// Path is not `/auth`. Caller sends 404 and keeps waiting.
-    NotFound,
-    /// Method is not GET. Caller sends 405 and keeps waiting.
-    MethodNotAllowed,
-}
-
 /// Parse the request target (path + query) out of an HTTP/1.x request head,
 /// returning `None` for a non-GET method.
 fn parse_get_target(head: &str) -> Option<&str> {
@@ -74,17 +58,6 @@ pub(super) fn classify_request(
         },
         _ => RequestOutcome::StateMismatch,
     }
-}
-
-/// A bound loopback listener with its state nonce and the login URL to open.
-/// Splitting "start" (immediate: port/url/state) from "await the callback" lets
-/// the TUI open the browser and render the waiting screen before blocking, while
-/// the CLI drives both back-to-back via [`run_login_flow`].
-pub struct LoopbackListener {
-    listener: TcpListener,
-    port: u16,
-    state: String,
-    login_url: String,
 }
 
 impl LoopbackListener {
@@ -292,3 +265,8 @@ pub fn open_browser(url: &str) {
     let mut cmd = std::process::Command::new("true");
     let _ = cmd.spawn();
 }
+
+#[path = "loopback/types.rs"]
+mod types;
+pub use types::LoopbackListener;
+pub(super) use types::RequestOutcome;

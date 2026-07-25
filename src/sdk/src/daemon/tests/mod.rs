@@ -27,9 +27,6 @@ mod provider_tests;
 mod system_info_tests;
 mod task_tests;
 
-/// Recorded `(recipient, body)` pairs captured by [`recording_send`].
-pub(super) type Recorded = Arc<StdMutex<Vec<(String, String)>>>;
-
 /// A [`SendFn`] that records every `(to, body)` it is handed, paired with the
 /// shared sink the test reads back.
 pub(super) fn recording_send() -> (SendFn, Recorded) {
@@ -267,3 +264,6 @@ pub(super) fn capabilities_frame(task_id: &str, correlation: Option<&str>) -> Ta
         ..task_frame(task_id, "", correlation)
     }
 }
+
+mod types;
+pub(super) use types::Recorded;

@@ -48,12 +48,6 @@ pub fn default_log_dir(env: &std::collections::HashMap<String, String>) -> PathB
     medulla::home::medulla_home(env).join("logs")
 }
 
-/// A file every log line is appended to.
-struct FileSink {
-    path: PathBuf,
-    handle: Option<File>,
-}
-
 impl FileSink {
     /// Open `dir/<name>.log` for appending, rotating an oversized existing file.
     ///
@@ -92,25 +86,6 @@ impl FileSink {
             self.handle = None;
         }
     }
-}
-
-/// One captured log line.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LogLine {
-    /// Epoch ms when it was written.
-    pub at: i64,
-    /// The line itself, as the daemon wrote it.
-    pub text: String,
-}
-
-/// A bounded, shared ring of daemon log lines.
-///
-/// Cheap to clone; every clone reads and writes the same ring.
-#[derive(Clone)]
-pub struct LogBuffer {
-    lines: Arc<Mutex<VecDeque<LogLine>>>,
-    now: Arc<dyn Fn() -> i64 + Send + Sync>,
-    file: Arc<Mutex<Option<FileSink>>>,
 }
 
 impl Default for LogBuffer {
@@ -202,3 +177,8 @@ impl LogBuffer {
 #[cfg(test)]
 #[path = "log_tests.rs"]
 mod tests;
+
+mod types;
+use types::FileSink;
+pub use types::LogBuffer;
+pub use types::LogLine;

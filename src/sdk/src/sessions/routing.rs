@@ -12,29 +12,6 @@ use crate::tinyplace::HarnessProvider;
 
 use super::types::{SessionClass, SessionPolicy};
 
-/// What provoked a session. The routing input that is *not* operator policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Stimulus {
-    /// A `medulla-tinyplace/1` `task` frame — a discrete unit of delegated work.
-    Task,
-    /// A conversational plain-text DM from a peer.
-    PlainText,
-    /// The operator opened a session from the TUI.
-    Operator,
-}
-
-/// How a provider's child process is driven.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Transport {
-    /// One process per turn: spawn, feed the prompt as argv, read to EOF.
-    ///
-    /// Continuity, when the provider supports it, comes from resuming a captured
-    /// session id rather than from keeping the process alive.
-    OneShot,
-    /// One long-lived process fed newline-delimited JSON turns over stdin.
-    Interactive,
-}
-
 impl Transport {
     /// The wire/display string.
     pub fn as_str(self) -> &'static str {
@@ -129,3 +106,8 @@ pub fn route_transport(class: SessionClass, provider: HarnessProvider) -> Transp
 pub fn has_continuity(provider: HarnessProvider) -> bool {
     can_run_interactive(provider) || can_resume(provider)
 }
+
+#[path = "routing/types.rs"]
+mod types;
+pub use types::Stimulus;
+pub use types::Transport;

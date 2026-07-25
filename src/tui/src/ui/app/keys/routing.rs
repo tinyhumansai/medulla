@@ -164,10 +164,6 @@ impl App {
     }
 }
 
-/// Whether Routing consumed a key and its optional runtime command.
-pub(super) enum RoutingKey {
-    /// Routing handled the key.
-    Handled(Option<Cmd>),
-    /// A structural/global binding may handle the key.
-    Unhandled,
-}
+#[path = "routing/types.rs"]
+mod types;
+pub(super) use types::RoutingKey;

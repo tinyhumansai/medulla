@@ -24,28 +24,6 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::super::types::{PtyRequest, WrapperConfig};
 
-/// A spawned harness child, uniform across the PTY and inherited-stdio paths.
-///
-/// The run loop destructures this rather than calling methods on it, so each
-/// field can be borrowed independently inside `tokio::select!`.
-pub(super) struct ChildSession {
-    /// Sink for bytes typed into the child. `Some` only when input injection is
-    /// active; [`drain_and_inject`](super::super::bridge::drain_and_inject)
-    /// writes inbound owner messages here.
-    pub(super) input: Option<mpsc::UnboundedSender<Vec<u8>>>,
-    /// Resolves with the shell-style exit code once the child has exited.
-    pub(super) done: oneshot::Receiver<i32>,
-    /// Sending on this kills the child; consumed on first use.
-    pub(super) kill: Option<oneshot::Sender<()>>,
-    /// Resolves once the PTY reader has copied the child's final output to our
-    /// stdout. `None` on the inherited-stdio path, where the child wrote to the
-    /// real stdout directly and nothing is buffered on our side.
-    pub(super) drained: Option<oneshot::Receiver<()>>,
-    /// Returns the terminal to cooked mode (PTY path only). Called by the run
-    /// loop once the child's output has drained.
-    pub(super) restore: Option<Box<dyn FnOnce() + Send>>,
-}
-
 /// Spawn `bin` with `args` under `config`, choosing the stdio strategy.
 ///
 /// `inject` is the bridge's `receive_active`: whether inbound owner messages
@@ -185,3 +163,7 @@ pub(super) fn exit_code(status: std::process::ExitStatus) -> i32 {
     }
     1
 }
+
+#[path = "child/types.rs"]
+mod types;
+pub(super) use types::ChildSession;

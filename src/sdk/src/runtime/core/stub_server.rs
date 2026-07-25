@@ -14,32 +14,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::task::JoinHandle;
 
-/// How the stub should behave for the test in hand.
-#[derive(Clone)]
-pub(super) struct StubConfig {
-    /// The `protocol` int advertised in the `ready` banner (2 ⇒ mismatch).
-    pub(super) protocol: i64,
-    /// Whether `hello` is answered `ok:true` (false ⇒ a fatal rejection).
-    pub(super) hello_ok: bool,
-    /// Close the connection right after an `instruct` (to force a reconnect).
-    pub(super) drop_after_instruct: bool,
-    /// Answer `instruct` with `ok:false` (to exercise the failed-request path).
-    pub(super) instruct_fail: bool,
-    /// The `event.event` payloads streamed after an `instruct` receipt.
-    pub(super) instruct_events: Vec<Value>,
-    /// An optional pause between consecutive `instruct_events` writes, so a
-    /// test can force the host to observe (and act on) each event alone rather
-    /// than folding the whole batch in one wakeup.
-    pub(super) instruct_event_gap: Option<std::time::Duration>,
-    /// The `event.event` payloads re-emitted when a `subscribe` carries a
-    /// `replay` key (a re-attach rebaseline, serve-protocol §5). Empty ⇒ the
-    /// stub replays nothing, matching a serve with no recent history.
-    pub(super) replay_events: Vec<Value>,
-    /// Raw frames to push right after answering `hello` (e.g. a `call` or a
-    /// duplicate `ready`), exercising the host's inbound-frame handling.
-    pub(super) after_hello: Vec<Value>,
-}
-
 impl Default for StubConfig {
     fn default() -> Self {
         StubConfig {
@@ -60,18 +34,6 @@ impl Default for StubConfig {
             ],
         }
     }
-}
-
-/// A running stub. Drop aborts the accept loop and unlinks the socket.
-pub(super) struct StubServer {
-    /// The socket path to attach a [`CoreRuntime`](super::CoreRuntime) to.
-    pub(super) path: PathBuf,
-    /// How many connections have been accepted (grows across reconnects).
-    accepts: Arc<AtomicUsize>,
-    /// Every `(op, params)` received, in arrival order.
-    received: Arc<Mutex<Vec<(String, Value)>>>,
-    /// The accept-loop task.
-    accept_task: JoinHandle<()>,
 }
 
 /// A process-unique temp socket path (kept short for the ~104-char sun_path cap).
@@ -291,3 +253,8 @@ async fn serve_op(
 async fn send(wr: &mut tokio::net::unix::OwnedWriteHalf, frame: &Value) -> std::io::Result<()> {
     wr.write_all(format!("{frame}\n").as_bytes()).await
 }
+
+#[path = "stub_server/types.rs"]
+mod types;
+pub(super) use types::StubConfig;
+pub(super) use types::StubServer;

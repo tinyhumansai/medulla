@@ -16,18 +16,6 @@ use ::tinyplace::types::{
 
 use crate::daemon::mappers::HarnessSemanticEvent;
 
-/// The stable per-run facts an envelope carries, plus the advancing `seq`.
-pub struct EnvelopeBuilder {
-    wrapper_session_id: String,
-    harness_session_id: String,
-    cwd: String,
-    provider: String,
-    command: String,
-    argv: Vec<String>,
-    source_path: String,
-    seq: i64,
-}
-
 impl EnvelopeBuilder {
     /// Start a builder. `harness_session_id` may be the wrapper id until the real
     /// transcript id is discovered (kept non-empty so envelopes stay valid).
@@ -191,3 +179,6 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 #[path = "envelope_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::EnvelopeBuilder;

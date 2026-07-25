@@ -24,31 +24,11 @@ use crate::tinyplace::HarnessProvider;
 
 use super::completion::{TurnSignal, TurnWatcher};
 
-/// The outcome of folding one raw line.
-#[derive(Debug, Clone)]
-pub struct LineFold {
-    /// Semantic events this line produced, in order. Drive status frames from
-    /// these; they are identical in both modes.
-    pub events: Vec<HarnessSemanticEvent>,
-    /// The turn's answer, present only on the line that ended it.
-    pub reply: Option<String>,
-}
-
 impl LineFold {
     /// Whether this line ended the turn.
     pub fn is_complete(&self) -> bool {
         self.reply.is_some()
     }
-}
-
-/// Folds a harness's raw output into semantic events and a completion.
-///
-/// One per turn. Feed it every line from whichever source the mode provides.
-pub struct TurnStream {
-    mapper: HarnessLineMapper,
-    watcher: TurnWatcher,
-    line_no: i64,
-    events_seen: usize,
 }
 
 impl TurnStream {
@@ -137,3 +117,8 @@ impl TurnStream {
         }
     }
 }
+
+#[path = "turn_stream/types.rs"]
+mod types;
+pub use types::LineFold;
+pub use types::TurnStream;

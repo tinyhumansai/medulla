@@ -25,23 +25,6 @@ use super::protocol::{
 };
 use super::types::{Command, ConnState, CoreError, CoreState, HANDSHAKE_TIMEOUT, RECONNECT_DELAY};
 
-/// A [`Runtime`](crate::runtime::Runtime) attached to a `medulla-serve` process
-/// over a unix domain socket. Snapshot/subscribe read the shared state the
-/// driver folds into; the mutating methods enqueue [`Command`]s the driver
-/// serializes onto the wire.
-pub struct CoreRuntime {
-    /// Shared connection state the snapshot is rendered from.
-    pub(super) state: Arc<Mutex<CoreState>>,
-    /// Pinged after every fold/mutation so the UI re-pulls a snapshot.
-    pub(super) tx: broadcast::Sender<()>,
-    /// Commands to the connection driver.
-    pub(super) cmd_tx: mpsc::UnboundedSender<Command>,
-    /// The attached socket path, for diagnostics.
-    pub(super) socket_path: PathBuf,
-    /// The driver task handle, aborted on drop.
-    driver: Mutex<Option<JoinHandle<()>>>,
-}
-
 impl CoreRuntime {
     /// Attach to a `medulla-serve` process already listening at `socket_path`.
     ///
@@ -81,16 +64,6 @@ impl Drop for CoreRuntime {
             handle.abort();
         }
     }
-}
-
-/// How one connection attempt ended, deciding whether the driver re-attaches.
-enum ConnOutcome {
-    /// The command channel closed (handle dropped) or a clean `shutdown`.
-    Shutdown,
-    /// A fatal handshake outcome; carries the reason. The driver stops retrying.
-    Fatal(String),
-    /// The socket dropped mid-session (or was not yet present). Re-attach.
-    Dropped,
 }
 
 /// The driver's outer loop: attach, service, and re-attach on a transient drop
@@ -303,14 +276,6 @@ fn handle_disconnected_command(cmd: Option<Command>) -> ConnOutcome {
     }
 }
 
-/// The serve identity learned from a successful handshake.
-struct HelloOk {
-    /// The serve build version (from `ready`).
-    serve: Option<String>,
-    /// The session id serve owns (from `ready`).
-    session_id: Option<String>,
-}
-
 /// The handshake: read the `ready` banner, check the version, send `hello`, and
 /// await its `res` (serve-protocol §3).
 async fn handshake(
@@ -375,14 +340,6 @@ async fn read_line(
         Ok(0) | Err(_) => Err(HandshakeError::Dropped),
         Ok(_) => Ok(line),
     }
-}
-
-/// How the handshake can fail.
-enum HandshakeError {
-    /// A permanent rejection (version mismatch / `hello` error / startup error).
-    Fatal(String),
-    /// A transport drop mid-handshake; the driver re-attaches.
-    Dropped,
 }
 
 /// Record the serve version + session id from the `ready` banner into state.
@@ -505,3 +462,10 @@ fn set_conn(state: &Arc<Mutex<CoreState>>, tx: &broadcast::Sender<()>, conn: Con
     }
     let _ = tx.send(());
 }
+
+#[path = "client/types.rs"]
+mod types;
+use types::ConnOutcome;
+pub use types::CoreRuntime;
+use types::HandshakeError;
+use types::HelloOk;

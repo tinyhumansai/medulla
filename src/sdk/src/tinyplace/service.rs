@@ -31,25 +31,6 @@ use crate::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity};
 const PRESENCE_POLL: Duration = Duration::from_secs(10);
 const CONTACT_POLL: Duration = Duration::from_millis(1500);
 
-/// What the service observes and the TUI renders.
-#[derive(Debug, Clone, Default)]
-pub struct TinyplaceObservation {
-    /// This TUI's own tiny.place identity.
-    pub identity: Option<TinyplaceIdentity>,
-    /// The configured peer roster, tagged `harness=tinyplace`.
-    pub roster: Vec<AgentDescriptor>,
-    /// Latest presence per peer agent id.
-    pub presence: HashMap<String, AgentPresence>,
-    /// A problem the operator needs to know about, such as a failed pre-key
-    /// publish — which leaves the identity reachable in the directory but unable
-    /// to receive any DM.
-    ///
-    /// Carried here rather than printed: the consumers of this service own a
-    /// terminal screen, and anything written to stdout or stderr under one lands
-    /// on top of the UI and never clears.
-    pub notice: Option<String>,
-}
-
 impl TinyplaceObservation {
     /// Merge this observation into a runtime snapshot in place.
     ///
@@ -70,15 +51,6 @@ impl TinyplaceObservation {
             snapshot.presence.insert(id.clone(), presence.clone());
         }
     }
-}
-
-/// A running tiny.place background service. Dropping it aborts its loops.
-pub struct TinyplaceService {
-    observation: Arc<Mutex<TinyplaceObservation>>,
-    contacts: ContactDesk,
-    transport: crate::daemon::transport::SignalTransport,
-    endpoint: String,
-    handles: Vec<JoinHandle<()>>,
 }
 
 impl Drop for TinyplaceService {
@@ -295,3 +267,7 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 #[path = "service_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::TinyplaceObservation;
+pub use types::TinyplaceService;

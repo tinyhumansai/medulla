@@ -481,3 +481,34 @@ pub struct HistoryRewardClaim {
     #[serde(default)]
     pub already_claimed: bool,
 }
+
+#[allow(unused_imports)]
+use super::*;
+/// Client for the Medulla backend HTTP + SSE API.
+#[derive(Debug, Clone)]
+pub struct MedullaClient {
+    pub(super) base_url: String,
+    pub(super) jwt: String,
+    pub(super) http: reqwest::Client,
+}
+/// Builder for [`MedullaClient`].
+#[derive(Debug, Default)]
+pub struct MedullaClientBuilder {
+    pub(super) base_url: Option<String>,
+    pub(super) jwt: Option<String>,
+    pub(super) http: Option<reqwest::Client>,
+}
+/// Raw response envelope shared by every endpoint.
+#[derive(Debug, Deserialize)]
+pub(super) struct RawEnvelope {
+    #[serde(default)]
+    pub(super) success: bool,
+    #[serde(default)]
+    pub(super) data: Option<Value>,
+    #[serde(default)]
+    pub(super) error: Option<String>,
+    #[serde(rename = "errorCode", default)]
+    pub(super) error_code: Option<String>,
+    #[serde(default)]
+    pub(super) details: Option<Value>,
+}

@@ -14,28 +14,12 @@ pub trait TaskSourceProvider: Send + Sync {
     async fn sync(&self, config: &SourceConfig, repository: &mut TaskRepository) -> SyncResult;
 }
 
-/// GitHub REST provider. The token is read from source configuration.
-#[derive(Debug, Clone)]
-pub struct GitHubProvider {
-    client: reqwest::Client,
-}
-
 impl Default for GitHubProvider {
     fn default() -> Self {
         Self {
             client: reqwest::Client::new(),
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct GitHubRecord {
-    number: u64,
-    title: String,
-    body: Option<String>,
-    html_url: String,
-    state: String,
-    pull_request: Option<serde_json::Value>,
 }
 
 #[async_trait]
@@ -110,3 +94,8 @@ impl TaskSourceProvider for GitHubProvider {
         result
     }
 }
+
+#[path = "github/types.rs"]
+mod types;
+pub use types::GitHubProvider;
+use types::GitHubRecord;

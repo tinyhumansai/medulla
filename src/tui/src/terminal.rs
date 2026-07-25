@@ -16,13 +16,6 @@ use crossterm::terminal::{
 };
 use crossterm::{execute, queue};
 
-/// RAII guard that owns the terminal's raw-mode/alt-screen/kitty state and
-/// restores it on drop. Construct with [`TermGuard::setup`].
-pub(crate) struct TermGuard {
-    alt_screen: bool,
-    kitty: bool,
-}
-
 impl TermGuard {
     /// Enter raw mode, optionally the alternate screen, enable mouse capture,
     /// and push the kitty disambiguation flag when the terminal supports it.
@@ -76,3 +69,7 @@ pub(crate) fn set_mouse_capture(on: bool) {
         let _ = execute!(out, DisableMouseCapture);
     }
 }
+
+#[path = "terminal/types.rs"]
+mod types;
+pub(crate) use types::TermGuard;

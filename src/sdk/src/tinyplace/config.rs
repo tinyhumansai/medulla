@@ -16,24 +16,6 @@ use serde::{Deserialize, Serialize};
 /// duplicated here.
 pub const DEFAULT_ENDPOINT: &str = crate::config::PROD_TINYPLACE_BASE_URL;
 
-/// The persisted CLI config. JSON field names match the TypeScript SDK
-/// (camelCase for the multi-word keys).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct TinyplaceFileConfig {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub endpoint: Option<String>,
-    #[serde(rename = "secretKey", skip_serializing_if = "Option::is_none", default)]
-    pub secret_key: Option<String>,
-    #[serde(rename = "siwsToken", skip_serializing_if = "Option::is_none", default)]
-    pub siws_token: Option<String>,
-    #[serde(
-        rename = "openHumanOwner",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
-    pub open_human_owner: Option<String>,
-}
-
 /// The absolute config-file path: `TINYPLACE_CONFIG` when set, otherwise
 /// `<medulla_home>/tinyplace/config.json`.
 ///
@@ -138,3 +120,6 @@ pub fn resolve_endpoint(env: &HashMap<String, String>, config: &TinyplaceFileCon
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::TinyplaceFileConfig;

@@ -255,14 +255,6 @@ impl App {
     }
 }
 
-/// Whether the Settings dispatcher consumed a key, and any command it produced.
-pub(super) enum SettingsKey {
-    /// Settings handled the key; run the enclosed command, if any.
-    Handled(Box<Option<Cmd>>),
-    /// Settings does not bind this key — fall through to the global bindings.
-    Unhandled,
-}
-
 impl SettingsKey {
     /// Mark a key as consumed while keeping the comparatively large command
     /// payload out of the dispatch enum itself.
@@ -270,3 +262,7 @@ impl SettingsKey {
         Self::Handled(Box::new(cmd))
     }
 }
+
+#[path = "settings/types.rs"]
+mod types;
+pub(super) use types::SettingsKey;

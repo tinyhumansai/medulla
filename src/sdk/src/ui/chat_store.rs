@@ -18,53 +18,6 @@ use serde::{Deserialize, Serialize};
 
 const ROLES: &[&str] = &["system", "user", "assistant", "tool"];
 
-/// A conversation turn.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-}
-
-/// An in-memory tree node (messages included on save; loaded from disk on load).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChatNode {
-    pub session_id: String,
-    pub name: String,
-    pub fork_point: Option<i64>,
-    pub messages: Vec<ChatMessage>,
-    pub children: Vec<ChatNode>,
-}
-
-/// One row for the `/resume` picker — from `tree.json` alone (no md reads).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MainChatSummary {
-    pub session_id: String,
-    pub name: String,
-    pub turns: usize,
-    pub thread_count: usize,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StoredNode {
-    #[serde(rename = "sessionId")]
-    session_id: String,
-    name: String,
-    #[serde(rename = "forkPoint", skip_serializing_if = "Option::is_none", default)]
-    fork_point: Option<i64>,
-    turns: usize,
-    md: String,
-    children: Vec<StoredNode>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StoredTree {
-    version: u8,
-    #[serde(rename = "updatedAt")]
-    updated_at: String,
-    root: StoredNode,
-}
-
 fn is_marker_line(line: &str) -> Option<&str> {
     let inner = line.strip_prefix("<!-- turn:")?.strip_suffix(" -->")?;
     if !inner.is_empty() && inner.chars().all(|c| c.is_ascii_alphabetic()) {
@@ -307,3 +260,10 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 #[path = "chat_store_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::ChatMessage;
+pub use types::ChatNode;
+pub use types::MainChatSummary;
+use types::StoredNode;
+use types::StoredTree;

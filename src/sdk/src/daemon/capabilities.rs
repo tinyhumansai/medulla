@@ -27,21 +27,6 @@ pub const CAPABILITY_PROMPT: &str = "Report your own capabilities for an orchest
 /// A capability probe should answer in seconds; a slow one must not stall a query.
 pub const DEFAULT_PROBE_TIMEOUT_MS: u64 = 60_000;
 
-/// Inputs for one capability probe.
-pub struct ProbeOptions {
-    pub provider: HarnessProvider,
-    pub run_task: RunTaskFn,
-    pub workspace: String,
-    pub accessible_dirs: Vec<String>,
-    pub env: HashMap<String, String>,
-    pub providers: Vec<HarnessProvider>,
-    pub timeout_ms: Option<u64>,
-    pub model: Option<String>,
-    pub agent: Option<String>,
-    pub skip_permissions: bool,
-    pub abort: Abort,
-}
-
 /// Ask the agent what it can do, merged over the facts we already know. Never
 /// fails — a failed probe yields the cheap facts and empty arrays.
 pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
@@ -108,13 +93,6 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
     merged.mcp_servers = reported.mcp_servers;
     merged.summary = reported.summary.or(dir.fallback_summary);
     merged
-}
-
-struct ReportedCapabilities {
-    accessible_dirs: Vec<String>,
-    tools: Vec<String>,
-    mcp_servers: Vec<String>,
-    summary: Option<String>,
 }
 
 /// Pull the capability object out of a provider reply. Scans for the first
@@ -202,13 +180,6 @@ fn unique(values: impl Iterator<Item = String>) -> Vec<String> {
     out
 }
 
-/// Git project + branch, best-effort.
-#[derive(Debug, Clone, Default)]
-pub struct GitFacts {
-    pub project: Option<String>,
-    pub branch: Option<String>,
-}
-
 /// Project + branch from git, best-effort. Runs `git -C <cwd>` so a workspace
 /// that does not exist fails as a non-zero exit, not a spawn error.
 pub async fn read_git_facts(cwd: &str) -> GitFacts {
@@ -260,3 +231,8 @@ fn resolve_path(path: &str) -> String {
 #[cfg(test)]
 #[path = "capabilities_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::GitFacts;
+pub use types::ProbeOptions;
+use types::ReportedCapabilities;

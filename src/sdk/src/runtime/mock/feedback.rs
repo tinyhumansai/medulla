@@ -14,40 +14,6 @@ use crate::client::{
 
 use super::types::{gen_id, now_millis, MockRuntime};
 
-/// The scripted board: items plus their comments, keyed by item id.
-#[derive(Default)]
-pub(super) struct MockBoard {
-    /// Board items, in insertion order.
-    pub(super) items: Vec<FeedbackItem>,
-    /// Comments per item id, oldest first.
-    pub(super) comments: Vec<(String, Vec<FeedbackComment>)>,
-}
-
-/// The scripted description of one board row, before it is expanded into a
-/// [`FeedbackItem`]. Grouping these keeps [`row`] to a single argument.
-struct Seed<'a> {
-    /// The item id.
-    id: &'a str,
-    /// Feature request or bug report.
-    kind: FeedbackType,
-    /// Triage status.
-    status: FeedbackStatus,
-    /// The item title.
-    title: &'a str,
-    /// The item body.
-    body: &'a str,
-    /// Upvotes.
-    up: i64,
-    /// Downvotes.
-    down: i64,
-    /// The demo user's own vote.
-    my_vote: i8,
-    /// How many comments the item has.
-    comment_count: i64,
-    /// The filed GitHub issue number, when the item has been filed.
-    issue: Option<i64>,
-}
-
 impl Default for Seed<'_> {
     fn default() -> Self {
         Seed {
@@ -286,3 +252,8 @@ impl MockRuntime {
 pub(super) fn demo_board() -> Arc<Mutex<MockBoard>> {
     Arc::new(Mutex::new(MockBoard::demo()))
 }
+
+#[path = "feedback/types.rs"]
+mod types;
+pub(super) use types::MockBoard;
+use types::Seed;

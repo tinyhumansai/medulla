@@ -79,19 +79,6 @@ pub(super) fn event_color(env: &EventEnvelope) -> Option<&'static str> {
     }
 }
 
-/// Fold the chat event stream into a wrapped conversational transcript.
-/// One tool call being assembled from the stream.
-///
-/// The name and the arguments arrive as *separate* events — `tool_call_start`
-/// carries the name once, the deltas carry argument fragments — so a call can
-/// only be rendered after its fragments stop arriving. Held here until the next
-/// non-tool event flushes it.
-#[derive(Default)]
-struct PendingCall {
-    name: String,
-    args: String,
-}
-
 /// Render the assembled tool calls, newest last, and clear them.
 fn flush_calls(pending: &mut Vec<(i64, PendingCall)>, cols: usize, out: &mut Vec<StyledLine>) {
     for (_, call) in pending.drain(..) {
@@ -466,3 +453,6 @@ impl App {
 
 #[cfg(test)]
 mod tests;
+
+mod types;
+use types::PendingCall;

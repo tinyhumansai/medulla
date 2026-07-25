@@ -31,19 +31,6 @@ pub const PALETTE: [Color; 10] = [
     Color::DarkGray,
 ];
 
-/// The resolved color roles used across the TUI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Theme {
-    /// Selection/highlight background, brand, panel titles, and primary accents.
-    pub primary: Color,
-    /// Secondary accent for inline overlays (prompt/resume borders).
-    pub accent: Color,
-    /// Foreground drawn on top of `primary` for selected rows.
-    pub selection_fg: Color,
-    /// Dim panel border color.
-    pub dim_border: Color,
-}
-
 impl Default for Theme {
     fn default() -> Self {
         Theme {
@@ -235,3 +222,6 @@ pub fn persist_theme(path: &Path, theme: &Theme) -> anyhow::Result<()> {
 #[cfg(test)]
 #[path = "theme_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::Theme;

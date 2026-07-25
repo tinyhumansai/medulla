@@ -14,17 +14,6 @@ use crate::client::{HistoryRewardClaim, MedullaClient, Result};
 use super::scan::read_redacted_session;
 use super::types::HistorySessionFile;
 
-/// Progress after each transcript is dealt with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShareProgress {
-    /// Transcripts successfully uploaded so far.
-    pub uploaded: usize,
-    /// Transcripts in this share.
-    pub total: usize,
-    /// Running count of secrets scrubbed before sending.
-    pub redactions: usize,
-}
-
 /// Redacts and uploads every transcript in `files`, then claims the reward.
 ///
 /// `on_progress` is invoked once per transcript, whether it uploaded or not, so a
@@ -77,3 +66,7 @@ where
 
     client.claim_history_reward().await
 }
+
+#[path = "share/types.rs"]
+mod types;
+pub use types::ShareProgress;

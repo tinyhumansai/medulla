@@ -17,16 +17,6 @@ const BOOL_FLAGS: &[&str] = &[
     "reonboard",
 ];
 
-/// A parsed `--flag [value]` bag: repeatable string values plus a set of
-/// present boolean switches.
-#[derive(Default)]
-pub(super) struct Flags {
-    /// Repeatable `--name value` entries, in order.
-    values: HashMap<String, Vec<String>>,
-    /// Present boolean switches from [`BOOL_FLAGS`].
-    bools: HashSet<String>,
-}
-
 impl Flags {
     /// Parse `args` into [`Flags`]. Every token must be a `--name`; boolean
     /// flags stand alone, all others consume the following token as their value.
@@ -118,3 +108,7 @@ pub(super) fn parse_provider(value: &str) -> Result<HarnessProvider, String> {
         )
     })
 }
+
+#[path = "flags/types.rs"]
+mod types;
+pub(super) use types::Flags;

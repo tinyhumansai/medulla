@@ -13,12 +13,6 @@ use base64::Engine;
 /// not report it as a completed copy.
 pub const OSC_52: &str = "OSC 52";
 
-/// A clipboard writer: a binary taking the text on stdin.
-pub struct Writer {
-    pub cmd: &'static str,
-    pub args: &'static [&'static str],
-}
-
 /// Clipboard binaries to try, in order. The X11/Wayland set backstops the other
 /// unixes, which ship the same tools.
 pub fn writers(platform: &str) -> &'static [Writer] {
@@ -99,3 +93,6 @@ pub fn current_platform() -> &'static str {
 #[cfg(test)]
 #[path = "clipboard_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::Writer;

@@ -171,3 +171,24 @@ pub(in crate::sessions) struct SessionEntry {
 
 /// How many transcript lines to retain per session before dropping the oldest.
 pub(super) const TRANSCRIPT_CAP: usize = 500;
+
+#[allow(unused_imports)]
+use super::*;
+/// A clock in epoch ms (injectable for tests).
+pub type NowFn = Arc<dyn Fn() -> i64 + Send + Sync>;
+pub(in super::super) struct Inner {
+    pub(in super::super) config: SessionConfig,
+    pub(in super::super) registry: SessionRegistry,
+    pub(in super::super) run_task: RunTaskFn,
+    pub(in super::super) now: NowFn,
+    pub(in super::super) sessions: Mutex<Vec<SessionEntry>>,
+    pub(in super::super) next_id: AtomicU64,
+    pub(in super::super) changed: broadcast::Sender<()>,
+}
+/// Spins up and manages coding-agent sessions in both lifetime classes.
+///
+/// Cheap to clone (an `Arc`), so the daemon, the hub, and the TUI can share one.
+#[derive(Clone)]
+pub struct SessionManager {
+    pub(in super::super) inner: Arc<Inner>,
+}

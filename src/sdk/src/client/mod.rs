@@ -22,27 +22,10 @@ pub use types::*;
 
 use futures::stream::Stream;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
 use serde_json::Value;
 
 /// Default backend base URL.
 pub const DEFAULT_BASE_URL: &str = "http://localhost:5000";
-
-/// Client for the Medulla backend HTTP + SSE API.
-#[derive(Debug, Clone)]
-pub struct MedullaClient {
-    base_url: String,
-    jwt: String,
-    http: reqwest::Client,
-}
-
-/// Builder for [`MedullaClient`].
-#[derive(Debug, Default)]
-pub struct MedullaClientBuilder {
-    base_url: Option<String>,
-    jwt: Option<String>,
-    http: Option<reqwest::Client>,
-}
 
 impl MedullaClientBuilder {
     /// Set the backend base URL (default [`DEFAULT_BASE_URL`]).
@@ -398,21 +381,6 @@ fn parse_run_result(value: Value) -> Result<RunResult> {
     }
 }
 
-/// Raw response envelope shared by every endpoint.
-#[derive(Debug, Deserialize)]
-struct RawEnvelope {
-    #[serde(default)]
-    success: bool,
-    #[serde(default)]
-    data: Option<Value>,
-    #[serde(default)]
-    error: Option<String>,
-    #[serde(rename = "errorCode", default)]
-    error_code: Option<String>,
-    #[serde(default)]
-    details: Option<Value>,
-}
-
 /// Unwrap a `{success, data}` envelope into `T`, mapping failures and non-2xx
 /// responses into [`ClientError::Api`].
 pub(crate) fn unwrap_envelope<T: DeserializeOwned>(status: u16, body: &[u8]) -> Result<T> {
@@ -466,3 +434,4 @@ pub(crate) fn urlencode(s: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+use types::RawEnvelope;

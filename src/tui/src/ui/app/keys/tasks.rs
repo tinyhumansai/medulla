@@ -151,10 +151,6 @@ impl App {
     }
 }
 
-/// Whether Tasks consumed a key and its optional persistence command.
-pub(super) enum TasksKey {
-    /// Tasks handled the key.
-    Handled(Option<Cmd>),
-    /// A structural/global binding may handle the key.
-    Unhandled,
-}
+#[path = "tasks/types.rs"]
+mod types;
+pub(super) use types::TasksKey;

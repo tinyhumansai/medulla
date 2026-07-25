@@ -19,17 +19,6 @@ pub const MAX_FILE_EXCERPT_CHARS: usize = 4_000;
 /// Hard cap on any summary text (≈100 tokens at ~6 chars/token of prose).
 pub const MAX_SUMMARY_CHARS: usize = 600;
 
-/// What the workspace's project files yield for one probe.
-#[derive(Debug, Clone, Default)]
-pub struct DirContext {
-    /// Labeled, trimmed excerpts to append to the probe prompt; `None` when the
-    /// workspace has none of the well-known files.
-    pub prompt_block: Option<String>,
-    /// Deterministic ≤[`MAX_SUMMARY_CHARS`] digest, the summary of last resort
-    /// when the LLM probe fails or omits one.
-    pub fallback_summary: Option<String>,
-}
-
 /// Read CLAUDE.md/AGENTS.md/README.md under `cwd`. A symlinked pair (the common
 /// `CLAUDE.md → AGENTS.md` convention) is included once, under the first name.
 pub async fn read_dir_context(cwd: &str) -> DirContext {
@@ -151,3 +140,6 @@ pub fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 #[path = "dir_context_tests.rs"]
 mod tests;
+
+mod types;
+pub use types::DirContext;

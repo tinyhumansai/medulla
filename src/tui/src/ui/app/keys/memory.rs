@@ -140,10 +140,6 @@ impl App {
     }
 }
 
-/// Whether Memory consumed a key and its optional service command.
-pub(super) enum MemoryKey {
-    /// Memory handled the key.
-    Handled(Option<Cmd>),
-    /// A structural/global binding may handle the key.
-    Unhandled,
-}
+#[path = "memory/types.rs"]
+mod types;
+pub(super) use types::MemoryKey;

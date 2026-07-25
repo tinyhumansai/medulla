@@ -21,28 +21,6 @@ use futures::stream::{Stream, StreamExt};
 use crate::client::error::{ClientError, Result};
 use crate::client::types::EventEnvelope;
 
-/// A completed SSE frame.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SseFrame {
-    /// Cursor value from an `id:` line, when present.
-    pub id: Option<u64>,
-    /// Concatenated `data:` payload (lines joined with `\n`).
-    pub data: String,
-}
-
-/// Incremental SSE line parser. Feed byte chunks; collect completed frames.
-#[derive(Debug, Default)]
-pub struct SseParser {
-    /// Bytes of an incomplete trailing line.
-    line_buf: String,
-    /// Accumulated `data:` payload for the in-progress frame.
-    data: String,
-    /// Whether any `data:` line has been seen for the in-progress frame.
-    got_data: bool,
-    /// `id:` value seen for the in-progress frame.
-    id: Option<u64>,
-}
-
 impl SseParser {
     /// Create an empty parser.
     pub fn new() -> Self {
@@ -107,15 +85,6 @@ impl SseParser {
     }
 }
 
-/// Seq-based de-duplication for reconnect replay.
-///
-/// Frames carrying a persisted `seq` are only accepted when they advance past
-/// the cursor; frames without a seq (deltas) always pass.
-#[derive(Debug, Default)]
-pub struct SeqDedup {
-    cursor: Option<u64>,
-}
-
 impl SeqDedup {
     /// Start from an optional last-seen seq (the reconnect `Last-Event-ID`).
     pub fn new(start: Option<u64>) -> Self {
@@ -142,17 +111,6 @@ impl SeqDedup {
             }
         }
     }
-}
-
-/// Internal driver state for the reconnecting stream.
-struct StreamState {
-    http: reqwest::Client,
-    url: String,
-    parser: SseParser,
-    dedup: SeqDedup,
-    pending: VecDeque<Result<EventEnvelope>>,
-    body: Option<futures::stream::BoxStream<'static, reqwest::Result<Vec<u8>>>>,
-    first_connect: bool,
 }
 
 impl StreamState {
@@ -255,3 +213,10 @@ pub fn event_stream(
         state.next().await.map(|item| (item, state))
     })
 }
+
+#[path = "sse/types.rs"]
+mod types;
+pub use types::SeqDedup;
+pub use types::SseFrame;
+pub use types::SseParser;
+use types::StreamState;

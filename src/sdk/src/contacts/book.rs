@@ -11,22 +11,6 @@ use std::sync::{Arc, Mutex};
 
 use super::types::{AdmissionPolicy, ContactDecision, ContactRequest, RequestState};
 
-/// The observed pending queue plus the operator's decisions.
-///
-/// Cheap to clone (an `Arc`), so the poll loop and the UI share one.
-#[derive(Clone)]
-pub struct ContactBook {
-    inner: Arc<Mutex<Inner>>,
-}
-
-struct Inner {
-    policy: AdmissionPolicy,
-    allowlist: HashSet<String>,
-    /// Requests in first-seen order, so the list does not reshuffle under the
-    /// operator's cursor as the poll loop runs.
-    requests: Vec<ContactRequest>,
-}
-
 impl ContactBook {
     /// Build a book with `policy` and an allowlist of peer cryptoIds.
     pub fn new(policy: AdmissionPolicy, allowlist: impl IntoIterator<Item = String>) -> Self {
@@ -280,3 +264,8 @@ impl Default for ContactBook {
         ContactBook::new(AdmissionPolicy::default(), Vec::new())
     }
 }
+
+#[path = "book/types.rs"]
+mod types;
+pub use types::ContactBook;
+use types::Inner;

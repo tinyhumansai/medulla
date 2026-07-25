@@ -26,21 +26,6 @@ fn clock() -> NowFn {
     Arc::new(move || counter.fetch_add(1, Ordering::SeqCst))
 }
 
-/// A relay that serves a fixed incoming list and records every call.
-#[derive(Default)]
-struct FakeRelay {
-    incoming: Mutex<Vec<IncomingRequest>>,
-    /// Peers the relay already considers contacts.
-    accepted: Mutex<Vec<IncomingRequest>>,
-    calls: Mutex<Vec<String>>,
-    fail: Mutex<bool>,
-    /// Fails only the contact-list read, so a decision can succeed while the
-    /// re-read that follows it does not.
-    fail_list: Mutex<bool>,
-    /// Every relay interaction in order, listings included.
-    trace: Mutex<Vec<String>>,
-}
-
 impl FakeRelay {
     fn with_incoming(ids: &[&str]) -> Arc<Self> {
         Arc::new(FakeRelay {
@@ -136,3 +121,6 @@ impl ContactRelay for FakeRelay {
         Box::pin(async move { self.record(&format!("block:{agent_id}")) })
     }
 }
+
+mod types;
+use types::FakeRelay;

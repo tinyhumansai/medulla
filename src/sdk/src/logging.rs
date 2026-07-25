@@ -10,9 +10,6 @@
 
 use std::sync::Arc;
 
-/// A sink for one line of diagnostics.
-pub type LineSink = Arc<dyn Fn(&str) + Send + Sync>;
-
 /// A sink that writes to stderr, for callers that own their terminal.
 pub fn stderr_sink() -> LineSink {
     Arc::new(|line: &str| eprintln!("{line}"))
@@ -41,3 +38,7 @@ pub fn preview(text: &str) -> String {
     let head: String = flat.chars().take(PREVIEW_CHARS).collect();
     format!("{head}…")
 }
+
+#[path = "logging/types.rs"]
+mod types;
+pub use types::LineSink;

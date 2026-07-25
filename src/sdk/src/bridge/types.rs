@@ -72,7 +72,7 @@ pub enum BridgeTransport {
     /// Device-local in-memory delivery.
     Local(LocalBridge),
     /// Remote encrypted delivery over tiny.place.
-    Tinyplace(TinyplaceBridge),
+    Tinyplace(Box<TinyplaceBridge>),
 }
 
 impl BridgeTransport {

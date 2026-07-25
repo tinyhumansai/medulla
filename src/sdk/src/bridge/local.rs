@@ -14,11 +14,12 @@ use crate::daemon::transport::InboundMessage;
 use super::Bridge;
 
 type Inbox = Arc<Mutex<VecDeque<InboundMessage>>>;
+type WeakInbox = Weak<Mutex<VecDeque<InboundMessage>>>;
 
 /// An isolated collection of device-local bridge endpoints.
 #[derive(Clone, Default)]
 pub struct LocalBridgeNetwork {
-    endpoints: Arc<Mutex<HashMap<String, Weak<Mutex<VecDeque<InboundMessage>>>>>>,
+    endpoints: Arc<Mutex<HashMap<String, WeakInbox>>>,
 }
 
 impl LocalBridgeNetwork {

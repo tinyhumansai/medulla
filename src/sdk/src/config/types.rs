@@ -363,10 +363,15 @@ impl RouterConfig {
     /// The effective endpoint for `provider`, applying the documented precedence
     /// `providers.<p>.baseUrl` > top-level `baseUrl` > (unset → the harness's
     /// own on-disk config). Returns `None` when neither is configured.
+    ///
+    /// A blank provider override (`baseUrl = ""`) is treated as unset so it
+    /// cannot silently shadow a valid top-level endpoint, matching how blank
+    /// `apiKeyEnv` values are filtered elsewhere.
     pub fn base_url_for(&self, provider: &str) -> Option<&str> {
         self.providers
             .get(provider)
             .and_then(|p| p.base_url.as_deref())
+            .filter(|s| !s.is_empty())
             .or(self.base_url.as_deref())
     }
 

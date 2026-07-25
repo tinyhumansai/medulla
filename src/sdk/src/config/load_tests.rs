@@ -251,6 +251,50 @@ fn load_config_toml_and_json_parity() {
 }
 
 #[test]
+fn load_config_layers_router_section_from_toml() {
+    // A global config sets the top-level router endpoint + key-var name; a
+    // project-local config adds a per-provider (claude) Anthropic-passthrough
+    // override. The field-level merge keeps both, and precedence resolves so
+    // claude uses its override while codex inherits the top-level endpoint.
+    let home = temp_dir("router-home");
+    let cwd = temp_dir("router-cwd");
+    std::fs::write(
+        home.join("config.toml"),
+        "[router]\nbaseUrl = \"https://gateway.internal/v1\"\napiKeyEnv = \"MEDULLA_ROUTER_KEY\"\n\n[router.models]\nreasoning = \"gpt-tier-a\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(cwd.join(".medulla")).unwrap();
+    std::fs::write(
+        cwd.join(".medulla").join("config.toml"),
+        "[router.providers.claude]\nbaseUrl = \"https://gateway.internal/anthropic\"\n",
+    )
+    .unwrap();
+
+    let loaded = load_config(
+        None,
+        &env(&[("MEDULLA_HOME", home.to_str().unwrap())]),
+        &cwd,
+    )
+    .unwrap();
+    let router = loaded.config.router.expect("router section merged");
+    // Global top-level survives the merge.
+    assert_eq!(router.api_key_env.as_deref(), Some("MEDULLA_ROUTER_KEY"));
+    assert_eq!(router.model_for_tier("reasoning"), Some("gpt-tier-a"));
+    // Project-local provider override wins for claude; codex inherits top-level.
+    assert_eq!(
+        router.base_url_for("claude"),
+        Some("https://gateway.internal/anthropic")
+    );
+    assert_eq!(
+        router.base_url_for("codex"),
+        Some("https://gateway.internal/v1")
+    );
+    assert_eq!(loaded.sources.len(), 2);
+    let _ = std::fs::remove_dir_all(&home);
+    let _ = std::fs::remove_dir_all(&cwd);
+}
+
+#[test]
 fn merge_value_is_recursive() {
     let mut base = serde_json::json!({"a":{"x":1,"y":2},"b":9});
     merge_value(&mut base, serde_json::json!({"a":{"y":5,"z":3},"c":7}));

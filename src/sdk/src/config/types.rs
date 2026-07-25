@@ -310,6 +310,71 @@ impl Default for BackendConfig {
     }
 }
 
+/// Per-provider router override. Only `baseUrl` is provider-scoped today: the
+/// three harnesses reach a custom endpoint differently (claude needs an
+/// Anthropic-passthrough URL, codex/opencode an OpenAI-compatible one), so the
+/// endpoint can be steered per provider while the API key stays shared.
+///
+/// Mirrors medulla-v1's `RouterProviderConfig` and the backend's stored shape so
+/// one config document round-trips across all three modules.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RouterProviderConfig {
+    /// OpenAI-compatible (or Anthropic-passthrough) endpoint for this provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+/// The optional `[router]` section: a custom OpenAI-compatible router (gateway or
+/// proxy) the worker points its harnesses at, so inference is centralized,
+/// metered, and re-routable without hand-editing each harness's on-disk config.
+///
+/// camelCase on the wire (`baseUrl`, `apiKeyEnv`, `models`,
+/// `providers.<p>.baseUrl`), matching the published contract that medulla-v1
+/// resolves and the backend serves at `GET/PUT /medulla/v1/router`. Absent
+/// entirely means the feature is off — zero behaviour change.
+///
+/// The API key is referenced by env-var **name** (`apiKeyEnv`), never inlined:
+/// it is resolved from the daemon's own environment at spawn and excluded from
+/// every frame and config diagnostic. Every field is optional; a config that
+/// sets only `baseUrl` still routes, deferring model selection to the harness.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RouterConfig {
+    /// Top-level OpenAI-compatible endpoint for every provider without an override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Env-var NAME holding the API key — never the secret itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    /// Tier → model/SKU mapping (`reasoning` / `compress` / `orchestrator`). A
+    /// missing tier falls through to the harness's own configuration.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub models: HashMap<String, String>,
+    /// Per-provider overrides, keyed by provider id (`claude` / `codex` /
+    /// `opencode`).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub providers: HashMap<String, RouterProviderConfig>,
+}
+
+impl RouterConfig {
+    /// The effective endpoint for `provider`, applying the documented precedence
+    /// `providers.<p>.baseUrl` > top-level `baseUrl` > (unset → the harness's
+    /// own on-disk config). Returns `None` when neither is configured.
+    pub fn base_url_for(&self, provider: &str) -> Option<&str> {
+        self.providers
+            .get(provider)
+            .and_then(|p| p.base_url.as_deref())
+            .or(self.base_url.as_deref())
+    }
+
+    /// The model/SKU mapped for `tier`, or `None` when the router leaves it to
+    /// the harness.
+    pub fn model_for_tier(&self, tier: &str) -> Option<&str> {
+        self.models.get(tier).map(String::as_str)
+    }
+}
+
 /// The optional `[theme]` config section: named ratatui colors (case-insensitive)
 /// or `#rrggbb` hex strings. Missing fields fall back to the default theme. The
 /// Appearance settings subpage persists these keys.
@@ -366,6 +431,9 @@ pub struct TuiConfig {
     pub workflow: WorkflowConfig,
     #[serde(default)]
     pub hub: HubSection,
+    /// Custom OpenAI-compatible router. Absent means routing is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub router: Option<RouterConfig>,
 }
 
 impl Default for TuiConfig {
@@ -383,6 +451,7 @@ impl Default for TuiConfig {
             onboarding: OnboardingConfig::default(),
             workflow: WorkflowConfig::default(),
             hub: HubSection::default(),
+            router: None,
         }
     }
 }

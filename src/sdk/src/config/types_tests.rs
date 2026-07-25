@@ -169,3 +169,88 @@ fn peer_protocol_defaults_to_task() {
     let peer: Peer = serde_json::from_str(r#"{"id":"p1"}"#).unwrap();
     assert_eq!(peer.protocol, "task");
 }
+
+#[test]
+fn router_absent_by_default_and_omitted_from_output() {
+    // No [router] section → feature entirely off, and it never appears in
+    // serialized output (zero behaviour change for configs that don't use it).
+    let cfg: TuiConfig = serde_json::from_str("{}").unwrap();
+    assert!(cfg.router.is_none());
+    let json = serde_json::to_value(&cfg).unwrap();
+    assert!(
+        json.get("router").is_none(),
+        "absent router must be omitted"
+    );
+}
+
+#[test]
+fn router_section_round_trips_camel_case() {
+    // The exact published contract shape (matches medulla-v1's routerConfig
+    // fixture and the backend's stored shape).
+    let cfg: TuiConfig = serde_json::from_str(
+        r#"{"router":{
+            "baseUrl":"https://gateway.internal/v1",
+            "apiKeyEnv":"MEDULLA_ROUTER_KEY",
+            "models":{"reasoning":"gpt-tier-a","compress":"gpt-tier-c"},
+            "providers":{"claude":{"baseUrl":"https://gateway.internal/anthropic"}}
+        }}"#,
+    )
+    .unwrap();
+    let router = cfg.router.clone().unwrap();
+    assert_eq!(
+        router.base_url.as_deref(),
+        Some("https://gateway.internal/v1")
+    );
+    assert_eq!(router.api_key_env.as_deref(), Some("MEDULLA_ROUTER_KEY"));
+    assert_eq!(router.model_for_tier("reasoning"), Some("gpt-tier-a"));
+    assert_eq!(router.model_for_tier("compress"), Some("gpt-tier-c"));
+    assert_eq!(router.model_for_tier("orchestrator"), None);
+
+    // Re-serialize and confirm camelCase keys survive (never snake_case).
+    let out = serde_json::to_string(&cfg).unwrap();
+    assert!(out.contains("\"baseUrl\""));
+    assert!(out.contains("\"apiKeyEnv\""));
+    assert!(!out.contains("base_url"));
+    assert!(!out.contains("api_key_env"));
+
+    // Full round-trip preserves equality.
+    let reparsed: TuiConfig = serde_json::from_str(&out).unwrap();
+    assert_eq!(reparsed.router, cfg.router);
+}
+
+#[test]
+fn router_base_url_precedence_provider_over_top_level() {
+    // providers.<p>.baseUrl beats the top-level baseUrl; a provider with no
+    // override inherits the top-level; an unconfigured router yields nothing.
+    let router: RouterConfig = serde_json::from_str(
+        r#"{
+            "baseUrl":"https://top.example/v1",
+            "providers":{"claude":{"baseUrl":"https://claude.example/anthropic"}}
+        }"#,
+    )
+    .unwrap();
+    // claude has an explicit override → provider URL wins.
+    assert_eq!(
+        router.base_url_for("claude"),
+        Some("https://claude.example/anthropic")
+    );
+    // codex has no override → falls back to the top-level baseUrl.
+    assert_eq!(router.base_url_for("codex"), Some("https://top.example/v1"));
+
+    // With neither top-level nor provider baseUrl set, resolution is empty.
+    let empty = RouterConfig::default();
+    assert_eq!(empty.base_url_for("codex"), None);
+}
+
+#[test]
+fn router_tolerates_unknown_fields() {
+    // Permissive parsing: unknown keys inside [router] (and a future
+    // provider-scoped field) must not fail the load.
+    let cfg: TuiConfig = serde_json::from_str(
+        r#"{"router":{"baseUrl":"https://x/v1","futureKnob":true,
+            "providers":{"codex":{"baseUrl":"https://c/v1","weight":3}}}}"#,
+    )
+    .unwrap();
+    let router = cfg.router.unwrap();
+    assert_eq!(router.base_url_for("codex"), Some("https://c/v1"));
+}

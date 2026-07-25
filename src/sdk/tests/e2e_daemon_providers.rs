@@ -535,3 +535,60 @@ async fn no_router_config_spawns_child_unchanged() {
     let seen = std::fs::read_to_string(&marker).expect("marker written");
     assert_eq!(seen, "base=[]", "no router → ANTHROPIC_BASE_URL is unset");
 }
+
+#[tokio::test]
+async fn router_loaded_from_config_file_reaches_the_spawned_child() {
+    // The config-load → daemon-population wiring, end to end: a `[router]` section
+    // on disk is parsed by `load_config` into the exact `RouterConfig` the spawn
+    // seam accepts, and its endpoint reaches the child. This is the seam the
+    // standalone daemon and worker TUI use to populate `DaemonConfig.router`.
+    let dir = TempDir::new();
+    // An explicit config file with a router endpoint (camelCase on the wire).
+    let config_path = dir.path().join("medulla.tui.json");
+    std::fs::write(
+        &config_path,
+        r#"{"router":{"baseUrl":"https://gw/anthropic","apiKeyEnv":"MEDULLA_ROUTER_KEY"}}"#,
+    )
+    .expect("write config");
+
+    // Load it the way the daemon does; env only carries a home so discovery is
+    // deterministic (the explicit path bypasses layer discovery regardless).
+    let load_env: HashMap<String, String> = [(
+        "MEDULLA_HOME".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    )]
+    .into_iter()
+    .collect();
+    let loaded = medulla::config::load_config(
+        Some(config_path.to_string_lossy().as_ref()),
+        &load_env,
+        dir.path(),
+    )
+    .expect("config loads");
+    let router = loaded
+        .config
+        .router
+        .clone()
+        .expect("[router] section populated the daemon config");
+
+    // Feed the loaded router into the real spawn path; the child must see it.
+    const SECRET: &str = "sk-from-config-file-2b7c";
+    let marker = dir.path().join("cfg-key-marker");
+    let marker = marker.to_string_lossy().into_owned();
+    let script = format!(
+        "#!/bin/sh\n\
+         printf '%s' \"$ANTHROPIC_AUTH_TOKEN\" > '{marker}'\n\
+         printf '{{\"type\":\"result\",\"result\":\"endpoint=%s\"}}\\n' \"$ANTHROPIC_BASE_URL\"\n",
+    );
+    let bin = dir.write_script("cfg_router_claude.sh", &script);
+    let env = env_with(&[
+        ("TINYPLACE_CLAUDE_BIN", &bin),
+        ("MEDULLA_ROUTER_KEY", SECRET),
+    ]);
+    let options = router_options(HarnessProvider::Claude, &bin, env, Some(router));
+    let result = run_provider_task(options).await.expect("router run ok");
+
+    assert_eq!(result.reply, "endpoint=https://gw/anthropic");
+    let seen = std::fs::read_to_string(&marker).expect("marker written");
+    assert_eq!(seen, SECRET, "child received the key resolved by name");
+}

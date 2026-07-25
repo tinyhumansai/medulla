@@ -218,6 +218,9 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         // permission bypass — nobody is in the pane to answer a prompt, and a
         // task that stops on one has hung until it times out.
         skip_permissions: !args.iter().any(|a| a == "--no-skip-permissions"),
+        // The custom OpenAI-compatible router from the layered config. Absent
+        // `[router]` leaves this `None` and every harness spawns unrouted.
+        router: loaded.config.router.clone(),
     })
     .await;
     drop(service); // aborts the background polls

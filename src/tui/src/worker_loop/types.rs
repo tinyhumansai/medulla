@@ -17,6 +17,10 @@ pub struct WorkerTuiConfig {
     pub theme: medulla_tui::ui::theme::Theme,
     pub trust_workspace: bool,
     pub skip_permissions: bool,
+    /// Custom OpenAI-compatible router loaded from the layered config. Threaded
+    /// into every peer task's spawn environment so the worker TUI routes exactly
+    /// like the headless daemon. `None` means routing is off.
+    pub router: Option<medulla::config::RouterConfig>,
 }
 /// The select loop.
 /// What building the daemon runtime needs, once the launch step is answered.
@@ -34,4 +38,7 @@ pub(in super::super) struct StartWiring {
     /// Whether peer sessions run with the harness's permission-bypass flag.
     /// `--no-skip-permissions` clears it.
     pub(in super::super) skip_permissions: bool,
+    /// Custom OpenAI-compatible router from the loaded config, layered into each
+    /// peer task's spawn environment. `None` means routing is off.
+    pub(in super::super) router: Option<medulla::config::RouterConfig>,
 }

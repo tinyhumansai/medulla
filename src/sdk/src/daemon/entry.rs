@@ -227,6 +227,17 @@ pub async fn run_daemon(
             })
         })
     };
+    // The custom OpenAI-compatible router, read from the same layered config the
+    // TUI loads (`--config` override, else project-local/user-global discovery).
+    // A malformed or missing config leaves routing off rather than failing the
+    // daemon: routing is an optional overlay, not a boot dependency.
+    let router = crate::config::load_config(
+        flags.string("config").as_deref(),
+        &env,
+        std::path::Path::new(&workspace),
+    )
+    .ok()
+    .and_then(|loaded| loaded.config.router);
     let config = DaemonConfig {
         providers: providers.clone(),
         default_provider,
@@ -242,9 +253,9 @@ pub async fn run_daemon(
         agent: opencode_agent,
         extra_args: Vec::new(),
         skip_permissions,
-        // Standalone `medulla daemon` does not yet load a [router] section; the
-        // executor honors it the moment a config source populates this.
-        router: None,
+        // The custom OpenAI-compatible router from the layered `[router]` config,
+        // layered into every task's spawn environment by the executor.
+        router,
     };
     let run_task: RunTaskFn =
         Arc::new(|options: RunTaskOptions| Box::pin(run_provider_task(options)));

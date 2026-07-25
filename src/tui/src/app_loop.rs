@@ -243,16 +243,18 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // history. Gated locally by `[onboarding] welcomeCompleted` so a returning
     // user is never re-prompted; the backend independently refuses a second
     // grant. Only runs against a real authenticated backend — never on the mock.
-    let config_path = home.join("config.toml");
-    // Onboarding state must be written back to the file it is *read* from. With
-    // an explicit --config, discovery is bypassed entirely, so persisting to the
-    // home config would leave the flag unread and the flow would reappear every
-    // launch.
-    let onboarding_path = args
+    let home_config_path = home.join("config.toml");
+    // Every write-back (onboarding flag, routing strategy, …) must target the
+    // file config is *read* from. With an explicit --config, discovery is bypassed
+    // entirely, so persisting to the home config would leave the value unread and
+    // the change silently lost on the next launch — the flow reappears, the saved
+    // strategy reverts. Resolve the active config path once and use it for all
+    // persistence.
+    let active_config_path = args
         .config
         .as_deref()
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| config_path.clone());
+        .unwrap_or_else(|| home_config_path.clone());
     // A consented upload outlives the welcome screen; the event loop reports its
     // progress and result on the status line while the user works.
     let mut sharing = None;
@@ -264,7 +266,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // a user who declined or silently burns an unclaimed offer.
                 if session.outcome.settles_onboarding() {
                     if let Err(e) =
-                        medulla::config::persist_welcome_completed(&onboarding_path, true)
+                        medulla::config::persist_welcome_completed(&active_config_path, true)
                     {
                         startup_status = Some(format!("could not save onboarding state ({e})"));
                     }
@@ -329,13 +331,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 loaded: loaded.clone(),
                 startup_status: status.take(),
                 tinyplace_obs: tinyplace_obs.clone(),
-                config_path: config_path.clone(),
+                config_path: active_config_path.clone(),
                 medulla_home: home.clone(),
                 memory_service: memory_service.clone(),
                 // Only the first session can inherit the share: by the time a
                 // relogin happens it has long finished.
                 sharing: sharing.take(),
-                onboarding_path: onboarding_path.clone(),
+                onboarding_path: active_config_path.clone(),
             },
         )
         .await;

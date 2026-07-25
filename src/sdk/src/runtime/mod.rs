@@ -7,6 +7,7 @@ pub mod backend;
 /// The `medulla-serve` NDJSON socket runtime (attach-only, unix-only).
 #[cfg(unix)]
 pub mod core;
+mod event_log;
 /// The non-interactive one-instruction driver for scripting / e2e automation.
 pub mod headless;
 pub mod mock;

@@ -8,6 +8,7 @@
 //!
 //! [`Runtime`]: crate::runtime::Runtime
 
+use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -15,6 +16,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::harness_contract::HarnessStatus;
+use crate::runtime::event_log::ThreadEventLog;
 use crate::runtime::{CycleResultSummary, StreamState};
 use crate::ui::chat_store::{now_millis, ChatMessage};
 use crate::ui::events::{EventEnvelope, TuiEvent};
@@ -37,11 +39,6 @@ pub(super) const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// attach-only milestone never does; here a drop means serve is cycling, so we
 /// re-attach promptly.
 pub(super) const RECONNECT_DELAY: Duration = Duration::from_millis(50);
-
-/// Cap on retained events before the oldest are dropped.
-pub(super) const EVENT_CAP: usize = 5000;
-/// Cap on retained chat events before the oldest are dropped.
-pub(super) const CHAT_CAP: usize = 2000;
 
 /// The ports the host declares it can answer in `hello`. Declared eagerly so the
 /// handshake mirrors the full serve capability set; actual port *hosting*
@@ -160,10 +157,8 @@ pub(super) struct CoreState {
     pub(super) running: bool,
     /// Local async-mode toggle; inert server-side (no serve op backs it).
     pub(super) async_mode: bool,
-    /// The folded event log, capped at [`EVENT_CAP`].
-    pub(super) events: Vec<EventEnvelope>,
-    /// The user/assistant/error subset, capped at [`CHAT_CAP`].
-    pub(super) chat_events: Vec<EventEnvelope>,
+    /// Shared bounded event history and chat-visible projection.
+    pub(super) event_log: ThreadEventLog,
     /// The rendered chat transcript.
     pub(super) messages: Vec<ChatMessage>,
     /// The body of the most recently optimistically-appended user turn still
@@ -199,8 +194,7 @@ impl CoreState {
             conn: ConnState::Connecting,
             running: false,
             async_mode: false,
-            events: Vec::new(),
-            chat_events: Vec::new(),
+            event_log: ThreadEventLog::default(),
             messages: Vec::new(),
             pending_user_echo: None,
             last_result: None,
@@ -221,22 +215,7 @@ impl CoreState {
             at: now_millis(),
             event,
         };
-        let chatty = matches!(
-            env.event,
-            TuiEvent::User { .. } | TuiEvent::Assistant { .. } | TuiEvent::Error { .. }
-        );
-        self.events.push(env.clone());
-        if self.events.len() > EVENT_CAP {
-            let drop = self.events.len() - EVENT_CAP;
-            self.events.drain(0..drop);
-        }
-        if chatty {
-            self.chat_events.push(env);
-            if self.chat_events.len() > CHAT_CAP {
-                let drop = self.chat_events.len() - CHAT_CAP;
-                self.chat_events.drain(0..drop);
-            }
-        }
+        self.event_log.push(env);
     }
 
     /// Record a protocol `event.seq`, latching [`gap`](CoreState::gap) when it is
@@ -283,8 +262,7 @@ impl CoreState {
     pub(super) fn reset_for_replay(&mut self) {
         let unacked = self.pending_user_echo.take();
         self.running = false;
-        self.events.clear();
-        self.chat_events.clear();
+        self.event_log.clear();
         self.messages.clear();
         self.last_result = None;
         self.harness = None;
@@ -324,5 +302,21 @@ impl CoreState {
             ConnState::Reconnecting => format!("{version} (reconnecting)"),
             ConnState::Unavailable(reason) => format!("{version} (unavailable: {reason})"),
         }
+    }
+}
+
+impl Deref for CoreState {
+    type Target = ThreadEventLog;
+
+    /// Expose event projections without adapter-specific forwarding methods.
+    fn deref(&self) -> &Self::Target {
+        &self.event_log
+    }
+}
+
+impl DerefMut for CoreState {
+    /// Expose mutable event projections to protocol folding and snapshots.
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.event_log
     }
 }

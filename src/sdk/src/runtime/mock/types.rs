@@ -10,21 +10,18 @@
 //! `pub(super)` items.
 
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
 
+use crate::runtime::event_log::ThreadEventLog;
 use crate::runtime::{
     AgentDescriptor, AgentPresence, CycleResultSummary, PeerSession, ThreadSummary,
     TinyplaceIdentity, WorkerInfo,
 };
 use crate::ui::chat_store::ChatMessage;
 use crate::ui::events::{EventEnvelope, TuiEvent};
-
-/// Cap on retained events per thread before the oldest are dropped.
-const EVENT_CAP: usize = 5000;
-/// Cap on retained chat events per thread before the oldest are dropped.
-const CHAT_CAP: usize = 2000;
 
 /// One conversation thread: its chat transcript, event log, and run state.
 pub(super) struct Thread {
@@ -38,14 +35,28 @@ pub(super) struct Thread {
     pub(super) session_id: String,
     /// Chat messages exchanged in the thread.
     pub(super) messages: Vec<ChatMessage>,
-    /// Full event log for the thread.
-    pub(super) events: Vec<EventEnvelope>,
-    /// Chat-only subset of `events` (user/assistant/error).
-    pub(super) chat_events: Vec<EventEnvelope>,
+    /// Shared bounded event history and chat-visible projection.
+    pub(super) event_log: ThreadEventLog,
     /// Whether a cycle is currently running in this thread.
     pub(super) running: bool,
     /// Summary of the last completed cycle, if any.
     pub(super) last_result: Option<CycleResultSummary>,
+}
+
+impl Deref for Thread {
+    type Target = ThreadEventLog;
+
+    /// Expose event projections without adapter-specific forwarding methods.
+    fn deref(&self) -> &Self::Target {
+        &self.event_log
+    }
+}
+
+impl DerefMut for Thread {
+    /// Expose mutable event projections to runtime operations.
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.event_log
+    }
 }
 
 /// The whole scripted world: every thread plus shared roster/presence data.
@@ -108,23 +119,8 @@ impl State {
             at: now_millis(),
             event,
         };
-        let chatty = matches!(
-            env.event,
-            TuiEvent::User { .. } | TuiEvent::Assistant { .. } | TuiEvent::Error { .. }
-        );
         let thread = self.active_mut();
-        thread.events.push(env.clone());
-        if thread.events.len() > EVENT_CAP {
-            let drop = thread.events.len() - EVENT_CAP;
-            thread.events.drain(0..drop);
-        }
-        if chatty {
-            thread.chat_events.push(env);
-            if thread.chat_events.len() > CHAT_CAP {
-                let drop = thread.chat_events.len() - CHAT_CAP;
-                thread.chat_events.drain(0..drop);
-            }
-        }
+        thread.event_log.push(env);
     }
 }
 
@@ -254,8 +250,7 @@ impl MockRuntime {
                 name: "main".into(),
                 session_id,
                 messages: Vec::new(),
-                events: Vec::new(),
-                chat_events: Vec::new(),
+                event_log: ThreadEventLog::default(),
                 running: false,
                 last_result: None,
             }],

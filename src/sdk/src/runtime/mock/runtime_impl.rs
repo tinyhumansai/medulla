@@ -12,6 +12,7 @@ use crate::client::{
     FeedbackComment, FeedbackDetail, FeedbackItem, FeedbackPage, FeedbackQuery, FeedbackSubmission,
     FeedbackType,
 };
+use crate::runtime::event_log::ThreadEventLog;
 use crate::runtime::{ContextItem, CycleResultSummary, Runtime, RuntimeSnapshot};
 use crate::ui::chat_store::{ChatMessage, MainChatSummary};
 use crate::ui::events::{TuiEvent, Usage};
@@ -175,8 +176,10 @@ impl Runtime for MockRuntime {
                 name: name.unwrap_or_else(|| format!("fork {next}")),
                 session_id: gen_id("tui"),
                 messages,
-                events: chat_events.clone(),
-                chat_events,
+                event_log: ThreadEventLog {
+                    events: chat_events.clone(),
+                    chat_events,
+                },
                 running: false,
                 last_result: None,
             };

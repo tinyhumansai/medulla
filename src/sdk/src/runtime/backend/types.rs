@@ -5,20 +5,19 @@
 //! wiring in [`stream`](super::stream), and the [`Runtime`](crate::runtime::Runtime)
 //! trait surface in [`runtime`](super::runtime).
 
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use crate::client::MedullaClient;
+use crate::runtime::event_log::ThreadEventLog;
 use crate::runtime::CycleResultSummary;
 use crate::ui::chat_store::ChatMessage;
-use crate::ui::events::EventEnvelope;
 
-/// Upper bound on the per-thread raw event log; older events are dropped.
-pub(super) const EVENT_CAP: usize = 5000;
-/// Upper bound on the per-thread chat-events subset; older events are dropped.
-pub(super) const CHAT_CAP: usize = 2000;
+#[cfg(test)]
+pub(super) use crate::runtime::event_log::{CHAT_CAP, EVENT_CAP};
 
 /// One local thread over a backend session.
 pub(super) struct Thread {
@@ -32,10 +31,8 @@ pub(super) struct Thread {
     pub(super) session_id: String,
     /// Rendered user/assistant transcript for this thread.
     pub(super) messages: Vec<ChatMessage>,
-    /// The full folded event log, capped at [`EVENT_CAP`].
-    pub(super) events: Vec<EventEnvelope>,
-    /// The user/assistant/error subset, capped at [`CHAT_CAP`].
-    pub(super) chat_events: Vec<EventEnvelope>,
+    /// Shared bounded event history and chat-visible projection.
+    pub(super) event_log: ThreadEventLog,
     /// Whether a cycle is currently running on this thread.
     pub(super) running: bool,
     /// Summary of the most recently completed cycle, if any.
@@ -57,8 +54,7 @@ impl Thread {
             name: name.to_string(),
             session_id,
             messages: Vec::new(),
-            events: Vec::new(),
-            chat_events: Vec::new(),
+            event_log: ThreadEventLog::default(),
             running: false,
             last_result: None,
             pending_user_echo: None,
@@ -73,11 +69,26 @@ impl Thread {
             h.abort();
         }
         self.messages.clear();
-        self.events.clear();
-        self.chat_events.clear();
+        self.event_log.clear();
         self.running = false;
         self.last_result = None;
         self.pending_user_echo = None;
+    }
+}
+
+impl Deref for Thread {
+    type Target = ThreadEventLog;
+
+    /// Expose event projections without adapter-specific forwarding methods.
+    fn deref(&self) -> &Self::Target {
+        &self.event_log
+    }
+}
+
+impl DerefMut for Thread {
+    /// Expose mutable event projections to snapshot and fork wiring.
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.event_log
     }
 }
 

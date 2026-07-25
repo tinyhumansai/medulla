@@ -12,28 +12,12 @@ use crate::runtime::{CycleResultSummary, ThreadSummary};
 use crate::ui::chat_store::{iso8601_utc, now_millis, ChatMessage, MainChatSummary};
 use crate::ui::events::{EventEnvelope, TuiEvent};
 
-use super::types::{State, Thread, CHAT_CAP, EVENT_CAP};
+use super::types::{State, Thread};
 
 impl State {
-    /// Push a fully-formed local event into a thread, applying both caps and the
-    /// chat-events subset filter.
+    /// Push a fully-formed local event through the shared bounded thread log.
     pub(super) fn push_event(thread: &mut Thread, env: EventEnvelope) {
-        let chatty = matches!(
-            env.event,
-            TuiEvent::User { .. } | TuiEvent::Assistant { .. } | TuiEvent::Error { .. }
-        );
-        thread.events.push(env.clone());
-        if thread.events.len() > EVENT_CAP {
-            let drop = thread.events.len() - EVENT_CAP;
-            thread.events.drain(0..drop);
-        }
-        if chatty {
-            thread.chat_events.push(env);
-            if thread.chat_events.len() > CHAT_CAP {
-                let drop = thread.chat_events.len() - CHAT_CAP;
-                thread.chat_events.drain(0..drop);
-            }
-        }
+        thread.event_log.push(env);
     }
 
     /// Optimistically append the just-submitted user turn to the active thread.

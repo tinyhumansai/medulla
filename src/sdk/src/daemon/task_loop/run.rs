@@ -171,6 +171,7 @@ impl DaemonRuntime {
             extra_args: self.inner.config.extra_args.clone(),
             skip_permissions: self.inner.config.skip_permissions,
             abort: abort.clone(),
+            router: self.inner.config.router.clone(),
             on_event: Some(on_event),
             on_stdin: Some(on_stdin),
         };
@@ -289,6 +290,7 @@ impl DaemonRuntime {
             extra_args: self.inner.config.extra_args.clone(),
             skip_permissions: self.inner.config.skip_permissions,
             abort,
+            router: self.inner.config.router.clone(),
             on_event: None,
             on_stdin: None,
         };

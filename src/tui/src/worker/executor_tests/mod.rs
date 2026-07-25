@@ -90,6 +90,7 @@ fn options(
         extra_args: vec!["-c".to_string(), script.to_string()],
         skip_permissions: false,
         abort: Abort::new(),
+        router: None,
         on_event: None,
         on_stdin: None,
     }

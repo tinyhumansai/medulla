@@ -341,6 +341,7 @@ impl SessionManager {
             skip_permissions: self.inner.config.skip_permissions,
             resume_session_id: resume.map(str::to_string),
             abort: abort.clone(),
+            router: self.inner.config.router.clone(),
             on_event: None,
             on_stdin: None,
         };

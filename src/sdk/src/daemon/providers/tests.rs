@@ -228,6 +228,48 @@ fn make_path_lookup_resolves_pathish_and_bare_names() {
     assert!(!lookup("definitely-not-a-real-binary-xyz"));
 }
 
+#[test]
+fn router_env_resolution_is_the_spawn_seams_source_of_truth() {
+    // The executor folds exactly what the pure resolver emits: the per-provider
+    // endpoint var + the key referenced BY NAME (resolved from the daemon env at
+    // spawn, never returned here). This pins that contract at the provider seam.
+    use crate::config::RouterConfig;
+    use crate::tinyplace::env::router_env;
+
+    let router: RouterConfig = serde_json::from_str(
+        r#"{"baseUrl":"https://gw/v1","apiKeyEnv":"MEDULLA_ROUTER_KEY",
+            "providers":{"claude":{"baseUrl":"https://gw/anthropic"}}}"#,
+    )
+    .unwrap();
+
+    // codex → OpenAI-compatible endpoint + key-by-name; provider override absent.
+    let codex = router_env(HarnessProvider::Codex, &router);
+    assert_eq!(
+        codex.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://gw/v1".to_string())]
+    );
+    assert_eq!(
+        codex.secret_env,
+        vec![(
+            "OPENAI_API_KEY".to_string(),
+            "MEDULLA_ROUTER_KEY".to_string()
+        )]
+    );
+
+    // claude → Anthropic wire, provider-scoped endpoint beats the top-level.
+    let claude = router_env(HarnessProvider::Claude, &router);
+    assert_eq!(
+        claude.env,
+        vec![(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://gw/anthropic".to_string()
+        )]
+    );
+    assert_eq!(claude.secret_env[0].0, "ANTHROPIC_AUTH_TOKEN");
+    // The resolver never yields the secret value — only its env-var name.
+    assert_eq!(claude.secret_env[0].1, "MEDULLA_ROUTER_KEY");
+}
+
 #[tokio::test]
 async fn abort_cancelled_resolves_when_signalled() {
     let abort = Abort::new();

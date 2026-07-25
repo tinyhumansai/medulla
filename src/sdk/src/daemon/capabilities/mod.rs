@@ -83,6 +83,8 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         extra_args: Vec::new(),
         skip_permissions: options.skip_permissions,
         abort: options.abort.clone(),
+        // The probe self-reports about this machine; it is not a routed task.
+        router: None,
         on_event: None,
         on_stdin: None,
     };

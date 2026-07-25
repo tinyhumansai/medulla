@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, Notify};
 
+use crate::config::RouterConfig;
 use crate::tinyplace::HarnessProvider;
 use std::collections::HashMap;
 
@@ -107,6 +108,11 @@ pub struct RunTaskOptions {
     pub resume_session_id: Option<String>,
     /// The cooperative abort handle.
     pub abort: Abort,
+    /// Optional custom OpenAI-compatible router. When `Some`, the executor layers
+    /// the provider's endpoint env (and, if `apiKeyEnv` is set, its key resolved
+    /// from this run's `env` by name) into the child's environment at spawn.
+    /// `None` (the default) means routing is off and the child spawns unchanged.
+    pub router: Option<RouterConfig>,
     /// Fired for each parsed semantic event — drives periodic status frames.
     pub on_event: Option<OnEvent>,
     /// Register a stdin channel for `input`-frame forwarding into the child.
@@ -158,4 +164,5 @@ pub(super) struct RunSpec {
     pub(super) skip_permissions: bool,
     pub(super) resume_session_id: Option<String>,
     pub(super) abort: Abort,
+    pub(super) router: Option<RouterConfig>,
 }

@@ -104,6 +104,7 @@ fn live_options(
         extra_args: Vec::new(),
         skip_permissions: true,
         abort: Abort::new(),
+        router: None,
         on_event: None,
         on_stdin: None,
     }

@@ -190,6 +190,9 @@ pub(super) fn worker_runtime(
         // `--no-skip-permissions` is how an operator who *is* watching declines
         // it. Narrated at startup: this is not a default to discover later.
         skip_permissions: start.skip_permissions,
+        // Router wiring from the loaded config lands in a later wave; the daemon
+        // executor already honors this once a source populates it.
+        router: None,
     };
     let executor = match mode {
         // The same executor `medulla daemon` uses, so headless-with-a-screen is

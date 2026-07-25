@@ -68,6 +68,7 @@ pub(super) fn base_config() -> DaemonConfig {
         agent: None,
         extra_args: Vec::new(),
         skip_permissions: false,
+        router: None,
     }
 }
 

@@ -242,6 +242,9 @@ pub async fn run_daemon(
         agent: opencode_agent,
         extra_args: Vec::new(),
         skip_permissions,
+        // Standalone `medulla daemon` does not yet load a [router] section; the
+        // executor honors it the moment a config source populates this.
+        router: None,
     };
     let run_task: RunTaskFn =
         Arc::new(|options: RunTaskOptions| Box::pin(run_provider_task(options)));

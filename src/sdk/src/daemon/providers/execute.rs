@@ -70,6 +70,7 @@ pub async fn run_provider_task(options: RunTaskOptions) -> Result<RunTaskResult,
         skip_permissions: options.skip_permissions,
         resume_session_id: options.resume_session_id,
         abort: options.abort,
+        router: options.router,
     };
     let mut attempt: u32 = 1;
     loop {
@@ -136,6 +137,34 @@ async fn run_provider_attempt(
         spec.provider,
         &merged_env,
     ));
+    // Custom OpenAI-compatible router: layer the provider's endpoint env (and,
+    // when configured, its API key) into the child at the spawn seam, so headless
+    // daemon, operator-TUI daemon, and interactive wrappers all route identically.
+    // The endpoint is a literal; the API key is resolved HERE, at spawn, from this
+    // run's own environment BY NAME — it is never inlined into config, and it never
+    // reaches a task frame, a status detail, or a log line. A configured key whose
+    // env var is absent is a hard error (an explicit error frame upstream), never a
+    // silent empty key that would spawn the harness unauthenticated.
+    if let Some(router) = &spec.router {
+        let injection = crate::tinyplace::env::router_env(spec.provider, router);
+        for (key, value) in injection.env {
+            merged_env.insert(key, value);
+        }
+        for (child_var, source_name) in injection.secret_env {
+            match spec.env.get(&source_name).filter(|v| !v.is_empty()) {
+                Some(secret) => {
+                    merged_env.insert(child_var, secret.clone());
+                }
+                None => {
+                    return Err(format!(
+                        "router API key env var `{source_name}` is not set; \
+                         export it or remove apiKeyEnv from [router]"
+                    ));
+                }
+            }
+        }
+        extra_args.extend(injection.args);
+    }
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_resumed_run_args(
         spec.provider,

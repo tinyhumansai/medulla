@@ -71,6 +71,11 @@ pub struct DaemonConfig {
     pub extra_args: Vec<String>,
     /// Whether to pass the provider's skip-permissions flag.
     pub skip_permissions: bool,
+    /// Optional custom OpenAI-compatible router. When set, every task this daemon
+    /// runs has the provider's routed endpoint (and, if configured, its API key
+    /// resolved from [`env`](Self::env) by name) layered into the spawn
+    /// environment. `None` means routing is off.
+    pub router: Option<crate::config::RouterConfig>,
 }
 
 /// Bookkeeping for a single in-flight task keyed by `sender + taskId`.

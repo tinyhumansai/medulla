@@ -131,6 +131,7 @@ pub fn daemon_config(
         agent: None,
         extra_args: Vec::new(),
         skip_permissions: false,
+        router: None,
     }
 }
 

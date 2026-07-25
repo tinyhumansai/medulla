@@ -102,6 +102,26 @@ impl BackendRuntime {
     fn ping(&self) {
         let _ = self.tx.send(());
     }
+
+    /// Upload a probe result — capabilities plus per-harness budgets and
+    /// readiness — to the backend orchestrator so this backend-runtime fleet is
+    /// sized like a hub fleet. Delegates to
+    /// [`MedullaClient::upload_capabilities`]; the orchestrator reads the
+    /// budget-decorated roster back at `GET /medulla/v1/roster`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any client/transport error from the upload; the caller decides
+    /// whether an advertisement failure is worth surfacing (it never blocks work).
+    pub async fn upload_capabilities(
+        &self,
+        capabilities: &crate::tinyplace::AgentCapabilities,
+    ) -> anyhow::Result<()> {
+        self.client
+            .upload_capabilities(capabilities)
+            .await
+            .map_err(|e| anyhow!(e.to_string()))
+    }
 }
 
 impl Runtime for BackendRuntime {

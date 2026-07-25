@@ -4,7 +4,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
 use medulla::contacts::{ContactRequest, RequestState};
@@ -62,21 +62,7 @@ impl WorkerApp {
 
     /// A titled panel block.
     fn panel<'a>(&self, title: impl Into<String>, focused: bool) -> Block<'a> {
-        let border = if focused {
-            Color::Cyan
-        } else {
-            Color::DarkGray
-        };
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border))
-            .title(Span::styled(
-                title.into(),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ))
+        crate::ui::widgets::panel(&self.theme, title, focused)
     }
 
     /// The header: what this process is, and its address.
@@ -242,9 +228,7 @@ impl WorkerApp {
             }
         } else {
             let visible = inner.height as usize;
-            let start = selected
-                .saturating_sub(visible / 2)
-                .min(rows.len().saturating_sub(visible));
+            let start = crate::ui::selection::viewport_start(selected, rows.len(), visible);
             self.hit_rows = Some((inner, start));
             for (i, row) in rows.iter().enumerate().skip(start).take(visible) {
                 lines.push(session_line(row, i == selected, self.now()));

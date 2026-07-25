@@ -15,32 +15,13 @@ impl App {
     /// Draw the inline prompt overlay (Workers add/edit, Agents answer).
     pub(super) fn draw_prompt(&mut self, f: &mut Frame, area: Rect) {
         let Some(prompt) = &self.prompt else { return };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(self.theme.accent))
-            .title(Span::styled(
-                prompt.title.clone(),
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ));
+        let block = crate::ui::widgets::panel(&self.theme, prompt.title.clone(), true);
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let chars: Vec<char> = prompt.draft.text.chars().collect();
-        let before: String = chars.iter().take(prompt.draft.cursor).collect();
-        let at: String = chars
-            .get(prompt.draft.cursor)
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| " ".into());
-        let after: String = chars.iter().skip(prompt.draft.cursor + 1).collect();
-        let spans = vec![
-            Span::styled("❯ ", Style::default().fg(Color::Magenta)),
-            Span::raw(before),
-            Span::styled(at, Style::default().add_modifier(Modifier::REVERSED)),
-            Span::raw(after),
-        ];
-        f.render_widget(Paragraph::new(TLine::from(spans)), inner);
+        f.render_widget(
+            Paragraph::new(crate::ui::widgets::prompt_line(&prompt.draft, &self.theme)),
+            inner,
+        );
     }
 
     /// Draw the Chat composer with its caret-highlighted draft lines.
@@ -106,10 +87,7 @@ impl App {
         let inner = block.inner(area);
         f.render_widget(block, area);
         let cap = (inner.height as usize).max(1);
-        let start = picker
-            .index
-            .saturating_sub(cap / 2)
-            .min(picker.chats.len().saturating_sub(cap));
+        let start = crate::ui::selection::viewport_start(picker.index, picker.chats.len(), cap);
         let mut lines = Vec::new();
         for (i, chat) in picker.chats.iter().enumerate().skip(start).take(cap) {
             let marker = if i == picker.index { "❯ " } else { "  " };

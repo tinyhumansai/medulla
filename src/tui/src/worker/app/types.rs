@@ -63,45 +63,19 @@ impl ExecutionMode {
 pub const EXECUTION_MODES: [ExecutionMode; 2] =
     [ExecutionMode::Interactive, ExecutionMode::Headless];
 
-/// Text entry currently owned by the daemon UI.
+/// Action submitted by the daemon's shared text prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Prompt {
+pub enum PromptKind {
     /// Enter a master cryptoId or `@handle`.
-    ConnectMaster(String),
+    ConnectMaster,
     /// Send a plain instruction or note to the selected master.
-    MessageMaster { address: String, input: String },
+    MessageMaster { address: String },
     /// Add a directory to the advertised workspace allowlist.
-    AddWorkspace(String),
+    AddWorkspace,
 }
 
-impl Prompt {
-    /// Prompt title.
-    pub fn title(&self) -> &'static str {
-        match self {
-            Prompt::ConnectMaster(_) => "Connect a master",
-            Prompt::MessageMaster { .. } => "Message the master",
-            Prompt::AddWorkspace(_) => "Allow a workspace",
-        }
-    }
-
-    /// Editable text.
-    pub fn input(&self) -> &str {
-        match self {
-            Prompt::ConnectMaster(input)
-            | Prompt::AddWorkspace(input)
-            | Prompt::MessageMaster { input, .. } => input,
-        }
-    }
-
-    /// Editable text.
-    pub fn input_mut(&mut self) -> &mut String {
-        match self {
-            Prompt::ConnectMaster(input)
-            | Prompt::AddWorkspace(input)
-            | Prompt::MessageMaster { input, .. } => input,
-        }
-    }
-}
+/// Text entry currently owned by the daemon UI.
+pub type Prompt = crate::ui::composer::TextPrompt<PromptKind>;
 
 /// Which question the launch setup step is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +214,8 @@ pub struct WorkerApp {
     pub(super) credential_dir: std::path::PathBuf,
     /// Resolved relay endpoint.
     pub(super) endpoint: Option<String>,
+    /// Shared visual roles used by every TUI component.
+    pub(super) theme: crate::ui::theme::Theme,
     /// Active text-entry prompt.
     pub(super) prompt: Option<Prompt>,
     /// A pending destructive confirmation.

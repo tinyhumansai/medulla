@@ -88,6 +88,7 @@ fn a_missing_harness_is_reported_as_such_not_as_an_empty_list() {
         config_path: "/tmp/config.toml".into(),
         credential_dir: "/tmp/wallet".into(),
         endpoint: None,
+        theme: crate::ui::theme::Theme::default(),
     });
     let out = render(&mut app, 110, 20);
     assert!(out.contains("No coding agents on PATH"), "got: {out}");
@@ -255,6 +256,7 @@ fn a_single_installed_harness_is_settled_without_a_menu_of_one() {
         config_path: "/tmp/config.toml".into(),
         credential_dir: "/tmp/wallet".into(),
         endpoint: None,
+        theme: crate::ui::theme::Theme::default(),
     });
     assert_eq!(
         app.screen(),
@@ -287,6 +289,7 @@ fn with_no_harness_installed_there_is_nothing_to_ask_and_the_screen_says_so() {
         config_path: "/tmp/config.toml".into(),
         credential_dir: "/tmp/wallet".into(),
         endpoint: None,
+        theme: crate::ui::theme::Theme::default(),
     });
     assert_eq!(
         app.screen(),
@@ -449,6 +452,7 @@ fn copying_without_an_identity_says_so_rather_than_copying_nothing() {
         config_path: "/tmp/config.toml".into(),
         credential_dir: "/tmp/wallet".into(),
         endpoint: None,
+        theme: crate::ui::theme::Theme::default(),
     });
     app.choose_mode(ExecutionMode::Headless);
     app.choose_harness(HarnessProvider::Codex);

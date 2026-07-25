@@ -3,7 +3,7 @@
 //! layout and summary-row helpers. State lives in [`super::types`]; the state
 //! machine in [`super::state`].
 
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::Alignment;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
@@ -14,7 +14,7 @@ use super::types::{OnboardingScreen, Step};
 impl OnboardingScreen {
     /// Render the centered onboarding panel.
     pub fn draw(&mut self, f: &mut Frame) {
-        let area = centered_rect(66, 18, f.area());
+        let area = crate::ui::layout::centered_fixed(66, 18, f.area());
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -165,27 +165,4 @@ fn summary_line<'a>(label: &'a str, value: &'a str) -> Line<'a> {
         ),
         Span::styled(value.to_string(), Style::default().fg(Color::White)),
     ])
-}
-
-/// A `w`×`h` rectangle centered in `area` (clamped to the area's size).
-fn centered_rect(w: u16, h: u16, area: Rect) -> Rect {
-    let w = w.min(area.width);
-    let h = h.min(area.height);
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length((area.height.saturating_sub(h)) / 2),
-            Constraint::Length(h),
-            Constraint::Min(0),
-        ])
-        .split(area);
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length((area.width.saturating_sub(w)) / 2),
-            Constraint::Length(w),
-            Constraint::Min(0),
-        ])
-        .split(rows[1]);
-    cols[1]
 }

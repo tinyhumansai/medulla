@@ -9,6 +9,7 @@ use medulla::tinyplace::HarnessProvider;
 use super::super::pty::{PtyManager, SessionRow};
 use super::types::{Confirm, ExecutionMode, Screen, SetupStep, WorkerApp, TABS};
 use crate::log::LogBuffer;
+use crate::ui::theme::Theme;
 
 /// How the worker TUI is wired at startup.
 pub struct WorkerWiring {
@@ -36,6 +37,8 @@ pub struct WorkerWiring {
     pub credential_dir: std::path::PathBuf,
     /// Relay endpoint resolved at startup.
     pub endpoint: Option<String>,
+    /// Shared visual theme used by the main and daemon TUIs.
+    pub theme: Theme,
 }
 
 impl WorkerApp {
@@ -92,6 +95,7 @@ impl WorkerApp {
             config_path: wiring.config_path,
             credential_dir: wiring.credential_dir,
             endpoint: wiring.endpoint,
+            theme: wiring.theme,
             prompt: None,
             confirm: None,
             status,

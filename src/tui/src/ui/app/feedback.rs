@@ -37,12 +37,8 @@ impl App {
 
     /// Move the selection and load the newly selected item's comments.
     pub(super) fn move_feedback_index(&mut self, up: bool) -> Option<Cmd> {
-        let max = self.feedback.items.len().saturating_sub(1);
-        self.feedback.index = if up {
-            self.feedback.index.saturating_sub(1)
-        } else {
-            (self.feedback.index + 1).min(max)
-        };
+        self.feedback.index =
+            crate::ui::selection::moved(self.feedback.index, self.feedback.items.len(), up);
         self.feedback.detail_scroll = 0;
         self.feedback_detail_cmd()
     }

@@ -1,7 +1,7 @@
 //! Shared text-entry overlay for daemon controls.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
@@ -14,36 +14,17 @@ impl WorkerApp {
         let Some(prompt) = &self.prompt else {
             return;
         };
-        let rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(42),
-                Constraint::Length(5),
-                Constraint::Percentage(42),
-            ])
-            .split(area);
-        let columns = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(18),
-                Constraint::Percentage(64),
-                Constraint::Percentage(18),
-            ])
-            .split(rows[1]);
-        let target = columns[1];
+        let target = crate::ui::layout::centered_percent(area, 64, 20);
         f.render_widget(Clear, target);
-        let block = self.panel(prompt.title(), true);
+        let block = self.panel(prompt.title.clone(), true);
         let inner = block.inner(target);
         f.render_widget(block, target);
         f.render_widget(
             Paragraph::new(vec![
-                Line::from(Span::styled(
-                    format!("{}▏", prompt.input()),
-                    Style::default().fg(Color::White),
-                )),
+                crate::ui::widgets::prompt_line(&prompt.draft, &self.theme),
                 Line::from(Span::styled(
                     "Enter confirm · Esc cancel",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().add_modifier(Modifier::DIM),
                 )),
             ]),
             inner,

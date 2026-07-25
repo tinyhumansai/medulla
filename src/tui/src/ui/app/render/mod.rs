@@ -7,7 +7,7 @@
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::agents::Line as StyledLine;
@@ -417,16 +417,7 @@ impl App {
 
     /// A rounded, titled panel [`Block`] styled from the active theme.
     pub(super) fn panel<'a>(&self, title: impl Into<String>) -> Block<'a> {
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(self.theme.dim_border))
-            .title(Span::styled(
-                title.into(),
-                Style::default()
-                    .fg(self.theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            ))
+        crate::ui::widgets::panel(&self.theme, title, false)
     }
 
     /// Dispatch content rendering to the active tab's draw method.

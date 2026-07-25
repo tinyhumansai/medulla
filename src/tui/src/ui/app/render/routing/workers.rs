@@ -33,9 +33,7 @@ impl App {
                 .checked_div(2)
                 .unwrap_or(0)
                 .max(1);
-            let start = selected
-                .saturating_sub(visible / 2)
-                .min(workers.len().saturating_sub(visible));
+            let start = crate::ui::selection::viewport_start(selected, workers.len(), visible);
             for (index, worker) in workers.iter().enumerate().skip(start).take(visible) {
                 let selected_default = if worker.selected { "●" } else { " " };
                 let handle = worker.handle.as_deref().unwrap_or(&worker.address);

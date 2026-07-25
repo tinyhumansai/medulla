@@ -57,11 +57,13 @@ impl App {
     fn task_list_key(&mut self, code: KeyCode) -> TasksKey {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.selected = self.selected.saturating_sub(1);
+                self.selected =
+                    crate::ui::selection::moved(self.selected, self.tasks.tasks.len(), true);
                 TasksKey::Handled(None)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.selected = (self.selected + 1).min(self.tasks.tasks.len().saturating_sub(1));
+                self.selected =
+                    crate::ui::selection::moved(self.selected, self.tasks.tasks.len(), false);
                 TasksKey::Handled(None)
             }
             KeyCode::Char('a') => {
@@ -105,12 +107,19 @@ impl App {
     fn task_sources_key(&mut self, code: KeyCode) -> TasksKey {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.task_source_index = self.task_source_index.saturating_sub(1);
+                self.task_source_index = crate::ui::selection::moved(
+                    self.task_source_index,
+                    self.tasks.sources.len(),
+                    true,
+                );
                 TasksKey::Handled(None)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.task_source_index =
-                    (self.task_source_index + 1).min(self.tasks.sources.len().saturating_sub(1));
+                self.task_source_index = crate::ui::selection::moved(
+                    self.task_source_index,
+                    self.tasks.sources.len(),
+                    false,
+                );
                 TasksKey::Handled(None)
             }
             KeyCode::Char('a') => {

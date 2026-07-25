@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use ratatui::layout::Rect;
 
-use crate::ui::composer::Draft;
+use crate::ui::composer::{Draft, TextPrompt};
 use crate::ui::theme::Theme;
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackQuery, FeedbackType};
 use medulla::config::LoadedConfig;
@@ -312,16 +312,8 @@ impl Default for FeedbackState {
     }
 }
 
-/// A single-line inline input overlay, composer-styled, reused for the fleet and
-/// steering prompts.
-pub(super) struct Prompt {
-    /// What the prompt submits.
-    pub(super) kind: PromptKind,
-    /// The overlay title.
-    pub(super) title: String,
-    /// The editable draft buffer.
-    pub(super) draft: Draft,
-}
+/// A single-line inline input overlay shared with daemon controls.
+pub(super) type Prompt = TextPrompt<PromptKind>;
 
 /// Cached credential-presence flags displayed by Routing's Manage Keys pane.
 #[derive(Default)]

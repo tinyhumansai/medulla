@@ -12,7 +12,13 @@ fn master_add_prompt_emits_a_connect_command() {
     app.set_tab(TAB_MASTER);
 
     assert_eq!(app.on_key(key(KeyCode::Char('a'))), None);
-    assert_eq!(app.prompt, Some(Prompt::ConnectMaster(String::new())));
+    assert_eq!(
+        app.prompt,
+        Some(Prompt::new(
+            super::super::types::PromptKind::ConnectMaster,
+            "Connect a master"
+        ))
+    );
     for ch in "@boss".chars() {
         app.on_key(key(KeyCode::Char(ch)));
     }

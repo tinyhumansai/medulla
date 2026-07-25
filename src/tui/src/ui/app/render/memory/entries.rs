@@ -86,9 +86,7 @@ impl App {
         frame.render_widget(block, area);
         let selected = self.memory_index.min(entries.len().saturating_sub(1));
         let visible = (inner.height as usize).max(1);
-        let start = selected
-            .saturating_sub(visible / 2)
-            .min(entries.len().saturating_sub(visible));
+        let start = crate::ui::selection::viewport_start(selected, entries.len(), visible);
         let mut lines = Vec::new();
         for (index, entry) in entries.iter().enumerate().skip(start).take(visible) {
             let (label, base) = match entry {

@@ -12,9 +12,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use medulla::contacts::ContactDecision;
 
 use super::types::{
-    Confirm, ExecutionMode, Prompt, Screen, SetupStep, WorkerApp, WorkerCmd, EXECUTION_MODES, TABS,
-    TAB_MASTER, TAB_REQUESTS, TAB_SESSIONS, TAB_WORKSPACES,
+    Confirm, ExecutionMode, Prompt, PromptKind, Screen, SetupStep, WorkerApp, WorkerCmd,
+    EXECUTION_MODES, TABS, TAB_MASTER, TAB_REQUESTS, TAB_SESSIONS, TAB_WORKSPACES,
 };
+use crate::ui::composer::{edit_prompt, PromptAction};
 
 impl WorkerApp {
     /// Handle one key press, producing any follow-up command.
@@ -138,41 +139,30 @@ impl WorkerApp {
         if ctrl && key.code == KeyCode::Char('c') {
             return Some(WorkerCmd::Quit);
         }
-        match key.code {
-            KeyCode::Esc => {
+        let action = edit_prompt(self.prompt.as_mut()?, key);
+        match action {
+            PromptAction::Cancel => {
                 self.prompt = None;
                 self.set_status("Cancelled");
                 None
             }
-            KeyCode::Backspace => {
-                if let Some(prompt) = self.prompt.as_mut() {
-                    prompt.input_mut().pop();
-                }
-                None
-            }
-            KeyCode::Char(ch) => {
-                if let Some(prompt) = self.prompt.as_mut() {
-                    prompt.input_mut().push(ch);
-                }
-                None
-            }
-            KeyCode::Enter => {
+            PromptAction::Submit => {
                 let prompt = self.prompt.take()?;
-                let input = prompt.input().trim().to_string();
+                let input = prompt.draft.text.trim().to_string();
                 if input.is_empty() {
                     self.set_status("Nothing entered");
                     return None;
                 }
-                match prompt {
-                    Prompt::ConnectMaster(_) => Some(WorkerCmd::ConnectMaster(input)),
-                    Prompt::AddWorkspace(_) => Some(WorkerCmd::AddWorkspace(input)),
-                    Prompt::MessageMaster { address, .. } => Some(WorkerCmd::MessageMaster {
+                match prompt.kind {
+                    PromptKind::ConnectMaster => Some(WorkerCmd::ConnectMaster(input)),
+                    PromptKind::AddWorkspace => Some(WorkerCmd::AddWorkspace(input)),
+                    PromptKind::MessageMaster { address } => Some(WorkerCmd::MessageMaster {
                         address,
                         text: input,
                     }),
                 }
             }
-            _ => None,
+            PromptAction::Editing => None,
         }
     }
 
@@ -254,7 +244,7 @@ impl WorkerApp {
                 None
             }
             KeyCode::Char('a') => {
-                self.prompt = Some(Prompt::ConnectMaster(String::new()));
+                self.prompt = Some(Prompt::new(PromptKind::ConnectMaster, "Connect a master"));
                 None
             }
             KeyCode::Char('i') | KeyCode::Enter => {
@@ -262,10 +252,10 @@ impl WorkerApp {
                     self.set_status("No master configured — press a to connect one");
                     return None;
                 };
-                self.prompt = Some(Prompt::MessageMaster {
-                    address,
-                    input: String::new(),
-                });
+                self.prompt = Some(Prompt::new(
+                    PromptKind::MessageMaster { address },
+                    "Message the master",
+                ));
                 None
             }
             _ => None,
@@ -276,7 +266,7 @@ impl WorkerApp {
     fn on_workspaces_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
         match key.code {
             KeyCode::Char('a') => {
-                self.prompt = Some(Prompt::AddWorkspace(String::new()));
+                self.prompt = Some(Prompt::new(PromptKind::AddWorkspace, "Allow a workspace"));
                 None
             }
             KeyCode::Char('d') => {
@@ -354,11 +344,6 @@ impl WorkerApp {
                 (&mut self.request_index, len)
             }
         };
-        let max = len.saturating_sub(1);
-        *index = if up {
-            index.saturating_sub(1)
-        } else {
-            (*index + 1).min(max)
-        };
+        *index = crate::ui::selection::moved(*index, len, up);
     }
 }

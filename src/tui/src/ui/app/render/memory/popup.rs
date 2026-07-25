@@ -1,6 +1,6 @@
 //! Centered detail modal for the selected Memory entry.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Clear, Paragraph, Wrap};
@@ -20,7 +20,7 @@ impl App {
             "Esc close",
             Style::default().add_modifier(Modifier::DIM),
         )));
-        let popup = centered_rect(area, 70, 60);
+        let popup = crate::ui::layout::centered_percent(area, 70, 60);
         frame.render_widget(Clear, popup);
         frame.render_widget(
             Paragraph::new(Text::from(body))
@@ -63,24 +63,4 @@ impl App {
             }
         }
     }
-}
-
-/// Center a percentage-sized rectangle within `area`.
-fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - height_percent) / 2),
-            Constraint::Percentage(height_percent),
-            Constraint::Percentage((100 - height_percent) / 2),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - width_percent) / 2),
-            Constraint::Percentage(width_percent),
-            Constraint::Percentage((100 - width_percent) / 2),
-        ])
-        .split(vertical[1])[1]
 }

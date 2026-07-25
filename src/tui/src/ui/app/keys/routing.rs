@@ -52,12 +52,19 @@ impl App {
     fn workers_key(&mut self, code: KeyCode) -> RoutingKey {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.worker_index = self.worker_index.saturating_sub(1);
+                self.worker_index = crate::ui::selection::moved(
+                    self.worker_index,
+                    self.runtime.workers().len(),
+                    true,
+                );
                 RoutingKey::Handled(None)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let max = self.runtime.workers().len().saturating_sub(1);
-                self.worker_index = (self.worker_index + 1).min(max);
+                self.worker_index = crate::ui::selection::moved(
+                    self.worker_index,
+                    self.runtime.workers().len(),
+                    false,
+                );
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('a') => {

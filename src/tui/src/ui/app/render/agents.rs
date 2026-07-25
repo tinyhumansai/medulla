@@ -57,9 +57,7 @@ impl App {
         let inner = block.inner(cols[0]);
         f.render_widget(block, cols[0]);
         let capacity = (inner.height as usize).max(1);
-        let window_start = active
-            .saturating_sub(capacity / 2)
-            .min(rows.len().saturating_sub(capacity));
+        let window_start = crate::ui::selection::viewport_start(active, rows.len(), capacity);
         self.hit_agents = Some((inner, window_start));
         let mut lines: Vec<TLine> = Vec::new();
         for (offset, row) in rows.iter().skip(window_start).take(capacity).enumerate() {

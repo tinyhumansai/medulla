@@ -7,7 +7,7 @@
 //! must state exactly what leaves the machine, and that secrets are stripped
 //! first. Everything else is presentation.
 
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::Alignment;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
@@ -21,7 +21,7 @@ const METER_WIDTH: usize = 24;
 impl WelcomeScreen {
     /// Render the centered welcome panel.
     pub fn draw(&mut self, f: &mut Frame) {
-        let area = centered_rect(70, 20, f.area());
+        let area = crate::ui::layout::centered_fixed(70, 20, f.area());
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -305,29 +305,6 @@ fn bytes(value: u64) -> String {
     } else {
         format!("{value:.0} B")
     }
-}
-
-/// A `w`×`h` rectangle centered in `area` (clamped to the area's size).
-fn centered_rect(w: u16, h: u16, area: Rect) -> Rect {
-    let w = w.min(area.width);
-    let h = h.min(area.height);
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length((area.height.saturating_sub(h)) / 2),
-            Constraint::Length(h),
-            Constraint::Min(0),
-        ])
-        .split(area);
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length((area.width.saturating_sub(w)) / 2),
-            Constraint::Length(w),
-            Constraint::Min(0),
-        ])
-        .split(rows[1]);
-    cols[1]
 }
 
 #[cfg(test)]

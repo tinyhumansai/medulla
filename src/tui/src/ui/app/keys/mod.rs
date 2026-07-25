@@ -10,7 +10,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::types::{tab_pos, App, Cmd, TABS};
 use crate::ui::command::CopyScope;
-use crate::ui::composer::{delete_before, insert_at, move_caret_row, Draft};
+use crate::ui::composer::{
+    delete_before, edit_prompt, insert_at, move_caret_row, Draft, PromptAction,
+};
 
 mod memory;
 mod routing;
@@ -59,34 +61,18 @@ impl App {
 
         // The inline prompt (Workers add/edit, Agents answer) owns input while open.
         if self.prompt.is_some() {
-            match k.code {
-                KeyCode::Char('c') if ctrl => self.should_quit = true,
-                KeyCode::Esc => {
-                    self.prompt = None;
-                    self.set_status("Cancelled");
-                }
-                KeyCode::Enter => return self.submit_prompt(),
-                KeyCode::Backspace | KeyCode::Delete => {
-                    if let Some(p) = &mut self.prompt {
-                        p.draft = delete_before(&p.draft.text, p.draft.cursor);
+            if ctrl && k.code == KeyCode::Char('c') {
+                self.should_quit = true;
+            } else {
+                let action = edit_prompt(self.prompt.as_mut().expect("prompt is present"), k);
+                match action {
+                    PromptAction::Cancel => {
+                        self.prompt = None;
+                        self.set_status("Cancelled");
                     }
+                    PromptAction::Submit => return self.submit_prompt(),
+                    PromptAction::Editing => {}
                 }
-                KeyCode::Left => {
-                    if let Some(p) = &mut self.prompt {
-                        p.draft.cursor = p.draft.cursor.saturating_sub(1);
-                    }
-                }
-                KeyCode::Right => {
-                    if let Some(p) = &mut self.prompt {
-                        p.draft.cursor = (p.draft.cursor + 1).min(p.draft.text.chars().count());
-                    }
-                }
-                KeyCode::Char(c) if !ctrl && !alt => {
-                    if let Some(p) = &mut self.prompt {
-                        p.draft = insert_at(&p.draft.text, p.draft.cursor, &c.to_string());
-                    }
-                }
-                _ => {}
             }
             return None;
         }

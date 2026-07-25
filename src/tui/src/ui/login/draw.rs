@@ -2,7 +2,7 @@
 //! ([`LoginScreen::draw`]) plus the spinner frame and the display/layout
 //! helpers it relies on.
 
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::Alignment;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
@@ -19,7 +19,7 @@ impl LoginScreen {
 
     /// Render the centered login panel.
     pub fn draw(&mut self, f: &mut Frame) {
-        let area = centered_rect(64, 24, f.area());
+        let area = crate::ui::layout::centered_fixed(64, 24, f.area());
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -164,27 +164,4 @@ pub(super) fn token_display(token: &str, width: usize) -> String {
         out.push('…');
         out
     }
-}
-
-/// A `w`×`h` rectangle centered in `area` (clamped to the area's size).
-fn centered_rect(w: u16, h: u16, area: Rect) -> Rect {
-    let w = w.min(area.width);
-    let h = h.min(area.height);
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length((area.height.saturating_sub(h)) / 2),
-            Constraint::Length(h),
-            Constraint::Min(0),
-        ])
-        .split(area);
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length((area.width.saturating_sub(w)) / 2),
-            Constraint::Length(w),
-            Constraint::Min(0),
-        ])
-        .split(rows[1]);
-    cols[1]
 }

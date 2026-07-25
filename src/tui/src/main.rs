@@ -195,6 +195,7 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
                 .unwrap_or_else(|_| path.clone())
         })
         .collect();
+    let theme = medulla_tui::ui::theme::Theme::from_config(&loaded.config.theme);
     let result = worker_loop::run_worker_tui(worker_loop::WorkerTuiConfig {
         env,
         workspace,
@@ -207,6 +208,7 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         startup_status,
         transport,
         endpoint: service.as_ref().map(|s| s.endpoint().to_string()),
+        theme,
         // Claude gates a fresh directory behind a modal trust dialog that only
         // appears on a TTY, so the worker clears it up front — naming the
         // workspace at launch is the decision to run peer work there. This

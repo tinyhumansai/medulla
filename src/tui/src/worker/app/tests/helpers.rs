@@ -135,6 +135,7 @@ pub(super) fn app_at_setup(sessions: PtyManager, contacts: Option<ContactDesk>) 
         config_path: "/tmp/medulla-test-config.toml".into(),
         credential_dir: "/tmp/medulla-test-wallet".into(),
         endpoint: Some("https://relay.test".into()),
+        theme: crate::ui::theme::Theme::default(),
     })
 }
 

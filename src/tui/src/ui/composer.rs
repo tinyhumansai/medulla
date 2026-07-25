@@ -1,8 +1,11 @@
 //! Composer text math. The draft is one string with embedded newlines; these
 //! helpers map the flat caret offset onto rendered rows so the input box can
-//! draw a multi-line draft with the caret on the correct row. Offsets are in
-//! Unicode scalar values (chars), matching the JS string-index semantics closely
-//! enough for terminal editing.
+//! draw a multi-line draft with the caret on the correct row. The shared
+//! [`TextPrompt`] and [`edit_prompt`] path also keeps main and daemon overlays
+//! behaviorally identical. Offsets are in Unicode scalar values (chars),
+//! matching the JS string-index semantics closely enough for terminal editing.
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Caret {
@@ -22,6 +25,88 @@ pub struct Draft {
 impl Draft {
     pub fn new() -> Self {
         Draft::default()
+    }
+}
+
+/// A domain-tagged single-line text prompt.
+///
+/// `K` describes what submitting the text means; editing and rendering remain
+/// shared regardless of whether the caller is the main or daemon TUI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextPrompt<K> {
+    /// Domain action performed when the prompt is submitted.
+    pub kind: K,
+    /// Human-facing panel title.
+    pub title: String,
+    /// Editable text and caret.
+    pub draft: Draft,
+}
+
+impl<K> TextPrompt<K> {
+    /// Create an empty prompt for `kind`.
+    pub fn new(kind: K, title: impl Into<String>) -> Self {
+        Self {
+            kind,
+            title: title.into(),
+            draft: Draft::new(),
+        }
+    }
+
+    /// Create a prompt whose caret starts after `text`.
+    pub fn with_text(kind: K, title: impl Into<String>, text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self {
+            kind,
+            title: title.into(),
+            draft: Draft {
+                cursor: text.chars().count(),
+                text,
+            },
+        }
+    }
+}
+
+/// Result of routing a key through [`edit_prompt`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptAction {
+    /// The key was consumed as an edit or intentionally ignored.
+    Editing,
+    /// The caller should close the prompt without submitting.
+    Cancel,
+    /// The caller should consume and submit the prompt.
+    Submit,
+}
+
+/// Apply standard single-line prompt editing.
+///
+/// Control and Alt character chords are consumed without inserting their
+/// printable character; callers retain ownership of global chords before
+/// invoking this helper.
+pub fn edit_prompt<K>(prompt: &mut TextPrompt<K>, key: KeyEvent) -> PromptAction {
+    match key.code {
+        KeyCode::Esc => PromptAction::Cancel,
+        KeyCode::Enter => PromptAction::Submit,
+        KeyCode::Backspace | KeyCode::Delete => {
+            prompt.draft = delete_before(&prompt.draft.text, prompt.draft.cursor);
+            PromptAction::Editing
+        }
+        KeyCode::Left => {
+            prompt.draft.cursor = prompt.draft.cursor.saturating_sub(1);
+            PromptAction::Editing
+        }
+        KeyCode::Right => {
+            prompt.draft.cursor = (prompt.draft.cursor + 1).min(prompt.draft.text.chars().count());
+            PromptAction::Editing
+        }
+        KeyCode::Char(ch)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            prompt.draft = insert_at(&prompt.draft.text, prompt.draft.cursor, &ch.to_string());
+            PromptAction::Editing
+        }
+        _ => PromptAction::Editing,
     }
 }
 
@@ -159,5 +244,24 @@ mod tests {
         let d = insert_at("héllo", 2, "!");
         assert_eq!(d.text, "hé!llo");
         assert_eq!(d.cursor, 3);
+    }
+
+    #[test]
+    fn text_prompt_edits_unicode_and_reports_terminal_actions() {
+        let mut prompt = TextPrompt::new((), "title");
+        assert_eq!(
+            edit_prompt(&mut prompt, KeyEvent::from(KeyCode::Char('é'))),
+            PromptAction::Editing
+        );
+        assert_eq!(prompt.draft.text, "é");
+        assert_eq!(prompt.draft.cursor, 1);
+        assert_eq!(
+            edit_prompt(&mut prompt, KeyEvent::from(KeyCode::Enter)),
+            PromptAction::Submit
+        );
+        assert_eq!(
+            edit_prompt(&mut prompt, KeyEvent::from(KeyCode::Esc)),
+            PromptAction::Cancel
+        );
     }
 }

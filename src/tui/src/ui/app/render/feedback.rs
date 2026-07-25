@@ -163,9 +163,7 @@ impl App {
         // Two rows per item (title, then the badge line), so the window is half
         // the available height.
         let vis = ((inner.height as usize) / 2).max(1);
-        let start = idx
-            .saturating_sub(vis / 2)
-            .min(items.len().saturating_sub(vis));
+        let start = crate::ui::selection::viewport_start(idx, items.len(), vis);
 
         let mut lines: Vec<TLine> = Vec::new();
         for (i, item) in items.iter().enumerate().skip(start).take(vis) {

@@ -72,12 +72,19 @@ impl App {
     fn memory_list_key(&mut self, code: KeyCode) -> MemoryKey {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.memory_index = self.memory_index.saturating_sub(1);
+                self.memory_index = crate::ui::selection::moved(
+                    self.memory_index,
+                    self.memory_page_entries().len(),
+                    true,
+                );
                 MemoryKey::Handled(None)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let max = self.memory_page_entries().len().saturating_sub(1);
-                self.memory_index = (self.memory_index + 1).min(max);
+                self.memory_index = crate::ui::selection::moved(
+                    self.memory_index,
+                    self.memory_page_entries().len(),
+                    false,
+                );
                 MemoryKey::Handled(None)
             }
             KeyCode::Enter => {
@@ -95,12 +102,13 @@ impl App {
     fn memory_search_key(&mut self, code: KeyCode) -> MemoryKey {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.memory_index = self.memory_index.saturating_sub(1);
+                self.memory_index =
+                    crate::ui::selection::moved(self.memory_index, self.memory_hits.len(), true);
                 MemoryKey::Handled(None)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let max = self.memory_hits.len().saturating_sub(1);
-                self.memory_index = (self.memory_index + 1).min(max);
+                self.memory_index =
+                    crate::ui::selection::moved(self.memory_index, self.memory_hits.len(), false);
                 MemoryKey::Handled(None)
             }
             KeyCode::Enter if !self.memory_hits.is_empty() => {

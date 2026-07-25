@@ -31,17 +31,19 @@ impl App {
     /// Route one key while the decision overlay owns input.
     pub(super) fn handle_decision_key(&mut self, code: KeyCode) {
         let items = self.decisions();
-        self.decision_index = self.decision_index.min(items.len().saturating_sub(1));
+        self.decision_index = crate::ui::selection::clamp(self.decision_index, items.len());
         match code {
             KeyCode::Esc => {
                 self.decision_open = false;
                 self.set_status("Decision queue closed");
             }
             KeyCode::Up => {
-                self.decision_index = self.decision_index.saturating_sub(1);
+                self.decision_index =
+                    crate::ui::selection::moved(self.decision_index, items.len(), true);
             }
             KeyCode::Down => {
-                self.decision_index = (self.decision_index + 1).min(items.len().saturating_sub(1));
+                self.decision_index =
+                    crate::ui::selection::moved(self.decision_index, items.len(), false);
             }
             KeyCode::Char('d') => self.dismiss_selected_decision(items),
             KeyCode::Enter => self.answer_or_dismiss_selected_decision(items),
@@ -57,7 +59,7 @@ impl App {
         };
         self.dismissed_decisions.insert(item.id.clone());
         let remaining = self.decisions().len();
-        self.decision_index = self.decision_index.min(remaining.saturating_sub(1));
+        self.decision_index = crate::ui::selection::clamp(self.decision_index, remaining);
         self.decision_open = remaining > 0;
         self.set_status(format!("Decision dismissed · {remaining} pending"));
     }

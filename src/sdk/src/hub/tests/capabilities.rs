@@ -45,7 +45,10 @@ async fn capability_probe_returns_the_workers_budgets_and_readiness() {
         Duration::from_millis(100),
     );
 
-    let result = runner.capabilities("worker").await.expect("capability reply");
+    let result = runner
+        .capabilities("worker")
+        .await
+        .expect("capability reply");
 
     assert_eq!(result, caps());
     assert_eq!(worker.sent_kinds().await, vec!["capabilities"]);
@@ -60,7 +63,9 @@ fn decoration_maps_budgets_and_readiness_onto_the_backend_shape() {
     // exactly as `parseHarnessBudget` accepts. The window/source enums are
     // snake_case; the seat is carried on the wire (the backend strips it into the
     // client-safe projection).
-    let budgets = payload["harnessBudgets"].as_array().expect("harnessBudgets");
+    let budgets = payload["harnessBudgets"]
+        .as_array()
+        .expect("harnessBudgets");
     assert_eq!(budgets.len(), 1);
     assert_eq!(budgets[0]["provider"], json!("claude"));
     assert_eq!(budgets[0]["window"], json!("five_hour"));

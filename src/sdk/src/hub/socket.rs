@@ -151,11 +151,17 @@ pub async fn connect_harness(
         })
         // Capability probe: answer from the roster facts, decorated with the
         // worker's live budgets/readiness probed over tiny.place.
+        //
+        // CRITICAL: spawn rather than await, for the same reason as `task_run`.
+        // The live probe hops to the worker over tiny.place and can take tens of
+        // seconds (its harness readiness probe); awaiting it inside the callback
+        // starves engine.io's ping/pong and the server drops the hub, failing
+        // every later delegation while this process still looks alive.
         .on("medulla:capabilities_request", move |payload, socket| {
             let roster = cap_roster.clone();
             let runner = cap_runner.clone();
             async move {
-                handle_capabilities(payload, socket, roster, runner).await;
+                tokio::spawn(handle_capabilities(payload, socket, roster, runner));
             }
             .boxed()
         })

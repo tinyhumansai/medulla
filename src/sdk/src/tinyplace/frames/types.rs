@@ -135,6 +135,114 @@ pub struct TokenUsage {
     pub output_tokens: i64,
 }
 
+/// The metering window a paid harness seat renews its allowance on.
+///
+/// Wire values are snake_case (`five_hour`), matching the provider enum. Defaults
+/// to [`BudgetWindow::Unknown`] so a probe that cannot determine the window still
+/// serializes a well-formed descriptor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BudgetWindow {
+    /// A per-day allowance.
+    Daily,
+    /// A per-week allowance.
+    Weekly,
+    /// The rolling five-hour window some subscriptions meter on.
+    FiveHour,
+    /// The metering window is not known.
+    #[default]
+    Unknown,
+}
+
+/// How a [`HarnessBudget`]'s numbers were arrived at.
+///
+/// `estimate` is the expected common case: providers rarely publish exact
+/// per-window numbers, so most descriptors are best-effort inferences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BudgetSource {
+    /// Best-effort inference; no exact per-window numbers were published.
+    Estimate,
+    /// The provider itself reported the numbers.
+    ProviderReported,
+    /// The operator configured the numbers explicitly.
+    Configured,
+}
+
+/// A best-effort, per-harness token-budget descriptor advertised on
+/// `capabilities_result` so an orchestrator can size tasks against real
+/// capacity.
+///
+/// Every numeric field is optional — a probe that cannot establish a number
+/// leaves it absent rather than inventing one. Budget accounting is *soft*: a
+/// missing or stale descriptor must fail open and never block delegation, and a
+/// mis-reported budget cannot push a consumer past a limit the provider still
+/// enforces. `seat` is an opaque identifier only; API keys and credential
+/// material are never resolved into this descriptor and never appear in a frame
+/// or diagnostic.
+///
+/// Multi-word field names are camelCase on the wire (`limitTokens`), matching the
+/// rest of this frame module; enum values are snake_case.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessBudget {
+    /// The provider this budget describes.
+    pub provider: HarnessProvider,
+    /// Opaque identifier for the paid seat/subscription the harness draws from,
+    /// when known. Never a credential; omitted when absent.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub seat: Option<String>,
+    /// The metering window the allowance renews on.
+    pub window: BudgetWindow,
+    /// Estimated allowance for the window, or absent when unknown.
+    #[serde(
+        rename = "limitTokens",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub limit_tokens: Option<i64>,
+    /// Best-effort consumption so far in the window, or absent when unknown.
+    #[serde(
+        rename = "usedTokens",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub used_tokens: Option<i64>,
+    /// `limit - used`, clamped at zero; absent unless both inputs are known.
+    #[serde(
+        rename = "remainingTokens",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub remaining_tokens: Option<i64>,
+    /// Unix seconds until which the seat is throttled/parked, else absent.
+    #[serde(
+        rename = "cooldownUntil",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub cooldown_until: Option<i64>,
+    /// How the numbers were arrived at.
+    pub source: BudgetSource,
+}
+
+/// Per-provider readiness advertised alongside budgets.
+///
+/// A harness that is installed but currently unusable — unauthenticated,
+/// unreachable, or cooling down — is reported present with `ready = false` and a
+/// `reason`, rather than omitted, so a consumer does not route work that will
+/// fail. Readiness is heuristic and fails open: an unverifiable fact leaves the
+/// harness `ready` rather than forcing it false.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessReadiness {
+    /// The provider this readiness describes.
+    pub provider: HarnessProvider,
+    /// Whether the harness is believed usable right now.
+    pub ready: bool,
+    /// Why the harness is not ready, when `ready` is false; omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub reason: Option<String>,
+}
+
 /// A decoded protocol frame.
 ///
 /// `task_id` is the cycle-scoped correlation key; `correlation_id` (when present)

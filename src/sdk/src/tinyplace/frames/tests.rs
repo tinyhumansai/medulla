@@ -2,8 +2,9 @@
 //! round-trips, optional-field handling, and tolerant capabilities parsing.
 
 use crate::tinyplace::{
-    decode_task_frame, encode_task_frame, parse_agent_capabilities, EncodeFrameInput,
-    HarnessProvider, TaskFrameKind, TINYPLACE_PROTO,
+    decode_task_frame, encode_task_frame, parse_agent_capabilities, BudgetSource, BudgetWindow,
+    EncodeFrameInput, HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrameKind,
+    TINYPLACE_PROTO,
 };
 use serde_json::json;
 
@@ -211,6 +212,89 @@ fn parses_agent_capabilities() {
     assert_eq!(caps.tools, vec!["Bash", "Read"]);
     assert_eq!(caps.mcp_servers, vec!["langfuse"]);
     assert_eq!(caps.summary.as_deref(), Some("coding agent"));
+}
+
+#[test]
+fn harness_budget_uses_camelcase_keys_and_snake_enum_values() {
+    let budget = HarnessBudget {
+        provider: HarnessProvider::Claude,
+        seat: Some("seat-9".to_string()),
+        window: BudgetWindow::FiveHour,
+        limit_tokens: Some(1_000),
+        used_tokens: Some(250),
+        remaining_tokens: Some(750),
+        cooldown_until: Some(1_800_000_000),
+        source: BudgetSource::ProviderReported,
+    };
+    let value = serde_json::to_value(&budget).unwrap();
+    assert_eq!(value["provider"], "claude");
+    assert_eq!(value["seat"], "seat-9");
+    // Enum values are snake_case; numeric keys are camelCase.
+    assert_eq!(value["window"], "five_hour");
+    assert_eq!(value["limitTokens"], 1_000);
+    assert_eq!(value["usedTokens"], 250);
+    assert_eq!(value["remainingTokens"], 750);
+    assert_eq!(value["cooldownUntil"], 1_800_000_000_i64);
+    assert_eq!(value["source"], "provider_reported");
+    // Round-trips cleanly.
+    let back: HarnessBudget = serde_json::from_value(value).unwrap();
+    assert_eq!(back, budget);
+}
+
+#[test]
+fn harness_budget_omits_absent_optionals() {
+    let budget = HarnessBudget {
+        provider: HarnessProvider::Codex,
+        seat: None,
+        window: BudgetWindow::Unknown,
+        limit_tokens: None,
+        used_tokens: None,
+        remaining_tokens: None,
+        cooldown_until: None,
+        source: BudgetSource::Estimate,
+    };
+    let value = serde_json::to_value(&budget).unwrap();
+    assert_eq!(value["window"], "unknown");
+    assert_eq!(value["source"], "estimate");
+    // All optional numeric/seat/cooldown keys are dropped when absent.
+    for key in [
+        "seat",
+        "limitTokens",
+        "usedTokens",
+        "remainingTokens",
+        "cooldownUntil",
+    ] {
+        assert!(value.get(key).is_none(), "{key} should be omitted");
+    }
+    let back: HarnessBudget = serde_json::from_value(value).unwrap();
+    assert_eq!(back, budget);
+}
+
+#[test]
+fn harness_readiness_omits_reason_when_ready() {
+    let ready = HarnessReadiness {
+        provider: HarnessProvider::Opencode,
+        ready: true,
+        reason: None,
+    };
+    let value = serde_json::to_value(&ready).unwrap();
+    assert_eq!(value["provider"], "opencode");
+    assert_eq!(value["ready"], true);
+    assert!(value.get("reason").is_none());
+
+    let not_ready = HarnessReadiness {
+        provider: HarnessProvider::Opencode,
+        ready: false,
+        reason: Some("not authenticated".to_string()),
+    };
+    let value = serde_json::to_value(&not_ready).unwrap();
+    assert_eq!(value["ready"], false);
+    assert_eq!(value["reason"], "not authenticated");
+}
+
+#[test]
+fn budget_window_defaults_to_unknown() {
+    assert_eq!(BudgetWindow::default(), BudgetWindow::Unknown);
 }
 
 #[test]

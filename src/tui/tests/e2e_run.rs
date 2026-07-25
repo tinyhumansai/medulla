@@ -93,7 +93,7 @@ fn serve_conn(stream: UnixStream) {
     send(
         &mut writer,
         &json!({
-            "t": "ready", "protocol": 1, "serve": "3.12.0", "sessionId": "agent",
+            "t": "ready", "protocol": 2, "serve": "3.14.1", "sessionId": "agent",
             "capabilities": ["inference", "tools", "subagents"], "error": null
         }),
     );
@@ -131,7 +131,7 @@ fn serve_op(writer: &mut UnixStream, op: &str, id: &str, seq: &mut u64) -> bool 
             send(
                 writer,
                 &json!({"t":"res","id":id,"ok":true,"result":{
-                    "protocol":1,"sessionId":"agent","ports":["inference","tools","subagents"]
+                    "protocol":2,"sessionId":"agent","ports":["inference","tools","subagents"]
                 }}),
             );
             false

@@ -31,9 +31,10 @@ pub struct SessionConfig {
     pub skip_permissions: bool,
     /// Per-turn idle watchdog budget, in ms.
     pub turn_timeout_ms: u64,
-    /// Optional custom OpenAI-compatible router, layered into every turn's spawn
-    /// environment so interactive sessions route exactly like headless tasks.
-    /// `None` means routing is off.
+    /// Optional custom OpenAI-compatible router, layered into each *one-shot*
+    /// turn's spawn environment so headless turns route like daemon tasks.
+    /// Interactive (PTY) sessions are not routed yet — `InteractiveSpec` carries
+    /// no router. `None` means routing is off everywhere.
     pub router: Option<crate::config::RouterConfig>,
 }
 

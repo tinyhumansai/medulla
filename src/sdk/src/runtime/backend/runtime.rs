@@ -42,6 +42,10 @@ impl BackendRuntime {
     /// is safe. Each profile's `workspace` is the root path as given, which must
     /// match what the roster reports (`metadata.workspace`) for the backend to
     /// attribute it to that agent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the initial backend session cannot be minted.
     pub async fn connect_with_workspaces(
         client: MedullaClient,
         hub: Arc<Mutex<Option<crate::hub::HubHandle>>>,

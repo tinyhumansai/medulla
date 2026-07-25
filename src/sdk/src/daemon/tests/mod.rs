@@ -60,6 +60,7 @@ pub(super) fn base_config() -> DaemonConfig {
         providers: vec![HarnessProvider::Claude],
         default_provider: HarnessProvider::Claude,
         workspace: ".".to_string(),
+        accessible_dirs: vec![".".to_string()],
         env: std::collections::HashMap::new(),
         task_timeout_ms: 60_000,
         capability_timeout_ms: None,

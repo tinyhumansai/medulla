@@ -157,7 +157,7 @@ impl App {
         // every key so its subpage bindings are not shadowed by the global ones.
         if tab == "Settings" {
             if let SettingsKey::Handled(cmd) = self.on_settings_key(k.code) {
-                return cmd;
+                return *cmd;
             }
         }
         if tab == "Routing" {

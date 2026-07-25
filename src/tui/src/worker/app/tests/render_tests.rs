@@ -14,14 +14,12 @@ use super::super::types::{ExecutionMode, Screen, SetupStep, WorkerCmd, TAB_CONTA
 // ----------------------------------------------------------------- render ---
 
 #[test]
-fn with_no_identity_the_contact_tabs_explain_rather_than_look_empty() {
+fn master_tab_explains_worker_level_credentials() {
     let mut app = app_with(PtyManager::new(), None);
     app.set_tab(TAB_CONTACTS);
     let out = render(&mut app, 110, 16);
-    assert!(
-        out.contains("No tiny.place identity is configured"),
-        "got: {out}"
-    );
+    assert!(out.contains("Worker-level credentials"), "got: {out}");
+    assert!(out.contains("local wallet"), "got: {out}");
 }
 
 #[test]
@@ -40,8 +38,8 @@ fn an_empty_fleet_says_what_fills_it() {
     // state must not offer a key that no longer exists.
     let mut app = app_with(PtyManager::new(), None);
     let out = render(&mut app, 110, 20);
-    assert!(out.contains("No sessions running"));
-    assert!(out.contains("Peer tasks open sessions here"), "got: {out}");
+    assert!(out.contains("No agents running"));
+    assert!(out.contains("Master tasks open agent"), "got: {out}");
 }
 
 #[test]
@@ -53,6 +51,12 @@ fn a_missing_harness_is_reported_as_such_not_as_an_empty_list() {
         agent_id: None,
         providers: Vec::new(),
         startup_status: None,
+        primary_workspace: "/workspace".into(),
+        workspaces: vec![],
+        masters: Vec::new(),
+        config_path: "/tmp/config.toml".into(),
+        credential_dir: "/tmp/wallet".into(),
+        endpoint: None,
     });
     let out = render(&mut app, 110, 20);
     assert!(out.contains("No coding agents on PATH"), "got: {out}");
@@ -161,7 +165,7 @@ fn answering_the_mode_advances_to_the_harness_question() {
         "not started yet"
     );
 
-    assert_eq!(app.mode(), Some(ExecutionMode::Headless));
+    assert_eq!(app.mode(), Some(ExecutionMode::Interactive));
     assert_eq!(app.setup_step(), SetupStep::Harness);
     assert_eq!(app.screen(), Screen::Setup, "still setting up");
 
@@ -169,13 +173,13 @@ fn answering_the_mode_advances_to_the_harness_question() {
     assert!(out.contains("Which coding agent"), "got: {out}");
     // The settled answer stays visible, so the second question is answered in
     // the context of the first.
-    assert!(out.contains("running headless"), "got: {out}");
+    assert!(out.contains("running interactive"), "got: {out}");
 }
 
 #[test]
 fn answering_both_questions_starts_the_worker() {
     let app = &mut app_at_setup(PtyManager::new(), None);
-    app.on_key(key(KeyCode::Char('2'))); // interactive
+    app.on_key(key(KeyCode::Char('1'))); // interactive
     let cmd = app.on_key(key(KeyCode::Char('2'))); // codex
 
     match cmd {
@@ -214,6 +218,12 @@ fn a_single_installed_harness_is_settled_without_a_menu_of_one() {
         agent_id: None,
         providers: vec![HarnessProvider::Codex],
         startup_status: None,
+        primary_workspace: "/workspace".into(),
+        workspaces: vec![],
+        masters: Vec::new(),
+        config_path: "/tmp/config.toml".into(),
+        credential_dir: "/tmp/wallet".into(),
+        endpoint: None,
     });
     assert_eq!(
         app.screen(),
@@ -223,7 +233,7 @@ fn a_single_installed_harness_is_settled_without_a_menu_of_one() {
 
     match app.on_key(key(KeyCode::Char('1'))) {
         Some(WorkerCmd::Start { mode, provider }) => {
-            assert_eq!(mode, ExecutionMode::Headless);
+            assert_eq!(mode, ExecutionMode::Interactive);
             assert_eq!(provider, HarnessProvider::Codex, "settled, not asked");
         }
         other => panic!("expected Start, got {other:?}"),
@@ -240,6 +250,12 @@ fn with_no_harness_installed_there_is_nothing_to_ask_and_the_screen_says_so() {
         agent_id: None,
         providers: Vec::new(),
         startup_status: None,
+        primary_workspace: "/workspace".into(),
+        workspaces: vec![],
+        masters: Vec::new(),
+        config_path: "/tmp/config.toml".into(),
+        credential_dir: "/tmp/wallet".into(),
+        endpoint: None,
     });
     assert_eq!(
         app.screen(),
@@ -270,14 +286,14 @@ fn ctrl_c_quits_the_setup_step_too() {
 #[test]
 fn enter_answers_the_highlighted_setup_option() {
     // The number keys answer directly; Enter answers whatever the cursor is on.
-    // From the mode step with the cursor at rest that settles headless and
+    // From the mode step with the cursor at rest that settles interactive and
     // advances to the harness question — without starting the worker yet.
     let app = &mut app_at_setup(PtyManager::new(), None);
     assert!(
         app.on_key(key(KeyCode::Enter)).is_none(),
         "answering the first of two questions does not start the worker"
     );
-    assert_eq!(app.mode(), Some(ExecutionMode::Headless));
+    assert_eq!(app.mode(), Some(ExecutionMode::Interactive));
     assert_eq!(app.setup_step(), SetupStep::Harness);
     assert_eq!(app.screen(), Screen::Setup, "still choosing the harness");
 }
@@ -310,7 +326,7 @@ fn the_first_tab_is_labelled_for_the_mode() {
     assert!(render(&mut headless, 100, 14).contains("1 Log"));
 
     let mut interactive = app_with(PtyManager::new(), None);
-    assert!(render(&mut interactive, 100, 14).contains("1 Sessions"));
+    assert!(render(&mut interactive, 100, 14).contains("1 Agents"));
 }
 
 #[test]
@@ -346,14 +362,14 @@ fn an_empty_headless_log_explains_what_it_is_waiting_for() {
 }
 
 #[test]
-fn contacts_and_requests_are_the_same_in_both_modes() {
+fn master_and_requests_are_the_same_in_both_modes() {
     // The contact graph is a property of the machine, not of how it runs tasks.
     for mut app in [
         super::helpers::headless_app(PtyManager::new(), None),
         app_with(PtyManager::new(), None),
     ] {
         app.set_tab(TAB_CONTACTS);
-        assert!(render(&mut app, 100, 16).contains("Contacts"));
+        assert!(render(&mut app, 100, 16).contains("Master"));
     }
 }
 
@@ -396,6 +412,12 @@ fn copying_without_an_identity_says_so_rather_than_copying_nothing() {
         agent_id: None,
         providers: vec![HarnessProvider::Codex],
         startup_status: None,
+        primary_workspace: "/workspace".into(),
+        workspaces: vec![],
+        masters: Vec::new(),
+        config_path: "/tmp/config.toml".into(),
+        credential_dir: "/tmp/wallet".into(),
+        endpoint: None,
     });
     app.choose_mode(ExecutionMode::Headless);
     app.choose_harness(HarnessProvider::Codex);

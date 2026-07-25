@@ -217,8 +217,8 @@ pub fn help_text() -> String {
 Usage:\n  \
 medulla                 Start the interactive chat TUI (default)\n  \
 medulla run <text>      Submit one instruction to a local medulla-serve socket and stream events (JSON lines)\n  \
-medulla daemon [flags]  Run the headless coding-agent daemon (serves tasks over tiny.place)\n  \
-medulla daemon --tui    Run the daemon with its operator screen\n  \
+medulla daemon [flags]  Run the daemon TUI (agents, master, workspaces, requests)\n  \
+medulla daemon --headless  Run without the operator screen (automatic when piped)\n  \
                         --workspace <dir>      where peer tasks run\n  \
                         --no-trust-workspace   don't pre-trust it with claude\n  \
 medulla sessions        List recent claude/codex sessions as JSON\n  \

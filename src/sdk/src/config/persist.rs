@@ -123,3 +123,63 @@ pub fn persist_hub_workers(
         .collect();
     persist_setting(path, "hub", "workers", toml::Value::Array(rows))
 }
+
+/// Replace the workspace roots this daemon may advertise to an orchestrator.
+///
+/// The list is written under `[workflow].workspaces`, which is shared with the
+/// main TUI's repository view. Replacing rather than merging makes removals
+/// durable and keeps the worker's permission boundary legible on disk.
+pub fn persist_workflow_workspaces(path: &Path, workspaces: &[String]) -> anyhow::Result<()> {
+    persist_setting(
+        path,
+        "workflow",
+        "workspaces",
+        toml::Value::Array(
+            workspaces
+                .iter()
+                .cloned()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    )
+}
+
+/// Replace the static tiny.place peer roster without touching worker identity.
+///
+/// The daemon TUI uses this when an operator adds a master. Only public peer
+/// addresses and labels are stored here; the worker's signing key remains in
+/// its own `identityDir` wallet and is never copied into the orchestrator
+/// configuration.
+pub fn persist_tinyplace_peers(path: &Path, peers: &[crate::config::Peer]) -> anyhow::Result<()> {
+    let rows = peers
+        .iter()
+        .map(|peer| {
+            let mut row = toml::Table::new();
+            row.insert("id".into(), toml::Value::String(peer.id.clone()));
+            if let Some(value) = &peer.name {
+                row.insert("name".into(), toml::Value::String(value.clone()));
+            }
+            if let Some(value) = &peer.handle {
+                row.insert("handle".into(), toml::Value::String(value.clone()));
+            }
+            if let Some(value) = &peer.address {
+                row.insert("address".into(), toml::Value::String(value.clone()));
+            }
+            if let Some(values) = &peer.tags {
+                row.insert(
+                    "tags".into(),
+                    toml::Value::Array(values.iter().cloned().map(toml::Value::String).collect()),
+                );
+            }
+            if let Some(value) = &peer.description {
+                row.insert("description".into(), toml::Value::String(value.clone()));
+            }
+            row.insert(
+                "protocol".into(),
+                toml::Value::String(peer.protocol.clone()),
+            );
+            toml::Value::Table(row)
+        })
+        .collect();
+    persist_setting(path, "tinyplace", "peers", toml::Value::Array(rows))
+}

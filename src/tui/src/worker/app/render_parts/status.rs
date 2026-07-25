@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use super::super::types::{WorkerApp, TAB_CONTACTS, TAB_SESSIONS};
+use super::super::types::{WorkerApp, TAB_MASTER, TAB_SESSIONS, TAB_WORKSPACES};
 
 impl WorkerApp {
     /// Draw the status line with keys for the active context and mouse state.
@@ -26,9 +26,12 @@ impl WorkerApp {
                 TAB_SESSIONS => format!(
                     "↑↓/click watch · K kill · d drop · y copy · {mouse_hint} · q quit"
                 ),
-                TAB_CONTACTS => {
-                    format!("↑↓/click select · p policy · y copy · {mouse_hint} · q quit")
-                }
+                TAB_MASTER => format!(
+                    "↑↓/click select · a add · i interact · y copy · {mouse_hint} · q quit"
+                ),
+                TAB_WORKSPACES => format!(
+                    "↑↓/click select · a allow · d remove · {mouse_hint} · q quit"
+                ),
                 _ => format!(
                     "↑↓/click select · a accept · x decline · B block · r refresh · {mouse_hint} · q quit"
                 ),

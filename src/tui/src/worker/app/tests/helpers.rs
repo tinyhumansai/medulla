@@ -129,6 +129,12 @@ pub(super) fn app_at_setup(sessions: PtyManager, contacts: Option<ContactDesk>) 
         agent_id: Some("So1anaWa11et".to_string()),
         providers: vec![HarnessProvider::Claude, HarnessProvider::Codex],
         startup_status: None,
+        primary_workspace: "/workspace".into(),
+        workspaces: vec!["/workspace".into()],
+        masters: Vec::new(),
+        config_path: "/tmp/medulla-test-config.toml".into(),
+        credential_dir: "/tmp/medulla-test-wallet".into(),
+        endpoint: Some("https://relay.test".into()),
     })
 }
 

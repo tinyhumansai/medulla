@@ -45,6 +45,12 @@ pub struct DaemonConfig {
     pub default_provider: HarnessProvider,
     /// Absolute working directory tasks run in.
     pub workspace: String,
+    /// Workspace roots the operator explicitly allows this worker to advertise.
+    ///
+    /// The primary [`workspace`](Self::workspace) is always included even when
+    /// this list is empty. These paths are capability metadata for routing; a
+    /// peer still cannot select an arbitrary working directory in a task frame.
+    pub accessible_dirs: Vec<String>,
     /// Environment passed to spawned provider processes.
     pub env: HashMap<String, String>,
     /// Per-task execution timeout, in ms.
@@ -110,6 +116,11 @@ pub(super) struct Inner {
     pub(super) inflight_idle: Notify,
     /// Cached capability probe result.
     pub(super) capabilities: TokioMutex<Option<AgentCapabilities>>,
+    /// Workspace roots currently approved for capability advertisement.
+    ///
+    /// Kept outside the immutable config so the daemon TUI can change the
+    /// allowlist without restarting the worker.
+    pub(super) accessible_dirs: StdMutex<Vec<String>>,
 }
 
 /// The provider-agnostic daemon task state machine. Cheap to clone (an `Arc`),

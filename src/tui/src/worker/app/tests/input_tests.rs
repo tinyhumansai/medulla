@@ -6,7 +6,7 @@ use crossterm::event::{
 
 use super::super::super::pty::PtyManager;
 use super::super::types::{ExecutionMode, SetupStep};
-use super::helpers::{app_at_setup, app_with, desk_with, desk_with_contacts, render, render_lines};
+use super::helpers::{app_at_setup, app_with, desk_with, render, render_lines};
 
 /// Build a synthetic left-click at a terminal cell.
 fn click(column: u16, row: u16) -> Event {
@@ -76,9 +76,9 @@ fn buffered_mouse_events_are_ignored_after_capture_is_released() {
         KeyModifiers::CONTROL,
     )));
 
-    app.on_event(click(27, 1));
+    app.on_event(click(37, 1));
 
-    assert_eq!(app.tab(), "Sessions");
+    assert_eq!(app.tab(), "Agents");
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn setup_options_can_be_clicked() {
     let mut app = app_at_setup(PtyManager::new(), None);
     let _ = render(&mut app, 100, 30);
 
-    let command = app.on_event(click(5, 7));
+    let command = app.on_event(click(5, 6));
 
     assert!(command.is_none());
     assert_eq!(app.mode(), Some(ExecutionMode::Interactive));
@@ -112,9 +112,9 @@ fn setup_options_stay_on_clickable_rows_in_a_narrow_terminal() {
     let mut app = app_at_setup(PtyManager::new(), None);
     let lines = render_lines(&mut app, 30, 20);
 
-    assert!(lines[6].contains("Headless"), "{}", lines[6]);
-    assert!(lines[7].contains("Interactive"), "{}", lines[7]);
-    app.on_event(click(5, 7));
+    assert!(lines[6].contains("Interactive"), "{}", lines[6]);
+    assert!(lines[7].contains("Headless"), "{}", lines[7]);
+    app.on_event(click(5, 6));
     assert_eq!(app.mode(), Some(ExecutionMode::Interactive));
 }
 
@@ -123,7 +123,7 @@ fn tab_labels_can_be_clicked() {
     let mut app = app_with(PtyManager::new(), None);
     let _ = render(&mut app, 100, 30);
 
-    app.on_event(click(27, 1));
+    app.on_event(click(37, 1));
 
     assert_eq!(app.tab(), "Requests");
 }
@@ -132,7 +132,7 @@ fn tab_labels_can_be_clicked() {
 async fn list_rows_can_be_clicked() {
     let desk = desk_with(&["alice", "bob"]).await;
     let mut app = app_with(PtyManager::new(), Some(desk));
-    app.set_tab(2);
+    app.set_tab(3);
     let _ = render(&mut app, 100, 30);
 
     app.on_event(click(3, 4));
@@ -140,19 +140,16 @@ async fn list_rows_can_be_clicked() {
     assert_eq!(app.selected_request().unwrap().agent_id, "bob");
 }
 
-#[tokio::test]
-async fn narrow_contact_rows_stay_aligned_with_their_hitboxes() {
-    let desk = desk_with_contacts(
-        &[],
-        &["a-very-long-contact-identifier-that-would-wrap", "bob"],
-    )
-    .await;
-    let mut app = app_with(PtyManager::new(), Some(desk));
+#[test]
+fn narrow_master_rows_stay_aligned_with_their_hitboxes() {
+    let mut app = app_with(PtyManager::new(), None);
+    app.add_master("a-very-long-master-identifier-that-would-wrap".into(), None);
+    app.add_master("bob".into(), None);
     app.set_tab(1);
 
-    let lines = render_lines(&mut app, 24, 12);
+    let lines = render_lines(&mut app, 40, 12);
 
     assert!(lines[4].contains("bob"), "{}", lines[4]);
     app.on_event(click(3, 4));
-    assert_eq!(app.selected_contact().unwrap().agent_id, "bob");
+    assert_eq!(app.selected_master_address().as_deref(), Some("bob"));
 }

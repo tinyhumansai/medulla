@@ -41,20 +41,20 @@ impl App {
         ) {
             NavAction::SelectionChanged => {
                 self.disarm_logout();
-                return SettingsKey::Handled(self.tab_enter_cmd());
+                return SettingsKey::handled(self.tab_enter_cmd());
             }
             NavAction::Entered => {
                 self.set_status(format!(
                     "{} · Esc to go back to the menu",
                     self.settings_subpage()
                 ));
-                return SettingsKey::Handled(None);
+                return SettingsKey::handled(None);
             }
             NavAction::Left => {
                 self.set_status("Settings · menu");
-                return SettingsKey::Handled(None);
+                return SettingsKey::handled(None);
             }
-            NavAction::Consumed => return SettingsKey::Handled(None),
+            NavAction::Consumed => return SettingsKey::handled(None),
             NavAction::Unhandled => {}
         }
 
@@ -91,20 +91,20 @@ impl App {
                 } else {
                     (self.appearance_index + 1).min(THEME_ROLES.len() - 1)
                 };
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             SP_CONFIG => {
                 self.move_config_index(up);
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
-            SP_FEEDBACK => SettingsKey::Handled(self.move_feedback_index(up)),
+            SP_FEEDBACK => SettingsKey::handled(self.move_feedback_index(up)),
             SP_TRACE => {
                 self.selected = if up {
                     self.selected.saturating_sub(1)
                 } else {
                     self.selected + 1
                 };
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             SP_CONTEXT => {
                 self.context_index = if up {
@@ -112,11 +112,11 @@ impl App {
                 } else {
                     (self.context_index + 1).min(self.contexts.len().saturating_sub(1))
                 };
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             // Usage and Account have nothing to scroll; swallow the key so it
             // does not fall through to the global bindings and switch tabs.
-            _ => SettingsKey::Handled(None),
+            _ => SettingsKey::handled(None),
         }
     }
 
@@ -125,9 +125,9 @@ impl App {
         match code {
             KeyCode::Char('r') => {
                 self.set_status("Usage · refreshing…");
-                SettingsKey::Handled(Some(Cmd::LoadUsage))
+                SettingsKey::handled(Some(Cmd::LoadUsage))
             }
-            KeyCode::Char('c') => SettingsKey::Handled(self.set_settings_subpage(SP_CONFIG)),
+            KeyCode::Char('c') => SettingsKey::handled(self.set_settings_subpage(SP_CONFIG)),
             _ => SettingsKey::Unhandled,
         }
     }
@@ -142,11 +142,11 @@ impl App {
                 } else {
                     (self.appearance_index + 1).min(THEME_ROLES.len() - 1)
                 };
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Enter => {
                 self.cycle_appearance_role(!matches!(code, KeyCode::Left));
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             _ => SettingsKey::Unhandled,
         }
@@ -157,7 +157,7 @@ impl App {
         match code {
             KeyCode::Char('j') | KeyCode::Char('k') => {
                 self.move_config_index(matches!(code, KeyCode::Char('k')));
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Enter => {
                 let delta = match code {
@@ -167,7 +167,7 @@ impl App {
                 };
                 let status = self.adjust_setting(delta);
                 self.set_status(status);
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             _ => SettingsKey::Unhandled,
         }
@@ -176,27 +176,27 @@ impl App {
     /// Feedback: browse the board, vote, comment, and submit.
     fn feedback_key(&mut self, code: KeyCode) -> SettingsKey {
         match code {
-            KeyCode::Char('k') => SettingsKey::Handled(self.move_feedback_index(true)),
-            KeyCode::Char('j') => SettingsKey::Handled(self.move_feedback_index(false)),
-            KeyCode::Char('u') => SettingsKey::Handled(self.vote_selected_feedback(1)),
-            KeyCode::Char('d') => SettingsKey::Handled(self.vote_selected_feedback(-1)),
+            KeyCode::Char('k') => SettingsKey::handled(self.move_feedback_index(true)),
+            KeyCode::Char('j') => SettingsKey::handled(self.move_feedback_index(false)),
+            KeyCode::Char('u') => SettingsKey::handled(self.vote_selected_feedback(1)),
+            KeyCode::Char('d') => SettingsKey::handled(self.vote_selected_feedback(-1)),
             KeyCode::Char('c') => {
                 self.open_feedback_comment();
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             KeyCode::Char('n') => {
                 self.open_feedback_submit(FeedbackType::Feature);
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             KeyCode::Char('b') => {
                 self.open_feedback_submit(FeedbackType::Bug);
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
-            KeyCode::Char('s') => SettingsKey::Handled(self.cycle_feedback_sort()),
-            KeyCode::Char('f') => SettingsKey::Handled(self.cycle_feedback_filter()),
+            KeyCode::Char('s') => SettingsKey::handled(self.cycle_feedback_sort()),
+            KeyCode::Char('f') => SettingsKey::handled(self.cycle_feedback_filter()),
             KeyCode::Char('r') | KeyCode::Enter => {
                 self.set_status("Feedback · refreshing…");
-                SettingsKey::Handled(self.reload_feedback())
+                SettingsKey::handled(self.reload_feedback())
             }
             _ => SettingsKey::Unhandled,
         }
@@ -207,11 +207,11 @@ impl App {
         match code {
             KeyCode::Char('k') => {
                 self.selected = self.selected.saturating_sub(1);
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             KeyCode::Char('j') => {
                 self.selected += 1;
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             _ => SettingsKey::Unhandled,
         }
@@ -222,16 +222,16 @@ impl App {
         match code {
             KeyCode::Char('k') => {
                 self.context_index = self.context_index.saturating_sub(1);
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             KeyCode::Char('j') => {
                 let max = self.contexts.len().saturating_sub(1);
                 self.context_index = (self.context_index + 1).min(max);
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             KeyCode::Char('r') => {
                 self.set_status("Context · refreshing…");
-                SettingsKey::Handled(Some(Cmd::InspectContext))
+                SettingsKey::handled(Some(Cmd::InspectContext))
             }
             _ => SettingsKey::Unhandled,
         }
@@ -243,12 +243,12 @@ impl App {
             KeyCode::Enter => {
                 let status = self.confirm_logout();
                 self.set_status(status);
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             KeyCode::Esc => {
                 self.disarm_logout();
                 self.set_status("Account · logout cancelled");
-                SettingsKey::Handled(None)
+                SettingsKey::handled(None)
             }
             _ => SettingsKey::Unhandled,
         }
@@ -258,7 +258,15 @@ impl App {
 /// Whether the Settings dispatcher consumed a key, and any command it produced.
 pub(super) enum SettingsKey {
     /// Settings handled the key; run the enclosed command, if any.
-    Handled(Option<Cmd>),
+    Handled(Box<Option<Cmd>>),
     /// Settings does not bind this key — fall through to the global bindings.
     Unhandled,
+}
+
+impl SettingsKey {
+    /// Mark a key as consumed while keeping the comparatively large command
+    /// payload out of the dispatch enum itself.
+    fn handled(cmd: Option<Cmd>) -> Self {
+        Self::Handled(Box::new(cmd))
+    }
 }

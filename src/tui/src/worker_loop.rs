@@ -24,11 +24,14 @@ use medulla::daemon::{DaemonConfig, DaemonRuntime};
 use medulla::tinyplace::{decode_task_frame, HarnessProvider};
 
 use medulla_tui::log::LogBuffer;
-use medulla_tui::worker::app::{ExecutionMode, WorkerApp, WorkerCmd, WorkerWiring};
+use medulla_tui::worker::app::{ExecutionMode, WorkerApp, WorkerWiring};
 use medulla_tui::worker::executor::PtySessionExecutor;
 use medulla_tui::worker::pty::PtyManager;
 
 use crate::terminal::{set_mouse_capture, TermGuard};
+
+#[path = "worker_loop/commands.rs"]
+mod commands;
 
 /// Redraw cadence. Fast enough that a harness's own cursor blink and spinner
 /// look native, slow enough to bound the cost of a full repaint.
@@ -40,22 +43,43 @@ const INBOX_POLL: Duration = Duration::from_millis(1_000);
 /// Peer work admitted at once before the daemon sheds load.
 const MAX_PENDING: usize = 16;
 
+/// Everything the daemon TUI needs after identity/bootstrap resolution.
+pub struct WorkerTuiConfig {
+    pub env: HashMap<String, String>,
+    pub workspace: String,
+    pub workspaces: Vec<String>,
+    pub masters: Vec<medulla::config::Peer>,
+    pub config_path: std::path::PathBuf,
+    pub credential_dir: std::path::PathBuf,
+    pub contacts: Option<ContactDesk>,
+    pub agent_id: Option<String>,
+    pub startup_status: Option<String>,
+    pub transport: Option<SignalTransport>,
+    pub endpoint: Option<String>,
+    pub trust_workspace: bool,
+    pub skip_permissions: bool,
+}
+
 /// Run the worker TUI to exit.
 ///
 /// `env` is the process environment harness sessions inherit; `workspace` is the
 /// directory they run in.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_worker_tui(
-    env: HashMap<String, String>,
-    workspace: String,
-    contacts: Option<ContactDesk>,
-    agent_id: Option<String>,
-    startup_status: Option<String>,
-    transport: Option<SignalTransport>,
-    endpoint: Option<String>,
-    trust_workspace: bool,
-    skip_permissions: bool,
-) -> anyhow::Result<()> {
+pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
+    let WorkerTuiConfig {
+        env,
+        workspace,
+        workspaces,
+        masters,
+        config_path,
+        credential_dir,
+        contacts,
+        agent_id,
+        startup_status,
+        transport,
+        endpoint,
+        trust_workspace,
+        skip_permissions,
+    } = config;
     let providers = medulla::daemon::providers::detect_providers(&env, None, None);
     let sessions = PtyManager::new();
     let logs = LogBuffer::new();
@@ -91,6 +115,7 @@ pub async fn run_worker_tui(
     // A worker should not accept peer work before it has been told how to run
     // it — and the mode decides which executor the runtime is even built with.
     let mut inbox: Option<tokio::task::JoinHandle<()>> = None;
+    let mut runtime: Option<DaemonRuntime> = None;
 
     let startup_status = match (startup_status, &log_path) {
         (Some(status), _) => Some(status),
@@ -104,6 +129,12 @@ pub async fn run_worker_tui(
         providers: providers.clone(),
         startup_status,
         logs: logs.clone(),
+        primary_workspace: workspace.clone(),
+        workspaces: workspaces.clone(),
+        masters,
+        config_path,
+        credential_dir,
+        endpoint: endpoint.clone(),
     });
 
     // The guard restores the terminal even on a panic — a worker TUI that dies
@@ -114,6 +145,7 @@ pub async fn run_worker_tui(
     let start = StartWiring {
         env: env.clone(),
         workspace: workspace.clone(),
+        workspaces,
         providers: providers.clone(),
         sessions: sessions.clone(),
         transport,
@@ -121,7 +153,7 @@ pub async fn run_worker_tui(
         trust_workspace,
         skip_permissions,
     };
-    let result = drive(&mut terminal, &mut app, &start, &mut inbox).await;
+    let result = drive(&mut terminal, &mut app, &start, &mut inbox, &mut runtime).await;
 
     // Every harness dies with the TUI. Leaving one attached to a PTY nobody
     // holds would strand a process the operator can no longer see or stop.
@@ -136,7 +168,7 @@ pub async fn run_worker_tui(
 ///
 /// The mode picks the executor and nothing else: admission control, duplicate
 /// rejection, correlation and replies are the runtime's, identically either way.
-fn worker_runtime(
+pub(super) fn worker_runtime(
     start: &StartWiring,
     mode: ExecutionMode,
     provider: HarnessProvider,
@@ -145,6 +177,7 @@ fn worker_runtime(
     let StartWiring {
         env,
         workspace,
+        workspaces,
         providers,
         sessions,
         logs,
@@ -155,6 +188,7 @@ fn worker_runtime(
         // The operator's choice is the fallback for a frame that names none.
         default_provider: provider,
         workspace: workspace.to_string(),
+        accessible_dirs: workspaces.clone(),
         env: env.clone(),
         // The executor settles a turn when the harness says it is done, so this
         // is only the outer bound on a wedged one.
@@ -200,7 +234,7 @@ fn worker_runtime(
 }
 
 /// Drain the encrypted inbox into the runtime until aborted.
-fn spawn_inbox_drain(
+pub(super) fn spawn_inbox_drain(
     transport: SignalTransport,
     runtime: DaemonRuntime,
 ) -> tokio::task::JoinHandle<()> {
@@ -217,19 +251,20 @@ fn spawn_inbox_drain(
 
 /// The select loop.
 /// What building the daemon runtime needs, once the launch step is answered.
-struct StartWiring {
-    env: HashMap<String, String>,
-    workspace: String,
-    providers: Vec<HarnessProvider>,
-    sessions: PtyManager,
-    transport: Option<SignalTransport>,
-    logs: LogBuffer,
+pub(super) struct StartWiring {
+    pub(super) env: HashMap<String, String>,
+    pub(super) workspace: String,
+    pub(super) workspaces: Vec<String>,
+    pub(super) providers: Vec<HarnessProvider>,
+    pub(super) sessions: PtyManager,
+    pub(super) transport: Option<SignalTransport>,
+    pub(super) logs: LogBuffer,
     /// Whether to pre-trust the workspace with claude. `--no-trust-workspace`
     /// clears it for an operator who would rather answer the dialog themselves.
-    trust_workspace: bool,
+    pub(super) trust_workspace: bool,
     /// Whether peer sessions run with the harness's permission-bypass flag.
     /// `--no-skip-permissions` clears it.
-    skip_permissions: bool,
+    pub(super) skip_permissions: bool,
 }
 
 /// Pre-trust the workspace so claude does not open on its trust dialog.
@@ -237,7 +272,7 @@ struct StartWiring {
 /// Narrated to the log and the status line: silently editing somebody's claude
 /// config would be the wrong kind of convenient, even when it is the thing they
 /// asked for by naming the workspace.
-fn claude_preflight(start: &StartWiring, app: &mut WorkerApp) {
+pub(super) fn claude_preflight(start: &StartWiring, app: &mut WorkerApp) {
     use medulla_tui::worker::trust;
 
     let mut said = Vec::new();
@@ -266,6 +301,7 @@ async fn drive(
     app: &mut WorkerApp,
     start: &StartWiring,
     inbox: &mut Option<tokio::task::JoinHandle<()>>,
+    runtime: &mut Option<DaemonRuntime>,
 ) -> anyhow::Result<()> {
     let mut reader = EventStream::new();
     let mut tick = tokio::time::interval(TICK);
@@ -285,92 +321,11 @@ async fn drive(
             maybe_event = reader.next() => {
                 if let Some(Ok(event)) = maybe_event {
                     if let Some(cmd) = app.on_event(event) {
-                        run_cmd(app, cmd, start, inbox).await;
+                        commands::run_cmd(app, cmd, start, inbox, runtime).await;
                     }
                 }
             }
             _ = tick.tick() => {}
-        }
-    }
-}
-
-/// Execute a command the app emitted.
-async fn run_cmd(
-    app: &mut WorkerApp,
-    cmd: WorkerCmd,
-    start: &StartWiring,
-    inbox: &mut Option<tokio::task::JoinHandle<()>>,
-) {
-    match cmd {
-        WorkerCmd::Quit => app.should_quit = true,
-        WorkerCmd::Refresh => {
-            let Some(desk) = app.contact_desk() else {
-                app.set_status("No tiny.place identity — nothing to refresh");
-                return;
-            };
-            let health = desk.refresh().await;
-            app.set_status(match &health {
-                medulla::contacts::PollHealth::Failed { error, .. } => {
-                    format!("Relay unreachable: {error}")
-                }
-                _ => format!(
-                    "Relay checked · {} request(s) known, {} pending",
-                    desk.requests().len(),
-                    desk.pending_count()
-                ),
-            });
-        }
-        WorkerCmd::Start { mode, provider } => {
-            let Some(transport) = start.transport.clone() else {
-                app.set_status("No tiny.place identity — this worker serves local sessions only");
-                return;
-            };
-            if inbox.is_some() {
-                return; // already serving
-            }
-            // Clear claude's workspace-trust dialog before any peer can dispatch
-            // work, rather than letting the first task die against a modal.
-            // Interactive-and-claude only: the dialog exists solely on a TTY,
-            // and there is no reason to touch claude's config for a worker the
-            // operator pointed at codex.
-            if mode == ExecutionMode::Interactive && provider == HarnessProvider::Claude {
-                claude_preflight(start, app);
-            }
-            // Say it out loud. Running peer work with permission checks off is
-            // exactly the sort of default that must not be discovered from a
-            // process listing three weeks later.
-            start.logs.push(if start.skip_permissions {
-                format!(
-                    "{}: permission checks bypassed for peer tasks (--no-skip-permissions declines)",
-                    provider.as_str()
-                )
-            } else {
-                format!(
-                    "{}: permission checks left on — a task that stops to ask will hang",
-                    provider.as_str()
-                )
-            });
-            let runtime = worker_runtime(start, mode, provider, &transport);
-            *inbox = Some(spawn_inbox_drain(transport, runtime));
-            app.set_status(format!(
-                "Serving peers · {} on {}",
-                mode.as_str(),
-                provider.as_str()
-            ));
-        }
-        WorkerCmd::ContactOp { agent_id, decision } => {
-            let Some(desk) = app.contact_desk() else {
-                app.set_status("No tiny.place identity — contact decisions are unavailable");
-                return;
-            };
-            // Awaited inline: a contact decision is one small REST call, and
-            // blocking the loop for it keeps the queue and the screen honest
-            // about what has actually been settled.
-            let status = match desk.decide(&agent_id, decision).await {
-                Ok(status) => status,
-                Err(message) => message,
-            };
-            app.set_status(status);
         }
     }
 }

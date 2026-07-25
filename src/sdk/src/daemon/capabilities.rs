@@ -32,6 +32,7 @@ pub struct ProbeOptions {
     pub provider: HarnessProvider,
     pub run_task: RunTaskFn,
     pub workspace: String,
+    pub accessible_dirs: Vec<String>,
     pub env: HashMap<String, String>,
     pub providers: Vec<HarnessProvider>,
     pub timeout_ms: Option<u64>,
@@ -50,7 +51,14 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
 
     let base = AgentCapabilities {
         cwd: Some(cwd.clone()),
-        accessible_dirs: vec![cwd.clone()],
+        accessible_dirs: unique(
+            std::iter::once(cwd.clone()).chain(
+                options
+                    .accessible_dirs
+                    .iter()
+                    .map(|path| resolve_path(path)),
+            ),
+        ),
         project: git.project.clone(),
         branch: git.branch.clone(),
         providers: options.providers.clone(),
@@ -91,7 +99,11 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
 
     let reported = parse_capability_reply(&reply);
     let mut merged = base;
-    merged.accessible_dirs = unique(std::iter::once(cwd).chain(reported.accessible_dirs));
+    merged.accessible_dirs = unique(
+        std::iter::once(cwd)
+            .chain(options.accessible_dirs)
+            .chain(reported.accessible_dirs),
+    );
     merged.tools = reported.tools;
     merged.mcp_servers = reported.mcp_servers;
     merged.summary = reported.summary.or(dir.fallback_summary);
@@ -315,6 +327,7 @@ mod tests {
             provider: HarnessProvider::Claude,
             run_task,
             workspace: workspace.to_string(),
+            accessible_dirs: Vec::new(),
             env: HashMap::new(),
             providers: vec![HarnessProvider::Claude],
             timeout_ms: Some(1_000),
@@ -358,6 +371,32 @@ mod tests {
         assert!(caps.mcp_servers.is_empty());
         assert!(caps.summary.is_none());
         assert!(caps.cwd.is_some(), "cheap facts survive a failed probe");
+    }
+
+    #[tokio::test]
+    async fn configured_workspace_allowlist_is_advertised_without_a_provider() {
+        let primary = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let run_task: RunTaskFn =
+            Arc::new(|_opts| Box::pin(async move { Err("provider wedged".to_string()) }));
+        let mut options =
+            probe_options_in(run_task, primary.path().to_str().expect("utf-8 primary"));
+        options.accessible_dirs = vec![
+            second.path().to_string_lossy().into_owned(),
+            primary.path().to_string_lossy().into_owned(),
+        ];
+
+        let caps = probe_capabilities(options).await;
+
+        assert_eq!(caps.accessible_dirs.len(), 2);
+        assert_eq!(
+            caps.accessible_dirs[0],
+            primary.path().canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            caps.accessible_dirs[1],
+            second.path().canonicalize().unwrap().to_string_lossy()
+        );
     }
 
     #[tokio::test]

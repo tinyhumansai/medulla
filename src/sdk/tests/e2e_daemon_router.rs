@@ -62,8 +62,9 @@ fn router_options(
 
 #[tokio::test]
 async fn router_injects_claude_endpoint_and_resolves_key_by_name_without_leaking() {
-    // A distinctive secret so any leak is unmistakable.
-    const SECRET: &str = "sk-router-secret-DO-NOT-LEAK-9f3a";
+    // A distinctive, clearly-synthetic marker (not token-shaped, so it never
+    // trips secret scanning) so any leak into the reply frame is unmistakable.
+    const SECRET: &str = "ROUTER-KEY-VALUE-DO-NOT-LEAK-9f3a";
     let dir = TempDir::new();
     let marker = dir.path().join("key-marker");
     let marker = marker.to_string_lossy().into_owned();
@@ -197,7 +198,8 @@ async fn router_loaded_from_config_file_reaches_the_spawned_child() {
         .expect("[router] section populated the daemon config");
 
     // Feed the loaded router into the real spawn path; the child must see it.
-    const SECRET: &str = "sk-from-config-file-2b7c";
+    // A clearly-synthetic, non-token-shaped marker (avoids secret scanning).
+    const SECRET: &str = "CONFIG-FILE-KEY-VALUE-2b7c";
     let marker = dir.path().join("cfg-key-marker");
     let marker = marker.to_string_lossy().into_owned();
     let script = format!(

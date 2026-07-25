@@ -305,26 +305,6 @@ impl MedullaClient {
         self.send(req).await
     }
 
-    /// Advertise this fleet's probed capabilities — including per-harness budgets
-    /// and readiness — to the backend orchestrator
-    /// (`POST /medulla/v1/agents/capabilities`).
-    ///
-    /// The [`AgentCapabilities`] body serializes camelCase (`limitTokens`,
-    /// `remainingTokens`, …) and omits absent optionals, matching the same frame
-    /// the hub fleet advertises on the socket plane's `capabilities_result`. This
-    /// is how a backend-runtime fleet is sized like a hub fleet: the orchestrator
-    /// reads the budget-decorated roster back at `GET /medulla/v1/roster`.
-    pub async fn upload_capabilities(
-        &self,
-        capabilities: &crate::tinyplace::AgentCapabilities,
-    ) -> Result<()> {
-        let req = self
-            .authed(self.http.post(self.url("/medulla/v1/agents/capabilities")))
-            .json(capabilities);
-        let _: Value = self.send(req).await?;
-        Ok(())
-    }
-
     /// Read the backend's configured worker routing strategy
     /// (`GET /medulla/v1/routing/strategy`).
     ///

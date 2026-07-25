@@ -103,54 +103,6 @@ async fn plain_connect_omits_workspace_profiles_from_the_mint() {
 }
 
 #[tokio::test]
-async fn uploading_capabilities_advertises_budgets_to_the_backend() {
-    // Step 9: the runtime call uploads the probe result (capabilities + budgets +
-    // readiness) so a backend-runtime fleet is sized like a hub fleet.
-    use medulla::tinyplace::{
-        AgentCapabilities, BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider,
-        HarnessReadiness,
-    };
-
-    let backend = MockBackend::start().await;
-    let runtime = runtime(&backend).await;
-
-    let caps = AgentCapabilities {
-        providers: vec![HarnessProvider::Claude],
-        budgets: vec![HarnessBudget {
-            provider: HarnessProvider::Claude,
-            seat: None,
-            window: BudgetWindow::FiveHour,
-            limit_tokens: None,
-            used_tokens: None,
-            remaining_tokens: Some(900_000),
-            cooldown_until: None,
-            source: BudgetSource::Estimate,
-        }],
-        readiness: vec![HarnessReadiness {
-            provider: HarnessProvider::Claude,
-            ready: false,
-            reason: Some("not authenticated".into()),
-        }],
-        ..Default::default()
-    };
-    runtime
-        .upload_capabilities(&caps)
-        .await
-        .expect("advertisement accepted");
-
-    let upload = backend
-        .requests()
-        .into_iter()
-        .find(|r| r.method == "POST" && r.path == "/medulla/v1/agents/capabilities")
-        .expect("a capability advertisement request");
-    let body: serde_json::Value = serde_json::from_str(&upload.body).expect("json body");
-    assert_eq!(body["budgets"][0]["remainingTokens"], json!(900_000));
-    assert_eq!(body["budgets"][0]["window"], json!("five_hour"));
-    assert_eq!(body["readiness"][0]["ready"], json!(false));
-    assert_eq!(body["readiness"][0]["reason"], json!("not authenticated"));
-}
-
-#[tokio::test]
 async fn forking_adds_a_thread_and_switching_changes_the_active_one() {
     let backend = MockBackend::start().await;
     let runtime = runtime(&backend).await;

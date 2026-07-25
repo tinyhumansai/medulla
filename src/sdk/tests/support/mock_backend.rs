@@ -4,7 +4,6 @@
 //! to satisfy [`medulla::client::MedullaClient`]:
 //!
 //! - `POST /medulla/v1/sessions`            → 201 `{sessionId}`
-//! - `POST /medulla/v1/agents/capabilities` → 200 `{accepted}` (records the body)
 //! - `GET  /medulla/v1/sessions`            → 200 session list
 //! - `GET  /medulla/v1/sessions/:id`        → 200 session detail (`eventSeq`)
 //! - `POST /medulla/v1/sessions/:id/messages` → 202 `{cycleId,seq}` (or 500)
@@ -328,9 +327,6 @@ async fn handle_conn(mut sock: TcpStream, state: Arc<MockState>) -> std::io::Res
             config.created_session_id.clone()
         };
         ("201 Created", json!({ "sessionId": id }))
-    } else if route_path == "/medulla/v1/agents/capabilities" && method == "POST" {
-        // Capability/budget advertisement upload; the body is recorded above.
-        ("200 OK", json!({ "accepted": true }))
     } else if route_path == "/medulla/v1/sessions" && method == "GET" {
         ("200 OK", config.sessions_list.clone())
     } else if route_path.ends_with("/messages") && method == "POST" {

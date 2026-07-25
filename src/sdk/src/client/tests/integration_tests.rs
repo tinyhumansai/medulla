@@ -81,51 +81,6 @@ async fn consume_login_token_returns_jwt() {
 }
 
 #[tokio::test]
-async fn upload_capabilities_posts_budget_decorated_advertisement() {
-    use crate::tinyplace::{
-        AgentCapabilities, BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider,
-        HarnessReadiness,
-    };
-
-    let (base, req) =
-        spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", json!({ "accepted": true }))).await;
-    let client = MedullaClient::new(base, "jwt-abc");
-
-    let caps = AgentCapabilities {
-        providers: vec![HarnessProvider::Codex],
-        budgets: vec![HarnessBudget {
-            provider: HarnessProvider::Codex,
-            seat: None,
-            window: BudgetWindow::Weekly,
-            limit_tokens: Some(2_000),
-            used_tokens: Some(500),
-            remaining_tokens: Some(1_500),
-            cooldown_until: None,
-            source: BudgetSource::Configured,
-        }],
-        readiness: vec![HarnessReadiness {
-            provider: HarnessProvider::Codex,
-            ready: true,
-            reason: None,
-        }],
-        ..Default::default()
-    };
-    client.upload_capabilities(&caps).await.unwrap();
-
-    let sent = req.await.unwrap();
-    assert!(
-        sent.starts_with("POST /medulla/v1/agents/capabilities"),
-        "{sent}"
-    );
-    assert!(sent.contains("authorization: Bearer jwt-abc"), "{sent}");
-    // camelCase budget/readiness ride the advertisement body.
-    assert!(sent.contains("\"budgets\""), "budgets present: {sent}");
-    assert!(sent.contains("\"remainingTokens\":1500"), "{sent}");
-    assert!(sent.contains("\"readiness\""), "readiness present: {sent}");
-    assert!(sent.contains("\"ready\":true"), "{sent}");
-}
-
-#[tokio::test]
 async fn routing_strategy_get_and_put_round_trip_camel_case() {
     use crate::runtime::RoutingStrategy;
 

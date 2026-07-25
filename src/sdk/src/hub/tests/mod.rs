@@ -5,6 +5,7 @@
 //! fake worker.
 
 mod activity;
+mod capabilities;
 mod dispatch;
 mod roster;
 mod system_info;

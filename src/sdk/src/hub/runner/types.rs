@@ -16,6 +16,11 @@ pub(super) type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
 /// In-flight lightweight system probes, keyed by correlation id.
 pub(super) type SystemInfoWaiters =
     Arc<Mutex<HashMap<String, oneshot::Sender<Result<WorkerSystemInfo, String>>>>>;
+/// In-flight capability probes, keyed by correlation id. Each resolves with the
+/// worker's self-reported [`AgentCapabilities`] (carrying its budgets/readiness)
+/// or the worker's error text.
+pub(super) type CapabilitiesWaiters =
+    Arc<Mutex<HashMap<String, oneshot::Sender<Result<AgentCapabilities, String>>>>>;
 /// Shared registry of abort signals, keyed by the orchestrator-facing task id
 /// (`medulla:task_abort.taskId`). One entry per in-flight [`TaskRunner::run`],
 /// registered for the whole call; notifying it makes that call stop the worker,
@@ -45,6 +50,8 @@ pub struct TaskRunner {
     pub(super) waiters: Waiters,
     /// System-information probes waiting for a worker response.
     pub(super) system_info_waiters: SystemInfoWaiters,
+    /// Capability probes waiting for a worker's `capabilities_result`.
+    pub(super) capabilities_waiters: CapabilitiesWaiters,
     /// Abort signals for in-flight dispatches, keyed by orchestrator-facing task
     /// id; [`abort_task`](Self::abort_task) notifies one to cancel its dispatch.
     pub(super) aborts: Aborts,

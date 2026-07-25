@@ -33,6 +33,9 @@ pub(in crate::hub::tests) enum Mode {
     SystemInfoAfterReset(WorkerSystemInfo),
     /// Answers a capacity probe with malformed JSON.
     InvalidSystemInfo,
+    /// Answers a capability probe with the given [`AgentCapabilities`] (its
+    /// budgets/readiness serialized into a `capabilities_result` frame).
+    Capabilities(AgentCapabilities),
 }
 
 pub(in crate::hub::tests) struct FakeWorker {

@@ -78,6 +78,7 @@ pub async fn connect_harness(
     let run_activity = activity.clone();
     let run_roster = roster.clone();
     let cap_roster = roster.clone();
+    let cap_runner = runner.clone();
     let abort_runner = runner.clone();
     let abort_log = log.clone();
 
@@ -148,11 +149,13 @@ pub async fn connect_harness(
             }
             .boxed()
         })
-        // Capability probe: answer from the roster metadata.
+        // Capability probe: answer from the roster facts, decorated with the
+        // worker's live budgets/readiness probed over tiny.place.
         .on("medulla:capabilities_request", move |payload, socket| {
             let roster = cap_roster.clone();
+            let runner = cap_runner.clone();
             async move {
-                handle_capabilities(payload, socket, roster).await;
+                handle_capabilities(payload, socket, roster, runner).await;
             }
             .boxed()
         })
@@ -315,9 +318,23 @@ async fn handle_task_run(
     let _ = socket.emit("medulla:task_result", frame).await;
 }
 
-/// Answer a capability probe from the roster metadata (static, so a probe never
-/// blocks delegation).
-async fn handle_capabilities(payload: Payload, socket: Client, roster: SharedRoster) {
+/// Answer a capability probe, decorating the static roster facts with the
+/// worker's live budgets/readiness.
+///
+/// The static facts (`providers`, `summary`) are established from the roster
+/// without touching the worker, so a probe always answers even if the worker is
+/// unreachable. On top of that, the hub asks the resolved worker for its
+/// [`AgentCapabilities`] over tiny.place and maps its `budgets`/`readiness` onto
+/// the backend-shaped keys (`harnessBudgets`, `ready`, `readyReason`) that the
+/// backend's `sanitizeCapabilities` reads. The probe fails open: any transport
+/// error, timeout, or malformed reply simply omits those keys rather than
+/// blocking the answer.
+async fn handle_capabilities(
+    payload: Payload,
+    socket: Client,
+    roster: SharedRoster,
+    runner: Arc<TaskRunner>,
+) {
     let Some(obj) = first_obj(payload) else {
         return;
     };
@@ -325,19 +342,69 @@ async fn handle_capabilities(payload: Payload, socket: Client, roster: SharedRos
         return;
     };
     let agent_id = str_field(&obj, "agentId").unwrap_or_default();
-    // Extract what we need, then drop the lock before awaiting the emit.
-    let (providers, summary) = {
+    // Resolve the targeted worker (or the selected/first when unattributed),
+    // then drop the lock before any await.
+    let worker = {
         let r = roster.lock().expect("roster lock");
-        match r.iter().find(|w| w.id == agent_id) {
-            Some(w) => (vec![w.harness.clone()], format!("{} daemon", w.harness)),
-            None => (Vec::new(), String::new()),
-        }
+        let wanted = agent_id.trim();
+        let found = if wanted.is_empty() {
+            r.iter().find(|w| w.selected).or_else(|| r.first())
+        } else {
+            r.iter().find(|w| w.id == wanted || w.address == wanted)
+        };
+        found.cloned()
     };
-    let capabilities = json!({ "providers": providers, "summary": summary });
+    let (providers, summary, address) = match &worker {
+        Some(w) => (
+            vec![w.harness.clone()],
+            format!("{} daemon", w.harness),
+            Some(w.address.clone()),
+        ),
+        None => (Vec::new(), String::new(), None),
+    };
+    let mut capabilities = json!({ "providers": providers, "summary": summary });
+    // Real path: probe the worker for its budgets/readiness and decorate. Fails
+    // open — a probe error leaves only the static facts.
+    if let Some(address) = address {
+        if let Ok(caps) = runner.capabilities(&address).await {
+            decorate_with_budgets(&mut capabilities, &caps);
+        }
+    }
     let _ = socket
         .emit(
             "medulla:capabilities_result",
             json!({ "probeId": probe_id, "capabilities": capabilities }),
         )
         .await;
+}
+
+/// Map a worker's [`AgentCapabilities`] budgets/readiness onto the backend-shaped
+/// `capabilities` payload the backend's `sanitizeCapabilities` reads.
+///
+/// The worker frame carries a per-provider `readiness` array and a `budgets`
+/// array; the backend's `AgentCapabilities` bag carries a flat `harnessBudgets`
+/// array plus a single advisory `ready`/`readyReason` pair. The `HarnessBudget`
+/// entries already serialize in the camelCase the backend's `parseHarnessBudget`
+/// accepts, so `harnessBudgets` is the budget array verbatim. `ready` is the AND
+/// of the readiness entries (usable only when every installed harness is), and
+/// `readyReason` surfaces the first not-ready reason.
+pub(super) fn decorate_with_budgets(
+    capabilities: &mut Value,
+    caps: &crate::tinyplace::AgentCapabilities,
+) {
+    let Some(obj) = capabilities.as_object_mut() else {
+        return;
+    };
+    if !caps.budgets.is_empty() {
+        if let Ok(budgets) = serde_json::to_value(&caps.budgets) {
+            obj.insert("harnessBudgets".to_string(), budgets);
+        }
+    }
+    if !caps.readiness.is_empty() {
+        let not_ready = caps.readiness.iter().find(|r| !r.ready);
+        obj.insert("ready".to_string(), Value::Bool(not_ready.is_none()));
+        if let Some(reason) = not_ready.and_then(|r| r.reason.clone()) {
+            obj.insert("readyReason".to_string(), Value::String(reason));
+        }
+    }
 }

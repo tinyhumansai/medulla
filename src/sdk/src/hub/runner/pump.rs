@@ -9,12 +9,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::tinyplace::{decode_task_frame, TaskFrame, TaskFrameKind, TokenUsage, WorkerSystemInfo};
+use crate::tinyplace::{
+    decode_task_frame, parse_agent_capabilities, TaskFrame, TaskFrameKind, TokenUsage,
+    WorkerSystemInfo,
+};
 
 use super::super::relay::Relay;
 use super::super::types::{HubLog, TaskOutcome};
 use super::super::ActivityLog;
-use super::{SystemInfoWaiters, Waiters};
+use super::{CapabilitiesWaiters, SystemInfoWaiters, Waiters};
 
 /// How many inbound messages to drain per pump tick.
 const DRAIN_LIMIT: i64 = 50;
@@ -26,6 +29,7 @@ const DRAIN_LIMIT: i64 = 50;
 pub(super) async fn route_frame(
     waiters: &Waiters,
     system_info_waiters: &SystemInfoWaiters,
+    capabilities_waiters: &CapabilitiesWaiters,
     frame: TaskFrame,
     log: &Option<HubLog>,
     activity: &Option<ActivityLog>,
@@ -61,6 +65,14 @@ pub(super) async fn route_frame(
         let result = serde_json::from_str::<WorkerSystemInfo>(&frame.text)
             .map_err(|error| format!("invalid worker system info: {error}"));
         if let Some(waiter) = system_info_waiters.lock().await.remove(&key) {
+            let _ = waiter.send(result);
+        }
+        return;
+    }
+    if frame.kind == TaskFrameKind::CapabilitiesResult {
+        let result = parse_agent_capabilities(&frame.text)
+            .ok_or_else(|| "invalid worker capabilities payload".to_string());
+        if let Some(waiter) = capabilities_waiters.lock().await.remove(&key) {
             let _ = waiter.send(result);
         }
         return;
@@ -106,6 +118,7 @@ pub(super) async fn pump_loop(
     relay: Arc<dyn Relay>,
     waiters: Waiters,
     system_info_waiters: SystemInfoWaiters,
+    capabilities_waiters: CapabilitiesWaiters,
     poll: Duration,
     log: Option<HubLog>,
     activity: Option<ActivityLog>,
@@ -113,7 +126,15 @@ pub(super) async fn pump_loop(
     loop {
         for msg in relay.drain_inbox(DRAIN_LIMIT).await {
             if let Some(frame) = decode_task_frame(&msg.text) {
-                route_frame(&waiters, &system_info_waiters, frame, &log, &activity).await;
+                route_frame(
+                    &waiters,
+                    &system_info_waiters,
+                    &capabilities_waiters,
+                    frame,
+                    &log,
+                    &activity,
+                )
+                .await;
             }
         }
         tokio::time::sleep(poll).await;

@@ -15,8 +15,8 @@ use tokio::sync::Mutex;
 use crate::daemon::transport::InboundMessage;
 use crate::hub::{Relay, TaskRequest};
 use crate::tinyplace::{
-    decode_task_frame, encode_task_frame_with_usage, EncodeFrameInput, TaskFrameKind, TokenUsage,
-    WorkerSystemInfo,
+    decode_task_frame, encode_task_frame_with_usage, AgentCapabilities, EncodeFrameInput,
+    TaskFrameKind, TokenUsage, WorkerSystemInfo,
 };
 
 impl FakeWorker {
@@ -77,6 +77,27 @@ impl Relay for FakeWorker {
                     None,
                 ),
             });
+            return Ok(());
+        }
+        if frame.kind == TaskFrameKind::Capabilities {
+            if let Mode::Capabilities(caps) = &self.mode {
+                self.inbox.lock().await.push_back(InboundMessage {
+                    from: "worker".to_string(),
+                    text: encode_task_frame_with_usage(
+                        EncodeFrameInput {
+                            kind: TaskFrameKind::CapabilitiesResult,
+                            task_id: frame.task_id,
+                            text: serde_json::to_string(caps).unwrap(),
+                            ts: "T".to_string(),
+                            correlation_id: frame.correlation_id,
+                            harness: None,
+                            provider: None,
+                            model: None,
+                        },
+                        None,
+                    ),
+                });
+            }
             return Ok(());
         }
         // Only a `task` frame starts work. An `abort` is the runner telling us to
@@ -141,6 +162,7 @@ impl Relay for FakeWorker {
             // Ack + status already queued above; no terminal frame follows.
             Mode::Silent | Mode::AckOnly => {}
             Mode::SystemInfo(_) | Mode::SystemInfoAfterReset(_) | Mode::InvalidSystemInfo => {}
+            Mode::Capabilities(_) => {}
         }
         Ok(())
     }

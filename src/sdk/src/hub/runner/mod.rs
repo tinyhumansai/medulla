@@ -17,11 +17,14 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
-use crate::tinyplace::{encode_task_frame, EncodeFrameInput, TaskFrameKind, WorkerSystemInfo};
+use crate::tinyplace::{
+    encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind, WorkerSystemInfo,
+};
 
 use super::relay::Relay;
 use super::types::{RunError, TaskOutcome, TaskRequest};
 
+mod capabilities;
 mod pump;
 mod system_info;
 
@@ -141,10 +144,12 @@ impl TaskRunner {
     ) -> Self {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
         let system_info_waiters: SystemInfoWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let capabilities_waiters: CapabilitiesWaiters = Arc::new(Mutex::new(HashMap::new()));
         let pump = tokio::spawn(pump::pump_loop(
             relay.clone(),
             waiters.clone(),
             system_info_waiters.clone(),
+            capabilities_waiters.clone(),
             poll,
             log,
             activity,
@@ -153,6 +158,7 @@ impl TaskRunner {
             relay,
             waiters,
             system_info_waiters,
+            capabilities_waiters,
             aborts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             counter: AtomicU64::new(0),
             ack_window,
@@ -389,6 +395,7 @@ fn settle(
 
 mod types;
 use types::AbortGuard;
+use types::CapabilitiesWaiters;
 use types::SystemInfoWaiters;
 pub use types::TaskRunner;
 use types::Waiter;

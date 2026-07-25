@@ -119,6 +119,86 @@ async fn routing_strategy_get_and_put_round_trip_camel_case() {
 }
 
 #[tokio::test]
+async fn roster_decodes_capacity_and_safe_budgets() {
+    let data = json!({
+        "workers": [{
+            "registryId": "agent-1",
+            "label": "Reviewer",
+            "description": "Reviews changes",
+            "availability": "online",
+            "harness": "codex",
+            "cpuCores": 8,
+            "selected": true,
+            "budgets": [{
+                "provider": "codex",
+                "window": "weekly",
+                "remainingTokens": 9000,
+                "limitTokens": 10000,
+                "source": "configured"
+            }]
+        }]
+    });
+    let (base, req) = spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", data)).await;
+    let client = MedullaClient::new(base, "jwt");
+    let workers = client.roster().await.unwrap();
+    assert_eq!(workers[0].registry_id, "agent-1");
+    assert_eq!(workers[0].cpu_cores, Some(8));
+    assert_eq!(workers[0].budgets[0].remaining_tokens, Some(9000));
+    assert!(req.await.unwrap().starts_with("GET /medulla/v1/roster "));
+}
+
+#[tokio::test]
+async fn program_task_create_uses_camel_case_contract() {
+    let data = json!({
+        "task": {
+            "id": "task-1",
+            "title": "Ship integration",
+            "description": "",
+            "status": "inProgress",
+            "createdAt": "2026-07-25T00:00:00Z",
+            "updatedAt": "2026-07-25T00:00:00Z",
+            "dispatch": {}
+        }
+    });
+    let (base, req) = spawn_stub_capture(ok_envelope("HTTP/1.1 201 Created", data)).await;
+    let client = MedullaClient::new(base, "jwt");
+    let task = client
+        .create_program_task(CreateProgramTask {
+            title: "Ship integration".into(),
+            description: None,
+            status: Some(ProgramTaskStatus::InProgress),
+            recurrence: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(task.status, ProgramTaskStatus::InProgress);
+    let sent = req.await.unwrap();
+    assert!(sent.starts_with("POST /medulla/v1/tasks "), "{sent}");
+    assert!(sent.contains("\"status\":\"inProgress\""), "{sent}");
+}
+
+#[tokio::test]
+async fn program_source_sync_surfaces_nonfatal_provider_errors() {
+    let data = json!({
+        "result": {
+            "added": 2,
+            "updated": 1,
+            "unchanged": 3,
+            "errors": ["GitHub result truncated at the page cap"]
+        }
+    });
+    let (base, req) = spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", data)).await;
+    let client = MedullaClient::new(base, "jwt");
+    let result = client.sync_program_task_source("source-1").await.unwrap();
+    assert_eq!(result.added, 2);
+    assert_eq!(result.errors.len(), 1);
+    assert!(req
+        .await
+        .unwrap()
+        .starts_with("POST /medulla/v1/tasks/sources/source-1/sync "));
+}
+
+#[tokio::test]
 async fn me_carries_bearer_and_unwraps() {
     let (base, req) =
         spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", json!({ "sub": "user-1" }))).await;

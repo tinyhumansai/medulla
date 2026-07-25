@@ -129,6 +129,238 @@ pub struct AbortResult {
 }
 
 // ---------------------------------------------------------------------------
+// Program APIs (/medulla/v1/roster, /medulla/v1/tasks)
+// ---------------------------------------------------------------------------
+
+/// Client-safe harness budget advertised by a connected worker.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RosterBudget {
+    pub provider: String,
+    pub window: String,
+    #[serde(default)]
+    pub remaining_tokens: Option<u64>,
+    #[serde(default)]
+    pub limit_tokens: Option<u64>,
+    #[serde(default)]
+    pub cooldown_until: Option<u64>,
+    pub source: String,
+}
+
+/// Connected worker returned by `GET /medulla/v1/roster`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RosterWorker {
+    pub registry_id: String,
+    pub label: String,
+    pub description: String,
+    pub availability: String,
+    #[serde(default)]
+    pub harness: Option<String>,
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub handle: Option<String>,
+    #[serde(default)]
+    pub wallet_peer_id: Option<String>,
+    #[serde(default)]
+    pub cpu_cores: Option<u32>,
+    #[serde(default)]
+    pub total_mem_bytes: Option<u64>,
+    #[serde(default)]
+    pub available_mem_bytes: Option<u64>,
+    #[serde(default)]
+    pub primary_ipv4: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub selected: bool,
+    #[serde(default)]
+    pub capabilities: Option<Value>,
+    #[serde(default)]
+    pub budgets: Vec<RosterBudget>,
+}
+
+/// Response payload of `GET /medulla/v1/roster`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Roster {
+    #[serde(default)]
+    pub workers: Vec<RosterWorker>,
+}
+
+/// Lifecycle state of an operator-owned program task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProgramTaskStatus {
+    Open,
+    InProgress,
+    Done,
+    Cancelled,
+}
+
+/// Recurrence frequency for an operator-owned program task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskRecurrenceFrequency {
+    Daily,
+    Weekly,
+    Monthly,
+    EveryDays,
+}
+
+/// Optional recurrence rule attached to a program task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRecurrence {
+    pub frequency: TaskRecurrenceFrequency,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_days: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_at: Option<String>,
+}
+
+/// External source identity attached to a synchronized task.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramTaskSourceRef {
+    pub provider: String,
+    pub source_id: String,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// An operator-owned task in the backend program ledger.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramTask {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub status: ProgramTaskStatus,
+    #[serde(default)]
+    pub recurrence: Option<TaskRecurrence>,
+    #[serde(default)]
+    pub source: Option<ProgramTaskSourceRef>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub last_synced_at: Option<String>,
+    #[serde(default)]
+    pub dispatch: Value,
+}
+
+/// Input for creating a program task.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProgramTask {
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<ProgramTaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<TaskRecurrence>,
+}
+
+/// Patch accepted by `PATCH /medulla/v1/tasks/:id`.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProgramTask {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<ProgramTaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<TaskRecurrence>,
+}
+
+/// GitHub issue state selected by a task source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubIssueState {
+    Open,
+    Closed,
+    All,
+}
+
+/// A configured GitHub task source. Tokens never appear on this response.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramTaskSource {
+    pub id: String,
+    pub provider: String,
+    pub enabled: bool,
+    pub repository: String,
+    pub state: GithubIssueState,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub filter: Option<String>,
+    pub has_token: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Input for configuring a GitHub task source.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProgramTaskSource {
+    pub repository: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<GithubIssueState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Result of synchronizing one GitHub source into the task ledger.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TaskSourceSyncResult {
+    pub added: u64,
+    pub updated: u64,
+    pub unchanged: u64,
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct TasksPayload {
+    pub(super) tasks: Vec<ProgramTask>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct TaskPayload {
+    pub(super) task: ProgramTask,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct TaskSourcesPayload {
+    pub(super) sources: Vec<ProgramTaskSource>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct TaskSourcePayload {
+    pub(super) source: ProgramTaskSource,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct TaskSourceSyncPayload {
+    pub(super) result: TaskSourceSyncResult,
+}
+
+/// Result shared by program task/source delete endpoints.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeleteProgramItem {
+    pub deleted: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Event stream
 // ---------------------------------------------------------------------------
 

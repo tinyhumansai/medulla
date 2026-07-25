@@ -1,0 +1,219 @@
+//! (Unix-only: exercises spawned `/bin/sh` fake-provider scripts.)
+//!
+//! End-to-end coverage for the daemon's client-side OpenAI-compatible router at
+//! the provider spawn seam ([`medulla::daemon::providers::run_provider_task`]):
+//! endpoint injection, API-key resolution by env-var *name*, the no-router
+//! passthrough, and the config-file → daemon-population wiring. The secrecy
+//! invariant — the resolved key value never rides the reply frame — is pinned
+//! here. Split out of `e2e_daemon_providers.rs` to keep each test file within
+//! the mandatory 500-line ceiling.
+
+mod support;
+
+use std::collections::HashMap;
+
+use medulla::daemon::providers::{run_provider_task, Abort, RunTaskOptions};
+use medulla::tinyplace::HarnessProvider;
+
+use support::fake_provider::TempDir;
+
+/// Parse a `RouterConfig` from JSON for the spawn-seam tests.
+fn router_cfg(json: &str) -> medulla::config::RouterConfig {
+    serde_json::from_str(json).expect("valid router config")
+}
+
+/// Build an env carrying host `PATH` plus explicit overrides.
+fn env_with(overrides: &[(&str, &str)]) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    if let Ok(path) = std::env::var("PATH") {
+        env.insert("PATH".to_string(), path);
+    }
+    for (k, v) in overrides {
+        env.insert((*k).to_string(), (*v).to_string());
+    }
+    env
+}
+
+fn router_options(
+    provider: HarnessProvider,
+    bin: &str,
+    env: HashMap<String, String>,
+    router: Option<medulla::config::RouterConfig>,
+) -> RunTaskOptions {
+    let _ = bin;
+    RunTaskOptions {
+        conversation: String::new(),
+        resume_session_id: None,
+        provider,
+        prompt: "do it".to_string(),
+        cwd: ".".to_string(),
+        env,
+        timeout_ms: 5_000,
+        model: None,
+        agent: None,
+        extra_args: Vec::new(),
+        skip_permissions: false,
+        abort: Abort::new(),
+        router,
+        on_event: None,
+        on_stdin: None,
+    }
+}
+
+#[tokio::test]
+async fn router_injects_claude_endpoint_and_resolves_key_by_name_without_leaking() {
+    // A distinctive secret so any leak is unmistakable.
+    const SECRET: &str = "sk-router-secret-DO-NOT-LEAK-9f3a";
+    let dir = TempDir::new();
+    let marker = dir.path().join("key-marker");
+    let marker = marker.to_string_lossy().into_owned();
+    // The fake claude echoes the ROUTED endpoint into its result (safe to log)
+    // and writes the resolved AUTH TOKEN to a marker file — out of band, so the
+    // token never rides the reply frame.
+    let script = format!(
+        "#!/bin/sh\n\
+         printf '%s' \"$ANTHROPIC_AUTH_TOKEN\" > '{marker}'\n\
+         printf '{{\"type\":\"result\",\"result\":\"endpoint=%s\"}}\\n' \"$ANTHROPIC_BASE_URL\"\n",
+    );
+    let bin = dir.write_script("router_claude.sh", &script);
+
+    // The daemon's own environment holds the key under its configured name.
+    let env = env_with(&[
+        ("TINYPLACE_CLAUDE_BIN", &bin),
+        ("MEDULLA_ROUTER_KEY", SECRET),
+    ]);
+    let router =
+        router_cfg(r#"{"baseUrl":"https://gw/anthropic","apiKeyEnv":"MEDULLA_ROUTER_KEY"}"#);
+    let options = router_options(HarnessProvider::Claude, &bin, env, Some(router));
+    let result = run_provider_task(options).await.expect("router run ok");
+
+    // The child saw the routed endpoint...
+    assert_eq!(result.reply, "endpoint=https://gw/anthropic");
+    // ...and received the key resolved from the daemon env BY NAME.
+    let seen = std::fs::read_to_string(&marker).expect("marker written");
+    assert_eq!(seen, SECRET, "child received the resolved AUTH token");
+    // ...but the secret NEVER appears in the reply frame.
+    assert!(
+        !result.reply.contains(SECRET),
+        "the key value must not leak into the reply frame"
+    );
+}
+
+#[tokio::test]
+async fn router_codex_endpoint_only_preserves_existing_credentials() {
+    // No apiKeyEnv → the router steers OPENAI_BASE_URL and leaves the harness's
+    // own OPENAI_API_KEY untouched (endpoint-only routing).
+    let dir = TempDir::new();
+    let marker = dir.path().join("codex-env");
+    let marker = marker.to_string_lossy().into_owned();
+    let script = format!(
+        "#!/bin/sh\n\
+         printf 'base=%s key=%s' \"$OPENAI_BASE_URL\" \"$OPENAI_API_KEY\" > '{marker}'\n\
+         printf '{{\"type\":\"event_msg\",\"timestamp\":\"2026-07-05T00:00:00Z\",\"payload\":{{\"type\":\"agent_message\",\"message\":\"ok\"}}}}\\n'\n",
+    );
+    let bin = dir.write_script("router_codex.sh", &script);
+    let env = env_with(&[
+        ("TINYPLACE_CODEX_BIN", &bin),
+        ("OPENAI_API_KEY", "pre-existing-key"),
+    ]);
+    let router = router_cfg(r#"{"baseUrl":"https://gw/v1"}"#);
+    let options = router_options(HarnessProvider::Codex, &bin, env, Some(router));
+    let result = run_provider_task(options).await.expect("router run ok");
+    assert_eq!(result.reply, "ok");
+    let seen = std::fs::read_to_string(&marker).expect("marker written");
+    assert_eq!(seen, "base=https://gw/v1 key=pre-existing-key");
+}
+
+#[tokio::test]
+async fn router_missing_key_env_is_a_hard_error_not_a_silent_empty_key() {
+    // apiKeyEnv names a var that is absent from the daemon env → explicit error
+    // (surfaced upstream as an error frame), never a silent unauthenticated spawn.
+    let env = env_with(&[("TINYPLACE_CODEX_BIN", "/nonexistent/codex")]);
+    let router = router_cfg(r#"{"baseUrl":"https://gw/v1","apiKeyEnv":"ABSENT_ROUTER_KEY"}"#);
+    let options = router_options(HarnessProvider::Codex, "codex", env, Some(router));
+    let err = run_provider_task(options)
+        .await
+        .expect_err("missing router key must error");
+    assert!(
+        err.contains("ABSENT_ROUTER_KEY"),
+        "names the missing var: {err}"
+    );
+    assert!(err.contains("not set"), "explains the failure: {err}");
+}
+
+#[tokio::test]
+async fn no_router_config_spawns_child_unchanged() {
+    // router: None → zero behaviour change; the endpoint env is never set.
+    let dir = TempDir::new();
+    let marker = dir.path().join("no-router");
+    let marker = marker.to_string_lossy().into_owned();
+    let script = format!(
+        "#!/bin/sh\n\
+         printf 'base=[%s]' \"$ANTHROPIC_BASE_URL\" > '{marker}'\n\
+         printf '{{\"type\":\"result\",\"result\":\"done\"}}\\n'\n",
+    );
+    let bin = dir.write_script("no_router_claude.sh", &script);
+    let env = env_with(&[("TINYPLACE_CLAUDE_BIN", &bin)]);
+    let options = router_options(HarnessProvider::Claude, &bin, env, None);
+    let result = run_provider_task(options).await.expect("run ok");
+    assert_eq!(result.reply, "done");
+    let seen = std::fs::read_to_string(&marker).expect("marker written");
+    assert_eq!(seen, "base=[]", "no router → ANTHROPIC_BASE_URL is unset");
+}
+
+#[tokio::test]
+async fn router_loaded_from_config_file_reaches_the_spawned_child() {
+    // The config-load → daemon-population wiring, end to end: a `[router]` section
+    // on disk is parsed by `load_config` into the exact `RouterConfig` the spawn
+    // seam accepts, and its endpoint reaches the child. This is the seam the
+    // standalone daemon and worker TUI use to populate `DaemonConfig.router`.
+    let dir = TempDir::new();
+    // An explicit config file with a router endpoint (camelCase on the wire).
+    let config_path = dir.path().join("medulla.tui.json");
+    std::fs::write(
+        &config_path,
+        r#"{"router":{"baseUrl":"https://gw/anthropic","apiKeyEnv":"MEDULLA_ROUTER_KEY"}}"#,
+    )
+    .expect("write config");
+
+    // Load it the way the daemon does; env only carries a home so discovery is
+    // deterministic (the explicit path bypasses layer discovery regardless).
+    let load_env: HashMap<String, String> = [(
+        "MEDULLA_HOME".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    )]
+    .into_iter()
+    .collect();
+    let loaded = medulla::config::load_config(
+        Some(config_path.to_string_lossy().as_ref()),
+        &load_env,
+        dir.path(),
+    )
+    .expect("config loads");
+    let router = loaded
+        .config
+        .router
+        .clone()
+        .expect("[router] section populated the daemon config");
+
+    // Feed the loaded router into the real spawn path; the child must see it.
+    const SECRET: &str = "sk-from-config-file-2b7c";
+    let marker = dir.path().join("cfg-key-marker");
+    let marker = marker.to_string_lossy().into_owned();
+    let script = format!(
+        "#!/bin/sh\n\
+         printf '%s' \"$ANTHROPIC_AUTH_TOKEN\" > '{marker}'\n\
+         printf '{{\"type\":\"result\",\"result\":\"endpoint=%s\"}}\\n' \"$ANTHROPIC_BASE_URL\"\n",
+    );
+    let bin = dir.write_script("cfg_router_claude.sh", &script);
+    let env = env_with(&[
+        ("TINYPLACE_CLAUDE_BIN", &bin),
+        ("MEDULLA_ROUTER_KEY", SECRET),
+    ]);
+    let options = router_options(HarnessProvider::Claude, &bin, env, Some(router));
+    let result = run_provider_task(options).await.expect("router run ok");
+
+    assert_eq!(result.reply, "endpoint=https://gw/anthropic");
+    let seen = std::fs::read_to_string(&marker).expect("marker written");
+    assert_eq!(seen, SECRET, "child received the key resolved by name");
+}

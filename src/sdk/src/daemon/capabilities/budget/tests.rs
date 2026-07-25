@@ -4,9 +4,7 @@ use std::collections::HashMap;
 
 use crate::tinyplace::{BudgetSource, BudgetWindow, HarnessProvider};
 
-use super::budget::{
-    evaluate_provider, probe_budgets, BudgetSeams, ConfiguredBudget, ProviderProbeInput,
-};
+use super::{evaluate_provider, probe_budgets, BudgetSeams, ConfiguredBudget, ProviderProbeInput};
 
 const NOW: i64 = 1_000_000;
 

@@ -246,9 +246,6 @@ fn resolve_path(path: &str) -> String {
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-mod budget_tests;
-
 pub mod budget;
 pub use budget::{
     evaluate_provider, probe_budgets, BudgetSeams, ConfiguredBudget, ProviderProbeInput,

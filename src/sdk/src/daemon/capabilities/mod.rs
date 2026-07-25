@@ -34,6 +34,12 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
     let git = read_git_facts(&cwd).await;
     let dir = read_dir_context(&cwd).await;
 
+    // Best-effort budget/readiness for the offered harnesses. Fails open: this
+    // never errors and only reports installed providers, so an unusable machine
+    // simply advertises fewer (or no) budgets rather than blocking the report.
+    let (readiness, budgets) =
+        probe_budgets(&options.providers, &BudgetSeams::from_env(&options.env));
+
     let base = AgentCapabilities {
         cwd: Some(cwd.clone()),
         accessible_dirs: unique(
@@ -52,6 +58,10 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         // Deterministic digest of CLAUDE.md/AGENTS.md/README.md — the summary
         // of last resort so a failed probe still carries project context.
         summary: dir.fallback_summary.clone(),
+        // Budget/readiness are established from the environment, not the agent's
+        // self-report, so they survive a failed probe (which returns `base`).
+        budgets,
+        readiness,
     };
 
     let prompt = match &dir.prompt_block {

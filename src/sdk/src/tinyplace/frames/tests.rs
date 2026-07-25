@@ -307,3 +307,67 @@ fn parse_agent_capabilities_defaults_missing_arrays() {
     assert!(parse_agent_capabilities("[]").is_none());
     assert!(parse_agent_capabilities("nope").is_none());
 }
+
+#[test]
+fn old_capabilities_without_budgets_parse_to_empty() {
+    // A peer that predates the budget surface omits the keys entirely.
+    let text = json!({
+        "cwd": "/repo",
+        "providers": ["claude"],
+        "tools": ["Bash"],
+    })
+    .to_string();
+    let caps = parse_agent_capabilities(&text).unwrap();
+    assert!(caps.budgets.is_empty(), "absent budgets → empty");
+    assert!(caps.readiness.is_empty(), "absent readiness → empty");
+}
+
+#[test]
+fn empty_budgets_and_readiness_are_omitted_on_the_wire() {
+    // A new peer with nothing to advertise serializes a frame an old peer parses.
+    let caps = crate::tinyplace::AgentCapabilities {
+        cwd: Some("/repo".to_string()),
+        providers: vec![HarnessProvider::Claude],
+        ..Default::default()
+    };
+    let value = serde_json::to_value(&caps).unwrap();
+    assert!(value.get("budgets").is_none());
+    assert!(value.get("readiness").is_none());
+}
+
+#[test]
+fn new_capabilities_round_trip_budgets_and_readiness() {
+    let caps = crate::tinyplace::AgentCapabilities {
+        cwd: Some("/repo".to_string()),
+        providers: vec![HarnessProvider::Claude, HarnessProvider::Codex],
+        budgets: vec![HarnessBudget {
+            provider: HarnessProvider::Claude,
+            seat: None,
+            window: BudgetWindow::Unknown,
+            limit_tokens: None,
+            used_tokens: None,
+            remaining_tokens: None,
+            cooldown_until: None,
+            source: BudgetSource::Estimate,
+        }],
+        readiness: vec![
+            HarnessReadiness {
+                provider: HarnessProvider::Claude,
+                ready: true,
+                reason: None,
+            },
+            HarnessReadiness {
+                provider: HarnessProvider::Codex,
+                ready: false,
+                reason: Some("not authenticated".to_string()),
+            },
+        ],
+        ..Default::default()
+    };
+    let text = serde_json::to_string(&caps).unwrap();
+    // Parsed back through the tolerant frame parser, the budget surface survives.
+    let back = parse_agent_capabilities(&text).unwrap();
+    assert_eq!(back.budgets, caps.budgets);
+    assert_eq!(back.readiness, caps.readiness);
+    assert_eq!(back.providers, caps.providers);
+}

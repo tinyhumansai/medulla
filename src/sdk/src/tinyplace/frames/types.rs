@@ -350,6 +350,20 @@ pub struct AgentCapabilities {
     /// A free-text summary of the agent, when reported.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub summary: Option<String>,
+    /// Best-effort, per-harness token budgets (see [`HarnessBudget`]).
+    ///
+    /// Additive and backward-compatible: a peer that predates the budget surface
+    /// omits the key, which deserializes to an empty vector; an empty vector
+    /// serializes to nothing, so old peers still parse the frame. Advisory only —
+    /// budget accounting is soft and must never block delegation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub budgets: Vec<HarnessBudget>,
+    /// Per-provider readiness for the installed harnesses (see [`HarnessReadiness`]).
+    ///
+    /// Same backward-compatibility contract as [`AgentCapabilities::budgets`]:
+    /// absent/empty is tolerated in both directions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub readiness: Vec<HarnessReadiness>,
 }
 
 /// Deserialize a `Vec<String>`, discarding non-string and blank entries.

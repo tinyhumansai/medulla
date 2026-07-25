@@ -255,6 +255,71 @@ async fn capabilities_summary_falls_back_to_workspace_digest() {
     );
 }
 
+// 5c. Capabilities: the probe advertises a best-effort budget and readiness for
+//     the installed harness (claude via its bin override) on the result frame.
+//     The provider is installed and not definitively unauthenticated, so it is
+//     ready with an `estimate` budget carrying no invented numbers.
+#[tokio::test]
+async fn capabilities_result_advertises_budget_and_readiness() {
+    let tmp = TempDir::new();
+    let script = tmp.write_script("claude", &claude_capabilities_script());
+    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(
+        config(HarnessProvider::Claude, tmp.path_str(), env),
+        real_run_task(),
+        send,
+    );
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(
+            TaskFrameKind::Capabilities,
+            "cap-3",
+            "",
+            Some("corr-11"),
+        )),
+    );
+    runtime.idle().await;
+
+    let frames = decoded_frames(&recorded);
+    let result = frames
+        .iter()
+        .find(|f| f.kind == TaskFrameKind::CapabilitiesResult)
+        .expect("capabilities_result frame");
+    let caps = parse_agent_capabilities(&result.text).expect("parseable capabilities");
+
+    // Readiness: claude is installed via the bin override → present and ready.
+    let readiness = caps
+        .readiness
+        .iter()
+        .find(|r| r.provider == HarnessProvider::Claude)
+        .expect("claude readiness advertised");
+    assert!(readiness.ready, "an installed harness is ready");
+    assert!(readiness.reason.is_none());
+
+    // Budget: a best-effort estimate with no invented numbers, no seat leaked.
+    let budget = caps
+        .budgets
+        .iter()
+        .find(|b| b.provider == HarnessProvider::Claude)
+        .expect("claude budget advertised");
+    assert_eq!(budget.source, medulla::tinyplace::BudgetSource::Estimate);
+    assert!(budget.limit_tokens.is_none());
+    assert!(budget.remaining_tokens.is_none());
+    assert!(
+        budget.seat.is_none(),
+        "seat identifiers never ride the frame"
+    );
+
+    // Providers not installed on the machine are omitted from the fleet entirely.
+    assert!(caps
+        .budgets
+        .iter()
+        .all(|b| b.provider == HarnessProvider::Claude));
+}
+
 // 6. Plaintext DM: a non-frame body → raw text reply (no frame) via real spawn.
 #[tokio::test]
 async fn plaintext_dm_replies_raw() {

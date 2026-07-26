@@ -112,6 +112,32 @@ impl App {
                 }),
             )));
         }
+        // Placement chip: where this agent actually runs, resolved up the
+        // containment chain. Absent for the orchestrator lane and for any agent
+        // whose placement nothing declares — an empty chip would only claim the
+        // fleet is unknown twice.
+        if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
+            let placement = self.snapshot.capacity.placement(descriptor);
+            let chip = [
+                placement.host.map(|h| h.name.clone()),
+                placement.harness.map(|h| h.kind.clone()),
+                placement.workspace.map(|w| w.path.clone()),
+                placement
+                    .template
+                    .map(|t| format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))),
+            ]
+            .into_iter()
+            .flatten()
+            .filter(|part| !part.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+            if !chip.is_empty() {
+                header.push(TLine::from(Span::styled(
+                    chip,
+                    Style::default().fg(Color::Cyan),
+                )));
+            }
+        }
         // Context bar.
         if let Some(l) = lane {
             if let Some(used) = l.context_tokens {

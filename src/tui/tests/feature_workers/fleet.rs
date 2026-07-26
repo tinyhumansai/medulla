@@ -85,3 +85,25 @@ fn a_heading_row_is_never_selected_as_a_detail_target() {
     }
     assert_eq!(app.selected_fleet_key(), None);
 }
+
+#[test]
+fn the_agents_tab_shows_where_the_selected_agent_runs() {
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Agents");
+    // Walk off the orchestrator lane onto the placed roster agent.
+    let _ = app.on_event(key(KeyCode::Down));
+    let out = render(&mut app, 160, 40);
+    assert!(
+        out.contains("workshop") && out.contains("/srv/repos/medulla"),
+        "the agent lane names its host and workspace: {out}"
+    );
+}
+
+#[test]
+fn an_unplaced_lane_shows_no_placement_chip() {
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Agents");
+    // The orchestrator lane has no descriptor, so nothing to resolve.
+    let out = render(&mut app, 160, 40);
+    assert!(!out.contains("/srv/repos/medulla"), "{out}");
+}

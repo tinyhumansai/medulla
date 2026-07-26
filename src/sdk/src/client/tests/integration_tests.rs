@@ -177,6 +177,19 @@ async fn program_task_create_uses_camel_case_contract() {
     assert!(sent.contains("\"status\":\"inProgress\""), "{sent}");
 }
 
+#[test]
+fn program_task_patch_distinguishes_omitted_and_cleared_recurrence() {
+    let omitted = serde_json::to_value(UpdateProgramTask::default()).unwrap();
+    assert_eq!(omitted, json!({}));
+
+    let cleared = serde_json::to_value(UpdateProgramTask {
+        recurrence: Some(None),
+        ..UpdateProgramTask::default()
+    })
+    .unwrap();
+    assert_eq!(cleared, json!({ "recurrence": null }));
+}
+
 #[tokio::test]
 async fn program_source_sync_surfaces_nonfatal_provider_errors() {
     let data = json!({

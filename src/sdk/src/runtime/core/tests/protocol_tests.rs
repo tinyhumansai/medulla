@@ -132,6 +132,11 @@ fn outbound_frames_are_well_formed() {
         .unwrap()
         .iter()
         .any(|p| p == "inference"));
+    assert!(hello["ports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p == "hosts"));
 }
 
 #[test]

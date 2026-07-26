@@ -26,12 +26,16 @@ use crate::ui::events::{EventEnvelope, TuiEvent};
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HostResources {
+    /// Logical CPU cores available to the host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu_cores: Option<f64>,
+    /// Total physical memory in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_memory_bytes: Option<u64>,
+    /// Currently available physical memory in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub available_memory_bytes: Option<u64>,
+    /// Currently available disk capacity in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_free_bytes: Option<u64>,
 }
@@ -40,13 +44,19 @@ pub struct HostResources {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HostDescriptor {
+    /// Stable manager-scoped host identifier.
     pub id: String,
+    /// Operator-facing host name.
     pub name: String,
+    /// Current manager-reported availability.
     pub availability: String,
+    /// Network address used to reach the host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
+    /// Latest resource observation for the host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resources: Option<HostResources>,
+    /// Deployment-specific host attributes.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub metadata: serde_json::Map<String, Value>,
 }
@@ -55,18 +65,26 @@ pub struct HostDescriptor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessBudget {
+    /// Provider that meters the budget.
     pub provider: String,
+    /// Provider-defined accounting window.
     pub window: String,
+    /// Optional provider seat or account identifier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seat: Option<String>,
+    /// Total token allowance in the current window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit_tokens: Option<u64>,
+    /// Tokens consumed in the current window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub used_tokens: Option<u64>,
+    /// Tokens still available in the current window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remaining_tokens: Option<u64>,
+    /// Unix timestamp after which a depleted budget becomes usable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cooldown_until: Option<u64>,
+    /// Origin of the budget observation.
     pub source: String,
 }
 
@@ -74,19 +92,29 @@ pub struct HarnessBudget {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessDescriptor {
+    /// Stable manager-scoped harness identifier.
     pub id: String,
+    /// Identifier of the host running this harness.
     pub host_id: String,
+    /// Harness implementation or protocol family.
     pub kind: String,
+    /// Current manager-reported availability.
     pub availability: String,
+    /// Whether the harness is ready to accept work.
     pub ready: bool,
+    /// Operator-facing explanation when the harness is not ready.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready_reason: Option<String>,
+    /// Inference providers exposed by the harness.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<String>,
+    /// Agent templates the harness can instantiate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub template_ids: Vec<String>,
+    /// Provider budgets currently visible to the harness.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub budgets: Vec<HarnessBudget>,
+    /// Deployment-specific harness attributes.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub metadata: serde_json::Map<String, Value>,
 }
@@ -95,12 +123,16 @@ pub struct HarnessDescriptor {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceProfile {
+    /// Advisory instructions parsed from `MEDULLA.md`.
     #[serde(default)]
     pub instructions: String,
+    /// Harness kinds preferred by the workspace.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<String>,
+    /// Named model preferences declared by the workspace.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub models: serde_json::Map<String, Value>,
+    /// Additional profile properties preserved from the declaration.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub metadata: serde_json::Map<String, Value>,
 }
@@ -109,16 +141,24 @@ pub struct WorkspaceProfile {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDescriptor {
+    /// Stable manager-scoped workspace identifier.
     pub id: String,
+    /// Operator-facing workspace name.
     pub name: String,
+    /// Filesystem path as seen by the owning harness.
     pub path: String,
+    /// Identifier of the harness that exposes this workspace.
     pub harness_id: String,
+    /// Parsed advisory workspace profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<WorkspaceProfile>,
+    /// Project or repository identity, when discovered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    /// Agent templates explicitly enabled for this workspace.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub template_ids: Vec<String>,
+    /// Deployment-specific workspace attributes.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub metadata: serde_json::Map<String, Value>,
 }
@@ -127,14 +167,19 @@ pub struct WorkspaceDescriptor {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTemplateHarnessOverride {
+    /// Harness-specific model selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Harness-specific reasoning effort.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// Harness-specific tool allowlist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<String>>,
+    /// Harness-specific provider parameters.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub params: serde_json::Map<String, Value>,
+    /// Harness-specific instruction replacement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
 }
@@ -143,24 +188,35 @@ pub struct AgentTemplateHarnessOverride {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTemplate {
+    /// Stable manager-scoped template identifier.
     pub id: String,
+    /// Optional operator-facing template name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Operator-facing description of the agent role.
     pub description: String,
+    /// Default instruction text supplied to instantiated agents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    /// Default tool allowlist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<String>>,
+    /// Default model selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Default reasoning effort.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// Default provider-specific parameters.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub params: serde_json::Map<String, Value>,
+    /// Discovery and routing labels.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Deployment-specific template attributes.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub metadata: serde_json::Map<String, Value>,
+    /// Per-harness overrides keyed by harness kind.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub harnesses: std::collections::BTreeMap<String, AgentTemplateHarnessOverride>,
 }
@@ -169,10 +225,15 @@ pub struct AgentTemplate {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CoreDeclarations {
+    /// Hosts known when the runtime attaches.
     pub hosts: Vec<HostDescriptor>,
+    /// Harnesses known when the runtime attaches.
     pub harnesses: Vec<HarnessDescriptor>,
+    /// Workspaces known when the runtime attaches.
     pub workspaces: Vec<WorkspaceDescriptor>,
+    /// Agent roster served to the orchestrator.
     pub agents: Vec<crate::runtime::AgentDescriptor>,
+    /// Agent templates available for provisioning.
     pub agent_templates: Vec<AgentTemplate>,
 }
 
@@ -199,7 +260,7 @@ pub(super) const RECONNECT_DELAY: Duration = Duration::from_millis(50);
 /// handshake mirrors the full serve capability set; actual port *hosting*
 /// (answering the reverse-RPC `call` frames) is a later milestone, so inbound
 /// calls are refused `port_unavailable` for now (see [`super::client`]).
-pub(super) const HOST_PORTS: [&str; 10] = [
+pub(super) const HOST_PORTS: [&str; 11] = [
     "inference",
     "tools",
     "subagents",
@@ -210,6 +271,7 @@ pub(super) const HOST_PORTS: [&str; 10] = [
     "sessions",
     "roster",
     "budgets",
+    "hosts",
 ];
 
 /// The connection's lifecycle, surfaced through [`describe`](CoreState::describe)

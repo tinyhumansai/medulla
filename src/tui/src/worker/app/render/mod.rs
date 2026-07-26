@@ -33,7 +33,7 @@ impl WorkerApp {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1), // header
+                Constraint::Length(2), // header (identity, then what it serves)
                 Constraint::Length(1), // tab bar
                 Constraint::Min(3),    // body
                 Constraint::Length(1), // status
@@ -60,8 +60,75 @@ impl WorkerApp {
         crate::ui::widgets::panel(&self.theme, title, focused)
     }
 
-    /// The header: what this process is, and its address.
+    /// The header: what this process is and where it can be reached, then what
+    /// it will actually do for a peer that reaches it.
+    ///
+    /// The second line exists because the first answers "who am I" and an
+    /// operator's next three questions are "what can this run", "in which
+    /// directory", and "through which relay". The workspace especially: a peer's
+    /// task edits files there, and it was previously only visible by inferring
+    /// it from the shell the daemon was launched in.
     fn draw_header(&self, f: &mut Frame, area: Rect) {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(area);
+        self.draw_header_identity(f, rows[0]);
+        self.draw_header_capacity(f, rows[1]);
+    }
+
+    /// The second header line: harnesses, workspace, relay, and approved peers.
+    fn draw_header_capacity(&self, f: &mut Frame, area: Rect) {
+        let dim = Style::default().add_modifier(Modifier::DIM);
+        let mut spans = Vec::new();
+
+        // What this machine can actually run. Empty is worth saying loudly: a
+        // worker with no harness accepts peers and then fails every task.
+        if self.providers.is_empty() {
+            spans.push(Span::styled(
+                "no agent CLI found",
+                Style::default().fg(Color::Red),
+            ));
+        } else {
+            spans.push(Span::styled(
+                self.providers
+                    .iter()
+                    .map(|provider| provider.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                Style::default().fg(self.theme.primary),
+            ));
+        }
+
+        // Clipped from the left: the tail of a path identifies a repo, the head
+        // is usually a home directory shared by every candidate.
+        spans.push(Span::styled("  in ", dim));
+        spans.push(Span::styled(
+            crate::ui::util::clip_left(&self.primary_workspace, 44),
+            Style::default().fg(Color::White),
+        ));
+
+        let peers = self.masters.len();
+        spans.push(Span::styled(
+            format!(
+                "  {peers} approved peer{}",
+                if peers == 1 { "" } else { "s" }
+            ),
+            if peers == 0 {
+                Style::default().fg(Color::Yellow)
+            } else {
+                dim
+            },
+        ));
+
+        if let Some(endpoint) = &self.endpoint {
+            spans.push(Span::styled(format!("  via {endpoint}"), dim));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
+    }
+
+    /// The first header line: what this process is, and its address.
+    fn draw_header_identity(&self, f: &mut Frame, area: Rect) {
         let mut spans = vec![
             Span::styled(
                 "MEDULLA WORKER",

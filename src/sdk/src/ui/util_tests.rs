@@ -29,3 +29,14 @@ fn wrap_breaks_on_spaces() {
     let hard = wrap("abcdefghij", 4);
     assert_eq!(hard, vec!["abcd", "efgh", "ij"]);
 }
+
+#[test]
+fn clip_left_keeps_the_tail_that_identifies_a_path() {
+    // Short enough to survive untouched.
+    assert_eq!(clip_left("/work/repo", 20), "/work/repo");
+    // The distinguishing tail is kept; the shared prefix is what goes.
+    assert_eq!(clip_left("/Users/me/work/repo", 10), "…work/repo");
+    // Degenerate widths return the marker rather than panicking.
+    assert_eq!(clip_left("/Users/me/work/repo", 1), "…");
+    assert_eq!(clip_left("/Users/me/work/repo", 0), "…");
+}

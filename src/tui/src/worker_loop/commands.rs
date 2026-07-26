@@ -123,6 +123,17 @@ async fn connect_master(app: &mut WorkerApp, start: &StartWiring, input: String)
     match transport.request_contact(&address).await {
         Ok(()) => {
             app.add_master(address.clone(), handle);
+            // Pairing is two-sided: the master answers with a contact request of
+            // its own, and the admission allowlist was seeded from
+            // `[tinyplace].peers` at boot — so without this the master the
+            // operator just added is a stranger to the running desk, its request
+            // waits in the queue, and the pairing only completes after a restart.
+            // The refresh is what makes the Master row settle now rather than on
+            // whichever poll tick happens to notice.
+            if let Some(desk) = app.contact_desk() {
+                desk.allow(address.clone());
+                desk.refresh().await;
+            }
             if let Err(err) =
                 medulla::config::persist_tinyplace_peers(app.config_path(), app.masters())
             {

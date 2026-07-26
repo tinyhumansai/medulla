@@ -60,6 +60,7 @@ fn new_agent_lane(key: String, label: String) -> AgentLane {
         last_at: 0,
         tasks: Vec::new(),
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: None,
         session_id: None,
@@ -109,6 +110,7 @@ pub fn derive_agent_lanes(
     let mut tier_turns: [(AgentRole, &str, Vec<TurnBlock>); 1] =
         [(AgentRole::Orchestrator, "orchestrator", Vec::new())];
     let mut tier_tokens: HashMap<usize, i64> = HashMap::new();
+    let mut tier_usage: HashMap<usize, crate::ui::meters::LaneUsage> = HashMap::new();
     let mut workers = Lanes::new();
     let mut task_agent: HashMap<String, String> = HashMap::new();
 
@@ -181,6 +183,7 @@ pub fn derive_agent_lanes(
                 tier_turns[ti].2.push(block);
                 if let Some(u) = usage {
                     tier_tokens.insert(ti, u.input_tokens);
+                    tier_usage.entry(ti).or_default().accumulate(u);
                 }
             }
             TuiEvent::TaskStart {
@@ -316,6 +319,7 @@ pub fn derive_agent_lanes(
                 lane.active_tasks = (lane.active_tasks - 1).max(0);
                 if let Some(u) = &digest.usage {
                     lane.context_tokens = Some(u.input_tokens);
+                    lane.usage.accumulate(u);
                 }
                 let idx = touch_task(lane, &digest.task_id, at, Some(block));
                 lane.tasks[idx].status = status;
@@ -380,6 +384,7 @@ pub fn derive_agent_lanes(
             label: label.to_string(),
             role,
             context_tokens: tier_tokens.get(&ti).copied(),
+            usage: tier_usage.get(&ti).copied().unwrap_or_default(),
             turns,
             last_at,
             tasks: Vec::new(),

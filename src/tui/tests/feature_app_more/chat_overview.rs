@@ -232,6 +232,7 @@ fn overview_shows_active_model_calls_and_completed_task() {
             usage: Some(Usage {
                 input_tokens: 10,
                 output_tokens: 2,
+                ..Default::default()
             }),
             depth: 2,
             contract: None,

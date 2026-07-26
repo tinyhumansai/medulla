@@ -28,6 +28,7 @@ fn lane(role: AgentRole) -> AgentLane {
         last_at: 0,
         tasks: Vec::new(),
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: None,
         session_id: None,

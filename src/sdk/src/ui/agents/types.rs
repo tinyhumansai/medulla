@@ -139,6 +139,9 @@ pub struct AgentLane {
     pub tasks: Vec<TaskState>,
     /// Last-known context token count, if reported.
     pub context_tokens: Option<i64>,
+    /// Token usage accumulated for this lane: the current prompt, the output
+    /// summed over its life, and the cache share when the provider reports one.
+    pub usage: crate::ui::meters::LaneUsage,
     /// A harness label tag, if learned.
     pub harness_label: Option<String>,
     /// The backing agent id, if any.

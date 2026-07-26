@@ -54,6 +54,7 @@ fn lane(question: bool) -> AgentLane {
             question_id: question.then(|| "q1".into()),
         }],
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: Some("dev".into()),
         session_id: None,

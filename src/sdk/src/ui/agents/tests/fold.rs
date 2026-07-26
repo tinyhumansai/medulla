@@ -27,6 +27,7 @@ fn inference_end_folds_into_the_orchestrator_tier() {
             usage: Some(Usage {
                 input_tokens: 100,
                 output_tokens: 20,
+                ..Default::default()
             }),
             content: Some("hi".into()),
             reasoning: None,
@@ -95,6 +96,7 @@ fn anonymous_task_lane_and_completion() {
                     usage: Some(Usage {
                         input_tokens: 500,
                         output_tokens: 50,
+                        ..Default::default()
                     }),
                     depth: 2,
                     contract: None,

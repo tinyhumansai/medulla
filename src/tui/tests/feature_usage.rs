@@ -52,6 +52,7 @@ fn script_usage(rt: &Arc<MockRuntime>) {
         usage: Some(Usage {
             input_tokens: 1200,
             output_tokens: 340,
+            ..Default::default()
         }),
         content: None,
         reasoning: None,
@@ -65,6 +66,7 @@ fn script_usage(rt: &Arc<MockRuntime>) {
         usage: Some(Usage {
             input_tokens: 800,
             output_tokens: 90,
+            ..Default::default()
         }),
         content: None,
         reasoning: None,
@@ -79,6 +81,7 @@ fn script_usage(rt: &Arc<MockRuntime>) {
             usage: Some(Usage {
                 input_tokens: 5000,
                 output_tokens: 700,
+                ..Default::default()
             }),
             depth: 2,
             contract: None,

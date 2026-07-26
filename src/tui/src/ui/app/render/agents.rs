@@ -21,6 +21,7 @@ use crate::ui::agents::{
 };
 use crate::ui::fleet::fleet_detail;
 use crate::ui::harness::{budget_note, task_board_lines};
+use crate::ui::meters;
 use crate::ui::util::fmt_tokens;
 use medulla::harness_contract::AgentBudgetMetadata;
 
@@ -173,64 +174,51 @@ impl App {
                 }),
             )));
         }
-        // Placement chip: where this agent actually runs, resolved up the
-        // containment chain. Absent for the orchestrator lane and for any agent
-        // whose placement nothing declares — an empty chip would only claim the
-        // fleet is unknown twice.
-        if let Some(descriptor) = selected_node
-            .is_none()
-            .then(|| lane.and_then(|l| l.descriptor.as_ref()))
-            .flatten()
-        {
+        // Where this lane runs, and how hard: the placement chip, then compact
+        // meters for the machine's memory and load and for the lane's own
+        // context window. Every reading is omitted rather than zeroed when it
+        // was not reported — a bar at 0% claims a measurement nobody took.
+        if selected_node.is_none() {
             let capacity = self.fleet_capacity();
-            let placement = capacity.placement(descriptor);
-            let chip = [
-                placement.host.map(|h| h.name.clone()),
-                placement.harness.map(|h| h.kind.clone()),
-                placement.workspace.map(|w| w.path.clone()),
-                placement
-                    .template
-                    .map(|t| format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))),
-            ]
-            .into_iter()
-            .flatten()
-            .filter(|part| !part.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ");
-            if !chip.is_empty() {
-                header.push(TLine::from(Span::styled(
-                    chip,
-                    Style::default().fg(Color::Cyan),
-                )));
+            if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
+                let placement = capacity.placement(descriptor);
+                let chip = [
+                    placement.host.map(|h| h.name.clone()),
+                    placement.harness.map(|h| h.kind.clone()),
+                    placement.workspace.map(|w| w.path.clone()),
+                    placement
+                        .template
+                        .map(|t| format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|part| !part.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+                if !chip.is_empty() {
+                    header.push(TLine::from(Span::styled(
+                        chip,
+                        Style::default().fg(Color::Cyan),
+                    )));
+                }
+                if let Some(resources) = placement.host.and_then(|h| h.resources.as_ref()) {
+                    for line in [
+                        meters::cpu_meter(resources),
+                        meters::memory_meter(resources),
+                        meters::disk_line(resources),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        header.push(styled_to_tline(&line));
+                    }
+                }
             }
-        }
-        // Context bar.
-        if let Some(l) = lane.filter(|_| selected_node.is_none()) {
-            if let Some(used) = l.context_tokens {
+            if let Some(lane) = lane {
                 let window = self.loaded.config.medulla.context_window() as i64;
-                let pct = ((used as f64 / window as f64) * 100.0).round().min(100.0) as i64;
-                let filled = ((pct as f64 / 100.0) * 16.0).round() as usize;
-                let bar = format!(
-                    "{}{}",
-                    "█".repeat(filled),
-                    "░".repeat(16usize.saturating_sub(filled))
-                );
-                let c = if pct >= 90 {
-                    Color::Red
-                } else if pct >= 70 {
-                    Color::Yellow
-                } else {
-                    Color::DarkGray
-                };
-                let detail = if l.role == AgentRole::Agent {
-                    format!("{} tokens", fmt_tokens(used))
-                } else {
-                    format!("{}/{} ({pct}%)", fmt_tokens(used), fmt_tokens(window))
-                };
-                header.push(TLine::from(Span::styled(
-                    format!("context {bar} {detail}"),
-                    Style::default().fg(c),
-                )));
+                if let Some(line) = meters::context_meter(&lane.usage, window) {
+                    header.push(styled_to_tline(&line));
+                }
             }
         }
         // Reserve the last row for the status line (scroll notice or spinner),

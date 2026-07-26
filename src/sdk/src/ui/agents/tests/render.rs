@@ -168,6 +168,7 @@ fn lane_lines_agent_task_with_no_turns_shows_placeholder() {
             question_id: None,
         }],
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: Some("dev".into()),
         session_id: None,

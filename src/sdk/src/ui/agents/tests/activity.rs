@@ -31,6 +31,7 @@ fn worker_lane(agent_id: &str) -> AgentLane {
         last_at: 0,
         tasks: Vec::new(),
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: Some(agent_id.into()),
         session_id: None,

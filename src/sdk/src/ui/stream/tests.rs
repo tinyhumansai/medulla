@@ -29,6 +29,7 @@ fn end(tier: &str, model: Option<&str>, usage: Option<(i64, i64)>) -> TuiEvent {
         usage: usage.map(|(i, o)| Usage {
             input_tokens: i,
             output_tokens: o,
+            ..Default::default()
         }),
         content: None,
         reasoning: None,
@@ -53,6 +54,7 @@ fn usage_fold_accumulates_tiers_and_tasks() {
                     usage: Some(Usage {
                         input_tokens: 7,
                         output_tokens: 3,
+                        ..Default::default()
                     }),
                     depth: 1,
                     contract: None,

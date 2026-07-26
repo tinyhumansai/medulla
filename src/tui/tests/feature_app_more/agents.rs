@@ -30,6 +30,7 @@ fn agents_renders_subtask_rows_more_overflow_and_task_transcript() {
             usage: Some(Usage {
                 input_tokens: 5000,
                 output_tokens: 300,
+                ..Default::default()
             }),
             depth: 2,
             contract: None,
@@ -196,6 +197,7 @@ fn agents_lane_context_bar_reflects_high_and_mid_usage() {
                 usage: Some(Usage {
                     input_tokens: tokens,
                     output_tokens: 100,
+                    ..Default::default()
                 }),
                 depth: 2,
                 contract: None,

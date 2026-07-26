@@ -32,6 +32,7 @@ fn known_event_round_trips() {
         usage: Some(Usage {
             input_tokens: 10,
             output_tokens: 5,
+            ..Default::default()
         }),
         content: None,
         reasoning: None,
@@ -130,6 +131,7 @@ fn one_of_each() -> Vec<(&'static str, TuiEvent)> {
                     usage: Some(Usage {
                         input_tokens: 1,
                         output_tokens: 2,
+                        ..Default::default()
                     }),
                     depth: 2,
                     contract: None,

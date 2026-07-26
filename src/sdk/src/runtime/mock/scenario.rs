@@ -77,6 +77,10 @@ impl MockRuntime {
                 usage: Some(Usage {
                     input_tokens: 1200,
                     output_tokens: 90,
+                    // A provider that reports its cache, so the demo exercises
+                    // the context meter's cache segment.
+                    cache_read_tokens: Some(840),
+                    cache_creation_tokens: None,
                 }),
                 content: None,
                 reasoning: None,
@@ -104,6 +108,8 @@ impl MockRuntime {
                     usage: Some(Usage {
                         input_tokens: 6400,
                         output_tokens: 420,
+                        cache_read_tokens: Some(5_100),
+                        cache_creation_tokens: None,
                     }),
                     depth: 2,
                     contract: None,
@@ -132,6 +138,8 @@ impl MockRuntime {
                     usage: Some(Usage {
                         input_tokens: 6400,
                         output_tokens: 420,
+                        cache_read_tokens: Some(5_100),
+                        cache_creation_tokens: None,
                     }),
                     depth: 2,
                     contract: None,
@@ -172,6 +180,7 @@ fn demo_capacity() -> CapacitySnapshot {
                 total_memory_bytes: Some(32 * 1024 * 1024 * 1024),
                 available_memory_bytes: Some(12 * 1024 * 1024 * 1024),
                 disk_free_bytes: Some(220 * 1024 * 1024 * 1024),
+                load_average_1m: Some(2.1),
             }),
             metadata: Map::new(),
         }],

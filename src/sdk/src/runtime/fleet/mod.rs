@@ -41,6 +41,11 @@ pub struct HostResources {
     /// Currently available disk capacity in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_free_bytes: Option<u64>,
+    /// One-minute load average, as reported by the host. Divided by
+    /// [`cpu_cores`](HostResources::cpu_cores) it is the machine's utilisation;
+    /// on its own it means nothing, which is why both travel together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_average_1m: Option<f64>,
 }
 
 /// A machine on which one or more harnesses run.

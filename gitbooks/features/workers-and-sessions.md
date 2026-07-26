@@ -221,9 +221,12 @@ pages described above.
 
 The Agents tab is where an operation becomes legible, and where you drive it:
 this is the conversation surface too. There is one lane for the orchestrator and
-one per agent, idle until its first task and busy while in flight, with context
-usage shown per row and, for a placed agent, the host, harness, workspace, and
-template it runs as. Under the lanes is the declared fleet; under the transcript
+one per agent, idle until its first task and busy while in flight. Selecting one
+shows where it runs — host, harness, workspace path, and the template it was
+provisioned from — above compact meters for the machine's load and memory and for
+the lane's own context window, split into prompt, output, and the cache share
+when the provider reports one. Every reading is omitted rather than zeroed when
+it was not reported: a bar at 0% would claim a measurement nobody took. Under the lanes is the declared fleet; under the transcript
 is the composer.
 
 Selecting the orchestrator and typing is the conversation. Selecting an agent

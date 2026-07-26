@@ -141,6 +141,7 @@ fn resources(peer: &WorkerInfo) -> Option<HostResources> {
         total_memory_bytes: peer.memory_total_bytes,
         available_memory_bytes: peer.memory_available_bytes,
         disk_free_bytes: None,
+        ..Default::default()
     };
     (resources != HostResources::default()).then_some(resources)
 }

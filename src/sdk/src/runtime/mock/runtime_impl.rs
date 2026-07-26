@@ -95,6 +95,7 @@ impl Runtime for MockRuntime {
                     usage: Some(Usage {
                         input_tokens: 800,
                         output_tokens: 120,
+                        ..Default::default()
                     }),
                     content: Some("Here is my reasoning.".into()),
                     reasoning: None,

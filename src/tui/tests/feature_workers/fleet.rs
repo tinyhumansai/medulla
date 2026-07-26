@@ -81,3 +81,34 @@ fn the_demo_flag_stands_a_fleet_in_only_when_nothing_is_declared() {
         "stand-in must not mask a real fleet"
     );
 }
+
+#[test]
+fn the_selected_agent_shows_its_placement_and_compact_meters() {
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Agents");
+    // Walk onto the placed roster agent.
+    let _ = app.on_event(alt_key(KeyCode::Down));
+    let out = render(&mut app, 160, 44);
+
+    // Where it runs…
+    assert!(out.contains("workshop"), "host: {out}");
+    assert!(out.contains("/srv/repos/medulla"), "workspace: {out}");
+    // …and how hard, as meters rather than bare numbers.
+    assert!(out.contains("cpu"), "cpu meter: {out}");
+    assert!(out.contains("2.10 load / 10 cores"), "{out}");
+    assert!(out.contains("ram"), "ram meter: {out}");
+    assert!(out.contains("20.0GB / 32.0GB"), "used, not free: {out}");
+    assert!(out.contains("disk"), "disk: {out}");
+}
+
+#[test]
+fn the_context_meter_splits_input_output_and_cache() {
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Agents");
+    // The orchestrator lane carries the scripted cycle's usage.
+    let out = render(&mut app, 160, 44);
+    assert!(out.contains("ctx"), "context meter: {out}");
+    assert!(out.contains("in 1k / 32k"), "{out}");
+    assert!(out.contains("out "), "{out}");
+    assert!(out.contains("cache 70%"), "the reported cache share: {out}");
+}

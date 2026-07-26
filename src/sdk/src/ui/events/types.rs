@@ -9,7 +9,12 @@ use serde_json::{Map, Value};
 use crate::harness_contract::{VerificationEvidence, WorkerContract};
 
 /// Token accounting reported alongside an inference or task result.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// The cache fields are optional because not every provider reports them and
+/// not every wire carries them: absent means "not reported", which the UI
+/// renders as no cache segment rather than as zero. Reading a missing number as
+/// 0% would claim a cache miss that was never measured.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Usage {
     /// Tokens consumed by the prompt.
     #[serde(rename = "inputTokens")]
@@ -17,6 +22,32 @@ pub struct Usage {
     /// Tokens produced by the model.
     #[serde(rename = "outputTokens")]
     pub output_tokens: i64,
+    /// Prompt tokens served from the provider's cache, when reported.
+    #[serde(
+        default,
+        rename = "cacheReadTokens",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cache_read_tokens: Option<i64>,
+    /// Prompt tokens written into the provider's cache, when reported.
+    #[serde(
+        default,
+        rename = "cacheCreationTokens",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cache_creation_tokens: Option<i64>,
+}
+
+impl Usage {
+    /// The share of prompt tokens that came from cache, when both numbers are
+    /// known and the prompt was non-empty.
+    pub fn cache_hit_rate(&self) -> Option<f64> {
+        let cached = self.cache_read_tokens? as f64;
+        // `inputTokens` is the whole prompt, cached portion included, so the
+        // ratio is against it rather than against cached + uncached.
+        let total = self.input_tokens as f64;
+        (total > 0.0).then(|| (cached / total).clamp(0.0, 1.0))
+    }
 }
 
 /// A single tool invocation emitted by a completed inference.

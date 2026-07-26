@@ -23,6 +23,7 @@ fn host(id: &str) -> HostDescriptor {
             total_memory_bytes: Some(32 << 30),
             available_memory_bytes: Some(12 << 30),
             disk_free_bytes: None,
+            ..Default::default()
         }),
         metadata: Default::default(),
     }

@@ -41,10 +41,16 @@ copied in the direction that is easy.
 1. In the orchestrator, open **Routing › Add Host** and press `c`. That copies a
    single line which installs `medulla` if it is missing and starts the worker.
    Paste it into an SSH session on the machine you want to add.
-2. The worker prints its address and puts it on **your** clipboard, not the
-   remote machine's — it hands the text to your terminal (OSC 52), so it
-   survives the SSH boundary. Back in the orchestrator, press `a` and paste it,
-   optionally followed by a label.
+2. The worker prints its address and hands it to **your** terminal's clipboard
+   rather than the remote machine's, using OSC 52, so it survives the SSH
+   boundary. Back in the orchestrator, press `a` and paste it, optionally
+   followed by a label.
+
+   The clipboard step needs a terminal that accepts OSC 52 — most do, but tmux
+   wants `set -g set-clipboard on` and some terminals disable it for security.
+   It is also skipped when the daemon's output is piped rather than attached to
+   a terminal. Either way the address is printed on a line of its own, so you
+   can select it by hand.
 
 To skip the copy entirely, name the worker: run `medulla daemon --handle
 build-box` and type `@build-box` into Add Host. Pass `--no-pair` when the

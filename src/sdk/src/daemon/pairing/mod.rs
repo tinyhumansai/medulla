@@ -36,6 +36,18 @@ use crate::clipboard::osc52;
 /// that already has `medulla` starts the worker instead of reinstalling it, and
 /// so the whole thing stays one line rather than a decision the operator has to
 /// make before running anything.
+///
+/// # Trust
+///
+/// The binary this installs *is* verified: `install.sh` resolves the release
+/// manifest, downloads the platform archive, and refuses to install on a SHA-256
+/// mismatch. What is not pinned is `install.sh` itself, which is read from the
+/// default branch — so the trust root is that fetch over TLS from GitHub, and a
+/// compromised branch would be executed. Closing that would mean publishing the
+/// installer as a signed release asset and pinning this URL to it; until then
+/// this is the same exposure as the documented `curl … | sh` in the README, and
+/// the guard means it is not even reached on a machine that already has the
+/// binary.
 pub const REMOTE_JOIN_COMMAND: &str = "command -v medulla >/dev/null 2>&1 || \
      curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh; \
      medulla daemon";

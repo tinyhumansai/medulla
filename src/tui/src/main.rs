@@ -16,6 +16,7 @@ mod app_loop;
 mod commands;
 mod event_loop;
 mod hub_relay;
+mod local_host;
 mod run;
 mod terminal;
 mod worker_loop;

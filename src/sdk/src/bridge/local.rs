@@ -140,6 +140,11 @@ impl Bridge for LocalBridge {
             .find(|candidate| self.network.contains(candidate))
     }
 
+    /// Every address this bridge can reach is on this device by construction.
+    async fn is_device_local(&self, address: &str) -> bool {
+        self.resolve_handle(address).await.is_some()
+    }
+
     async fn contact_accepted(&self, peer: &str) -> bool {
         self.network.contains(peer)
     }

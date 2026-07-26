@@ -194,6 +194,66 @@ pub struct OpencodeConfig {
     pub max_concurrency: u32,
 }
 
+/// The `host` section: whether this machine also *runs* the work the
+/// orchestrator hands out, and how.
+///
+/// A plain `medulla` is both orchestrator and host by default — the common case
+/// is one person on one laptop, and needing a second `medulla daemon` process
+/// beside the TUI to get any work done was a step nobody should have to know
+/// about. Every field has a working default; the whole section is optional.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HostSection {
+    /// Whether to host tasks on this device. `MEDULLA_HOST=0` overrides it off
+    /// for a single run without editing the file.
+    pub enabled: bool,
+    /// The address the host binds on the device-local bus. Orchestrator-facing
+    /// only — it never leaves this machine — so it is a readable name rather
+    /// than a key.
+    pub address: String,
+    /// Working directory tasks run in. Empty means the directory `medulla` was
+    /// launched from, which is the one the operator is looking at.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub workspace: String,
+    /// Coding-agent CLIs to serve. Empty detects whatever is installed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<String>,
+    /// The CLI used when a task names none. Empty takes the first detected.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub default_provider: String,
+    /// Maximum tasks run at once on this machine.
+    pub concurrency: u32,
+    /// Per-task execution timeout, in ms.
+    pub task_timeout_ms: u64,
+    /// Default model hint passed to the harness. Empty leaves the CLI's own.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    /// Whether the harness runs with its permission prompts bypassed. On by
+    /// default because a hosted task is unattended: nobody is in the pane to
+    /// answer a prompt, so a task that hits one has hung until it times out.
+    pub skip_permissions: bool,
+}
+
+impl Default for HostSection {
+    fn default() -> Self {
+        HostSection {
+            enabled: true,
+            address: d_host_address(),
+            workspace: String::new(),
+            providers: Vec::new(),
+            default_provider: String::new(),
+            concurrency: 2,
+            task_timeout_ms: 600_000,
+            model: String::new(),
+            skip_permissions: true,
+        }
+    }
+}
+
+fn d_host_address() -> String {
+    "this-device".into()
+}
+
 /// Workspace roots a daemon worker may expose to operator-managed sessions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -552,6 +612,9 @@ pub struct TuiConfig {
     pub workflow: WorkflowConfig,
     #[serde(default)]
     pub hub: HubSection,
+    /// Whether this device also hosts the tasks the orchestrator hands out.
+    #[serde(default)]
+    pub host: HostSection,
     /// Custom OpenAI-compatible router. Absent means routing is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub router: Option<RouterConfig>,
@@ -584,6 +647,7 @@ impl Default for TuiConfig {
             onboarding: OnboardingConfig::default(),
             workflow: WorkflowConfig::default(),
             hub: HubSection::default(),
+            host: HostSection::default(),
             router: None,
             budget: None,
             routing_strategy: None,

@@ -121,6 +121,10 @@ impl Bridge for RoutingBridge {
         self.remote.as_ref()?.resolve_handle(name).await
     }
 
+    async fn is_device_local(&self, address: &str) -> bool {
+        self.is_local(address).await
+    }
+
     async fn contact_accepted(&self, peer: &str) -> bool {
         if self.is_local(peer).await {
             return true;

@@ -59,6 +59,16 @@ pub trait Bridge: Send + Sync {
         None
     }
 
+    /// Whether `address` is served by this device rather than a remote peer.
+    ///
+    /// Callers use this to skip machinery that only makes sense across a
+    /// network: address-shape validation, contact edges, session resets. It
+    /// defaults to `false` so a transport that has no device-local scope — every
+    /// remote one — is never mistaken for having one.
+    async fn is_device_local(&self, _address: &str) -> bool {
+        false
+    }
+
     /// Whether `peer` is ready to receive messages.
     async fn contact_accepted(&self, peer: &str) -> bool;
 
@@ -120,6 +130,13 @@ impl Bridge for BridgeTransport {
         match self {
             Self::Local(bridge) => bridge.resolve_handle(name).await,
             Self::Tinyplace(bridge) => bridge.resolve_handle(name).await,
+        }
+    }
+
+    async fn is_device_local(&self, address: &str) -> bool {
+        match self {
+            Self::Local(bridge) => bridge.is_device_local(address).await,
+            Self::Tinyplace(bridge) => bridge.is_device_local(address).await,
         }
     }
 

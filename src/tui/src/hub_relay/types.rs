@@ -4,3 +4,20 @@ use super::*;
 /// The shared slot a [`BackendRuntime`](medulla::runtime::backend::BackendRuntime)
 /// reads for its live worker roster; filled once the hub connects.
 pub(crate) type HubSlot = Arc<Mutex<Option<HubHandle>>>;
+
+/// The device-local half of a hub's dispatch: the in-process bus, the address
+/// the hub binds on it, and the host (if any) already listening there.
+///
+/// Grouped into one value because the three are meaningless apart — a bus with
+/// no address bound is unreachable, and a host entry naming an address on a bus
+/// the hub does not share would be a roster row nothing can deliver to.
+#[derive(Clone)]
+pub(crate) struct LocalDispatch {
+    /// The bus shared by the hub and everything hosted in this process.
+    pub(crate) network: medulla::bridge::LocalBridgeNetwork,
+    /// The address the hub itself binds on that bus.
+    pub(crate) hub_address: String,
+    /// The host running on this device, as a roster entry. `None` when hosting
+    /// is switched off — the bus is still shared, so a host can appear later.
+    pub(crate) host: Option<WorkerSpec>,
+}

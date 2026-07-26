@@ -146,6 +146,23 @@ pub(crate) fn build_hub_config_with_log(
     home: &Path,
     log: medulla::hub::HubLog,
 ) -> Option<HubConfig> {
+    build_hub_config_with_host(env, home, log, None)
+}
+
+/// Like [`build_hub_config_with_log`], additionally dispatching over `local` —
+/// the device-local bus a host in this same process is bound to.
+///
+/// `local` carries the bus and, when a host is running on it, the roster entry
+/// naming that host. The entry is prepended rather than appended so the machine
+/// the operator is sitting at leads the list, and it replaces any remembered
+/// entry with the same address so restarting never accumulates duplicates of
+/// itself.
+pub(crate) fn build_hub_config_with_host(
+    env: &HashMap<String, String>,
+    home: &Path,
+    log: medulla::hub::HubLog,
+    local: Option<LocalDispatch>,
+) -> Option<HubConfig> {
     if !hub_enabled(env) {
         return None;
     }
@@ -155,6 +172,16 @@ pub(crate) fn build_hub_config_with_log(
     if workers.is_empty() {
         workers = workers_from_config(home);
     }
+    let (local_network, local_address) = match &local {
+        Some(dispatch) => {
+            if let Some(host) = &dispatch.host {
+                workers.retain(|worker| worker.address != host.address);
+                workers.insert(0, host.clone());
+            }
+            (Some(dispatch.network.clone()), dispatch.hub_address.clone())
+        }
+        None => (None, String::new()),
+    };
     let creds = medulla::auth::CredentialStore::at_home(home).load_or_legacy()?;
     let identity_dir = env
         .get("MEDULLA_HUB_IDENTITY_DIR")
@@ -172,6 +199,8 @@ pub(crate) fn build_hub_config_with_log(
         identity_dir,
         workers,
         poll: Duration::from_millis(poll_ms),
+        local_network,
+        local_address,
     })
 }
 
@@ -184,12 +213,13 @@ pub(crate) async fn start(
     home: &Path,
     slot: HubSlot,
     logs: medulla_tui::log::LogBuffer,
+    local: Option<LocalDispatch>,
 ) -> Option<HubSession> {
     // The hub must never write to the terminal here: the TUI owns the alternate
     // screen, and ratatui only repaints the cells it manages, so a stray line
     // lands on top of the UI and is never cleared. Capturing them keeps the
     // screen intact and the diagnostics readable.
-    let config = build_hub_config_with_log(env, home, logs.sink())?;
+    let config = build_hub_config_with_host(env, home, logs.sink(), local)?;
     match start_hub(config).await {
         Ok(session) => {
             *slot.lock().expect("hub slot") = Some(session.handle.clone());
@@ -206,4 +236,4 @@ pub(crate) async fn start(
 mod tests;
 
 mod types;
-pub(crate) use types::HubSlot;
+pub(crate) use types::{HubSlot, LocalDispatch};

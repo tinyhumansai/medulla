@@ -21,7 +21,7 @@ mod types;
 mod tests;
 
 pub use activity::{ActivityLog, WorkerActivity};
-pub use boot::{run_hub, start_hub, HubConfig, HubSession, WorkerSpec};
+pub use boot::{run_hub, start_hub, HubConfig, HubSession, WorkerSpec, DEFAULT_LOCAL_HUB_ADDRESS};
 pub use handle::HubHandle;
 pub use relay::Relay;
 pub use roster::HubWorker;

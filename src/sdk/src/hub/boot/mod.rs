@@ -13,7 +13,7 @@ use std::time::Duration;
 use ::tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 use rust_socketio::asynchronous::Client;
 
-use crate::bridge::TinyplaceBridge;
+use crate::bridge::{RoutingBridge, TinyplaceBridge};
 use crate::daemon::transport::SignalTransport;
 use crate::tinyplace::{load_or_create_identity, resolve_endpoint};
 
@@ -21,6 +21,9 @@ use super::handle::HubHandle;
 use super::roster::{HubWorker, SharedRoster};
 use super::runner::TaskRunner;
 use super::socket::connect_harness;
+
+/// The address a hub binds on the device-local bus when the caller names none.
+pub const DEFAULT_LOCAL_HUB_ADDRESS: &str = "medulla-orchestrator";
 
 /// Build the transport + runner, connect the harness client, and return a
 /// [`HubSession`]. Errors only on fatal setup (bad identity, unreachable
@@ -62,7 +65,26 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
     // One transport, shared: the runner dispatches through it and the handle
     // opens contact edges through it. A second on the same wallet would be a
     // second writer to one Signal session store.
-    let relay: Arc<dyn super::relay::Relay> = Arc::new(TinyplaceBridge::new(transport));
+    let remote: Arc<dyn super::relay::Relay> = Arc::new(TinyplaceBridge::new(transport));
+    // With a local bus attached the relay becomes a router: workers hosted in
+    // this process are reached in memory and never touch the relay, while remote
+    // ones fall through unchanged. Binding is fatal rather than best-effort —
+    // a failure means something else already holds this address, and silently
+    // continuing remote-only would look exactly like a host that never answers.
+    let relay: Arc<dyn super::relay::Relay> = match &config.local_network {
+        Some(network) => {
+            let address = match config.local_address.trim() {
+                "" => DEFAULT_LOCAL_HUB_ADDRESS,
+                value => value,
+            };
+            let local = network.bind(address).map_err(|e| {
+                anyhow::anyhow!("hub: could not bind local address {address} ({e})")
+            })?;
+            (config.log)(&format!("hub: also hosting on the local bus as {address}"));
+            Arc::new(RoutingBridge::new(local, remote))
+        }
+        None => remote,
+    };
     // One activity log, shared by the pump that observes frames and the socket
     // that dispatches them — the Agents view reads what both write.
     let activity = super::ActivityLog::new();

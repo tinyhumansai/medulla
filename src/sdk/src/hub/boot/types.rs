@@ -35,6 +35,17 @@ pub struct HubConfig {
     pub log: super::super::types::HubLog,
     /// Where roster changes are saved. `None` keeps the roster in memory only.
     pub persist: Option<super::super::types::RosterSink>,
+    /// The device-local bus this hub also dispatches over.
+    ///
+    /// `Some` makes the hub bi-modal: a worker whose address is bound on this
+    /// network is reached in-process, and everything else still goes over
+    /// tiny.place. That is what lets one program be both the orchestrator and a
+    /// host for its own machine. `None` keeps every worker remote.
+    pub local_network: Option<crate::bridge::LocalBridgeNetwork>,
+    /// The address the hub binds on the local bus. Ignored without a
+    /// [`local_network`](Self::local_network); empty falls back to
+    /// [`DEFAULT_LOCAL_HUB_ADDRESS`](super::DEFAULT_LOCAL_HUB_ADDRESS).
+    pub local_address: String,
 }
 /// A running hub: the live [`HubHandle`] plus the client/runner kept alive for
 /// the session (dropping this disconnects and stops the pump).

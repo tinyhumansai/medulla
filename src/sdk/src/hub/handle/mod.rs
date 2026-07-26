@@ -186,7 +186,14 @@ impl HubHandle {
     /// id or the address is dropped first, so one peer can never occupy two
     /// roster slots however it was named.
     pub async fn add(&self, mut worker: HubWorker) -> anyhow::Result<()> {
-        if !is_plausible_address(&worker.address) {
+        // Address-shape validation exists to catch a mis-paste of a tiny.place
+        // cryptoId, which is otherwise silent. A device-local host is exempt:
+        // its address is a name this process bound, so "does it exist" is
+        // answerable exactly, and demanding base58 of it would make the host on
+        // this very machine the one worker the roster refuses.
+        if !is_plausible_address(&worker.address)
+            && !self.relay.is_device_local(&worker.address).await
+        {
             let given = worker.address.clone();
             (self.log)(&format!("hub: refused worker address {given:?}"));
             anyhow::bail!(

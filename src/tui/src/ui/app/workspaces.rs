@@ -63,6 +63,13 @@ impl App {
     /// advertise; a path that does not resolve is still accepted, because a
     /// directory on a mount that is not up yet is a real thing to declare and
     /// the row flags it as missing rather than refusing it.
+    ///
+    /// An unresolvable *relative* path is still made absolute against the
+    /// current directory before being stored. Persisting `projects/repo`
+    /// verbatim would mean the declaration silently names a different place on
+    /// the next launch — whatever directory `medulla` happened to start in —
+    /// and an advertised relative path is not a location at all to whoever
+    /// reads it.
     pub(in crate::ui::app) fn add_workspace(&mut self, path: &str) {
         let path = path.trim();
         if path.is_empty() {
@@ -71,7 +78,7 @@ impl App {
         }
         let resolved = std::fs::canonicalize(path)
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| path.to_string());
+            .unwrap_or_else(|_| absolute(path));
         if self.workspace_rows().iter().any(|r| r.path == resolved) {
             self.set_status(format!("Already declared · {resolved}"));
             return;
@@ -126,4 +133,22 @@ impl App {
             Err(e) => self.set_status(format!("Could not save the workspace list ({e})")),
         }
     }
+}
+
+/// Make `path` absolute against the process's current directory.
+///
+/// Used only when `canonicalize` failed, which means the directory is not there
+/// *yet* — a mount that is not up, a checkout not made. `canonicalize` would
+/// also have resolved symlinks and `..`; this cannot, so the stored path is
+/// merely absolute rather than fully normalised. That is the honest limit: it
+/// fixes "which directory did they mean" without pretending to have inspected
+/// something that does not exist.
+fn absolute(path: &str) -> String {
+    let path = std::path::Path::new(path);
+    if path.is_absolute() {
+        return path.to_string_lossy().into_owned();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path).to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string_lossy().into_owned())
 }

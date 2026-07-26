@@ -169,3 +169,51 @@ fn another_machines_workspace_is_shown_but_not_removable_here() {
         app.status()
     );
 }
+
+#[test]
+fn a_relative_path_is_stored_absolute() {
+    // `canonicalize` fails for a directory that is not there yet, and persisting
+    // `projects/repo` verbatim would silently name a different place on the next
+    // launch — whatever directory medulla happened to start in.
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    let mut app = app_with_workspaces(&[], &config);
+    app.focus_routing_subpage("Workspaces");
+    assert!(app.on_event(key(KeyCode::Char('a'))).is_none());
+    for ch in "projects/not-created-yet".chars() {
+        let _ = app.on_event(key(KeyCode::Char(ch)));
+    }
+    assert!(app.on_event(key(KeyCode::Enter)).is_none());
+
+    let text = std::fs::read_to_string(&config).expect("config written");
+    assert!(
+        !text.contains("\"projects/not-created-yet\""),
+        "the relative form must not be what is stored: {text}"
+    );
+    let cwd = std::env::current_dir().unwrap();
+    assert!(
+        text.contains(
+            &cwd.join("projects/not-created-yet")
+                .to_string_lossy()
+                .to_string()
+        ),
+        "stored absolute against the current directory: {text}"
+    );
+}
+
+#[test]
+fn entering_the_page_pulls_a_fresh_read_of_the_fleet() {
+    // A backend session starts with an empty capacity snapshot, so without this
+    // the page showed only this device's directories until the operator happened
+    // to visit another capacity page first.
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Routing");
+    // Walk the nav down to Workspaces, then step in.
+    let _ = app.on_event(key(KeyCode::Down));
+    let _ = app.on_event(key(KeyCode::Down));
+    assert_eq!(app.routing_subpage(), "Workspaces");
+    assert!(matches!(
+        app.on_event(key(KeyCode::Enter)),
+        Some(Cmd::RefreshFleet)
+    ));
+}

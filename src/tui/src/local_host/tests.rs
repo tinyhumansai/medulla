@@ -9,12 +9,24 @@ use medulla::tinyplace::HarnessProvider;
 
 use super::{host_address, host_enabled, options_from_config, start};
 
+/// A path that is guaranteed to exist and be executable on every platform.
+///
+/// The running test binary itself. `/bin/sh` was the obvious choice and the
+/// wrong one: it does not exist on Windows, so detection found nothing there and
+/// every test that needed an "installed" harness failed on that runner alone.
+fn installed_bin() -> String {
+    std::env::current_exe()
+        .expect("the test binary has a path")
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// An env with exactly `claude` "installed", so detection is deterministic and
 /// independent of what the machine running the tests actually has.
 fn env_with_only_claude() -> HashMap<String, String> {
     HashMap::from([
         ("PATH".to_string(), String::new()),
-        ("TINYPLACE_CLAUDE_BIN".to_string(), "/bin/sh".to_string()),
+        ("TINYPLACE_CLAUDE_BIN".to_string(), installed_bin()),
     ])
 }
 

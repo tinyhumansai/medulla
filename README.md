@@ -33,6 +33,19 @@ medulla daemon
 
 On a terminal this opens the reduced daemon TUI. Choose the execution mode and installed harness, then use its four tabs to watch agent lanes, connect and message a master, manage the workspace roots advertised to that master, and approve incoming requests. The daemon creates and stores a worker-level tiny.place wallet locally; it does not need the master's backend token. Workspace and master choices are saved to the Medulla config, so the usual setup does not require environment variables. Use `medulla daemon --headless` for a service process; non-terminal launches select headless mode automatically.
 
+### Telling the orchestrator what there is to work on
+
+This device hosts a harness as well as orchestrating, so it usually has more than
+one project on it. **Routing › Workspaces** lists every directory the fleet can
+work in — this machine's, which you add with `a` and remove with `d`, and every
+other host's, which that machine declares and this page shows read-only.
+
+What is listed here for this device is exactly what reaches the orchestrator as
+`capabilities.accessibleDirs`, alongside the harness's own summary of each
+project. It is routing context, not a permission grant: a delegated task still
+runs in `[host].workspace`. The list persists to `[host].workspaces` and is
+advertised from the next launch.
+
 Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
 ## What It Does

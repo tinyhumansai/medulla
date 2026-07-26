@@ -295,6 +295,30 @@ impl App {
         });
     }
 
+    /// Copy one short line — a command, an address — to the clipboard, naming it
+    /// in the status line.
+    ///
+    /// Kept apart from [`App::copy_chat`], which reports a size because a
+    /// transcript's length is the useful confirmation. For a single line the
+    /// useful confirmation is *what* was copied, so the caller names it.
+    pub(in crate::ui::app) fn copy_line(&mut self, what: &str, text: &str) {
+        if let Some(sink) = &self.copy_capture {
+            sink.lock().expect("copy sink").push(text.to_string());
+            self.set_status(format!("Copied {what} (captured)"));
+            return;
+        }
+        let via = copy_to_clipboard(text, current_platform(), |osc| {
+            use std::io::Write;
+            let _ = std::io::stdout().write_all(osc.as_bytes());
+            let _ = std::io::stdout().flush();
+        });
+        self.set_status(if via == OSC_52 {
+            format!("Sent {what} → terminal (OSC 52); check your clipboard")
+        } else {
+            format!("Copied {what} → clipboard ({via})")
+        });
+    }
+
     /// Handle a submitted composer line (a plain turn or a slash command).
     pub(super) fn execute(&mut self, value: String) -> Option<Cmd> {
         let clean = value.trim().to_string();

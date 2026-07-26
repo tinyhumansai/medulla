@@ -28,6 +28,18 @@
 
 use crate::clipboard::osc52;
 
+/// The single line to paste into a shell on the machine being added.
+///
+/// One paste, in the easy direction: it is copied on the orchestrator — a local
+/// terminal, where copying is trivial — and pasted into the remote session.
+/// Installing is guarded rather than unconditional so pasting it onto a machine
+/// that already has `medulla` starts the worker instead of reinstalling it, and
+/// so the whole thing stays one line rather than a decision the operator has to
+/// make before running anything.
+pub const REMOTE_JOIN_COMMAND: &str = "command -v medulla >/dev/null 2>&1 || \
+     curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh; \
+     medulla daemon";
+
 /// The OSC 52 escape that hands `address` to the operator's terminal clipboard.
 ///
 /// Returns `None` when `stdout_is_terminal` is false. A daemon under systemd or

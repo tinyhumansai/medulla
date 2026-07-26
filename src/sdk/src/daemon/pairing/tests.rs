@@ -53,3 +53,14 @@ fn a_blank_handle_is_treated_as_no_handle() {
     let banner = pairing_banner("abc123", Some("  "), false);
     assert!(!banner.contains('@'), "{banner}");
 }
+
+#[test]
+fn the_remote_join_command_is_one_pasteable_line() {
+    // A multi-line command would paste as several shell invocations, and the
+    // continuation escapes in the literal are easy to get wrong.
+    assert!(!REMOTE_JOIN_COMMAND.contains('\n'), "{REMOTE_JOIN_COMMAND}");
+    assert!(!REMOTE_JOIN_COMMAND.contains("  "), "{REMOTE_JOIN_COMMAND}");
+    // Installing is guarded, and the line ends by starting the worker.
+    assert!(REMOTE_JOIN_COMMAND.starts_with("command -v medulla"));
+    assert!(REMOTE_JOIN_COMMAND.ends_with("medulla daemon"));
+}

@@ -4,6 +4,7 @@ use crossterm::event::KeyCode;
 
 use crate::ui::composer::{insert_at, Draft};
 use crate::ui::multi_pane::{self, NavAction};
+use medulla::daemon::pairing::REMOTE_JOIN_COMMAND;
 use medulla::runtime::WorkerOp;
 
 use super::super::types::{
@@ -172,13 +173,21 @@ impl App {
         }
     }
 
-    /// Open the existing host-address prompt from the dedicated Add Host pane.
+    /// Open the existing host-address prompt from the dedicated Add Host pane,
+    /// or copy the line the operator has to run on the machine being added.
     fn add_host_key(&mut self, code: KeyCode) -> RoutingKey {
-        if matches!(code, KeyCode::Enter | KeyCode::Char('a')) {
-            self.open_add_host_prompt();
-            RoutingKey::Handled(None)
-        } else {
-            RoutingKey::Unhandled
+        match code {
+            KeyCode::Enter | KeyCode::Char('a') => {
+                self.open_add_host_prompt();
+                RoutingKey::Handled(None)
+            }
+            // Copying it here rather than retyping it there is the whole point:
+            // this end is a local terminal, so the copy is free.
+            KeyCode::Char('c') => {
+                self.copy_line("the worker install line", REMOTE_JOIN_COMMAND);
+                RoutingKey::Handled(None)
+            }
+            _ => RoutingKey::Unhandled,
         }
     }
 

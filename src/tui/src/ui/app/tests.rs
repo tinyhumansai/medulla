@@ -276,3 +276,46 @@ fn clicking_a_context_chunk_selects_it() {
     let _ = a.handle_click(3, 40);
     assert_eq!(a.context_index, 1);
 }
+
+#[test]
+fn routing_strategies_render_host_and_subscription_groups() {
+    let mut a = app();
+    a.tab_index = 3;
+    a.routing_index = types::RP_STRATEGIES;
+    a.routing_focused = true;
+
+    let out = render(&mut a);
+    assert!(out.contains("Host strategy"), "{out}");
+    assert!(out.contains("CPU First"), "{out}");
+    assert!(out.contains("Subscription strategy"), "{out}");
+    assert!(out.contains("Most Available Budget"), "{out}");
+}
+
+#[test]
+fn subscription_strategy_navigation_persists_and_emits_its_own_operation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut a = app();
+    a.set_config_path(dir.path().join("config.toml"));
+    a.tab_index = 3;
+    a.routing_index = types::RP_STRATEGIES;
+    a.routing_focused = true;
+
+    a.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(matches!(
+        cmd,
+        Some(Cmd::WorkerOp(
+            medulla::runtime::WorkerOp::ApplySubscriptionStrategy {
+                strategy: medulla::runtime::SubscriptionRoutingStrategy::MostAvailableBudget
+            }
+        ))
+    ));
+    let saved = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(
+        saved.contains("subscriptionRoutingStrategy = \"mostAvailableBudget\""),
+        "{saved}"
+    );
+}

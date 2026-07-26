@@ -78,6 +78,17 @@ pub fn persist_routing_strategy(path: &Path, wire_value: &str) -> anyhow::Result
     write_document(path, &doc)
 }
 
+/// Persist the top-level `subscriptionRoutingStrategy` key while preserving
+/// every other key and section.
+pub fn persist_subscription_routing_strategy(path: &Path, wire_value: &str) -> anyhow::Result<()> {
+    let mut doc = read_document(path)?;
+    doc.insert(
+        "subscriptionRoutingStrategy".to_string(),
+        toml::Value::String(wire_value.to_string()),
+    );
+    write_document(path, &doc)
+}
+
 /// Parse `path` into a TOML table, treating an absent file as an empty document.
 fn read_document(path: &Path) -> anyhow::Result<toml::Table> {
     match std::fs::read_to_string(path) {

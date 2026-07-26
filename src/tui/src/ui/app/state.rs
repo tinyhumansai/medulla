@@ -38,6 +38,15 @@ impl App {
                     .position(|option| option.strategy == strategy)
             })
             .unwrap_or(0);
+        let subscription_strategy_index = loaded
+            .config
+            .subscription_routing_strategy
+            .and_then(|strategy| {
+                super::types::SUBSCRIPTION_STRATEGIES
+                    .iter()
+                    .position(|option| option.strategy == strategy)
+            })
+            .unwrap_or(0);
         App {
             runtime,
             loaded,
@@ -62,6 +71,8 @@ impl App {
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index,
+            subscription_strategy_index,
+            subscription_strategy_focused: false,
             credential_status: super::credentials::detect_credential_status(),
             tasks_index: 0,
             tasks_focused: false,

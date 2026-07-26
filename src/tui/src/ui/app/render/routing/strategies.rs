@@ -6,18 +6,26 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use super::super::super::types::{App, ROUTING_STRATEGIES};
+use super::super::super::types::{App, ROUTING_STRATEGIES, SUBSCRIPTION_STRATEGIES};
 
 impl App {
     /// Draw the strategy chooser shell.
     pub(super) fn draw_strategies(&self, f: &mut Frame, area: Rect) {
         let dim = Style::default().add_modifier(Modifier::DIM);
+        let mut lines = Vec::new();
+        lines.push(TLine::from(Span::styled(
+            if self.subscription_strategy_focused {
+                "  Host strategy"
+            } else {
+                "▸ Host strategy"
+            },
+            dim,
+        )));
         let selected = self
             .routing_strategy_index
             .min(ROUTING_STRATEGIES.len() - 1);
-        let mut lines = Vec::new();
         for (index, option) in ROUTING_STRATEGIES.iter().enumerate() {
-            let style = if index == selected {
+            let style = if !self.subscription_strategy_focused && index == selected {
                 self.theme.selection()
             } else {
                 Style::default()
@@ -37,7 +45,38 @@ impl App {
         }
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
-            "↑↓/jk choose · Enter apply · automatic strategies need refreshed worker details",
+            if self.subscription_strategy_focused {
+                "▸ Subscription strategy"
+            } else {
+                "  Subscription strategy"
+            },
+            dim,
+        )));
+        let selected = self
+            .subscription_strategy_index
+            .min(SUBSCRIPTION_STRATEGIES.len() - 1);
+        for (index, option) in SUBSCRIPTION_STRATEGIES.iter().enumerate() {
+            let style = if self.subscription_strategy_focused && index == selected {
+                self.theme.selection()
+            } else {
+                Style::default()
+            };
+            lines.push(TLine::from(Span::styled(
+                format!(
+                    "{} {}",
+                    if index == selected { "▸" } else { " " },
+                    option.label
+                ),
+                style,
+            )));
+            lines.push(TLine::from(Span::styled(
+                format!("  {}", option.description),
+                dim,
+            )));
+        }
+        lines.push(TLine::from(""));
+        lines.push(TLine::from(Span::styled(
+            "←→/hl group · ↑↓/jk choose · Enter apply · refresh host details and budgets first",
             dim,
         )));
         f.render_widget(

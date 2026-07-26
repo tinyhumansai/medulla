@@ -378,3 +378,24 @@ fn routing_strategy_wire_round_trips_and_reconciles() {
         "absent both, Manual preserves the operator's selection"
     );
 }
+
+#[test]
+fn subscription_routing_strategy_round_trips_wire_values() {
+    use crate::runtime::SubscriptionRoutingStrategy;
+
+    for strategy in [
+        SubscriptionRoutingStrategy::Manual,
+        SubscriptionRoutingStrategy::Balanced,
+        SubscriptionRoutingStrategy::MostAvailableBudget,
+    ] {
+        assert_eq!(
+            SubscriptionRoutingStrategy::from_wire(strategy.as_wire()),
+            Some(strategy)
+        );
+    }
+    assert_eq!(
+        SubscriptionRoutingStrategy::MostAvailableBudget.as_wire(),
+        "mostAvailableBudget"
+    );
+    assert_eq!(SubscriptionRoutingStrategy::from_wire("nonsense"), None);
+}

@@ -431,6 +431,30 @@ impl App {
         }
     }
 
+    /// Persist and remember the provider-subscription routing strategy.
+    pub(super) fn persist_subscription_strategy_now(
+        &mut self,
+        strategy: medulla::runtime::SubscriptionRoutingStrategy,
+    ) {
+        self.loaded.config.subscription_routing_strategy = Some(strategy);
+        match &self.config_path {
+            Some(path) => {
+                match medulla::config::persist_subscription_routing_strategy(
+                    path,
+                    strategy.as_wire(),
+                ) {
+                    Ok(()) => self.set_status(format!(
+                        "Applying {strategy:?} subscription strategy… (saved)"
+                    )),
+                    Err(e) => self.set_status(format!("Subscription strategy save failed: {e}")),
+                }
+            }
+            None => self.set_status(format!(
+                "Applying {strategy:?} subscription strategy… (not persisted)"
+            )),
+        }
+    }
+
     /// Write the current theme to the injected config path, surfacing a status
     /// note on success or failure. A `None` path applies live but does not save.
     pub(super) fn persist_theme_now(&mut self, role: &str) {

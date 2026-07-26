@@ -46,6 +46,8 @@ pub struct HubConfig {
     /// [`local_network`](Self::local_network); empty falls back to
     /// [`DEFAULT_LOCAL_HUB_ADDRESS`](super::DEFAULT_LOCAL_HUB_ADDRESS).
     pub local_address: String,
+    /// How untargeted tasks choose among provider subscriptions on a host.
+    pub subscription_strategy: crate::runtime::SubscriptionRoutingStrategy,
 }
 /// A running hub: the live [`HubHandle`] plus the client/runner kept alive for
 /// the session (dropping this disconnects and stops the pump).

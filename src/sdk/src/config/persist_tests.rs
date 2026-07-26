@@ -173,6 +173,27 @@ fn persist_setting_preserves_unrelated_sections() {
 }
 
 #[test]
+fn subscription_routing_strategy_persists_without_clobbering_host_strategy() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "routingStrategy = \"cpuFirst\"\n[onboarding]\nwelcomeCompleted = true\n",
+    )
+    .unwrap();
+
+    super::persist_subscription_routing_strategy(&path, "mostAvailableBudget").unwrap();
+
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("routingStrategy = \"cpuFirst\""), "{saved}");
+    assert!(
+        saved.contains("subscriptionRoutingStrategy = \"mostAvailableBudget\""),
+        "{saved}"
+    );
+    assert!(saved.contains("welcomeCompleted = true"), "{saved}");
+}
+
+#[test]
 fn persist_section_replaces_only_the_named_table() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");

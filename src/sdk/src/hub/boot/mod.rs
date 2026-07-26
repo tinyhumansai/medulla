@@ -42,7 +42,17 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         signer: Some(signer.clone() as Arc<dyn Signer>),
         ..Default::default()
     });
-    let transport = SignalTransport::new(client, &signer, &config.identity_dir);
+    let transport = SignalTransport::new(client.clone(), &signer, &config.identity_dir);
+
+    // Inbound pairing. A worker that names this hub as its master requests
+    // contact *here*, and until something reads that queue the relay keeps
+    // refusing DMs in both directions — see [`super::pairing`] for why this
+    // admits every request rather than an allowlist.
+    let pairing = super::pairing::spawn_pairing(
+        Arc::new(crate::contacts::ClientContacts::new(client)),
+        config.log.clone(),
+        config.poll,
+    );
 
     // Publish pre-keys so a worker can run X3DH against us (best-effort).
     if let Err(e) = transport.publish_keys(&signer).await {
@@ -145,6 +155,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         handle,
         _runner: runner,
         _client: socket,
+        _pairing: pairing,
     })
 }
 

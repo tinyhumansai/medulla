@@ -7,5 +7,6 @@
 mod activity;
 mod capabilities;
 mod dispatch;
+mod pairing;
 mod roster;
 mod system_info;

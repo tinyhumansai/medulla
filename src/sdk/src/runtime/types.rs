@@ -106,7 +106,7 @@ pub struct WorkerInfo {
     /// when none were reported. Display-only.
     pub readiness: Vec<crate::tinyplace::HarnessReadiness>,
 }
-/// How the hub chooses a default worker from captured capacity details.
+/// How the hub chooses a default host from captured capacity details.
 ///
 /// Wire values are camelCase (`manual` / `balanced` / `cpuFirst` / `memoryFirst`),
 /// matching the backend's `GET/PUT /medulla/v1/routing/strategy` contract and the
@@ -115,7 +115,7 @@ pub struct WorkerInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RoutingStrategy {
-    /// Preserve the operator's explicit worker selection.
+    /// Preserve the operator's explicit host selection.
     Manual,
     /// Prefer CPU, using available memory as the tie-breaker.
     Balanced,
@@ -156,6 +156,42 @@ impl RoutingStrategy {
     /// never silently discards what the operator saved.
     pub fn reconcile(local: Option<Self>, backend: Option<Self>) -> Self {
         backend.or(local).unwrap_or(RoutingStrategy::Manual)
+    }
+}
+/// How the hub chooses a provider subscription after it has selected a host.
+///
+/// This is deliberately separate from [`RoutingStrategy`]: CPU and memory
+/// describe a host, while token headroom and readiness describe a subscription
+/// on that host. Wire values are camelCase for config and future backend parity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubscriptionRoutingStrategy {
+    /// Preserve an explicitly requested provider or the host's configured default.
+    Manual,
+    /// Prefer the ready subscription with the greatest remaining percentage.
+    Balanced,
+    /// Prefer the ready subscription with the greatest absolute token headroom.
+    MostAvailableBudget,
+}
+
+impl SubscriptionRoutingStrategy {
+    /// The camelCase wire token used by configuration and runtime adapters.
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            SubscriptionRoutingStrategy::Manual => "manual",
+            SubscriptionRoutingStrategy::Balanced => "balanced",
+            SubscriptionRoutingStrategy::MostAvailableBudget => "mostAvailableBudget",
+        }
+    }
+
+    /// Parse a camelCase wire token, or `None` when unrecognized.
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "manual" => Some(SubscriptionRoutingStrategy::Manual),
+            "balanced" => Some(SubscriptionRoutingStrategy::Balanced),
+            "mostAvailableBudget" => Some(SubscriptionRoutingStrategy::MostAvailableBudget),
+            _ => None,
+        }
     }
 }
 /// A mutation on the worker-peer registry (`worker.add`/`select`/`update`/`remove`).

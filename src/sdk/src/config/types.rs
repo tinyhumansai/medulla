@@ -15,7 +15,7 @@ use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
 use crate::runtime::fleet::{
     AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor, WorkspaceDescriptor,
 };
-use crate::runtime::{AgentDescriptor, RoutingStrategy};
+use crate::runtime::{AgentDescriptor, RoutingStrategy, SubscriptionRoutingStrategy};
 use crate::tinyplace::BudgetWindow;
 
 // --- serde default helpers -------------------------------------------------
@@ -627,6 +627,10 @@ pub struct TuiConfig {
     /// when present. Absent means no local preference (defaults to `manual`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub routing_strategy: Option<RoutingStrategy>,
+    /// How the orchestrator chooses among ready provider subscriptions after
+    /// selecting a host. Absent preserves the requested or host-default provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_routing_strategy: Option<SubscriptionRoutingStrategy>,
     /// Operator-declared hosts, harnesses, workspaces, agents, and templates.
     #[serde(default, skip_serializing_if = "FleetConfig::is_empty")]
     pub fleet: FleetConfig,
@@ -651,6 +655,7 @@ impl Default for TuiConfig {
             router: None,
             budget: None,
             routing_strategy: None,
+            subscription_routing_strategy: None,
             fleet: FleetConfig::default(),
         }
     }

@@ -285,6 +285,27 @@ fn routing_strategy_round_trips_camel_case() {
 }
 
 #[test]
+fn subscription_routing_strategy_round_trips_camel_case() {
+    use crate::runtime::SubscriptionRoutingStrategy;
+
+    let cfg: TuiConfig =
+        serde_json::from_str(r#"{"subscriptionRoutingStrategy":"mostAvailableBudget"}"#).unwrap();
+    assert_eq!(
+        cfg.subscription_routing_strategy,
+        Some(SubscriptionRoutingStrategy::MostAvailableBudget)
+    );
+
+    let out = serde_json::to_string(&cfg).unwrap();
+    assert!(
+        out.contains("\"subscriptionRoutingStrategy\":\"mostAvailableBudget\""),
+        "{out}"
+    );
+    let empty = TuiConfig::default();
+    let json = serde_json::to_value(empty).unwrap();
+    assert!(json.get("subscriptionRoutingStrategy").is_none());
+}
+
+#[test]
 fn budget_absent_by_default_and_omitted_from_output() {
     // No [budget] section → estimates only, and it never appears in output.
     let cfg: TuiConfig = serde_json::from_str("{}").unwrap();

@@ -148,7 +148,7 @@ fn hello_carries_static_roster_and_agent_templates() {
             template_id: Some("reviewer".into()),
             ..AgentDescriptor::default()
         }],
-        agent_templates: vec![super::super::types::AgentTemplate {
+        agent_templates: vec![crate::runtime::AgentTemplate {
             id: "reviewer".into(),
             name: Some("Reviewer".into()),
             description: "Reviews diffs without writing.".into(),

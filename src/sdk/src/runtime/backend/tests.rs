@@ -296,3 +296,110 @@ fn worker_label_patches_require_the_supported_string_field() {
         );
     }
 }
+
+// --- roster → capacity projection -------------------------------------------
+
+/// A roster row as the backend sends it, with only the fields a test cares about.
+fn roster_worker(patch: Value) -> crate::client::RosterWorker {
+    let mut raw = json!({
+        "registryId": "w-1",
+        "label": "dev-1",
+        "description": "A remote coding agent.",
+        "availability": "online",
+        "selected": false,
+    });
+    let Value::Object(patch) = patch else {
+        panic!("patch must be an object")
+    };
+    for (k, v) in patch {
+        raw[k] = v;
+    }
+    serde_json::from_value(raw).unwrap()
+}
+
+#[test]
+fn projects_a_worker_onto_host_harness_and_agent() {
+    let (agents, capacity) = super::fleet::project_roster(&[roster_worker(json!({
+        "harness": "claude-code",
+        "cpuCores": 8,
+        "totalMemBytes": 32u64 << 30,
+        "availableMemBytes": 12u64 << 30,
+        "primaryIpv4": "10.0.0.4",
+        "tags": ["code"],
+    }))]);
+
+    assert_eq!(capacity.hosts.len(), 1);
+    assert_eq!(capacity.harnesses.len(), 1);
+    let host = &capacity.hosts[0];
+    assert_eq!(host.name, "dev-1");
+    assert_eq!(host.address.as_deref(), Some("10.0.0.4"));
+    assert_eq!(host.resources.as_ref().unwrap().cpu_cores, Some(8.0));
+
+    let harness = &capacity.harnesses[0];
+    assert_eq!(harness.host_id, host.id);
+    assert_eq!(harness.kind, "claude-code");
+    assert!(harness.ready);
+
+    // No probed cwd, so the agent is placed on its host directly rather than
+    // pointing at a workspace nothing declares.
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0].id, "w-1");
+    assert_eq!(agents[0].workspace_id, None);
+    assert_eq!(agents[0].host_id.as_deref(), Some(host.id.as_str()));
+    assert_eq!(agents[0].tags, vec!["code".to_string()]);
+}
+
+#[test]
+fn synthesizes_a_workspace_from_a_probed_cwd() {
+    let (agents, capacity) = super::fleet::project_roster(&[roster_worker(json!({
+        "harness": "codex",
+        "capabilities": { "cwd": "/srv/repos/medulla", "project": "medulla", "branch": "main" },
+    }))]);
+
+    assert_eq!(capacity.workspaces.len(), 1);
+    let workspace = &capacity.workspaces[0];
+    assert_eq!(workspace.path, "/srv/repos/medulla");
+    assert_eq!(workspace.project.as_deref(), Some("medulla"));
+    assert_eq!(workspace.harness_id, capacity.harnesses[0].id);
+
+    // With a workspace to walk up from, the agent must not also claim a host.
+    assert_eq!(
+        agents[0].workspace_id.as_deref(),
+        Some(workspace.id.as_str())
+    );
+    assert_eq!(agents[0].host_id, None);
+    let placement = capacity.placement(&agents[0]);
+    assert_eq!(placement.host, Some(&capacity.hosts[0]));
+    assert_eq!(placement.harness, Some(&capacity.harnesses[0]));
+}
+
+#[test]
+fn carries_budgets_onto_the_harness_and_gates_readiness_on_availability() {
+    let (_, capacity) = super::fleet::project_roster(&[roster_worker(json!({
+        "availability": "offline",
+        "budgets": [{
+            "provider": "anthropic",
+            "window": "5h",
+            "remainingTokens": 250_000u64,
+            "limitTokens": 1_000_000u64,
+            "source": "provider_reported",
+        }],
+    }))]);
+
+    let harness = &capacity.harnesses[0];
+    assert!(!harness.ready, "an offline worker takes no work");
+    assert_eq!(harness.providers, vec!["anthropic".to_string()]);
+    assert_eq!(harness.budgets[0].remaining(), Some(250_000));
+    assert_eq!(harness.budgets[0].fraction_remaining(), Some(0.25));
+}
+
+#[test]
+fn keeps_look_alike_workers_as_separate_hosts() {
+    let (agents, capacity) = super::fleet::project_roster(&[
+        roster_worker(json!({ "registryId": "w-1" })),
+        roster_worker(json!({ "registryId": "w-2" })),
+    ]);
+    assert_eq!(agents.len(), 2);
+    assert_eq!(capacity.hosts.len(), 2);
+    assert_ne!(capacity.hosts[0].id, capacity.hosts[1].id);
+}

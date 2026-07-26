@@ -15,8 +15,7 @@ use crate::client::{
     FeedbackType, MedullaClient, Role,
 };
 use crate::runtime::{
-    AgentDescriptor, AgentPresence, ContextItem, PeerSession, Runtime, RuntimeSnapshot,
-    TinyplaceIdentity,
+    AgentPresence, ContextItem, PeerSession, Runtime, RuntimeSnapshot, TinyplaceIdentity,
 };
 use crate::ui::chat_store::{now_millis, ChatMessage, MainChatSummary};
 use crate::ui::events::{EventEnvelope, TuiEvent};
@@ -122,6 +121,27 @@ impl Runtime for BackendRuntime {
             Some(h) => h.activity().snapshot(),
             None => Vec::new(),
         }
+    }
+
+    /// Pull the connected-worker roster and project it onto the capacity chain.
+    ///
+    /// A failed read leaves the previous fleet in place rather than blanking it:
+    /// a transient 5xx should not make the operator's fleet appear to vanish.
+    fn refresh_fleet(&self) -> BoxFuture<'static, anyhow::Result<()>> {
+        let client = self.client.clone();
+        let state = self.state.clone();
+        let tx = self.tx.clone();
+        Box::pin(async move {
+            let workers = client.roster().await?;
+            let (roster, capacity) = super::fleet::project_roster(&workers);
+            {
+                let mut s = state.lock().unwrap();
+                s.roster = roster;
+                s.capacity = capacity;
+            }
+            let _ = tx.send(());
+            Ok(())
+        })
     }
 
     fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {

@@ -16,17 +16,21 @@
 //!   server-side and is kept only so the UI toggle has somewhere to land.
 //! - `inspect_context` returns an empty list — the backend does not expose the
 //!   context store over HTTP.
-//! - Roster / presence / peer-session data is empty — that fleet data arrives
-//!   over Socket.IO, which this runtime does not open.
+//! - Presence / peer-session data is empty — that arrives over Socket.IO, which
+//!   this runtime does not open. The roster is not streamed either, but it *is*
+//!   readable: [`refresh_fleet`](crate::runtime::Runtime::refresh_fleet) pulls
+//!   `GET /medulla/v1/roster` and [`fleet`] projects it onto the capacity chain.
 //!
 //! Split by responsibility: [`types`] holds the local thread/session state model
 //! and the [`BackendRuntime`] handle, [`fold`] folds backend events into that
-//! state, [`stream`] wires the per-thread SSE tasks, [`worker_ops`] adapts hub
+//! state, [`fleet`] projects the connected-worker roster onto the capacity
+//! chain, [`stream`] wires the per-thread SSE tasks, [`worker_ops`] adapts hub
 //! workers and mutations, and [`runtime`] implements the
 //! [`Runtime`](crate::runtime::Runtime) trait over a live client. The only public
 //! item, [`BackendRuntime`], is re-exported here so callers use
 //! `medulla::runtime::backend::BackendRuntime`.
 
+mod fleet;
 mod fold;
 mod runtime;
 mod stream;

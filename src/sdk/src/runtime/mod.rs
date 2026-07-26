@@ -151,6 +151,18 @@ pub trait Runtime: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
+    /// Re-read the declared fleet — the connected roster and the capacity chain
+    /// it sits in — from the backing service, updating what the next
+    /// [`snapshot`](Runtime::snapshot) reports.
+    ///
+    /// Pull rather than push because capacity is declared, not streamed: no
+    /// runtime today emits an event when a host appears. A no-op success on
+    /// runtimes whose capacity is fixed at attach time (core, mock), so callers
+    /// may poll it unconditionally.
+    fn refresh_fleet(&self) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// The event stream's health, when this runtime tracks one. `None` for runtimes
     /// with no lossy stream to surface (mock / HTTP backend).
     fn stream_state(&self) -> Option<StreamState> {

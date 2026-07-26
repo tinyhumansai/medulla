@@ -113,7 +113,8 @@ orchestrator actually reads on every cycle, so it is worth a pass by hand.
 Writing the file is only half of it. `workspace add` also **registers** the
 directory in your config, which is what makes the orchestrator aware of it at
 all — an unregistered profile is never read. Re-running the command is safe: an
-already-registered directory is refreshed, not duplicated.
+already-registered directory is refreshed, not duplicated, and a `MEDULLA.md`
+that already exists is kept rather than overwritten.
 
 ```sh
 medulla workspace list        # what the orchestrator knows about
@@ -123,10 +124,11 @@ medulla workspace remove .    # stop placing work here (files untouched)
 `medulla init` writes the `MEDULLA.md` alone, without registering — useful for
 drafting a profile in a directory that should not yet take work.
 
-The `--force` flag overwrites an existing profile; without it, both commands
-refuse rather than discarding authored work. The `--offline` flag skips the model
-and writes an editable stub. If no model is available, or the call fails, they
-degrade to the stub and say so, so you are always left a usable file.
+The `--force` flag redrafts an existing profile. Without it, authored work is
+never discarded: `workspace add` keeps the file and registers anyway, and `init`
+refuses rather than overwriting. The `--offline` flag skips the model and writes
+an editable stub. If no model is available, or the call fails, both degrade to
+the stub and say so, so you are always left a usable file.
 
 See [CLI Reference](../developers/cli-reference.md) for the full flag list and
 [Orchestrator Routing](routing.md) for how these preferences meet Medulla's own

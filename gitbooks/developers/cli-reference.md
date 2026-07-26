@@ -236,9 +236,18 @@ Both land in one file: the explicit `--config` path, else the highest-precedence
 file in the layered load, else `<medulla home>/config.toml` — the same file the
 TUI writes, so the CLI and the running app share one registry.
 
-`add` is idempotent: re-running it keeps the entry's id and hand-tuned fields
-(name, harness, templates) and refreshes the rest. Pass `--force` to also redraft
-the `MEDULLA.md`.
+`add` is idempotent and safe over an existing profile: a `MEDULLA.md` that is
+already there is kept and the directory is still registered, so running it after
+[`medulla init`](#medulla-init) works. Re-running keeps the entry's id and
+hand-tuned fields (name, harness, templates) and refreshes the rest. Pass
+`--force` to redraft the `MEDULLA.md` as well.
+
+When the workspace's harness is not already declared, `add` declares it and its
+host, so the `Host -> Harness -> Workspace` chain actually resolves. Existing
+declarations are never rewritten.
+
+The registry is written as TOML: a `--config` path ending in `.json` is refused
+up front rather than corrupted.
 
 | Flag | Effect |
 | --- | --- |

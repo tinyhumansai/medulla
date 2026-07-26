@@ -66,6 +66,11 @@ pub fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
     };
     if let Some(mut stdin) = child.stdin.take() {
         if stdin.write_all(text.as_bytes()).is_err() {
+            // Reap it before giving up. Returning straight away leaves the
+            // helper as a zombie for the life of the process, and a TUI that
+            // retries a copy would accumulate one per attempt.
+            drop(stdin);
+            let _ = child.wait();
             return false;
         }
     }
@@ -75,8 +80,19 @@ pub fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
 /// Copy `text`, returning the mechanism that took it (the writer command, or
 /// [`OSC_52`]). `emit_osc` receives the escape sequence for the fallback path
 /// (write it to the terminal).
-pub fn copy_to_clipboard<F: FnMut(&str)>(text: &str, platform: &str, mut emit_osc: F) -> String {
-    for w in writers(platform) {
+pub fn copy_to_clipboard<F: FnMut(&str)>(text: &str, platform: &str, emit_osc: F) -> String {
+    copy_with(writers(platform), text, emit_osc)
+}
+
+/// [`copy_to_clipboard`] over an explicit writer list.
+///
+/// Split out so the two paths — a writer took it, nothing did — can be tested
+/// without depending on which clipboard binaries the test machine happens to
+/// have. Selecting by platform name cannot do that: `writers("macos")` names
+/// `pbcopy`, which exists on a developer's Mac and not in Linux CI, so the same
+/// assertion would exercise a different branch in each place.
+fn copy_with<F: FnMut(&str)>(writers: &[Writer], text: &str, mut emit_osc: F) -> String {
+    for w in writers {
         if pipe_to(w.cmd, w.args, text) {
             return w.cmd.to_string();
         }
@@ -101,10 +117,19 @@ pub fn copy_to_clipboard<F: FnMut(&str)>(text: &str, platform: &str, mut emit_os
 pub fn copy_for_operator<F: FnMut(&str)>(
     text: &str,
     platform: &str,
+    emit_osc: F,
+) -> Option<String> {
+    copy_for_operator_with(writers(platform), text, emit_osc)
+}
+
+/// [`copy_for_operator`] over an explicit writer list; see [`copy_with`].
+fn copy_for_operator_with<F: FnMut(&str)>(
+    writers: &[Writer],
+    text: &str,
     mut emit_osc: F,
 ) -> Option<String> {
     emit_osc(&osc52(text));
-    writers(platform)
+    writers
         .iter()
         .find(|w| pipe_to(w.cmd, w.args, text))
         .map(|w| w.cmd.to_string())

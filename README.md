@@ -33,6 +33,23 @@ medulla daemon
 
 On a terminal this opens the reduced daemon TUI. Choose the execution mode and installed harness, then use its four tabs to watch agent lanes, connect and message a master, manage the workspace roots advertised to that master, and approve incoming requests. The daemon creates and stores a worker-level tiny.place wallet locally; it does not need the master's backend token. Workspace and master choices are saved to the Medulla config, so the usual setup does not require environment variables. Use `medulla daemon --headless` for a service process; non-terminal launches select headless mode automatically.
 
+### Adding another machine
+
+Pairing needs one string to travel — the worker's address — and both halves are
+copied in the direction that is easy.
+
+1. In the orchestrator, open **Routing › Add Host** and press `c`. That copies a
+   single line which installs `medulla` if it is missing and starts the worker.
+   Paste it into an SSH session on the machine you want to add.
+2. The worker prints its address and puts it on **your** clipboard, not the
+   remote machine's — it hands the text to your terminal (OSC 52), so it
+   survives the SSH boundary. Back in the orchestrator, press `a` and paste it,
+   optionally followed by a label.
+
+To skip the copy entirely, name the worker: run `medulla daemon --handle
+build-box` and type `@build-box` into Add Host. Pass `--no-pair` when the
+daemon's output is being parsed by a script.
+
 Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
 ## What It Does

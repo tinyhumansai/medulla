@@ -241,6 +241,7 @@ Daemon flags:\n  \
 --concurrency <n>       Maximum tasks running at once\n  \
 --once                  Drain the inbox once and exit (probe)\n  \
 --no-onboard            Skip key publishing and directory registration\n  \
+--no-pair               Do not print the pairing block or copy the address\n  \
 --dangerously-skip-permissions  Pass the harness its skip-permissions flag\n\n\
 Wrapper flags:\n  \
 --no-bridge             Run the CLI as a plain passthrough (no tiny.place bridge)\n  \

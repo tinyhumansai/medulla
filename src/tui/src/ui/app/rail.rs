@@ -11,7 +11,7 @@
 //! is selected, and answers what the detail pane should show.
 
 use crate::ui::agents::AgentRow;
-use crate::ui::fleet::FleetNode;
+use crate::ui::fleet::{template_rows, FleetNode};
 
 use super::types::App;
 
@@ -38,16 +38,24 @@ impl RailRow {
 }
 
 impl App {
-    /// The rail's rows: the lanes, then the declared fleet under a divider.
+    /// The rail's rows: the lanes, the declared fleet, then the template catalog.
     ///
-    /// The fleet half is omitted entirely when nothing is declared, so a session
-    /// with no capacity to show is byte-identical to the lane list alone.
+    /// Each half is omitted entirely when it has nothing in it, so a session
+    /// with no capacity to show is byte-identical to the lane list alone. The
+    /// catalog is its own section rather than a branch of the tree because a
+    /// template constrains the chain rather than sitting in it — and selecting
+    /// one opens its declaration as a popup, since it has no transcript.
     pub(super) fn rail_rows(&self) -> Vec<RailRow> {
         let mut rows: Vec<RailRow> = self.agent_rows().into_iter().map(RailRow::Agent).collect();
         let fleet = self.fleet_rows();
         if !fleet.is_empty() {
             rows.push(RailRow::Divider("── fleet ──"));
             rows.extend(fleet.into_iter().map(RailRow::Fleet));
+        }
+        let templates = template_rows(&self.fleet_capacity(), &self.fleet_roster());
+        if !templates.is_empty() {
+            rows.push(RailRow::Divider("── agent templates ──"));
+            rows.extend(templates.into_iter().map(RailRow::Fleet));
         }
         rows
     }

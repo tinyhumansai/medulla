@@ -123,10 +123,35 @@ impl App {
         }
     }
 
-    /// Browse the agent-template catalog and re-read it on demand.
+    /// Browse the agent-template catalog, open one, and re-read it on demand.
     fn templates_key(&mut self, code: KeyCode) -> RoutingKey {
         let rows = crate::ui::fleet::template_rows(&self.fleet_capacity(), &self.fleet_roster());
+        // While the popup is open it owns scrolling and dismissal; everything
+        // else still falls through to the catalog beneath it.
+        if self.template_modal {
+            match code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.template_modal = false;
+                    self.template_scroll = 0;
+                    return RoutingKey::Handled(None);
+                }
+                KeyCode::PageDown => {
+                    self.template_scroll = self.template_scroll.saturating_add(5);
+                    return RoutingKey::Handled(None);
+                }
+                KeyCode::PageUp => {
+                    self.template_scroll = self.template_scroll.saturating_sub(5);
+                    return RoutingKey::Handled(None);
+                }
+                _ => {}
+            }
+        }
         match code {
+            KeyCode::Enter if !rows.is_empty() => {
+                self.template_modal = true;
+                self.template_scroll = 0;
+                RoutingKey::Handled(None)
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.template_index =
                     crate::ui::selection::moved(self.template_index, rows.len(), true);
@@ -137,14 +162,6 @@ impl App {
                 self.template_index =
                     crate::ui::selection::moved(self.template_index, rows.len(), false);
                 self.template_scroll = 0;
-                RoutingKey::Handled(None)
-            }
-            KeyCode::PageDown => {
-                self.template_scroll = self.template_scroll.saturating_add(5);
-                RoutingKey::Handled(None)
-            }
-            KeyCode::PageUp => {
-                self.template_scroll = self.template_scroll.saturating_sub(5);
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('r') => {

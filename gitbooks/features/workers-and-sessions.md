@@ -74,12 +74,15 @@ deployed into one workspace. Each level names exactly one parent, so an agent's
 host is derived by walking up rather than declared twice.
 
 Beside the chain sits the **agent template** catalog, on the Routing tab's
-`Templates` page. Where the chain declares *where* an agent can be stood up, a template
+`Agent Templates` page and as its own section at the foot of the Agents rail. Where the chain declares *where* an agent can be stood up, a template
 declares *what* may be stood up there — a description, default tools, an abstract
 model tier, and optional per-harness overrides whose presence also restricts
 which harness kinds the template may run on. Each row says where the template may
 run and how many agents currently exist because of it; a template no declared
-place admits is dimmed, because nothing can be provisioned from it.
+place admits is dimmed, because nothing can be provisioned from it. `Enter` opens
+the full declaration — tools, model tier, instructions, per-harness overrides,
+and the agents standing because of it — as a popup over whichever surface you
+opened it from, since that is read once and dismissed rather than kept on screen.
 
 Credentials live on the `Harnesses` page rather than a page of their own, because
 that is where they belong: a Claude subscription or an `ANTHROPIC_API_KEY` is

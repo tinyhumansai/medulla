@@ -9,7 +9,13 @@ fn routing_nav_exposes_every_subpage() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
     let out = render(&mut app, 120, 40);
-    for page in ["Hosts", "Harnesses", "Templates", "Add Host", "Strategies"] {
+    for page in [
+        "Hosts",
+        "Harnesses",
+        "Agent Template",
+        "Add Host",
+        "Strategies",
+    ] {
         assert!(out.contains(page), "missing {page}: {out}");
     }
 }

@@ -174,6 +174,31 @@ impl App {
             KeyCode::Enter if tab == "Agents" && (shift || alt) => {
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, "\n");
             }
+            // The popup owns Esc and its own scrolling while it is up.
+            KeyCode::Esc if tab == "Agents" && self.template_modal => {
+                self.template_modal = false;
+                self.template_scroll = 0;
+            }
+            KeyCode::PageUp | KeyCode::PageDown if tab == "Agents" && self.template_modal => {
+                let step = 5;
+                self.template_scroll = if matches!(k.code, KeyCode::PageUp) {
+                    self.template_scroll.saturating_sub(step)
+                } else {
+                    self.template_scroll.saturating_add(step)
+                };
+            }
+            // A template row has no transcript to show, so Enter opens its
+            // declaration instead of submitting an empty instruction.
+            KeyCode::Enter
+                if tab == "Agents"
+                    && self.draft.text.is_empty()
+                    && self
+                        .selected_fleet_node()
+                        .is_some_and(|node| node.key.starts_with("template:")) =>
+            {
+                self.template_modal = !self.template_modal;
+                self.template_scroll = 0;
+            }
             // Enter submits to whatever the cursor is on: an instruction to the
             // orchestrator, or an answer to the selected agent's open question.
             // Steering an agent from the lane the question appeared on is the

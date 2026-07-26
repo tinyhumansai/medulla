@@ -25,6 +25,7 @@ mod prompt;
 mod routing;
 mod settings;
 mod tasks;
+mod template_modal;
 
 /// Map a named color from the agent-lane model to a ratatui [`Color`].
 pub(super) fn color(name: &str) -> Color {
@@ -269,6 +270,9 @@ impl App {
         self.draw_content(f, rows[2]);
         if self.decision_open {
             self.draw_decisions(f, rows[2]);
+        }
+        if self.template_modal {
+            self.draw_template_modal(f, rows[2]);
         }
         if has_prompt {
             self.draw_prompt(f, rows[3]);

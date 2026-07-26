@@ -42,14 +42,19 @@ pub const TABS: [&str; 6] = [
 /// registers and steers by hand; `Harnesses` is the runtime level, which is
 /// where credentials live — a subscription or an API key is a property of the
 /// CLI runtime that spends it, not of the machine it happens to sit on;
-/// `Templates` is the catalog of what may be provisioned onto any of it.
+/// `Agent Templates` is the catalog of what may be provisioned onto any of it.
 /// `Add Host` and `Strategies` are the two actions that belong to no level.
 ///
 /// There is no `Fleet` page: the whole declared tree lives in the Agents rail,
 /// beside the lanes running on it. These pages are the *management* surfaces —
 /// what you register, authenticate, and choose — not the picture.
-pub const ROUTING_SUBPAGES: [&str; 5] =
-    ["Hosts", "Harnesses", "Templates", "Add Host", "Strategies"];
+pub const ROUTING_SUBPAGES: [&str; 5] = [
+    "Hosts",
+    "Harnesses",
+    "Agent Templates",
+    "Add Host",
+    "Strategies",
+];
 
 pub(super) const RP_HOSTS: usize = 0;
 pub(super) const RP_HARNESSES: usize = 1;
@@ -371,10 +376,12 @@ pub struct App {
     pub(super) chat_scroll: usize,
     /// Selected row on the Routing Hosts page.
     pub(super) host_index: usize,
-    /// Selected row on the Routing Templates page.
+    /// Selected row on the Routing Agent Templates page.
     pub(super) template_index: usize,
-    /// Scroll offset inside the Templates page's detail pane.
+    /// Scroll offset inside the open agent-template popup.
     pub(super) template_scroll: usize,
+    /// Whether the agent-template popup is open over the catalog.
+    pub(super) template_modal: bool,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.

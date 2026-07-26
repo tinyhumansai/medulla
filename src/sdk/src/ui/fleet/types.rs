@@ -43,7 +43,7 @@ impl FleetNodeKind {
             FleetNodeKind::Harness => "harness",
             FleetNodeKind::Workspace => "workspace",
             FleetNodeKind::Agent => "agent",
-            FleetNodeKind::Template => "template",
+            FleetNodeKind::Template => "agent template",
             FleetNodeKind::Section => "section",
         }
     }

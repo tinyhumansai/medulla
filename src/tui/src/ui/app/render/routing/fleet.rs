@@ -31,7 +31,8 @@ impl App {
             .constraints([Constraint::Percentage(46), Constraint::Min(0)])
             .split(area);
 
-        let hosts = self.snapshot.capacity.hosts.len();
+        let capacity_snapshot = self.fleet_capacity();
+        let hosts = capacity_snapshot.hosts.len();
         let agents = rows
             .iter()
             .filter(|r| r.kind == crate::ui::fleet::FleetNodeKind::Agent)
@@ -95,7 +96,7 @@ impl App {
         let inner = block.inner(cols[1]);
         f.render_widget(block, cols[1]);
         let width = (inner.width as usize).saturating_sub(2).max(24);
-        let detail = fleet_detail(&self.snapshot.capacity, &self.fleet_roster(), &key, width);
+        let detail = fleet_detail(&capacity_snapshot, &self.fleet_roster(), &key, width);
         let height = (inner.height as usize).max(1);
         let max_scroll = detail.len().saturating_sub(height);
         self.fleet_scroll = self.fleet_scroll.min(max_scroll);

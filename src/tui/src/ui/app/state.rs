@@ -413,7 +413,22 @@ impl App {
     /// registry knows about but the backend has not advertised still appears —
     /// in the `unplaced agents` group, since nothing declares where it runs.
     pub(super) fn fleet_rows(&self) -> Vec<FleetNode> {
-        fleet_rows(&self.snapshot.capacity, &self.fleet_roster())
+        fleet_rows(&self.fleet_capacity(), &self.fleet_roster())
+    }
+
+    /// The capacity the fleet surfaces render.
+    ///
+    /// The runtime's own declaration wins; the operator's `[fleet]` config is
+    /// the fallback, so a declared chain is still visible on a runtime that
+    /// reports none (the mock, or a backend that has not answered yet). They are
+    /// not merged: two half-descriptions of one fleet interleaved would be
+    /// harder to trust than whichever one is authoritative.
+    pub(super) fn fleet_capacity(&self) -> medulla::runtime::CapacitySnapshot {
+        if self.snapshot.capacity.is_empty() {
+            self.loaded.config.fleet.capacity()
+        } else {
+            self.snapshot.capacity.clone()
+        }
     }
 
     /// The roster the fleet surfaces resolve placements against: what the

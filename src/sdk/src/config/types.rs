@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
-use crate::runtime::RoutingStrategy;
+use crate::runtime::fleet::{
+    AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor, WorkspaceDescriptor,
+};
+use crate::runtime::{AgentDescriptor, RoutingStrategy};
 use crate::tinyplace::BudgetWindow;
 
 // --- serde default helpers -------------------------------------------------
@@ -472,6 +475,56 @@ pub struct OnboardingConfig {
     pub welcome_completed: bool,
 }
 
+/// Operator-declared capacity: the `Host → Harness → Workspace → Agent`
+/// containment chain plus the agent templates that may be provisioned into it.
+///
+/// Declared, never probed — this is what the client *offers* the orchestrator
+/// when it attaches to `medulla-serve`, and what the TUI's Fleet page renders
+/// when no backend supplies a fleet of its own. An empty section (the default)
+/// changes nothing: the handshake declares no capacity and the Fleet page shows
+/// its empty state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FleetConfig {
+    /// Machines this client declares.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<HostDescriptor>,
+    /// Agent CLI runtimes installed on those machines.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub harnesses: Vec<HarnessDescriptor>,
+    /// Folders those runtimes expose.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<WorkspaceDescriptor>,
+    /// Durable agent identities deployed into them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<AgentDescriptor>,
+    /// Kinds of agent that may be provisioned onto this chain.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agent_templates: Vec<AgentTemplate>,
+}
+
+impl FleetConfig {
+    /// Whether the operator declared nothing at all.
+    pub fn is_empty(&self) -> bool {
+        self.hosts.is_empty()
+            && self.harnesses.is_empty()
+            && self.workspaces.is_empty()
+            && self.agents.is_empty()
+            && self.agent_templates.is_empty()
+    }
+
+    /// The declared chain as the UI-facing roll-up (agents excluded — they reach
+    /// the UI through the snapshot roster).
+    pub fn capacity(&self) -> CapacitySnapshot {
+        CapacitySnapshot {
+            hosts: self.hosts.clone(),
+            harnesses: self.harnesses.clone(),
+            workspaces: self.workspaces.clone(),
+            templates: self.agent_templates.clone(),
+        }
+    }
+}
+
 /// The whole parsed config document (`medulla.tui.json` / `medulla.toml`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -511,6 +564,9 @@ pub struct TuiConfig {
     /// when present. Absent means no local preference (defaults to `manual`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub routing_strategy: Option<RoutingStrategy>,
+    /// Operator-declared hosts, harnesses, workspaces, agents, and templates.
+    #[serde(default, skip_serializing_if = "FleetConfig::is_empty")]
+    pub fleet: FleetConfig,
 }
 
 impl Default for TuiConfig {
@@ -531,6 +587,7 @@ impl Default for TuiConfig {
             router: None,
             budget: None,
             routing_strategy: None,
+            fleet: FleetConfig::default(),
         }
     }
 }

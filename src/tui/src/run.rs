@@ -44,7 +44,19 @@ pub(crate) async fn run_core(args: &[String]) -> anyhow::Result<()> {
     // of the driver spinning in reconnect until the attach timeout.
     validate_core_socket(&socket, source)?;
 
-    let runtime: Arc<dyn Runtime> = Arc::new(CoreRuntime::attach(socket));
+    // Declare the operator's configured fleet, exactly as the interactive path
+    // does: a headless run delegates through the same capacity.
+    let fleet = &loaded.config.fleet;
+    let runtime: Arc<dyn Runtime> = Arc::new(CoreRuntime::attach_with_declarations(
+        socket,
+        medulla::runtime::core::CoreDeclarations {
+            hosts: fleet.hosts.clone(),
+            harnesses: fleet.harnesses.clone(),
+            workspaces: fleet.workspaces.clone(),
+            agents: fleet.agents.clone(),
+            agent_templates: fleet.agent_templates.clone(),
+        },
+    ));
 
     let mut stdout = std::io::stdout();
     let result = drive_once(

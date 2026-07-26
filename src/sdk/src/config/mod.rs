@@ -33,8 +33,8 @@ pub use persist::{
     persist_tinyplace_peers, persist_welcome_completed, persist_workflow_workspaces,
 };
 pub use types::{
-    BackendConfig, BudgetConfig, CoreConfig, HubSection, HubWorkerConfig, LoadedConfig,
-    MedullaConfig, MemoryConfigSection, OnboardingConfig, OpencodeConfig, Peer,
+    BackendConfig, BudgetConfig, CoreConfig, FleetConfig, HubSection, HubWorkerConfig,
+    LoadedConfig, MedullaConfig, MemoryConfigSection, OnboardingConfig, OpencodeConfig, Peer,
     ProviderBudgetConfig, RouterConfig, RouterProviderConfig, ThemeConfig, TinyplaceConfig,
     TuiConfig, UpdateConfig, WorkflowConfig,
 };

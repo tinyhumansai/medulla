@@ -27,6 +27,21 @@ use crate::commands::{run_login_screen, save_credentials};
 use crate::event_loop::{run, SessionExit, SessionWiring};
 use crate::terminal::{restore, TermGuard};
 
+/// The operator's `[fleet]` section as the declarations the core handshake
+/// carries. Unix-only because `CoreDeclarations` ships with the socket runtime.
+#[cfg(unix)]
+fn core_declarations(
+    fleet: &medulla::config::FleetConfig,
+) -> medulla::runtime::core::CoreDeclarations {
+    medulla::runtime::core::CoreDeclarations {
+        hosts: fleet.hosts.clone(),
+        harnesses: fleet.harnesses.clone(),
+        workspaces: fleet.workspaces.clone(),
+        agents: fleet.agents.clone(),
+        agent_templates: fleet.agent_templates.clone(),
+    }
+}
+
 /// Parse TUI args, select a runtime, set up the terminal, optionally run the
 /// login screen, start background services, and drive the event loop to exit.
 pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
@@ -130,9 +145,14 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 "attaching to medulla-serve at {}",
                 socket.display()
             ));
-            runtime = Some(Arc::new(medulla::runtime::core::CoreRuntime::attach(
-                socket,
-            )));
+            // Declare the operator's configured fleet at handshake time: serve
+            // has no other way to learn what this client can run work on.
+            runtime = Some(Arc::new(
+                medulla::runtime::core::CoreRuntime::attach_with_declarations(
+                    socket,
+                    core_declarations(&loaded.config.fleet),
+                ),
+            ));
         }
     }
     if runtime.is_none() {

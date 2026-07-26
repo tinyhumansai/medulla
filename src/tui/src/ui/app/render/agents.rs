@@ -117,7 +117,8 @@ impl App {
         // whose placement nothing declares — an empty chip would only claim the
         // fleet is unknown twice.
         if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
-            let placement = self.snapshot.capacity.placement(descriptor);
+            let capacity = self.fleet_capacity();
+            let placement = capacity.placement(descriptor);
             let chip = [
                 placement.host.map(|h| h.name.clone()),
                 placement.harness.map(|h| h.kind.clone()),

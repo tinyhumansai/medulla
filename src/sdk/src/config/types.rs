@@ -215,6 +215,15 @@ pub struct HostSection {
     /// launched from, which is the one the operator is looking at.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub workspace: String,
+    /// Other directories this device is willing to work in.
+    ///
+    /// Advertised to the orchestrator as `capabilities.accessibleDirs`, so it
+    /// knows this machine has more than one project on it rather than inferring
+    /// the whole device from the folder `medulla` happened to be launched in.
+    /// Advisory routing context: a delegated task still runs in
+    /// [`workspace`](Self::workspace).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<String>,
     /// Coding-agent CLIs to serve. Empty detects whatever is installed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<String>,
@@ -240,6 +249,7 @@ impl Default for HostSection {
             enabled: true,
             address: d_host_address(),
             workspace: String::new(),
+            workspaces: Vec::new(),
             providers: Vec::new(),
             default_provider: String::new(),
             concurrency: 2,

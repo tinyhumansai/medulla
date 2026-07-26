@@ -29,6 +29,14 @@ pub struct EmbeddedDaemonOptions {
     /// Absolute working directory tasks run in. Empty resolves to the process's
     /// current directory at start.
     pub workspace: String,
+    /// Additional directories this host advertises as places work can happen.
+    ///
+    /// The primary [`workspace`](Self::workspace) is always included, so an
+    /// empty list keeps the previous behaviour exactly. These reach the
+    /// orchestrator as `capabilities.accessibleDirs`, which is how it learns
+    /// that a machine has more than one project on it — routing context, not a
+    /// permission grant: a task frame still cannot name a working directory.
+    pub workspaces: Vec<String>,
     /// Providers to serve. `None` detects whatever coding-agent CLIs are on
     /// `PATH`; an explicit list is still filtered by what is actually installed.
     pub providers: Option<Vec<HarnessProvider>>,
@@ -64,6 +72,7 @@ impl Default for EmbeddedDaemonOptions {
     fn default() -> Self {
         EmbeddedDaemonOptions {
             workspace: String::new(),
+            workspaces: Vec::new(),
             providers: None,
             default_provider: None,
             concurrency: DEFAULT_CONCURRENCY,

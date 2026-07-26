@@ -90,9 +90,10 @@ fn the_selected_agent_shows_its_placement_and_compact_meters() {
     let _ = app.on_event(alt_key(KeyCode::Down));
     let out = render(&mut app, 160, 44);
 
-    // Where it runs…
-    assert!(out.contains("workshop"), "host: {out}");
-    assert!(out.contains("/srv/repos/medulla"), "workspace: {out}");
+    // Where it runs — labelled, so the machine and the working directory are
+    // identifiable rather than two of several bare tokens.
+    assert!(out.contains("host workshop"), "host: {out}");
+    assert!(out.contains("dir /srv/repos/medulla"), "workspace: {out}");
     // …and how hard, as meters rather than bare numbers.
     assert!(out.contains("cpu"), "cpu meter: {out}");
     assert!(out.contains("2.10 load / 10 cores"), "{out}");

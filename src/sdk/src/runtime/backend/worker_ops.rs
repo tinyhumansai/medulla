@@ -27,6 +27,7 @@ pub(super) fn hub_worker_to_info(
             .starts_with('@')
             .then(|| worker.address.clone()),
         id: worker.id,
+        workspace: worker.workspace,
         address: worker.address,
         label: worker.label,
         harness: Some(worker.harness),

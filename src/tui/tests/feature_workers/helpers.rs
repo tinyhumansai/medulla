@@ -94,6 +94,7 @@ pub fn worker(id: &str, selected: bool) -> WorkerInfo {
         handle: Some(format!("@{id}")),
         label: Some(format!("{id} label")),
         harness: Some("codex".into()),
+        workspace: None,
         peer_id: Some(format!("peer-{id}")),
         cpu_cores: Some(8),
         memory_total_bytes: Some(32 * 1024 * 1024 * 1024),

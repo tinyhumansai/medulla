@@ -18,6 +18,7 @@ fn worker(id: &str, address: &str) -> WorkerInfo {
         handle: None,
         label: None,
         harness: Some("claude".into()),
+        workspace: None,
         peer_id: None,
         cpu_cores: None,
         memory_total_bytes: None,

@@ -101,6 +101,7 @@ pub fn fleet_app() -> App {
             handle: Some("@dev".into()),
             label: Some("primary".into()),
             harness: Some("claude".into()),
+            workspace: None,
             peer_id: None,
             cpu_cores: Some(8),
             memory_total_bytes: Some(32 * 1024 * 1024 * 1024),

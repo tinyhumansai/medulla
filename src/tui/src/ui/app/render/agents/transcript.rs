@@ -103,10 +103,42 @@ impl App {
             let capacity = self.fleet_capacity();
             if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
                 let placement = capacity.placement(descriptor);
+                // Labelled, not bare: "this device · claude · /Users/me/repo"
+                // reads as three unexplained tokens, and the two an operator
+                // actually needs — which machine, which folder — are exactly the
+                // two that look like everything else. The workspace path is the
+                // agent's probed cwd, so it is the real working directory
+                // rather than a declared intention.
+                // A lane may have no place in the declared chain at all — a
+                // hub-registered worker is announced directly and never appears
+                // in the capacity snapshot until it answers a capability probe.
+                // Falling back to what the descriptor itself carries means the
+                // machine and the working directory show from the first frame
+                // rather than only after the orchestrator happens to probe.
+                let meta = |key: &str| {
+                    descriptor
+                        .metadata
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_string)
+                };
+                let host = placement
+                    .host
+                    .map(|h| h.name.clone())
+                    .or_else(|| Some(descriptor.name.clone()).filter(|n| !n.trim().is_empty()));
+                let workspace = placement
+                    .workspace
+                    .map(|w| w.path.clone())
+                    .or_else(|| meta("workspace"));
                 let chip = [
-                    placement.host.map(|h| h.name.clone()),
-                    placement.harness.map(|h| h.kind.clone()),
-                    placement.workspace.map(|w| w.path.clone()),
+                    host.map(|h| format!("host {h}")),
+                    placement
+                        .harness
+                        .map(|h| h.kind.clone())
+                        .or_else(|| meta("harness")),
+                    workspace.map(|w| format!("dir {w}")),
                     placement
                         .template
                         .map(|t| format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))),

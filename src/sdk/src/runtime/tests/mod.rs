@@ -177,6 +177,7 @@ fn value_types_are_debug_clone_eq() {
         handle: None,
         label: None,
         harness: None,
+        workspace: None,
         peer_id: None,
         cpu_cores: None,
         memory_total_bytes: None,

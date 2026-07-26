@@ -62,6 +62,14 @@ pub fn host_descriptor(worker: &WorkerInfo) -> AgentDescriptor {
     if let Some(harness) = worker.harness.as_deref().filter(|h| !h.trim().is_empty()) {
         metadata.insert("harness".into(), Value::String(harness.to_string()));
     }
+    // The directory the worker runs tasks in. Published here so the Agents pane
+    // can name it immediately: the capacity chain only learns a workspace from a
+    // capability probe, which does not happen until the orchestrator asks for
+    // one, so a freshly-opened lane would otherwise show no working directory
+    // at all.
+    if let Some(workspace) = worker.workspace.as_deref().filter(|w| !w.trim().is_empty()) {
+        metadata.insert("workspace".into(), Value::String(workspace.to_string()));
+    }
     let name = [
         worker.label.as_deref(),
         worker.handle.as_deref(),

@@ -247,8 +247,10 @@ fn a_tool_call_still_streaming_is_not_rendered_early() {
         .map(|l| l.text)
         .collect();
     // The log ended, so it flushes — with whatever it has, not a lie about it.
+    // A half-written argument object does not parse, so the name renders alone
+    // rather than showing the fragment `sle` as if it were the whole command.
     assert_eq!(lines.len(), 1, "got {lines:?}");
-    assert!(lines[0].starts_with("⏺ Bash("), "got {lines:?}");
+    assert_eq!(lines[0], "⏺ Bash", "got {lines:?}");
 }
 
 #[test]
@@ -314,5 +316,10 @@ fn a_huge_argument_payload_is_clipped_not_dumped() {
         "got {} chars",
         call.chars().count()
     );
-    assert!(call.ends_with('…'), "clipping must be visible: {call}");
+    // The elision marker sits inside the parentheses, which close the call.
+    assert!(call.contains('…'), "clipping must be visible: {call}");
+    assert!(
+        !call.contains('{') && !call.contains('}'),
+        "the payload must be summarised, never dumped: {call}"
+    );
 }

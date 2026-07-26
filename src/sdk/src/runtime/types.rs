@@ -89,6 +89,10 @@ pub struct WorkerInfo {
     pub handle: Option<String>,
     pub label: Option<String>,
     pub harness: Option<String>,
+    /// Absolute path this worker runs tasks in, when the hub knows it — the
+    /// device-local host reports its own; a remote peer's is unknown until it
+    /// answers a capability probe.
+    pub workspace: Option<String>,
     pub peer_id: Option<String>,
     /// Logical CPU cores reported by the worker.
     pub cpu_cores: Option<u32>,

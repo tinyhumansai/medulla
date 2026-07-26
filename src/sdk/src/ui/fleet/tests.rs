@@ -341,6 +341,7 @@ fn peer(id: &str) -> WorkerInfo {
         handle: Some(format!("@{id}")),
         label: Some(format!("{id} label")),
         harness: Some("codex".into()),
+        workspace: None,
         peer_id: None,
         cpu_cores: Some(8),
         memory_total_bytes: Some(32 << 30),

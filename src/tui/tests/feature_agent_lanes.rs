@@ -113,6 +113,7 @@ fn local_worker(address: &str, label: Option<&str>) -> WorkerInfo {
         handle: None,
         label: label.map(str::to_string),
         harness: Some("claude".into()),
+        workspace: None,
         peer_id: None,
         cpu_cores: None,
         memory_total_bytes: None,

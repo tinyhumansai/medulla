@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 use crate::ui::agents::{
     derive_agent_lanes, merge_host_activity, merge_host_roster, AgentLane, AgentRole,
 };
+use crate::ui::command::CommandSpec;
 use crate::ui::composer::Draft;
 use crate::ui::fleet::{fleet_rows, merge_capacity, registry_capacity, FleetNode};
 use crate::ui::theme::Theme;
@@ -53,6 +54,7 @@ impl App {
             agent_index: 0,
             agent_scroll: 0,
             chat_scroll: 0,
+            command_index: 0,
             host_index: 0,
             template_index: 0,
             template_scroll: 0,
@@ -406,6 +408,69 @@ impl App {
         // the activity the hub observed locally is folded in.
         merge_host_activity(&mut lanes, &self.runtime.worker_activity());
         lanes
+    }
+
+    /// The commands offered for the current draft, or `None` when the peek is
+    /// closed.
+    ///
+    /// Open only on the conversation surface: the composer is the only place a
+    /// command can be typed, so offering the catalog anywhere else would be
+    /// advertising an input that is not there.
+    pub(super) fn command_suggestions(&self) -> Option<Vec<&'static CommandSpec>> {
+        if self.tab() != "Agents" || self.prompt.is_some() {
+            return None;
+        }
+        crate::ui::command::suggestions(&self.draft.text)
+    }
+
+    /// The highlighted command's name, while the peek is open.
+    /// Test/inspection seam.
+    pub fn selected_command(&self) -> Option<String> {
+        self.peeked_command().map(|spec| spec.name.to_string())
+    }
+
+    /// The command the peek would complete to, if it is open on a match.
+    pub(super) fn peeked_command(&self) -> Option<&'static CommandSpec> {
+        let specs = self.command_suggestions()?;
+        specs
+            .get(self.command_index.min(specs.len().saturating_sub(1)))
+            .copied()
+    }
+
+    /// Move the peek's cursor, wrapping at both ends so a short list is quick to
+    /// walk in either direction.
+    pub(super) fn move_command_index(&mut self, up: bool) {
+        let Some(len) = self.command_suggestions().map(|s| s.len()) else {
+            return;
+        };
+        if len == 0 {
+            return;
+        }
+        self.command_index = if up {
+            (self.command_index + len - 1) % len
+        } else {
+            (self.command_index + 1) % len
+        };
+    }
+
+    /// Replace the draft with the peeked command, ready for its argument.
+    ///
+    /// A command that takes an argument gets a trailing space — which also
+    /// closes the peek, since the choice has been made.
+    pub(super) fn complete_command(&mut self) {
+        let Some(spec) = self.peeked_command() else {
+            return;
+        };
+        let text = if spec.args.is_empty() {
+            format!("/{}", spec.name)
+        } else {
+            format!("/{} ", spec.name)
+        };
+        self.draft = Draft {
+            cursor: text.chars().count(),
+            text,
+        };
+        self.command_index = 0;
     }
 
     /// Whether the Agents cursor sits on the orchestrator lane.

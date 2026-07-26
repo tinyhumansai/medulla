@@ -374,6 +374,8 @@ pub struct App {
     pub(super) agent_index: usize,
     pub(super) agent_scroll: usize,
     pub(super) chat_scroll: usize,
+    /// Selected row in the command peek, while it is open.
+    pub(super) command_index: usize,
     /// Selected row on the Routing Hosts page.
     pub(super) host_index: usize,
     /// Selected row on the Routing Agent Templates page.

@@ -1,15 +1,18 @@
-//! Slash-command parsing and the `/copy` transcript helper.
+//! Slash-command parsing, the command catalog, and the `/copy` transcript
+//! helper.
 //!
 //! [`parse`] classifies a raw composer line into a [`SlashCommand`] without
 //! touching any UI state; the front end matches on the result to run the side
 //! effect. [`copy_text`] renders the transcript for a [`CopyScope`]. Keeping the
 //! parse pure makes the command surface testable and reusable across front ends.
 
+mod catalog;
 mod types;
 
 #[cfg(test)]
 mod tests;
 
+pub use catalog::{lookup, suggestions, CommandSpec, COMMANDS};
 pub use types::{CopyScope, SlashCommand};
 
 use crate::ui::events::{chat_transcript, last_assistant_message, EventEnvelope};
@@ -40,7 +43,7 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
     let cmd = cmd_raw.to_lowercase();
     let flag = arg.to_lowercase();
     Some(match cmd.as_str() {
-        "quit" | "q" => SlashCommand::Quit,
+        "quit" | "q" | "exit" => SlashCommand::Quit,
         "new" => SlashCommand::NewSession,
         "resume" => SlashCommand::Resume,
         "abort" => SlashCommand::Abort,

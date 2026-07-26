@@ -16,7 +16,7 @@ pub enum CopyScope {
 /// state, so the same vocabulary is reusable by any front end.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashCommand {
-    /// `/quit`, `/q` — exit the application.
+    /// `/quit`, `/exit`, `/q` — exit the application.
     Quit,
     /// `/new` — start a fresh conversation session.
     NewSession,

@@ -176,7 +176,12 @@ A session is the thread: its message history, the cycles that have run against
 it, and enough metadata to find it again. You can create one, list them, resume
 one, resume one, or archive it.
 
-Several can be open at once. `/new` (or `^N`) opens a **new thread** beside the
+Typing `/` in the composer opens the command list, filtered as you type: `↑↓`
+picks, `Tab` completes, `Enter` runs the highlighted one, `Esc` dismisses. The
+same list is on the Help page, rendered from the same catalog so the two cannot
+disagree.
+
+Several threads can be open at once. `/new` (or `^N`) opens a **new thread** beside the
 current one and focuses it — a fresh session with an empty transcript, inheriting
 nothing. The threads you already have keep running and keep their history; a
 strip above the lane list shows them with their running-task and attention

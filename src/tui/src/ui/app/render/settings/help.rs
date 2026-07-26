@@ -1,10 +1,13 @@
-//! The Help subpage: the keyboard and REPL command reference.
+//! The Help subpage: the keyboard reference, and the command list rendered from
+//! the catalog itself so it cannot drift from what the composer accepts.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
+
+use crate::ui::command::COMMANDS;
 
 use super::super::super::types::App;
 
@@ -13,18 +16,18 @@ impl App {
     pub(super) fn draw_help(&mut self, f: &mut Frame, area: Rect) {
         let dim = Style::default().add_modifier(Modifier::DIM);
         let bold = Style::default().add_modifier(Modifier::BOLD);
-        let lines = vec![
-            TLine::from("Tab / Shift-Tab switch views · Chat: type to compose, ↑↓ recall prompt history"),
+        let mut lines = vec![
+            TLine::from("Tab / Shift-Tab switch views · Agents: type to compose, ↑↓ recall prompt history"),
             TLine::from(Span::styled(
                 "In a multi-line draft ↑↓ walk the caret between rows; history recalls from the edge rows",
                 dim,
             )),
-            TLine::from("Chat pins to the latest reply; the composer is shown only on this view"),
             TLine::from("Enter sends · Shift-Enter inserts a newline (Option-Enter if Shift-Enter sends)"),
-            TLine::from("PageUp / PageDown scrolls the Chat and Agents transcripts"),
+            TLine::from("PageUp / PageDown scrolls the transcript"),
             TLine::from("Overview: E prepared decisions"),
-            TLine::from("Agents: ↑↓ pick an agent · j / k scroll · X cancel task · A answer a question"),
-            TLine::from("Workers: a add peer · Enter/s select · e edit label · d/x remove"),
+            TLine::from("Agents: ⌥↑↓ walk the rail · ⌥X cancel task · ⌥A answer a question · Enter opens a template"),
+            TLine::from("Agents: selecting an agent with an open question makes Enter answer it"),
+            TLine::from("Routing: a add host · Enter/s select · e edit label · d/x remove"),
             TLine::from("Memory: ↑↓ / j k browse directives, facets & hits · /memory <query> to search"),
             TLine::from(" "),
             TLine::from(Span::styled("Settings", bold)),
@@ -35,7 +38,7 @@ impl App {
             TLine::from("Trace & Context (Debug): j / k page events and chunks"),
             TLine::from("Account: Enter twice to log out · Usage: r refresh"),
             TLine::from(" "),
-            TLine::from("Ctrl-N new session · Ctrl-C quit (nav keys act only when the input is empty)"),
+            TLine::from("Ctrl-N new thread · Ctrl-↑↓ switch threads · Ctrl-C quit"),
             TLine::from(" "),
             TLine::from(Span::styled("Copy", bold)),
             TLine::from("Ctrl-Y copies the whole chat · /copy last copies just the latest reply"),
@@ -45,10 +48,24 @@ impl App {
             TLine::from("Ctrl-O / /mouse release the mouse to the terminal for native drag-select"),
             TLine::from(" "),
             TLine::from(Span::styled("Commands", bold)),
-            TLine::from("/new · /resume · /abort · /clear · /config · /copy [all|last]"),
-            TLine::from("/usage · /settings · /theme · /memory [query] · /feedback · /mouse"),
-            TLine::from("/help · /quit"),
+            TLine::from(Span::styled(
+                "Type / in the composer to browse these · ↑↓ pick · Tab complete · Enter run",
+                dim,
+            )),
         ];
+        // Rendered from the catalog rather than restated: a hand-kept list is
+        // how a command ends up documented here and missing from the parser.
+        let gutter = COMMANDS
+            .iter()
+            .map(|spec| spec.usage().chars().count())
+            .max()
+            .unwrap_or(0);
+        for spec in COMMANDS {
+            lines.push(TLine::from(vec![
+                Span::styled(format!("{:<gutter$}", spec.usage()), Style::default()),
+                Span::styled(format!("  {}", spec.description), dim),
+            ]));
+        }
         f.render_widget(
             Paragraph::new(Text::from(lines))
                 .wrap(Wrap { trim: true })

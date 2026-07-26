@@ -164,6 +164,36 @@ impl App {
             }
         }
 
+        // The command peek owns navigation and completion while it is open. It
+        // opens on a typed `/` and closes as soon as one is chosen, so these
+        // overrides last for exactly as long as there is a choice on screen.
+        if self.command_suggestions().is_some() {
+            match k.code {
+                KeyCode::Up | KeyCode::Down => {
+                    self.move_command_index(matches!(k.code, KeyCode::Up));
+                    return None;
+                }
+                KeyCode::Tab => {
+                    self.complete_command();
+                    return None;
+                }
+                // Enter runs the peeked command rather than the half-typed
+                // prefix: picking `/quit` from the list and pressing Enter must
+                // quit, not report `/qu` as unknown.
+                KeyCode::Enter if !shift && !alt => {
+                    self.complete_command();
+                    let value = self.draft.text.clone();
+                    return self.execute(value);
+                }
+                KeyCode::Esc => {
+                    self.draft = Draft::new();
+                    self.command_index = 0;
+                    return None;
+                }
+                _ => {}
+            }
+        }
+
         match k.code {
             KeyCode::Char('E') if tab == "Overview" => {
                 self.open_decisions();
@@ -228,6 +258,7 @@ impl App {
             }
             KeyCode::Backspace | KeyCode::Delete if tab == "Agents" => {
                 self.draft = delete_before(&self.draft.text, self.draft.cursor);
+                self.command_index = 0;
             }
             KeyCode::Esc if tab == "Agents" => {
                 self.draft = Draft::new();
@@ -280,6 +311,8 @@ impl App {
             }
             KeyCode::Char(c) if tab == "Agents" && !ctrl && !alt => {
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, &c.to_string());
+                // Narrowing the list invalidates where the cursor was pointing.
+                self.command_index = 0;
             }
             _ => {}
         }

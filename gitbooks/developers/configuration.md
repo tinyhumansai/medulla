@@ -103,3 +103,86 @@ The socket path resolves as, highest first: the explicit `--core-socket <path>` 
 ```
 
 The core runtime unlocks the Routing tab (fleet peer management) and task steering (`X` cancel task, `A` answer a pending question). It is **unix-only** (it rides a Unix domain socket). On Windows a `--core-socket` flag or `[core]` config section resolves to a startup note ("core runtime requires unix sockets — unavailable on Windows") and falls through to the normal backend→mock chain.
+
+## Fleet
+
+The `fleet` section declares the capacity Medulla may place work on: the
+`Host → Harness → Workspace → Agent` containment chain, plus the agent templates
+that may be provisioned onto it. Nothing here is probed — this is what you say
+exists.
+
+```json
+{
+  "fleet": {
+    "hosts": [
+      {
+        "id": "workshop",
+        "name": "workshop",
+        "availability": "online",
+        "resources": { "cpuCores": 10, "availableMemoryBytes": 12884901888 }
+      }
+    ],
+    "harnesses": [
+      {
+        "id": "workshop-claude",
+        "hostId": "workshop",
+        "kind": "claude-code",
+        "availability": "online",
+        "ready": true,
+        "providers": ["anthropic"],
+        "templateIds": ["implementer"],
+        "budgets": [
+          {
+            "provider": "anthropic",
+            "window": "5h",
+            "limitTokens": 1000000,
+            "remainingTokens": 760000,
+            "source": "configured"
+          }
+        ]
+      }
+    ],
+    "workspaces": [
+      {
+        "id": "medulla",
+        "name": "medulla",
+        "path": "/srv/repos/medulla",
+        "harnessId": "workshop-claude"
+      }
+    ],
+    "agents": [
+      {
+        "id": "dev-1",
+        "name": "dev-1",
+        "description": "Implements scoped changes in the medulla repo.",
+        "availability": "online",
+        "workspaceId": "medulla",
+        "templateId": "implementer"
+      }
+    ],
+    "agentTemplates": [
+      {
+        "id": "implementer",
+        "name": "Implementer",
+        "description": "Implements a scoped change and reports what it did.",
+        "model": "reasoning"
+      }
+    ]
+  }
+}
+```
+
+Every level names exactly one parent (`hostId` on a harness, `harnessId` on a
+workspace, `workspaceId` on an agent), and an agent with no `workspaceId` is a
+local agent, which may name a `hostId` directly instead. `templateIds` on a
+harness or workspace narrows the catalog for that place; absent means inherit, so
+an allowlist only ever subtracts. A template's optional `harnesses` block holds
+per-harness overrides and, by its presence, restricts the harness kinds the
+template may run on.
+
+The section is optional and empty by default. When present it is declared to a
+local orchestration server at handshake time, and the terminal app's
+Routing › Fleet page renders it whenever the runtime itself reports no capacity —
+so it is useful even on the mock runtime. A runtime that *does* report capacity
+(the hosted backend projects its connected-worker roster onto the same chain)
+wins; the two are never merged.

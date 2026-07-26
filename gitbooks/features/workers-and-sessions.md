@@ -33,8 +33,8 @@ them.
 
 ### Managing them
 
-Fleet management lives on the **Routing** tab, which has four pages: `List
-Workers`, `Add Worker`, `Manage Keys`, and `Strategies`. The list page shows each
+Fleet management lives on the **Routing** tab, which has five pages: `List
+Workers`, `Fleet`, `Add Worker`, `Manage Keys`, and `Strategies`. The list page shows each
 registered peer with its handle, label, harness, and — once capacity is
 refreshed — its CPU cores and available memory. Press `a` to add a peer, where
 the first token is the address or `@handle` and the rest is a label. `Enter` or
@@ -50,6 +50,53 @@ surface — the hosted backend wired to a live hub, or the local core runtime �
 covered in [Configuration](../developers/configuration.md#runtimes). Without one,
 worker management reports itself unavailable rather than silently mutating
 unrelated state.
+
+### Seeing the whole fleet
+
+`List Workers` is the peers this hub can dispatch to. The **Fleet** page is one
+level up: the declared capacity those dispatches land on, as the containment
+chain Medulla actually models.
+
+```
+Host  →  Harness  →  Workspace  →  Agent
+```
+
+A **host** is a machine, with the cores, memory, and disk it declares. A
+**harness** is an agent CLI runtime installed on that host — `claude-code`,
+`codex`, `opencode`, `tinyplace`, `openhuman`, or something it names itself —
+carrying its providers, its readiness, and its token **budgets**. A **workspace**
+is a folder that harness exposes, optionally with a parsed
+[`MEDULLA.md`](workspace-profiles.md) profile. An **agent** is a durable identity
+deployed into one workspace. Each level names exactly one parent, so an agent's
+host is derived by walking up rather than declared twice.
+
+Beside the chain sits the **agent template** catalog: the kinds of agent that may
+be provisioned onto it. Where the chain declares *where* an agent can be stood
+up, a template declares *what* may be stood up there — a description, default
+tools, an abstract model tier, and optional per-harness overrides whose presence
+also restricts which harness kinds the template may run on.
+
+The tree is an index; the pane beside it is the full declaration. Select a
+harness to read every budget window and seat, a workspace to read its profile, an
+agent to see its resolved placement and the template it came from, or a template
+to read its instructions. `↑↓`/`jk` browse, `PgUp`/`PgDn` scroll the detail, and
+`r` re-reads capacity from the runtime — capacity is declared, never streamed, so
+it is pulled rather than pushed.
+
+Nothing is invented and nothing is dropped. A harness whose host is not declared
+still renders, under the id it claims, marked as a dangling parent. An agent with
+no resolvable placement lands in an `unplaced agents` group rather than being
+adopted by an arbitrary host. And an agent with no workspace at all is not a
+mistake: that is how a local agent is declared, and the detail pane says so.
+
+Everything on this page is declared rather than probed, which is the point — it
+is visible on pass one, for every agent, with no capability round-trip. Against
+the hosted backend the connected-worker roster is projected onto the same chain,
+so the page is populated even where the manager reports one flat row per worker.
+You can also declare a chain yourself in the
+[`fleet` config section](../developers/configuration.md#fleet), which the
+terminal app declares to a local orchestrator at handshake time and renders when
+the runtime reports no capacity of its own.
 
 ### Choosing a default worker
 
@@ -158,9 +205,14 @@ ledger, and any pending decision. The Tasks tab is the planning surface, covered
 in [Tasks and Sources](tasks-and-sources.md); Routing is the fleet surface
 described above.
 
-The Agents tab is where an operation becomes legible. There is one lane per
-agent, idle until its first task and busy while in flight, with context usage
-shown per row. What reaches you is assistant text and short status lines, since
+The Agents tab is where an operation becomes legible. There is one lane for the
+orchestrator and one per agent, idle until its first task and busy while in
+flight, with context usage shown per row and, for a placed agent, the host,
+harness, workspace, and template it runs as. There is deliberately no lane for
+the layer between them: the orchestrator deploys 0..N concurrent managers per
+cycle, and what reaches this client is the orchestrator and the agents it is
+managing. A manager is how work was fanned out, not something you talk to or
+steer — its model calls are still visible verbatim under Settings › Trace. What reaches you is assistant text and short status lines, since
 raw tool payloads are filtered out before they hit your screen, on the same
 principle that keeps them out of the orchestrator's context.
 

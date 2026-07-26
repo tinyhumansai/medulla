@@ -132,3 +132,53 @@ tokenEnv = "MEDULLA_TOKEN"
 # accent = "magenta"      # inline overlay borders (prompt / resume picker)
 # selectionFg = "black"   # text drawn on top of the primary selection background
 # dimBorder = "darkgray"  # panel borders
+
+# ---------------------------------------------------------------------------
+# fleet — operator-declared capacity: the Host → Harness → Workspace → Agent
+# containment chain plus the agent templates that may be provisioned onto it.
+# Declared, never probed. The terminal app declares this to a local
+# orchestration server at handshake time, and the Agents rail renders it
+# whenever the runtime itself reports no capacity of its own.
+#
+# Every level names exactly one parent (hostId on a harness, harnessId on a
+# workspace, workspaceId on an agent). An agent with no workspaceId is a local
+# agent and may name a hostId directly instead. templateIds narrows the catalog
+# for a place; absent means inherit, so an allowlist only ever subtracts.
+#
+# To see the surfaces with no fleet at all, set MEDULLA_DEMO_FLEET=1 (here or in
+# .env) for a small stand-in fleet. It is opt-in and never overrides a real one.
+# ---------------------------------------------------------------------------
+# [[fleet.hosts]]
+# id = "workshop"
+# name = "workshop"
+# availability = "online"
+# resources = { cpuCores = 10, availableMemoryBytes = 12884901888 }
+
+# [[fleet.harnesses]]
+# id = "workshop-claude"
+# hostId = "workshop"
+# kind = "claude-code"       # claude-code · codex · opencode · tinyplace · …
+# availability = "online"
+# ready = true
+# providers = ["anthropic"]
+# budgets = [{ provider = "anthropic", window = "5h", limitTokens = 1000000, remainingTokens = 760000, source = "configured" }]
+
+# [[fleet.workspaces]]
+# id = "medulla"
+# name = "medulla"
+# path = "/srv/repos/medulla"
+# harnessId = "workshop-claude"
+
+# [[fleet.agents]]
+# id = "dev-1"
+# name = "dev-1"
+# description = "Implements scoped changes in the medulla repo."
+# availability = "online"
+# workspaceId = "medulla"
+# templateId = "implementer"
+
+# [[fleet.agentTemplates]]
+# id = "implementer"
+# name = "Implementer"
+# description = "Implements a scoped change and reports what it did."
+# model = "reasoning"        # an abstract tier, never a concrete SKU

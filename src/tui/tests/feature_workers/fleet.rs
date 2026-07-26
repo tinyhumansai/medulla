@@ -56,3 +56,28 @@ fn an_unplaced_lane_shows_no_placement_chip() {
     let out = render(&mut app, 160, 40);
     assert!(!out.contains("claude-code · /srv/repos/medulla"), "{out}");
 }
+
+#[test]
+fn the_demo_flag_stands_a_fleet_in_only_when_nothing_is_declared() {
+    // The parse rule is the contract; the surfaces read it through
+    // `fleet_capacity`, which prefers anything real over the stand-in.
+    use medulla::runtime::{demo_capacity, demo_requested_from};
+    assert!(!demo_requested_from(None));
+    assert!(demo_requested_from(Some("1")));
+
+    // The stand-in is a complete chain, so every surface has something to draw.
+    let capacity = demo_capacity();
+    assert!(!capacity.is_empty());
+    assert!(!capacity.hosts.is_empty() && !capacity.templates.is_empty());
+
+    // A runtime that declares its own capacity wins: the demo app already has
+    // one, so its rail shows the scripted host rather than the stand-in's.
+    let mut app = app_with_workers(None);
+    tab(&mut app, "Agents");
+    let out = render(&mut app, 160, 40);
+    assert!(out.contains("workshop"), "{out}");
+    assert!(
+        !out.contains("builder"),
+        "stand-in must not mask a real fleet"
+    );
+}

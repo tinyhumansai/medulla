@@ -181,8 +181,18 @@ per-harness overrides and, by its presence, restricts the harness kinds the
 template may run on.
 
 The section is optional and empty by default. When present it is declared to a
-local orchestration server at handshake time, and the terminal app's
-Routing › Fleet page renders it whenever the runtime itself reports no capacity —
-so it is useful even on the mock runtime. A runtime that *does* report capacity
-(the hosted backend projects its connected-worker roster onto the same chain)
-wins; the two are never merged.
+local orchestration server at handshake time, and the Agents rail renders it
+whenever the runtime itself reports no capacity — so it is useful even on the
+mock runtime. A runtime that *does* report capacity (the hosted backend projects
+its connected-host roster onto the same chain) wins; the two are never merged.
+
+Locally registered peers are folded in as hosts on top of whichever of those
+applies, since a registered machine *is* the host level of the chain.
+
+### Demo fleet
+
+`MEDULLA_DEMO_FLEET=1`, in the environment or the cwd `.env`, stands in a small
+fake fleet — two hosts, three harnesses, two workspaces, two agents, two
+templates — so every fleet surface can be exercised with no backend, no socket,
+and no registered peer. It is strictly opt-in, and it is the last fallback: any
+real capacity, declared or reported, takes precedence over it.

@@ -55,9 +55,10 @@ unrelated state.
 
 ### Seeing the whole fleet
 
-`Hosts` is the machines this hub can dispatch to. The **Fleet** page is the whole
-declared picture those dispatches land in, as the containment chain Medulla
-actually models.
+`Hosts` is the machines this hub can dispatch to. The declared picture those
+dispatches land in lives on the **Agents** tab, under the lanes — one rail over
+the work and the capacity running it, as the containment chain Medulla actually
+models.
 
 ```
 Host  →  Harness  →  Workspace  →  Agent
@@ -72,8 +73,8 @@ is a folder that harness exposes, optionally with a parsed
 deployed into one workspace. Each level names exactly one parent, so an agent's
 host is derived by walking up rather than declared twice.
 
-Beside the chain sits the **agent template** catalog, on its own `Templates`
-page. Where the chain declares *where* an agent can be stood up, a template
+Beside the chain sits the **agent template** catalog, on the Routing tab's
+`Templates` page. Where the chain declares *where* an agent can be stood up, a template
 declares *what* may be stood up there — a description, default tools, an abstract
 model tier, and optional per-harness overrides whose presence also restricts
 which harness kinds the template may run on. Each row says where the template may
@@ -88,12 +89,12 @@ hosts. The page reads per harness kind — what authenticates it, whether this
 machine has that, and the declared instances of that kind with their host,
 readiness, and budget. Secret values are never rendered.
 
-The tree is an index; the pane beside it is the full declaration. Select a
-harness to read every budget window and seat, a workspace to read its profile, an
-agent to see its resolved placement and the template it came from, or a template
-to read its instructions. `↑↓`/`jk` browse, `PgUp`/`PgDn` scroll the detail, and
-`r` re-reads capacity from the runtime — capacity is declared, never streamed, so
-it is pulled rather than pushed.
+The rail is an index; the pane beside it is the full declaration. Select a
+harness to read every budget window and seat, a workspace to read its profile, or
+an agent to see its resolved placement and the template it came from. `Alt`+`↑↓`
+walks the rail, `PgUp`/`PgDn` scrolls the pane. Capacity is declared, never
+streamed, so it is pulled: the Harnesses and Templates pages re-read it on entry
+and on `r`.
 
 Nothing is invented and nothing is dropped. A harness whose host is not declared
 still renders, under the id it claims, marked as a dangling parent. An agent with
@@ -108,7 +109,9 @@ so the page is populated even where the manager reports one flat row per worker.
 You can also declare a chain yourself in the
 [`fleet` config section](../developers/configuration.md#fleet), which the
 terminal app declares to a local orchestrator at handshake time and renders when
-the runtime reports no capacity of its own.
+the runtime reports no capacity of its own. To see the surfaces with no fleet at
+all, `MEDULLA_DEMO_FLEET=1` stands in a small fake one — opt-in, and never
+preferred over a real reading.
 
 ### Choosing a default worker
 
@@ -208,19 +211,28 @@ continues while you keep going, instead of blocking until the fan-out drains. Th
 
 ## What you see
 
-The terminal app organizes this into seven tabs: Overview, Chat, Agents, Tasks,
-Routing, Memory, and Settings — the last of which holds Usage, Appearance,
-Config, Feedback, Trace, Context, Account, and Help, grouped under General,
-Debug, and About headings. Overview is the at-a-glance panel: runtime identity
-and health, the active cycle, recent events, the last cycle's results, the task
-ledger, and any pending decision. The Tasks tab is the planning surface, covered
-in [Tasks and Sources](tasks-and-sources.md); Routing is the fleet surface
-described above.
+The terminal app organizes this into six tabs: Overview, Agents, Tasks, Routing,
+Memory, and Settings — the last of which holds Usage, Appearance, Config,
+Feedback, Trace, Context, Account, and Help, grouped under General, Debug, and
+About headings. Overview is the at-a-glance panel: runtime identity and health,
+the active cycle, recent events, the last cycle's results, the task ledger, and
+any pending decision. The Tasks tab is the planning surface, covered in
+[Tasks and Sources](tasks-and-sources.md); Routing holds the fleet's management
+pages described above.
 
-The Agents tab is where an operation becomes legible. There is one lane for the
-orchestrator and one per agent, idle until its first task and busy while in
-flight, with context usage shown per row and, for a placed agent, the host,
-harness, workspace, and template it runs as. There is deliberately no lane for
+The Agents tab is where an operation becomes legible, and where you drive it:
+this is the conversation surface too. There is one lane for the orchestrator and
+one per agent, idle until its first task and busy while in flight, with context
+usage shown per row and, for a placed agent, the host, harness, workspace, and
+template it runs as. Under the lanes is the declared fleet; under the transcript
+is the composer.
+
+Selecting the orchestrator and typing is the conversation. Selecting an agent
+shows that agent's own turns, and if it has raised a question, Enter answers it
+rather than starting a new cycle — you answer where the question appeared.
+Printable keys always type, so the shortcuts take a modifier: `Alt`+`↑↓` walks
+the rail, `Alt`+`X` cancels the selected task, `Alt`+`A` opens the answer prompt,
+`^F` forks, and `^↑↓` switches threads. There is deliberately no lane for
 the layer between them: the orchestrator deploys 0..N concurrent managers per
 cycle, and what reaches this client is the orchestrator and the agents it is
 managing. A manager is how work was fanned out, not something you talk to or

@@ -429,3 +429,50 @@ fn merging_never_lists_one_machine_twice() {
     assert_eq!(merged.hosts.len(), 2);
     assert_eq!(merged.harnesses.len(), 1);
 }
+
+// --- the env-gated stand-in fleet -------------------------------------------
+
+#[test]
+fn the_demo_fleet_is_a_walkable_chain_with_a_restricted_template() {
+    let capacity = crate::runtime::demo_capacity();
+    let agents = crate::runtime::demo_agents();
+
+    // Every demo agent resolves all the way up to a host.
+    for agent in &agents {
+        let placement = capacity.placement(agent);
+        assert!(
+            placement.workspace.is_some(),
+            "{} has a workspace",
+            agent.id
+        );
+        assert!(placement.harness.is_some(), "{} has a harness", agent.id);
+        assert!(placement.host.is_some(), "{} has a host", agent.id);
+        assert!(placement.template.is_some(), "{} has a template", agent.id);
+    }
+
+    // The rows the surfaces actually render are non-empty and well-formed.
+    let rows = fleet_rows(&capacity, &agents);
+    assert!(rows.iter().any(|r| r.kind == FleetNodeKind::Host));
+    assert!(rows.iter().any(|r| r.kind == FleetNodeKind::Workspace));
+    assert!(
+        !rows.iter().any(|r| r.label.contains("unplaced")),
+        "the demo chain places every demo agent"
+    );
+
+    // The reviewer is codex-only and the site workspace allowlists it, so it may
+    // run in exactly one place — which is what makes the allowlist visible.
+    let reviewer = capacity.template("demo-reviewer").expect("reviewer");
+    assert_eq!(places_allowing(reviewer, &capacity), 1);
+}
+
+#[test]
+fn the_demo_flag_is_opt_in_and_ignores_negative_spellings() {
+    use crate::runtime::demo_requested_from;
+    assert!(!demo_requested_from(None), "unset means off");
+    for off in ["", "  ", "0", "false", "FALSE", "no", "off"] {
+        assert!(!demo_requested_from(Some(off)), "{off:?} must read as off");
+    }
+    for on in ["1", "true", "yes", "please"] {
+        assert!(demo_requested_from(Some(on)), "{on:?} must read as on");
+    }
+}

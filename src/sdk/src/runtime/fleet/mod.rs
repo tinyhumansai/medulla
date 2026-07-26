@@ -12,9 +12,18 @@
 //! These types were previously private to the unix-only `medulla-serve`
 //! runtime. They live here because the same shapes now reach every runtime and
 //! the whole UI layer, neither of which is unix-only.
+//!
+//! [`demo`] holds the env-gated stand-in fleet used to exercise the UI without a
+//! backend; nothing in this module reads it.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+mod demo;
+
+pub use demo::{
+    demo_agents, demo_capacity, demo_fleet_requested, demo_requested_from, DEMO_FLEET_ENV,
+};
 
 /// Resources declared for one host in the manager placement graph.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

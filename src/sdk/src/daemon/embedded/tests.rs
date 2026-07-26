@@ -19,6 +19,18 @@ use crate::tinyplace::{
 
 use super::{EmbeddedDaemon, EmbeddedDaemonOptions};
 
+/// A path that is guaranteed to exist and be executable on every platform.
+///
+/// The running test binary itself. `/bin/sh` was the obvious choice and the
+/// wrong one: it does not exist on Windows, so detection found nothing there and
+/// every test that needed an "installed" harness failed on that runner alone.
+fn installed_bin() -> String {
+    std::env::current_exe()
+        .expect("the test binary has a path")
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// An environment in which exactly `claude` is "installed".
 ///
 /// `PATH` is emptied so nothing actually on this machine can be discovered, and
@@ -27,7 +39,7 @@ use super::{EmbeddedDaemon, EmbeddedDaemonOptions};
 fn env_with_only_claude() -> HashMap<String, String> {
     HashMap::from([
         ("PATH".to_string(), String::new()),
-        ("TINYPLACE_CLAUDE_BIN".to_string(), "/bin/sh".to_string()),
+        ("TINYPLACE_CLAUDE_BIN".to_string(), installed_bin()),
     ])
 }
 
@@ -337,4 +349,69 @@ async fn dropping_the_host_stops_it_serving() {
     received.pump().await;
     assert!(!received.seen(TaskFrameKind::Ack));
     assert!(!received.seen(TaskFrameKind::Reply));
+}
+
+#[tokio::test]
+async fn an_explicitly_named_default_provider_is_honoured_when_it_is_installed() {
+    // The rejection path is covered above; this is the accepting half, which is
+    // what an operator with several CLIs installed actually exercises.
+    let network = LocalBridgeNetwork::new();
+    let host = EmbeddedDaemon::start_with_executor(
+        Arc::new(network.bind("host").unwrap()) as Arc<dyn Bridge>,
+        "host",
+        EmbeddedDaemonOptions {
+            default_provider: Some(HarnessProvider::Claude),
+            ..options(env_with_only_claude())
+        },
+        replying_executor("unused"),
+    )
+    .expect("claude is installed, so naming it is valid");
+
+    assert_eq!(host.default_provider(), HarnessProvider::Claude);
+    assert_eq!(
+        host.observation().default_provider(),
+        HarnessProvider::Claude
+    );
+}
+
+#[tokio::test]
+async fn an_explicit_workspace_is_resolved_rather_than_the_launch_directory() {
+    // The workspace decides what a peer's task can edit, so "the directory I
+    // named" and "the directory I happened to launch from" must not be confused.
+    let dir = std::env::temp_dir();
+    let network = LocalBridgeNetwork::new();
+    let host = EmbeddedDaemon::start_with_executor(
+        Arc::new(network.bind("host").unwrap()) as Arc<dyn Bridge>,
+        "host",
+        EmbeddedDaemonOptions {
+            workspace: dir.to_string_lossy().into_owned(),
+            ..options(env_with_only_claude())
+        },
+        replying_executor("unused"),
+    )
+    .unwrap();
+
+    let resolved = std::fs::canonicalize(&dir).unwrap_or(dir);
+    assert_eq!(host.workspace(), resolved.to_string_lossy());
+    // The runtime is reachable for a caller that needs to look past the wrapper.
+    assert_eq!(host.runtime().clone().shutdown(), ());
+}
+
+#[tokio::test]
+async fn a_host_describes_itself_by_where_it_is_and_what_it_serves() {
+    // `EmbeddedDaemon` has no derivable Debug — the runtime and join handle have
+    // no useful representation — so the hand-written one is worth pinning.
+    let (host, _peer) = hosted(replying_executor("unused"));
+
+    let rendered = format!("{host:?}");
+
+    assert!(rendered.contains("EmbeddedDaemon"), "got: {rendered}");
+    assert!(
+        rendered.contains("host"),
+        "should name its address: {rendered}"
+    );
+    assert!(
+        rendered.contains("Claude"),
+        "should name what it serves: {rendered}"
+    );
 }

@@ -100,7 +100,7 @@ fn a_saved_roster_comes_back_on_the_next_launch() {
         "nothing remembered before anything is saved"
     );
 
-    let sink = super::roster_sink(home, medulla::hub::stderr_log());
+    let sink = super::roster_sink(home, medulla::hub::stderr_log(), String::new());
     sink(&[
         worker("alpha", "3Hob1Fxu", true),
         worker("beta", "@peer", false),
@@ -120,7 +120,11 @@ fn an_explicit_environment_roster_is_not_merged_with_the_saved_one() {
     // quietly re-add a worker the operator had removed.
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
-    super::roster_sink(home, medulla::hub::stderr_log())(&[worker("saved", "addr-saved", false)]);
+    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[worker(
+        "saved",
+        "addr-saved",
+        false,
+    )]);
 
     let from_env = super::workers_from_env(&env(&[("MEDULLA_TINYPLACE_PEER", "addr-env")]));
     assert_eq!(from_env.len(), 1);
@@ -139,7 +143,9 @@ fn saving_over_a_config_leaves_its_other_sections_alone() {
     )
     .expect("seed");
 
-    super::roster_sink(home, medulla::hub::stderr_log())(&[worker("alpha", "addr", false)]);
+    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[worker(
+        "alpha", "addr", false,
+    )]);
 
     let text = std::fs::read_to_string(home.join("config.toml")).expect("read");
     assert!(text.contains("welcomeCompleted"), "got: {text}");
@@ -152,6 +158,73 @@ fn an_unwritable_roster_path_does_not_take_the_hub_down() {
     let sink = super::roster_sink(
         std::path::Path::new("/proc/nonexistent/nope"),
         medulla::hub::stderr_log(),
+        String::new(),
     );
     sink(&[worker("alpha", "addr", false)]);
+}
+
+#[test]
+fn the_device_local_host_is_never_written_into_the_saved_roster() {
+    // It is derived from `[host]` on every launch, so remembering it would
+    // outlive the setting that produced it.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+
+    super::roster_sink(home, medulla::hub::stderr_log(), "this-device".to_string())(&[
+        worker("this-device", "this-device", false),
+        worker("beta", "3Hob1Fxu", false),
+    ]);
+
+    let saved = super::workers_from_config(home);
+    assert_eq!(saved.len(), 1, "only the remote worker persists: {saved:?}");
+    assert_eq!(saved[0].address, "3Hob1Fxu");
+}
+
+#[test]
+fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
+    // The regression: a roster saved by an older build (or any run that wrote
+    // the entry) would keep advertising `this-device` after `MEDULLA_HOST=0`.
+    // With no local endpoint bound, the router finds no match and sends its
+    // tasks over tiny.place to a name no relay can resolve.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+    // Write it the way a build without the filter would have.
+    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[
+        worker("this-device", "this-device", false),
+        worker("beta", "3Hob1Fxu", false),
+    ]);
+    assert_eq!(super::workers_from_config(home).len(), 2, "seeded");
+
+    medulla::auth::CredentialStore::at_home(home)
+        .save(&medulla::auth::Credentials {
+            base_url: "https://api.example".into(),
+            jwt: "jwt".into(),
+        })
+        .expect("seed credentials so the hub config builds");
+
+    let config = super::build_hub_config_with_host(
+        &env(&[]),
+        home,
+        medulla::hub::stderr_log(),
+        Some(super::LocalDispatch {
+            network: medulla::bridge::LocalBridgeNetwork::new(),
+            hub_address: "medulla-orchestrator".to_string(),
+            host_address: "this-device".to_string(),
+            // Hosting is off: nothing is bound at `this-device` this run.
+            host: None,
+        }),
+    )
+    .expect("the hub config builds with credentials present");
+
+    assert!(
+        !config.workers.iter().any(|w| w.address == "this-device"),
+        "the stale local entry must not be advertised: {:?}",
+        config
+            .workers
+            .iter()
+            .map(|w| &w.address)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(config.workers.len(), 1);
+    assert_eq!(config.workers[0].address, "3Hob1Fxu");
 }

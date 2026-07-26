@@ -130,6 +130,12 @@ pub fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
+/// An `Alt`-modified key: lane and rail navigation on the Agents tab, since the
+/// bare arrows belong to the composer.
+pub fn alt_key(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::ALT))
+}
+
 /// Jump the app to the named top-level tab.
 pub fn tab(app: &mut App, name: &str) {
     app.tab_index = TABS.iter().position(|t| *t == name).unwrap();

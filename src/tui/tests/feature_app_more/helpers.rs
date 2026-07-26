@@ -124,6 +124,12 @@ pub fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
+/// An `Alt`-modified key: the Agents tab's steering and lane-selection chord,
+/// since the bare keys now belong to the composer.
+pub fn alt_key(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::ALT))
+}
+
 pub fn ctrl(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::CONTROL))
 }
@@ -191,7 +197,7 @@ pub fn app_with_selected_task() -> (App, Arc<MockRuntime>) {
         if app.selected_task_id().is_some() {
             break;
         }
-        let _ = app.on_event(key(KeyCode::Down));
+        let _ = app.on_event(alt_key(KeyCode::Down));
     }
     (app, rt)
 }

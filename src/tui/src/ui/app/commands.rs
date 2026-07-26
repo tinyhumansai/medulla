@@ -52,6 +52,31 @@ impl App {
     }
 
     /// Open the answer prompt for the selected task's pending question.
+    /// Send the composer's text as an answer when the cursor sits on a task with
+    /// an open question, consuming the draft.
+    ///
+    /// Returns `Some(None)` when it handled the key (an answer was sent, or the
+    /// draft was empty and there was nothing to send) and `None` when the caller
+    /// should treat the text as an ordinary instruction instead. The distinction
+    /// matters: typing into an agent's lane must not silently start a new
+    /// orchestrator cycle.
+    pub(super) fn answer_from_composer(&mut self, text: &str) -> Option<Option<Cmd>> {
+        let task = self.selected_agent_task()?;
+        let question_id = task.question_id.clone()?;
+        let cycle_id = crate::ui::agents::parse_task_key(&task.task_id)
+            .0?
+            .to_string();
+        if text.trim().is_empty() {
+            self.set_status("Type an answer for the pending question");
+            return Some(None);
+        }
+        self.runtime
+            .answer_question(cycle_id, question_id, text.to_string());
+        self.draft = Draft::new();
+        self.set_status(format!("Answer sent to {}", task.task_id));
+        Some(None)
+    }
+
     pub(super) fn answer_selected_task(&mut self) {
         match self.selected_agent_task() {
             Some(t) => match (
@@ -303,7 +328,7 @@ impl App {
             }
             SlashCommand::Fork(name) => {
                 self.fork_thread(name);
-                self.tab_index = tab_pos("Chat");
+                self.tab_index = tab_pos("Agents");
             }
             SlashCommand::Resume => return Some(Cmd::ListChats),
             SlashCommand::Abort => {

@@ -37,7 +37,7 @@ fn slash_fork_with_name_focuses_chat_and_names_thread() {
     // Start from a non-Chat tab to prove the fork focuses Chat.
     tab(&mut app, "Agents");
     let _ = submit_line(&mut app, "/fork My Branch");
-    assert_eq!(app.tab(), "Chat");
+    assert_eq!(app.tab(), "Agents");
     assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
     // The forked thread carried the (case-preserved) name.
     let out = render(&mut app, 120, 40);
@@ -156,7 +156,7 @@ fn chat_left_right_backspace_and_esc() {
 #[test]
 fn control_chords_route() {
     let (mut app, rt) = demo_app();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     // Ctrl-O toggles mouse capture (and back).
     let before = app.mouse_capture;
     let _ = app.on_event(ctrl(KeyCode::Char('o')));
@@ -182,7 +182,7 @@ fn ctrl_f_forks_and_focuses_chat() {
     let (mut app, rt) = demo_app();
     tab(&mut app, "Agents");
     let _ = app.on_event(ctrl(KeyCode::Char('f')));
-    assert_eq!(app.tab(), "Chat");
+    assert_eq!(app.tab(), "Agents");
     assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
 }
 
@@ -191,7 +191,7 @@ fn ctrl_updown_switches_threads_on_chat() {
     let (mut app, rt) = demo_app();
     rt.fork(Some("branch".into()));
     app.refresh_snapshot();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     let _ = app.on_event(ctrl(KeyCode::Up));
     let _ = app.on_event(ctrl(KeyCode::Down));
     assert!(rt.recorded_calls().iter().any(|c| c == "set_active_thread"));
@@ -223,7 +223,7 @@ fn up_down_recall_prompt_history() {
 #[test]
 fn multiline_draft_caret_walk_and_render() {
     let (mut app, _rt) = empty_app();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     type_str(&mut app, "line one");
     let _ = app.on_event(Event::Key(KeyEvent::new(
         KeyCode::Enter,

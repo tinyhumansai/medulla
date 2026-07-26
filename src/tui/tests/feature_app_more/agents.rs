@@ -48,7 +48,7 @@ fn agents_renders_subtask_rows_more_overflow_and_task_transcript() {
         if app.selected_task_id().is_some() {
             break;
         }
-        let _ = app.on_event(key(KeyCode::Down));
+        let _ = app.on_event(alt_key(KeyCode::Down));
     }
     assert!(app.selected_task_id().is_some(), "landed on a Sub row");
     let out = render(&mut app, 120, 40);
@@ -61,7 +61,7 @@ fn agents_x_on_a_lane_row_prompts_to_select_a_task() {
     tab(&mut app, "Agents");
     // Default cursor sits on a tier lane, not a task row.
     assert!(app.selected_task_id().is_none());
-    let _ = app.on_event(key(KeyCode::Char('X')));
+    let _ = app.on_event(alt_key(KeyCode::Char('X')));
     assert!(
         app.status().contains("Select a running task"),
         "status: {}",
@@ -73,7 +73,7 @@ fn agents_x_on_a_lane_row_prompts_to_select_a_task() {
 fn agents_x_cancels_selected_cycle_task() {
     let (mut app, _rt) = app_with_selected_task();
     assert_eq!(app.selected_task_id().as_deref(), Some("cyc-9/t:q1"));
-    let _ = app.on_event(key(KeyCode::Char('X')));
+    let _ = app.on_event(alt_key(KeyCode::Char('X')));
     // The bare task id (after the cycle prefix) appears in the confirmation.
     assert!(
         app.status().contains("Cancel requested") && app.status().contains("q1"),
@@ -85,7 +85,7 @@ fn agents_x_cancels_selected_cycle_task() {
 #[test]
 fn agents_a_opens_the_answer_prompt() {
     let (mut app, _rt) = app_with_selected_task();
-    let _ = app.on_event(key(KeyCode::Char('A')));
+    let _ = app.on_event(alt_key(KeyCode::Char('A')));
     let (title, draft) = app.prompt_state().expect("answer prompt should open");
     assert!(title.starts_with("Answer"), "title: {title}");
     assert!(draft.is_empty());
@@ -103,11 +103,11 @@ fn agents_a_on_task_without_question_reports_none() {
         if app.selected_task_id().is_some() {
             break;
         }
-        let _ = app.on_event(key(KeyCode::Down));
+        let _ = app.on_event(alt_key(KeyCode::Down));
     }
     // Only proceed if we actually landed on the (question-less) task row.
     if app.selected_task_id().is_some() {
-        let _ = app.on_event(key(KeyCode::Char('A')));
+        let _ = app.on_event(alt_key(KeyCode::Char('A')));
         assert!(
             app.status().contains("no pending question") || app.prompt_state().is_none(),
             "status: {}",
@@ -121,7 +121,7 @@ fn agents_a_on_task_without_question_reports_none() {
 #[test]
 fn prompt_answer_typing_editing_and_send() {
     let (mut app, _rt) = app_with_selected_task();
-    let _ = app.on_event(key(KeyCode::Char('A')));
+    let _ = app.on_event(alt_key(KeyCode::Char('A')));
     assert!(app.prompt_state().is_some());
     type_str(&mut app, "yess");
     // Backspace trims the stray char.
@@ -146,12 +146,12 @@ fn prompt_answer_typing_editing_and_send() {
 #[test]
 fn prompt_esc_cancels_and_ctrl_c_quits() {
     let (mut app, _rt) = app_with_selected_task();
-    let _ = app.on_event(key(KeyCode::Char('A')));
+    let _ = app.on_event(alt_key(KeyCode::Char('A')));
     let _ = app.on_event(key(KeyCode::Esc));
     assert!(app.prompt_state().is_none());
     assert!(app.status().contains("Cancelled"));
 
-    let _ = app.on_event(key(KeyCode::Char('A')));
+    let _ = app.on_event(alt_key(KeyCode::Char('A')));
     assert!(app.prompt_state().is_some());
     let _ = app.on_event(ctrl(KeyCode::Char('c')));
     assert!(app.should_quit);
@@ -160,7 +160,7 @@ fn prompt_esc_cancels_and_ctrl_c_quits() {
 #[test]
 fn prompt_empty_answer_is_cancelled() {
     let (mut app, _rt) = app_with_selected_task();
-    let _ = app.on_event(key(KeyCode::Char('A')));
+    let _ = app.on_event(alt_key(KeyCode::Char('A')));
     let cmd = app.on_event(key(KeyCode::Enter));
     assert!(cmd.is_none());
     assert!(
@@ -212,7 +212,7 @@ fn agents_lane_context_bar_reflects_high_and_mid_usage() {
                 assert!(out.contains("context"), "context bar renders");
                 break;
             }
-            let _ = app.on_event(key(KeyCode::Down));
+            let _ = app.on_event(alt_key(KeyCode::Down));
         }
     }
 }
@@ -229,10 +229,10 @@ fn agents_jk_scroll_and_arrow_nav() {
     let _ = app.on_event(key(KeyCode::Char('k')));
     // Arrow up/down move the agent cursor across selectable rows without panic.
     for _ in 0..15 {
-        let _ = app.on_event(key(KeyCode::Down));
+        let _ = app.on_event(alt_key(KeyCode::Down));
     }
     for _ in 0..15 {
-        let _ = app.on_event(key(KeyCode::Up));
+        let _ = app.on_event(alt_key(KeyCode::Up));
     }
     let _ = render(&mut app, 120, 40);
 }
@@ -332,7 +332,7 @@ fn agents_renders_read_only_seat_budget_for_a_budgeted_lane() {
             seen = true;
             break;
         }
-        let _ = app.on_event(key(KeyCode::Down));
+        let _ = app.on_event(alt_key(KeyCode::Down));
     }
     assert!(
         seen,
@@ -359,10 +359,10 @@ fn cancel_task_without_cycle_prefix_reports_no_cycle() {
         if app.selected_task_id().as_deref() == Some("bare-task") {
             break;
         }
-        let _ = app.on_event(key(KeyCode::Down));
+        let _ = app.on_event(alt_key(KeyCode::Down));
     }
     if app.selected_task_id().as_deref() == Some("bare-task") {
-        let _ = app.on_event(key(KeyCode::Char('X')));
+        let _ = app.on_event(alt_key(KeyCode::Char('X')));
         assert!(
             app.status().contains("no cycle"),
             "status: {}",

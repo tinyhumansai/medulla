@@ -17,7 +17,6 @@ use crate::ui::util::{clip, clock, wrap};
 use super::types::{App, TABS};
 
 mod agents;
-mod chat;
 mod decisions;
 mod feedback;
 mod memory;
@@ -242,11 +241,14 @@ impl App {
     /// composer/prompt/resume overlay when applicable, and the footer.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
-        let chat = self.tab() == "Chat";
+        // The composer now lives inside the Agents pane, so the only things that
+        // still claim a row of their own below the content are the inline prompt
+        // and the resume picker.
         let has_prompt = self.prompt.is_some();
+        let picking = self.resume_picker.is_some();
         let extra = if has_prompt {
             3
-        } else if chat {
+        } else if picking {
             self.extra_height()
         } else {
             0
@@ -270,12 +272,8 @@ impl App {
         }
         if has_prompt {
             self.draw_prompt(f, rows[3]);
-        } else if chat {
-            if self.resume_picker.is_some() {
-                self.draw_resume(f, rows[3]);
-            } else {
-                self.draw_composer(f, rows[3]);
-            }
+        } else if picking {
+            self.draw_resume(f, rows[3]);
         }
         self.draw_footer(f, rows[4]);
     }
@@ -411,7 +409,6 @@ impl App {
     pub(super) fn draw_content(&mut self, f: &mut Frame, area: Rect) {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
-            "Chat" => self.draw_chat(f, area),
             "Agents" => self.draw_agents(f, area),
             "Tasks" => self.draw_tasks(f, area),
             "Routing" => self.draw_routing(f, area),

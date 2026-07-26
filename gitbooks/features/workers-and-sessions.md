@@ -33,16 +33,18 @@ them.
 
 ### Managing them
 
-Fleet management lives on the **Routing** tab, which has five pages: `List
-Workers`, `Fleet`, `Add Worker`, `Manage Keys`, and `Strategies`. The list page shows each
-registered peer with its handle, label, harness, and — once capacity is
-refreshed — its CPU cores and available memory. Press `a` to add a peer, where
+Fleet management lives on the **Routing** tab, whose pages follow the chain
+itself: `Fleet`, `Hosts`, `Harnesses`, `Templates`, `Add Host`, and `Strategies`.
+The `Hosts` page shows each
+registered machine with its handle, label, harness, and — once capacity is
+refreshed — its CPU cores and available memory. Press `a` to add a host, where
 the first token is the address or `@handle` and the rest is a label. `Enter` or
 `s` selects, `e` edits the label, `d` removes, and a refresh pulls fresh
 capacity. A worker carries several identifiers that are deliberately kept
 distinct — a stable registry ID for edit/select/remove, a messaging address for
 delivery, and a wallet peer ID as identity metadata — and none stands in for
-another. The roster persists under the `hub` config section, so a selected
+another. A registered machine is also a host in the chain, so it appears on the
+`Fleet` page as one, carrying the harnesses it advertises. The roster persists under the `hub` config section, so a selected
 default survives a restart.
 
 Fleet peer management and task steering require a runtime that exposes a worker
@@ -53,9 +55,9 @@ unrelated state.
 
 ### Seeing the whole fleet
 
-`List Workers` is the peers this hub can dispatch to. The **Fleet** page is one
-level up: the declared capacity those dispatches land on, as the containment
-chain Medulla actually models.
+`Hosts` is the machines this hub can dispatch to. The **Fleet** page is the whole
+declared picture those dispatches land in, as the containment chain Medulla
+actually models.
 
 ```
 Host  →  Harness  →  Workspace  →  Agent
@@ -70,11 +72,21 @@ is a folder that harness exposes, optionally with a parsed
 deployed into one workspace. Each level names exactly one parent, so an agent's
 host is derived by walking up rather than declared twice.
 
-Beside the chain sits the **agent template** catalog: the kinds of agent that may
-be provisioned onto it. Where the chain declares *where* an agent can be stood
-up, a template declares *what* may be stood up there — a description, default
-tools, an abstract model tier, and optional per-harness overrides whose presence
-also restricts which harness kinds the template may run on.
+Beside the chain sits the **agent template** catalog, on its own `Templates`
+page. Where the chain declares *where* an agent can be stood up, a template
+declares *what* may be stood up there — a description, default tools, an abstract
+model tier, and optional per-harness overrides whose presence also restricts
+which harness kinds the template may run on. Each row says where the template may
+run and how many agents currently exist because of it; a template no declared
+place admits is dimmed, because nothing can be provisioned from it.
+
+Credentials live on the `Harnesses` page rather than a page of their own, because
+that is where they belong: a Claude subscription or an `ANTHROPIC_API_KEY` is
+spent by the CLI runtime, not by the machine under it. One host can run three
+harnesses on three providers, and one subscription can back harnesses on several
+hosts. The page reads per harness kind — what authenticates it, whether this
+machine has that, and the declared instances of that kind with their host,
+readiness, and budget. Secret values are never rendered.
 
 The tree is an index; the pane beside it is the full declaration. Select a
 harness to read every budget window and seat, a workspace to read its profile, an

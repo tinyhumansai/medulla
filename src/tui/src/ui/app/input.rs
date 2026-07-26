@@ -34,8 +34,7 @@ impl App {
             // matched on the subpage rather than on `tab` — which is always
             // "Settings" for both, and used to make these arms unreachable.
             MouseEventKind::ScrollUp => match (tab, self.settings_subpage()) {
-                ("Chat", _) => self.chat_scroll += 3,
-                ("Agents", _) => self.agent_scroll += 3,
+                ("Agents", _) => self.scroll_transcript(true, 3),
                 ("Memory", _) if self.memory_focused => {
                     self.memory_index = self.memory_index.saturating_sub(1)
                 }
@@ -46,8 +45,7 @@ impl App {
                 _ => {}
             },
             MouseEventKind::ScrollDown => match (tab, self.settings_subpage()) {
-                ("Chat", _) => self.chat_scroll = self.chat_scroll.saturating_sub(3),
-                ("Agents", _) => self.agent_scroll = self.agent_scroll.saturating_sub(3),
+                ("Agents", _) => self.scroll_transcript(false, 3),
                 ("Memory", _) if self.memory_focused => {
                     let max = self.memory_page_entries().len().saturating_sub(1);
                     self.memory_index = (self.memory_index + 1).min(max);
@@ -81,6 +79,8 @@ impl App {
         }
         let tab = self.tab();
         if tab == "Agents" {
+            // The rail stacks two hit-boxes — threads above lanes — so both are
+            // tried; an `else if` here left the threads strip unclickable.
             if let Some((rect, window_start)) = self.hit_agents {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
@@ -94,18 +94,6 @@ impl App {
                     }
                 }
             }
-        } else if tab == "Settings" && self.settings_subpage() == "Context" {
-            // Context is a Settings subpage, not a tab — matching on `tab` here
-            // made this branch unreachable, so clicking a chunk did nothing.
-            if let Some(rect) = self.hit_context {
-                if rect.contains((x, y).into()) {
-                    let rel = (y - rect.y) as usize;
-                    if rel < self.contexts.len() {
-                        self.context_index = rel;
-                    }
-                }
-            }
-        } else if tab == "Chat" {
             if let Some((rect, window_start)) = self.hit_threads {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
@@ -115,6 +103,17 @@ impl App {
                         self.runtime.set_active_thread(id);
                         self.chat_scroll = 0;
                         self.refresh_snapshot();
+                    }
+                }
+            }
+        } else if tab == "Settings" && self.settings_subpage() == "Context" {
+            // Context is a Settings subpage, not a tab — matching on `tab` here
+            // made this branch unreachable, so clicking a chunk did nothing.
+            if let Some(rect) = self.hit_context {
+                if rect.contains((x, y).into()) {
+                    let rel = (y - rect.y) as usize;
+                    if rel < self.contexts.len() {
+                        self.context_index = rel;
                     }
                 }
             }

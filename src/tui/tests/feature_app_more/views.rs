@@ -193,7 +193,7 @@ fn click_chat_thread_switches_active() {
     let (mut app, rt) = demo_app();
     rt.fork(Some("branch".into()));
     app.refresh_snapshot();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     let _ = render(&mut app, 120, 40);
     // Click rows inside the threads sidebar (left column, content starts ~row 3).
     for y in 3..8u16 {
@@ -225,7 +225,7 @@ fn resume_picker_navigates_and_loads() {
         },
     ]);
     // Render the modal (Chat tab hosts it in the composer slot).
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     let out = render(&mut app, 120, 40);
     assert!(out.contains("Resume a chat"), "modal renders");
     // Down to the second row, back up, down again, then Enter loads it.

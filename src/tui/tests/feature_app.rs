@@ -68,7 +68,7 @@ fn type_str(app: &mut App, s: &str) {
     }
 }
 
-/// Compose `s` on the Chat tab and press Enter, returning the resulting `Cmd`.
+/// Compose `s` on the Agents tab and press Enter, returning the resulting `Cmd`.
 fn submit_line(app: &mut App, s: &str) -> Option<Cmd> {
     app.tab_index = 1;
     type_str(app, s);
@@ -243,11 +243,11 @@ fn tab_and_backtab_cycle_tabs() {
     let (mut app, _rt) = demo_app();
     assert_eq!(app.tab(), "Overview");
     let _ = app.on_event(key(KeyCode::Tab));
-    assert_eq!(app.tab(), "Chat");
-    let _ = app.on_event(key(KeyCode::Tab));
     assert_eq!(app.tab(), "Agents");
+    let _ = app.on_event(key(KeyCode::Tab));
+    assert_eq!(app.tab(), "Tasks");
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert_eq!(app.tab(), "Chat");
+    assert_eq!(app.tab(), "Agents");
     // Wrap backwards from Overview to the last tab (Settings).
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
@@ -259,15 +259,15 @@ fn clicking_tab_bar_selects_tab() {
     let (mut app, _rt) = demo_app();
     // Draw first so the tab hit-boxes are recorded, then click within "Agents".
     let _ = render(&mut app, 120, 40);
-    let _ = app.on_event(mouse(MouseEventKind::Down(MouseButton::Left), 20, 1));
+    let _ = app.on_event(mouse(MouseEventKind::Down(MouseButton::Left), 12, 1));
     assert_eq!(app.tab(), "Agents");
 }
 
 #[test]
 fn each_tab_renders_its_signature() {
     let signatures = [
-        ("Chat", "Threads"),
         ("Agents", "Agents ·"),
+        ("Agents", "orchestrator"),
         ("Routing", "Routing"),
         ("Settings", "Settings"),
     ];
@@ -412,11 +412,11 @@ fn resume_picker_esc_closes_without_resuming() {
 // --- 7. thread / fork UX ----------------------------------------------------
 
 #[test]
-fn ctrl_f_forks_thread_and_focuses_chat() {
+fn ctrl_f_forks_thread_and_focuses_the_conversation() {
     let (mut app, rt) = demo_app();
     assert_eq!(app.snapshot.threads.len(), 1);
     let _ = app.on_event(ctrl(KeyCode::Char('f')));
-    assert_eq!(app.tab(), "Chat", "fork should focus the Chat tab");
+    assert_eq!(app.tab(), "Agents", "fork should focus the conversation");
     assert_eq!(app.snapshot.threads.len(), 2, "fork should add a thread");
     assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
 }

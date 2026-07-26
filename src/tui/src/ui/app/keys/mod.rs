@@ -5,6 +5,12 @@
 //!
 //! Tasks, Routing, Memory, and Settings host subpages with bindings of their own,
 //! so their handling lives in focused sibling modules rather than inline here.
+//!
+//! The Agents tab carries the composer, which settles every binding conflict on
+//! that tab: printable keys always type, so no message loses a character to a
+//! shortcut. The arrows belong to the caret and the history, exactly as they did
+//! on the old Chat tab; lane selection moves to `Alt`+`↑`/`↓`, transcript
+//! scrolling to `PageUp`/`PageDown`, and task steering to `Alt`+`X`/`Alt`+`A`.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -117,12 +123,12 @@ impl App {
                 }
                 KeyCode::Char('f') => {
                     self.fork_thread(None);
-                    if tab != "Chat" {
-                        self.tab_index = tab_pos("Chat");
+                    if tab != "Agents" {
+                        self.tab_index = tab_pos("Agents");
                     }
                     return None;
                 }
-                KeyCode::Up | KeyCode::Down if tab == "Chat" => {
+                KeyCode::Up | KeyCode::Down if tab == "Agents" => {
                     let idx = self.active_thread_idx();
                     let next = if matches!(k.code, KeyCode::Up) {
                         idx.checked_sub(1)
@@ -181,53 +187,60 @@ impl App {
                 self.selected = 0;
                 return self.tab_enter_cmd();
             }
-            KeyCode::PageUp if tab == "Chat" => {
-                self.chat_scroll += self.visible_count().saturating_sub(1).max(1);
-            }
-            KeyCode::PageDown if tab == "Chat" => {
+            KeyCode::PageUp if tab == "Agents" => {
                 let step = self.visible_count().saturating_sub(1).max(1);
-                self.chat_scroll = self.chat_scroll.saturating_sub(step);
+                self.scroll_transcript(true, step);
             }
-            KeyCode::Enter if tab == "Chat" && (shift || alt) => {
+            KeyCode::PageDown if tab == "Agents" => {
+                let step = self.visible_count().saturating_sub(1).max(1);
+                self.scroll_transcript(false, step);
+            }
+            KeyCode::Enter if tab == "Agents" && (shift || alt) => {
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, "\n");
             }
-            KeyCode::Enter if tab == "Chat" => {
+            // Enter submits to whatever the cursor is on: an instruction to the
+            // orchestrator, or an answer to the selected agent's open question.
+            // Steering an agent from the lane the question appeared on is the
+            // whole point of folding the composer in here.
+            KeyCode::Enter if tab == "Agents" => {
                 let value = self.draft.text.clone();
+                if let Some(cmd) = self.answer_from_composer(&value) {
+                    return cmd;
+                }
                 return self.execute(value);
             }
-            KeyCode::Backspace | KeyCode::Delete if tab == "Chat" => {
+            KeyCode::Backspace | KeyCode::Delete if tab == "Agents" => {
                 self.draft = delete_before(&self.draft.text, self.draft.cursor);
             }
-            KeyCode::Esc if tab == "Chat" => {
+            KeyCode::Esc if tab == "Agents" => {
                 self.draft = Draft::new();
             }
-            KeyCode::Left if tab == "Chat" => {
+            KeyCode::Left if tab == "Agents" => {
                 self.draft.cursor = self.draft.cursor.saturating_sub(1);
             }
-            KeyCode::Right if tab == "Chat" => {
+            KeyCode::Right if tab == "Agents" => {
                 self.draft.cursor = (self.draft.cursor + 1).min(self.draft.text.chars().count());
             }
-            KeyCode::Up | KeyCode::Down if tab == "Agents" && self.draft.text.is_empty() => {
+            // Lane selection: `Alt` because the bare arrows now belong to the
+            // composer, and a lane list you cannot reach from the keyboard would
+            // make the merged surface worse than the two it replaced.
+            KeyCode::Up | KeyCode::Down if tab == "Agents" && alt => {
                 self.agent_scroll = 0;
+                self.chat_scroll = 0;
                 self.move_agent_index(matches!(k.code, KeyCode::Up));
             }
-            KeyCode::Char('j') if tab == "Agents" && self.draft.text.is_empty() => {
-                self.agent_scroll += 1;
-            }
-            KeyCode::Char('k') if tab == "Agents" && self.draft.text.is_empty() => {
-                self.agent_scroll = self.agent_scroll.saturating_sub(1);
-            }
-            // Agents steering: cancel the selected running task, answer a pending question.
-            KeyCode::Char('X') if tab == "Agents" => {
+            // Agents steering: cancel the selected running task, answer a pending
+            // question through the modal prompt. Enter answers it inline too.
+            KeyCode::Char('X') | KeyCode::Char('x') if tab == "Agents" && alt => {
                 self.cancel_selected_task();
                 return None;
             }
-            KeyCode::Char('A') if tab == "Agents" => {
+            KeyCode::Char('A') | KeyCode::Char('a') if tab == "Agents" && alt => {
                 self.answer_selected_task();
                 return None;
             }
             KeyCode::Up => {
-                if tab == "Chat" {
+                if tab == "Agents" {
                     if let Some(moved) = move_caret_row(&self.draft.text, self.draft.cursor, -1) {
                         self.draft.cursor = moved;
                     } else {
@@ -238,7 +251,7 @@ impl App {
                 }
             }
             KeyCode::Down => {
-                if tab == "Chat" {
+                if tab == "Agents" {
                     if let Some(moved) = move_caret_row(&self.draft.text, self.draft.cursor, 1) {
                         self.draft.cursor = moved;
                     } else {
@@ -248,7 +261,7 @@ impl App {
                     self.selected += 1;
                 }
             }
-            KeyCode::Char(c) if tab == "Chat" && !ctrl && !alt => {
+            KeyCode::Char(c) if tab == "Agents" && !ctrl && !alt => {
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, &c.to_string());
             }
             _ => {}

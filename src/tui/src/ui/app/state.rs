@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use ratatui::layout::Rect;
 
-use crate::ui::agents::{derive_agent_lanes, merge_host_activity, merge_host_roster, AgentLane};
+use crate::ui::agents::{
+    derive_agent_lanes, merge_host_activity, merge_host_roster, AgentLane, AgentRole,
+};
 use crate::ui::composer::Draft;
 use crate::ui::fleet::{fleet_rows, merge_capacity, registry_capacity, FleetNode};
 use crate::ui::theme::Theme;
@@ -405,6 +407,36 @@ impl App {
         // the activity the hub observed locally is folded in.
         merge_host_activity(&mut lanes, &self.runtime.worker_activity());
         lanes
+    }
+
+    /// Whether the Agents cursor sits on the orchestrator lane.
+    ///
+    /// That lane is the conversation with the operator, so it scrolls the chat
+    /// transcript and its composer submits an instruction; every other lane
+    /// shows an agent's own turns and answers its questions.
+    pub fn on_orchestrator_lane(&self) -> bool {
+        let lanes = self.lanes();
+        let rows = self.agent_rows();
+        rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
+            .and_then(|row| row.lane_index())
+            .and_then(|index| lanes.get(index))
+            .map(|lane| lane.role == AgentRole::Orchestrator)
+            // An empty lane list means the orchestrator lane is all there is.
+            .unwrap_or(true)
+    }
+
+    /// Scroll whichever transcript the Agents cursor is reading.
+    pub(super) fn scroll_transcript(&mut self, up: bool, step: usize) {
+        let target = if self.on_orchestrator_lane() {
+            &mut self.chat_scroll
+        } else {
+            &mut self.agent_scroll
+        };
+        *target = if up {
+            target.saturating_add(step)
+        } else {
+            target.saturating_sub(step)
+        };
     }
 
     /// The flattened fleet tree for the Routing › Fleet page.

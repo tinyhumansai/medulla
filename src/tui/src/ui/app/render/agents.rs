@@ -1,6 +1,13 @@
-//! The Agents tab: the agent/task lane list on the left, the selected lane's or
-//! task's transcript (with a context bar) on the right, and the row/marker
-//! formatting helpers those two panes share.
+//! The Agents tab: the conversation surface. The lane list is on the left, the
+//! selected lane's transcript (with a context bar) fills the right, and the
+//! composer sits under it.
+//!
+//! This is where Chat went. Selecting the orchestrator lane and typing *is* the
+//! conversation, so its transcript is the chat log rather than a list of
+//! inference turns; selecting an agent shows that agent's own turns, and the
+//! composer answers its open question instead of starting a new cycle. One
+//! surface, because reading what an operation is doing and steering it were
+//! never two jobs.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -17,7 +24,7 @@ use crate::ui::util::fmt_tokens;
 use medulla::harness_contract::AgentBudgetMetadata;
 
 use super::super::types::App;
-use super::{color, styled_to_tline};
+use super::{chat_lines, color, styled_to_tline};
 
 impl App {
     /// Draw the Agents tab: lane list and the selected lane/task transcript.
@@ -33,10 +40,44 @@ impl App {
             _ => None,
         };
 
+        // Size the rail to its content rather than to a percentage: the labels
+        // are short and fixed-ish, the transcript is what benefits from width.
+        let widest = rows
+            .iter()
+            .map(|row| self.agent_row_line(row, &lanes, false).width())
+            .chain(self.thread_rows().iter().map(|line| line.width()))
+            .max()
+            .unwrap_or(0);
         let cols = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(36), Constraint::Min(0)])
+            .constraints([
+                Constraint::Length(crate::ui::multi_pane::sidebar_width(area.width, widest)),
+                Constraint::Min(0),
+            ])
             .split(area);
+        // Threads sit above the lanes, and only when there is a choice to make:
+        // with a single thread the transcript title already names it.
+        let threads = self.thread_rows();
+        let left = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(if threads.len() > 1 {
+                    (threads.len() as u16 + 2).min(area.height / 3)
+                } else {
+                    0
+                }),
+                Constraint::Min(0),
+            ])
+            .split(cols[0]);
+        // The composer lives inside the right column, under the transcript it
+        // belongs to, and grows with the draft.
+        let right = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(3),
+                Constraint::Length(self.composer_height()),
+            ])
+            .split(cols[1]);
 
         let running_tasks: usize = lanes
             .iter()
@@ -53,9 +94,14 @@ impl App {
         } else {
             format!("Agents · {agent_count}")
         };
+        if threads.len() > 1 {
+            self.draw_thread_strip(f, left[0], &threads);
+        } else {
+            self.hit_threads = None;
+        }
         let block = self.panel(title);
-        let inner = block.inner(cols[0]);
-        f.render_widget(block, cols[0]);
+        let inner = block.inner(left[1]);
+        f.render_widget(block, left[1]);
         let capacity = (inner.height as usize).max(1);
         let window_start = crate::ui::selection::viewport_start(active, rows.len(), capacity);
         self.hit_agents = Some((inner, window_start));
@@ -69,8 +115,15 @@ impl App {
         // Transcript pane.
         let lane = lanes.get(active_lane_index);
         let pane_width = ((cols[1].width as usize).saturating_sub(4)).max(24);
+        let on_orchestrator = lane
+            .map(|l| l.role == AgentRole::Orchestrator)
+            .unwrap_or(true);
         let content_lines: Vec<StyledLine> = if let Some(t) = &selected_task {
             task_lines(t, pane_width)
+        } else if on_orchestrator {
+            // The orchestrator lane is the conversation: show what was said, not
+            // the model calls that said it. The calls stay in Settings › Trace.
+            chat_lines(&self.snapshot.events, pane_width)
         } else {
             lane_lines(lane, pane_width)
         };
@@ -81,14 +134,25 @@ impl App {
                 t.task_id,
                 t.turns
             )
+        } else if on_orchestrator {
+            let thread = self
+                .snapshot
+                .threads
+                .get(self.active_thread_idx())
+                .map(|t| t.name.clone())
+                .unwrap_or_else(|| "main".into());
+            format!(
+                "orchestrator · {thread} · {} turns",
+                self.snapshot.messages.len().div_ceil(2)
+            )
         } else if let Some(l) = lane {
             format!("{} · {} turns", l.label, l.turns.len())
         } else {
             "Transcript".into()
         };
         let block = self.panel(title);
-        let inner = block.inner(cols[1]);
-        f.render_widget(block, cols[1]);
+        let inner = block.inner(right[0]);
+        f.render_widget(block, right[0]);
         let mut header: Vec<TLine> = Vec::new();
         // Harness task board: session-wide, shown only when the backend surfaces a
         // `HarnessStatus`. Degrades to nothing (empty vec) when absent or empty.
@@ -168,20 +232,158 @@ impl App {
                 )));
             }
         }
-        let capacity = (inner.height as usize).saturating_sub(header.len()).max(4);
+        // Reserve the last row for the status line (scroll notice or spinner),
+        // or a below-fold notice would itself fall below the fold.
+        let capacity = (inner.height as usize)
+            .saturating_sub(header.len() + 1)
+            .max(4);
         let max_scroll = content_lines.len().saturating_sub(capacity);
-        let eff = self.agent_scroll.min(max_scroll);
+        // The two transcripts keep their own scroll positions, so switching
+        // lanes and switching back does not lose your place in either.
+        let eff = if on_orchestrator {
+            let eff = self.chat_scroll.min(max_scroll);
+            self.chat_scroll = eff;
+            eff
+        } else {
+            self.agent_scroll.min(max_scroll)
+        };
         let end = content_lines.len() - eff;
         let view = &content_lines[end.saturating_sub(capacity)..end];
         let mut out = header;
+        if view.is_empty() {
+            out.push(TLine::from(Span::styled(
+                "No messages yet — type below to start.",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
         out.extend(view.iter().map(styled_to_tline));
         if eff > 0 {
             out.push(TLine::from(Span::styled(
                 format!("↑ {eff} more line(s) below · k to catch up"),
                 Style::default().add_modifier(Modifier::DIM),
             )));
+        } else if on_orchestrator && self.snapshot.running {
+            let calls = crate::ui::stream::running_calls(&self.snapshot.events);
+            let msg = if calls > 0 {
+                format!(
+                    "thinking · {calls} model call{} in flight",
+                    if calls == 1 { "" } else { "s" }
+                )
+            } else {
+                "working…".into()
+            };
+            out.push(TLine::from(Span::styled(
+                format!(
+                    "{} {msg}",
+                    crate::ui::util::SPINNER[self.frame % crate::ui::util::SPINNER.len()],
+                ),
+                Style::default().fg(Color::Yellow),
+            )));
         }
         f.render_widget(Paragraph::new(Text::from(out)), inner);
+
+        // Composer: what it submits depends on the cursor, so it says so.
+        self.draw_agent_composer(f, right[1], &selected_task, lane);
+    }
+
+    /// One row per open thread, with its running/attention badges and fork
+    /// indent. Built separately from the draw so the rail can be sized to it.
+    pub(super) fn thread_rows(&self) -> Vec<TLine<'static>> {
+        let depth = crate::ui::stream::thread_depths(&self.snapshot.threads);
+        self.snapshot
+            .threads
+            .iter()
+            .map(|thread| {
+                let d = *depth.get(&thread.id).unwrap_or(&0);
+                let indent = if d == 0 {
+                    String::new()
+                } else {
+                    format!("{}⑃ ", "  ".repeat(d - 1))
+                };
+                let marker = if thread.running { "▶" } else { "●" };
+                let mut badges = Vec::new();
+                if thread.running_tasks > 0 {
+                    badges.push(format!("{} run", thread.running_tasks));
+                }
+                if thread.attention > 0 {
+                    badges.push(format!("{}⚠", thread.attention));
+                }
+                let badge = if badges.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {}", badges.join(" "))
+                };
+                let mut style = Style::default();
+                if thread.running {
+                    style = style.fg(Color::Yellow);
+                }
+                if thread.id == self.snapshot.active_thread_id {
+                    style = self.theme.selection();
+                }
+                TLine::from(Span::styled(
+                    format!(
+                        "{indent}{marker} {} · {}t{badge}",
+                        thread.name, thread.turns
+                    ),
+                    style,
+                ))
+            })
+            .collect()
+    }
+
+    /// Draw the threads strip above the lane list.
+    fn draw_thread_strip(&mut self, f: &mut Frame, area: Rect, threads: &[TLine<'static>]) {
+        let block = self.panel(format!("Threads · {}", threads.len()));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let capacity = (inner.height as usize).max(1);
+        let active = self.active_thread_idx();
+        let window_start = crate::ui::selection::viewport_start(active, threads.len(), capacity);
+        self.hit_threads = Some((inner, window_start));
+        let view: Vec<TLine> = threads
+            .iter()
+            .skip(window_start)
+            .take(capacity)
+            .cloned()
+            .collect();
+        f.render_widget(Paragraph::new(Text::from(view)), inner);
+    }
+
+    /// The composer's height: its caption row, the draft's lines, and the border.
+    pub(super) fn composer_height(&self) -> u16 {
+        (self.draft.text.split('\n').count() as u16).max(1) + 3
+    }
+
+    /// Draw the composer with a caption naming its target.
+    fn draw_agent_composer(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+        selected_task: &Option<TaskState>,
+        lane: Option<&AgentLane>,
+    ) {
+        let target = match selected_task
+            .as_ref()
+            .filter(|task| task.question_id.is_some())
+        {
+            Some(task) => format!("answering {}", task.task_id),
+            None => lane
+                .filter(|l| l.role != AgentRole::Orchestrator)
+                .map(|l| format!("{} · Enter still instructs the orchestrator", l.label))
+                .unwrap_or_else(|| "orchestrator".into()),
+        };
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area);
+        f.render_widget(
+            Paragraph::new(TLine::from(Span::styled(
+                format!(" › {target}"),
+                Style::default().add_modifier(Modifier::DIM),
+            ))),
+            rows[0],
+        );
+        self.draw_composer(f, rows[1]);
     }
 
     /// Format one Agents-list row (separator, "more", sub-task, or lane).

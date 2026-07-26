@@ -103,7 +103,7 @@ fn the_agents_tab_shows_where_the_selected_agent_runs() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Agents");
     // Walk off the orchestrator lane onto the placed roster agent.
-    let _ = app.on_event(key(KeyCode::Down));
+    let _ = app.on_event(alt_key(KeyCode::Down));
     let out = render(&mut app, 160, 40);
     assert!(
         out.contains("workshop") && out.contains("/srv/repos/medulla"),

@@ -26,8 +26,14 @@ use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 /// Trace, Context, and Feedback used to live here. They are secondary surfaces —
 /// two of them diagnostic — so they now sit under Settings, keeping the tab bar
 /// to the views a session is actually driven from.
-pub const TABS: [&str; 7] = [
-    "Overview", "Chat", "Agents", "Tasks", "Routing", "Memory", "Settings",
+///
+/// Chat used to live here too, and is now the Agents tab: talking to the
+/// orchestrator *is* selecting its lane and typing. Splitting them meant reading
+/// what an operation was doing on one tab and steering it on another, with two
+/// scroll positions and no way to answer an agent's question from where the
+/// question was visible.
+pub const TABS: [&str; 6] = [
+    "Overview", "Agents", "Tasks", "Routing", "Memory", "Settings",
 ];
 
 /// The Routing tab's left-nav pages.

@@ -38,7 +38,7 @@ fn chat_app() -> App {
         body: "branch, then commit".into(),
     });
     app.refresh_snapshot();
-    app.tab_index = TABS.iter().position(|t| *t == "Chat").unwrap();
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
     app
 }
 
@@ -61,7 +61,7 @@ fn copying_a_chat_reports_what_went_where() {
 fn copying_an_empty_chat_says_there_is_nothing_to_copy() {
     let rt = Arc::new(MockRuntime::empty());
     let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
-    app.tab_index = TABS.iter().position(|t| *t == "Chat").unwrap();
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
     app.on_event(ctrl('y'));
     assert!(app.status().contains("Nothing to copy"), "{}", app.status());
 }
@@ -102,7 +102,11 @@ fn an_empty_feedback_description_cancels_the_submission() {
 fn answering_with_no_task_selected_explains_itself() {
     let mut app = chat_app();
     app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
-    app.on_event(key(KeyCode::Char('A')));
+    // `Alt`+`A`: the bare key types into the composer now.
+    app.on_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('A'),
+        KeyModifiers::ALT,
+    )));
     assert!(
         app.status().contains("Select a task"),
         "points at what to do first: {}",

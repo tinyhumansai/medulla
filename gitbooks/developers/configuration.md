@@ -102,7 +102,7 @@ The socket path resolves as, highest first: the explicit `--core-socket <path>` 
 }
 ```
 
-The core runtime unlocks the Routing tab (fleet peer management) and task steering (`X` cancel task, `A` answer a pending question). It is **unix-only** (it rides a Unix domain socket). On Windows a `--core-socket` flag or `[core]` config section resolves to a startup note ("core runtime requires unix sockets — unavailable on Windows") and falls through to the normal backend→mock chain.
+The core runtime unlocks the Routing tab (host and fleet management) and task steering (`X` cancel task, `A` answer a pending question). It is **unix-only** (it rides a Unix domain socket). On Windows a `--core-socket` flag or `[core]` config section resolves to a startup note ("core runtime requires unix sockets — unavailable on Windows") and falls through to the normal backend→mock chain.
 
 ## Fleet
 

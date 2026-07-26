@@ -161,7 +161,7 @@ fn chat_renders_error_and_wrapped_turns() {
         message: "it broke".into(),
     });
     app.refresh_snapshot();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     // Render narrow to force wrapping across multiple rows.
     let out = render(&mut app, 60, 24);
     assert!(out.contains("cycle: it broke"), "error line renders");
@@ -175,7 +175,7 @@ fn chat_shows_thinking_spinner_with_and_without_calls() {
     let (mut app, rt) = empty_app();
     rt.set_running(true);
     app.refresh_snapshot();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     // No inference in flight → "working…".
     let out = render(&mut app, 120, 40);
     assert!(out.contains("working"), "idle-stream spinner: {out:.0}");
@@ -212,7 +212,7 @@ fn chat_thread_sidebar_shows_badges_and_indent() {
         question_id: Some("q".into()),
     });
     app.refresh_snapshot();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     let out = render(&mut app, 120, 40);
     assert!(out.contains("run"), "running-task badge");
     assert!(out.contains('⚠'), "attention badge");

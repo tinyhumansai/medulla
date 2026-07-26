@@ -374,6 +374,91 @@ fn synthesizes_a_workspace_from_a_probed_cwd() {
 }
 
 #[test]
+fn every_accessible_directory_becomes_a_workspace_not_just_the_cwd() {
+    // A machine with three repositories on it has three places work could go,
+    // and the orchestrator can only route by what is declared. Before this the
+    // `accessibleDirs` the hub forwards reached the backend and stopped there.
+    let (agents, capacity) = super::fleet::project_roster(&[roster_worker(json!({
+        "harness": "claude",
+        "capabilities": {
+            "cwd": "/srv/repos/medulla",
+            "project": "medulla",
+            "accessibleDirs": [
+                "/srv/repos/medulla",
+                "/srv/repos/backend",
+                "  ",
+                "/srv/repos/backend",
+                "/srv/repos/infra",
+            ],
+        },
+    }))]);
+
+    let paths: Vec<&str> = capacity
+        .workspaces
+        .iter()
+        .map(|w| w.path.as_str())
+        .collect();
+    // The cwd leads and is not repeated; blanks and duplicates are dropped.
+    assert_eq!(
+        paths,
+        vec![
+            "/srv/repos/medulla",
+            "/srv/repos/backend",
+            "/srv/repos/infra"
+        ]
+    );
+    assert!(capacity
+        .workspaces
+        .iter()
+        .all(|w| w.harness_id == capacity.harnesses[0].id));
+
+    // Only the cwd backs the agent's placement: that is where it actually runs.
+    assert_eq!(
+        agents[0].workspace_id.as_deref(),
+        Some(capacity.workspaces[0].id.as_str())
+    );
+    // The probe reports one `project`, describing the cwd. Claiming it for a
+    // sibling directory would be an invention.
+    assert_eq!(capacity.workspaces[0].project.as_deref(), Some("medulla"));
+    assert!(capacity.workspaces[1].project.is_none());
+    assert_eq!(capacity.workspaces[1].name, "backend");
+    // Ids stay distinct, or the chain would resolve two folders to one node.
+    assert_eq!(
+        capacity
+            .workspaces
+            .iter()
+            .map(|w| w.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn a_malformed_accessible_dirs_value_yields_no_extra_workspaces() {
+    // The probe is self-reported by a harness: untrusted input, not a contract.
+    let (_, capacity) = super::fleet::project_roster(&[roster_worker(json!({
+        "capabilities": { "cwd": "/srv/repo", "accessibleDirs": "not-an-array" },
+    }))]);
+    assert_eq!(capacity.workspaces.len(), 1);
+    assert_eq!(capacity.workspaces[0].path, "/srv/repo");
+}
+
+#[test]
+fn accessible_directories_are_declared_even_without_a_probed_cwd() {
+    // No cwd means no placement to walk up from, but the directories are still
+    // real capacity the orchestrator should be able to see.
+    let (agents, capacity) = super::fleet::project_roster(&[roster_worker(json!({
+        "capabilities": { "accessibleDirs": ["/srv/repos/one"] },
+    }))]);
+    assert_eq!(capacity.workspaces.len(), 1);
+    assert_eq!(capacity.workspaces[0].path, "/srv/repos/one");
+    // The agent still hangs off the host directly.
+    assert!(agents[0].workspace_id.is_none());
+    assert!(agents[0].host_id.is_some());
+}
+
+#[test]
 fn carries_budgets_onto_the_harness_and_gates_readiness_on_availability() {
     let (_, capacity) = super::fleet::project_roster(&[roster_worker(json!({
         "availability": "offline",

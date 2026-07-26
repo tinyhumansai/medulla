@@ -145,3 +145,50 @@ fn nothing_declared_anywhere_yields_no_rows() {
     let rows = workspace_rows(&HostSection::default(), "", &CapacitySnapshot::default());
     assert!(rows.is_empty());
 }
+
+#[test]
+fn the_same_path_on_two_hosts_is_two_places_to_send_work() {
+    // Container fleets make identical machine-local paths the norm. Collapsing
+    // them by path alone hid real capacity.
+    let mut capacity = fleet();
+    capacity.hosts.push(HostDescriptor {
+        id: "host-2".into(),
+        name: "builder".into(),
+        availability: "online".into(),
+        address: None,
+        resources: None,
+        metadata: Default::default(),
+    });
+    capacity.harnesses.push(HarnessDescriptor {
+        id: "harness-2".into(),
+        host_id: "host-2".into(),
+        kind: "codex".into(),
+        availability: "online".into(),
+        ready: true,
+        ready_reason: None,
+        providers: Vec::new(),
+        template_ids: Vec::new(),
+        budgets: Vec::new(),
+        metadata: Default::default(),
+    });
+    let mut twin = capacity.workspaces[0].clone();
+    twin.id = "ws-2".into();
+    twin.harness_id = "harness-2".into();
+    capacity.workspaces.push(twin);
+
+    let rows = workspace_rows(&HostSection::default(), "", &capacity);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    let hosts: Vec<Option<&str>> = rows.iter().map(|r| r.host.as_deref()).collect();
+    assert_eq!(hosts, vec![Some("workshop"), Some("builder")]);
+}
+
+#[test]
+fn a_remote_row_is_still_folded_into_a_local_one_at_the_same_path() {
+    // This device's own workspace, reported back through the fleet, genuinely is
+    // one directory seen twice — and the local row is the editable one.
+    let mut capacity = fleet();
+    capacity.workspaces[0].path = "/srv/primary".into();
+    let rows = workspace_rows(&HostSection::default(), "/srv/primary", &capacity);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].editable);
+}

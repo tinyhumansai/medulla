@@ -51,7 +51,7 @@ pub fn workspace_rows(
 
     for workspace in &capacity.workspaces {
         let path = workspace.path.trim();
-        if path.is_empty() || rows.iter().any(|r| r.path == path) {
+        if path.is_empty() {
             continue;
         }
         // Walk up to the machine so the row says *where*, not just *what*. A
@@ -62,6 +62,18 @@ pub fn workspace_rows(
             .and_then(|h| capacity.host(&h.host_id))
             .map(|h| h.name.clone())
             .or_else(|| harness.map(|h| h.host_id.clone()));
+        // Deduplicate by machine *and* path, not path alone. Paths are local to
+        // the machine that reported them, so `/workspace/repo` on two hosts is
+        // two distinct places to send work — collapsing them hides real capacity,
+        // and container fleets make identical paths the norm rather than a
+        // curiosity. A remote row is still folded into a local one at the same
+        // path, because that genuinely is one directory seen twice.
+        if rows
+            .iter()
+            .any(|r| r.path == path && (r.host.is_none() || r.host == host_name))
+        {
+            continue;
+        }
         let detail = workspace
             .profile
             .as_ref()

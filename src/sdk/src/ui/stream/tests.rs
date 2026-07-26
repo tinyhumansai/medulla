@@ -1,7 +1,6 @@
 //! Unit tests for the stream derivations.
 
 use super::*;
-use crate::runtime::ThreadSummary;
 use crate::ui::events::{EventEnvelope, TaskDigest, Usage};
 
 /// Build an envelope with a synthetic timestamp derived from `seq`.
@@ -34,18 +33,6 @@ fn end(tier: &str, model: Option<&str>, usage: Option<(i64, i64)>) -> TuiEvent {
         content: None,
         reasoning: None,
         tool_calls: None,
-    }
-}
-
-fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
-    ThreadSummary {
-        id: id.into(),
-        parent_id: parent.map(Into::into),
-        name: id.into(),
-        running: false,
-        turns: 0,
-        running_tasks: 0,
-        attention: 0,
     }
 }
 
@@ -115,23 +102,4 @@ fn observed_model_returns_most_recent_for_tier() {
     assert_eq!(observed_model(&events, "reasoning"), Some("new"));
     assert_eq!(observed_model(&events, "orchestrator"), Some("other"));
     assert_eq!(observed_model(&events, "compress"), None);
-}
-
-#[test]
-fn thread_depths_counts_hops_and_guards_cycles() {
-    let threads = vec![
-        thread("root", None),
-        thread("a", Some("root")),
-        thread("b", Some("a")),
-    ];
-    let depths = thread_depths(&threads);
-    assert_eq!(depths["root"], 0);
-    assert_eq!(depths["a"], 1);
-    assert_eq!(depths["b"], 2);
-
-    // A 2-node cycle must not loop forever; depth is bounded by the 32-hop guard.
-    let cyclic = vec![thread("x", Some("y")), thread("y", Some("x"))];
-    let d = thread_depths(&cyclic);
-    assert_eq!(d["x"], 32);
-    assert_eq!(d["y"], 32);
 }

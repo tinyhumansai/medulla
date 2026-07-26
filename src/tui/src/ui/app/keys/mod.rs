@@ -14,7 +14,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::types::{tab_pos, App, Cmd, TABS};
+use super::types::{App, Cmd, TABS};
 use crate::ui::command::CopyScope;
 use crate::ui::composer::{
     delete_before, edit_prompt, insert_at, move_caret_row, Draft, PromptAction,
@@ -119,30 +119,6 @@ impl App {
                     self.runtime.new_session();
                     self.refresh_snapshot();
                     self.set_status("Started a fresh conversation session");
-                    return None;
-                }
-                KeyCode::Char('f') => {
-                    self.fork_thread(None);
-                    if tab != "Agents" {
-                        self.tab_index = tab_pos("Agents");
-                    }
-                    return None;
-                }
-                KeyCode::Up | KeyCode::Down if tab == "Agents" => {
-                    let idx = self.active_thread_idx();
-                    let next = if matches!(k.code, KeyCode::Up) {
-                        idx.checked_sub(1)
-                    } else {
-                        Some(idx + 1)
-                    };
-                    if let Some(n) = next {
-                        if let Some(t) = self.snapshot.threads.get(n) {
-                            let id = t.id.clone();
-                            self.runtime.set_active_thread(id);
-                            self.chat_scroll = 0;
-                            self.refresh_snapshot();
-                        }
-                    }
                     return None;
                 }
                 _ => {}

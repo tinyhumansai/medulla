@@ -87,8 +87,6 @@ impl BackendRuntime {
             threads: vec![Thread::new("t1", "main", created.session_id)],
             active_id: "t1".into(),
             seq: 0,
-            next_thread: 2,
-            async_mode: false,
             roster: Vec::new(),
             capacity: Default::default(),
         }));
@@ -255,7 +253,6 @@ impl Runtime for BackendRuntime {
                     public_key: h.public_key().to_string(),
                     handle: None,
                 }),
-            async_mode: s.async_mode,
             threads,
             active_thread_id: s.active_id.clone(),
             harness: None,
@@ -345,55 +342,6 @@ impl Runtime for BackendRuntime {
         self.ping();
     }
 
-    fn fork(&self, name: Option<String>) -> String {
-        let new_id = {
-            let mut s = self.state.lock().unwrap();
-            let id = format!("t{}", s.next_thread);
-            s.next_thread += 1;
-            let (parent_id, messages, chat_events) = {
-                let active = s.active();
-                (
-                    active.id.clone(),
-                    active.messages.clone(),
-                    active.chat_events.clone(),
-                )
-            };
-            let mut child = Thread::new(
-                &id,
-                &name.unwrap_or_else(|| format!("fork {id}")),
-                String::new(),
-            );
-            child.parent_id = Some(parent_id);
-            // Copy the parent transcript locally; the backend has no fork, so the
-            // fresh session below starts empty and diverges from here on.
-            child.messages = messages;
-            child.events = chat_events.clone();
-            child.chat_events = chat_events;
-            s.threads.push(child);
-            s.active_id = id.clone();
-            id
-        };
-        let client = self.client.clone();
-        let state = self.state.clone();
-        let tx = self.tx.clone();
-        let thread_id = new_id.clone();
-        let profiles = self.workspace_profiles.clone();
-        tokio::spawn(async move {
-            if let Ok(created) = client.create_session_with(None, &profiles).await {
-                {
-                    let mut s = state.lock().unwrap();
-                    if let Some(t) = s.by_id(&thread_id) {
-                        t.session_id = created.session_id;
-                    }
-                }
-                start_stream_on(&client, &state, &tx, &thread_id, None);
-                let _ = tx.send(());
-            }
-        });
-        self.ping();
-        new_id
-    }
-
     fn set_active_thread(&self, id: String) {
         {
             let mut s = self.state.lock().unwrap();
@@ -473,15 +421,6 @@ impl Runtime for BackendRuntime {
             let _ = tx.send(());
             Ok(())
         })
-    }
-
-    fn set_async_mode(&self, on: bool) -> bool {
-        {
-            let mut s = self.state.lock().unwrap();
-            s.async_mode = on;
-        }
-        self.ping();
-        on
     }
 
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {

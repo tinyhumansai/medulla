@@ -41,15 +41,6 @@ fn every_tab_renders() {
 }
 
 #[test]
-fn header_shows_async_toggle() {
-    let mut a = app();
-    a.runtime.set_async_mode(true);
-    a.refresh_snapshot();
-    let out = render(&mut a);
-    assert!(out.contains("ASYNC ON"));
-}
-
-#[test]
 fn slash_help_switches_tab() {
     let mut a = app();
     a.tab_index = 1;

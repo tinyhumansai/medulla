@@ -32,19 +32,6 @@ fn slash_new_and_abort_and_clear_set_status() {
 }
 
 #[test]
-fn slash_fork_with_name_focuses_chat_and_names_thread() {
-    let (mut app, rt) = demo_app();
-    // Start from a non-Chat tab to prove the fork focuses Chat.
-    tab(&mut app, "Agents");
-    let _ = submit_line(&mut app, "/fork My Branch");
-    assert_eq!(app.tab(), "Agents");
-    assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
-    // The forked thread carried the (case-preserved) name.
-    let out = render(&mut app, 120, 40);
-    assert!(out.contains("My Branch"), "thread name should render");
-}
-
-#[test]
 fn slash_copy_last_and_bad_arg() {
     let (mut app, rt) = empty_app();
     rt.script_event(TuiEvent::Assistant {
@@ -74,21 +61,6 @@ fn slash_copy_last_without_reply_reports_nothing() {
     let _ = submit_line(&mut app, "/copy last");
     assert!(
         app.status().contains("No assistant reply"),
-        "status: {}",
-        app.status()
-    );
-}
-
-#[test]
-fn slash_async_explicit_on_off_and_bad_arg() {
-    let (mut app, _rt) = empty_app();
-    let _ = submit_line(&mut app, "/async on");
-    assert!(app.snapshot.async_mode);
-    let _ = submit_line(&mut app, "/async off");
-    assert!(!app.snapshot.async_mode);
-    let _ = submit_line(&mut app, "/async maybe");
-    assert!(
-        app.status().contains("Usage: /async"),
         "status: {}",
         app.status()
     );
@@ -175,26 +147,6 @@ fn control_chords_route() {
     let calls = rt.recorded_calls();
     assert!(calls.iter().any(|c| c == "abort"));
     assert!(calls.iter().any(|c| c == "new_session"));
-}
-
-#[test]
-fn ctrl_f_forks_and_focuses_chat() {
-    let (mut app, rt) = demo_app();
-    tab(&mut app, "Agents");
-    let _ = app.on_event(ctrl(KeyCode::Char('f')));
-    assert_eq!(app.tab(), "Agents");
-    assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
-}
-
-#[test]
-fn ctrl_updown_switches_threads_on_chat() {
-    let (mut app, rt) = demo_app();
-    rt.fork(Some("branch".into()));
-    app.refresh_snapshot();
-    tab(&mut app, "Agents");
-    let _ = app.on_event(ctrl(KeyCode::Up));
-    let _ = app.on_event(ctrl(KeyCode::Down));
-    assert!(rt.recorded_calls().iter().any(|c| c == "set_active_thread"));
 }
 
 // --- prompt-history recall on the composer ----------------------------------

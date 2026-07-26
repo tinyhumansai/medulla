@@ -26,7 +26,7 @@ impl SlashCommand {
 ///
 /// Returns `None` when `input` is not a slash command (no leading `/` after
 /// trimming) so the caller can treat it as a normal prompt. The command token is
-/// matched case-insensitively; free-text arguments (`/fork`, `/memory`) preserve
+/// matched case-insensitively; free-text arguments (`/memory`) preserve
 /// their original case, while flag arguments (`/copy`, `/async`) are matched
 /// case-insensitively. Unrecognized commands map to [`SlashCommand::Unknown`] and
 /// invalid arguments to [`SlashCommand::BadUsage`], so no input is silently
@@ -42,7 +42,6 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
     Some(match cmd.as_str() {
         "quit" | "q" => SlashCommand::Quit,
         "new" => SlashCommand::NewSession,
-        "fork" => SlashCommand::Fork(non_empty(arg)),
         "resume" => SlashCommand::Resume,
         "abort" => SlashCommand::Abort,
         "clear" => SlashCommand::ClearView,
@@ -57,12 +56,6 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
             "" | "all" => SlashCommand::Copy(CopyScope::All),
             "last" => SlashCommand::Copy(CopyScope::Last),
             _ => SlashCommand::BadUsage("Usage: /copy [all|last]"),
-        },
-        "async" => match flag.as_str() {
-            "" => SlashCommand::Async(None),
-            "on" => SlashCommand::Async(Some(true)),
-            "off" => SlashCommand::Async(Some(false)),
-            _ => SlashCommand::BadUsage("Usage: /async [on|off]"),
         },
         _ => SlashCommand::Unknown(input.trim().to_string()),
     })

@@ -23,8 +23,6 @@ pub(super) use crate::runtime::event_log::{CHAT_CAP, EVENT_CAP};
 pub(super) struct Thread {
     /// Stable local thread id (e.g. `t1`).
     pub(super) id: String,
-    /// The thread this one was forked from, if any.
-    pub(super) parent_id: Option<String>,
     /// Human-facing thread name.
     pub(super) name: String,
     /// Backend session id; empty while a session is being created.
@@ -50,7 +48,6 @@ impl Thread {
     pub(super) fn new(id: &str, name: &str, session_id: String) -> Self {
         Thread {
             id: id.to_string(),
-            parent_id: None,
             name: name.to_string(),
             session_id,
             messages: Vec::new(),
@@ -100,10 +97,6 @@ pub(super) struct State {
     pub(super) active_id: String,
     /// Monotonic local sequence counter assigned to every folded event.
     pub(super) seq: u64,
-    /// The next numeric suffix to hand out when forking a thread.
-    pub(super) next_thread: usize,
-    /// Local-only async toggle; see the module doc for why it is inert.
-    pub(super) async_mode: bool,
     /// The connected agent roster, refreshed from `GET /medulla/v1/roster`.
     /// Empty until the first refresh lands.
     pub(super) roster: Vec<crate::runtime::AgentDescriptor>,

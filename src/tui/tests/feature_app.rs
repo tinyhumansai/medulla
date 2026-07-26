@@ -189,16 +189,6 @@ fn slash_help_and_config_switch_tabs() {
 }
 
 #[test]
-fn slash_async_toggles_flag() {
-    let (mut app, _rt) = empty_app();
-    assert!(!app.snapshot.async_mode);
-    let _ = submit_line(&mut app, "/async");
-    assert!(app.snapshot.async_mode);
-    let _ = submit_line(&mut app, "/async");
-    assert!(!app.snapshot.async_mode);
-}
-
-#[test]
 fn slash_copy_empty_chat_reports_nothing_to_copy() {
     let (mut app, _rt) = empty_app();
     let _ = submit_line(&mut app, "/copy");
@@ -410,16 +400,6 @@ fn resume_picker_esc_closes_without_resuming() {
 }
 
 // --- 7. thread / fork UX ----------------------------------------------------
-
-#[test]
-fn ctrl_f_forks_thread_and_focuses_the_conversation() {
-    let (mut app, rt) = demo_app();
-    assert_eq!(app.snapshot.threads.len(), 1);
-    let _ = app.on_event(ctrl(KeyCode::Char('f')));
-    assert_eq!(app.tab(), "Agents", "fork should focus the conversation");
-    assert_eq!(app.snapshot.threads.len(), 2, "fork should add a thread");
-    assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
-}
 
 #[test]
 fn ctrl_up_down_switches_threads() {

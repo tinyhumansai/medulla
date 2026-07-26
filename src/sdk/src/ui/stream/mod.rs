@@ -14,9 +14,7 @@ mod tests;
 
 pub use types::{TierUsage, UsageFold};
 
-use crate::runtime::ThreadSummary;
 use crate::ui::events::{EventEnvelope, TuiEvent};
-use std::collections::HashMap;
 
 /// Fold the event log into per-tier and per-task token totals for the Usage tab.
 ///
@@ -82,31 +80,4 @@ pub fn observed_model<'a>(events: &'a [EventEnvelope], tier: &str) -> Option<&'a
         }
         _ => None,
     })
-}
-
-/// Compute each thread's nesting depth from the parent links in `threads`.
-///
-/// A root (no parent) has depth 0; every parent hop adds one. Walks are bounded
-/// at 32 hops so a malformed cycle in the parent chain cannot loop forever.
-pub fn thread_depths(threads: &[ThreadSummary]) -> HashMap<String, usize> {
-    let by_id: HashMap<&str, Option<&str>> = threads
-        .iter()
-        .map(|t| (t.id.as_str(), t.parent_id.as_deref()))
-        .collect();
-    let mut out = HashMap::new();
-    for t in threads {
-        let mut depth = 0;
-        let mut cur = t.parent_id.as_deref();
-        let mut guard = 0;
-        while let Some(p) = cur {
-            if guard >= 32 {
-                break;
-            }
-            depth += 1;
-            cur = by_id.get(p).copied().flatten();
-            guard += 1;
-        }
-        out.insert(t.id.clone(), depth);
-    }
-    out
 }

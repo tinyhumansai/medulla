@@ -28,7 +28,6 @@ pub(super) struct Thread {
     /// Stable thread id (e.g. `t1`).
     pub(super) id: String,
     /// Parent thread id when this thread was forked, else `None`.
-    pub(super) parent_id: Option<String>,
     /// Human-facing thread name.
     pub(super) name: String,
     /// Session id assigned to this thread.
@@ -69,8 +68,6 @@ pub(super) struct State {
     seq: u64,
     /// Monotonic cycle counter used to mint cycle ids.
     pub(super) cycle_seq: u64,
-    /// Whether async delegation mode is on.
-    pub(super) async_mode: bool,
     /// Whether tracing is enabled.
     pub(super) tracing: bool,
     /// The scripted agent roster.
@@ -250,7 +247,6 @@ impl MockRuntime {
         let state = State {
             threads: vec![Thread {
                 id: "t1".into(),
-                parent_id: None,
                 name: "main".into(),
                 session_id,
                 messages: Vec::new(),
@@ -261,7 +257,6 @@ impl MockRuntime {
             active_id: "t1".into(),
             seq: 0,
             cycle_seq: 0,
-            async_mode: false,
             tracing: false,
             roster: Vec::new(),
             capacity: Default::default(),
@@ -298,7 +293,6 @@ impl MockRuntime {
                 }
                 ThreadSummary {
                     id: t.id.clone(),
-                    parent_id: t.parent_id.clone(),
                     name: t.name.clone(),
                     running: t.running,
                     turns: t.messages.len().div_ceil(2),

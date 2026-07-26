@@ -59,9 +59,6 @@ impl Runtime for FleetRuntime {
     fn new_session(&self) {
         self.inner.new_session()
     }
-    fn fork(&self, name: Option<String>) -> String {
-        self.inner.fork(name)
-    }
     fn set_active_thread(&self, id: String) {
         self.inner.set_active_thread(id)
     }
@@ -70,9 +67,6 @@ impl Runtime for FleetRuntime {
     }
     fn resume_chat(&self, id: String) -> BoxFuture<'static, anyhow::Result<()>> {
         self.inner.resume_chat(id)
-    }
-    fn set_async_mode(&self, on: bool) -> bool {
-        self.inner.set_async_mode(on)
     }
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {
         self.inner.inspect_context()

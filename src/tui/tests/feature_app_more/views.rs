@@ -188,21 +188,6 @@ fn context_mouse_wheel_scrolls() {
 
 // --- mouse clicks: context row, chat thread, tab-bar into Context -----------
 
-#[test]
-fn click_chat_thread_switches_active() {
-    let (mut app, rt) = demo_app();
-    rt.fork(Some("branch".into()));
-    app.refresh_snapshot();
-    tab(&mut app, "Agents");
-    let _ = render(&mut app, 120, 40);
-    // Click rows inside the threads sidebar (left column, content starts ~row 3).
-    for y in 3..8u16 {
-        let _ = app.on_event(mouse(MouseEventKind::Down(MouseButton::Left), 3, y));
-    }
-    // The runtime recorded at least one active-thread switch.
-    assert!(rt.recorded_calls().iter().any(|c| c == "set_active_thread"));
-}
-
 // --- resume picker navigation -----------------------------------------------
 
 #[test]

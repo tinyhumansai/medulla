@@ -65,17 +65,6 @@ impl App {
                 }),
             )),
         ];
-        session.push(if self.snapshot.async_mode {
-            TLine::from(Span::styled(
-                "async ● on",
-                Style::default().fg(Color::Magenta),
-            ))
-        } else {
-            TLine::from(Span::styled(
-                "async ○ off",
-                Style::default().add_modifier(Modifier::DIM),
-            ))
-        });
         session.push(if self.snapshot.tracing {
             TLine::from(Span::styled(
                 "langfuse ● tracing",

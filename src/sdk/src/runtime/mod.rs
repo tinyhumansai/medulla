@@ -108,13 +108,9 @@ pub trait Runtime: Send + Sync {
     }
     fn abort(&self);
     fn new_session(&self);
-    /// Fork the active thread, inheriting its history but with a fresh session.
-    /// Returns the new thread id.
-    fn fork(&self, name: Option<String>) -> String;
     fn set_active_thread(&self, id: String);
     fn list_main_chats(&self) -> BoxFuture<'static, anyhow::Result<Vec<MainChatSummary>>>;
     fn resume_chat(&self, main_session_id: String) -> BoxFuture<'static, anyhow::Result<()>>;
-    fn set_async_mode(&self, on: bool) -> bool;
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>>;
     fn shutdown(&self) -> BoxFuture<'static, anyhow::Result<()>>;
 

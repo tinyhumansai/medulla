@@ -16,25 +16,6 @@ fn demo_snapshot_is_populated() {
     assert_eq!(snap.messages.len(), 2);
 }
 
-#[test]
-fn fork_inherits_history() {
-    let rt = MockRuntime::demo();
-    let before = rt.snapshot().messages.len();
-    let id = rt.fork(Some("branch".into()));
-    let snap = rt.snapshot();
-    assert_eq!(snap.active_thread_id, id);
-    assert_eq!(snap.messages.len(), before);
-    assert_eq!(snap.threads.len(), 2);
-}
-
-#[test]
-fn async_toggle_reflected() {
-    let rt = MockRuntime::empty();
-    assert!(!rt.snapshot().async_mode);
-    assert!(rt.set_async_mode(true));
-    assert!(rt.snapshot().async_mode);
-}
-
 #[tokio::test]
 async fn submit_appends_turns() {
     let rt = MockRuntime::empty();
@@ -91,13 +72,9 @@ fn new_session_clears_history_and_resets_id() {
 #[test]
 fn set_active_thread_ignores_unknown_ids() {
     let rt = MockRuntime::demo();
-    rt.fork(Some("branch".into()));
-    assert_eq!(rt.snapshot().active_thread_id, "t2");
+    assert_eq!(rt.snapshot().active_thread_id, "t1");
     // An unknown id is a no-op; the active thread stays put.
     rt.set_active_thread("nope".into());
-    assert_eq!(rt.snapshot().active_thread_id, "t2");
-    // A known id switches back.
-    rt.set_active_thread("t1".into());
     assert_eq!(rt.snapshot().active_thread_id, "t1");
 }
 
@@ -192,7 +169,7 @@ fn memory_surface_defaults_empty_and_is_scriptable() {
 fn subscribe_receives_a_ping_on_mutation() {
     let rt = MockRuntime::empty();
     let mut rx = rt.subscribe();
-    rt.set_async_mode(true);
+    rt.new_session();
     assert!(rx.try_recv().is_ok());
 }
 

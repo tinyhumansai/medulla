@@ -33,12 +33,7 @@ fn command_token_is_case_insensitive() {
 }
 
 #[test]
-fn fork_and_memory_preserve_argument_case() {
-    assert_eq!(
-        parse("/fork My Feature"),
-        Some(SlashCommand::Fork(Some("My Feature".into())))
-    );
-    assert_eq!(parse("/fork"), Some(SlashCommand::Fork(None)));
+fn memory_preserves_argument_case() {
     assert_eq!(
         parse("/memory Find The Thing"),
         Some(SlashCommand::Memory(Some("Find The Thing".into())))
@@ -56,17 +51,6 @@ fn copy_validates_scope() {
     assert_eq!(
         parse("/copy bogus"),
         Some(SlashCommand::BadUsage("Usage: /copy [all|last]"))
-    );
-}
-
-#[test]
-fn async_toggles_and_validates() {
-    assert_eq!(parse("/async"), Some(SlashCommand::Async(None)));
-    assert_eq!(parse("/async on"), Some(SlashCommand::Async(Some(true))));
-    assert_eq!(parse("/async OFF"), Some(SlashCommand::Async(Some(false))));
-    assert_eq!(
-        parse("/async maybe"),
-        Some(SlashCommand::BadUsage("Usage: /async [on|off]"))
     );
 }
 

@@ -12,7 +12,7 @@ capacity, meaning something that can be handed a task. A session is a
 conversation thread, meaning the durable history you return to.
 
 Workers are long-lived and shared across sessions. Sessions accumulate history
-and can be resumed, forked, and archived. A single instruction you type runs as
+and can be resumed and archived. A single instruction you type runs as
 one cycle against a session, and inside that cycle work fans out to workers.
 
 ## Workers
@@ -171,15 +171,10 @@ dropped.
 
 A session is the thread: its message history, the cycles that have run against
 it, and enough metadata to find it again. You can create one, list them, resume
-one, fork one, or archive it.
+one, resume one, or archive it.
 
-Forking is worth calling out. A fork starts a new thread that inherits the
-parent's history up to a point, then diverges. When an operation is about to go
-one of two ways and you want both, you fork rather than lose the setup.
-
-In the TUI, `/new` starts a fresh session, `/fork [name]` branches the current
-one, `/resume` picks an earlier thread, and `/abort` stops the running cycle.
-`Ctrl-N` is the shortcut for a new session.
+In the TUI, `/new` starts a fresh session, `/resume` picks an earlier one, and
+`/abort` stops the running cycle. `Ctrl-N` is the shortcut for a new session.
 
 ### What survives
 
@@ -201,13 +196,14 @@ resumable session in its original working directory.
 ### Steering mid-flight
 
 Sessions are not fire-and-forget. While a fleet is running you can correct the
-plan, answer a worker's question with `A`, or cancel a task with `X`, and the
-operation absorbs the change rather than restarting. This is what the multi-turn
-steering benchmarks in [Benchmarks](../benchmarks.md) measure.
+plan, answer an agent's question by selecting its lane and typing (or `Alt`+`A`
+for the prompt), or cancel a task with `Alt`+`X`, and the operation absorbs the
+change rather than restarting. This is what the multi-turn steering benchmarks in
+[Benchmarks](../benchmarks.md) measure.
 
-Work can also run detached, so a delegation returns immediately and the operation
-continues while you keep going, instead of blocking until the fan-out drains. The
-`/async` command toggles the default.
+Work runs detached: a delegation returns immediately and the operation continues
+while you keep going, rather than blocking until the fan-out drains. This is not
+a mode — it is how delegation works.
 
 ## What you see
 
@@ -232,7 +228,7 @@ shows that agent's own turns, and if it has raised a question, Enter answers it
 rather than starting a new cycle — you answer where the question appeared.
 Printable keys always type, so the shortcuts take a modifier: `Alt`+`↑↓` walks
 the rail, `Alt`+`X` cancels the selected task, `Alt`+`A` opens the answer prompt,
-`^F` forks, and `^↑↓` switches threads. There is deliberately no lane for
+and `^X` aborts the cycle. There is deliberately no lane for
 the layer between them: the orchestrator deploys 0..N concurrent managers per
 cycle, and what reaches this client is the orchestrator and the agents it is
 managing. A manager is how work was fanned out, not something you talk to or

@@ -233,16 +233,11 @@ async fn local_lifecycle_hooks_behave() {
     rt.submit("hi".into()).await.unwrap();
     assert!(wait_until(|| !rt.snapshot().messages.is_empty()).await);
 
-    // set_async_mode is a local echo.
-    assert!(rt.set_async_mode(true));
-    assert!(rt.snapshot().async_mode);
-
     // new_session clears the local transcript without touching serve.
     rt.new_session();
     assert!(rt.snapshot().messages.is_empty());
 
-    // fork returns the current session id; set_active_thread is inert.
-    assert_eq!(rt.fork(None), "agent");
+    // set_active_thread is inert: serve is one session per connection.
     rt.set_active_thread("whatever".into());
 
     // The no-op surfaces resolve cleanly.

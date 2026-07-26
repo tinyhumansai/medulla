@@ -20,9 +20,6 @@ pub enum SlashCommand {
     Quit,
     /// `/new` — start a fresh conversation session.
     NewSession,
-    /// `/fork [name]` — fork the current thread, optionally named (original case
-    /// preserved).
-    Fork(Option<String>),
     /// `/resume` — open the saved-chat picker.
     Resume,
     /// `/abort` — request cancellation of the running cycle.
@@ -46,8 +43,6 @@ pub enum SlashCommand {
     ToggleMouse,
     /// `/copy [all|last]` — copy the transcript at the given scope.
     Copy(CopyScope),
-    /// `/async [on|off]` — set async delegation mode; `None` toggles it.
-    Async(Option<bool>),
     /// A recognized command invoked with an invalid argument; carries the usage
     /// hint to surface.
     BadUsage(&'static str),

@@ -99,7 +99,6 @@ impl App {
             hit_tabs_row: 0,
             hit_agents: None,
             hit_context: None,
-            hit_threads: None,
             last_events_len: 0,
             tinyplace_obs: None,
             copy_capture: None,

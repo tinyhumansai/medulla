@@ -45,8 +45,8 @@ impl App {
             TLine::from("Ctrl-O / /mouse release the mouse to the terminal for native drag-select"),
             TLine::from(" "),
             TLine::from(Span::styled("Commands", bold)),
-            TLine::from("/new · /fork [name] · /resume · /abort · /clear · /config · /copy [all|last]"),
-            TLine::from("/usage · /settings · /theme · /memory [query] · /feedback · /mouse · /async [on|off]"),
+            TLine::from("/new · /resume · /abort · /clear · /config · /copy [all|last]"),
+            TLine::from("/usage · /settings · /theme · /memory [query] · /feedback · /mouse"),
             TLine::from("/help · /quit"),
         ];
         f.render_widget(

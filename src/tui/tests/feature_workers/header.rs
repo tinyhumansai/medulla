@@ -41,9 +41,6 @@ fn header_shows_stream_glyph_for_running_cycle() {
         fn new_session(&self) {
             self.0.new_session()
         }
-        fn fork(&self, name: Option<String>) -> String {
-            self.0.fork(name)
-        }
         fn set_active_thread(&self, id: String) {
             self.0.set_active_thread(id)
         }
@@ -52,9 +49,6 @@ fn header_shows_stream_glyph_for_running_cycle() {
         }
         fn resume_chat(&self, id: String) -> BoxFuture<'static, anyhow::Result<()>> {
             self.0.resume_chat(id)
-        }
-        fn set_async_mode(&self, on: bool) -> bool {
-            self.0.set_async_mode(on)
         }
         fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {
             self.0.inspect_context()

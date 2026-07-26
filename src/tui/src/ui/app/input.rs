@@ -1,7 +1,7 @@
 //! Event routing and pointer input for [`App`]: the top-level [`App::on_event`]
 //! dispatch, mouse scroll/click handling, tab hit-testing, and the small
-//! navigation helpers (agent-row movement, prompt-history recall, mouse toggle,
-//! thread fork). Keyboard handling proper lives in [`super::keys`].
+//! navigation helpers (rail movement, prompt-history recall, mouse toggle).
+//! Keyboard handling proper lives in [`super::keys`].
 
 use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
 
@@ -79,8 +79,6 @@ impl App {
         }
         let tab = self.tab();
         if tab == "Agents" {
-            // The rail stacks two hit-boxes — threads above lanes — so both are
-            // tried; an `else if` here left the threads strip unclickable.
             if let Some((rect, window_start)) = self.hit_agents {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
@@ -91,18 +89,6 @@ impl App {
                             self.agent_scroll = 0;
                             self.agent_index = idx;
                         }
-                    }
-                }
-            }
-            if let Some((rect, window_start)) = self.hit_threads {
-                if rect.contains((x, y).into()) {
-                    let rel = (y - rect.y) as usize;
-                    let idx = window_start + rel;
-                    if let Some(t) = self.snapshot.threads.get(idx) {
-                        let id = t.id.clone();
-                        self.runtime.set_active_thread(id);
-                        self.chat_scroll = 0;
-                        self.refresh_snapshot();
                     }
                 }
             }
@@ -199,14 +185,5 @@ impl App {
         } else {
             "Mouse released — native click-drag selection & copy restored"
         });
-    }
-
-    /// Fork the active thread (optionally named), reset chat scroll, and refresh.
-    pub(super) fn fork_thread(&mut self, name: Option<String>) {
-        let label = name.clone().unwrap_or_else(|| "new thread".into());
-        self.runtime.fork(name);
-        self.chat_scroll = 0;
-        self.refresh_snapshot();
-        self.set_status(format!("Forked → {label} (inherits history; fresh fleet)"));
     }
 }

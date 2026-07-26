@@ -193,8 +193,6 @@ pub(super) struct CoreState {
     pub(super) conn: ConnState,
     /// Whether a cycle is currently running (folded from cycle framing events).
     pub(super) running: bool,
-    /// Local async-mode toggle; inert server-side (no serve op backs it).
-    pub(super) async_mode: bool,
     /// Shared bounded event history and chat-visible projection.
     pub(super) event_log: ThreadEventLog,
     /// The rendered chat transcript.
@@ -231,7 +229,6 @@ impl CoreState {
             serve_version: None,
             conn: ConnState::Connecting,
             running: false,
-            async_mode: false,
             event_log: ThreadEventLog::default(),
             messages: Vec::new(),
             pending_user_echo: None,

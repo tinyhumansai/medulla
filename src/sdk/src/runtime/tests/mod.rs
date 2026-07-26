@@ -156,7 +156,6 @@ fn value_types_are_debug_clone_eq() {
 
     let thread = ThreadSummary {
         id: "t1".into(),
-        parent_id: None,
         name: "main".into(),
         running: false,
         turns: 2,
@@ -237,18 +236,12 @@ impl Runtime for BareRuntime {
     }
     fn abort(&self) {}
     fn new_session(&self) {}
-    fn fork(&self, _name: Option<String>) -> String {
-        String::new()
-    }
     fn set_active_thread(&self, _id: String) {}
     fn list_main_chats(&self) -> BoxFuture<'static, anyhow::Result<Vec<MainChatSummary>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
     fn resume_chat(&self, _main_session_id: String) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
-    }
-    fn set_async_mode(&self, _on: bool) -> bool {
-        false
     }
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {
         Box::pin(async { Ok(Vec::new()) })

@@ -474,7 +474,6 @@ pub struct App {
     pub(super) hit_tabs_row: u16,
     pub(super) hit_agents: Option<(Rect, usize)>,
     pub(super) hit_context: Option<Rect>,
-    pub(super) hit_threads: Option<(Rect, usize)>,
     pub(super) last_events_len: usize,
 
     // Test-only clipboard capture: when set, `copy_chat` records the copied text

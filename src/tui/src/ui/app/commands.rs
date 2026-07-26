@@ -326,10 +326,6 @@ impl App {
                 self.refresh_snapshot();
                 self.set_status("Started a fresh conversation session");
             }
-            SlashCommand::Fork(name) => {
-                self.fork_thread(name);
-                self.tab_index = tab_pos("Agents");
-            }
             SlashCommand::Resume => return Some(Cmd::ListChats),
             SlashCommand::Abort => {
                 self.runtime.abort();
@@ -373,16 +369,6 @@ impl App {
             }
             SlashCommand::ToggleMouse => self.toggle_mouse(),
             SlashCommand::Copy(scope) => self.copy_chat(scope),
-            SlashCommand::Async(setting) => {
-                let on = setting.unwrap_or(!self.snapshot.async_mode);
-                self.runtime.set_async_mode(on);
-                self.refresh_snapshot();
-                self.set_status(if on {
-                    "async ON — delegations detach; chat stays free while sub-agents work"
-                } else {
-                    "async OFF — delegations await their results before the reply"
-                });
-            }
             SlashCommand::BadUsage(usage) => self.set_status(usage),
             SlashCommand::Unknown(input) => self.set_status(format!("Unknown command: {input}")),
         }

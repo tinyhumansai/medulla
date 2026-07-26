@@ -12,12 +12,11 @@ use crate::client::{
     FeedbackComment, FeedbackDetail, FeedbackItem, FeedbackPage, FeedbackQuery, FeedbackSubmission,
     FeedbackType,
 };
-use crate::runtime::event_log::ThreadEventLog;
 use crate::runtime::{ContextItem, CycleResultSummary, Runtime, RuntimeSnapshot};
 use crate::ui::chat_store::{ChatMessage, MainChatSummary};
 use crate::ui::events::{TuiEvent, Usage};
 
-use super::types::{gen_id, now_millis, MockRuntime, Thread};
+use super::types::{gen_id, now_millis, MockRuntime};
 
 impl Runtime for MockRuntime {
     fn snapshot(&self) -> RuntimeSnapshot {
@@ -37,7 +36,6 @@ impl Runtime for MockRuntime {
             presence: s.presence.clone(),
             sessions: s.sessions.clone(),
             tinyplace: s.tinyplace.clone(),
-            async_mode: s.async_mode,
             threads,
             active_thread_id: s.active_id.clone(),
             harness: s.harness.clone(),
@@ -158,40 +156,6 @@ impl Runtime for MockRuntime {
         self.ping();
     }
 
-    fn fork(&self, name: Option<String>) -> String {
-        self.record("fork");
-        let id = {
-            let mut s = self.state.lock().unwrap();
-            let next = format!("t{}", s.threads.len() + 1);
-            let (parent_id, messages, chat_events) = {
-                let active = s.active();
-                (
-                    active.id.clone(),
-                    active.messages.clone(),
-                    active.chat_events.clone(),
-                )
-            };
-            let child = Thread {
-                id: next.clone(),
-                parent_id: Some(parent_id),
-                name: name.unwrap_or_else(|| format!("fork {next}")),
-                session_id: gen_id("tui"),
-                messages,
-                event_log: ThreadEventLog {
-                    events: chat_events.clone(),
-                    chat_events,
-                },
-                running: false,
-                last_result: None,
-            };
-            s.threads.push(child);
-            s.active_id = next.clone();
-            next
-        };
-        self.ping();
-        id
-    }
-
     fn set_active_thread(&self, id: String) {
         self.record("set_active_thread");
         {
@@ -289,16 +253,6 @@ impl Runtime for MockRuntime {
             let _ = tx.send(());
             Ok(())
         })
-    }
-
-    fn set_async_mode(&self, on: bool) -> bool {
-        self.record("set_async_mode");
-        {
-            let mut s = self.state.lock().unwrap();
-            s.async_mode = on;
-        }
-        self.ping();
-        on
     }
 
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {

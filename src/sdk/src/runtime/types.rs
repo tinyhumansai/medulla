@@ -58,7 +58,6 @@ pub struct PeerSession {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadSummary {
     pub id: String,
-    pub parent_id: Option<String>,
     pub name: String,
     pub running: bool,
     pub turns: usize,
@@ -226,7 +225,6 @@ pub struct RuntimeSnapshot {
     pub presence: HashMap<String, AgentPresence>,
     pub sessions: HashMap<String, Vec<PeerSession>>,
     pub tinyplace: Option<TinyplaceIdentity>,
-    pub async_mode: bool,
     pub threads: Vec<ThreadSummary>,
     pub active_thread_id: String,
     /// Latest agent-harness status, when the backing runtime fronts a medulla-v1

@@ -313,19 +313,6 @@ impl App {
             ),
             Span::raw("  "),
         ];
-        if self.snapshot.async_mode {
-            spans.push(Span::styled(
-                "⚡ ASYNC ON",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            spans.push(Span::styled(
-                "async off",
-                Style::default().add_modifier(Modifier::DIM),
-            ));
-        }
         if let Some(notice) = &self.update_notice {
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
@@ -386,9 +373,8 @@ impl App {
     /// Draw the footer hint line.
     pub(super) fn draw_footer(&mut self, f: &mut Frame, area: Rect) {
         let text = format!(
-            "Tab views · ↑↓ history/nav · ⇧⏎ newline · ^Y copy · ^F fork · ^↑↓ thread · ^X abort · ^O mouse {} · /async {} · /help",
+            "Tab views · ⌥↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^Y copy · ^↑↓ thread · ^X abort · ^O mouse {} · /help",
             if self.mouse_capture { "●" } else { "○" },
-            if self.snapshot.async_mode { "on" } else { "off" },
         );
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(

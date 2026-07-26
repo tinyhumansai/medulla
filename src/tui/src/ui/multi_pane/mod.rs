@@ -22,7 +22,11 @@ pub(crate) use types::NavAction;
 mod tests;
 
 /// Default width of the subpage navigation column.
-pub(crate) const NAV_WIDTH: u16 = 20;
+///
+/// The width includes both borders. Twenty-two columns leave enough room for
+/// the longest numbered entry, `3 Agent Templates`, without clipping its final
+/// character.
+pub(crate) const NAV_WIDTH: u16 = 22;
 
 /// Split an area into the standard subpage menu and content panes.
 pub(crate) fn split(area: Rect) -> (Rect, Rect) {

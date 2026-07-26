@@ -12,7 +12,7 @@ fn routing_nav_exposes_every_subpage() {
     for page in [
         "Hosts",
         "Harnesses",
-        "Agent Template",
+        "Agent Templates",
         "Add Host",
         "Strategies",
     ] {

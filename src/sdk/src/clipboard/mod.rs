@@ -85,6 +85,31 @@ pub fn copy_to_clipboard<F: FnMut(&str)>(text: &str, platform: &str, mut emit_os
     OSC_52.to_string()
 }
 
+/// Copy `text` to the clipboard of whoever is *looking at* this program, which
+/// is not always the machine running it.
+///
+/// [`copy_to_clipboard`] treats OSC 52 as a fallback, which is right when the
+/// program and the operator share a machine. It is wrong for anything a worker
+/// hands back over SSH: `pbcopy`/`xclip` would succeed on the remote box and
+/// quietly fill a clipboard nobody can paste from, and because they succeeded
+/// the escape would never be emitted. So here the escape goes out *first* and
+/// unconditionally, and a local writer is attempted afterwards only so a
+/// locally-run session still lands in a real clipboard.
+///
+/// Returns the local writer that also took it, if any — the terminal hand-off
+/// cannot be confirmed, so it is never reported as a completed copy.
+pub fn copy_for_operator<F: FnMut(&str)>(
+    text: &str,
+    platform: &str,
+    mut emit_osc: F,
+) -> Option<String> {
+    emit_osc(&osc52(text));
+    writers(platform)
+        .iter()
+        .find(|w| pipe_to(w.cmd, w.args, text))
+        .map(|w| w.cmd.to_string())
+}
+
 /// The current OS name for [`writers`] / [`copy_to_clipboard`].
 pub fn current_platform() -> &'static str {
     std::env::consts::OS

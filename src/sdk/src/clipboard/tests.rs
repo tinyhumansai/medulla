@@ -54,6 +54,27 @@ fn copy_to_clipboard_uses_spawn_path_when_writer_exists() {
 }
 
 #[test]
+fn the_operator_copy_always_reaches_the_terminal_first() {
+    // The whole point: on a box reached over SSH, a local writer succeeding
+    // must not stop the escape that reaches the operator's actual machine.
+    // `macos` is used because `pbcopy` may well exist on this developer
+    // machine — so the assertion holds whether or not a writer takes it.
+    let mut captured = String::new();
+    let _ = copy_for_operator("hello", "macos", |s| captured.push_str(s));
+    assert!(captured.contains("]52;c;"), "{captured:?}");
+    assert!(captured.contains("aGVsbG8="), "base64(hello): {captured:?}");
+}
+
+#[test]
+fn the_operator_copy_reports_only_a_writer_it_confirmed() {
+    // A bogus platform routes to the linux writer set, absent in CI. The
+    // terminal hand-off cannot be confirmed, so nothing is claimed.
+    let mut fired = false;
+    assert_eq!(copy_for_operator("x", "no-such-os", |_| fired = true), None);
+    assert!(fired);
+}
+
+#[test]
 fn current_platform_is_reported() {
     assert!(!current_platform().is_empty());
 }

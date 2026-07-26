@@ -316,7 +316,10 @@ impl WorkerApp {
             self.set_status("Copied this worker's address (captured)");
             return;
         }
-        let via = crate::ui::clipboard::copy_to_clipboard(
+        // Via the terminal first: a worker is usually a machine reached over
+        // SSH, and the operator's clipboard is on the near side of that
+        // connection. See [`medulla::clipboard::copy_for_operator`].
+        crate::ui::clipboard::copy_for_operator(
             &address,
             crate::ui::clipboard::current_platform(),
             |osc| {
@@ -325,11 +328,7 @@ impl WorkerApp {
                 let _ = std::io::stdout().flush();
             },
         );
-        self.set_status(if via == crate::ui::clipboard::OSC_52 {
-            "Sent this worker's address to the terminal (OSC 52) — check your clipboard"
-        } else {
-            "Copied this worker's address — add it as a worker in the orchestrator"
-        });
+        self.set_status("Copied this worker's address — paste it into Routing › Add Host");
     }
 
     /// Whether this worker runs tasks headlessly.

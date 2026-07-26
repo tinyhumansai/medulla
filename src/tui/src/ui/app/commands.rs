@@ -183,6 +183,10 @@ impl App {
                     None
                 }
             },
+            PromptKind::WorkspaceAdd => {
+                self.add_workspace(&text);
+                None
+            }
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text));

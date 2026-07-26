@@ -42,15 +42,18 @@ pub const TABS: [&str; 6] = [
 /// registers and steers by hand; `Harnesses` is the runtime level, which is
 /// where credentials live — a subscription or an API key is a property of the
 /// CLI runtime that spends it, not of the machine it happens to sit on;
-/// `Agent Templates` is the catalog of what may be provisioned onto any of it.
-/// `Add Host` and `Strategies` are the two actions that belong to no level.
+/// `Workspaces` is the folder level, which is what the orchestrator actually
+/// reasons about — a machine is capacity, a directory is *work*; `Agent
+/// Templates` is the catalog of what may be provisioned onto any of it. `Add
+/// Host` and `Strategies` are the two actions that belong to no level.
 ///
 /// There is no `Fleet` page: the whole declared tree lives in the Agents rail,
 /// beside the lanes running on it. These pages are the *management* surfaces —
 /// what you register, authenticate, and choose — not the picture.
-pub const ROUTING_SUBPAGES: [&str; 5] = [
+pub const ROUTING_SUBPAGES: [&str; 6] = [
     "Hosts",
     "Harnesses",
+    "Workspaces",
     "Agent Templates",
     "Add Host",
     "Strategies",
@@ -58,9 +61,10 @@ pub const ROUTING_SUBPAGES: [&str; 5] = [
 
 pub(super) const RP_HOSTS: usize = 0;
 pub(super) const RP_HARNESSES: usize = 1;
-pub(super) const RP_TEMPLATES: usize = 2;
-pub(super) const RP_ADD_HOST: usize = 3;
-pub(super) const RP_STRATEGIES: usize = 4;
+pub(super) const RP_WORKSPACES: usize = 2;
+pub(super) const RP_TEMPLATES: usize = 3;
+pub(super) const RP_ADD_HOST: usize = 4;
+pub(super) const RP_STRATEGIES: usize = 5;
 
 /// The Tasks tab's left-nav pages.
 pub const TASKS_SUBPAGES: [&str; 2] = ["All Tasks", "Sources"];
@@ -313,6 +317,8 @@ pub(super) enum PromptKind {
     HostAdd,
     /// Edit the label of the worker with the given id.
     HostEditLabel(String),
+    /// Declare another directory this device may work in.
+    WorkspaceAdd,
     /// Answer a pending sub-agent question.
     AnswerQuestion {
         /// The cycle the question belongs to.
@@ -431,6 +437,8 @@ pub struct App {
     pub(super) command_index: usize,
     /// Selected row on the Routing Hosts page.
     pub(super) host_index: usize,
+    /// Selected row on the Routing Workspaces page.
+    pub(super) workspace_index: usize,
     /// Selected row on the Routing Agent Templates page.
     pub(super) template_index: usize,
     /// Scroll offset inside the open agent-template popup.

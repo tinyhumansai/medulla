@@ -48,7 +48,7 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
     assert!(app.on_event(key(KeyCode::Esc)).is_none());
     assert!(!app.routing_focused());
 
-    assert!(app.on_event(key(KeyCode::Char('5'))).is_none());
+    assert!(app.on_event(key(KeyCode::Char('6'))).is_none());
     assert_eq!(app.routing_subpage(), "Strategies");
     assert!(app.routing_focused());
 }

@@ -61,6 +61,7 @@ impl App {
             contexts: Vec::new(),
             context_index: 0,
             agent_index: 0,
+            agents_focus: super::types::AgentsFocus::default(),
             agent_scroll: 0,
             chat_scroll: 0,
             command_index: 0,
@@ -219,6 +220,11 @@ impl App {
     /// The current update banner text, if any. Test/inspection seam.
     pub fn update_notice(&self) -> Option<&str> {
         self.update_notice.as_deref()
+    }
+
+    /// Where the Agents rail cursor is. Test/inspection seam.
+    pub fn agent_index(&self) -> usize {
+        self.agent_index
     }
 
     /// The current composer draft text. Test/inspection seam.

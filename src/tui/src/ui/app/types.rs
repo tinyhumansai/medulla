@@ -185,6 +185,27 @@ pub(super) fn tab_pos(name: &str) -> usize {
     TABS.iter().position(|t| *t == name).unwrap_or(0)
 }
 
+/// Which half of the Agents tab the keyboard is driving.
+///
+/// The tab merges a list (the rail) with a text input (the composer), and a
+/// terminal has one keyboard for both. Typing has to work the instant the tab
+/// opens — that is the point of folding chat in here — so the composer holds
+/// focus by default and the bare arrows belong to the caret.
+///
+/// That left the rail reachable only by `Alt`+`↑`/`↓`, which most macOS
+/// terminals do not send at all unless the user has rebound the Option key.
+/// Focus is therefore explicit and movable, matching the menu/content model
+/// Settings and Routing already use: `Esc` steps out to the rail, `Enter` (or
+/// simply typing) steps back in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentsFocus {
+    /// The composer has the keyboard: arrows move the caret, Enter submits.
+    #[default]
+    Composer,
+    /// The rail has the keyboard: arrows walk the rows, Enter returns below.
+    Rail,
+}
+
 /// An async action the event loop must run on the app's behalf.
 #[derive(Debug)]
 pub enum Cmd {
@@ -402,6 +423,8 @@ pub struct App {
     pub(super) contexts: Vec<ContextItem>,
     pub(super) context_index: usize,
     pub(super) agent_index: usize,
+    /// Which half of the Agents tab the keyboard is driving.
+    pub(super) agents_focus: AgentsFocus,
     pub(super) agent_scroll: usize,
     pub(super) chat_scroll: usize,
     /// Selected row in the command peek, while it is open.

@@ -55,7 +55,9 @@ impl App {
         } else {
             format!("Agents · {agents}")
         };
-        let block = self.panel(title);
+        // The border says which half the keyboard is driving. Without it, Esc
+        // moving focus to the rail is invisible until the next arrow press.
+        let block = crate::ui::widgets::panel(&self.theme, title, self.agents_rail_focused());
         let inner = block.inner(panes.rail);
         f.render_widget(block, panes.rail);
 

@@ -25,14 +25,22 @@ impl App {
     }
 
     /// Draw the Chat composer with its caret-highlighted draft lines.
+    ///
+    /// The caret is drawn solid only while the composer holds the keyboard. When
+    /// focus has stepped out to the rail a reversed block would still read as
+    /// "your typing goes here", which is exactly the thing that is no longer
+    /// true — two visible carets and no way to tell which one is live.
     pub(super) fn draw_composer(&mut self, f: &mut Frame, area: Rect) {
+        let focused = !self.agents_rail_focused();
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(if self.snapshot.running {
                 Color::Yellow
-            } else {
+            } else if focused {
                 self.theme.primary
+            } else {
+                self.theme.dim_border
             }));
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -55,7 +63,11 @@ impl App {
                 spans.push(Span::raw(before));
                 spans.push(Span::styled(
                     at,
-                    Style::default().add_modifier(Modifier::REVERSED),
+                    if focused {
+                        Style::default().add_modifier(Modifier::REVERSED)
+                    } else {
+                        Style::default().add_modifier(Modifier::DIM)
+                    },
                 ));
                 spans.push(Span::raw(after));
             } else {

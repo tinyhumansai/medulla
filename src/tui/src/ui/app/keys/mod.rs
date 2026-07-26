@@ -20,11 +20,13 @@ use crate::ui::composer::{
     delete_before, edit_prompt, insert_at, move_caret_row, Draft, PromptAction,
 };
 
+mod agents;
 mod memory;
 mod routing;
 mod settings;
 mod tasks;
 
+use agents::AgentsKey;
 use memory::MemoryKey;
 use routing::RoutingKey;
 use settings::SettingsKey;
@@ -194,6 +196,15 @@ impl App {
             }
         }
 
+        // The rail claims the bare arrows while it holds focus. Placed after the
+        // global chords and the command peek so neither is shadowed, and before
+        // the composer bindings, which otherwise take every arrow and character.
+        if tab == "Agents" {
+            if let AgentsKey::Handled(cmd) = self.on_agents_rail_key(k) {
+                return cmd;
+            }
+        }
+
         match k.code {
             KeyCode::Char('E') if tab == "Overview" => {
                 self.open_decisions();
@@ -260,8 +271,16 @@ impl App {
                 self.draft = delete_before(&self.draft.text, self.draft.cursor);
                 self.command_index = 0;
             }
+            // Esc clears a draft first — that is the destructive-looking action
+            // and must stay one keypress away from a half-typed message. With
+            // nothing to clear it steps out to the rail, which is how a keyboard
+            // reaches the lane list on a terminal that cannot send Alt+Arrow.
             KeyCode::Esc if tab == "Agents" => {
-                self.draft = Draft::new();
+                if self.draft.text.is_empty() {
+                    self.focus_agents_rail();
+                } else {
+                    self.draft = Draft::new();
+                }
             }
             KeyCode::Left if tab == "Agents" => {
                 self.draft.cursor = self.draft.cursor.saturating_sub(1);

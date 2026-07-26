@@ -97,12 +97,21 @@ impl App {
             if let Some((rect, window_start)) = self.hit_agents {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
-                    let rows = self.agent_rows();
+                    // The *rail's* rows, not the lane rows: the rail also holds
+                    // the dividers, the declared fleet, and the template
+                    // catalog, and `agent_index` indexes all of it. Reading the
+                    // shorter list here meant every click below the lanes fell
+                    // off the end and silently did nothing.
+                    let rows = self.rail_rows();
                     let idx = window_start + rel;
                     if let Some(row) = rows.get(idx) {
                         if row.selectable() {
                             self.agent_scroll = 0;
+                            self.chat_scroll = 0;
                             self.agent_index = idx;
+                            // A click is a focus gesture: the arrows should now
+                            // continue from the row that was just picked.
+                            self.focus_agents_rail();
                         }
                     }
                 }

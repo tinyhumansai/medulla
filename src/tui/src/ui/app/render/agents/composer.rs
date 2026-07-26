@@ -64,9 +64,18 @@ impl App {
             ])
             .split(area);
         self.draw_command_peek(f, rows[0]);
+        // The caption doubles as the only place the focus keys are written down.
+        // Alt+Arrow is documented in the status bar and Help, but a terminal
+        // that cannot send it leaves the rail unreachable, so the key that
+        // always works is named right where the cursor is.
+        let caption = if self.agents_rail_focused() {
+            "↑↓ walk agents · Enter or type to write".to_string()
+        } else {
+            format!("› {target}   ·  Esc to pick an agent")
+        };
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(
-                format!(" › {target}"),
+                format!(" {caption}"),
                 Style::default().add_modifier(Modifier::DIM),
             ))),
             rows[1],

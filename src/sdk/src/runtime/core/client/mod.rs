@@ -41,6 +41,9 @@ impl CoreRuntime {
 
     /// Attach while declaring the manager placement graph, static roster, and
     /// agent-template catalog exposed by this client.
+    ///
+    /// Must be called from within a Tokio runtime because it immediately spawns
+    /// the background connection driver.
     pub fn attach_with_declarations(socket_path: PathBuf, declarations: CoreDeclarations) -> Self {
         let state = Arc::new(Mutex::new(CoreState::new()));
         let declarations = Arc::new(declarations);

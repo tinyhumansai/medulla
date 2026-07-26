@@ -191,6 +191,23 @@ fn program_task_patch_distinguishes_omitted_and_cleared_recurrence() {
 }
 
 #[tokio::test]
+async fn program_resource_ids_are_encoded_as_single_path_segments() {
+    let (base, req) =
+        spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", json!({ "deleted": true }))).await;
+    let client = MedullaClient::new(base, "jwt");
+    assert!(client.delete_program_task("task/with?#").await.unwrap());
+    assert!(req
+        .await
+        .unwrap()
+        .starts_with("DELETE /medulla/v1/tasks/task%2Fwith%3F%23 "),);
+
+    assert_eq!(
+        super::super::urlencode("source/with?#"),
+        "source%2Fwith%3F%23"
+    );
+}
+
+#[tokio::test]
 async fn program_source_sync_surfaces_nonfatal_provider_errors() {
     let data = json!({
         "result": {

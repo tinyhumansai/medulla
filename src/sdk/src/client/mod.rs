@@ -10,6 +10,7 @@
 
 pub mod error;
 pub mod feedback;
+mod program;
 pub mod sse;
 pub mod types;
 
@@ -18,6 +19,7 @@ pub use feedback::{
     FeedbackComment, FeedbackDetail, FeedbackGithub, FeedbackItem, FeedbackPage, FeedbackQuery,
     FeedbackSort, FeedbackStatus, FeedbackSubmission, FeedbackType,
 };
+pub use program::*;
 pub use types::*;
 
 use futures::stream::Stream;
@@ -362,6 +364,7 @@ impl MedullaClient {
         task_id: &str,
         patch: UpdateProgramTask,
     ) -> Result<ProgramTask> {
+        let task_id = urlencode(task_id);
         let req = self
             .authed(
                 self.http
@@ -374,6 +377,7 @@ impl MedullaClient {
 
     /// Delete an operator-owned program task (`DELETE /medulla/v1/tasks/:id`).
     pub async fn delete_program_task(&self, task_id: &str) -> Result<bool> {
+        let task_id = urlencode(task_id);
         let req = self.authed(
             self.http
                 .delete(self.url(&format!("/medulla/v1/tasks/{task_id}"))),
@@ -406,6 +410,7 @@ impl MedullaClient {
 
     /// Synchronize one GitHub source into the task ledger.
     pub async fn sync_program_task_source(&self, source_id: &str) -> Result<TaskSourceSyncResult> {
+        let source_id = urlencode(source_id);
         let req = self.authed(
             self.http
                 .post(self.url(&format!("/medulla/v1/tasks/sources/{source_id}/sync"))),
@@ -416,6 +421,7 @@ impl MedullaClient {
 
     /// Remove a configured GitHub task source.
     pub async fn delete_program_task_source(&self, source_id: &str) -> Result<bool> {
+        let source_id = urlencode(source_id);
         let req = self.authed(
             self.http
                 .delete(self.url(&format!("/medulla/v1/tasks/sources/{source_id}"))),

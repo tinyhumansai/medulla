@@ -1,4 +1,4 @@
-//! Public models for the worker roster and operator-owned task program APIs.
+//! Wire models for the worker roster and operator-owned task program APIs.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -1,7 +1,18 @@
-//! The event-stream fold: turn the flat event log into one lane per cognitive
-//! tier plus one lane per connected roster agent / anonymous task / peer session.
+//! The event-stream fold: turn the flat event log into the orchestrator lane
+//! plus one lane per connected roster agent / anonymous task / peer session.
 //! A port of the TS `deriveAgentLanes` essentials. Owns [`derive_agent_lanes`]
 //! and the private lane-collection machinery it drives.
+//!
+//! **The reasoning tier is not a lane.** Since the manager refactor the tier
+//! between the orchestrator and a harness task is 0..N concurrent *managers*,
+//! and the backend deliberately does not stream them: what reaches this client
+//! is the orchestrator and the agents it is managing. A manager is an
+//! implementation detail of how the orchestrator fanned work out, not a
+//! participant the operator talks to or steers, and rendering one lane labelled
+//! "reasoning" for N of them described the pre-4.0.0 topology anyway. Inference
+//! turns on the `reasoning` and `compress` tiers are therefore dropped here
+//! rather than folded into a lane nothing feeds. They remain visible verbatim
+//! under Settings › Trace, which is where a hidden layer belongs.
 
 use std::collections::HashMap;
 
@@ -92,12 +103,11 @@ pub fn derive_agent_lanes(
     harness: &str,
     roster: &[AgentDescriptor],
 ) -> Vec<AgentLane> {
-    // Tier accumulators, in fixed order.
-    let mut tier_turns: [(AgentRole, &str, Vec<TurnBlock>); 3] = [
-        (AgentRole::Orchestrator, "orchestrator", Vec::new()),
-        (AgentRole::Reasoning, "reasoning", Vec::new()),
-        (AgentRole::Compress, "summarizer", Vec::new()),
-    ];
+    // Tier accumulators. Only the orchestrator gets one: the manager tier and
+    // the compress function are deliberately hidden from this view (see the
+    // module doc), so their inference turns are folded nowhere.
+    let mut tier_turns: [(AgentRole, &str, Vec<TurnBlock>); 1] =
+        [(AgentRole::Orchestrator, "orchestrator", Vec::new())];
     let mut tier_tokens: HashMap<usize, i64> = HashMap::new();
     let mut workers = Lanes::new();
     let mut task_agent: HashMap<String, String> = HashMap::new();
@@ -124,11 +134,10 @@ pub fn derive_agent_lanes(
         workers.insert(lane);
     }
 
+    // `None` for every hidden tier, which drops that inference turn.
     let tier_index = |role: &str| -> Option<usize> {
         match role {
             "orchestrator" => Some(0),
-            "reasoning" => Some(1),
-            "compress" => Some(2),
             _ => None,
         }
     };

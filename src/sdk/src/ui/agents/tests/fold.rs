@@ -6,22 +6,21 @@ use crate::ui::agents::*;
 use crate::ui::events::{TaskDigest, TuiEvent, Usage};
 
 #[test]
-fn tier_lanes_always_present_in_order() {
+fn the_orchestrator_is_the_only_tier_lane() {
     let lanes = derive_agent_lanes(&[], "OPENCODE", &[]);
-    // orchestrator, reasoning first; summarizer (function) last.
-    assert_eq!(lanes.len(), 3);
+    // The manager tier and the compress function are hidden: the backend
+    // streams the orchestrator and the agents it manages, nothing between.
+    assert_eq!(lanes.len(), 1);
     assert_eq!(lanes[0].label, "orchestrator");
-    assert_eq!(lanes[1].label, "reasoning");
-    assert_eq!(lanes[2].label, "summarizer");
-    assert!(lanes[2].role.is_function());
+    assert_eq!(lanes[0].role, AgentRole::Orchestrator);
 }
 
 #[test]
-fn inference_end_folds_into_tier() {
+fn inference_end_folds_into_the_orchestrator_tier() {
     let events = vec![env(
         1,
         TuiEvent::InferenceEnd {
-            tier: "reasoning".into(),
+            tier: "orchestrator".into(),
             op: "execute_step".into(),
             model: Some("gpt".into()),
             duration_ms: 42,
@@ -35,12 +34,32 @@ fn inference_end_folds_into_tier() {
         },
     )];
     let lanes = derive_agent_lanes(&events, "", &[]);
-    let reasoning = &lanes[1];
-    assert_eq!(reasoning.turns.len(), 1);
-    assert!(reasoning.turns[0]
+    let orchestrator = &lanes[0];
+    assert_eq!(orchestrator.turns.len(), 1);
+    assert!(orchestrator.turns[0]
         .header
         .contains("execute_step · gpt · 42ms"));
-    assert_eq!(reasoning.context_tokens, Some(100));
+    assert_eq!(orchestrator.context_tokens, Some(100));
+}
+
+#[test]
+fn a_manager_turn_is_dropped_rather_than_given_a_lane() {
+    let events = vec![env(
+        1,
+        TuiEvent::InferenceEnd {
+            tier: "reasoning".into(),
+            op: "execute_step".into(),
+            model: None,
+            duration_ms: 5,
+            usage: None,
+            content: Some("planning".into()),
+            reasoning: None,
+            tool_calls: None,
+        },
+    )];
+    let lanes = derive_agent_lanes(&events, "", &[]);
+    assert_eq!(lanes.len(), 1);
+    assert!(lanes[0].turns.is_empty(), "the manager tier has no lane");
 }
 
 #[test]
@@ -134,8 +153,8 @@ fn agent_lane_stacks_tasks_with_row_model() {
         .count();
     assert_eq!(subs, 8);
     assert_eq!(more, 1);
-    // The functions divider precedes the summarizer.
-    assert!(rows.iter().any(|r| matches!(r, AgentRow::Separator)));
+    // No function lane is produced any more, so no divider is either.
+    assert!(!rows.iter().any(|r| matches!(r, AgentRow::Separator)));
 }
 
 #[test]

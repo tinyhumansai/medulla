@@ -15,7 +15,7 @@ use rust_socketio::{Event, Payload};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::roster::{address_of, register_payload, SharedRoster};
+use super::roster::{address_of, register_payload, SharedRoster, SharedSubscriptionStrategy};
 use super::runner::TaskRunner;
 use super::types::{RunError, TaskRequest};
 
@@ -70,6 +70,7 @@ pub async fn connect_harness(
     jwt: &str,
     roster: SharedRoster,
     runner: Arc<TaskRunner>,
+    subscription_strategy: SharedSubscriptionStrategy,
     log: super::types::HubLog,
     activity: Option<super::ActivityLog>,
 ) -> anyhow::Result<Client> {
@@ -81,6 +82,7 @@ pub async fn connect_harness(
     let cap_runner = runner.clone();
     let abort_runner = runner.clone();
     let abort_log = log.clone();
+    let run_subscription_strategy = subscription_strategy.clone();
 
     let client = ClientBuilder::new(backend_url.to_string())
         .auth(json!({ "token": jwt }))
@@ -104,12 +106,14 @@ pub async fn connect_harness(
             let runner = runner.clone();
             let roster = run_roster.clone();
             let run_activity = run_activity.clone();
+            let subscription_strategy = run_subscription_strategy.clone();
             async move {
                 tokio::spawn(handle_task_run(
                     payload,
                     socket,
                     runner,
                     roster,
+                    subscription_strategy,
                     run_log,
                     run_activity,
                 ));
@@ -182,6 +186,7 @@ async fn handle_task_run(
     socket: Client,
     runner: Arc<TaskRunner>,
     roster: SharedRoster,
+    subscription_strategy: SharedSubscriptionStrategy,
     log: super::types::HubLog,
     activity: Option<super::ActivityLog>,
 ) {
@@ -194,6 +199,10 @@ async fn handle_task_run(
     let instruction = str_field(&obj, "instruction").unwrap_or_default();
     let cycle_id = str_field(&obj, "cycleId");
     let agent_id = str_field(&obj, "agentId").unwrap_or_default();
+    let requested_provider = str_field(&obj, "provider")
+        .as_deref()
+        .and_then(crate::tinyplace::HarnessProvider::from_wire);
+    let model = str_field(&obj, "model");
     // The frame's own `timeoutMs` is deliberately ignored: that is the BACKEND's
     // task deadline, and the backend now enforces it (aborting a running task via
     // `medulla:task_abort`, which the hub relays). The hub owns no task deadline —
@@ -234,6 +243,28 @@ async fn handle_task_run(
             )
             .await;
         return;
+    };
+
+    // An explicit provider is authoritative. Only an untargeted task consults
+    // the subscription strategy, and a failed/unknown budget probe falls open
+    // to the daemon's own configured default.
+    let provider = match requested_provider {
+        Some(provider) => Some(provider),
+        None => {
+            let strategy = *subscription_strategy
+                .lock()
+                .expect("subscription strategy lock");
+            if strategy == crate::runtime::SubscriptionRoutingStrategy::Manual {
+                None
+            } else {
+                match runner.capabilities(&worker_address).await {
+                    Ok(capabilities) => {
+                        super::roster::subscription_for_strategy(&capabilities, strategy)
+                    }
+                    Err(_) => None,
+                }
+            }
+        }
     };
 
     let wire_task_id = wire_task_id(&task_id);
@@ -285,8 +316,8 @@ async fn handle_task_run(
         cycle_id,
         instruction,
         worker_address,
-        provider: None,
-        model: None,
+        provider,
+        model,
     };
 
     let outcome = runner.run(req, Some(tx)).await;

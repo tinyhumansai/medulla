@@ -223,6 +223,10 @@ pub enum WorkerOp {
     ApplyStrategy {
         strategy: RoutingStrategy,
     },
+    /// Choose provider subscriptions independently from host resources.
+    ApplySubscriptionStrategy {
+        strategy: SubscriptionRoutingStrategy,
+    },
 }
 /// The event stream's health, surfaced in the header when a cycle runs under the
 /// core runtime (§01 "lossy-but-not-silently").

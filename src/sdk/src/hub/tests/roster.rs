@@ -5,10 +5,13 @@
 //! and a tiny.place address, so these pin the resolution rules rather than the
 //! transport — dispatch itself is covered in [`super::super::dispatch`].
 
-use super::super::roster::worker_for_strategy;
 use super::super::roster::{address_of, register_payload, HubWorker};
-use crate::runtime::RoutingStrategy;
-use crate::tinyplace::WorkerSystemInfo;
+use super::super::roster::{subscription_for_strategy, worker_for_strategy};
+use crate::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
+use crate::tinyplace::{
+    AgentCapabilities, BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider,
+    HarnessReadiness, WorkerSystemInfo,
+};
 
 fn worker(id: &str, addr: &str) -> HubWorker {
     HubWorker {
@@ -90,6 +93,87 @@ fn balanced_uses_memory_to_break_cpu_ties_while_cpu_first_does_not() {
         worker_for_strategy(&workers, &details, RoutingStrategy::CpuFirst).as_deref(),
         Some("smaller"),
         "CPU First ignores RAM, so a CPU tie follows roster order"
+    );
+}
+
+fn provider_budget(
+    provider: HarnessProvider,
+    limit_tokens: i64,
+    remaining_tokens: i64,
+) -> HarnessBudget {
+    HarnessBudget {
+        provider,
+        seat: None,
+        window: BudgetWindow::Weekly,
+        limit_tokens: Some(limit_tokens),
+        used_tokens: Some(limit_tokens - remaining_tokens),
+        remaining_tokens: Some(remaining_tokens),
+        cooldown_until: None,
+        source: BudgetSource::Configured,
+    }
+}
+
+#[test]
+fn subscription_strategies_compare_percentage_and_absolute_budget_independently() {
+    let capabilities = AgentCapabilities {
+        providers: vec![HarnessProvider::Claude, HarnessProvider::Codex],
+        budgets: vec![
+            provider_budget(HarnessProvider::Claude, 1_000, 800),
+            provider_budget(HarnessProvider::Codex, 10_000, 2_000),
+        ],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        subscription_for_strategy(&capabilities, SubscriptionRoutingStrategy::Balanced),
+        Some(HarnessProvider::Claude),
+        "balanced compares normalized headroom"
+    );
+    assert_eq!(
+        subscription_for_strategy(
+            &capabilities,
+            SubscriptionRoutingStrategy::MostAvailableBudget
+        ),
+        Some(HarnessProvider::Codex),
+        "most-available compares absolute remaining tokens"
+    );
+    assert_eq!(
+        subscription_for_strategy(&capabilities, SubscriptionRoutingStrategy::Manual),
+        None,
+        "manual preserves the task hint or daemon default"
+    );
+}
+
+#[test]
+fn subscription_routing_excludes_not_ready_and_fails_open_without_numbers() {
+    let capabilities = AgentCapabilities {
+        providers: vec![HarnessProvider::Claude, HarnessProvider::Codex],
+        budgets: vec![
+            provider_budget(HarnessProvider::Claude, 1_000, 900),
+            provider_budget(HarnessProvider::Codex, 1_000, 100),
+        ],
+        readiness: vec![HarnessReadiness {
+            provider: HarnessProvider::Claude,
+            ready: false,
+            reason: Some("cooldown".into()),
+        }],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        subscription_for_strategy(&capabilities, SubscriptionRoutingStrategy::Balanced),
+        Some(HarnessProvider::Codex)
+    );
+    assert_eq!(
+        subscription_for_strategy(
+            &AgentCapabilities {
+                providers: vec![HarnessProvider::Claude],
+                ..Default::default()
+            },
+            SubscriptionRoutingStrategy::MostAvailableBudget
+        ),
+        None,
+        "missing advisory budget data falls back to the daemon default"
     );
 }
 

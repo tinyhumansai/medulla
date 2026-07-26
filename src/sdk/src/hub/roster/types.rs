@@ -17,3 +17,7 @@ pub struct HubWorker {
 }
 /// The roster shared between the socket layer and the [`HubHandle`].
 pub type SharedRoster = Arc<Mutex<Vec<HubWorker>>>;
+
+/// Live subscription-selection policy shared by the socket task path and the
+/// operator-facing hub handle.
+pub type SharedSubscriptionStrategy = Arc<Mutex<crate::runtime::SubscriptionRoutingStrategy>>;

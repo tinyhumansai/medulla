@@ -109,6 +109,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
             })
             .collect(),
     ));
+    let subscription_strategy = Arc::new(Mutex::new(config.subscription_strategy));
 
     (config.log)(&format!(
         "hub: connecting to {} ({} worker(s))",
@@ -120,6 +121,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         &config.jwt,
         roster.clone(),
         runner.clone(),
+        subscription_strategy.clone(),
         config.log.clone(),
         Some(activity.clone()),
     )
@@ -136,6 +138,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         log: config.log.clone(),
         persist: config.persist.clone(),
         activity,
+        subscription_strategy,
     });
     Ok(HubSession {
         handle,

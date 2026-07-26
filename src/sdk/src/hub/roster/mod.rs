@@ -139,6 +139,57 @@ pub(super) fn worker_for_strategy(
         .map(|(_, id)| id)
 }
 
+/// Choose a ready provider subscription from advertised budget headroom.
+///
+/// Manual routing returns `None`, preserving an explicit task hint or the
+/// daemon's configured default. Automatic strategies also return `None` when no
+/// provider reports remaining tokens, keeping budget metadata advisory and
+/// fail-open rather than blocking a valid host default.
+pub(super) fn subscription_for_strategy(
+    capabilities: &crate::tinyplace::AgentCapabilities,
+    strategy: crate::runtime::SubscriptionRoutingStrategy,
+) -> Option<crate::tinyplace::HarnessProvider> {
+    use crate::runtime::SubscriptionRoutingStrategy;
+
+    if strategy == SubscriptionRoutingStrategy::Manual {
+        return None;
+    }
+    capabilities
+        .providers
+        .iter()
+        .enumerate()
+        .filter(|(_, provider)| {
+            capabilities
+                .readiness
+                .iter()
+                .find(|readiness| readiness.provider == **provider)
+                .map(|readiness| readiness.ready)
+                .unwrap_or(true)
+        })
+        .filter_map(|(index, provider)| {
+            let budget = capabilities
+                .budgets
+                .iter()
+                .find(|budget| budget.provider == *provider)?;
+            let remaining = budget.remaining_tokens?.max(0);
+            let ratio = match budget.limit_tokens {
+                Some(limit) if limit > 0 => i128::from(remaining) * 1_000_000 / i128::from(limit),
+                _ => 0,
+            };
+            let preference = usize::MAX - index;
+            let key = match strategy {
+                SubscriptionRoutingStrategy::Balanced => (ratio, i128::from(remaining), preference),
+                SubscriptionRoutingStrategy::MostAvailableBudget => {
+                    (i128::from(remaining), ratio, preference)
+                }
+                SubscriptionRoutingStrategy::Manual => unreachable!("handled above"),
+            };
+            Some((key, *provider))
+        })
+        .max_by_key(|(key, _)| *key)
+        .map(|(_, provider)| provider)
+}
+
 /// A short, stable, human-scale id for a worker.
 ///
 /// The id is what the orchestrator must reproduce to address this worker: it is
@@ -187,5 +238,5 @@ fn slug(text: &str) -> String {
 }
 
 mod types;
-pub use types::HubWorker;
 pub use types::SharedRoster;
+pub use types::{HubWorker, SharedSubscriptionStrategy};

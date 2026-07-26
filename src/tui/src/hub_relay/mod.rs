@@ -56,6 +56,17 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
         .collect()
 }
 
+/// Subscription routing remembered beside the roster.
+fn subscription_strategy_from_config(home: &Path) -> medulla::runtime::SubscriptionRoutingStrategy {
+    let Ok(text) = std::fs::read_to_string(roster_path(home)) else {
+        return medulla::runtime::SubscriptionRoutingStrategy::Manual;
+    };
+    toml::from_str::<medulla::config::TuiConfig>(&text)
+        .ok()
+        .and_then(|config| config.subscription_routing_strategy)
+        .unwrap_or(medulla::runtime::SubscriptionRoutingStrategy::Manual)
+}
+
 /// A sink that writes roster changes back to the config file.
 ///
 /// Best-effort and narrated: failing to save a roster must not take the hub down
@@ -201,6 +212,7 @@ pub(crate) fn build_hub_config_with_host(
         poll: Duration::from_millis(poll_ms),
         local_network,
         local_address,
+        subscription_strategy: subscription_strategy_from_config(home),
     })
 }
 

@@ -87,6 +87,7 @@ impl HubHandle {
             log: wiring.log,
             persist: wiring.persist,
             activity: wiring.activity,
+            subscription_strategy: wiring.subscription_strategy,
         }
     }
 
@@ -167,6 +168,17 @@ impl HubHandle {
         drop(details);
         self.select(&selected);
         Ok(())
+    }
+
+    /// Change how untargeted tasks choose a ready provider subscription.
+    pub fn apply_subscription_strategy(
+        &self,
+        strategy: crate::runtime::SubscriptionRoutingStrategy,
+    ) {
+        *self
+            .subscription_strategy
+            .lock()
+            .expect("subscription strategy lock") = strategy;
     }
 
     /// Add (or replace, by id) a worker, open a contact edge, and re-register.

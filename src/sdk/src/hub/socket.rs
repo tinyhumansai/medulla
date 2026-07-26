@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use rust_socketio::asynchronous::{Client, ClientBuilder};
-use rust_socketio::{Event, Payload};
+use rust_socketio::{Event, Payload, TransportType};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -86,6 +86,23 @@ pub async fn connect_harness(
 
     let client = ClientBuilder::new(backend_url.to_string())
         .auth(json!({ "token": jwt }))
+        // Websocket only — never engine.io's polling handshake.
+        //
+        // That handshake mints a session id on ONE server process and requires
+        // every following poll to reach the same one. Behind a load balancer
+        // fronting several replicas that only holds if the client returns the
+        // balancer's affinity cookie, and `rust_engineio` implements no cookie
+        // handling at all: it sends none, so each poll is routed afresh and the
+        // server answers `{"code":1,"message":"Session ID unknown"}`. Observed
+        // against production, where the hub failed to connect roughly half the
+        // time and was dropped seconds later when it did — leaving the agent
+        // roster unregistered and the orchestrator reporting no hosts at all.
+        //
+        // A websocket is one connection: it is established once and stays on
+        // the process that accepted it, so no affinity is required. The cost is
+        // that a network which blocks websockets can no longer fall back to
+        // polling — an acceptable trade, since polling cannot work here anyway.
+        .transport_type(TransportType::Websocket)
         // (Re)advertise the current roster on connect.
         .on(Event::Connect, move |_payload, socket| {
             let roster = connect_roster.clone();

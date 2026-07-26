@@ -14,6 +14,7 @@ for headless operation, bridging coding-agent harnesses to
 | `medulla sessions` | List recent claude/codex sessions as JSON. |
 | `medulla memory <cmd>` | [Persona memory](#medulla-memory): `status` / `ingest` / `backfill` / `compile` / `search`. |
 | `medulla init [dir]` | [Draft a MEDULLA.md](#medulla-init) workspace profile. |
+| `medulla workspace <cmd>` | [Workspace registry](#medulla-workspace): `add [dir]` / `list` / `remove <dir\|id>`. |
 | `medulla hub` | [Relay hosted-backend tasks](#medulla-hub) to configured tiny.place workers. |
 | `medulla update` | [Self-update](#medulla-update): download, verify, install the latest release. |
 | `medulla version` / `help` | Version string; usage. |
@@ -209,6 +210,43 @@ usable file. It refuses to overwrite an authored profile unless `--force`/`-f` i
 given. Inference resolves the same way [memory](#medulla-memory) does: an explicit
 `OPENROUTER_API_KEY` wins, else the backend's inference surface with your
 `medulla login` token.
+
+`init` writes the file and nothing else. To also make the orchestrator aware of
+the directory, use [`medulla workspace add`](#medulla-workspace).
+
+## `medulla workspace`
+
+Manage the workspace registry — the directories the orchestrator knows about and
+can place work in:
+
+```sh
+medulla workspace add             # profile + register the current directory
+medulla workspace add ./payments  # or a specific one
+medulla workspace list            # show the registry (--json for machines)
+medulla workspace remove .        # unregister (files and MEDULLA.md untouched)
+```
+
+`add` does everything [`init`](#medulla-init) does, then enrols the directory in
+your config. Two lists are written: `[workflow].workspaces`, the roots whose
+`MEDULLA.md` rides every backend session mint, and `[fleet].workspaces`, the
+declared `Host -> Harness -> Workspace` chain work is placed onto. A profile that
+is in neither is never read.
+
+Both land in one file: the explicit `--config` path, else the highest-precedence
+file in the layered load, else `<medulla home>/config.toml` — the same file the
+TUI writes, so the CLI and the running app share one registry.
+
+`add` is idempotent: re-running it keeps the entry's id and hand-tuned fields
+(name, harness, templates) and refreshes the rest. Pass `--force` to also redraft
+the `MEDULLA.md`.
+
+| Flag | Effect |
+| --- | --- |
+| `--harness <id>` | Attach the workspace to this harness instead of the first declared one (`add`). |
+| `--force`, `-f` | Overwrite an existing `MEDULLA.md` (`add`). |
+| `--offline` | Skip the model call and write the editable stub (`add`). |
+| `--json` | Emit JSON instead of human-readable output (`list`). |
+| `--config <path>` | Explicit config file (`.toml` or `.json`) holding the registry. |
 
 ## `medulla hub`
 

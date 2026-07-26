@@ -13,6 +13,12 @@ models:
 routing: |
   Billing changes -> the payments agent.
   Schema migrations -> review before delegating.
+layout: |
+  src/
+  src/billing.rs
+  src/stripe/
+  migrations/
+  README.md
 ---
 
 Payments service. Owns billing, invoices, and the Stripe integration.
@@ -23,6 +29,41 @@ own task.
 The frontmatter preferences are **advisory**. medulla renders them into the
 orchestrator's context as guidance; it never gates delegation or model selection
 on them. Everything is optional — a profile that is only prose is valid.
+
+`layout` is scanned from the directory rather than drafted: the summary says what
+the workspace *is*, the layout says which paths it is made of, so the
+orchestrator can decompose work at a file granularity instead of guessing at
+entry points. It is bounded (two levels deep, ~40 entries) and skips build
+output, dependency caches, and dotfiles.
+
+## `medulla workspace`
+
+```
+medulla workspace add [dir] [--harness <id>] [--force] [--offline] [--config <path>]
+medulla workspace list [--json] [--config <path>]
+medulla workspace remove <dir|id> [--config <path>]
+```
+
+`add` is the command you want when setting up a new repository: it writes the
+profile **and** registers the directory, so the orchestrator can actually see it
+and place work there. Registration writes two config lists:
+
+| List | What it does |
+| --- | --- |
+| `[workflow].workspaces` | Roots whose `MEDULLA.md` rides every backend session mint. Without an entry here the profile is never read at runtime. |
+| `[fleet].workspaces` | The declared `Host → Harness → Workspace` chain the orchestrator places work onto. Without an entry here there is nowhere to *put* the work. |
+
+Both are written to a single file: the explicit `--config` path, else the
+highest-precedence file in the layered load, else `<medulla home>/config.toml` —
+the same file the TUI writes, so the CLI and the running app agree on one
+registry.
+
+`add` is idempotent. Re-running it on a directory keeps the entry's id and every
+hand-tuned field (name, harness, templates), so it refreshes rather than
+duplicating — pass `--force` to also redraft the `MEDULLA.md`.
+
+`remove` takes a path or a registry id and only unregisters: the directory and
+its `MEDULLA.md` are left alone.
 
 ## `medulla init`
 
@@ -35,11 +76,15 @@ Drafts a profile for `dir` (default: the current directory) and writes
 
 1. Reads the directory's `AGENTS.md`, `CLAUDE.md`, and `README.md` (whichever
    exist).
-2. Asks the configured model to distil them into a summary plus routing hints.
-3. Writes the result for you to review and edit.
+2. Scans the file layout.
+3. Asks the configured model to distil them into a summary plus routing hints.
+4. Writes the result for you to review and edit.
 
 The draft is a starting point, not the final word — the summary is what the
 orchestrator actually reads, so it is worth a pass by hand.
+
+`init` authors the file and stops there; it does **not** register the workspace.
+Use `medulla workspace add` for both.
 
 The scaffold `init` fills in lives at `src/sdk/src/init/MEDULLA.md.tmpl`. It sits
 inside the crate (rather than here under `docs/`) because it is embedded with

@@ -215,6 +215,27 @@ pub async fn run_daemon(
         ));
     }
 
+    // Pairing hand-off. Adding this worker to an orchestrator needs exactly one
+    // string to travel — this address — and the machine printing it is usually
+    // one the operator reached over SSH, where selecting it by hand is the step
+    // that makes people give up. So it goes to their terminal's clipboard and
+    // onto a line of its own. `--no-pair` opts out for scripted runs that parse
+    // this output. See [`super::pairing`].
+    if !flags.is_set("no-pair") {
+        let stdout_is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        let handoff = super::pairing::clipboard_handoff(&agent_id, stdout_is_terminal);
+        if let Some(escape) = &handoff {
+            use std::io::Write;
+            let mut out = std::io::stdout();
+            let _ = out.write_all(escape.as_bytes());
+            let _ = out.flush();
+        }
+        eprint!(
+            "{}",
+            super::pairing::pairing_banner(&agent_id, handle.as_deref(), handoff.is_some())
+        );
+    }
+
     // Runtime + transport-backed send.
     let send: SendFn = {
         let transport = transport.clone();

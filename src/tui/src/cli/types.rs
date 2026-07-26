@@ -33,6 +33,9 @@ pub enum Command {
     Update,
     /// Author a `MEDULLA.md` workspace profile for a directory.
     Init,
+    /// Manage the workspace registry (`add`/`list`/`remove`) — the directories
+    /// the orchestrator knows about and can place work in.
+    Workspace,
     /// Run the orchestrator hub: relay hosted-backend tasks to tiny.place
     /// workers over Signal DMs; carries the remaining args.
     Hub,
@@ -50,6 +53,50 @@ pub struct InitArgs {
     pub force: bool,
     /// `--offline`: skip the model call and write the editable stub.
     pub offline: bool,
+}
+
+/// The `medulla workspace` action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceAction {
+    /// `add [dir]` — author the profile *and* enrol the directory in the
+    /// registry. `None` targets the current working directory.
+    Add(Option<String>),
+    /// `list` — show every registered workspace.
+    List,
+    /// `remove <dir|id>` — unregister a workspace, leaving its files alone.
+    Remove(String),
+}
+
+/// Parsed `medulla workspace` flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceArgs {
+    /// Explicit `--config` path — the file the registry is read from and written
+    /// to. `None` selects the layered config discovery.
+    pub config: Option<String>,
+    /// `--harness <id>`: attach the workspace to this harness instead of the
+    /// first declared one (`add` only).
+    pub harness: Option<String>,
+    /// `--force`: overwrite an existing `MEDULLA.md` (`add` only).
+    pub force: bool,
+    /// `--offline`: skip the model call and write the editable stub (`add` only).
+    pub offline: bool,
+    /// Emit JSON instead of human-readable output (`list` only).
+    pub json: bool,
+    /// The selected action.
+    pub action: WorkspaceAction,
+}
+
+impl Default for WorkspaceArgs {
+    fn default() -> Self {
+        WorkspaceArgs {
+            config: None,
+            harness: None,
+            force: false,
+            offline: false,
+            json: false,
+            action: WorkspaceAction::List,
+        }
+    }
 }
 
 /// Parsed `medulla login` flags.

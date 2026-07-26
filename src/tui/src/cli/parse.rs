@@ -8,6 +8,7 @@ use medulla::tinyplace::HarnessProvider;
 
 use super::types::{
     Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs, UpdateArgs,
+    WorkspaceAction, WorkspaceArgs,
 };
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -28,6 +29,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("memory") => Command::Memory,
         Some("update") => Command::Update,
         Some("init") => Command::Init,
+        Some("workspace") | Some("workspaces") => Command::Workspace,
         Some("hub") => Command::Hub,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
@@ -157,6 +159,55 @@ pub fn parse_init_args(args: &[String]) -> InitArgs {
     out
 }
 
+/// Parse `medulla workspace` args out of the args following `workspace`.
+///
+/// The first bare word selects the action; a second bare word is its operand
+/// (the directory for `add`, the directory or registry id for `remove`). An
+/// unrecognised or absent action lists the registry, which is the harmless
+/// read-only answer to "I typed something roughly like this".
+///
+/// `remove` with no operand also falls back to listing rather than guessing at a
+/// target — deleting the wrong registry entry on a typo is not recoverable from
+/// the output.
+pub fn parse_workspace_args(args: &[String]) -> WorkspaceArgs {
+    let mut out = WorkspaceArgs::default();
+    let mut bare: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                if let Some(v) = it.next() {
+                    out.config = Some(v.clone());
+                }
+            }
+            "--harness" => {
+                if let Some(v) = it.next() {
+                    out.harness = Some(v.clone());
+                }
+            }
+            "--force" | "-f" => out.force = true,
+            "--offline" => out.offline = true,
+            "--json" => out.json = true,
+            other => {
+                if !other.starts_with('-') {
+                    bare.push(other.to_string());
+                }
+            }
+        }
+    }
+
+    let operand = bare.get(1).cloned();
+    out.action = match bare.first().map(String::as_str) {
+        Some("add") | Some("init") => WorkspaceAction::Add(operand),
+        Some("remove") | Some("rm") => match operand {
+            Some(target) => WorkspaceAction::Remove(target),
+            None => WorkspaceAction::List,
+        },
+        _ => WorkspaceAction::List,
+    };
+    out
+}
+
 /// Parse the TUI's own flags out of `argv[1..]`.
 pub fn parse_tui_args(args: &[String]) -> TuiArgs {
     let mut out = TuiArgs::default();
@@ -229,6 +280,7 @@ medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
 medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
+medulla workspace <cmd> Workspace registry: add [dir]|list|remove <dir|id>\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
@@ -259,6 +311,12 @@ Init flags:\n  \
 --force, -f             Overwrite an existing MEDULLA.md\n  \
 --offline               Skip the model call and write an editable stub\n  \
 --config <path>         Explicit config file (.toml or .json) for backend/model settings\n\n\
+Workspace flags:\n  \
+--harness <id>          Attach the added workspace to this harness (add)\n  \
+--force, -f             Overwrite an existing MEDULLA.md (add)\n  \
+--offline               Skip the model call and write an editable stub (add)\n  \
+--json                  Emit JSON instead of human-readable output (list)\n  \
+--config <path>         Explicit config file (.toml or .json) holding the registry\n\n\
 Run flags:\n  \
 --core-socket <path>    medulla-serve unix socket to attach (else MEDULLA_CORE_SOCKET / [core] config)\n  \
 --config <path>         Explicit config file (.toml or .json) for the [core] section\n\n\

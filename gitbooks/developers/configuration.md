@@ -104,6 +104,55 @@ The socket path resolves as, highest first: the explicit `--core-socket <path>` 
 
 The core runtime unlocks the Routing tab (host and fleet management) and task steering (`X` cancel task, `A` answer a pending question). It is **unix-only** (it rides a Unix domain socket). On Windows a `--core-socket` flag or `[core]` config section resolves to a startup note ("core runtime requires unix sockets — unavailable on Windows") and falls through to the normal backend→mock chain.
 
+## Hosting on this device
+
+A plain `medulla` is both halves of the system: the **orchestrator** that decides
+what work to hand out, and a **host** that runs it. The host binds an address on
+an in-process bus that the orchestrator dispatches over, so a task for this
+machine is delivered in memory — no tiny.place identity, no contact request, no
+relay round-trip, and no second `medulla daemon` process beside the TUI. Workers
+on other machines still travel over tiny.place; the orchestrator picks per
+address, so the two coexist without you configuring anything.
+
+It is on by default and needs no setup. It serves whichever coding-agent CLIs it
+finds on `PATH` (`claude`, `codex`, `opencode`), in the directory you launched
+from. The Overview tab grows a **This device** panel showing what it will run,
+where, and what it has run so far.
+
+```toml
+[host]
+enabled = true              # false to orchestrate only
+address = "this-device"     # local to this process; never goes on a wire
+workspace = ""              # empty = the directory you launched from
+providers = []              # empty = detect what is installed
+defaultProvider = ""        # empty = the first detected
+concurrency = 2
+taskTimeoutMs = 600000
+model = ""
+skipPermissions = true
+```
+
+`workspace` is the most consequential key here: anything a hosted task edits, it
+edits there.
+
+`skipPermissions` defaults to on because a hosted task is unattended — nobody is
+in the pane to answer a harness permission prompt, so a task that hits one has
+hung until it times out.
+
+### Turning either half off
+
+| Variable | Effect |
+| --- | --- |
+| `MEDULLA_HOST=0` | Orchestrate only — this machine runs nothing |
+| `MEDULLA_HUB=0` | Host only — no orchestrator uplink to the backend |
+
+Both are single-run overrides that beat the config file; `=1` forces the
+corresponding half on. Setting both leaves a plain chat client.
+
+If hosting was wanted and could not start — no agent CLI installed, or the
+address already bound — the TUI says so on the status line rather than silently
+orchestrating into a void.
+
 ## Fleet
 
 The `fleet` section declares the capacity Medulla may place work on: the

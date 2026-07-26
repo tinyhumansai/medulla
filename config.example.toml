@@ -52,6 +52,49 @@ tokenEnv = "MEDULLA_TOKEN"
 # token = "eyJ..."
 
 # ---------------------------------------------------------------------------
+# host — run the work on this machine, not only orchestrate it
+# ---------------------------------------------------------------------------
+# A plain `medulla` is both halves of the system: the orchestrator that decides
+# what work to hand out, and a host that runs it. The host binds an address on
+# an in-process bus the orchestrator dispatches over, so a task for this machine
+# never touches the network — no tiny.place identity, no contact request, no
+# second `medulla daemon` process. Remote workers still go over tiny.place, and
+# the orchestrator picks per address.
+#
+# It is on by default and needs no configuration: it serves whichever coding
+# agent CLIs it finds (claude / codex / opencode), in the directory you launched
+# from. The Overview tab's "This device" panel shows what it is doing.
+#
+# Env override: MEDULLA_HOST=0 turns hosting off for one run (MEDULLA_HOST=1
+# forces it on). This mirrors MEDULLA_HUB=0, which turns the orchestrator half
+# off — set both and you have a plain chat client.
+# [host]
+# Whether this device hosts tasks. Default: true
+# enabled = true
+# The address the orchestrator dispatches to. Local to this process; it never
+# goes on a wire, so it is a readable name rather than a key. Default: this-device
+# address = "this-device"
+# Where tasks run. Empty (the default) means the directory `medulla` was
+# launched from — the repo you are looking at. Anything a task edits, it edits
+# here, so this is the most consequential key in the section.
+# workspace = "/absolute/path/to/repo"
+# Which agent CLIs to serve. Empty (the default) detects whatever is installed.
+# An explicit list is still filtered by what is actually on PATH.
+# providers = ["claude", "codex"]
+# The CLI used when a task names none. Empty takes the first detected.
+# defaultProvider = "claude"
+# Maximum tasks run at once on this machine. Default: 2
+# concurrency = 2
+# Per-task execution timeout, in ms. Default: 600000 (10 minutes)
+# taskTimeoutMs = 600000
+# Default model hint passed to the harness. Empty leaves the CLI's own default.
+# model = "claude-sonnet-4-5"
+# Whether the harness runs with its permission prompts bypassed. On by default
+# because a hosted task is unattended: nobody is in the pane to answer a prompt,
+# so a task that hits one has hung until it times out.
+# skipPermissions = true
+
+# ---------------------------------------------------------------------------
 # core — the medulla-serve NDJSON orchestration socket (optional)
 # ---------------------------------------------------------------------------
 # [core]

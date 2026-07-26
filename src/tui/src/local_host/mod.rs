@@ -57,26 +57,35 @@ pub(crate) fn host_address(config: &HostSection) -> String {
 
 /// Translate the `[host]` section into the SDK's start-up options.
 ///
-/// Unparseable provider names are dropped rather than fatal: a typo in one entry
-/// of a list should not stop this machine hosting with the CLIs it does have.
-/// The names that survive are still filtered by what is installed, so a dropped
-/// entry cannot silently widen what the host claims.
+/// # Errors
+///
+/// An unrecognized provider name is rejected rather than skipped. Dropping one
+/// silently inverts the operator's intent: `providers = ["claudde"]` would parse
+/// to an empty list, and an empty list means *detect everything installed* — so
+/// a typo meant to narrow what this machine runs would instead widen it, and
+/// unattended work would go to a CLI nobody chose, with permission prompts
+/// bypassed. The same applies to `defaultProvider`, where an unknown name would
+/// quietly fall back to whichever CLI happened to be detected first.
 pub(crate) fn options_from_config(
     config: &HostSection,
     env: &HashMap<String, String>,
     router: Option<medulla::config::RouterConfig>,
     budget: Option<medulla::config::BudgetConfig>,
     log: Option<medulla::hub::HubLog>,
-) -> EmbeddedDaemonOptions {
-    let providers: Vec<HarnessProvider> = config
+) -> Result<EmbeddedDaemonOptions, String> {
+    let providers = config
         .providers
         .iter()
-        .filter_map(|name| HarnessProvider::from_wire(name.trim()))
-        .collect();
-    EmbeddedDaemonOptions {
+        .map(|name| parse_provider(name))
+        .collect::<Result<Vec<_>, _>>()?;
+    let default_provider = match config.default_provider.trim() {
+        "" => None,
+        name => Some(parse_provider(name)?),
+    };
+    Ok(EmbeddedDaemonOptions {
         workspace: config.workspace.clone(),
         providers: (!providers.is_empty()).then_some(providers),
-        default_provider: HarnessProvider::from_wire(config.default_provider.trim()),
+        default_provider,
         concurrency: config.concurrency.max(1) as usize,
         task_timeout_ms: config.task_timeout_ms,
         model: (!config.model.trim().is_empty()).then(|| config.model.trim().to_string()),
@@ -86,7 +95,17 @@ pub(crate) fn options_from_config(
         budget,
         log,
         ..Default::default()
-    }
+    })
+}
+
+/// Parse one configured provider name, naming the valid spellings on failure.
+fn parse_provider(name: &str) -> Result<HarnessProvider, String> {
+    HarnessProvider::from_wire(name.trim()).ok_or_else(|| {
+        format!(
+            "unknown harness \"{}\" in [host] — expected one of: claude, codex, opencode",
+            name.trim()
+        )
+    })
 }
 
 /// The roster entry describing a host running on this machine.

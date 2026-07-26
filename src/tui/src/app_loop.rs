@@ -343,25 +343,29 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // registers with the backend has to name this host from the first moment, or
     // the orchestrator's opening move has nowhere to send work.
     let local_network = medulla::bridge::LocalBridgeNetwork::new();
-    let host_options = crate::local_host::options_from_config(
+    // A bad `[host]` section is reported exactly like a failed start: this
+    // machine does not host, and the operator is told why. `and_then` keeps the
+    // two failure kinds — unparseable config, unstartable host — on one path.
+    let local_host = match crate::local_host::options_from_config(
         &loaded.config.host,
         &env,
         loaded.config.router.clone(),
         loaded.config.budget.clone(),
         Some(hub_logs.sink()),
-    );
-    let local_host =
-        match crate::local_host::start(&loaded.config.host, &env, &local_network, host_options) {
-            Ok(host) => host,
-            Err(e) => {
-                // Not fatal: the orchestrator still drives remote workers. But it is
-                // the difference between "nothing happens" and "nothing happens
-                // *here*", so it goes on the status line rather than only the log.
-                hub_logs.push(format!("host: not hosting on this device ({e})"));
-                startup_status.get_or_insert(format!("not hosting on this device ({e})"));
-                None
-            }
-        };
+    )
+    .and_then(|options| {
+        crate::local_host::start(&loaded.config.host, &env, &local_network, options)
+    }) {
+        Ok(host) => host,
+        Err(e) => {
+            // Not fatal: the orchestrator still drives remote workers. But it is
+            // the difference between "nothing happens" and "nothing happens
+            // *here*", so it goes on the status line rather than only the log.
+            hub_logs.push(format!("host: not hosting on this device ({e})"));
+            startup_status.get_or_insert(format!("not hosting on this device ({e})"));
+            None
+        }
+    };
     if let Some(host) = &local_host {
         hub_logs.push(format!(
             "host: serving [{}] as {} in {}",
@@ -377,6 +381,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let local_dispatch = crate::hub_relay::LocalDispatch {
         network: local_network,
         hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
+        // Always known, even with hosting off — it is what identifies a
+        // remembered local roster entry that must not be inherited.
+        host_address: crate::local_host::host_address(&loaded.config.host),
         host: local_host.as_ref().map(|host| host.spec().clone()),
     };
 

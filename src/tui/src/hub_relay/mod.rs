@@ -61,11 +61,22 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
 /// Best-effort and narrated: failing to save a roster must not take the hub down
 /// with it, but a silent failure would leave the operator re-adding the same
 /// worker every launch with no idea why.
-fn roster_sink(home: &Path, log: medulla::hub::HubLog) -> medulla::hub::RosterSink {
+/// `local_address` names the device-local host, which is deliberately *not*
+/// saved: it is derived from `[host]` on every launch, so remembering it would
+/// outlive the setting that produced it. A roster that kept it would, on the
+/// next run with hosting off, advertise a worker whose address nothing binds —
+/// and the router, finding no local endpoint, would send its tasks over
+/// tiny.place to a name no relay can resolve.
+fn roster_sink(
+    home: &Path,
+    log: medulla::hub::HubLog,
+    local_address: String,
+) -> medulla::hub::RosterSink {
     let path = roster_path(home);
     Arc::new(move |workers: &[medulla::hub::HubWorker]| {
         let rows: Vec<medulla::config::HubWorkerConfig> = workers
             .iter()
+            .filter(|w| w.address != local_address)
             .map(|w| medulla::config::HubWorkerConfig {
                 id: w.id.clone(),
                 address: w.address.clone(),
@@ -172,8 +183,15 @@ pub(crate) fn build_hub_config_with_host(
     if workers.is_empty() {
         workers = workers_from_config(home);
     }
+    // The device-local host is injected fresh, never inherited. Remembered
+    // entries at its address are dropped first — including when no host is
+    // running now, which is the case that mattered: a roster saved while
+    // hosting was on would otherwise keep advertising `this-device` after
+    // `MEDULLA_HOST=0`, and its tasks would be routed to a relay that has never
+    // heard the name.
     let (local_network, local_address) = match &local {
         Some(dispatch) => {
+            workers.retain(|worker| worker.address != dispatch.host_address);
             if let Some(host) = &dispatch.host {
                 workers.retain(|worker| worker.address != host.address);
                 workers.insert(0, host.clone());
@@ -191,8 +209,12 @@ pub(crate) fn build_hub_config_with_host(
         .get("MEDULLA_HUB_POLL_MS")
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_MS);
+    let persisted_local = local
+        .as_ref()
+        .map(|dispatch| dispatch.host_address.clone())
+        .unwrap_or_default();
     Some(HubConfig {
-        persist: Some(roster_sink(home, log.clone())),
+        persist: Some(roster_sink(home, log.clone(), persisted_local)),
         log,
         backend_url: creds.base_url,
         jwt: creds.jwt,

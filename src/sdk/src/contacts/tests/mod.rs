@@ -68,7 +68,7 @@ impl FakeRelay {
     fn record(&self, call: &str) -> Result<(), String> {
         self.calls.lock().unwrap().push(call.to_string());
         self.trace.lock().unwrap().push(call.to_string());
-        if *self.fail.lock().unwrap() {
+        if *self.fail.lock().unwrap() || *self.fail_decision.lock().unwrap() {
             return Err("relay unreachable".to_string());
         }
         Ok(())

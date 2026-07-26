@@ -14,6 +14,9 @@ pub(super) struct FakeRelay {
     /// Fails only the contact-list read, so a decision can succeed while the
     /// re-read that follows it does not.
     pub(super) fail_list: Mutex<bool>,
+    /// Fails only accept/decline/block, so listing keeps working while a
+    /// decision does not — a relay that is up but refused this one call.
+    pub(super) fail_decision: Mutex<bool>,
     /// Every relay interaction in order, listings included.
     pub(super) trace: Mutex<Vec<String>>,
 }

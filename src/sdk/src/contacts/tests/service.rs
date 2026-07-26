@@ -343,3 +343,56 @@ async fn an_established_contact_is_narrated_by_id_not_only_counted() {
     desk.refresh().await;
     assert!(said.lock().unwrap().is_empty(), "got {:?}", said.lock());
 }
+
+#[tokio::test]
+async fn an_automatic_accept_the_relay_refused_is_retried_on_the_next_poll() {
+    // Where nobody is watching — the hub identity has no operator screen — a
+    // single transient `accept` failure used to strand the peer for the life of
+    // the process: `decide` recorded it as Failed, and only Pending records were
+    // candidates for auto-admission.
+    let relay = FakeRelay::with_incoming(&["worker"]);
+    *relay.fail_decision.lock().unwrap() = true;
+    let book = ContactBook::new(AdmissionPolicy::All, Vec::<String>::new());
+    let now = clock();
+
+    poll_once(relay.as_ref(), &book, &now).await.unwrap();
+    assert_eq!(book.get("worker").unwrap().state, RequestState::Failed);
+
+    *relay.fail_decision.lock().unwrap() = false;
+    poll_once(relay.as_ref(), &book, &now).await.unwrap();
+
+    assert_eq!(book.get("worker").unwrap().state, RequestState::Accepted);
+}
+
+#[tokio::test]
+async fn an_operator_decision_the_relay_refused_is_not_retried_as_an_accept() {
+    // The retry above must not reach across and re-decide for the operator: a
+    // decline that failed is theirs to repeat, and silently converting it into
+    // an auto-accept would be the opposite of what they asked for.
+    let relay = FakeRelay::with_incoming(&["stranger"]);
+    let book = ContactBook::default();
+    let now = clock();
+    poll_once(relay.as_ref(), &book, &now).await.unwrap();
+
+    *relay.fail_decision.lock().unwrap() = true;
+    let refused = decide(
+        relay.as_ref(),
+        &book,
+        "stranger",
+        ContactDecision::Decline,
+        false,
+        &now,
+    )
+    .await;
+    assert!(refused.is_err());
+    *relay.fail_decision.lock().unwrap() = false;
+
+    book.set_policy(AdmissionPolicy::All);
+    poll_once(relay.as_ref(), &book, &now).await.unwrap();
+
+    assert_eq!(
+        book.get("stranger").unwrap().state,
+        RequestState::Failed,
+        "an operator's failed decision waits for the operator"
+    );
+}

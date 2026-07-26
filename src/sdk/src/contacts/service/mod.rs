@@ -139,14 +139,22 @@ pub async fn poll_once(
         if book.observe(&request.agent_id, request.handle.clone(), now()) {
             observed += 1;
         }
-        // Only a still-pending request is a candidate for auto-admission: a
-        // request the operator already declined must not be resurrected by a
-        // later policy widening.
-        let still_pending = book
+        // A request the operator already settled must not be resurrected by a
+        // later policy widening, so only two states are candidates for
+        // auto-admission: one still pending, and one whose *own* automatic
+        // attempt the relay refused. The second matters where nobody is watching
+        // — the hub identity has no operator screen — because a single transient
+        // `accept` failure would otherwise strand that peer until a restart. A
+        // failed *operator* decision stays theirs to repeat.
+        let retryable = book
             .get(&request.agent_id)
-            .map(|record| record.state == super::types::RequestState::Pending)
+            .map(|record| match record.state {
+                super::types::RequestState::Pending => true,
+                super::types::RequestState::Failed => record.auto,
+                _ => false,
+            })
             .unwrap_or(false);
-        if !still_pending {
+        if !retryable {
             continue;
         }
         if let Some(decision) = book.auto_decision(&request.agent_id) {
@@ -204,7 +212,7 @@ pub async fn decide(
             Ok(())
         }
         Err(message) => {
-            book.fail(agent_id, message.clone(), now());
+            book.fail(agent_id, message.clone(), auto, now());
             Err(message)
         }
     }

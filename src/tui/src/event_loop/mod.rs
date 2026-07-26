@@ -49,6 +49,7 @@ pub(crate) async fn run(
         memory_service,
         mut sharing,
         onboarding_path,
+        host,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
@@ -58,6 +59,9 @@ pub(crate) async fn run(
     }
     if let Some(obs) = tinyplace_obs {
         app.set_tinyplace_observation(obs);
+    }
+    if let Some(host) = host {
+        app.set_host_observation(host);
     }
     if let Some(status) = startup_status {
         app.set_status(status);

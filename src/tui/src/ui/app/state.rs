@@ -105,6 +105,7 @@ impl App {
             hit_context: None,
             last_events_len: 0,
             tinyplace_obs: None,
+            host_obs: None,
             copy_capture: None,
         }
     }
@@ -285,6 +286,17 @@ impl App {
     ) {
         self.tinyplace_obs = Some(obs);
         self.refresh_snapshot();
+    }
+
+    /// Attach the read-only view of the host running on this device, so the
+    /// Overview tab can say what this machine is doing with the work it is sent.
+    pub fn set_host_observation(&mut self, host: medulla::daemon::embedded::HostObservation) {
+        self.host_obs = Some(host);
+    }
+
+    /// The host running on this device, if any.
+    pub fn host_observation(&self) -> Option<&medulla::daemon::embedded::HostObservation> {
+        self.host_obs.as_ref()
     }
 
     /// Re-read the runtime snapshot and merge in the tiny.place observation.

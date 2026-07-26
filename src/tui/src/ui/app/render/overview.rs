@@ -15,14 +15,28 @@ use super::super::types::App;
 impl App {
     /// Draw the Overview tab: logo, top panels, and live activity.
     pub(super) fn draw_overview(&mut self, f: &mut Frame, area: Rect) {
+        // The host strip is only laid out when this device is actually hosting.
+        // A permanently-reserved empty band would cost the live feed several
+        // rows to say nothing, on every run that orchestrates but does not host.
+        //
+        // Two borders plus three fixed lines, and a fourth only once the host
+        // has a status worth showing — reserving that row up front would leave a
+        // blank line under the counters for the whole of an idle session.
+        let host_rows = match &self.host_obs {
+            Some(host) => 5 + u16::from(host.stats().last_status.is_some()),
+            None => 0,
+        };
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(4),
                 Constraint::Length(7),
+                Constraint::Length(host_rows),
                 Constraint::Min(0),
             ])
             .split(area);
+        let host_area = rows[2];
+        let rows = [rows[0], rows[1], rows[3]];
         let logo: Vec<TLine> = crate::ui::LOGO
             .iter()
             .map(|row| {
@@ -115,6 +129,9 @@ impl App {
         // Third panel: tiny.place presence, or the local worker harness.
         self.draw_overview_third(f, top[2]);
 
+        // This device, when it is also hosting the work.
+        self.draw_host_panel(f, host_area);
+
         // Live activity.
         let take = self.visible_count().saturating_sub(1).max(5);
         let start = self.snapshot.events.len().saturating_sub(take);
@@ -133,6 +150,78 @@ impl App {
         f.render_widget(
             Paragraph::new(body).block(self.panel("Live activity")),
             rows[1],
+        );
+    }
+
+    /// The "This device" strip: what this machine will run, where, and what it
+    /// has run so far.
+    ///
+    /// Present only while a host is actually running in this process. The panel
+    /// answers the question an operator asks first — "is my own laptop part of
+    /// the fleet, and is it doing anything?" — which was previously only
+    /// answerable by reading the orchestrator log.
+    pub(super) fn draw_host_panel(&self, f: &mut Frame, area: Rect) {
+        let Some(host) = &self.host_obs else {
+            return;
+        };
+        if area.height == 0 {
+            return;
+        }
+        let stats = host.stats();
+        let running = stats.tasks_running();
+        let providers = host
+            .providers()
+            .iter()
+            .map(|provider| provider.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let mut lines = vec![
+            TLine::from(vec![
+                Span::styled(
+                    if running > 0 {
+                        "● busy "
+                    } else {
+                        "● ready "
+                    },
+                    Style::default().fg(if running > 0 {
+                        Color::Yellow
+                    } else {
+                        Color::Green
+                    }),
+                ),
+                Span::styled(
+                    host.address().to_string(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {providers}"),
+                    Style::default().fg(self.theme.primary),
+                ),
+            ]),
+            // Clipped to the panel: a deep workspace path is common and wrapping
+            // it would push the counters out of a fixed-height strip.
+            TLine::from(Span::styled(
+                clip(host.workspace(), area.width.saturating_sub(4) as usize),
+                Style::default().add_modifier(Modifier::DIM),
+            )),
+            TLine::from(format!(
+                "running {running} · done {} · failed {} · probes {}",
+                stats.tasks_completed, stats.tasks_failed, stats.probes_answered
+            )),
+        ];
+        if let Some(status) = &stats.last_status {
+            lines.push(TLine::from(Span::styled(
+                clip(
+                    &format!("▸ {status}"),
+                    area.width.saturating_sub(4) as usize,
+                ),
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
+        f.render_widget(
+            Paragraph::new(Text::from(lines)).block(self.panel("This device")),
+            area,
         );
     }
 

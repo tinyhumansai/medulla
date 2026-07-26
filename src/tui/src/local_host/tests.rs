@@ -147,7 +147,8 @@ async fn a_started_host_advertises_this_machine_to_the_hub() {
         "the roster entry should say what runs where: {}",
         spec.description
     );
-    assert_eq!(host.stats().tasks_started, 0);
+    assert_eq!(host.observation().stats().tasks_started, 0);
+    assert_eq!(host.observation().address(), "this-device");
 }
 
 #[tokio::test]

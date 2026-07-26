@@ -33,9 +33,13 @@ impl LocalHost {
         self.daemon.providers()
     }
 
-    /// What this host has been doing, for the fleet view.
-    pub(crate) fn stats(&self) -> medulla::daemon::embedded::EmbeddedDaemonStats {
-        self.daemon.stats()
+    /// A cloneable read-only view for the UI, carrying both this host's identity
+    /// and its live counters.
+    ///
+    /// Handed to each session rather than the host itself: a session is rebuilt
+    /// on every relogin, and the host outlives all of them.
+    pub(crate) fn observation(&self) -> medulla::daemon::embedded::HostObservation {
+        self.daemon.observation()
     }
 
     /// The roster entry the hub should advertise for this host.

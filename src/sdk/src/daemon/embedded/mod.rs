@@ -29,8 +29,8 @@ mod types;
 mod tests;
 
 pub use types::{
-    EmbeddedDaemon, EmbeddedDaemonOptions, EmbeddedDaemonStats, DEFAULT_CONCURRENCY,
-    DEFAULT_LOCAL_POLL, DEFAULT_TASK_TIMEOUT_MS,
+    EmbeddedDaemon, EmbeddedDaemonOptions, EmbeddedDaemonStats, HostObservation,
+    DEFAULT_CONCURRENCY, DEFAULT_LOCAL_POLL, DEFAULT_TASK_TIMEOUT_MS,
 };
 
 /// How many frames one drain pass takes. Bounded so a large backlog is handled
@@ -183,6 +183,18 @@ impl EmbeddedDaemon {
     /// A snapshot of what this host has been doing.
     pub fn stats(&self) -> EmbeddedDaemonStats {
         self.stats.lock().expect("embedded daemon stats").clone()
+    }
+
+    /// A cloneable read-only view, for a UI that renders this host from
+    /// somewhere the host itself cannot be moved to.
+    pub fn observation(&self) -> HostObservation {
+        HostObservation::new(
+            self.address.clone(),
+            self.workspace.clone(),
+            self.providers.clone(),
+            self.default_provider,
+            self.stats.clone(),
+        )
     }
 
     /// The underlying task state machine, for a host that needs to reach past

@@ -414,6 +414,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // relogin happens it has long finished.
                 sharing: sharing.take(),
                 onboarding_path: active_config_path.clone(),
+                // Cloned per session rather than moved: a relogin starts a new
+                // session, and the machine did not stop hosting because the
+                // account changed.
+                host: local_host.as_ref().map(|host| host.observation()),
             },
         )
         .await;

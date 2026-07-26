@@ -497,4 +497,9 @@ pub struct App {
     // up without the runtime having to know about tiny.place.
     pub(super) tinyplace_obs:
         Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
+    // A read-only view of the task host running on this device, when one is.
+    // Read live at render rather than merged into the snapshot: its counters
+    // move on the host's own schedule, and the snapshot is the *runtime's*
+    // picture of the world — the host is a peer to it, not part of it.
+    pub(super) host_obs: Option<medulla::daemon::embedded::HostObservation>,
 }

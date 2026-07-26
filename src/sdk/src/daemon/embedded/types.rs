@@ -141,6 +141,100 @@ pub struct EmbeddedDaemon {
     pub(super) drain: tokio::task::JoinHandle<()>,
 }
 
+/// A cloneable, read-only view of a running host.
+///
+/// The host itself is not clonable — two owners of one drain loop would each
+/// believe they control its lifetime — but a UI needs to read it from wherever
+/// it renders. This is that read side: identity fields are copied once because
+/// they never change, and the counters stay shared so every observer sees the
+/// same live numbers rather than a snapshot frozen at hand-off.
+///
+/// An observation does **not** keep the host alive. When the host is dropped the
+/// counters simply stop advancing, which is the truth a UI should be showing.
+#[derive(Debug, Clone)]
+pub struct HostObservation {
+    /// The address the orchestrator dispatches to.
+    address: String,
+    /// Where tasks run.
+    workspace: String,
+    /// The coding-agent CLIs this machine has.
+    providers: Vec<HarnessProvider>,
+    /// The CLI used when a task names none.
+    default_provider: HarnessProvider,
+    /// The live counters.
+    stats: SharedStats,
+}
+
+impl HostObservation {
+    /// Build a view over a host's identity and counters.
+    pub(super) fn new(
+        address: String,
+        workspace: String,
+        providers: Vec<HarnessProvider>,
+        default_provider: HarnessProvider,
+        stats: SharedStats,
+    ) -> Self {
+        Self {
+            address,
+            workspace,
+            providers,
+            default_provider,
+            stats,
+        }
+    }
+
+    /// Build a view whose counters are fixed rather than shared with a running
+    /// host.
+    ///
+    /// For callers that must render a host they do not own — a UI test pinning
+    /// the panel, or a screen showing a host recorded elsewhere. The counters
+    /// never advance, which is correct for a value that is not backed by a
+    /// running drain loop; use [`EmbeddedDaemon::observation`] for a live one.
+    pub fn detached(
+        address: impl Into<String>,
+        workspace: impl Into<String>,
+        providers: Vec<HarnessProvider>,
+        default_provider: HarnessProvider,
+        stats: EmbeddedDaemonStats,
+    ) -> Self {
+        Self {
+            address: address.into(),
+            workspace: workspace.into(),
+            providers,
+            default_provider,
+            stats: Arc::new(Mutex::new(stats)),
+        }
+    }
+
+    /// The address the orchestrator dispatches to.
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+
+    /// Where tasks this host accepts run.
+    pub fn workspace(&self) -> &str {
+        &self.workspace
+    }
+
+    /// The coding-agent CLIs this machine has.
+    pub fn providers(&self) -> &[HarnessProvider] {
+        &self.providers
+    }
+
+    /// The CLI used when a task names none.
+    pub fn default_provider(&self) -> HarnessProvider {
+        self.default_provider
+    }
+
+    /// The counters as of now.
+    pub fn stats(&self) -> EmbeddedDaemonStats {
+        self.stats
+            .lock()
+            .map(|stats| stats.clone())
+            .unwrap_or_default()
+    }
+}
+
 /// Hand-written because the runtime, executor, and join handle have no useful
 /// representation — what identifies a host is where it is and what it serves.
 impl std::fmt::Debug for EmbeddedDaemon {

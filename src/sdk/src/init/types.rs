@@ -101,4 +101,13 @@ pub struct InitOutcome {
     pub drafted: bool,
     /// Instruction files the draft was based on.
     pub sources: Vec<&'static str>,
+    /// The scanned file layout embedded in the profile.
+    pub layout: Vec<String>,
+    /// The registry entry written for this workspace. `None` when registration
+    /// was skipped or failed — see [`InitOutcome::registration_error`].
+    pub registration: Option<super::registry::WorkspaceRegistration>,
+    /// Why registration failed, when it was attempted and did not succeed. The
+    /// profile is still written in that case, so this is a warning rather than
+    /// an error.
+    pub registration_error: Option<String>,
 }

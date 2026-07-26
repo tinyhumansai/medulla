@@ -1,22 +1,35 @@
-//! Workspace initialisation: authoring a `MEDULLA.md` for a directory.
+//! Workspace initialisation: registering a directory and authoring its
+//! `MEDULLA.md`.
 //!
-//! A `MEDULLA.md` at a workspace root tells the orchestrator what that
-//! directory *is* and how to route work over it — a short summary plus advisory
-//! preferences (harnesses, models, routing hints). `medulla init` drafts one by
-//! reading the repo's own instruction files (`AGENTS.md` / `CLAUDE.md` /
-//! `README.md`) and asking a model to distil them, then writes the result for
-//! the operator to review and edit.
+//! Two things are needed before an orchestrator can work in a directory, and
+//! this module owns both — `medulla init` does the first, `medulla workspace
+//! add` does both:
+//!
+//! 1. **Describe it.** A `MEDULLA.md` at the workspace root says what the
+//!    directory *is*, which files it is made of, and how to route work over it —
+//!    a short summary, a scanned file layout, and advisory preferences
+//!    (harnesses, models, routing hints). The summary is drafted by reading the
+//!    repo's own instruction files (`AGENTS.md` / `CLAUDE.md` / `README.md`) and
+//!    asking a model to distil them, then written for the operator to edit.
+//! 2. **Register it.** A profile nothing knows about is inert, so the directory
+//!    is also enrolled in the operator's config: `[workflow].workspaces`, whose
+//!    profiles ride every backend session mint, and `[fleet].workspaces`, the
+//!    declared chain the orchestrator places work onto. See [`registry`].
 //!
 //! The module is split by responsibility: [`types`] holds the data model,
-//! [`template`] renders the docs-shipped scaffold, and [`draft`] owns the model
-//! call. This file wires them together and owns the filesystem edges (reading
-//! sources, writing the profile, reading one back for the run request).
+//! [`layout`] scans the tree, [`template`] renders the docs-shipped scaffold,
+//! [`draft`] owns the model call, and [`registry`] owns the config writes. This
+//! file wires them together and owns the filesystem edges (reading sources,
+//! writing the profile, reading one back for the run request).
 //!
 //! Offline is a first-class path: with no API key and no backend login the
 //! draft falls back to a deterministic stub, so `init` still produces a valid,
-//! hand-editable file.
+//! hand-editable file — and the layout scan and registration are unaffected,
+//! since neither needs a model.
 
 mod draft;
+mod layout;
+pub mod registry;
 mod template;
 pub mod types;
 
@@ -30,6 +43,8 @@ use anyhow::{anyhow, Result};
 use tinycortex::memory::score::extract::ChatProvider;
 
 pub use draft::{build_user_prompt, draft_profile, parse_draft};
+pub use layout::{layout_block, scan_layout};
+pub use registry::{deregister_workspace, register_workspace, workspace_id, WorkspaceRegistration};
 pub use template::render_medulla_md;
 pub use types::{DraftedProfile, InitOutcome, InitSources};
 
@@ -131,6 +146,37 @@ pub async fn init_workspace_with_settings(
     .await
 }
 
+/// Draft and write a profile, then register the workspace — the whole of what
+/// `medulla workspace add` does, in one call.
+///
+/// The profile is written first: registration points at a path, and a registry
+/// entry whose `MEDULLA.md` failed to write would advertise a workspace the
+/// orchestrator can find but not read. A registration failure is *not* fatal to
+/// the profile — the file is already on disk and useful — so it is reported on
+/// [`InitOutcome::registration_error`] rather than returned as an error, and the
+/// caller decides how loudly to say so.
+///
+/// # Errors
+///
+/// Returns an error only when the profile itself cannot be drafted or written
+/// (see [`init_workspace`]).
+pub async fn init_and_register_workspace(
+    dir: &Path,
+    settings: &crate::memory::MemorySettings,
+    config_path: &Path,
+    config: &crate::config::TuiConfig,
+    harness: Option<&str>,
+    offline: bool,
+    force: bool,
+) -> Result<InitOutcome> {
+    let mut outcome = init_workspace_with_settings(dir, settings, offline, force).await?;
+    match register_workspace(config_path, config, dir, harness) {
+        Ok(registration) => outcome.registration = Some(registration),
+        Err(err) => outcome.registration_error = Some(err.to_string()),
+    }
+    Ok(outcome)
+}
+
 /// Whether a model is reachable with these settings — lets a caller warn before
 /// falling back to the stub, without naming a vendor type.
 pub fn model_available(settings: &crate::memory::MemorySettings) -> bool {
@@ -158,22 +204,31 @@ pub async fn init_workspace(
     }
 
     let sources = read_sources(dir);
+    // Scanned before the model call so the draft can name real paths, and kept
+    // regardless of whether that call happens — the layout is the part of the
+    // profile that needs no model at all.
+    let layout = scan_layout(dir);
     let (draft, drafted) = match provider {
-        Some(provider) if !sources.is_empty() => match draft_profile(provider, &sources).await {
-            Ok(draft) => (draft, true),
-            // A provider/parse failure must not lose the operator's `init`: fall
-            // back to the stub and let the outcome report that it was not drafted.
-            Err(_) => (DraftedProfile::stub(), false),
-        },
+        Some(provider) if !sources.is_empty() => {
+            match draft_profile(provider, &sources, &layout).await {
+                Ok(draft) => (draft, true),
+                // A provider/parse failure must not lose the operator's `init`: fall
+                // back to the stub and let the outcome report that it was not drafted.
+                Err(_) => (DraftedProfile::stub(), false),
+            }
+        }
         _ => (DraftedProfile::stub(), false),
     };
 
-    let contents = render_medulla_md(&draft);
+    let contents = render_medulla_md(&draft, &layout);
     let path = write_medulla_md(dir, &contents, force)?;
     Ok(InitOutcome {
         path,
         contents,
         drafted,
         sources: sources.found(),
+        layout,
+        registration: None,
+        registration_error: None,
     })
 }

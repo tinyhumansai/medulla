@@ -8,7 +8,7 @@ use medulla::runtime::WorkerOp;
 
 use super::super::types::{
     App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_HOST, RP_HARNESSES,
-    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES,
+    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, SUBSCRIPTION_STRATEGIES,
 };
 
 impl App {
@@ -208,20 +208,47 @@ impl App {
     fn strategies_key(&mut self, code: KeyCode) -> RoutingKey {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.routing_strategy_index = self.routing_strategy_index.saturating_sub(1);
+                if self.subscription_strategy_focused {
+                    self.subscription_strategy_index =
+                        self.subscription_strategy_index.saturating_sub(1);
+                } else {
+                    self.routing_strategy_index = self.routing_strategy_index.saturating_sub(1);
+                }
                 RoutingKey::Handled(None)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.routing_strategy_index =
-                    (self.routing_strategy_index + 1).min(ROUTING_STRATEGIES.len() - 1);
+                if self.subscription_strategy_focused {
+                    self.subscription_strategy_index = (self.subscription_strategy_index + 1)
+                        .min(SUBSCRIPTION_STRATEGIES.len() - 1);
+                } else {
+                    self.routing_strategy_index =
+                        (self.routing_strategy_index + 1).min(ROUTING_STRATEGIES.len() - 1);
+                }
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.subscription_strategy_focused = false;
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => {
+                self.subscription_strategy_focused = true;
                 RoutingKey::Handled(None)
             }
             KeyCode::Enter => {
-                let strategy = ROUTING_STRATEGIES[self.routing_strategy_index].strategy;
-                // Persist the operator's selection (and set the status) before
-                // applying it to the runtime, so it reloads highlighted next start.
-                self.persist_routing_strategy_now(strategy);
-                RoutingKey::Handled(Some(Cmd::WorkerOp(WorkerOp::ApplyStrategy { strategy })))
+                if self.subscription_strategy_focused {
+                    let strategy =
+                        SUBSCRIPTION_STRATEGIES[self.subscription_strategy_index].strategy;
+                    self.persist_subscription_strategy_now(strategy);
+                    RoutingKey::Handled(Some(Cmd::WorkerOp(WorkerOp::ApplySubscriptionStrategy {
+                        strategy,
+                    })))
+                } else {
+                    let strategy = ROUTING_STRATEGIES[self.routing_strategy_index].strategy;
+                    // Persist the operator's selection (and set the status) before
+                    // applying it to the runtime, so it reloads highlighted next start.
+                    self.persist_routing_strategy_now(strategy);
+                    RoutingKey::Handled(Some(Cmd::WorkerOp(WorkerOp::ApplyStrategy { strategy })))
+                }
             }
             _ => RoutingKey::Unhandled,
         }

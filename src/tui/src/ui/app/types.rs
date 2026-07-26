@@ -18,8 +18,8 @@ use crate::ui::theme::Theme;
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackQuery, FeedbackType};
 use medulla::config::LoadedConfig;
 use medulla::memory::{MemoryHit, MemoryStatus};
-use medulla::runtime::RoutingStrategy;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
+use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 
 /// The ordered top-level tab names. The tab index selects into this array.
 ///
@@ -110,6 +110,36 @@ pub(super) const ROUTING_STRATEGIES: [RoutingStrategyOption; 4] = [
         strategy: RoutingStrategy::MemoryFirst,
         label: "Memory First",
         description: "Choose the host with the most currently available RAM.",
+    },
+];
+
+/// Display metadata for one subscription-level selection rule.
+#[derive(Clone, Copy)]
+pub(super) struct SubscriptionStrategyOption {
+    /// Runtime strategy sent when the option is applied.
+    pub(super) strategy: SubscriptionRoutingStrategy,
+    /// Short label rendered in the strategy chooser.
+    pub(super) label: &'static str,
+    /// Operator-facing explanation of the budget comparison.
+    pub(super) description: &'static str,
+}
+
+/// Subscription strategy options in the order shown by the chooser.
+pub(super) const SUBSCRIPTION_STRATEGIES: [SubscriptionStrategyOption; 3] = [
+    SubscriptionStrategyOption {
+        strategy: SubscriptionRoutingStrategy::Manual,
+        label: "Manual",
+        description: "Keep the requested provider or the host's configured default.",
+    },
+    SubscriptionStrategyOption {
+        strategy: SubscriptionRoutingStrategy::Balanced,
+        label: "Balanced",
+        description: "Choose the ready subscription with the most remaining percentage.",
+    },
+    SubscriptionStrategyOption {
+        strategy: SubscriptionRoutingStrategy::MostAvailableBudget,
+        label: "Most Available Budget",
+        description: "Choose the ready subscription with the most remaining tokens.",
     },
 ];
 
@@ -390,6 +420,10 @@ pub struct App {
     pub(super) routing_focused: bool,
     /// Selected row on the Routing strategy page.
     pub(super) routing_strategy_index: usize,
+    /// Selected subscription rule on the Routing strategy page.
+    pub(super) subscription_strategy_index: usize,
+    /// Whether the subscription group, rather than the host group, has focus.
+    pub(super) subscription_strategy_focused: bool,
     /// Credential presence captured on startup and refreshed when its pane opens.
     pub(super) credential_status: CredentialStatus,
     /// The active Tasks subpage (index into [`TASKS_SUBPAGES`]).

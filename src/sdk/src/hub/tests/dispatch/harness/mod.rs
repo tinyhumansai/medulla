@@ -45,7 +45,7 @@ impl FakeWorker {
 
 #[async_trait]
 impl Relay for FakeWorker {
-    async fn send(&self, _to: &str, body: &str) -> Result<(), String> {
+    async fn send(&self, to: &str, body: &str) -> Result<(), String> {
         if self.fail_send {
             return Err("send boom".to_string());
         }
@@ -62,7 +62,7 @@ impl Relay for FakeWorker {
                 _ => return Ok(()),
             };
             self.inbox.lock().await.push_back(InboundMessage {
-                from: "worker".to_string(),
+                from: to.to_string(),
                 text: encode_task_frame_with_usage(
                     EncodeFrameInput {
                         kind: TaskFrameKind::SystemInfoResult,
@@ -82,7 +82,7 @@ impl Relay for FakeWorker {
         if frame.kind == TaskFrameKind::Capabilities {
             if let Mode::Capabilities(caps) = &self.mode {
                 self.inbox.lock().await.push_back(InboundMessage {
-                    from: "worker".to_string(),
+                    from: to.to_string(),
                     text: encode_task_frame_with_usage(
                         EncodeFrameInput {
                             kind: TaskFrameKind::CapabilitiesResult,
@@ -116,7 +116,7 @@ impl Relay for FakeWorker {
         let cid = frame.correlation_id.clone();
         let task_id = frame.task_id.clone();
         let mk = |kind, text: &str, usage| InboundMessage {
-            from: "worker".to_string(),
+            from: to.to_string(),
             text: encode_task_frame_with_usage(
                 EncodeFrameInput {
                     kind,
@@ -136,13 +136,46 @@ impl Relay for FakeWorker {
         // ahead of everything so the pump's skip-and-continue path runs first.
         if let Mode::GarbageThenReply(_) = self.mode {
             q.push_back(InboundMessage {
-                from: "worker".to_string(),
+                from: to.to_string(),
                 text: "not-a-task-frame".to_string(),
             });
+        }
+        // An impostor's frames go in ahead of the worker's own, carrying the right
+        // correlation id from the wrong sender.
+        if let Mode::ImpostorThenReply {
+            impostor, stolen, ..
+        } = &self.mode
+        {
+            for kind in [TaskFrameKind::Status, TaskFrameKind::Reply] {
+                q.push_back(InboundMessage {
+                    from: impostor.clone(),
+                    text: encode_task_frame_with_usage(
+                        EncodeFrameInput {
+                            kind,
+                            task_id: task_id.clone(),
+                            text: stolen.clone(),
+                            ts: "T".to_string(),
+                            correlation_id: cid.clone(),
+                            harness: None,
+                            provider: None,
+                            model: None,
+                        },
+                        None,
+                    ),
+                });
+            }
         }
         q.push_back(mk(TaskFrameKind::Ack, "accepted", None));
         q.push_back(mk(TaskFrameKind::Status, "running python audit.py", None));
         match &self.mode {
+            Mode::ImpostorThenReply { reply, .. } => q.push_back(mk(
+                TaskFrameKind::Reply,
+                reply,
+                Some(TokenUsage {
+                    input_tokens: 3,
+                    output_tokens: 5,
+                }),
+            )),
             Mode::Reply(text) | Mode::RecoverAfterReset(text) => q.push_back(mk(
                 TaskFrameKind::Reply,
                 text,

@@ -266,6 +266,7 @@ impl TaskRunner {
             self.waiters.lock().await.insert(
                 cid.clone(),
                 Waiter {
+                    from: req.worker_address.clone(),
                     reply: tx,
                     status: status.clone(),
                     activity: activity.clone(),
@@ -396,6 +397,7 @@ fn settle(
 mod types;
 use types::AbortGuard;
 use types::CapabilitiesWaiters;
+use types::Probe;
 use types::SystemInfoWaiters;
 pub use types::TaskRunner;
 use types::Waiter;

@@ -36,6 +36,17 @@ pub(in crate::hub::tests) enum Mode {
     /// Answers a capability probe with the given [`AgentCapabilities`] (its
     /// budgets/readiness serialized into a `capabilities_result` frame).
     Capabilities(AgentCapabilities),
+    /// A third peer answers first, under the dispatch's own correlation id, and
+    /// the real worker replies after it. Models the shared inbox: every contact
+    /// of this identity can post to it, and correlation ids are not secrets.
+    ImpostorThenReply {
+        /// The address the injected frames claim to come from.
+        impostor: String,
+        /// What the impostor claims the task returned.
+        stolen: String,
+        /// What the real worker actually returns.
+        reply: String,
+    },
 }
 
 pub(in crate::hub::tests) struct FakeWorker {

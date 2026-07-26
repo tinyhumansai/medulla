@@ -22,18 +22,49 @@ use super::{CapabilitiesWaiters, SystemInfoWaiters, Waiters};
 /// How many inbound messages to drain per pump tick.
 const DRAIN_LIMIT: i64 = 50;
 
-/// Route one decoded frame to its waiter, keyed by `correlationId` (falling back
-/// to `taskId`). Any frame pokes the waiter's `activity` (sign of life);
-/// `reply`/`error` then settle and remove it; `status` forwards; `ack` just
-/// counted as activity.
+/// Route one decoded frame from `from` to its waiter, keyed by `correlationId`
+/// (falling back to `taskId`). Any frame pokes the waiter's `activity` (sign of
+/// life); `reply`/`error` then settle and remove it; `status` forwards; `ack`
+/// just counted as activity.
+///
+/// A frame is only ever routed to a waiter registered for `from`. The inbox is
+/// shared by every peer holding a contact edge with this identity, and a
+/// correlation id is not a secret — probe ids are plain counters — so without
+/// the check any contact could settle another worker's dispatch, or answer a
+/// capability/system-info probe on its behalf, by guessing one. Mismatches are
+/// dropped and logged rather than ignored quietly: a frame arriving under
+/// someone else's correlation id is either a bug or an attempt, and both are
+/// worth seeing.
 pub(super) async fn route_frame(
     waiters: &Waiters,
     system_info_waiters: &SystemInfoWaiters,
     capabilities_waiters: &CapabilitiesWaiters,
+    from: &str,
     frame: TaskFrame,
     log: &Option<HubLog>,
     activity: &Option<ActivityLog>,
 ) {
+    // Checked before anything is recorded, so an impostor's frame cannot reach
+    // the activity ring the Agents view renders either.
+    if let Some(expected) = expected_sender(
+        waiters,
+        system_info_waiters,
+        capabilities_waiters,
+        &key_of(&frame),
+    )
+    .await
+    {
+        if expected != from {
+            if let Some(log) = log {
+                log(&format!(
+                    "hub: dropped a {} frame for task {} — sent by {from}, which is not the worker it was dispatched to",
+                    frame.kind.as_str(),
+                    frame.task_id,
+                ));
+            }
+            return;
+        }
+    }
     // Recorded as well as logged: the log is for a human reading afterwards,
     // this is what the Agents view renders live.
     if let Some(activity) = activity {
@@ -57,23 +88,20 @@ pub(super) async fn route_frame(
             crate::logging::preview(&frame.text),
         ));
     }
-    let key = frame
-        .correlation_id
-        .clone()
-        .unwrap_or_else(|| frame.task_id.clone());
+    let key = key_of(&frame);
     if frame.kind == TaskFrameKind::SystemInfoResult {
         let result = serde_json::from_str::<WorkerSystemInfo>(&frame.text)
             .map_err(|error| format!("invalid worker system info: {error}"));
-        if let Some(waiter) = system_info_waiters.lock().await.remove(&key) {
-            let _ = waiter.send(result);
+        if let Some(probe) = system_info_waiters.lock().await.remove(&key) {
+            let _ = probe.tx.send(result);
         }
         return;
     }
     if frame.kind == TaskFrameKind::CapabilitiesResult {
         let result = parse_agent_capabilities(&frame.text)
             .ok_or_else(|| "invalid worker capabilities payload".to_string());
-        if let Some(waiter) = capabilities_waiters.lock().await.remove(&key) {
-            let _ = waiter.send(result);
+        if let Some(probe) = capabilities_waiters.lock().await.remove(&key) {
+            let _ = probe.tx.send(result);
         }
         return;
     }
@@ -112,6 +140,40 @@ pub(super) async fn route_frame(
     }
 }
 
+/// The correlation key a frame routes under: its `correlationId`, or its
+/// `taskId` when it carries none.
+fn key_of(frame: &TaskFrame) -> String {
+    frame
+        .correlation_id
+        .clone()
+        .unwrap_or_else(|| frame.task_id.clone())
+}
+
+/// The address the waiter registered under `key` expects to hear from, if any
+/// waiter is registered at all.
+///
+/// `None` means nothing is waiting on this key — a late frame for a settled
+/// dispatch, say — and those are left to the routing below, which finds no
+/// waiter and does nothing with them beyond the activity record.
+async fn expected_sender(
+    waiters: &Waiters,
+    system_info_waiters: &SystemInfoWaiters,
+    capabilities_waiters: &CapabilitiesWaiters,
+    key: &str,
+) -> Option<String> {
+    if let Some(waiter) = waiters.lock().await.get(key) {
+        return Some(waiter.from.clone());
+    }
+    if let Some(probe) = system_info_waiters.lock().await.get(key) {
+        return Some(probe.from.clone());
+    }
+    capabilities_waiters
+        .lock()
+        .await
+        .get(key)
+        .map(|probe| probe.from.clone())
+}
+
 /// The pump: drain the inbox, decode each message, route it, then sleep. Runs
 /// until the owning [`TaskRunner`](super::TaskRunner) is dropped (which aborts it).
 pub(super) async fn pump_loop(
@@ -130,6 +192,7 @@ pub(super) async fn pump_loop(
                     &waiters,
                     &system_info_waiters,
                     &capabilities_waiters,
+                    &msg.from,
                     frame,
                     &log,
                     &activity,

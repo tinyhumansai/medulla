@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::hub::socket::decorate_with_budgets;
+use crate::hub::probe::decorate_with_budgets;
 use crate::hub::tests::dispatch::harness::{FakeWorker, Mode};
 use crate::hub::TaskRunner;
 use crate::tinyplace::{

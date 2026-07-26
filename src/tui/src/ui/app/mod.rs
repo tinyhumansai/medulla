@@ -23,6 +23,7 @@ mod render;
 mod settings_edit;
 mod state;
 mod types;
+mod workspaces;
 
 #[cfg(test)]
 mod tests;

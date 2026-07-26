@@ -56,6 +56,19 @@ To skip the copy entirely, name the worker: run `medulla daemon --handle
 build-box` and type `@build-box` into Add Host. Pass `--no-pair` when the
 daemon's output is being parsed by a script.
 
+### Telling the orchestrator what there is to work on
+
+This device hosts a harness as well as orchestrating, so it usually has more than
+one project on it. **Routing › Workspaces** lists every directory the fleet can
+work in — this machine's, which you add with `a` and remove with `d`, and every
+other host's, which that machine declares and this page shows read-only.
+
+What is listed here for this device is exactly what reaches the orchestrator as
+`capabilities.accessibleDirs`, alongside the harness's own summary of each
+project. It is routing context, not a permission grant: a delegated task still
+runs in `[host].workspace`. The list persists to `[host].workspaces` and is
+advertised from the next launch.
+
 Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
 ## What It Does

@@ -9,7 +9,7 @@ use medulla::runtime::WorkerOp;
 
 use super::super::types::{
     App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_HOST, RP_HARNESSES,
-    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, SUBSCRIPTION_STRATEGIES,
+    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
 };
 
 impl App {
@@ -46,6 +46,7 @@ impl App {
 
         match self.routing_index {
             RP_HOSTS => self.hosts_key(code),
+            RP_WORKSPACES => self.workspaces_key(code),
             RP_TEMPLATES => self.templates_key(code),
             RP_ADD_HOST => self.add_host_key(code),
             RP_HARNESSES => self.harnesses_key(code),
@@ -168,6 +169,42 @@ impl App {
             KeyCode::Char('r') => {
                 self.set_status("Refreshing fleet…");
                 RoutingKey::Handled(Some(Cmd::RefreshFleet))
+            }
+            _ => RoutingKey::Unhandled,
+        }
+    }
+
+    /// Browse the workspace list and change this device's half of it.
+    fn workspaces_key(&mut self, code: KeyCode) -> RoutingKey {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.workspace_index = crate::ui::selection::moved(
+                    self.workspace_index,
+                    self.workspace_rows().len(),
+                    true,
+                );
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.workspace_index = crate::ui::selection::moved(
+                    self.workspace_index,
+                    self.workspace_rows().len(),
+                    false,
+                );
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('a') => {
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::WorkspaceAdd,
+                    title: "Add workspace — absolute path to a directory".into(),
+                    draft: Draft::new(),
+                });
+                self.set_status("Add workspace · Enter save · Esc cancel");
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('d') => {
+                self.remove_selected_workspace();
+                RoutingKey::Handled(None)
             }
             _ => RoutingKey::Unhandled,
         }

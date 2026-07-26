@@ -122,7 +122,7 @@ impl EmbeddedDaemon {
             providers: providers.clone(),
             default_provider,
             workspace: workspace.clone(),
-            accessible_dirs: vec![workspace.clone()],
+            accessible_dirs: accessible_dirs(&workspace, &options.workspaces),
             env,
             task_timeout_ms: options.task_timeout_ms,
             capability_timeout_ms: None,
@@ -224,6 +224,30 @@ fn resolve_workspace(configured: &str) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .into_owned()
+}
+
+/// The directories this host advertises, primary first.
+///
+/// The primary workspace always leads: it is where tasks actually run, and an
+/// orchestrator reading the list top-down should see the default before the
+/// alternatives. Each extra is canonicalized so `~/../repo` and `/Users/me/repo`
+/// do not both appear, blanks are dropped, and duplicates collapse — a list that
+/// names one directory twice reads as two places to work.
+fn accessible_dirs(workspace: &str, extra: &[String]) -> Vec<String> {
+    let mut out = vec![workspace.to_string()];
+    for dir in extra {
+        // Checked *before* resolving: `resolve_workspace("")` yields the process
+        // cwd, but a blank config entry means a stray line, not "the directory I
+        // launched from". Resolving first would silently advertise it.
+        if dir.trim().is_empty() {
+            continue;
+        }
+        let dir = resolve_workspace(dir);
+        if !out.contains(&dir) {
+            out.push(dir);
+        }
+    }
+    out
 }
 
 /// Build the runtime's send callback, recording outbound frames on the way out.

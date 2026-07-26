@@ -22,3 +22,6 @@ mod header;
 
 #[path = "feature_workers/fleet.rs"]
 mod fleet;
+
+#[path = "feature_workers/workspaces.rs"]
+mod workspaces;

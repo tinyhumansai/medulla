@@ -171,6 +171,26 @@ pub fn persist_workflow_workspaces(path: &Path, workspaces: &[String]) -> anyhow
     )
 }
 
+/// Replace the extra directories this device advertises (`[host].workspaces`).
+///
+/// Replacing rather than merging is what makes a removal durable: a merge would
+/// leave a directory the operator deleted from the list still on disk, and it
+/// would come back on the next launch.
+pub fn persist_host_workspaces(path: &Path, workspaces: &[String]) -> anyhow::Result<()> {
+    persist_setting(
+        path,
+        "host",
+        "workspaces",
+        toml::Value::Array(
+            workspaces
+                .iter()
+                .cloned()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    )
+}
+
 /// Replace the static tiny.place peer roster without touching worker identity.
 ///
 /// The daemon TUI uses this when an operator adds a master. Only public peer

@@ -66,6 +66,7 @@ impl App {
             chat_scroll: 0,
             command_index: 0,
             host_index: 0,
+            workspace_index: 0,
             template_index: 0,
             template_scroll: 0,
             template_modal: false,

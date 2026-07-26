@@ -129,6 +129,11 @@ fn spec_for(daemon: &EmbeddedDaemon) -> WorkerSpec {
             daemon.workspace()
         ),
         harness,
+        // The one roster entry whose workspace this process actually knows: the
+        // host runs in this directory. Declaring it is what gives the
+        // orchestrator a placed agent rather than a bare one it treats as
+        // having nowhere to work.
+        workspace: Some(daemon.workspace().to_string()),
     }
 }
 

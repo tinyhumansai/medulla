@@ -14,6 +14,12 @@ pub struct WorkerSpec {
     pub description: String,
     /// The coding-agent harness the worker runs (`claude`/`codex`/`opencode`).
     pub harness: String,
+    /// Absolute path of the workspace this worker runs tasks in, when the hub
+    /// knows it — which is the case for a host in this same process, and not for
+    /// a remote tiny.place peer the operator merely named.
+    ///
+    /// Advertised as `metadata.workspace`; see [`HubWorker::workspace`].
+    pub workspace: Option<String>,
 }
 /// Everything [`start_hub`] needs to bridge the backend to remote workers.
 /// Not `Debug`: the log sink is a boxed closure with no useful representation,

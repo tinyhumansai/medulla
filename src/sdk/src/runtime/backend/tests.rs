@@ -223,6 +223,7 @@ fn hub_worker(address: &str) -> HubWorker {
         harness: "claude".to_string(),
         label: Some("builder".to_string()),
         selected: false,
+        workspace: None,
     }
 }
 

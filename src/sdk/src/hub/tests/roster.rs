@@ -20,6 +20,7 @@ fn worker(id: &str, addr: &str) -> HubWorker {
         harness: "claude".to_string(),
         label: None,
         selected: false,
+        workspace: None,
     }
 }
 
@@ -187,6 +188,35 @@ fn register_payload_advertises_id_address_and_harness() {
     assert_eq!(agents[0]["metadata"]["harness"], "claude");
 }
 
+/// A worker whose workspace this hub knows must advertise it, because that is
+/// what the backend turns into a `WorkspaceDescriptor` and places the agent in.
+/// Without it the orchestrator reads the fleet as "no workspaces declared" and
+/// declines work it could have delegated.
+#[test]
+fn register_payload_advertises_a_known_workspace() {
+    let mut w = worker("this-device", "this-device");
+    w.workspace = Some("/srv/repos/medulla".to_string());
+    let payload = register_payload(&[w]);
+    let agents = payload.get("agents").unwrap().as_array().unwrap();
+    assert_eq!(agents[0]["metadata"]["workspace"], "/srv/repos/medulla");
+}
+
+/// An unknown workspace omits the key rather than sending an empty string: the
+/// backend falls back to the worker's probed `capabilities.cwd`, and `""` would
+/// win that fallback and place the agent nowhere.
+#[test]
+fn register_payload_omits_an_unknown_or_blank_workspace() {
+    let payload = register_payload(&[worker("w1", "GRVaddr")]);
+    let agents = payload.get("agents").unwrap().as_array().unwrap();
+    assert!(agents[0]["metadata"].get("workspace").is_none());
+
+    let mut blank = worker("w2", "ADDR2");
+    blank.workspace = Some("   ".to_string());
+    let payload = register_payload(&[blank]);
+    let agents = payload.get("agents").unwrap().as_array().unwrap();
+    assert!(agents[0]["metadata"].get("workspace").is_none());
+}
+
 #[test]
 fn an_absent_agent_id_falls_back_but_an_unknown_one_does_not() {
     // These were one case and are two. An absent id means "any worker" — the
@@ -299,6 +329,7 @@ fn hw(id: &str, address: &str) -> HubWorker {
         harness: "claude".to_string(),
         label: None,
         selected: false,
+        workspace: None,
     }
 }
 

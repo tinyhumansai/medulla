@@ -66,6 +66,9 @@ pub(super) async fn apply_worker_op(
                     harness: harness.unwrap_or_else(|| "claude".to_string()),
                     label,
                     selected: false,
+                    // A peer added by address: this hub has no idea where it
+                    // runs tasks. The backend falls back to its probed cwd.
+                    workspace: None,
                 })
                 .await
         }

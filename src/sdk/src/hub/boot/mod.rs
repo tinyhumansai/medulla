@@ -106,6 +106,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
                 harness: w.harness.clone(),
                 label: (w.name != "tinyplace-worker").then(|| w.name.clone()),
                 selected: false,
+                workspace: w.workspace.clone(),
             })
             .collect(),
     ));

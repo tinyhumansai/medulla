@@ -24,6 +24,19 @@ use serde_json::{json, Value};
 /// unreachability surfaces as a task error, which is honest, whereas advertising
 /// "offline" would refuse delegation outright.
 fn to_agent(w: &HubWorker) -> Value {
+    // `metadata.workspace` is what places the agent: the backend turns it into a
+    // WorkspaceDescriptor and sets the agent's `workspaceId` from it. Omitted
+    // rather than sent empty when unknown, so the backend falls through to the
+    // worker's probed `capabilities.cwd` instead of placing it at "".
+    let mut metadata = json!({ "address": w.address, "harness": w.harness });
+    if let Some(workspace) = w
+        .workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        metadata["workspace"] = json!(workspace);
+    }
     json!({
         "id": w.id,
         // The name falls back to the id, not to a second constant. `agent_list`
@@ -35,7 +48,7 @@ fn to_agent(w: &HubWorker) -> Value {
         "description": format!("{} daemon", w.harness),
         "availability": "online",
         "tags": ["code"],
-        "metadata": { "address": w.address, "harness": w.harness },
+        "metadata": metadata,
     })
 }
 

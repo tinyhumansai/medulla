@@ -162,6 +162,10 @@ async fn a_started_host_advertises_this_machine_to_the_hub() {
         "the roster entry should say what runs where: {}",
         spec.description
     );
+    // Structured, not only prose: the backend places the agent from
+    // `metadata.workspace`, and a path buried in the description does not
+    // reach it — the orchestrator would see a host with no workspace at all.
+    assert_eq!(spec.workspace.as_deref(), Some(host.workspace()));
     assert_eq!(host.observation().stats().tasks_started, 0);
     assert_eq!(host.observation().address(), "this-device");
 }

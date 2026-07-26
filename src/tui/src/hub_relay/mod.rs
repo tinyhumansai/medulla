@@ -52,6 +52,10 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
             name: w.label.unwrap_or_else(|| "tinyplace-worker".to_string()),
             description: format!("{} daemon", w.harness),
             harness: w.harness,
+            // Remembered rosters carry no workspace: the local host's is
+            // injected fresh each launch (see `build_hub_config_with_host`),
+            // and a remote peer's is unknown here.
+            workspace: None,
         })
         .collect()
 }
@@ -118,6 +122,7 @@ fn workers_from_env(env: &HashMap<String, String>) -> Vec<WorkerSpec> {
         name: "tinyplace-worker".to_string(),
         description: format!("{provider} daemon"),
         harness: provider.clone(),
+        workspace: None,
     };
     if let Some(list) = env
         .get("MEDULLA_HUB_WORKERS")

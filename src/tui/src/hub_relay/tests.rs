@@ -84,6 +84,7 @@ fn worker(id: &str, address: &str, selected: bool) -> medulla::hub::HubWorker {
         harness: "claude".to_string(),
         label: Some("laptop".to_string()),
         selected,
+        workspace: None,
     }
 }
 

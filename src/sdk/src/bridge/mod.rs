@@ -5,8 +5,13 @@
 //! transport for peers that may live on another device. Consumers depend on the
 //! shared [`Bridge`] contract, so routing code does not need to know where a
 //! peer is running.
+//!
+//! [`RoutingBridge`] composes the two: one endpoint that keeps device-local
+//! peers on the in-memory bus and sends everything else over tiny.place. That is
+//! what lets a single process act as both orchestrator and host.
 
 mod local;
+mod routing;
 mod tinyplace;
 mod types;
 
@@ -14,5 +19,6 @@ mod types;
 mod tests;
 
 pub use local::{LocalBridge, LocalBridgeNetwork};
+pub use routing::RoutingBridge;
 pub use tinyplace::TinyplaceBridge;
 pub use types::{Bridge, BridgeKind, BridgeTransport};

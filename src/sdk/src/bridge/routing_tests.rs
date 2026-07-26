@@ -1,0 +1,217 @@
+//! Unit tests for [`RoutingBridge`]: which side of the router an address lands
+//! on, and that the local side never reaches the remote transport.
+
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+
+use crate::bridge::{Bridge, LocalBridgeNetwork, RoutingBridge};
+use crate::daemon::transport::InboundMessage;
+
+/// A remote stand-in that records every call it receives.
+///
+/// The assertions that matter are negative — "the local path did NOT touch the
+/// remote" — so the double records rather than merely responding.
+#[derive(Default)]
+struct RecordingRemote {
+    sent: Mutex<Vec<(String, String)>>,
+    contacts: Mutex<Vec<String>>,
+    resets: Mutex<Vec<String>>,
+    inbox: Mutex<Vec<InboundMessage>>,
+}
+
+impl RecordingRemote {
+    fn with_inbox(messages: Vec<InboundMessage>) -> Self {
+        Self {
+            inbox: Mutex::new(messages),
+            ..Default::default()
+        }
+    }
+
+    fn sent(&self) -> Vec<(String, String)> {
+        self.sent.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl Bridge for RecordingRemote {
+    async fn send(&self, to: &str, body: &str) -> Result<(), String> {
+        self.sent
+            .lock()
+            .unwrap()
+            .push((to.to_string(), body.to_string()));
+        Ok(())
+    }
+
+    async fn drain_inbox(&self, limit: i64) -> Vec<InboundMessage> {
+        let mut inbox = self.inbox.lock().unwrap();
+        let count = (limit.max(0) as usize).min(inbox.len());
+        inbox.drain(..count).collect()
+    }
+
+    async fn request_contact(&self, peer: &str) -> Result<(), String> {
+        self.contacts.lock().unwrap().push(peer.to_string());
+        Ok(())
+    }
+
+    async fn resolve_handle(&self, name: &str) -> Option<String> {
+        (name == "@remote").then(|| "remote-address".to_string())
+    }
+
+    async fn contact_accepted(&self, peer: &str) -> bool {
+        peer == "remote-address"
+    }
+
+    async fn reset_session(&self, peer: &str) {
+        self.resets.lock().unwrap().push(peer.to_string());
+    }
+}
+
+/// A router bound as `hub` with a `host` endpoint beside it, plus the remote it
+/// falls through to.
+fn wired() -> (
+    RoutingBridge,
+    Arc<RecordingRemote>,
+    crate::bridge::LocalBridge,
+) {
+    let network = LocalBridgeNetwork::new();
+    let hub = network.bind("hub").unwrap();
+    let host = network.bind("host").unwrap();
+    let remote = Arc::new(RecordingRemote::default());
+    let router = RoutingBridge::new(hub, remote.clone() as Arc<dyn Bridge>);
+    (router, remote, host)
+}
+
+#[tokio::test]
+async fn a_bound_local_address_is_delivered_in_process_and_never_sent_remotely() {
+    let (router, remote, host) = wired();
+
+    router.send("host", "run this here").await.unwrap();
+
+    assert_eq!(
+        host.drain_inbox(10)
+            .await
+            .into_iter()
+            .map(|m| (m.from, m.text))
+            .collect::<Vec<_>>(),
+        vec![("hub".to_string(), "run this here".to_string())]
+    );
+    assert!(remote.sent().is_empty());
+}
+
+#[tokio::test]
+async fn an_unbound_address_falls_through_to_the_remote_transport() {
+    let (router, remote, _host) = wired();
+
+    router
+        .send("remote-address", "run this there")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        remote.sent(),
+        vec![("remote-address".to_string(), "run this there".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn an_endpoint_that_goes_away_stops_routing_locally() {
+    let (router, remote, host) = wired();
+    assert!(router.is_local("host").await);
+
+    drop(host);
+
+    assert!(!router.is_local("host").await);
+    router.send("host", "after teardown").await.unwrap();
+    assert_eq!(
+        remote.sent(),
+        vec![("host".to_string(), "after teardown".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn draining_merges_both_inboxes_within_one_shared_limit() {
+    let network = LocalBridgeNetwork::new();
+    let hub = network.bind("hub").unwrap();
+    let host = network.bind("host").unwrap();
+    let remote = Arc::new(RecordingRemote::with_inbox(vec![
+        InboundMessage {
+            from: "peer".to_string(),
+            text: "remote-one".to_string(),
+        },
+        InboundMessage {
+            from: "peer".to_string(),
+            text: "remote-two".to_string(),
+        },
+    ]));
+    let router = RoutingBridge::new(hub, remote.clone() as Arc<dyn Bridge>);
+    host.send("hub", "local-one").await.unwrap();
+
+    let drained = router.drain_inbox(2).await;
+
+    assert_eq!(
+        drained.into_iter().map(|m| m.text).collect::<Vec<_>>(),
+        vec!["local-one".to_string(), "remote-one".to_string()]
+    );
+    // The over-limit remote frame is still queued rather than dropped.
+    assert_eq!(remote.drain_inbox(10).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_local_peer_needs_no_contact_edge_and_no_session_reset() {
+    let (router, remote, _host) = wired();
+
+    assert!(router.contact_accepted("host").await);
+    router.request_contact("host").await.unwrap();
+    router.reset_session("host").await;
+
+    assert!(remote.contacts.lock().unwrap().is_empty());
+    assert!(remote.resets.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_remote_peer_keeps_its_contact_edge_and_session_reset() {
+    let (router, remote, _host) = wired();
+
+    assert!(router.contact_accepted("remote-address").await);
+    router.request_contact("remote-address").await.unwrap();
+    router.reset_session("remote-address").await;
+
+    assert_eq!(*remote.contacts.lock().unwrap(), vec!["remote-address"]);
+    assert_eq!(*remote.resets.lock().unwrap(), vec!["remote-address"]);
+}
+
+#[tokio::test]
+async fn handles_resolve_locally_first_then_remotely() {
+    let network = LocalBridgeNetwork::new();
+    let hub = network.bind("hub").unwrap();
+    let _host = network.bind("@host").unwrap();
+    let router = RoutingBridge::new(hub, Arc::new(RecordingRemote::default()) as Arc<dyn Bridge>);
+
+    assert_eq!(
+        router.resolve_handle("host").await.as_deref(),
+        Some("@host")
+    );
+    assert_eq!(
+        router.resolve_handle("@remote").await.as_deref(),
+        Some("remote-address")
+    );
+    assert_eq!(router.resolve_handle("@nobody").await, None);
+}
+
+#[tokio::test]
+async fn without_a_remote_a_non_local_address_fails_loudly() {
+    let network = LocalBridgeNetwork::new();
+    let router = RoutingBridge::local_only(network.bind("hub").unwrap());
+
+    let error = router.send("somewhere-else", "hello").await.unwrap_err();
+
+    assert!(
+        error.contains("somewhere-else"),
+        "unexpected error: {error}"
+    );
+    assert!(!router.contact_accepted("somewhere-else").await);
+    assert!(router.drain_inbox(10).await.is_empty());
+    assert_eq!(router.local_address(), "hub");
+    assert!(router.remote().is_none());
+}

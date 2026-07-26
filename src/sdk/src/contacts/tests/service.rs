@@ -280,3 +280,66 @@ async fn spawn_contact_poll_fills_the_shared_book_and_stops_when_aborted() {
         "aborting the handle ends the loop"
     );
 }
+
+#[tokio::test]
+async fn a_master_paired_mid_session_is_admitted_without_a_restart() {
+    // The bug this prevents: the allowlist was seeded once, from the peers the
+    // config named at boot. Pairing a master from the daemon's Master tab wrote
+    // the config and told the operator it had worked, but the running desk had
+    // never heard of it — so the master's answering contact request queued as a
+    // stranger's, the Master row never came up, and the pairing only completed
+    // the next time the worker was restarted.
+    let relay = FakeRelay::with_incoming(&["master"]);
+    let desk = ContactDesk::new(
+        relay.clone() as Arc<dyn ContactRelay>,
+        AdmissionPolicy::Allowlist,
+        Vec::<String>::new(),
+    )
+    .with_now(clock());
+
+    desk.refresh().await;
+    assert_eq!(desk.pending_count(), 1, "not paired yet, so nothing admits");
+
+    desk.allow("master");
+    desk.refresh().await;
+
+    assert_eq!(relay.calls(), vec!["accept:master".to_string()]);
+    assert_eq!(desk.pending_count(), 0);
+    assert!(
+        desk.accepted().iter().any(|c| c.agent_id == "master"),
+        "the paired master is a contact now: {:?}",
+        desk.accepted()
+    );
+}
+
+#[tokio::test]
+async fn an_established_contact_is_narrated_by_id_not_only_counted() {
+    // "1 new contact" is not answerable: a peer that pairs itself settles with
+    // nobody deciding anything here, so the log has to say which peer it was.
+    let relay = FakeRelay::with_incoming(&["master"]);
+    let said = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = {
+        let said = said.clone();
+        Arc::new(move |line: &str| said.lock().unwrap().push(line.to_string()))
+    };
+    let desk = ContactDesk::new(
+        relay.clone() as Arc<dyn ContactRelay>,
+        AdmissionPolicy::All,
+        Vec::<String>::new(),
+    )
+    .with_now(clock())
+    .with_log(sink);
+
+    desk.refresh().await;
+
+    let lines = said.lock().unwrap().clone();
+    assert!(
+        lines.iter().any(|line| line.contains("master")),
+        "got {lines:?}"
+    );
+
+    // A second poll finds the same contact and must not narrate it again.
+    said.lock().unwrap().clear();
+    desk.refresh().await;
+    assert!(said.lock().unwrap().is_empty(), "got {:?}", said.lock());
+}

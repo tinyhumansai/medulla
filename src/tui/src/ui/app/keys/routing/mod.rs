@@ -31,9 +31,16 @@ impl App {
                     self.routing_subpage()
                 ));
                 // Capacity is declared, never streamed, so entering the page is
-                // the moment to go and read it.
-                let cmd = matches!(self.routing_index, RP_HARNESSES | RP_TEMPLATES)
-                    .then_some(Cmd::RefreshFleet);
+                // the moment to go and read it. Workspaces belongs here too: a
+                // backend session starts with an empty `snapshot.capacity`, so
+                // without this the page showed only this device's directories
+                // until the operator happened to visit Harnesses or Templates
+                // first — which reads as "the fleet has no workspaces".
+                let cmd = matches!(
+                    self.routing_index,
+                    RP_HARNESSES | RP_TEMPLATES | RP_WORKSPACES
+                )
+                .then_some(Cmd::RefreshFleet);
                 return RoutingKey::Handled(cmd);
             }
             NavAction::Left => {

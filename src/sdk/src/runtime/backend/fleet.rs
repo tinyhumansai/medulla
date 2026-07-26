@@ -95,6 +95,35 @@ pub(super) fn project_roster(workers: &[RosterWorker]) -> (Vec<AgentDescriptor>,
             id
         });
 
+        // The other directories the probe reported. The worker *runs* in its
+        // cwd, so only that one backs the agent's placement — but a machine with
+        // three repositories on it has three places work could go, and the
+        // orchestrator can only route by what is declared. Without this the
+        // `accessibleDirs` the hub now forwards reached the backend and stopped
+        // there, never becoming rows anything could read.
+        for (index, dir) in probed_dirs(worker, "accessibleDirs")
+            .into_iter()
+            .filter(|dir| Some(dir.as_str()) != probed_cwd(worker).as_deref())
+            .enumerate()
+        {
+            capacity.workspaces.push(WorkspaceDescriptor {
+                id: format!("ws:{}:{index}", worker.registry_id),
+                name: dir
+                    .rsplit('/')
+                    .find(|part| !part.is_empty())
+                    .unwrap_or(&dir)
+                    .to_string(),
+                path: dir,
+                harness_id: harness_id.clone(),
+                profile: None,
+                // The probe reports one `project`, and it describes the cwd.
+                // Claiming it for a sibling directory would be an invention.
+                project: None,
+                template_ids: Vec::new(),
+                metadata: Map::new(),
+            });
+        }
+
         agents.push(AgentDescriptor {
             id: worker.registry_id.clone(),
             name: display_name(worker),
@@ -199,4 +228,30 @@ fn probed_str(worker: &RosterWorker, key: &str) -> Option<String> {
 /// The working directory the capability probe reported, if any.
 fn probed_cwd(worker: &RosterWorker) -> Option<String> {
     probed_str(worker, "cwd")
+}
+
+/// A probed string array, trimmed and de-duplicated in reported order.
+///
+/// Blanks are dropped rather than becoming a workspace at path `""`, and a
+/// non-array value yields nothing instead of an error — the probe is
+/// self-reported by a harness, so it is untrusted input, not a contract.
+fn probed_dirs(worker: &RosterWorker, key: &str) -> Vec<String> {
+    let Some(values) = worker
+        .capabilities
+        .as_ref()
+        .and_then(|caps| caps.get(key))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for value in values {
+        let Some(dir) = value.as_str().map(str::trim).filter(|d| !d.is_empty()) else {
+            continue;
+        };
+        if !out.iter().any(|seen| seen == dir) {
+            out.push(dir.to_string());
+        }
+    }
+    out
 }

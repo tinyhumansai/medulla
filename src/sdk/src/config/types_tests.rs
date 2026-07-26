@@ -423,9 +423,41 @@ fn fleet_parses_the_containment_chain_and_round_trips_in_camel_case() {
 }
 
 #[test]
-fn an_absent_fleet_section_declares_nothing_and_is_not_serialized() {
+fn an_absent_fleet_section_seeds_the_coding_catalog() {
     let cfg: TuiConfig = serde_json::from_str("{}").unwrap();
+    let ids: Vec<&str> = cfg
+        .fleet
+        .agent_templates
+        .iter()
+        .map(|template| template.id.as_str())
+        .collect();
+
+    assert_eq!(
+        ids,
+        [
+            "coding-agent",
+            "code-reviewer",
+            "pr-manager",
+            "repo-orchestrator"
+        ]
+    );
+    assert!(cfg
+        .fleet
+        .agent_templates
+        .iter()
+        .all(|template| template.model.is_none() && template.tools.is_none()));
+    assert!(cfg.fleet.has_only_coding_defaults());
+    assert!(serde_json::to_string(&cfg)
+        .unwrap()
+        .contains("\"agentTemplates\""));
+}
+
+#[test]
+fn an_explicit_empty_template_catalog_opts_out_of_coding_defaults() {
+    let cfg: TuiConfig = serde_json::from_str(r#"{"fleet":{"agentTemplates":[]}}"#).unwrap();
+
     assert!(cfg.fleet.is_empty());
+    assert!(!cfg.fleet.has_only_coding_defaults());
     assert!(cfg.fleet.capacity().is_empty());
     assert!(!serde_json::to_string(&cfg).unwrap().contains("fleet"));
 }

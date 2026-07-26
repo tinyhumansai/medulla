@@ -14,6 +14,7 @@ const BOOL_FLAGS: &[&str] = &[
     "dangerously-skip-permissions",
     "once",
     "no-onboard",
+    "no-pair",
     "reonboard",
 ];
 

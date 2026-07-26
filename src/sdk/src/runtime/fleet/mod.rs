@@ -19,8 +19,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod defaults;
 mod demo;
 
+pub(crate) use defaults::coding_agent_templates;
 pub use demo::{
     demo_agents, demo_capacity, demo_fleet_requested, demo_requested_from, DEMO_FLEET_ENV,
 };

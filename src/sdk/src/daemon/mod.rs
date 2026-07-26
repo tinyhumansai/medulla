@@ -27,6 +27,7 @@ pub mod capabilities;
 pub mod dir_context;
 pub mod embedded;
 pub mod mappers;
+pub mod pairing;
 pub mod providers;
 pub mod transport;
 

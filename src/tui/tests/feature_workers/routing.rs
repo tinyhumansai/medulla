@@ -48,7 +48,7 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
     assert!(app.on_event(key(KeyCode::Esc)).is_none());
     assert!(!app.routing_focused());
 
-    assert!(app.on_event(key(KeyCode::Char('5'))).is_none());
+    assert!(app.on_event(key(KeyCode::Char('6'))).is_none());
     assert_eq!(app.routing_subpage(), "Strategies");
     assert!(app.routing_focused());
 }
@@ -124,4 +124,33 @@ fn strategy_selection_persists_to_config_and_reloads_highlighted() {
     let out = render(&mut reloaded, 120, 40);
     // The selection marker sits on the CPU First row.
     assert!(out.contains("▸ CPU First"), "CPU First highlighted: {out}");
+}
+
+#[test]
+fn add_host_shows_the_line_to_run_on_the_machine_being_added() {
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("Add Host");
+    let out = render(&mut app, 160, 44);
+    // The page is a procedure, not a definition: both halves of the pairing and
+    // the two keys that drive them.
+    assert!(out.contains("On the machine you want to add"), "{out}");
+    assert!(out.contains("medulla daemon"), "{out}");
+    assert!(out.contains("Back here"), "{out}");
+    assert!(out.contains("c copy the install line"), "{out}");
+}
+
+#[test]
+fn add_host_copies_the_install_line_rather_than_asking_it_to_be_retyped() {
+    let mut app = app_with_workers(None);
+    let sink = app.capture_clipboard();
+    app.focus_routing_subpage("Add Host");
+    assert!(app.on_event(key(KeyCode::Char('c'))).is_none());
+    let copied = sink.lock().unwrap().clone();
+    assert_eq!(copied.len(), 1, "one copy: {copied:?}");
+    assert_eq!(copied[0], medulla::daemon::pairing::REMOTE_JOIN_COMMAND);
+    assert!(
+        app.status().contains("install line"),
+        "the status names what was copied: {}",
+        app.status()
+    );
 }

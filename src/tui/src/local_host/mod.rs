@@ -84,6 +84,7 @@ pub(crate) fn options_from_config(
     };
     Ok(EmbeddedDaemonOptions {
         workspace: config.workspace.clone(),
+        workspaces: config.workspaces.clone(),
         providers: (!providers.is_empty()).then_some(providers),
         default_provider,
         concurrency: config.concurrency.max(1) as usize,

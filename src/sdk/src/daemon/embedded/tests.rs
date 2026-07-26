@@ -17,7 +17,7 @@ use crate::tinyplace::{
     TaskFrameKind,
 };
 
-use super::{EmbeddedDaemon, EmbeddedDaemonOptions};
+use super::{accessible_dirs, EmbeddedDaemon, EmbeddedDaemonOptions};
 
 /// A path that is guaranteed to exist and be executable on every platform.
 ///
@@ -414,4 +414,54 @@ async fn a_host_describes_itself_by_where_it_is_and_what_it_serves() {
         rendered.contains("Claude"),
         "should name what it serves: {rendered}"
     );
+}
+
+#[test]
+fn the_primary_workspace_always_leads_the_advertised_directories() {
+    // An orchestrator reading the list top-down should see where tasks actually
+    // run before the alternatives.
+    let dirs = accessible_dirs("/srv/primary", &[]);
+    assert_eq!(dirs, vec!["/srv/primary".to_string()]);
+}
+
+#[test]
+fn extra_workspaces_are_appended_without_duplicating_the_primary() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let primary = tmp.path().join("primary");
+    let other = tmp.path().join("other");
+    std::fs::create_dir_all(&primary).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let primary = std::fs::canonicalize(&primary).unwrap();
+    let other = std::fs::canonicalize(&other).unwrap();
+
+    let dirs = accessible_dirs(
+        &primary.to_string_lossy(),
+        &[
+            other.to_string_lossy().into_owned(),
+            // The primary again, and a repeat of `other`: a list naming one
+            // directory twice reads as two places to work.
+            primary.to_string_lossy().into_owned(),
+            other.to_string_lossy().into_owned(),
+        ],
+    );
+    assert_eq!(
+        dirs,
+        vec![
+            primary.to_string_lossy().into_owned(),
+            other.to_string_lossy().into_owned()
+        ]
+    );
+}
+
+#[test]
+fn a_blank_entry_does_not_advertise_the_launch_directory() {
+    // `resolve_workspace("")` yields the process cwd. A stray blank line in the
+    // config must not silently expose whatever folder medulla was started in.
+    let cwd = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let dirs = accessible_dirs("/srv/primary", &["".to_string(), "   ".to_string()]);
+    assert_eq!(dirs, vec!["/srv/primary".to_string()]);
+    assert!(!dirs.contains(&cwd), "{dirs:?}");
 }

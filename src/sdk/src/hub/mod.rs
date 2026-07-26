@@ -12,6 +12,7 @@ mod activity;
 mod boot;
 mod handle;
 mod pairing;
+mod probe;
 mod relay;
 mod roster;
 mod runner;

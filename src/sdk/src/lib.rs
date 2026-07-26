@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod bridge;
 pub mod client;
+pub mod clipboard;
 pub mod clock;
 pub mod config;
 pub mod contacts;

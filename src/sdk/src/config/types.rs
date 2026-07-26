@@ -215,6 +215,15 @@ pub struct HostSection {
     /// launched from, which is the one the operator is looking at.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub workspace: String,
+    /// Other directories this device is willing to work in.
+    ///
+    /// Advertised to the orchestrator as `capabilities.accessibleDirs`, so it
+    /// knows this machine has more than one project on it rather than inferring
+    /// the whole device from the folder `medulla` happened to be launched in.
+    /// Advisory routing context: a delegated task still runs in
+    /// [`workspace`](Self::workspace).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<String>,
     /// Coding-agent CLIs to serve. Empty detects whatever is installed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<String>,
@@ -240,6 +249,7 @@ impl Default for HostSection {
             enabled: true,
             address: d_host_address(),
             workspace: String::new(),
+            workspaces: Vec::new(),
             providers: Vec::new(),
             default_provider: String::new(),
             concurrency: 2,
@@ -540,10 +550,10 @@ pub struct OnboardingConfig {
 ///
 /// Declared, never probed — this is what the client *offers* the orchestrator
 /// when it attaches to `medulla-serve`, and what the TUI's Fleet page renders
-/// when no backend supplies a fleet of its own. An empty section (the default)
-/// changes nothing: the handshake declares no capacity and the Fleet page shows
-/// its empty state.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// when no backend supplies a fleet of its own. The default declares only the
+/// built-in coding template catalog; it provisions no agents and advertises no
+/// host capacity. An explicit empty template list opts out of that catalog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct FleetConfig {
     /// Machines this client declares.
@@ -563,6 +573,18 @@ pub struct FleetConfig {
     pub agent_templates: Vec<AgentTemplate>,
 }
 
+impl Default for FleetConfig {
+    fn default() -> Self {
+        Self {
+            hosts: Vec::new(),
+            harnesses: Vec::new(),
+            workspaces: Vec::new(),
+            agents: Vec::new(),
+            agent_templates: crate::runtime::fleet::coding_agent_templates(),
+        }
+    }
+}
+
 impl FleetConfig {
     /// Whether the operator declared nothing at all.
     pub fn is_empty(&self) -> bool {
@@ -571,6 +593,18 @@ impl FleetConfig {
             && self.workspaces.is_empty()
             && self.agents.is_empty()
             && self.agent_templates.is_empty()
+    }
+
+    /// Whether this config contains only the built-in coding catalog.
+    ///
+    /// This lets opt-in demonstrations replace the seed with their own complete
+    /// fleet while ordinary runtimes still advertise the useful defaults.
+    pub fn has_only_coding_defaults(&self) -> bool {
+        self.hosts.is_empty()
+            && self.harnesses.is_empty()
+            && self.workspaces.is_empty()
+            && self.agents.is_empty()
+            && self.agent_templates == crate::runtime::fleet::coding_agent_templates()
     }
 
     /// The declared chain as the UI-facing roll-up (agents excluded — they reach

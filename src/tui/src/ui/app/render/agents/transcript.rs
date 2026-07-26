@@ -1,0 +1,195 @@
+//! The pane beside the rail: a transcript when the cursor is on a lane or task,
+//! the declaration when it is on a fleet row.
+//!
+//! Above whichever it is sits the header — the harness task board, the seat
+//! budget, where the lane runs, and the compact meters for that machine and
+//! this lane's context window. The header is built first because it decides how
+//! many rows are left for the body to scroll through.
+
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line as TLine, Span, Text};
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
+
+use crate::ui::agents::{lane_lines, task_lines, Line as StyledLine};
+use crate::ui::fleet::fleet_detail;
+use crate::ui::harness::{budget_note, task_board_lines};
+use crate::ui::meters;
+use medulla::harness_contract::AgentBudgetMetadata;
+
+use super::super::super::types::App;
+use super::super::{chat_lines, styled_to_tline};
+use super::types::Selection;
+
+impl App {
+    /// Draw the transcript or declaration for whatever the cursor is on.
+    pub(super) fn draw_agents_pane(&mut self, f: &mut Frame, area: Rect, selection: &Selection) {
+        let lane = selection.lane();
+        let pane_width = ((area.width as usize).saturating_sub(4)).max(24);
+        let on_orchestrator = selection.on_orchestrator;
+        let content_lines: Vec<StyledLine> = if let Some(node) = &selection.node {
+            fleet_detail(
+                &self.fleet_capacity(),
+                &self.fleet_roster(),
+                &node.key,
+                pane_width,
+            )
+        } else if let Some(t) = &selection.task {
+            task_lines(t, pane_width)
+        } else if on_orchestrator {
+            // The orchestrator lane is the conversation: show what was said, not
+            // the model calls that said it. The calls stay in Settings › Trace.
+            chat_lines(&self.snapshot.events, pane_width)
+        } else {
+            lane_lines(lane, pane_width)
+        };
+        let title = if let Some(node) = &selection.node {
+            format!("{} · {}", node.kind.label(), node.label)
+        } else if let Some(t) = &selection.task {
+            format!(
+                "{} › {} · {} turns",
+                lane.map(|l| l.label.as_str()).unwrap_or("task"),
+                t.task_id,
+                t.turns
+            )
+        } else if on_orchestrator {
+            let thread = self
+                .snapshot
+                .threads
+                .get(self.active_thread_idx())
+                .map(|t| t.name.clone())
+                .unwrap_or_else(|| "main".into());
+            format!(
+                "orchestrator · {thread} · {} turns",
+                self.snapshot.messages.len().div_ceil(2)
+            )
+        } else if let Some(l) = lane {
+            format!("{} · {} turns", l.label, l.turns.len())
+        } else {
+            "Transcript".into()
+        };
+        let block = self.panel(title);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let mut header: Vec<TLine> = Vec::new();
+        // Harness task board: session-wide, shown only when the backend surfaces a
+        // `HarnessStatus`. Degrades to nothing (empty vec) when absent or empty.
+        if let Some(status) = &self.snapshot.harness {
+            for line in task_board_lines(status, pane_width) {
+                header.push(styled_to_tline(&line));
+            }
+        }
+        // Read-only seat budget for the selected lane, when its descriptor carries
+        // a `metadata.budget` stamp. Seat CRUD stays a backend REST concern.
+        if let Some(budget) = lane
+            .and_then(|l| l.descriptor.as_ref())
+            .and_then(|d| AgentBudgetMetadata::from_metadata(&d.metadata))
+        {
+            header.push(TLine::from(Span::styled(
+                format!("seat {}", budget_note(&budget)),
+                Style::default().fg(if budget.exhausted {
+                    Color::Red
+                } else {
+                    Color::Magenta
+                }),
+            )));
+        }
+        // Where this lane runs, and how hard: the placement chip, then compact
+        // meters for the machine's memory and load and for the lane's own
+        // context window. Every reading is omitted rather than zeroed when it
+        // was not reported — a bar at 0% claims a measurement nobody took.
+        if selection.node.is_none() {
+            let capacity = self.fleet_capacity();
+            if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
+                let placement = capacity.placement(descriptor);
+                let chip = [
+                    placement.host.map(|h| h.name.clone()),
+                    placement.harness.map(|h| h.kind.clone()),
+                    placement.workspace.map(|w| w.path.clone()),
+                    placement
+                        .template
+                        .map(|t| format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|part| !part.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+                if !chip.is_empty() {
+                    header.push(TLine::from(Span::styled(
+                        chip,
+                        Style::default().fg(Color::Cyan),
+                    )));
+                }
+                if let Some(resources) = placement.host.and_then(|h| h.resources.as_ref()) {
+                    for line in [
+                        meters::cpu_meter(resources),
+                        meters::memory_meter(resources),
+                        meters::disk_line(resources),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        header.push(styled_to_tline(&line));
+                    }
+                }
+            }
+            if let Some(lane) = lane {
+                let window = self.loaded.config.medulla.context_window() as i64;
+                if let Some(line) = meters::context_meter(&lane.usage, window) {
+                    header.push(styled_to_tline(&line));
+                }
+            }
+        }
+        // Reserve the last row for the status line (scroll notice or spinner),
+        // or a below-fold notice would itself fall below the fold.
+        let capacity = (inner.height as usize)
+            .saturating_sub(header.len() + 1)
+            .max(4);
+        let max_scroll = content_lines.len().saturating_sub(capacity);
+        // The two transcripts keep their own scroll positions, so switching
+        // lanes and switching back does not lose your place in either.
+        let eff = if on_orchestrator {
+            let eff = self.chat_scroll.min(max_scroll);
+            self.chat_scroll = eff;
+            eff
+        } else {
+            self.agent_scroll.min(max_scroll)
+        };
+        let end = content_lines.len() - eff;
+        let view = &content_lines[end.saturating_sub(capacity)..end];
+        let mut out = header;
+        if view.is_empty() {
+            out.push(TLine::from(Span::styled(
+                "No messages yet — type below to start.",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
+        out.extend(view.iter().map(styled_to_tline));
+        if eff > 0 {
+            out.push(TLine::from(Span::styled(
+                format!("↑ {eff} more line(s) below · k to catch up"),
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        } else if on_orchestrator && self.snapshot.running {
+            let calls = crate::ui::stream::running_calls(&self.snapshot.events);
+            let msg = if calls > 0 {
+                format!(
+                    "thinking · {calls} model call{} in flight",
+                    if calls == 1 { "" } else { "s" }
+                )
+            } else {
+                "working…".into()
+            };
+            out.push(TLine::from(Span::styled(
+                format!(
+                    "{} {msg}",
+                    crate::ui::util::SPINNER[self.frame % crate::ui::util::SPINNER.len()],
+                ),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+        f.render_widget(Paragraph::new(Text::from(out)), inner);
+    }
+}

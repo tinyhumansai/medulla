@@ -157,7 +157,7 @@ impl App {
                 } else {
                     Color::DarkGray
                 };
-                let detail = if l.role == AgentRole::Worker {
+                let detail = if l.role == AgentRole::Agent {
                     format!("{} tokens", fmt_tokens(used))
                 } else {
                     format!("{}/{} ({pct}%)", fmt_tokens(used), fmt_tokens(window))
@@ -225,7 +225,7 @@ impl App {
                 let is_fn = item.role.is_function();
                 let ctx = match item.context_tokens {
                     None => String::new(),
-                    Some(used) if item.role == AgentRole::Worker => {
+                    Some(used) if item.role == AgentRole::Agent => {
                         format!(" · ctx {}", fmt_tokens(used))
                     }
                     Some(used) => format!(
@@ -269,7 +269,7 @@ impl App {
     pub(super) fn lane_marker(&self, item: &AgentLane, is_fn: bool) -> &'static str {
         if is_fn {
             "ƒ"
-        } else if item.role != AgentRole::Worker {
+        } else if item.role != AgentRole::Agent {
             "●"
         } else if item.session_id.is_some() {
             let state = self.session_state(item);
@@ -316,7 +316,7 @@ impl App {
                 Some(other) => format!(" · {other}"),
                 None => " · …".into(),
             }
-        } else if item.role == AgentRole::Worker {
+        } else if item.role == AgentRole::Agent {
             if item.active_tasks > 0 {
                 " · busy".into()
             } else if item.turns.is_empty() {

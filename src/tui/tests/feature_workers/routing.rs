@@ -1,4 +1,4 @@
-//! Routing fleet-view navigation and capacity-strategy coverage: the five
+//! Routing fleet-view navigation and capacity-strategy coverage: the six
 //! subpages and menu focus model, unbound-key passthrough, and the routing
 //! strategy chooser (apply → `WorkerOp`, persistence to config, reload-highlight).
 
@@ -10,10 +10,11 @@ fn routing_nav_exposes_every_subpage() {
     tab(&mut app, "Routing");
     let out = render(&mut app, 120, 40);
     for page in [
-        "List Workers",
         "Fleet",
-        "Add Worker",
-        "Manage Keys",
+        "Hosts",
+        "Harnesses",
+        "Templates",
+        "Add Host",
         "Strategies",
     ] {
         assert!(out.contains(page), "missing {page}: {out}");
@@ -38,15 +39,19 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
     assert!(!app.routing_focused());
 
     assert!(app.on_event(key(KeyCode::Down)).is_none());
-    assert_eq!(app.routing_subpage(), "Fleet");
+    assert_eq!(app.routing_subpage(), "Hosts");
     assert!(app.on_event(key(KeyCode::Down)).is_none());
-    assert_eq!(app.routing_subpage(), "Add Worker");
-    assert!(app.on_event(key(KeyCode::Enter)).is_none());
+    assert_eq!(app.routing_subpage(), "Harnesses");
+    // Entering a capacity page pulls a fresh read; capacity is never streamed.
+    assert!(matches!(
+        app.on_event(key(KeyCode::Enter)),
+        Some(Cmd::RefreshFleet)
+    ));
     assert!(app.routing_focused());
     assert!(app.on_event(key(KeyCode::Esc)).is_none());
     assert!(!app.routing_focused());
 
-    assert!(app.on_event(key(KeyCode::Char('5'))).is_none());
+    assert!(app.on_event(key(KeyCode::Char('6'))).is_none());
     assert_eq!(app.routing_subpage(), "Strategies");
     assert!(app.routing_focused());
 }
@@ -54,7 +59,7 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
 #[test]
 fn routing_pages_leave_unbound_keys_for_global_handling() {
     let mut app = app_with_workers(None);
-    for page in ["Add Worker", "Manage Keys", "Strategies"] {
+    for page in ["Add Host", "Strategies"] {
         app.focus_routing_subpage(page);
         assert!(app.on_event(key(KeyCode::Char('z'))).is_none());
     }

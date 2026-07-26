@@ -15,8 +15,6 @@ fn the_fleet_page_renders_the_declared_chain_top_down() {
     assert!(out.contains("claude-code"), "{out}");
     assert!(out.contains("/srv/repos/medulla"), "{out}");
     assert!(out.contains("dev-1"), "{out}");
-    assert!(out.contains("agent templates"), "{out}");
-    assert!(out.contains("Implementer"), "{out}");
 }
 
 #[test]
@@ -62,8 +60,7 @@ fn the_agent_detail_resolves_its_placement_and_template() {
 fn entering_the_page_and_pressing_r_both_ask_for_a_fresh_read() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
-    // Menu → Fleet → enter the content pane.
-    let _ = app.on_event(key(KeyCode::Down));
+    // Fleet is the first Routing page, so the menu opens on it.
     assert_eq!(app.routing_subpage(), "Fleet");
     assert!(
         matches!(app.on_event(key(KeyCode::Enter)), Some(Cmd::RefreshFleet)),
@@ -76,14 +73,29 @@ fn entering_the_page_and_pressing_r_both_ask_for_a_fresh_read() {
 }
 
 #[test]
-fn a_heading_row_is_never_selected_as_a_detail_target() {
+fn a_registered_peer_is_a_host_rather_than_an_unplaced_agent() {
     let mut app = app_with_workers(None);
     app.focus_routing_subpage("Fleet");
-    // Walk past the chain onto the `── agent templates ──` heading.
-    for _ in 0..4 {
-        let _ = app.on_event(key(KeyCode::Down));
-    }
-    assert_eq!(app.selected_fleet_key(), None);
+    let out = render(&mut app, 160, 40);
+    // `w1` is a registry peer: it belongs in the chain as a machine, and the
+    // codex harness it advertises hangs off it.
+    assert!(out.contains("w1 label"), "{out}");
+    assert!(!out.contains("unplaced agents"), "{out}");
+}
+
+#[test]
+fn the_templates_page_lists_the_catalog_and_its_usage() {
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("Templates");
+    let out = render(&mut app, 160, 40);
+    assert!(out.contains("Implementer"), "{out}");
+    assert!(out.contains("Implements a scoped change"), "{out}");
+    assert!(out.contains("provisioned agents"), "{out}");
+    assert!(out.contains("dev-1"), "{out}");
+    assert!(matches!(
+        app.on_event(key(KeyCode::Char('r'))),
+        Some(Cmd::RefreshFleet)
+    ));
 }
 
 #[test]

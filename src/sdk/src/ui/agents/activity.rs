@@ -10,7 +10,7 @@
 //!
 //! The orchestrator hub has the truth in-process — it dispatched the task and
 //! every frame comes back through its inbox. This module projects that onto the
-//! lanes it belongs to, the same way [`merge_worker_roster`](super::roster) puts
+//! lanes it belongs to, the same way [`merge_host_roster`](super::roster) puts
 //! locally-registered workers on the tab in the first place.
 
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ use super::types::{AgentLane, AgentRole, TaskState, TaskStatus, TurnBlock};
 /// Only lanes that already exist are filled: a lane is a roster entry, and
 /// inventing one from a stray task would put a worker on screen that this hub
 /// does not actually have.
-pub fn merge_worker_activity(lanes: &mut [AgentLane], activity: &[WorkerActivity]) {
+pub fn merge_host_activity(lanes: &mut [AgentLane], activity: &[WorkerActivity]) {
     if activity.is_empty() {
         return;
     }
@@ -37,7 +37,7 @@ pub fn merge_worker_activity(lanes: &mut [AgentLane], activity: &[WorkerActivity
     }
 
     for lane in lanes.iter_mut() {
-        if lane.role != AgentRole::Worker {
+        if lane.role != AgentRole::Agent {
             continue;
         }
         let Some(agent_id) = lane.agent_id.clone() else {

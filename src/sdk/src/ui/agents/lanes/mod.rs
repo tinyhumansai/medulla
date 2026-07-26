@@ -51,11 +51,11 @@ impl Lanes {
 }
 
 /// Build a fresh worker-role lane with all optional fields cleared.
-fn new_worker_lane(key: String, label: String) -> AgentLane {
+fn new_agent_lane(key: String, label: String) -> AgentLane {
     AgentLane {
         key,
         label,
-        role: AgentRole::Worker,
+        role: AgentRole::Agent,
         turns: Vec::new(),
         last_at: 0,
         tasks: Vec::new(),
@@ -114,7 +114,7 @@ pub fn derive_agent_lanes(
 
     // Seed one lane per connected roster agent (roster order).
     for agent in roster {
-        let mut lane = new_worker_lane(format!("agent:{}", agent.id), {
+        let mut lane = new_agent_lane(format!("agent:{}", agent.id), {
             if agent.name.is_empty() {
                 agent.id.clone()
             } else {
@@ -195,7 +195,7 @@ pub fn derive_agent_lanes(
                 }
                 let key = lane_key_for(task_id, &task_agent);
                 if !workers.contains(&key) {
-                    let mut lane = new_worker_lane(
+                    let mut lane = new_agent_lane(
                         key.clone(),
                         task_agent
                             .get(task_id)
@@ -468,7 +468,7 @@ fn ensure_lane(
     at: i64,
 ) {
     if !workers.contains(key) {
-        let mut lane = new_worker_lane(
+        let mut lane = new_agent_lane(
             key.to_string(),
             task_agent
                 .get(task_id)
@@ -486,7 +486,7 @@ fn ensure_lane(
 /// Ensure a session lane exists for `key`, tagging its parent machine.
 fn ensure_session_lane(workers: &mut Lanes, key: &str, agent_id: &str, session_id: &str, at: i64) {
     if !workers.contains(key) {
-        let mut lane = new_worker_lane(key.to_string(), format!("↳ {session_id}"));
+        let mut lane = new_agent_lane(key.to_string(), format!("↳ {session_id}"));
         lane.last_at = at;
         lane.session_id = Some(session_id.to_string());
         lane.parent_agent_id = Some(agent_id.to_string());

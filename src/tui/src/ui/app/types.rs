@@ -32,24 +32,28 @@ pub const TABS: [&str; 7] = [
 
 /// The Routing tab's left-nav pages.
 ///
-/// Fleet sits beside the worker list rather than on a tab of its own because it
-/// answers the same operator question one level up: List Workers is the peers
-/// this hub can dispatch to, Fleet is the declared capacity — hosts, harnesses,
-/// workspaces, agents, and the templates that may be provisioned into them —
-/// that those dispatches actually land on.
-pub const ROUTING_SUBPAGES: [&str; 5] = [
-    "List Workers",
+/// Ordered by the containment chain the fleet actually has. `Fleet` is the whole
+/// declared tree; `Hosts` is the machine level the operator registers and steers
+/// by hand; `Harnesses` is the runtime level, which is where credentials live —
+/// a subscription or an API key is a property of the CLI runtime that spends it,
+/// not of the machine it happens to sit on; `Templates` is the catalog of what
+/// may be provisioned onto any of it. `Add Host` and `Strategies` are the two
+/// actions that do not belong to a level.
+pub const ROUTING_SUBPAGES: [&str; 6] = [
     "Fleet",
-    "Add Worker",
-    "Manage Keys",
+    "Hosts",
+    "Harnesses",
+    "Templates",
+    "Add Host",
     "Strategies",
 ];
 
-pub(super) const RP_WORKERS: usize = 0;
-pub(super) const RP_FLEET: usize = 1;
-pub(super) const RP_ADD_WORKER: usize = 2;
-pub(super) const RP_KEYS: usize = 3;
-pub(super) const RP_STRATEGIES: usize = 4;
+pub(super) const RP_FLEET: usize = 0;
+pub(super) const RP_HOSTS: usize = 1;
+pub(super) const RP_HARNESSES: usize = 2;
+pub(super) const RP_TEMPLATES: usize = 3;
+pub(super) const RP_ADD_HOST: usize = 4;
+pub(super) const RP_STRATEGIES: usize = 5;
 
 /// The Tasks tab's left-nav pages.
 pub const TASKS_SUBPAGES: [&str; 2] = ["All Tasks", "Sources"];
@@ -83,7 +87,7 @@ pub(super) const ROUTING_STRATEGIES: [RoutingStrategyOption; 4] = [
     RoutingStrategyOption {
         strategy: RoutingStrategy::Manual,
         label: "Manual",
-        description: "Keep the worker explicitly selected in List Workers.",
+        description: "Keep the host explicitly selected on the Hosts page.",
     },
     RoutingStrategyOption {
         strategy: RoutingStrategy::Balanced,
@@ -93,12 +97,12 @@ pub(super) const ROUTING_STRATEGIES: [RoutingStrategyOption; 4] = [
     RoutingStrategyOption {
         strategy: RoutingStrategy::CpuFirst,
         label: "CPU First",
-        description: "Choose the worker with the most logical CPU cores.",
+        description: "Choose the host with the most logical CPU cores.",
     },
     RoutingStrategyOption {
         strategy: RoutingStrategy::MemoryFirst,
         label: "Memory First",
-        description: "Choose the worker with the most currently available RAM.",
+        description: "Choose the host with the most currently available RAM.",
     },
 ];
 
@@ -237,7 +241,7 @@ pub(super) enum MemoryEntry {
     Hit(MemoryHit),
 }
 
-/// The action a small inline prompt (Workers add/edit, Agents answer) submits.
+/// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
     /// Create a task from a title line.
     TaskCreate,
@@ -248,9 +252,9 @@ pub(super) enum PromptKind {
     /// Search local persona memory with a natural-language query.
     MemorySearch,
     /// Add a worker from an address/@handle line.
-    WorkerAdd,
+    HostAdd,
     /// Edit the label of the worker with the given id.
-    WorkerEditLabel(String),
+    HostEditLabel(String),
     /// Answer a pending sub-agent question.
     AnswerQuestion {
         /// The cycle the question belongs to.
@@ -363,7 +367,12 @@ pub struct App {
     pub(super) agent_index: usize,
     pub(super) agent_scroll: usize,
     pub(super) chat_scroll: usize,
-    pub(super) worker_index: usize,
+    /// Selected row on the Routing Hosts page.
+    pub(super) host_index: usize,
+    /// Selected row on the Routing Templates page.
+    pub(super) template_index: usize,
+    /// Scroll offset inside the Templates page's detail pane.
+    pub(super) template_scroll: usize,
     /// Selected row on the Routing Fleet page (index into the flattened tree).
     pub(super) fleet_index: usize,
     /// Scroll offset inside the Fleet page's detail pane.

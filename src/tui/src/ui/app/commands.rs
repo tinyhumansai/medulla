@@ -17,12 +17,12 @@ use super::types::{
 
 impl App {
     /// The worker under the Workers-list cursor, if the fleet is non-empty.
-    pub(super) fn selected_worker(&self) -> Option<WorkerInfo> {
+    pub(super) fn selected_host(&self) -> Option<WorkerInfo> {
         let ws = self.runtime.workers();
         if ws.is_empty() {
             return None;
         }
-        ws.get(self.worker_index.min(ws.len() - 1)).cloned()
+        ws.get(self.host_index.min(ws.len() - 1)).cloned()
     }
 
     /// The task under the Agents-list cursor, when a `Sub` (task) row is selected.
@@ -148,7 +148,7 @@ impl App {
                 self.set_status(format!("Memory · searching “{text}”…"));
                 Some(Cmd::SearchMemory(text))
             }
-            PromptKind::WorkerAdd => match WorkerOp::parse_add(&text) {
+            PromptKind::HostAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
                     self.set_status("Adding worker…");
                     Some(Cmd::WorkerOp(op))
@@ -158,7 +158,7 @@ impl App {
                     None
                 }
             },
-            PromptKind::WorkerEditLabel(id) => {
+            PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text));
                 self.set_status("Updating label…");

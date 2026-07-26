@@ -7,13 +7,13 @@ use crate::helpers::*;
 // --- Workers add prompt (empty registry) ------------------------------------
 
 #[test]
-fn workers_add_prompt_emits_add_cmd_for_address() {
+fn hosts_add_prompt_emits_add_cmd_for_address() {
     let (mut app, _rt) = empty_app();
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("Add Worker");
+    app.focus_routing_subpage("Add Host");
     let _ = app.on_event(key(KeyCode::Char('a')));
     let (title, _) = app.prompt_state().expect("add prompt open");
-    assert!(title.starts_with("Add worker"));
+    assert!(title.starts_with("Add host"));
     type_str(&mut app, "host:1234 my label");
     let cmd = app.on_event(key(KeyCode::Enter));
     match cmd {
@@ -30,7 +30,7 @@ fn workers_add_prompt_emits_add_cmd_for_address() {
 fn workers_add_prompt_handle_form() {
     let (mut app, _rt) = empty_app();
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("Add Worker");
+    app.focus_routing_subpage("Add Host");
     let _ = app.on_event(key(KeyCode::Char('a')));
     type_str(&mut app, "@dev-2");
     let cmd = app.on_event(key(KeyCode::Enter));
@@ -49,7 +49,7 @@ fn workers_add_prompt_handle_form() {
 fn workers_add_prompt_empty_is_cancelled() {
     let (mut app, _rt) = empty_app();
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("Add Worker");
+    app.focus_routing_subpage("Add Host");
     let _ = app.on_event(key(KeyCode::Char('a')));
     let cmd = app.on_event(key(KeyCode::Enter));
     assert!(cmd.is_none());
@@ -61,20 +61,20 @@ fn workers_add_prompt_empty_is_cancelled() {
 }
 
 #[test]
-fn workers_select_and_remove_no_op_when_empty() {
+fn hosts_select_and_remove_no_op_when_empty() {
     let (mut app, _rt) = empty_app();
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     // No workers → select/remove produce no command.
     assert!(app.on_event(key(KeyCode::Enter)).is_none());
     assert!(app.on_event(key(KeyCode::Char('d'))).is_none());
     // Up/Down clamp harmlessly at 0.
     let _ = app.on_event(key(KeyCode::Down));
     let _ = app.on_event(key(KeyCode::Up));
-    assert_eq!(app.worker_index(), 0);
+    assert_eq!(app.host_index(), 0);
     // The empty-state hint renders.
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("No workers registered"));
+    assert!(out.contains("No hosts registered"));
 }
 
 // --- Context navigation & mouse ---------------------------------------------
@@ -246,7 +246,7 @@ fn resume_picker_navigates_and_loads() {
 fn workers_render_with_harness_and_stream_health() {
     let mut app = fleet_app();
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     let out = render(&mut app, 120, 40);
     assert!(out.contains("CLAUDE"), "worker harness badge upper-cased");
     assert!(out.contains("primary"), "worker label renders");

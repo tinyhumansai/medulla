@@ -41,7 +41,7 @@ fn lane(question: bool) -> AgentLane {
     AgentLane {
         key: "agent:dev".into(),
         label: "dev".into(),
-        role: AgentRole::Worker,
+        role: AgentRole::Agent,
         turns: vec![],
         last_at: 0,
         tasks: vec![TaskState {

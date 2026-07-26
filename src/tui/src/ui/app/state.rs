@@ -5,11 +5,9 @@ use std::sync::Arc;
 
 use ratatui::layout::Rect;
 
-use crate::ui::agents::{
-    derive_agent_lanes, merge_worker_activity, merge_worker_roster, AgentLane,
-};
+use crate::ui::agents::{derive_agent_lanes, merge_host_activity, merge_host_roster, AgentLane};
 use crate::ui::composer::Draft;
-use crate::ui::fleet::{fleet_rows, FleetNode};
+use crate::ui::fleet::{fleet_rows, merge_capacity, registry_capacity, FleetNode};
 use crate::ui::theme::Theme;
 use medulla::config::LoadedConfig;
 use medulla::memory::{MemoryHit, MemoryStatus};
@@ -53,7 +51,9 @@ impl App {
             agent_index: 0,
             agent_scroll: 0,
             chat_scroll: 0,
-            worker_index: 0,
+            host_index: 0,
+            template_index: 0,
+            template_scroll: 0,
             fleet_index: 0,
             fleet_scroll: 0,
             routing_index: 0,
@@ -241,8 +241,8 @@ impl App {
     }
 
     /// The active worker-selection index. Test/inspection seam.
-    pub fn worker_index(&self) -> usize {
-        self.worker_index
+    pub fn host_index(&self) -> usize {
+        self.host_index
     }
 
     /// The active Routing subpage name. Test/inspection seam.
@@ -398,12 +398,12 @@ impl App {
     /// the registry — which is what resolves a delegated task's address — so
     /// reading the snapshot alone left a live, dispatchable worker off this tab.
     pub(super) fn lanes(&self) -> Vec<AgentLane> {
-        let roster = merge_worker_roster(&self.snapshot.roster, &self.runtime.workers());
+        let roster = merge_host_roster(&self.snapshot.roster, &self.runtime.workers());
         let mut lanes = derive_agent_lanes(&self.snapshot.events, &self.loaded.harness(), &roster);
         // The snapshot's events come from the backend, whose vocabulary says
         // nothing about delegated tasks — so a busy worker renders idle unless
         // the activity the hub observed locally is folded in.
-        merge_worker_activity(&mut lanes, &self.runtime.worker_activity());
+        merge_host_activity(&mut lanes, &self.runtime.worker_activity());
         lanes
     }
 
@@ -424,18 +424,26 @@ impl App {
     /// not merged: two half-descriptions of one fleet interleaved would be
     /// harder to trust than whichever one is authoritative.
     pub(super) fn fleet_capacity(&self) -> medulla::runtime::CapacitySnapshot {
-        if self.snapshot.capacity.is_empty() {
+        let declared = if self.snapshot.capacity.is_empty() {
             self.loaded.config.fleet.capacity()
         } else {
             self.snapshot.capacity.clone()
-        }
+        };
+        // The locally registered peers are hosts too, and they are frequently
+        // the only capacity a hub-backed session has. Declared records win on a
+        // collision; the registry only ever adds machines nothing else named.
+        merge_capacity(&declared, &registry_capacity(&self.runtime.workers()))
     }
 
-    /// The roster the fleet surfaces resolve placements against: what the
-    /// backend advertises plus the local worker registry, exactly as the Agents
-    /// lanes see it.
+    /// The agent identities the fleet surfaces place.
+    ///
+    /// Only the snapshot roster, unlike [`lanes`](App::lanes): a locally
+    /// registered peer is a *host*, and it reaches these surfaces through
+    /// [`fleet_capacity`](App::fleet_capacity) as one. Merging it in here as
+    /// well would list the same machine twice — once as capacity, once as an
+    /// agent with nowhere to live.
     pub(super) fn fleet_roster(&self) -> Vec<medulla::runtime::AgentDescriptor> {
-        merge_worker_roster(&self.snapshot.roster, &self.runtime.workers())
+        self.snapshot.roster.clone()
     }
 
     /// The selection key of the highlighted fleet row, skipping headings.

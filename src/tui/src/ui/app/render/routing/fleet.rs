@@ -37,7 +37,11 @@ impl App {
             .iter()
             .filter(|r| r.kind == crate::ui::fleet::FleetNodeKind::Agent)
             .count();
-        let block = self.panel(format!("Fleet · {hosts} hosts · {agents} agents"));
+        let block = self.panel(format!(
+            "Fleet · {hosts} host{} · {agents} agent{}",
+            if hosts == 1 { "" } else { "s" },
+            if agents == 1 { "" } else { "s" }
+        ));
         let inner = block.inner(cols[0]);
         f.render_widget(block, cols[0]);
 

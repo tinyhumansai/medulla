@@ -7,12 +7,15 @@
 //! "what exists to run it on", read from what the runtime declares. Neither
 //! probes anything, and both degrade to empty rather than to an error.
 //!
-//! Split by responsibility: [`types`] holds the node data model, [`rows`] the
-//! tree flattening, [`detail`] the selected-node pane, and the private `fmt`
-//! submodule the shared magnitude/budget formatters.
+//! Split by responsibility: [`types`] holds the node data model, [`registry`]
+//! the projection of the local peer registry onto the chain, [`rows`] the
+//! tree flattening and the template catalog beside it, [`detail`] the
+//! selected-node pane, and the private `fmt` submodule the shared
+//! magnitude/budget formatters.
 
 mod detail;
 mod fmt;
+mod registry;
 mod rows;
 mod types;
 
@@ -20,5 +23,6 @@ mod types;
 mod tests;
 
 pub use detail::fleet_detail;
-pub use rows::fleet_rows;
+pub use registry::{merge_capacity, registry_capacity};
+pub use rows::{fleet_rows, places_allowing, template_rows};
 pub use types::{FleetNode, FleetNodeKind};

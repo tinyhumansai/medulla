@@ -10,7 +10,7 @@ use crate::runtime::fleet::{
 };
 use crate::runtime::AgentDescriptor;
 
-use super::{fleet_detail, fleet_rows, FleetNodeKind};
+use super::{fleet_detail, fleet_rows, places_allowing, template_rows, FleetNodeKind};
 
 fn host(id: &str) -> HostDescriptor {
     HostDescriptor {
@@ -67,6 +67,26 @@ fn agent(id: &str) -> AgentDescriptor {
         template_id: None,
         tags: Vec::new(),
         metadata: Default::default(),
+    }
+}
+
+/// A template optionally restricted to the named harness kinds.
+fn template(id: &str, harnesses: &[&str]) -> AgentTemplate {
+    AgentTemplate {
+        id: id.into(),
+        name: Some(format!("{id}-name")),
+        description: "Does a thing.".into(),
+        instructions: None,
+        tools: None,
+        model: Some("reasoning".into()),
+        effort: None,
+        params: Default::default(),
+        tags: Vec::new(),
+        metadata: Default::default(),
+        harnesses: harnesses
+            .iter()
+            .map(|kind| (kind.to_string(), Default::default()))
+            .collect(),
     }
 }
 
@@ -171,29 +191,73 @@ fn a_harness_row_shows_its_tightest_budget_and_offline_reads_degraded() {
 }
 
 #[test]
-fn templates_render_after_the_chain_with_their_allowed_harnesses() {
+fn the_chain_holds_no_templates_of_its_own() {
     let (mut capacity, roster) = chain();
-    capacity.templates.push(AgentTemplate {
-        id: "reviewer".into(),
-        name: Some("Reviewer".into()),
-        description: "Reviews a diff.".into(),
-        instructions: None,
-        tools: None,
-        model: Some("reasoning".into()),
-        effort: None,
-        params: Default::default(),
-        tags: vec!["review".into()],
-        metadata: Default::default(),
-        harnesses: [("claude-code".to_string(), Default::default())]
-            .into_iter()
-            .collect(),
-    });
-    let rows = fleet_rows(&capacity, &roster);
-    let template = rows.last().unwrap();
-    assert_eq!(template.kind, FleetNodeKind::Template);
-    assert_eq!(template.label, "Reviewer");
-    assert!(template.detail.contains("on claude-code"));
-    assert_eq!(rows[rows.len() - 2].kind, FleetNodeKind::Section);
+    capacity
+        .templates
+        .push(template("reviewer", &["claude-code"]));
+    // A template constrains the chain rather than sitting in it, so the tree is
+    // byte-identical whether or not a catalog is declared.
+    assert_eq!(
+        fleet_rows(&capacity, &roster),
+        fleet_rows(
+            &CapacitySnapshot {
+                templates: Vec::new(),
+                ..capacity.clone()
+            },
+            &roster
+        )
+    );
+}
+
+#[test]
+fn the_template_catalog_reports_where_it_may_run_and_what_it_provisioned() {
+    let (mut capacity, mut roster) = chain();
+    capacity
+        .templates
+        .push(template("reviewer", &["claude-code"]));
+    roster[0].template_id = Some("reviewer".into());
+
+    let rows = template_rows(&capacity, &roster);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].kind, FleetNodeKind::Template);
+    assert_eq!(rows[0].label, "reviewer-name");
+    assert!(rows[0].detail.contains("on claude-code"));
+    assert!(rows[0].detail.contains("1 place"));
+    assert!(rows[0].detail.contains("1 agent"));
+    assert!(!rows[0].degraded);
+}
+
+#[test]
+fn a_template_no_place_admits_reads_degraded() {
+    let (mut capacity, roster) = chain();
+    // The only workspace is exposed by a claude-code harness, so a codex-only
+    // template has nowhere to run.
+    capacity.templates.push(template("codex-only", &["codex"]));
+    let rows = template_rows(&capacity, &roster);
+    assert!(rows[0].degraded);
+    assert!(rows[0].detail.contains("nowhere allows it"));
+}
+
+#[test]
+fn an_allowlist_only_ever_subtracts() {
+    let (mut capacity, _) = chain();
+    let unrestricted = template("any", &[]);
+    capacity.templates.push(unrestricted.clone());
+    // No allowlist anywhere: the whole catalog is admitted.
+    assert_eq!(places_allowing(&unrestricted, &capacity), 1);
+
+    // A workspace allowlist that names something else excludes it.
+    capacity.workspaces[0].template_ids = vec!["other".into()];
+    assert_eq!(places_allowing(&unrestricted, &capacity), 0);
+
+    // Naming it back admits it again.
+    capacity.workspaces[0].template_ids = vec!["any".into()];
+    assert_eq!(places_allowing(&unrestricted, &capacity), 1);
+
+    // A harness allowlist subtracts independently of the workspace's.
+    capacity.harnesses[0].template_ids = vec!["other".into()];
+    assert_eq!(places_allowing(&unrestricted, &capacity), 0);
 }
 
 #[test]
@@ -261,4 +325,107 @@ fn workspace_detail_shows_its_medulla_md_profile() {
         .collect();
     assert!(lines.iter().any(|l| l.contains("Prefer small commits.")));
     assert!(lines.iter().any(|l| l.contains("branch: main")));
+}
+
+// --- local registry → capacity ---------------------------------------------
+
+use crate::runtime::WorkerInfo;
+use crate::tinyplace::{BudgetSource, BudgetWindow, HarnessProvider, HarnessReadiness};
+
+/// A registered peer with the capacity facts the Hosts page shows.
+fn peer(id: &str) -> WorkerInfo {
+    WorkerInfo {
+        id: id.into(),
+        address: format!("{id}.example:9000"),
+        handle: Some(format!("@{id}")),
+        label: Some(format!("{id} label")),
+        harness: Some("codex".into()),
+        peer_id: None,
+        cpu_cores: Some(8),
+        memory_total_bytes: Some(32 << 30),
+        memory_available_bytes: Some(18 << 30),
+        ip_address: Some("10.0.0.9".into()),
+        selected: false,
+        budgets: Vec::new(),
+        readiness: Vec::new(),
+    }
+}
+
+#[test]
+fn a_registered_peer_becomes_a_host_with_its_advertised_harness() {
+    let capacity = super::registry_capacity(&[peer("w1")]);
+    assert_eq!(capacity.hosts.len(), 1);
+    assert_eq!(capacity.hosts[0].name, "w1 label");
+    assert_eq!(capacity.hosts[0].address.as_deref(), Some("10.0.0.9"));
+    assert_eq!(
+        capacity.hosts[0].resources.as_ref().unwrap().cpu_cores,
+        Some(8.0)
+    );
+    // Reachability is not liveness: the registry must not claim "online".
+    assert!(capacity.hosts[0].availability.is_empty());
+    assert_eq!(capacity.harnesses.len(), 1);
+    assert_eq!(capacity.harnesses[0].kind, "codex");
+    assert_eq!(capacity.harnesses[0].host_id, capacity.hosts[0].id);
+    assert!(capacity.harnesses[0].ready, "an unprobed runtime is usable");
+}
+
+#[test]
+fn probed_readiness_and_budgets_split_into_one_harness_per_provider() {
+    let mut p = peer("w1");
+    p.readiness = vec![
+        HarnessReadiness {
+            provider: HarnessProvider::Claude,
+            ready: true,
+            reason: None,
+        },
+        HarnessReadiness {
+            provider: HarnessProvider::Codex,
+            ready: false,
+            reason: Some("not authenticated".into()),
+        },
+    ];
+    p.budgets = vec![crate::tinyplace::HarnessBudget {
+        provider: HarnessProvider::Claude,
+        seat: Some("seat-1".into()),
+        window: BudgetWindow::FiveHour,
+        limit_tokens: Some(1_000_000),
+        used_tokens: Some(250_000),
+        remaining_tokens: Some(750_000),
+        cooldown_until: None,
+        source: BudgetSource::ProviderReported,
+    }];
+
+    let capacity = super::registry_capacity(&[p]);
+    assert_eq!(capacity.harnesses.len(), 2);
+    let claude = &capacity.harnesses[0];
+    assert_eq!(claude.kind, "claude");
+    assert_eq!(claude.budgets[0].window, "5h");
+    assert_eq!(claude.budgets[0].remaining(), Some(750_000));
+    let codex = &capacity.harnesses[1];
+    assert!(!codex.ready);
+    assert_eq!(codex.ready_reason.as_deref(), Some("not authenticated"));
+    assert!(codex.budgets.is_empty(), "budgets follow their provider");
+}
+
+#[test]
+fn merging_never_lists_one_machine_twice() {
+    let declared = CapacitySnapshot {
+        hosts: vec![HostDescriptor {
+            address: Some("10.0.0.9".into()),
+            ..host("declared")
+        }],
+        ..Default::default()
+    };
+    // Same address under a different id: still one machine.
+    let merged = super::merge_capacity(&declared, &super::registry_capacity(&[peer("w1")]));
+    assert_eq!(merged.hosts.len(), 1);
+    assert_eq!(merged.hosts[0].id, "declared");
+    assert!(merged.harnesses.is_empty(), "its harnesses are dropped too");
+
+    // A machine nothing declared is added, with its harnesses.
+    let mut elsewhere = peer("w2");
+    elsewhere.ip_address = Some("10.0.0.10".into());
+    let merged = super::merge_capacity(&declared, &super::registry_capacity(&[elsewhere]));
+    assert_eq!(merged.hosts.len(), 2);
+    assert_eq!(merged.harnesses.len(), 1);
 }

@@ -73,14 +73,22 @@ pub fn fleet_rows(capacity: &CapacitySnapshot, roster: &[AgentDescriptor]) -> Ve
         }
     }
 
-    if !capacity.templates.is_empty() {
-        rows.push(section("agent templates"));
-        for template in &capacity.templates {
-            rows.push(template_row(template));
-        }
-    }
-
     rows
+}
+
+/// Build the agent-template catalog's rows: one per declared template, each
+/// annotated with where it may run and how much of the roster came from it.
+///
+/// A separate list from [`fleet_rows`] on purpose. A template is not a level of
+/// the containment chain — it is a constraint *across* it, saying what may be
+/// stood up rather than where — so hanging it off the tree implied a parent it
+/// does not have.
+pub fn template_rows(capacity: &CapacitySnapshot, roster: &[AgentDescriptor]) -> Vec<FleetNode> {
+    capacity
+        .templates
+        .iter()
+        .map(|template| template_row(template, capacity, roster))
+        .collect()
 }
 
 /// Append one host's harnesses, their workspaces, and the agents in them.
@@ -201,13 +209,22 @@ fn agent_row(agent: &AgentDescriptor, capacity: &CapacitySnapshot, depth: usize)
     }
 }
 
-/// One template row: what may be provisioned, and where it is allowed to run.
-fn template_row(template: &crate::runtime::fleet::AgentTemplate) -> FleetNode {
+/// One template row: what may be provisioned, where it is allowed to run, and
+/// how many agents currently exist because of it.
+fn template_row(
+    template: &crate::runtime::fleet::AgentTemplate,
+    capacity: &CapacitySnapshot,
+    roster: &[AgentDescriptor],
+) -> FleetNode {
     let harnesses: Vec<String> = template.harnesses.keys().cloned().collect();
+    let provisioned = roster
+        .iter()
+        .filter(|a| a.template_id.as_deref() == Some(template.id.as_str()))
+        .count();
     FleetNode {
         key: format!("template:{}", template.id),
         kind: FleetNodeKind::Template,
-        depth: 1,
+        depth: 0,
         label: template.name.clone().unwrap_or_else(|| template.id.clone()),
         detail: fmt::join(&[
             template.model.clone().unwrap_or_default(),
@@ -218,10 +235,55 @@ fn template_row(template: &crate::runtime::fleet::AgentTemplate) -> FleetNode {
             } else {
                 format!("on {}", harnesses.join(", "))
             },
+            match places_allowing(template, capacity) {
+                0 => "nowhere allows it".into(),
+                1 => "1 place".into(),
+                n => format!("{n} places"),
+            },
+            match provisioned {
+                0 => String::new(),
+                1 => "1 agent".into(),
+                n => format!("{n} agents"),
+            },
             template.tags.join(", "),
         ]),
-        degraded: false,
+        // A template no declared place admits cannot be provisioned anywhere,
+        // which is worth seeing at a glance rather than only on selection.
+        degraded: places_allowing(template, capacity) == 0,
     }
+}
+
+/// How many declared workspaces admit this template.
+///
+/// A `templateIds` allowlist only ever subtracts: absent means inherit, so a
+/// workspace that declares none inherits its harness's list, and a harness that
+/// declares none admits the whole catalog. Enforcement is fail-open at the
+/// config level for exactly this reason.
+pub fn places_allowing(
+    template: &crate::runtime::fleet::AgentTemplate,
+    capacity: &CapacitySnapshot,
+) -> usize {
+    capacity
+        .workspaces
+        .iter()
+        .filter(|workspace| {
+            let harness = capacity.harness(&workspace.harness_id);
+            // A `harnesses` block on the template restricts it to those kinds.
+            if !template.harnesses.is_empty()
+                && !harness
+                    .map(|h| template.harnesses.contains_key(&h.kind))
+                    .unwrap_or(false)
+            {
+                return false;
+            }
+            let allowed_here =
+                workspace.template_ids.is_empty() || workspace.template_ids.contains(&template.id);
+            let allowed_on_harness = harness
+                .map(|h| h.template_ids.is_empty() || h.template_ids.contains(&template.id))
+                .unwrap_or(true);
+            allowed_here && allowed_on_harness
+        })
+        .count()
 }
 
 /// A non-selectable heading row.

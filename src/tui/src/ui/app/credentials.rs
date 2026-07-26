@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::types::{App, CredentialStatus, RP_KEYS};
+use super::types::{App, CredentialStatus, RP_HARNESSES};
 
 /// Read credential presence without ever loading or retaining secret values.
 pub(super) fn detect_credential_status() -> CredentialStatus {
@@ -24,7 +24,7 @@ pub(super) fn detect_credential_status() -> CredentialStatus {
 impl App {
     /// Refresh cached credential presence only when Manage Keys is active.
     pub(super) fn refresh_credential_status_if_needed(&mut self) {
-        if self.routing_index == RP_KEYS {
+        if self.routing_index == RP_HARNESSES {
             self.credential_status = detect_credential_status();
         }
     }

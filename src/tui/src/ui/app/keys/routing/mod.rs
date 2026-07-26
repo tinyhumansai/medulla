@@ -1,4 +1,4 @@
-//! Keyboard handling for the Routing tab and its worker-management panes.
+//! Keyboard handling for the Routing tab and its fleet-management panes.
 
 use crossterm::event::KeyCode;
 
@@ -7,8 +7,8 @@ use crate::ui::multi_pane::{self, NavAction};
 use medulla::runtime::WorkerOp;
 
 use super::super::types::{
-    App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_WORKER, RP_FLEET,
-    RP_KEYS, RP_STRATEGIES, RP_WORKERS,
+    App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_HOST, RP_FLEET,
+    RP_HARNESSES, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES,
 };
 
 impl App {
@@ -32,7 +32,8 @@ impl App {
                 ));
                 // Capacity is declared, never streamed, so entering the page is
                 // the moment to go and read it.
-                let cmd = (self.routing_index == RP_FLEET).then_some(Cmd::RefreshFleet);
+                let cmd = matches!(self.routing_index, RP_FLEET | RP_HARNESSES | RP_TEMPLATES)
+                    .then_some(Cmd::RefreshFleet);
                 return RoutingKey::Handled(cmd);
             }
             NavAction::Left => {
@@ -43,41 +44,42 @@ impl App {
         }
 
         match self.routing_index {
-            RP_WORKERS => self.workers_key(code),
             RP_FLEET => self.fleet_key(code),
-            RP_ADD_WORKER => self.add_worker_key(code),
-            RP_KEYS => self.manage_keys_key(code),
+            RP_HOSTS => self.hosts_key(code),
+            RP_TEMPLATES => self.templates_key(code),
+            RP_ADD_HOST => self.add_host_key(code),
+            RP_HARNESSES => self.harnesses_key(code),
             RP_STRATEGIES => self.strategies_key(code),
             _ => RoutingKey::Unhandled,
         }
     }
 
-    /// Browse and mutate the registered worker roster.
-    fn workers_key(&mut self, code: KeyCode) -> RoutingKey {
+    /// Browse and mutate the registered host roster.
+    fn hosts_key(&mut self, code: KeyCode) -> RoutingKey {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.worker_index = crate::ui::selection::moved(
-                    self.worker_index,
+                self.host_index = crate::ui::selection::moved(
+                    self.host_index,
                     self.runtime.workers().len(),
                     true,
                 );
                 RoutingKey::Handled(None)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.worker_index = crate::ui::selection::moved(
-                    self.worker_index,
+                self.host_index = crate::ui::selection::moved(
+                    self.host_index,
                     self.runtime.workers().len(),
                     false,
                 );
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('a') => {
-                self.routing_index = RP_ADD_WORKER;
-                self.open_add_worker_prompt();
+                self.routing_index = RP_ADD_HOST;
+                self.open_add_host_prompt();
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('s') | KeyCode::Enter => {
-                let cmd = self.selected_worker().map(|worker| {
+                let cmd = self.selected_host().map(|worker| {
                     self.set_status(format!(
                         "Selecting {}",
                         worker.label.as_deref().unwrap_or(&worker.address)
@@ -87,7 +89,7 @@ impl App {
                 RoutingKey::Handled(cmd)
             }
             KeyCode::Char('d') | KeyCode::Char('x') => {
-                let cmd = self.selected_worker().map(|worker| {
+                let cmd = self.selected_host().map(|worker| {
                     self.set_status(format!(
                         "Removing {}",
                         worker.label.as_deref().unwrap_or(&worker.address)
@@ -97,13 +99,13 @@ impl App {
                 RoutingKey::Handled(cmd)
             }
             KeyCode::Char('e') => {
-                if let Some(worker) = self.selected_worker() {
+                if let Some(worker) = self.selected_host() {
                     let mut draft = Draft::new();
                     if let Some(label) = &worker.label {
                         draft = insert_at("", 0, label);
                     }
                     self.prompt = Some(Prompt {
-                        kind: PromptKind::WorkerEditLabel(worker.id),
+                        kind: PromptKind::HostEditLabel(worker.id),
                         title: format!("Edit label — {}", worker.address),
                         draft,
                     });
@@ -112,7 +114,7 @@ impl App {
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('r') => {
-                let cmd = self.selected_worker().map(|worker| {
+                let cmd = self.selected_host().map(|worker| {
                     self.set_status(format!("Refreshing {} details…", worker.id));
                     Cmd::WorkerOp(WorkerOp::RefreshDetails { id: worker.id })
                 });
@@ -154,38 +156,71 @@ impl App {
         }
     }
 
-    /// Open the existing worker-address prompt from the dedicated Add Worker pane.
-    fn add_worker_key(&mut self, code: KeyCode) -> RoutingKey {
+    /// Browse the agent-template catalog and re-read it on demand.
+    fn templates_key(&mut self, code: KeyCode) -> RoutingKey {
+        let rows = crate::ui::fleet::template_rows(&self.fleet_capacity(), &self.fleet_roster());
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.template_index =
+                    crate::ui::selection::moved(self.template_index, rows.len(), true);
+                self.template_scroll = 0;
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.template_index =
+                    crate::ui::selection::moved(self.template_index, rows.len(), false);
+                self.template_scroll = 0;
+                RoutingKey::Handled(None)
+            }
+            KeyCode::PageDown => {
+                self.template_scroll = self.template_scroll.saturating_add(5);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::PageUp => {
+                self.template_scroll = self.template_scroll.saturating_sub(5);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('r') => {
+                self.set_status("Refreshing fleet…");
+                RoutingKey::Handled(Some(Cmd::RefreshFleet))
+            }
+            _ => RoutingKey::Unhandled,
+        }
+    }
+
+    /// Open the existing host-address prompt from the dedicated Add Host pane.
+    fn add_host_key(&mut self, code: KeyCode) -> RoutingKey {
         if matches!(code, KeyCode::Enter | KeyCode::Char('a')) {
-            self.open_add_worker_prompt();
+            self.open_add_host_prompt();
             RoutingKey::Handled(None)
         } else {
             RoutingKey::Unhandled
         }
     }
 
-    /// Build the worker-add prompt shared by the list shortcut and Add Worker page.
-    fn open_add_worker_prompt(&mut self) {
+    /// Build the host-add prompt shared by the list shortcut and Add Host page.
+    fn open_add_host_prompt(&mut self) {
         self.prompt = Some(Prompt {
-            kind: PromptKind::WorkerAdd,
-            title: "Add worker — address or @handle, optional label".into(),
+            kind: PromptKind::HostAdd,
+            title: "Add host — address or @handle, optional label".into(),
             draft: Draft::new(),
         });
-        self.set_status("Add worker · Enter save · Esc cancel");
+        self.set_status("Add host · Enter save · Esc cancel");
     }
 
-    /// Refresh cached subscription and API-key presence on demand.
-    fn manage_keys_key(&mut self, code: KeyCode) -> RoutingKey {
+    /// Re-read both halves of a harness on demand: the credentials it spends
+    /// (detected locally) and the declarations it appears in (from the runtime).
+    fn harnesses_key(&mut self, code: KeyCode) -> RoutingKey {
         if code == KeyCode::Char('r') {
             self.refresh_credential_status_if_needed();
-            self.set_status("Credential status refreshed");
-            RoutingKey::Handled(None)
+            self.set_status("Harnesses refreshed");
+            RoutingKey::Handled(Some(Cmd::RefreshFleet))
         } else {
             RoutingKey::Unhandled
         }
     }
 
-    /// Browse and apply an automatic default-worker strategy.
+    /// Browse and apply an automatic default-host strategy.
     fn strategies_key(&mut self, code: KeyCode) -> RoutingKey {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {

@@ -1,4 +1,4 @@
-//! Guided entry point for connecting another worker.
+//! Guided entry point for connecting another host.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -9,24 +9,24 @@ use ratatui::Frame;
 use super::super::super::types::App;
 
 impl App {
-    /// Draw the Add Worker instructions and action.
-    pub(super) fn draw_add_worker(&self, f: &mut Frame, area: Rect) {
+    /// Draw the Add Host instructions and action.
+    pub(super) fn draw_add_host(&self, f: &mut Frame, area: Rect) {
         let dim = Style::default().add_modifier(Modifier::DIM);
         let lines = vec![
-            TLine::from("Connect a tiny.place worker to this Medulla hub."),
+            TLine::from("Connect a tiny.place host to this Medulla hub."),
             TLine::from(""),
-            TLine::from("Enter the worker's address or @handle, followed by an optional label."),
-            TLine::from("Example: @build-box Primary build worker"),
+            TLine::from("Enter the host's address or @handle, followed by an optional label."),
+            TLine::from("Example: @build-box Primary build machine"),
             TLine::from(""),
             TLine::from(Span::styled(
-                "Press Enter or a to add a worker · Esc returns to the Routing menu",
+                "Press Enter or a to add a host · Esc returns to the Routing menu",
                 dim,
             )),
         ];
         f.render_widget(
             Paragraph::new(Text::from(lines))
                 .wrap(Wrap { trim: true })
-                .block(self.panel("Add Worker")),
+                .block(self.panel("Add Host")),
             area,
         );
     }

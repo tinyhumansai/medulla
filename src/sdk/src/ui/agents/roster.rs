@@ -50,7 +50,7 @@ fn names_same_peer(descriptor: &AgentDescriptor, worker: &WorkerInfo) -> bool {
 /// "announced, no reading" rather than as an online agent. The harness lands in
 /// `metadata` because that is what tags the lane label, and the address because
 /// that is what identifies the peer when a label is absent.
-pub fn worker_descriptor(worker: &WorkerInfo) -> AgentDescriptor {
+pub fn host_descriptor(worker: &WorkerInfo) -> AgentDescriptor {
     let mut metadata = Map::new();
     metadata.insert("source".into(), Value::String(SOURCE_LOCAL.into()));
     if !worker.address.trim().is_empty() {
@@ -96,7 +96,7 @@ pub fn worker_descriptor(worker: &WorkerInfo) -> AgentDescriptor {
 ///
 /// The snapshot roster wins on a collision: a peer the backend advertises
 /// carries capabilities and availability the local registry entry does not.
-pub fn merge_worker_roster(
+pub fn merge_host_roster(
     roster: &[AgentDescriptor],
     workers: &[WorkerInfo],
 ) -> Vec<AgentDescriptor> {
@@ -105,7 +105,7 @@ pub fn merge_worker_roster(
         if out.iter().any(|d| names_same_peer(d, worker)) {
             continue;
         }
-        out.push(worker_descriptor(worker));
+        out.push(host_descriptor(worker));
     }
     out
 }

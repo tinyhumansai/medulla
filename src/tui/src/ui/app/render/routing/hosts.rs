@@ -1,4 +1,4 @@
-//! Registered worker list and fleet actions.
+//! Registered host list and fleet actions.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -11,45 +11,48 @@ use medulla::tinyplace::{BudgetWindow, HarnessBudget, HarnessReadiness};
 use super::super::super::types::App;
 
 impl App {
-    /// Draw registered workers with selection and harness identity.
-    pub(super) fn draw_workers(&mut self, f: &mut Frame, area: Rect) {
-        let workers = self.runtime.workers();
-        let selected = self.worker_index.min(workers.len().saturating_sub(1));
-        self.worker_index = selected;
-        let block = self.panel(format!("List Workers · {}", workers.len()));
+    /// Draw registered hosts with selection and harness identity.
+    pub(super) fn draw_hosts(&mut self, f: &mut Frame, area: Rect) {
+        // `Runtime::workers()` keeps the name the serve/hub wire uses; what it
+        // returns is the host level of the containment chain, which is what this
+        // page shows and what the rest of the UI now calls it.
+        let hosts = self.runtime.workers();
+        let selected = self.host_index.min(hosts.len().saturating_sub(1));
+        self.host_index = selected;
+        let block = self.panel(format!("Hosts · {}", hosts.len()));
         let inner = block.inner(area);
         f.render_widget(block, area);
         let mut lines = Vec::new();
-        if workers.is_empty() {
+        if hosts.is_empty() {
             lines.push(TLine::from(Span::styled(
-                "No workers registered. Open Add Worker to connect a remote peer.",
+                "No hosts registered. Open Add Host to connect a remote machine.",
                 Style::default().add_modifier(Modifier::DIM),
             )));
         } else {
-            // Each worker consumes a summary row plus a capacity-details row.
+            // Each host consumes a summary row plus a capacity-details row.
             // Reserve the footer (and optional hub identity) before choosing the
-            // worker window so the selected row and action hints stay visible.
+            // host window so the selected row and action hints stay visible.
             let footer_rows = 1 + usize::from(self.snapshot.tinyplace.is_some()) * 2;
             let visible = usize::from(inner.height)
                 .saturating_sub(footer_rows)
                 .checked_div(2)
                 .unwrap_or(0)
                 .max(1);
-            let start = crate::ui::selection::viewport_start(selected, workers.len(), visible);
-            for (index, worker) in workers.iter().enumerate().skip(start).take(visible) {
-                let selected_default = if worker.selected { "●" } else { " " };
-                let handle = worker.handle.as_deref().unwrap_or(&worker.address);
-                let label = worker
+            let start = crate::ui::selection::viewport_start(selected, hosts.len(), visible);
+            for (index, host) in hosts.iter().enumerate().skip(start).take(visible) {
+                let selected_default = if host.selected { "●" } else { " " };
+                let handle = host.handle.as_deref().unwrap_or(&host.address);
+                let label = host
                     .label
                     .as_deref()
                     .map(|value| format!(" · {value}"))
                     .unwrap_or_default();
-                let harness = worker
+                let harness = host
                     .harness
                     .as_deref()
                     .map(|value| format!(" · {}", value.to_uppercase()))
                     .unwrap_or_default();
-                let mut style = if worker.selected {
+                let mut style = if host.selected {
                     Style::default().fg(Color::Green)
                 } else {
                     Style::default()
@@ -58,17 +61,14 @@ impl App {
                     style = self.theme.selection();
                 }
                 lines.push(TLine::from(Span::styled(
-                    format!(
-                        "{selected_default} {} · {handle}{label}{harness}",
-                        worker.id
-                    ),
+                    format!("{selected_default} {} · {handle}{label}{harness}", host.id),
                     style,
                 )));
                 let details = match (
-                    worker.ip_address.as_deref(),
-                    worker.cpu_cores,
-                    worker.memory_available_bytes,
-                    worker.memory_total_bytes,
+                    host.ip_address.as_deref(),
+                    host.cpu_cores,
+                    host.memory_available_bytes,
+                    host.memory_total_bytes,
                 ) {
                     (None, None, None, None) => {
                         "  details not captured · press r to refresh".into()
@@ -85,13 +85,13 @@ impl App {
                     ),
                 };
                 // Fold the probe's readiness and budget lines onto the same
-                // capacity row so the roster stays two lines per worker (its
-                // pagination unit). Absent when the worker advertised neither.
+                // capacity row so the roster stays two lines per host (its
+                // pagination unit). Absent when the host advertised neither.
                 let mut details = details;
-                if let Some(note) = readiness_summary(&worker.readiness) {
+                if let Some(note) = readiness_summary(&host.readiness) {
                     details.push_str(&format!(" · {note}"));
                 }
-                if let Some(note) = budget_summary(&worker.budgets) {
+                if let Some(note) = budget_summary(&host.budgets) {
                     details.push_str(&format!(" · {note}"));
                 }
                 lines.push(TLine::from(Span::styled(details, dim())));
@@ -112,7 +112,7 @@ impl App {
     }
 }
 
-/// Format a byte count for a compact worker-capacity row.
+/// Format a byte count for a compact host-capacity row.
 fn format_bytes(bytes: u64) -> String {
     const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
     const MIB: f64 = 1024.0 * 1024.0;
@@ -123,13 +123,13 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// Shared subdued style for worker detail rows.
+/// Shared subdued style for host detail rows.
 fn dim() -> Style {
     Style::default().add_modifier(Modifier::DIM)
 }
 
 /// Strip control characters from probe-supplied text before it reaches a ratatui
-/// span. Readiness reasons arrive from a remote worker over tiny.place, so a
+/// span. Readiness reasons arrive from a remote host over tiny.place, so a
 /// compromised or malicious peer could otherwise smuggle terminal escape/OSC
 /// sequences (cursor moves, title rewrites) into the operator's terminal.
 fn inline_text(value: &str) -> String {
@@ -137,7 +137,7 @@ fn inline_text(value: &str) -> String {
 }
 
 /// A compact per-harness readiness line, e.g.
-/// `ready claude · not-ready codex (not authenticated)`. `None` when the worker
+/// `ready claude · not-ready codex (not authenticated)`. `None` when the host
 /// advertised no readiness. Display-only; readiness is heuristic and advisory.
 /// The reason is untrusted peer text, so it is sanitized before rendering and a
 /// reason that sanitizes to empty is dropped.

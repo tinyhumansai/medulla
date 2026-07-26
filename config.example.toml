@@ -204,7 +204,12 @@ tokenEnv = "MEDULLA_TOKEN"
 # availability = "online"
 # ready = true
 # providers = ["anthropic"]
-# budgets = [{ provider = "anthropic", window = "5h", limitTokens = 1000000, remainingTokens = 760000, source = "configured" }]
+# Opaque account labels group the same subscription/key across hosts. They are
+# never credentials. Token windows and decimal balances may coexist.
+# budgets = [
+#   { provider = "anthropic", window = "5h", seat = "claude-primary", accountType = "subscription", limitTokens = 1000000, remainingTokens = 760000, source = "configured" },
+#   { provider = "openrouter", window = "balance", seat = "key-team", accountType = "api_key", amountUnit = "USD", limitAmount = 50.0, remainingAmount = 18.42, source = "provider_reported" },
+# ]
 
 # [[fleet.workspaces]]
 # id = "medulla"

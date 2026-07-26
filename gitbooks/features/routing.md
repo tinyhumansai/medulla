@@ -76,6 +76,15 @@ it runs at once, and its permission or sandbox posture. Medulla normalizes all
 three CLIs into one observation model, so a fleet mixing them reads as one
 operation instead of three log formats.
 
+The terminal app's **Routing → Harnesses** page groups that capacity as
+`harness → provider account → host`. Two Claude accounts therefore appear as
+two account groups, while the same account connected on a laptop and a build
+host appears once with both hosts beneath it. Usage is attached to the account,
+not repeated per host: token windows such as daily, weekly, and five-hour
+headroom render together, and API-key providers can report decimal balances such
+as remaining OpenRouter USD. Account IDs are opaque labels; credentials and API
+key values are never displayed.
+
 Routing here is by resolved agent identity. A task addressed to a specific
 configured worker, or auto-assigned to one, reaches that worker. When no explicit
 target is named, a default-worker strategy — Manual, Balanced, CPU First, or

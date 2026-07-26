@@ -184,9 +184,21 @@ exists.
           {
             "provider": "anthropic",
             "window": "5h",
+            "seat": "claude-primary",
+            "accountType": "subscription",
             "limitTokens": 1000000,
             "remainingTokens": 760000,
             "source": "configured"
+          },
+          {
+            "provider": "openrouter",
+            "window": "balance",
+            "seat": "key-team",
+            "accountType": "api_key",
+            "amountUnit": "USD",
+            "limitAmount": 50.0,
+            "remainingAmount": 18.42,
+            "source": "provider_reported"
           }
         ]
       }
@@ -220,6 +232,13 @@ exists.
   }
 }
 ```
+
+`seat` is an opaque, non-secret account ID used to group the same account across
+hosts. `accountType` distinguishes subscriptions, API keys, and future account
+families. Token allowances use the integer `*Tokens` fields; currency and credit
+balances use `amountUnit` with the decimal `limitAmount`, `usedAmount`, and
+`remainingAmount` fields. All are optional so an unavailable usage reading does
+not make a harness unusable.
 
 Every level names exactly one parent (`hostId` on a harness, `harnessId` on a
 workspace, `workspaceId` on an agent), and an agent with no `workspaceId` is a

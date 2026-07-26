@@ -146,20 +146,27 @@ pub async fn init_workspace_with_settings(
     .await
 }
 
-/// Draft and write a profile, then register the workspace — the whole of what
+/// Ensure a workspace has a profile, then register it — the whole of what
 /// `medulla workspace add` does, in one call.
 ///
-/// The profile is written first: registration points at a path, and a registry
-/// entry whose `MEDULLA.md` failed to write would advertise a workspace the
-/// orchestrator can find but not read. A registration failure is *not* fatal to
-/// the profile — the file is already on disk and useful — so it is reported on
+/// An **existing** `MEDULLA.md` is kept, not an error: registration is about
+/// enrolling the directory, and the overwhelmingly common paths into this
+/// function — re-running `add` to refresh an entry, or running it after
+/// `medulla init` — both start with a profile already on disk. Refusing them
+/// would make registering an already-described workspace impossible except by
+/// destroying the description first. `force` redrafts instead of keeping.
+///
+/// Otherwise the profile is written first: registration points at a path, and a
+/// registry entry whose `MEDULLA.md` failed to write would advertise a workspace
+/// the orchestrator can find but not read. A registration failure is *not* fatal
+/// to the profile — the file is already on disk and useful — so it is reported on
 /// [`InitOutcome::registration_error`] rather than returned as an error, and the
 /// caller decides how loudly to say so.
 ///
 /// # Errors
 ///
-/// Returns an error only when the profile itself cannot be drafted or written
-/// (see [`init_workspace`]).
+/// Returns an error only when a profile is needed and cannot be drafted or
+/// written (see [`init_workspace`]).
 pub async fn init_and_register_workspace(
     dir: &Path,
     settings: &crate::memory::MemorySettings,
@@ -169,7 +176,22 @@ pub async fn init_and_register_workspace(
     offline: bool,
     force: bool,
 ) -> Result<InitOutcome> {
-    let mut outcome = init_workspace_with_settings(dir, settings, offline, force).await?;
+    let mut outcome = match read_medulla_md(dir) {
+        Some(contents) if !force => InitOutcome {
+            path: profile_path(dir),
+            contents,
+            drafted: false,
+            sources: Vec::new(),
+            // Reported from the file that is actually on disk, so a kept profile
+            // is described by its own layout rather than a fresh scan the
+            // operator never asked for.
+            layout: Vec::new(),
+            kept_profile: true,
+            registration: None,
+            registration_error: None,
+        },
+        _ => init_workspace_with_settings(dir, settings, offline, force).await?,
+    };
     match register_workspace(config_path, config, dir, harness) {
         Ok(registration) => outcome.registration = Some(registration),
         Err(err) => outcome.registration_error = Some(err.to_string()),
@@ -228,6 +250,7 @@ pub async fn init_workspace(
         drafted,
         sources: sources.found(),
         layout,
+        kept_profile: false,
         registration: None,
         registration_error: None,
     })

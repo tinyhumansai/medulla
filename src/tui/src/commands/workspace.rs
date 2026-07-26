@@ -95,9 +95,14 @@ async fn add(
         report_registration(reg);
     }
     if let Some(err) = &outcome.registration_error {
-        // The profile is written and useful either way, so a failed registration
-        // is a warning rather than a failed command.
-        eprintln!("medulla workspace add: profile written but not registered: {err}");
+        // Registering is the whole point of `add`, so a failure here fails the
+        // command — exiting 0 would tell a script the workspace is enrolled when
+        // it is not. The profile is still on disk, and saying so distinguishes
+        // this from a run that did nothing at all.
+        return Err(anyhow::anyhow!(
+            "{err}\nThe profile at {} was written; only registration failed.",
+            outcome.path.display()
+        ));
     }
     Ok(())
 }
@@ -105,6 +110,11 @@ async fn add(
 /// Report what was written to `MEDULLA.md`. Shared with `medulla init`, which
 /// does exactly this much and no registration.
 pub(crate) fn report_profile(outcome: &InitOutcome) {
+    if outcome.kept_profile {
+        println!("Kept the existing {}.", outcome.path.display());
+        println!("Pass --force to redraft it from the directory's instruction files.");
+        return;
+    }
     if outcome.drafted {
         println!(
             "Wrote {} (drafted from {})",

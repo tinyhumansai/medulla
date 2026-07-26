@@ -101,8 +101,12 @@ pub struct InitOutcome {
     pub drafted: bool,
     /// Instruction files the draft was based on.
     pub sources: Vec<&'static str>,
-    /// The scanned file layout embedded in the profile.
+    /// The scanned file layout embedded in the profile. Empty when an existing
+    /// profile was kept ([`InitOutcome::kept_profile`]) — nothing was scanned.
     pub layout: Vec<String>,
+    /// True when a `MEDULLA.md` was already present and left as it was, rather
+    /// than drafted or stubbed. Registration still happened.
+    pub kept_profile: bool,
     /// The registry entry written for this workspace. `None` when registration
     /// was skipped or failed — see [`InitOutcome::registration_error`].
     pub registration: Option<super::registry::WorkspaceRegistration>,

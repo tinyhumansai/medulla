@@ -219,6 +219,10 @@ pub struct RuntimeSnapshot {
     pub last_result: Option<CycleResultSummary>,
     pub tracing: bool,
     pub roster: Vec<AgentDescriptor>,
+    /// The declared capacity the roster's agents sit in: hosts, harnesses,
+    /// workspaces, and the agent-template catalog. Empty on runtimes that
+    /// declare none, which every fleet surface reads as "nothing declared".
+    pub capacity: crate::runtime::fleet::CapacitySnapshot,
     pub presence: HashMap<String, AgentPresence>,
     pub sessions: HashMap<String, Vec<PeerSession>>,
     pub tinyplace: Option<TinyplaceIdentity>,

@@ -34,7 +34,11 @@ mod stub_server;
 mod tests;
 
 pub use client::CoreRuntime;
-pub use types::{
-    AgentTemplate, AgentTemplateHarnessOverride, CoreDeclarations, HarnessBudget,
-    HarnessDescriptor, HostDescriptor, HostResources, WorkspaceDescriptor, WorkspaceProfile,
+pub use types::CoreDeclarations;
+// The containment-chain descriptors moved to `runtime::fleet` when they stopped
+// being core-only; re-exported here so `runtime::core::HostDescriptor` and
+// friends keep resolving.
+pub use crate::runtime::fleet::{
+    AgentTemplate, AgentTemplateHarnessOverride, HarnessBudget, HarnessDescriptor, HostDescriptor,
+    HostResources, WorkspaceDescriptor, WorkspaceProfile,
 };

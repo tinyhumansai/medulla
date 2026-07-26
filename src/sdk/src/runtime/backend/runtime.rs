@@ -90,6 +90,8 @@ impl BackendRuntime {
             seq: 0,
             next_thread: 2,
             async_mode: false,
+            roster: Vec::new(),
+            capacity: Default::default(),
         }));
         let rt = BackendRuntime {
             client,
@@ -217,7 +219,8 @@ impl Runtime for BackendRuntime {
             messages: active.messages.clone(),
             last_result: active.last_result.clone(),
             tracing: false,
-            roster: Vec::<AgentDescriptor>::new(),
+            roster: s.roster.clone(),
+            capacity: s.capacity.clone(),
             presence: HashMap::<String, AgentPresence>::new(),
             sessions: HashMap::<String, Vec<PeerSession>>::new(),
             // The hub's own identity, so the operator can read off the address a

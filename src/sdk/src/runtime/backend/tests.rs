@@ -32,6 +32,8 @@ fn state_with_thread() -> State {
         seq: 0,
         next_thread: 2,
         async_mode: false,
+        roster: Vec::new(),
+        capacity: Default::default(),
     }
 }
 

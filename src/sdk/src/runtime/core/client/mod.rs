@@ -49,18 +49,20 @@ impl CoreRuntime {
         let declarations = Arc::new(declarations);
         let (tx, _rx) = broadcast::channel(256);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let declarations_for_driver = declarations.clone();
         let driver = tokio::spawn(driver_loop(
             socket_path.clone(),
             state.clone(),
             tx.clone(),
             cmd_rx,
-            declarations,
+            declarations_for_driver,
         ));
         CoreRuntime {
             state,
             tx,
             cmd_tx,
             socket_path,
+            declarations,
             driver: Mutex::new(Some(driver)),
         }
     }

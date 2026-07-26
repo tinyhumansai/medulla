@@ -75,6 +75,10 @@ pub(super) struct State {
     pub(super) tracing: bool,
     /// The scripted agent roster.
     pub(super) roster: Vec<AgentDescriptor>,
+    /// The scripted declared capacity: the containment chain and template
+    /// catalog the scripted roster sits in. Empty by default so the fleet
+    /// surfaces degrade to "nothing declared".
+    pub(super) capacity: crate::runtime::CapacitySnapshot,
     /// The scripted worker registry, as `Runtime::workers` reports it. Distinct
     /// from `roster`: the registry is the fleet this process can delegate to,
     /// which is not necessarily what a backend advertises.
@@ -260,6 +264,7 @@ impl MockRuntime {
             async_mode: false,
             tracing: false,
             roster: Vec::new(),
+            capacity: Default::default(),
             workers: Vec::new(),
             presence: HashMap::new(),
             sessions: HashMap::new(),

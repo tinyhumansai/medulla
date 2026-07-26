@@ -33,6 +33,7 @@ impl Runtime for MockRuntime {
             last_result: active.last_result.clone(),
             tracing: s.tracing,
             roster: s.roster.clone(),
+            capacity: s.capacity.clone(),
             presence: s.presence.clone(),
             sessions: s.sessions.clone(),
             tinyplace: s.tinyplace.clone(),

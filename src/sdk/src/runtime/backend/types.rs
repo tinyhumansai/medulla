@@ -104,6 +104,12 @@ pub(super) struct State {
     pub(super) next_thread: usize,
     /// Local-only async toggle; see the module doc for why it is inert.
     pub(super) async_mode: bool,
+    /// The connected agent roster, refreshed from `GET /medulla/v1/roster`.
+    /// Empty until the first refresh lands.
+    pub(super) roster: Vec<crate::runtime::AgentDescriptor>,
+    /// The containment chain projected from that same roster response, so the
+    /// fleet surfaces have a host/harness/workspace tree to render.
+    pub(super) capacity: crate::runtime::CapacitySnapshot,
 }
 
 impl State {

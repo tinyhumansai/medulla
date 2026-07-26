@@ -9,6 +9,8 @@ pub mod capabilities;
 #[cfg(unix)]
 pub mod core;
 mod event_log;
+/// The declared-capacity containment chain and agent-template catalog.
+pub mod fleet;
 /// The non-interactive one-instruction driver for scripting / e2e automation.
 pub mod headless;
 pub mod mock;
@@ -241,6 +243,10 @@ fn no_feedback_backend() -> anyhow::Error {
 mod tests;
 
 mod types;
+pub use fleet::{
+    AgentPlacement, AgentTemplate, AgentTemplateHarnessOverride, CapacitySnapshot, HarnessBudget,
+    HarnessDescriptor, HostDescriptor, HostResources, WorkspaceDescriptor, WorkspaceProfile,
+};
 pub use types::AgentDescriptor;
 pub use types::AgentPresence;
 pub use types::ContextItem;

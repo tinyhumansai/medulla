@@ -31,12 +31,25 @@ pub const TABS: [&str; 7] = [
 ];
 
 /// The Routing tab's left-nav pages.
-pub const ROUTING_SUBPAGES: [&str; 4] = ["List Workers", "Add Worker", "Manage Keys", "Strategies"];
+///
+/// Fleet sits beside the worker list rather than on a tab of its own because it
+/// answers the same operator question one level up: List Workers is the peers
+/// this hub can dispatch to, Fleet is the declared capacity — hosts, harnesses,
+/// workspaces, agents, and the templates that may be provisioned into them —
+/// that those dispatches actually land on.
+pub const ROUTING_SUBPAGES: [&str; 5] = [
+    "List Workers",
+    "Fleet",
+    "Add Worker",
+    "Manage Keys",
+    "Strategies",
+];
 
 pub(super) const RP_WORKERS: usize = 0;
-pub(super) const RP_ADD_WORKER: usize = 1;
-pub(super) const RP_KEYS: usize = 2;
-pub(super) const RP_STRATEGIES: usize = 3;
+pub(super) const RP_FLEET: usize = 1;
+pub(super) const RP_ADD_WORKER: usize = 2;
+pub(super) const RP_KEYS: usize = 3;
+pub(super) const RP_STRATEGIES: usize = 4;
 
 /// The Tasks tab's left-nav pages.
 pub const TASKS_SUBPAGES: [&str; 2] = ["All Tasks", "Sources"];
@@ -186,6 +199,8 @@ pub enum Cmd {
         /// The comment text.
         body: String,
     },
+    /// Re-read the declared fleet (roster + capacity) from the runtime.
+    RefreshFleet,
     /// Submit new feedback to the board.
     SubmitFeedback {
         /// Feature request or bug report.
@@ -349,6 +364,10 @@ pub struct App {
     pub(super) agent_scroll: usize,
     pub(super) chat_scroll: usize,
     pub(super) worker_index: usize,
+    /// Selected row on the Routing Fleet page (index into the flattened tree).
+    pub(super) fleet_index: usize,
+    /// Scroll offset inside the Fleet page's detail pane.
+    pub(super) fleet_scroll: usize,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.

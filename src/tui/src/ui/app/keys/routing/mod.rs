@@ -7,8 +7,8 @@ use crate::ui::multi_pane::{self, NavAction};
 use medulla::runtime::WorkerOp;
 
 use super::super::types::{
-    App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_WORKER, RP_KEYS,
-    RP_STRATEGIES, RP_WORKERS,
+    App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_WORKER, RP_FLEET,
+    RP_KEYS, RP_STRATEGIES, RP_WORKERS,
 };
 
 impl App {
@@ -30,7 +30,10 @@ impl App {
                     "{} · Esc to go back to the menu",
                     self.routing_subpage()
                 ));
-                return RoutingKey::Handled(None);
+                // Capacity is declared, never streamed, so entering the page is
+                // the moment to go and read it.
+                let cmd = (self.routing_index == RP_FLEET).then_some(Cmd::RefreshFleet);
+                return RoutingKey::Handled(cmd);
             }
             NavAction::Left => {
                 self.set_status("Routing · menu");
@@ -41,6 +44,7 @@ impl App {
 
         match self.routing_index {
             RP_WORKERS => self.workers_key(code),
+            RP_FLEET => self.fleet_key(code),
             RP_ADD_WORKER => self.add_worker_key(code),
             RP_KEYS => self.manage_keys_key(code),
             RP_STRATEGIES => self.strategies_key(code),
@@ -113,6 +117,38 @@ impl App {
                     Cmd::WorkerOp(WorkerOp::RefreshDetails { id: worker.id })
                 });
                 RoutingKey::Handled(cmd)
+            }
+            _ => RoutingKey::Unhandled,
+        }
+    }
+
+    /// Browse the declared fleet tree and re-read it on demand.
+    fn fleet_key(&mut self, code: KeyCode) -> RoutingKey {
+        let rows = self.fleet_rows().len();
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.fleet_index = crate::ui::selection::moved(self.fleet_index, rows, true);
+                self.fleet_scroll = 0;
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.fleet_index = crate::ui::selection::moved(self.fleet_index, rows, false);
+                self.fleet_scroll = 0;
+                RoutingKey::Handled(None)
+            }
+            // The detail pane can outgrow its height on a template with long
+            // instructions or a workspace profile; scroll it rather than clip.
+            KeyCode::PageDown => {
+                self.fleet_scroll = self.fleet_scroll.saturating_add(5);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::PageUp => {
+                self.fleet_scroll = self.fleet_scroll.saturating_sub(5);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('r') => {
+                self.set_status("Refreshing fleet…");
+                RoutingKey::Handled(Some(Cmd::RefreshFleet))
             }
             _ => RoutingKey::Unhandled,
         }

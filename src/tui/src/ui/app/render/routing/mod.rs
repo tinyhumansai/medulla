@@ -5,9 +5,10 @@ use ratatui::Frame;
 
 use crate::ui::multi_pane;
 
-use super::super::types::{App, RP_ADD_WORKER, RP_KEYS, RP_STRATEGIES, RP_WORKERS};
+use super::super::types::{App, RP_ADD_WORKER, RP_FLEET, RP_KEYS, RP_STRATEGIES, RP_WORKERS};
 
 mod add_worker;
+mod fleet;
 mod keys;
 mod nav;
 mod strategies;
@@ -20,6 +21,7 @@ impl App {
         self.draw_routing_nav(f, nav);
         match self.routing_index {
             RP_WORKERS => self.draw_workers(f, content),
+            RP_FLEET => self.draw_fleet(f, content),
             RP_ADD_WORKER => self.draw_add_worker(f, content),
             RP_KEYS => self.draw_manage_keys(f, content),
             RP_STRATEGIES => self.draw_strategies(f, content),

@@ -179,6 +179,17 @@ pub(super) fn run_cmd(
                 let _ = tx.send(AppMsg::Status(status));
             });
         }
+        Cmd::RefreshFleet => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                // A failed refresh keeps the previous fleet on screen; the
+                // status line is where the failure belongs, not the tree.
+                if let Err(e) = rt.refresh_fleet().await {
+                    let _ = tx.send(AppMsg::Status(format!("fleet refresh failed: {e}")));
+                }
+            });
+        }
         Cmd::LoadUsage => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

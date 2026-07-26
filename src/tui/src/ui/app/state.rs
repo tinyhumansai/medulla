@@ -9,6 +9,7 @@ use crate::ui::agents::{
     derive_agent_lanes, merge_worker_activity, merge_worker_roster, AgentLane,
 };
 use crate::ui::composer::Draft;
+use crate::ui::fleet::{fleet_rows, FleetNode};
 use crate::ui::theme::Theme;
 use medulla::config::LoadedConfig;
 use medulla::memory::{MemoryHit, MemoryStatus};
@@ -53,6 +54,8 @@ impl App {
             agent_scroll: 0,
             chat_scroll: 0,
             worker_index: 0,
+            fleet_index: 0,
+            fleet_scroll: 0,
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index,
@@ -402,6 +405,31 @@ impl App {
         // the activity the hub observed locally is folded in.
         merge_worker_activity(&mut lanes, &self.runtime.worker_activity());
         lanes
+    }
+
+    /// The flattened fleet tree for the Routing › Fleet page.
+    ///
+    /// Reads the same merged roster the Agents lanes do, so an agent the local
+    /// registry knows about but the backend has not advertised still appears —
+    /// in the `unplaced agents` group, since nothing declares where it runs.
+    pub(super) fn fleet_rows(&self) -> Vec<FleetNode> {
+        fleet_rows(&self.snapshot.capacity, &self.fleet_roster())
+    }
+
+    /// The roster the fleet surfaces resolve placements against: what the
+    /// backend advertises plus the local worker registry, exactly as the Agents
+    /// lanes see it.
+    pub(super) fn fleet_roster(&self) -> Vec<medulla::runtime::AgentDescriptor> {
+        merge_worker_roster(&self.snapshot.roster, &self.runtime.workers())
+    }
+
+    /// The selection key of the highlighted fleet row, skipping headings.
+    /// Test/inspection seam for the Fleet page's navigation.
+    pub fn selected_fleet_key(&self) -> Option<String> {
+        let rows = self.fleet_rows();
+        rows.get(self.fleet_index.min(rows.len().saturating_sub(1)))
+            .filter(|row| row.kind.selectable())
+            .map(|row| row.key.clone())
     }
 
     /// The index of the active thread in the snapshot's thread list.

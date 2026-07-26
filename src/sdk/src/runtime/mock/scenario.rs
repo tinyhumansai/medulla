@@ -7,6 +7,10 @@ use std::collections::HashMap;
 
 use serde_json::{json, Map};
 
+use crate::runtime::fleet::{
+    AgentTemplate, CapacitySnapshot, HarnessBudget, HarnessDescriptor, HostDescriptor,
+    HostResources, WorkspaceDescriptor,
+};
 use crate::runtime::{
     AgentDescriptor, AgentPresence, CycleResultSummary, PeerSession, TinyplaceIdentity,
 };
@@ -31,12 +35,15 @@ impl MockRuntime {
                 name: "dev-1".into(),
                 description: "A remote coding agent for delegated implementation work.".into(),
                 availability: "online".into(),
-                workspace_id: None,
+                // Placed in the demo chain below, so the Fleet page shows the
+                // agent under the workspace it is deployed into.
+                workspace_id: Some("ws-1".into()),
                 host_id: None,
-                template_id: None,
+                template_id: Some("implementer".into()),
                 tags: vec!["code".into()],
                 metadata: meta,
             }];
+            s.capacity = demo_capacity();
             s.presence.insert(
                 "dev-1".into(),
                 AgentPresence {
@@ -146,5 +153,71 @@ impl MockRuntime {
             );
         }
         rt
+    }
+}
+
+/// The demo containment chain: one host running one harness that exposes one
+/// workspace, plus a template that may be provisioned onto it. Deliberately
+/// small — it exists so every fleet surface has a shape to render, not to
+/// exercise the caps.
+fn demo_capacity() -> CapacitySnapshot {
+    CapacitySnapshot {
+        hosts: vec![HostDescriptor {
+            id: "host-1".into(),
+            name: "workshop".into(),
+            availability: "online".into(),
+            address: Some("10.0.0.4".into()),
+            resources: Some(HostResources {
+                cpu_cores: Some(10.0),
+                total_memory_bytes: Some(32 * 1024 * 1024 * 1024),
+                available_memory_bytes: Some(12 * 1024 * 1024 * 1024),
+                disk_free_bytes: Some(220 * 1024 * 1024 * 1024),
+            }),
+            metadata: Map::new(),
+        }],
+        harnesses: vec![HarnessDescriptor {
+            id: "harness-1".into(),
+            host_id: "host-1".into(),
+            kind: "claude-code".into(),
+            availability: "online".into(),
+            ready: true,
+            ready_reason: None,
+            providers: vec!["anthropic".into()],
+            template_ids: vec!["implementer".into()],
+            budgets: vec![HarnessBudget {
+                provider: "anthropic".into(),
+                window: "5h".into(),
+                seat: Some("seat-1".into()),
+                limit_tokens: Some(1_000_000),
+                used_tokens: Some(240_000),
+                remaining_tokens: Some(760_000),
+                cooldown_until: None,
+                source: "provider_reported".into(),
+            }],
+            metadata: Map::new(),
+        }],
+        workspaces: vec![WorkspaceDescriptor {
+            id: "ws-1".into(),
+            name: "medulla".into(),
+            path: "/srv/repos/medulla".into(),
+            harness_id: "harness-1".into(),
+            profile: None,
+            project: Some("medulla".into()),
+            template_ids: Vec::new(),
+            metadata: Map::new(),
+        }],
+        templates: vec![AgentTemplate {
+            id: "implementer".into(),
+            name: Some("Implementer".into()),
+            description: "Implements a scoped change and reports what it did.".into(),
+            instructions: None,
+            tools: None,
+            model: Some("reasoning".into()),
+            effort: None,
+            params: Map::new(),
+            tags: vec!["code".into()],
+            metadata: Map::new(),
+            harnesses: Default::default(),
+        }],
     }
 }

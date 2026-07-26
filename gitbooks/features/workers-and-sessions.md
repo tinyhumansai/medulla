@@ -176,8 +176,16 @@ A session is the thread: its message history, the cycles that have run against
 it, and enough metadata to find it again. You can create one, list them, resume
 one, resume one, or archive it.
 
-In the TUI, `/new` starts a fresh session, `/resume` picks an earlier one, and
-`/abort` stops the running cycle. `Ctrl-N` is the shortcut for a new session.
+Several can be open at once. `/new` (or `^N`) opens a **new thread** beside the
+current one and focuses it — a fresh session with an empty transcript, inheriting
+nothing. The threads you already have keep running and keep their history; a
+strip above the lane list shows them with their running-task and attention
+badges, `^↑↓` walks between them, and clicking one switches. `/resume` picks up
+an earlier session, and `/abort` stops the running cycle.
+
+Against a local orchestration server this is single-threaded by construction —
+that wire is one session per connection — so `/new` clears the view rather than
+opening a second thread.
 
 ### What survives
 

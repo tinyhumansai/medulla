@@ -48,11 +48,15 @@ impl App {
             _ => None,
         };
 
+        // Threads sit above the lanes, and only when there is more than one:
+        // with a single thread the transcript title already names it.
+        let threads = self.thread_rows();
         // Size the rail to its content rather than to a percentage: the labels
         // are short and fixed-ish, the transcript is what benefits from width.
         let widest = rows
             .iter()
             .map(|row| self.rail_row_line(row, &lanes, false).width())
+            .chain(threads.iter().map(|line| line.width()))
             .max()
             .unwrap_or(0);
         let cols = Layout::default()
@@ -62,6 +66,17 @@ impl App {
                 Constraint::Min(0),
             ])
             .split(area);
+        let left = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(if threads.len() > 1 {
+                    (threads.len() as u16 + 2).min(area.height / 3)
+                } else {
+                    0
+                }),
+                Constraint::Min(0),
+            ])
+            .split(cols[0]);
         // The composer lives inside the right column, under the transcript it
         // belongs to, and grows with the draft.
         let right = Layout::default()
@@ -87,9 +102,14 @@ impl App {
         } else {
             format!("Agents · {agent_count}")
         };
+        if threads.len() > 1 {
+            self.draw_thread_strip(f, left[0], &threads);
+        } else {
+            self.hit_threads = None;
+        }
         let block = self.panel(title);
-        let inner = block.inner(cols[0]);
-        f.render_widget(block, cols[0]);
+        let inner = block.inner(left[1]);
+        f.render_widget(block, left[1]);
         let capacity = (inner.height as usize).max(1);
         let window_start = crate::ui::selection::viewport_start(active, rows.len(), capacity);
         self.hit_agents = Some((inner, window_start));
@@ -273,6 +293,59 @@ impl App {
 
         // Composer: what it submits depends on the cursor, so it says so.
         self.draw_agent_composer(f, right[1], &selected_task, lane);
+    }
+
+    /// One row per open thread, with its running/attention badges. Built apart
+    /// from the draw so the rail can be sized to it.
+    pub(super) fn thread_rows(&self) -> Vec<TLine<'static>> {
+        self.snapshot
+            .threads
+            .iter()
+            .map(|thread| {
+                let marker = if thread.running { "▶" } else { "●" };
+                let mut badges = Vec::new();
+                if thread.running_tasks > 0 {
+                    badges.push(format!("{} run", thread.running_tasks));
+                }
+                if thread.attention > 0 {
+                    badges.push(format!("{}⚠", thread.attention));
+                }
+                let badge = if badges.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {}", badges.join(" "))
+                };
+                let mut style = Style::default();
+                if thread.running {
+                    style = style.fg(Color::Yellow);
+                }
+                if thread.id == self.snapshot.active_thread_id {
+                    style = self.theme.selection();
+                }
+                TLine::from(Span::styled(
+                    format!("{marker} {} · {}t{badge}", thread.name, thread.turns),
+                    style,
+                ))
+            })
+            .collect()
+    }
+
+    /// Draw the threads strip above the lane list.
+    fn draw_thread_strip(&mut self, f: &mut Frame, area: Rect, threads: &[TLine<'static>]) {
+        let block = self.panel(format!("Threads · {}", threads.len()));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let capacity = (inner.height as usize).max(1);
+        let active = self.active_thread_idx();
+        let window_start = crate::ui::selection::viewport_start(active, threads.len(), capacity);
+        self.hit_threads = Some((inner, window_start));
+        let view: Vec<TLine> = threads
+            .iter()
+            .skip(window_start)
+            .take(capacity)
+            .cloned()
+            .collect();
+        f.render_widget(Paragraph::new(Text::from(view)), inner);
     }
 
     /// The composer's height: its caption row, the draft's lines, and the border.

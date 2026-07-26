@@ -480,6 +480,8 @@ pub struct App {
     pub(super) hit_tabs: Vec<(u16, u16)>,
     pub(super) hit_tabs_row: u16,
     pub(super) hit_agents: Option<(Rect, usize)>,
+    /// The threads strip's hit box and its first visible row, for click-to-switch.
+    pub(super) hit_threads: Option<(Rect, usize)>,
     pub(super) hit_context: Option<Rect>,
     pub(super) last_events_len: usize,
 

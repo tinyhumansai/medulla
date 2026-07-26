@@ -117,10 +117,12 @@ impl Runtime for CoreRuntime {
     }
 
     fn new_session(&self) {
-        // No serve frame resets a session in place — serve owns the harness and
-        // rehydrates from the host `sessions` port (serve-protocol §7). Clear the
-        // local transcript so the view starts fresh; the durable session is
-        // untouched.
+        // Unlike the mock and backend runtimes this opens no thread: serve is
+        // one session per connection (serve-protocol §1), so there is nowhere
+        // for a second one to live. And no serve frame resets a session in place
+        // — serve owns the harness and rehydrates from the host `sessions` port
+        // (§7) — so this clears the local transcript for a fresh view and leaves
+        // the durable session untouched.
         {
             let mut s = self.state.lock().unwrap();
             s.messages.clear();

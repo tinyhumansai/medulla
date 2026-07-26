@@ -399,20 +399,52 @@ fn resume_picker_esc_closes_without_resuming() {
     assert!(!app.resume_open());
 }
 
-// --- 7. thread / fork UX ----------------------------------------------------
+// --- 7. thread UX -----------------------------------------------------------
 
 #[test]
-fn ctrl_up_down_switches_threads() {
+fn ctrl_n_opens_a_thread_and_ctrl_up_down_switches_between_them() {
     let (mut app, _rt) = demo_app();
-    // Fork to create a second thread; the fork becomes active.
-    let _ = app.on_event(ctrl(KeyCode::Char('f')));
-    let active_after_fork = app.snapshot.active_thread_id.clone();
-    // Ctrl-Up moves to the previous (parent) thread.
+    assert_eq!(app.snapshot.threads.len(), 1);
+
+    // A new thread is opened beside the first, not in place of it, and takes
+    // focus. Nothing is inherited: the transcript starts empty.
+    let _ = app.on_event(ctrl(KeyCode::Char('n')));
+    assert_eq!(app.snapshot.threads.len(), 2);
+    let opened = app.snapshot.active_thread_id.clone();
+    assert_ne!(opened, "t1");
+    assert!(
+        app.snapshot.messages.is_empty(),
+        "a new thread starts empty"
+    );
+    assert_eq!(app.tab(), "Agents", "and lands on the conversation");
+
+    // Ctrl-Up walks back to the first thread, whose transcript is intact.
     let _ = app.on_event(ctrl(KeyCode::Up));
     assert_eq!(app.snapshot.active_thread_id, "t1");
-    // Ctrl-Down returns to the forked thread.
+    assert!(
+        !app.snapshot.messages.is_empty(),
+        "the first thread survives"
+    );
+
+    // Ctrl-Down returns.
     let _ = app.on_event(ctrl(KeyCode::Down));
-    assert_eq!(app.snapshot.active_thread_id, active_after_fork);
+    assert_eq!(app.snapshot.active_thread_id, opened);
+}
+
+#[test]
+fn the_threads_strip_appears_once_there_is_a_choice_to_make() {
+    let (mut app, _rt) = demo_app();
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
+    let out = render(&mut app, 120, 40);
+    assert!(
+        !out.contains("Threads ·"),
+        "one thread needs no strip: {out}"
+    );
+
+    let _ = app.on_event(ctrl(KeyCode::Char('n')));
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("Threads · 2"), "{out}");
+    assert!(out.contains("thread 2"), "{out}");
 }
 
 // --- 8. abort / new-session keys -------------------------------------------
@@ -424,7 +456,7 @@ fn ctrl_x_aborts_and_ctrl_n_starts_new_session() {
     assert!(app.status().contains("Abort"), "status: {}", app.status());
 
     let _ = app.on_event(ctrl(KeyCode::Char('n')));
-    assert!(app.status().contains("fresh"), "status: {}", app.status());
+    assert!(app.status().contains("Opened"), "status: {}", app.status());
 
     let calls = rt.recorded_calls();
     assert!(calls.iter().any(|c| c == "abort"), "calls: {calls:?}");

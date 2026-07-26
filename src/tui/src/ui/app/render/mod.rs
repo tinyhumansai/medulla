@@ -377,7 +377,7 @@ impl App {
     /// Draw the footer hint line.
     pub(super) fn draw_footer(&mut self, f: &mut Frame, area: Rect) {
         let text = format!(
-            "Tab views · ⌥↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^Y copy · ^↑↓ thread · ^X abort · ^O mouse {} · /help",
+            "Tab views · ⌥↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^O mouse {} · /help",
             if self.mouse_capture { "●" } else { "○" },
         );
         f.render_widget(

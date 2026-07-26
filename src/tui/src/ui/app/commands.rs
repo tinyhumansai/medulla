@@ -322,9 +322,7 @@ impl App {
         match command {
             SlashCommand::Quit => self.should_quit = true,
             SlashCommand::NewSession => {
-                self.runtime.new_session();
-                self.refresh_snapshot();
-                self.set_status("Started a fresh conversation session");
+                self.new_thread();
             }
             SlashCommand::Resume => return Some(Cmd::ListChats),
             SlashCommand::Abort => {

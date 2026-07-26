@@ -16,7 +16,8 @@ use crate::runtime::{ContextItem, CycleResultSummary, Runtime, RuntimeSnapshot};
 use crate::ui::chat_store::{ChatMessage, MainChatSummary};
 use crate::ui::events::{TuiEvent, Usage};
 
-use super::types::{gen_id, now_millis, MockRuntime};
+use super::types::{gen_id, now_millis, MockRuntime, Thread};
+use crate::runtime::event_log::ThreadEventLog;
 
 impl Runtime for MockRuntime {
     fn snapshot(&self) -> RuntimeSnapshot {
@@ -145,14 +146,18 @@ impl Runtime for MockRuntime {
         self.record("new_session");
         {
             let mut s = self.state.lock().unwrap();
-            let session_id = gen_id("tui");
-            let t = s.active_mut();
-            t.messages.clear();
-            t.events.clear();
-            t.chat_events.clear();
-            t.running = false;
-            t.last_result = None;
-            t.session_id = session_id;
+            let id = format!("t{}", s.threads.len() + 1);
+            let name = format!("thread {}", s.threads.len() + 1);
+            s.threads.push(Thread {
+                id: id.clone(),
+                name,
+                session_id: gen_id("tui"),
+                messages: Vec::new(),
+                event_log: ThreadEventLog::default(),
+                running: false,
+                last_result: None,
+            });
+            s.active_id = id;
         }
         self.ping();
     }

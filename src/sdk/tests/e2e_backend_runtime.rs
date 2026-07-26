@@ -116,29 +116,39 @@ async fn switching_threads_changes_the_active_one() {
 }
 
 #[tokio::test]
-async fn a_new_session_replaces_the_active_thread_session() {
-    let backend = MockBackend::start().await;
+async fn a_new_session_opens_a_thread_rather_than_clearing_one() {
+    // Distinct session ids per mint, so "the new thread got its own" is checkable.
+    let backend = MockBackend::start_with(support::mock_backend::MockConfig {
+        unique_sessions: true,
+        ..Default::default()
+    })
+    .await;
     let runtime = runtime(&backend).await;
-    let before = runtime.snapshot().session_id;
-    assert!(!before.is_empty());
+    let first = runtime.snapshot().session_id;
+    assert!(!first.is_empty());
 
-    // The id is cleared synchronously and refilled by a spawned task, so the
-    // thread is briefly session-less; wait for the replacement to land.
+    // The thread is added synchronously and its session minted by a spawned
+    // task, so it is briefly session-less; wait for the id to land.
     runtime.new_session();
-    let mut after = String::new();
+    let mut second = String::new();
     for _ in 0..80 {
-        after = runtime.snapshot().session_id;
-        if !after.is_empty() {
+        second = runtime.snapshot().session_id;
+        if !second.is_empty() {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
-    assert!(
-        !after.is_empty(),
-        "a new session id should replace the old one"
-    );
-    // The thread survives the swap.
-    assert_eq!(runtime.snapshot().threads.len(), 1);
+    assert!(!second.is_empty(), "the new thread gets its own session");
+    assert_ne!(second, first, "and it is not the old one");
+
+    // Both threads are open, and the new one has focus.
+    let snap = runtime.snapshot();
+    assert_eq!(snap.threads.len(), 2, "a thread is opened, not replaced");
+    assert_ne!(snap.active_thread_id, "t1");
+
+    // The first thread is intact and switchable back to.
+    runtime.set_active_thread("t1".to_string());
+    assert_eq!(runtime.snapshot().session_id, first);
 }
 
 #[tokio::test]

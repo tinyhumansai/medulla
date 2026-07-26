@@ -30,6 +30,7 @@ fn state_with_thread() -> State {
         threads: vec![Thread::new("t1", "main", "sess-1".into())],
         active_id: "t1".into(),
         seq: 0,
+        next_thread: 2,
         roster: Vec::new(),
         capacity: Default::default(),
     }

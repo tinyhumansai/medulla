@@ -116,9 +116,25 @@ impl App {
                     return None;
                 }
                 KeyCode::Char('n') => {
-                    self.runtime.new_session();
-                    self.refresh_snapshot();
-                    self.set_status("Started a fresh conversation session");
+                    self.new_thread();
+                    return None;
+                }
+                // Walk the open threads. The bare arrows belong to the composer,
+                // so switching between conversations takes the control chord.
+                KeyCode::Up | KeyCode::Down if tab == "Agents" => {
+                    let idx = self.active_thread_idx();
+                    let next = if matches!(k.code, KeyCode::Up) {
+                        idx.checked_sub(1)
+                    } else {
+                        Some(idx + 1)
+                    };
+                    if let Some(thread) = next.and_then(|n| self.snapshot.threads.get(n)) {
+                        let id = thread.id.clone();
+                        self.runtime.set_active_thread(id);
+                        self.chat_scroll = 0;
+                        self.agent_scroll = 0;
+                        self.refresh_snapshot();
+                    }
                     return None;
                 }
                 _ => {}

@@ -17,7 +17,7 @@ fn slash_resume_emits_list_chats_cmd() {
 fn slash_new_and_abort_and_clear_set_status() {
     let (mut app, rt) = demo_app();
     let _ = submit_line(&mut app, "/new");
-    assert!(app.status().contains("fresh"), "status: {}", app.status());
+    assert!(app.status().contains("Opened"), "status: {}", app.status());
     let _ = submit_line(&mut app, "/abort");
     assert!(app.status().contains("Abort"), "status: {}", app.status());
     let _ = submit_line(&mut app, "/clear");
@@ -139,11 +139,11 @@ fn control_chords_route() {
     let sink = app.capture_clipboard();
     let _ = app.on_event(ctrl(KeyCode::Char('y')));
     assert_eq!(sink.lock().unwrap().len(), 1);
-    // Ctrl-X aborts, Ctrl-N starts a fresh session.
+    // Ctrl-X aborts, Ctrl-N opens a thread.
     let _ = app.on_event(ctrl(KeyCode::Char('x')));
     assert!(app.status().contains("Abort"));
     let _ = app.on_event(ctrl(KeyCode::Char('n')));
-    assert!(app.status().contains("fresh"));
+    assert!(app.status().contains("Opened"));
     let calls = rt.recorded_calls();
     assert!(calls.iter().any(|c| c == "abort"));
     assert!(calls.iter().any(|c| c == "new_session"));

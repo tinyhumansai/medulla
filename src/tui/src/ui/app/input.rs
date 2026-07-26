@@ -79,6 +79,21 @@ impl App {
         }
         let tab = self.tab();
         if tab == "Agents" {
+            // The rail stacks two hit boxes — threads above lanes — so both are
+            // tried; an `else if` here would leave the strip unclickable.
+            if let Some((rect, window_start)) = self.hit_threads {
+                if rect.contains((x, y).into()) {
+                    let rel = (y - rect.y) as usize;
+                    let idx = window_start + rel;
+                    if let Some(t) = self.snapshot.threads.get(idx) {
+                        let id = t.id.clone();
+                        self.runtime.set_active_thread(id);
+                        self.chat_scroll = 0;
+                        self.agent_scroll = 0;
+                        self.refresh_snapshot();
+                    }
+                }
+            }
             if let Some((rect, window_start)) = self.hit_agents {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
@@ -138,6 +153,29 @@ impl App {
         } else {
             next as usize
         };
+    }
+
+    /// Open a new thread and focus the conversation.
+    ///
+    /// A thread is opened, not reset: several conversations can be in flight at
+    /// once, and clearing the one you were in would throw away the transcript
+    /// you were keeping. Nothing is inherited from the current thread — that is
+    /// the whole difference from the fork this replaced.
+    pub(super) fn new_thread(&mut self) {
+        self.runtime.new_session();
+        self.draft = crate::ui::composer::Draft::new();
+        self.chat_scroll = 0;
+        self.agent_scroll = 0;
+        self.agent_index = 0;
+        self.tab_index = super::types::tab_pos("Agents");
+        self.refresh_snapshot();
+        let name = self
+            .snapshot
+            .threads
+            .get(self.active_thread_idx())
+            .map(|t| t.name.clone())
+            .unwrap_or_else(|| "main".into());
+        self.set_status(format!("Opened {name} · ^↑↓ switches threads"));
     }
 
     /// Recall an older prompt from history into the composer.

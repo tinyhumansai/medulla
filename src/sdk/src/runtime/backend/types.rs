@@ -97,6 +97,8 @@ pub(super) struct State {
     pub(super) active_id: String,
     /// Monotonic local sequence counter assigned to every folded event.
     pub(super) seq: u64,
+    /// The next numeric suffix to hand out when opening a thread.
+    pub(super) next_thread: usize,
     /// The connected agent roster, refreshed from `GET /medulla/v1/roster`.
     /// Empty until the first refresh lands.
     pub(super) roster: Vec<crate::runtime::AgentDescriptor>,

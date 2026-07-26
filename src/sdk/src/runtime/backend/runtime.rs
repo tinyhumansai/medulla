@@ -87,6 +87,7 @@ impl BackendRuntime {
             threads: vec![Thread::new("t1", "main", created.session_id)],
             active_id: "t1".into(),
             seq: 0,
+            next_thread: 2,
             roster: Vec::new(),
             capacity: Default::default(),
         }));
@@ -315,13 +316,22 @@ impl Runtime for BackendRuntime {
         self.ping();
     }
 
+    /// Open a *new* thread on a fresh backend session and focus it.
+    ///
+    /// Additive rather than in-place: the point of several threads is running
+    /// more than one conversation at a time, and resetting the active one would
+    /// throw away the transcript the operator was keeping. Nothing is inherited
+    /// — a new thread starts empty, which is the whole difference from the fork
+    /// this replaced.
     fn new_session(&self) {
         let thread_id = {
             let mut s = self.state.lock().unwrap();
-            let t = s.active_mut();
-            t.reset();
-            t.session_id.clear();
-            t.id.clone()
+            let id = format!("t{}", s.next_thread);
+            s.next_thread += 1;
+            let name = format!("thread {}", s.threads.len() + 1);
+            s.threads.push(Thread::new(&id, &name, String::new()));
+            s.active_id = id.clone();
+            id
         };
         let client = self.client.clone();
         let state = self.state.clone();

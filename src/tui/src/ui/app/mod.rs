@@ -18,6 +18,7 @@ mod feedback;
 mod input;
 mod keys;
 mod memory;
+mod rail;
 mod render;
 mod settings_edit;
 mod state;

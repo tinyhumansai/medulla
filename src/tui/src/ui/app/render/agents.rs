@@ -19,10 +19,12 @@ use crate::ui::agents::{
     lane_lines, task_lines, AgentLane, AgentRole, AgentRow, Line as StyledLine, TaskState,
     TaskStatus,
 };
+use crate::ui::fleet::fleet_detail;
 use crate::ui::harness::{budget_note, task_board_lines};
 use crate::ui::util::fmt_tokens;
 use medulla::harness_contract::AgentBudgetMetadata;
 
+use super::super::rail::RailRow;
 use super::super::types::App;
 use super::{chat_lines, color, styled_to_tline};
 
@@ -30,13 +32,18 @@ impl App {
     /// Draw the Agents tab: lane list and the selected lane/task transcript.
     pub(super) fn draw_agents(&mut self, f: &mut Frame, area: Rect) {
         let lanes = self.lanes();
-        let rows = self.agent_rows();
+        let rows = self.rail_rows();
         let active = self.agent_index.min(rows.len().saturating_sub(1));
         self.agent_index = active;
         let selected_row = rows.get(active);
-        let active_lane_index = selected_row.and_then(|r| r.lane_index()).unwrap_or(0);
+        // A fleet row shows a declaration; everything else shows a transcript.
+        let selected_node = self.selected_fleet_node();
+        let active_lane_index = match selected_row {
+            Some(RailRow::Agent(row)) => row.lane_index().unwrap_or(0),
+            _ => 0,
+        };
         let selected_task: Option<TaskState> = match selected_row {
-            Some(AgentRow::Sub { task, .. }) => Some(task.clone()),
+            Some(RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
             _ => None,
         };
 
@@ -44,7 +51,7 @@ impl App {
         // are short and fixed-ish, the transcript is what benefits from width.
         let widest = rows
             .iter()
-            .map(|row| self.agent_row_line(row, &lanes, false).width())
+            .map(|row| self.rail_row_line(row, &lanes, false).width())
             .chain(self.thread_rows().iter().map(|line| line.width()))
             .max()
             .unwrap_or(0);
@@ -108,17 +115,25 @@ impl App {
         let mut lines: Vec<TLine> = Vec::new();
         for (offset, row) in rows.iter().skip(window_start).take(capacity).enumerate() {
             let idx = window_start + offset;
-            lines.push(self.agent_row_line(row, &lanes, idx == active));
+            lines.push(self.rail_row_line(row, &lanes, idx == active));
         }
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         // Transcript pane.
         let lane = lanes.get(active_lane_index);
         let pane_width = ((cols[1].width as usize).saturating_sub(4)).max(24);
-        let on_orchestrator = lane
-            .map(|l| l.role == AgentRole::Orchestrator)
-            .unwrap_or(true);
-        let content_lines: Vec<StyledLine> = if let Some(t) = &selected_task {
+        let on_orchestrator = selected_node.is_none()
+            && lane
+                .map(|l| l.role == AgentRole::Orchestrator)
+                .unwrap_or(true);
+        let content_lines: Vec<StyledLine> = if let Some(node) = &selected_node {
+            fleet_detail(
+                &self.fleet_capacity(),
+                &self.fleet_roster(),
+                &node.key,
+                pane_width,
+            )
+        } else if let Some(t) = &selected_task {
             task_lines(t, pane_width)
         } else if on_orchestrator {
             // The orchestrator lane is the conversation: show what was said, not
@@ -127,7 +142,9 @@ impl App {
         } else {
             lane_lines(lane, pane_width)
         };
-        let title = if let Some(t) = &selected_task {
+        let title = if let Some(node) = &selected_node {
+            format!("{} · {}", node.kind.label(), node.label)
+        } else if let Some(t) = &selected_task {
             format!(
                 "{} › {} · {} turns",
                 lane.map(|l| l.label.as_str()).unwrap_or("task"),
@@ -180,7 +197,11 @@ impl App {
         // containment chain. Absent for the orchestrator lane and for any agent
         // whose placement nothing declares — an empty chip would only claim the
         // fleet is unknown twice.
-        if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
+        if let Some(descriptor) = selected_node
+            .is_none()
+            .then(|| lane.and_then(|l| l.descriptor.as_ref()))
+            .flatten()
+        {
             let capacity = self.fleet_capacity();
             let placement = capacity.placement(descriptor);
             let chip = [
@@ -204,7 +225,7 @@ impl App {
             }
         }
         // Context bar.
-        if let Some(l) = lane {
+        if let Some(l) = lane.filter(|_| selected_node.is_none()) {
             if let Some(used) = l.context_tokens {
                 let window = self.loaded.config.medulla.context_window() as i64;
                 let pct = ((used as f64 / window as f64) * 100.0).round().min(100.0) as i64;
@@ -384,6 +405,38 @@ impl App {
             rows[0],
         );
         self.draw_composer(f, rows[1]);
+    }
+
+    /// Format one rail row: a lane row, the fleet divider, or a fleet node.
+    pub(super) fn rail_row_line(
+        &self,
+        row: &RailRow,
+        lanes: &[AgentLane],
+        active: bool,
+    ) -> TLine<'static> {
+        match row {
+            RailRow::Agent(row) => self.agent_row_line(row, lanes, active),
+            RailRow::Divider(text) => TLine::from(Span::styled(
+                text.to_string(),
+                Style::default().add_modifier(Modifier::DIM),
+            )),
+            RailRow::Fleet(node) => {
+                let mut style = Style::default().fg(color(node.kind.color()));
+                if node.degraded {
+                    style = style.add_modifier(Modifier::DIM);
+                }
+                if active {
+                    style = self.theme.selection();
+                }
+                let indent = "  ".repeat(node.depth);
+                let text = if node.detail.is_empty() {
+                    format!("{indent}{}", node.label)
+                } else {
+                    format!("{indent}{} · {}", node.label, node.detail)
+                };
+                TLine::from(Span::styled(text, style))
+            }
+        }
     }
 
     /// Format one Agents-list row (separator, "more", sub-task, or lane).

@@ -132,9 +132,12 @@ impl App {
         (self.area.height as usize).saturating_sub(13).max(5)
     }
 
-    /// Move the Agents-list cursor to the next/previous selectable row.
+    /// Move the Agents-rail cursor to the next/previous selectable row.
+    ///
+    /// The rail spans the lanes and the declared fleet, so this walks straight
+    /// from the last agent into the first host rather than stopping short.
     pub(super) fn move_agent_index(&mut self, up: bool) {
-        let rows = self.agent_rows();
+        let rows = self.rail_rows();
         if rows.is_empty() {
             return;
         }

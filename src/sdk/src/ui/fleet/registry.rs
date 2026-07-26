@@ -179,13 +179,19 @@ pub fn merge_capacity(base: &CapacitySnapshot, extra: &CapacitySnapshot) -> Capa
             continue;
         }
         out.hosts.push(host.clone());
-        out.harnesses.extend(
-            extra
+        // De-duplicated by id as well as by parent: two registry entries for one
+        // peer produce two identical harness records pointing at the same host,
+        // and taking every match would list that runtime twice.
+        for harness in extra.harnesses.iter().filter(|h| h.host_id == host.id) {
+            if out
                 .harnesses
                 .iter()
-                .filter(|h| h.host_id == host.id)
-                .cloned(),
-        );
+                .any(|existing| existing.id == harness.id)
+            {
+                continue;
+            }
+            out.harnesses.push(harness.clone());
+        }
     }
     out
 }

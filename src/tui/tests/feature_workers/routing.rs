@@ -1,4 +1,4 @@
-//! Routing fleet-view navigation and capacity-strategy coverage: the six
+//! Routing navigation and capacity-strategy coverage: the five
 //! subpages and menu focus model, unbound-key passthrough, and the routing
 //! strategy chooser (apply → `WorkerOp`, persistence to config, reload-highlight).
 
@@ -9,14 +9,7 @@ fn routing_nav_exposes_every_subpage() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
     let out = render(&mut app, 120, 40);
-    for page in [
-        "Fleet",
-        "Hosts",
-        "Harnesses",
-        "Templates",
-        "Add Host",
-        "Strategies",
-    ] {
+    for page in ["Hosts", "Harnesses", "Templates", "Add Host", "Strategies"] {
         assert!(out.contains(page), "missing {page}: {out}");
     }
 }
@@ -39,8 +32,6 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
     assert!(!app.routing_focused());
 
     assert!(app.on_event(key(KeyCode::Down)).is_none());
-    assert_eq!(app.routing_subpage(), "Hosts");
-    assert!(app.on_event(key(KeyCode::Down)).is_none());
     assert_eq!(app.routing_subpage(), "Harnesses");
     // Entering a capacity page pulls a fresh read; capacity is never streamed.
     assert!(matches!(
@@ -51,7 +42,7 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
     assert!(app.on_event(key(KeyCode::Esc)).is_none());
     assert!(!app.routing_focused());
 
-    assert!(app.on_event(key(KeyCode::Char('6'))).is_none());
+    assert!(app.on_event(key(KeyCode::Char('5'))).is_none());
     assert_eq!(app.routing_subpage(), "Strategies");
     assert!(app.routing_focused());
 }

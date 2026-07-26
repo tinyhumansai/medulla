@@ -38,28 +38,24 @@ pub const TABS: [&str; 6] = [
 
 /// The Routing tab's left-nav pages.
 ///
-/// Ordered by the containment chain the fleet actually has. `Fleet` is the whole
-/// declared tree; `Hosts` is the machine level the operator registers and steers
-/// by hand; `Harnesses` is the runtime level, which is where credentials live —
-/// a subscription or an API key is a property of the CLI runtime that spends it,
-/// not of the machine it happens to sit on; `Templates` is the catalog of what
-/// may be provisioned onto any of it. `Add Host` and `Strategies` are the two
-/// actions that do not belong to a level.
-pub const ROUTING_SUBPAGES: [&str; 6] = [
-    "Fleet",
-    "Hosts",
-    "Harnesses",
-    "Templates",
-    "Add Host",
-    "Strategies",
-];
+/// Ordered by the containment chain. `Hosts` is the machine level the operator
+/// registers and steers by hand; `Harnesses` is the runtime level, which is
+/// where credentials live — a subscription or an API key is a property of the
+/// CLI runtime that spends it, not of the machine it happens to sit on;
+/// `Templates` is the catalog of what may be provisioned onto any of it.
+/// `Add Host` and `Strategies` are the two actions that belong to no level.
+///
+/// There is no `Fleet` page: the whole declared tree lives in the Agents rail,
+/// beside the lanes running on it. These pages are the *management* surfaces —
+/// what you register, authenticate, and choose — not the picture.
+pub const ROUTING_SUBPAGES: [&str; 5] =
+    ["Hosts", "Harnesses", "Templates", "Add Host", "Strategies"];
 
-pub(super) const RP_FLEET: usize = 0;
-pub(super) const RP_HOSTS: usize = 1;
-pub(super) const RP_HARNESSES: usize = 2;
-pub(super) const RP_TEMPLATES: usize = 3;
-pub(super) const RP_ADD_HOST: usize = 4;
-pub(super) const RP_STRATEGIES: usize = 5;
+pub(super) const RP_HOSTS: usize = 0;
+pub(super) const RP_HARNESSES: usize = 1;
+pub(super) const RP_TEMPLATES: usize = 2;
+pub(super) const RP_ADD_HOST: usize = 3;
+pub(super) const RP_STRATEGIES: usize = 4;
 
 /// The Tasks tab's left-nav pages.
 pub const TASKS_SUBPAGES: [&str; 2] = ["All Tasks", "Sources"];
@@ -379,10 +375,6 @@ pub struct App {
     pub(super) template_index: usize,
     /// Scroll offset inside the Templates page's detail pane.
     pub(super) template_scroll: usize,
-    /// Selected row on the Routing Fleet page (index into the flattened tree).
-    pub(super) fleet_index: usize,
-    /// Scroll offset inside the Fleet page's detail pane.
-    pub(super) fleet_scroll: usize,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.

@@ -16,3 +16,4 @@ pub mod meters;
 mod meters_tests;
 pub mod stream;
 pub mod util;
+pub mod workspaces;

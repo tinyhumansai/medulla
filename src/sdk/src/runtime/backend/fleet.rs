@@ -175,10 +175,15 @@ fn budget(source: &RosterBudget) -> HarnessBudget {
     HarnessBudget {
         provider: source.provider.clone(),
         window: source.window.clone(),
-        seat: None,
+        seat: source.seat.clone(),
+        account_type: source.account_type.clone(),
         limit_tokens: source.limit_tokens,
         used_tokens: None,
         remaining_tokens: source.remaining_tokens,
+        amount_unit: source.amount_unit.clone(),
+        limit_amount: source.limit_amount,
+        used_amount: source.used_amount,
+        remaining_amount: source.remaining_amount,
         cooldown_until: source.cooldown_until,
         source: source.source.clone(),
     }

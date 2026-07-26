@@ -1,16 +1,9 @@
-//! The Harnesses page: the agent CLI runtimes work actually executes on, and
-//! the credentials and budgets each one spends.
+//! The Harnesses page: connected runtime accounts, subdivided by host.
 //!
-//! Keys and subscriptions live here rather than on a page of their own because
-//! that is where they belong in the model: a Claude subscription or an
-//! `ANTHROPIC_API_KEY` is a property of the runtime that spends it, not of the
-//! machine it happens to sit on. One host can run three harnesses on three
-//! different providers, and one subscription can back harnesses on several
-//! hosts, so a flat "credentials" list could only ever describe one of those.
-//!
-//! The page therefore reads per harness *kind*: what authenticates it, whether
-//! this machine has that, and which declared instances of the kind exist — with
-//! the host they run on and the token budgets they report.
+//! A credential belongs to an account consumed by a harness, while the process
+//! using it belongs to a host. The page therefore renders the hierarchy as
+//! `harness kind → provider/account id → host`, with account-level usage shown
+//! once even when the same account is connected on several machines.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -21,9 +14,14 @@ use ratatui::Frame;
 use medulla::runtime::CapacitySnapshot;
 
 use super::super::super::types::{App, CredentialStatus};
+use grouping::account_groups;
+use usage::usage_summary;
 
+mod grouping;
 #[cfg(test)]
 mod tests;
+mod types;
+mod usage;
 
 /// One harness kind's credential story: what authenticates it, and how.
 struct HarnessCredential {
@@ -37,82 +35,61 @@ struct HarnessCredential {
     keys: &'static [(&'static str, &'static str)],
 }
 
-/// The harness kinds this client knows how to authenticate.
-///
-/// The harness vocabulary is open, not an enum, so a declared harness of an
-/// unlisted kind is normal rather than an error: it gets no credential rows and
-/// its declarations still render, under its own heading.
+/// Harness kinds whose local credential presence Medulla knows how to detect.
 const HARNESS_CREDENTIALS: [HarnessCredential; 3] = [
     HarnessCredential {
         kind: "claude-code",
         label: "Claude Code",
         subscription: Some(("Claude subscription", "run `claude /login`")),
-        keys: &[("Anthropic", "ANTHROPIC_API_KEY")],
+        keys: &[("Anthropic API key", "ANTHROPIC_API_KEY")],
     },
     HarnessCredential {
         kind: "codex",
         label: "Codex",
         subscription: Some(("Codex subscription", "run `codex login`")),
-        keys: &[("OpenAI", "OPENAI_API_KEY")],
+        keys: &[("OpenAI API key", "OPENAI_API_KEY")],
     },
     HarnessCredential {
         kind: "opencode",
         label: "opencode",
         subscription: None,
         keys: &[
-            ("OpenRouter", "OPENROUTER_API_KEY"),
-            ("Anthropic", "ANTHROPIC_API_KEY"),
-            ("OpenAI", "OPENAI_API_KEY"),
+            ("OpenRouter API key", "OPENROUTER_API_KEY"),
+            ("Anthropic API key", "ANTHROPIC_API_KEY"),
+            ("OpenAI API key", "OPENAI_API_KEY"),
         ],
     },
 ];
 
 impl App {
-    /// Draw each harness kind with its credentials, instances, and budgets.
+    /// Draw harnesses grouped by provider account, then by connected host.
     pub(super) fn draw_harnesses(&self, f: &mut Frame, area: Rect) {
         let capacity = self.fleet_capacity();
         let dim = Style::default().add_modifier(Modifier::DIM);
-        let bold = Style::default().add_modifier(Modifier::BOLD);
         let mut lines: Vec<TLine> = Vec::new();
 
         for entry in &HARNESS_CREDENTIALS {
-            lines.push(TLine::from(Span::styled(entry.label, bold)));
-            if let Some((label, hint)) = entry.subscription {
-                lines.push(credential_line(
-                    label,
-                    self.credential_status.subscription_for(entry.kind),
-                    hint,
-                ));
-            }
-            for (label, var) in entry.keys {
-                lines.push(credential_line(
-                    label,
-                    self.credential_status.key_for(var),
-                    &format!("set ${var}"),
-                ));
-            }
-            lines.extend(instance_lines(&capacity, entry.kind));
-            lines.push(TLine::from(""));
+            lines.extend(harness_lines(
+                &capacity,
+                entry.kind,
+                entry.label,
+                Some((entry, &self.credential_status)),
+            ));
         }
 
-        // Declared harnesses of a kind this client has no credential story for.
-        // They are still real capacity, so they are listed rather than dropped.
+        // The harness vocabulary is open. Unknown kinds retain the same
+        // account/host structure even though local credential detection has no
+        // provider-specific login hint for them.
         for kind in unlisted_kinds(&capacity) {
-            lines.push(TLine::from(Span::styled(kind.clone(), bold)));
-            lines.push(TLine::from(Span::styled(
-                "  no credential mapping known — authentication is the runtime's own",
-                dim,
-            )));
-            lines.extend(instance_lines(&capacity, &kind));
-            lines.push(TLine::from(""));
+            lines.extend(harness_lines(&capacity, &kind, &kind, None));
         }
 
         lines.push(TLine::from(Span::styled(
-            "Press r to refresh detected credentials.",
+            "Press r to refresh connected hosts, accounts, usage, and local credential presence.",
             dim,
         )));
         lines.push(TLine::from(Span::styled(
-            "Secret values are never rendered. Subscription sessions remain owned by their provider CLIs.",
+            "Account IDs are opaque labels. Secret values are never rendered.",
             dim,
         )));
         f.render_widget(
@@ -124,62 +101,111 @@ impl App {
     }
 }
 
-/// The declared instances of one harness kind, with host, readiness, and budget.
-///
-/// Empty when nothing of this kind is declared: a credential can sit on a
-/// machine that runs no harness, and printing "none declared" under every kind
-/// an operator never set up would drown the page.
-fn instance_lines(capacity: &CapacitySnapshot, kind: &str) -> Vec<TLine<'static>> {
-    capacity
+/// Render one harness kind's account groups and local credential fallbacks.
+fn harness_lines(
+    capacity: &CapacitySnapshot,
+    kind: &str,
+    label: &str,
+    credentials: Option<(&HarnessCredential, &CredentialStatus)>,
+) -> Vec<TLine<'static>> {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let dim = Style::default().add_modifier(Modifier::DIM);
+    let mut lines = vec![TLine::from(Span::styled(label.to_string(), bold))];
+
+    for group in account_groups(capacity, kind) {
+        let account_id = group.account_id.as_deref().unwrap_or("unidentified");
+        lines.push(TLine::from(Span::styled(
+            format!(
+                "  {} {} · {account_id}",
+                title_case(&group.provider),
+                group.account_type.replace('_', " ")
+            ),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        if let Some(usage) = usage_summary(&group.budgets) {
+            lines.push(TLine::from(Span::styled(
+                format!("    usage · {usage}"),
+                dim,
+            )));
+        }
+        for harness in group.harnesses {
+            let host = capacity
+                .host(&harness.host_id)
+                .map(|host| host.name.clone())
+                .unwrap_or_else(|| format!("{} (undeclared)", harness.host_id));
+            let connection = if harness.availability.eq_ignore_ascii_case("offline") {
+                "offline"
+            } else {
+                "connected"
+            };
+            let readiness = if harness.ready { "ready" } else { "not ready" };
+            let style = if harness.ready {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::Red)
+            };
+            lines.push(TLine::from(Span::styled(
+                format!("    ▸ {host} · {connection} · {readiness}"),
+                style,
+            )));
+        }
+    }
+
+    if let Some((entry, status)) = credentials {
+        lines.push(TLine::from(Span::styled(
+            "  detected on this host (account ID unavailable)",
+            dim,
+        )));
+        if let Some((credential_label, hint)) = entry.subscription {
+            lines.push(credential_line(
+                credential_label,
+                status.subscription_for(entry.kind),
+                hint,
+            ));
+        }
+        for (credential_label, variable) in entry.keys {
+            lines.push(credential_line(
+                credential_label,
+                status.key_for(variable),
+                &format!("set ${variable}"),
+            ));
+        }
+    } else if capacity
         .harnesses
         .iter()
-        .filter(|harness| harness.kind == kind)
-        .map(|harness| {
-            let mut parts = vec![capacity
-                .host(&harness.host_id)
-                .map(|h| h.name.clone())
-                .unwrap_or_else(|| format!("{} (undeclared)", harness.host_id))];
-            parts.push(if harness.ready { "ready" } else { "not ready" }.to_string());
-            if let Some(budget) = harness.budgets.iter().find(|b| b.remaining().is_some()) {
-                parts.push(format!(
-                    "{} {} · {} left",
-                    budget.provider,
-                    budget.window,
-                    budget.remaining().map(tokens).unwrap_or_default()
-                ));
-            }
-            TLine::from(Span::styled(
-                format!("  ▸ {}", parts.join(" · ")),
-                Style::default().fg(if harness.ready {
-                    Color::Blue
-                } else {
-                    Color::Red
-                }),
-            ))
-        })
-        .collect()
+        .any(|harness| harness.kind == kind)
+    {
+        lines.push(TLine::from(Span::styled(
+            "  local credential detection is unavailable for this harness",
+            dim,
+        )));
+    }
+    lines.push(TLine::from(""));
+    lines
 }
 
 /// Declared harness kinds with no credential mapping, in first-seen order.
 fn unlisted_kinds(capacity: &CapacitySnapshot) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+    let mut kinds = Vec::new();
     for harness in &capacity.harnesses {
-        let known = HARNESS_CREDENTIALS.iter().any(|e| e.kind == harness.kind);
-        if !known && !out.contains(&harness.kind) {
-            out.push(harness.kind.clone());
+        let known = HARNESS_CREDENTIALS
+            .iter()
+            .any(|entry| entry.kind == harness.kind);
+        if !known && !kinds.contains(&harness.kind) {
+            kinds.push(harness.kind.clone());
         }
     }
-    out
+    kinds
 }
 
-/// A token magnitude, matching the Fleet page's wording.
-fn tokens(n: u64) -> String {
-    if n < 1_000 {
-        n.to_string()
-    } else if n < 1_000_000 {
-        format!("{}k", (n as f64 / 1_000.0).round() as u64)
-    } else {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
+/// Uppercase the first character of an open-vocabulary provider label.
+fn title_case(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => "Unknown".into(),
     }
 }
 
@@ -194,8 +220,8 @@ impl CredentialStatus {
     }
 
     /// Whether the named API-key environment variable is present.
-    fn key_for(&self, var: &str) -> bool {
-        match var {
+    fn key_for(&self, variable: &str) -> bool {
+        match variable {
             "ANTHROPIC_API_KEY" => self.anthropic_api_key,
             "OPENAI_API_KEY" => self.openai_api_key,
             "OPENROUTER_API_KEY" => self.openrouter_api_key,
@@ -220,7 +246,7 @@ fn credential_line<'a>(label: &str, present: bool, absent_hint: &str) -> TLine<'
         )
     };
     TLine::from(vec![
-        Span::styled(format!("  {glyph} {label} · "), style),
+        Span::styled(format!("    {glyph} {label} · "), style),
         Span::styled(status, style),
     ])
 }

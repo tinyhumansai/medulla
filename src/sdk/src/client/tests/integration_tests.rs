@@ -130,11 +130,14 @@ async fn roster_decodes_capacity_and_safe_budgets() {
             "cpuCores": 8,
             "selected": true,
             "budgets": [{
-                "provider": "codex",
-                "window": "weekly",
-                "remainingTokens": 9000,
-                "limitTokens": 10000,
-                "source": "configured"
+                "provider": "openrouter",
+                "window": "balance",
+                "seat": "key-team",
+                "accountType": "api_key",
+                "amountUnit": "USD",
+                "remainingAmount": 18.42,
+                "limitAmount": 50.0,
+                "source": "provider_reported"
             }]
         }]
     });
@@ -143,7 +146,11 @@ async fn roster_decodes_capacity_and_safe_budgets() {
     let workers = client.roster().await.unwrap();
     assert_eq!(workers[0].registry_id, "agent-1");
     assert_eq!(workers[0].cpu_cores, Some(8));
-    assert_eq!(workers[0].budgets[0].remaining_tokens, Some(9000));
+    let budget = &workers[0].budgets[0];
+    assert_eq!(budget.seat.as_deref(), Some("key-team"));
+    assert_eq!(budget.account_type.as_deref(), Some("api_key"));
+    assert_eq!(budget.amount_unit.as_deref(), Some("USD"));
+    assert_eq!(budget.remaining_amount, Some(18.42));
     assert!(req.await.unwrap().starts_with("GET /medulla/v1/roster "));
 }
 

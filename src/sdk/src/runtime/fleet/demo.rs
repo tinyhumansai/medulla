@@ -14,9 +14,9 @@
 //! real reading**: a runtime that declares anything, or a config that does,
 //! takes precedence, so the stand-in cannot mask the thing it stands in for.
 //!
-//! Every record is deliberately ordinary — two hosts, three harnesses, two
+//! Every record is deliberately ordinary — two hosts, four harnesses, two
 //! workspaces, two agents, two templates — because the point is to see the
-//! layout, the budget colouring, and the placement walk, not to stress the caps.
+//! layout, account grouping, budget colouring, and placement walk.
 
 use serde_json::{json, Map};
 
@@ -93,16 +93,40 @@ pub fn demo_capacity() -> CapacitySnapshot {
                 ready_reason: None,
                 providers: vec!["anthropic".into()],
                 template_ids: Vec::new(),
-                budgets: vec![HarnessBudget {
-                    provider: "anthropic".into(),
-                    window: "5h".into(),
-                    seat: Some("max-20x".into()),
-                    limit_tokens: Some(2_000_000),
-                    used_tokens: Some(1_240_000),
-                    remaining_tokens: Some(760_000),
-                    cooldown_until: None,
-                    source: "provider_reported".into(),
-                }],
+                budgets: vec![
+                    token_budget("anthropic", "5h", "claude-primary", 2_000_000, 760_000),
+                    token_budget("anthropic", "daily", "claude-primary", 5_000_000, 3_400_000),
+                    token_budget(
+                        "anthropic",
+                        "weekly",
+                        "claude-primary",
+                        25_000_000,
+                        18_000_000,
+                    ),
+                ],
+                metadata: Map::new(),
+            },
+            // A second Claude account on another host must remain a separate
+            // account group rather than being folded into the primary seat.
+            HarnessDescriptor {
+                id: "demo-harness-claude-secondary".into(),
+                host_id: "demo-host-builder".into(),
+                kind: "claude-code".into(),
+                availability: "online".into(),
+                ready: true,
+                ready_reason: None,
+                providers: vec!["anthropic".into()],
+                template_ids: Vec::new(),
+                budgets: vec![
+                    token_budget("anthropic", "daily", "claude-secondary", 1_000_000, 850_000),
+                    token_budget(
+                        "anthropic",
+                        "weekly",
+                        "claude-secondary",
+                        8_000_000,
+                        6_500_000,
+                    ),
+                ],
                 metadata: Map::new(),
             },
             HarnessDescriptor {
@@ -115,16 +139,13 @@ pub fn demo_capacity() -> CapacitySnapshot {
                 providers: vec!["openai".into()],
                 template_ids: Vec::new(),
                 // Nearly spent, so the budget colouring has something to show.
-                budgets: vec![HarnessBudget {
-                    provider: "openai".into(),
-                    window: "weekly".into(),
-                    seat: None,
-                    limit_tokens: Some(1_000_000),
-                    used_tokens: Some(940_000),
-                    remaining_tokens: Some(60_000),
-                    cooldown_until: None,
-                    source: "estimate".into(),
-                }],
+                budgets: vec![token_budget(
+                    "openai",
+                    "weekly",
+                    "codex-personal",
+                    1_000_000,
+                    60_000,
+                )],
                 metadata: Map::new(),
             },
             HarnessDescriptor {
@@ -136,7 +157,7 @@ pub fn demo_capacity() -> CapacitySnapshot {
                 ready_reason: Some("cli not authenticated".into()),
                 providers: vec!["openrouter".into()],
                 template_ids: Vec::new(),
-                budgets: Vec::new(),
+                budgets: vec![usd_balance("openrouter", "key-team", 50.0, 18.42)],
                 metadata: Map::new(),
             },
         ],
@@ -251,3 +272,47 @@ pub fn demo_agents() -> Vec<AgentDescriptor> {
 
 /// One gibibyte, for readable resource literals.
 const GB: u64 = 1024 * 1024 * 1024;
+
+/// One provider-reported token window in the stand-in fleet.
+fn token_budget(
+    provider: &str,
+    window: &str,
+    account_id: &str,
+    limit: u64,
+    remaining: u64,
+) -> HarnessBudget {
+    HarnessBudget {
+        provider: provider.into(),
+        window: window.into(),
+        seat: Some(account_id.into()),
+        account_type: Some("subscription".into()),
+        limit_tokens: Some(limit),
+        used_tokens: Some(limit.saturating_sub(remaining)),
+        remaining_tokens: Some(remaining),
+        amount_unit: None,
+        limit_amount: None,
+        used_amount: None,
+        remaining_amount: None,
+        cooldown_until: None,
+        source: "provider_reported".into(),
+    }
+}
+
+/// One API-key balance denominated in USD.
+fn usd_balance(provider: &str, account_id: &str, limit: f64, remaining: f64) -> HarnessBudget {
+    HarnessBudget {
+        provider: provider.into(),
+        window: "balance".into(),
+        seat: Some(account_id.into()),
+        account_type: Some("api_key".into()),
+        limit_tokens: None,
+        used_tokens: None,
+        remaining_tokens: None,
+        amount_unit: Some("USD".into()),
+        limit_amount: Some(limit),
+        used_amount: Some((limit - remaining).max(0.0)),
+        remaining_amount: Some(remaining),
+        cooldown_until: None,
+        source: "provider_reported".into(),
+    }
+}

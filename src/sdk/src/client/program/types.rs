@@ -4,19 +4,37 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Client-safe harness budget advertised by a connected worker.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RosterBudget {
     /// Provider that meters the budget.
     pub provider: String,
     /// Provider-defined accounting window.
     pub window: String,
+    /// Opaque account or paid-seat identifier; never credential material.
+    #[serde(default)]
+    pub seat: Option<String>,
+    /// Authentication/account family, such as `subscription` or `api_key`.
+    #[serde(default)]
+    pub account_type: Option<String>,
     /// Tokens still available in the current window, when known.
     #[serde(default)]
     pub remaining_tokens: Option<u64>,
     /// Total token allowance for the current window, when known.
     #[serde(default)]
     pub limit_tokens: Option<u64>,
+    /// Unit for a decimal provider balance, such as `USD`.
+    #[serde(default)]
+    pub amount_unit: Option<String>,
+    /// Decimal allowance in `amountUnit`, when the provider exposes one.
+    #[serde(default)]
+    pub limit_amount: Option<f64>,
+    /// Decimal amount consumed in the current window.
+    #[serde(default)]
+    pub used_amount: Option<f64>,
+    /// Decimal balance still available.
+    #[serde(default)]
+    pub remaining_amount: Option<f64>,
     /// Unix timestamp after which a depleted budget becomes usable.
     #[serde(default)]
     pub cooldown_until: Option<u64>,

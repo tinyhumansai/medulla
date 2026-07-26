@@ -377,19 +377,24 @@ fn carries_budgets_onto_the_harness_and_gates_readiness_on_availability() {
     let (_, capacity) = super::fleet::project_roster(&[roster_worker(json!({
         "availability": "offline",
         "budgets": [{
-            "provider": "anthropic",
-            "window": "5h",
-            "remainingTokens": 250_000u64,
-            "limitTokens": 1_000_000u64,
+            "provider": "openrouter",
+            "window": "balance",
+            "seat": "key-team",
+            "accountType": "api_key",
+            "amountUnit": "USD",
+            "remainingAmount": 18.42,
+            "limitAmount": 50.0,
             "source": "provider_reported",
         }],
     }))]);
 
     let harness = &capacity.harnesses[0];
     assert!(!harness.ready, "an offline worker takes no work");
-    assert_eq!(harness.providers, vec!["anthropic".to_string()]);
-    assert_eq!(harness.budgets[0].remaining(), Some(250_000));
-    assert_eq!(harness.budgets[0].fraction_remaining(), Some(0.25));
+    assert_eq!(harness.providers, vec!["openrouter".to_string()]);
+    assert_eq!(harness.budgets[0].seat.as_deref(), Some("key-team"));
+    assert_eq!(harness.budgets[0].account_type.as_deref(), Some("api_key"));
+    assert_eq!(harness.budgets[0].remaining_amount(), Some(18.42));
+    assert!((harness.budgets[0].fraction_remaining().unwrap() - 0.3684).abs() < f64::EPSILON);
 }
 
 #[test]

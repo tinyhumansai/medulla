@@ -239,10 +239,20 @@ fn harnesses_page_names_credentials_per_runtime_without_values() {
     assert!(out.contains("Codex subscription"));
     assert!(out.contains("Anthropic"));
     assert!(out.contains("OpenRouter"));
-    // The declared claude-code harness renders under its own kind, with the host
-    // it runs on and the budget it reports.
-    assert!(out.contains("workshop · ready"), "{out}");
-    assert!(out.contains("anthropic 5h · 760k left"), "{out}");
+    // The declared Claude harness is grouped by its account before the host,
+    // with account-level usage shown once above that host.
+    assert!(
+        out.contains("Anthropic subscription · seat-1"),
+        "account group: {out}"
+    );
+    assert!(
+        out.contains("usage · 5h · 760k tokens left (76%)"),
+        "account usage: {out}"
+    );
+    assert!(
+        out.contains("workshop · connected · ready"),
+        "host subdivision: {out}"
+    );
     assert!(out.contains("Press r to refresh"));
     assert!(out.contains("Secret values are never rendered"));
     // `r` re-reads both halves: local credentials and declared capacity.

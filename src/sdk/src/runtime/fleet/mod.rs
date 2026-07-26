@@ -80,6 +80,9 @@ pub struct HarnessBudget {
     /// Optional provider seat or account identifier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seat: Option<String>,
+    /// Authentication/account family, such as `subscription` or `api_key`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_type: Option<String>,
     /// Total token allowance in the current window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit_tokens: Option<u64>,
@@ -89,6 +92,22 @@ pub struct HarnessBudget {
     /// Tokens still available in the current window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remaining_tokens: Option<u64>,
+    /// Unit for decimal account balances, such as `USD`.
+    ///
+    /// Token allowances continue to use the integer token fields above. These
+    /// amount fields cover provider credits and currency balances without
+    /// rounding them into tokens or hard-coding one currency into the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_unit: Option<String>,
+    /// Total decimal allowance in [`amount_unit`](Self::amount_unit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_amount: Option<f64>,
+    /// Decimal amount consumed in the current window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_amount: Option<f64>,
+    /// Decimal amount still available in the current window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_amount: Option<f64>,
     /// Unix timestamp after which a depleted budget becomes usable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cooldown_until: Option<u64>,
@@ -324,11 +343,21 @@ pub struct AgentPlacement<'a> {
 impl HarnessBudget {
     /// Remaining tokens as a fraction of the window limit, when both are known.
     pub fn fraction_remaining(&self) -> Option<f64> {
-        let limit = self.limit_tokens.filter(|l| *l > 0)? as f64;
-        let remaining = match (self.remaining_tokens, self.used_tokens) {
-            (Some(r), _) => r as f64,
-            (None, Some(u)) => (limit - u as f64).max(0.0),
-            (None, None) => return None,
+        let (limit, remaining) = if let Some(limit) = self.limit_tokens.filter(|l| *l > 0) {
+            let remaining = match (self.remaining_tokens, self.used_tokens) {
+                (Some(r), _) => r as f64,
+                (None, Some(u)) => (limit as f64 - u as f64).max(0.0),
+                (None, None) => return None,
+            };
+            (limit as f64, remaining)
+        } else {
+            let limit = self.limit_amount.filter(|limit| *limit > 0.0)?;
+            let remaining = match (self.remaining_amount, self.used_amount) {
+                (Some(remaining), _) => remaining,
+                (None, Some(used)) => (limit - used).max(0.0),
+                (None, None) => return None,
+            };
+            (limit, remaining)
         };
         Some((remaining / limit).clamp(0.0, 1.0))
     }
@@ -339,6 +368,16 @@ impl HarnessBudget {
         match (self.remaining_tokens, self.limit_tokens, self.used_tokens) {
             (Some(r), _, _) => Some(r),
             (None, Some(l), Some(u)) => Some(l.saturating_sub(u)),
+            _ => None,
+        }
+    }
+
+    /// Decimal balance still available, preferring a reported remainder and
+    /// falling back to `limit - used`.
+    pub fn remaining_amount(&self) -> Option<f64> {
+        match (self.remaining_amount, self.limit_amount, self.used_amount) {
+            (Some(remaining), _, _) => Some(remaining.max(0.0)),
+            (None, Some(limit), Some(used)) => Some((limit - used).max(0.0)),
             _ => None,
         }
     }

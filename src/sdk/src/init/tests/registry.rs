@@ -8,7 +8,7 @@ use crate::config::TuiConfig;
 use crate::init::registry::{
     deregister_workspace, register_workspace, workspace_id, DEFAULT_HARNESS_ID,
 };
-use crate::runtime::{HarnessDescriptor, WorkspaceDescriptor};
+use crate::runtime::{HarnessDescriptor, HostDescriptor, WorkspaceDescriptor};
 
 /// A unique scratch directory per test.
 fn scratch(tag: &str) -> PathBuf {
@@ -277,6 +277,96 @@ fn deregister_can_remove_a_half_registered_root() {
 
     deregister_workspace(&config_path, &config, &path).unwrap();
     assert!(reload(&config_path).workflow.workspaces.is_empty());
+}
+
+#[test]
+fn registering_declares_the_harness_and_host_so_the_chain_resolves() {
+    // A workspace pointing at an undeclared harness leaves `placement()` unable
+    // to resolve a parent — the workspace exists but is unplaceable, which is
+    // the whole point of registering it.
+    let (workspace, config_path) = fixture("chain");
+    let reg = register_workspace(&config_path, &TuiConfig::default(), &workspace, None).unwrap();
+
+    let written = reload(&config_path);
+    let harness = written
+        .fleet
+        .harnesses
+        .iter()
+        .find(|h| h.id == reg.harness_id)
+        .expect("the workspace's harness is declared");
+    assert!(
+        written.fleet.hosts.iter().any(|h| h.id == harness.host_id),
+        "the harness's host is declared too"
+    );
+
+    // The chain resolves end to end through the capacity snapshot.
+    let capacity = written.fleet.capacity();
+    let agent = crate::runtime::AgentDescriptor {
+        workspace_id: Some(reg.id.clone()),
+        ..Default::default()
+    };
+    let placement = capacity.placement(&agent);
+    assert!(placement.workspace.is_some());
+    assert!(placement.harness.is_some(), "harness must resolve");
+    assert!(placement.host.is_some(), "host must resolve");
+}
+
+#[test]
+fn registering_never_rewrites_declared_hosts_or_harnesses() {
+    let (workspace, config_path) = fixture("declared-kept");
+    let mut config = TuiConfig::default();
+    config.fleet.harnesses = vec![harness("workstation")];
+    config.fleet.hosts = vec![HostDescriptor {
+        id: "host-1".into(),
+        name: "big box".into(),
+        availability: "online".into(),
+        address: Some("10.0.0.2".into()),
+        resources: None,
+        metadata: serde_json::Map::new(),
+    }];
+
+    register_workspace(&config_path, &config, &workspace, None).unwrap();
+
+    let written = reload(&config_path);
+    assert_eq!(written.fleet.harnesses.len(), 1, "no duplicate harness");
+    assert_eq!(written.fleet.hosts.len(), 1, "no duplicate host");
+    assert_eq!(written.fleet.hosts[0].name, "big box");
+    assert_eq!(written.fleet.hosts[0].address.as_deref(), Some("10.0.0.2"));
+}
+
+#[test]
+fn an_explicit_unknown_harness_is_declared_rather_than_left_dangling() {
+    let (workspace, config_path) = fixture("explicit-harness");
+    let reg = register_workspace(
+        &config_path,
+        &TuiConfig::default(),
+        &workspace,
+        Some("gpu-box"),
+    )
+    .unwrap();
+    assert_eq!(reg.harness_id, "gpu-box");
+
+    let written = reload(&config_path);
+    assert!(written.fleet.harnesses.iter().any(|h| h.id == "gpu-box"));
+}
+
+#[test]
+fn a_json_config_is_refused_before_anything_is_written() {
+    // `load_config` accepts JSON by extension but every persist writer renders
+    // TOML. Writing anyway leaves TOML bytes at a `.json` path that the next
+    // load rejects, so this must fail up front instead.
+    let (workspace, config_path) = fixture("json");
+    let json_path = config_path.with_extension("json");
+
+    let err = register_workspace(&json_path, &TuiConfig::default(), &workspace, None).unwrap_err();
+    assert!(err.to_string().contains("JSON"), "got: {err}");
+    assert!(
+        !json_path.exists(),
+        "nothing may be written to a JSON target"
+    );
+
+    let err = deregister_workspace(&json_path, &TuiConfig::default(), "anything").unwrap_err();
+    assert!(err.to_string().contains("JSON"), "got: {err}");
 }
 
 #[test]

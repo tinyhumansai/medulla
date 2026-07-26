@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
 
 use crate::config::{persist_setting, persist_workflow_workspaces, TuiConfig};
-use crate::runtime::WorkspaceDescriptor;
+use crate::runtime::{HarnessDescriptor, HostDescriptor, WorkspaceDescriptor};
 
 /// The harness a workspace is attached to when the operator has declared none.
 ///
@@ -127,6 +127,79 @@ fn resolve_harness_id(config: &TuiConfig, requested: Option<&str>) -> String {
         .unwrap_or_else(|| DEFAULT_HARNESS_ID.to_string())
 }
 
+/// The host a self-declared harness is attached to, matching the `[host]`
+/// section's default address so the two descriptions of "this machine" agree.
+pub const DEFAULT_HOST_ID: &str = "this-device";
+
+/// Ensure `harness_id` names a harness that actually exists, declaring it (and
+/// its host) when it does not.
+///
+/// A workspace names its owning harness by id, and
+/// [`CapacitySnapshot::placement`](crate::runtime::CapacitySnapshot::placement)
+/// resolves the parent only from the declared harness list. Registering a
+/// workspace against an id nobody declared therefore produces a dangling chain:
+/// the workspace exists but has no harness and no host, which is exactly the
+/// placement this command promises. On a plain single-laptop install the
+/// `[fleet]` section is empty, so that would be the *common* case rather than an
+/// edge one.
+///
+/// Only ever adds. An operator's existing declarations are authoritative and are
+/// never rewritten — if the harness is already declared this is a no-op, and its
+/// host is left alone even when it too is dangling, because inventing a host for
+/// a harness someone else declared would be guessing at their fleet.
+fn ensure_harness_declared(
+    config: &TuiConfig,
+    harness_id: &str,
+) -> (Vec<HostDescriptor>, Vec<HarnessDescriptor>) {
+    let mut hosts = config.fleet.hosts.clone();
+    let mut harnesses = config.fleet.harnesses.clone();
+    if harnesses.iter().any(|h| h.id == harness_id) {
+        return (hosts, harnesses);
+    }
+
+    // Attach to an already-declared host when there is one; a fleet with hosts
+    // but no harnesses is unusual, but adopting the first is closer to the
+    // operator's intent than minting a second description of the same machine.
+    let host_id = hosts
+        .first()
+        .map(|h| h.id.clone())
+        .unwrap_or_else(|| DEFAULT_HOST_ID.to_string());
+    if !hosts.iter().any(|h| h.id == host_id) {
+        hosts.push(HostDescriptor {
+            id: host_id.clone(),
+            name: "this device".to_string(),
+            availability: "online".to_string(),
+            address: None,
+            resources: None,
+            metadata: serde_json::Map::new(),
+        });
+    }
+
+    harnesses.push(HarnessDescriptor {
+        id: harness_id.to_string(),
+        host_id,
+        // The harness kind is what the operator's `[host]` section already says
+        // this machine runs; with nothing configured, the generic local kind is
+        // honest about not knowing which CLI will pick the work up.
+        kind: non_empty(&config.host.default_provider)
+            .unwrap_or_else(|| DEFAULT_HARNESS_ID.to_string()),
+        availability: "online".to_string(),
+        ready: true,
+        ready_reason: None,
+        providers: Vec::new(),
+        template_ids: Vec::new(),
+        budgets: Vec::new(),
+        metadata: serde_json::Map::new(),
+    });
+    (hosts, harnesses)
+}
+
+/// Borrow a config string only when the operator actually set it.
+fn non_empty(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 /// Build the descriptor for a workspace that is not in the registry yet.
 fn new_descriptor(path: &str, harness_id: &str) -> WorkspaceDescriptor {
     WorkspaceDescriptor {
@@ -181,6 +254,7 @@ pub fn register_workspace(
     dir: &Path,
     harness: Option<&str>,
 ) -> Result<WorkspaceRegistration> {
+    reject_unwritable_config(config_path)?;
     let path = registry_path(dir)?;
 
     // --- [fleet].workspaces: the placement chain ---------------------------
@@ -219,6 +293,22 @@ pub fn register_workspace(
         .unwrap_or_else(|| workspace_id(&path));
     let name = workspace_name(&path);
 
+    // The workspace's parent must exist for the chain to resolve, so the harness
+    // (and its host) are declared alongside it rather than left dangling.
+    let (hosts, harnesses) = ensure_harness_declared(config, &harness_id);
+    persist_setting(
+        config_path,
+        "fleet",
+        "hosts",
+        toml::Value::try_from(&hosts).map_err(|err| anyhow!("Cannot serialize hosts: {err}"))?,
+    )?;
+    persist_setting(
+        config_path,
+        "fleet",
+        "harnesses",
+        toml::Value::try_from(&harnesses)
+            .map_err(|err| anyhow!("Cannot serialize harnesses: {err}"))?,
+    )?;
     persist_fleet_workspaces(config_path, &workspaces)?;
 
     // --- [workflow].workspaces: the profile-carrying roots -----------------
@@ -258,6 +348,7 @@ pub fn deregister_workspace(
     config: &TuiConfig,
     selector: &str,
 ) -> Result<WorkspaceRegistration> {
+    reject_unwritable_config(config_path)?;
     // A selector that names a real directory is compared canonically; one that
     // does not is still a valid id or a stale path, so a failure here is not an
     // error on its own.
@@ -305,6 +396,29 @@ pub fn deregister_workspace(
         harness_id: removed.harness_id,
         added: false,
     })
+}
+
+/// Refuse to write a config file this module cannot render.
+///
+/// `load_config` accepts JSON *or* TOML by extension, but every writer under
+/// [`crate::config::persist`] parses and renders TOML only. Writing to a `.json`
+/// target would either fail mid-way through (an existing file, which no longer
+/// parses as TOML) or — worse — succeed against a *missing* one and leave TOML
+/// bytes at a `.json` path that the very next load rejects. Failing up front
+/// keeps the operator's chosen config file intact and says which format is
+/// supported, instead of corrupting it and reporting success.
+fn reject_unwritable_config(config_path: &Path) -> Result<()> {
+    let is_json = config_path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+    if is_json {
+        return Err(anyhow!(
+            "{} is a JSON config — the workspace registry is written as TOML. \
+             Point --config at a .toml file (or omit it to use the default).",
+            config_path.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Replace the `[fleet].workspaces` array, preserving every other key.

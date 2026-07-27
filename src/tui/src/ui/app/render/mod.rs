@@ -27,6 +27,8 @@ mod settings;
 mod tasks;
 mod template_modal;
 mod tool_call;
+#[cfg(feature = "workflows")]
+pub(super) mod workflows;
 
 /// Map a named color from the agent-lane model to a ratatui [`Color`].
 pub(super) fn color(name: &str) -> Color {
@@ -434,6 +436,8 @@ impl App {
             "Overview" => self.draw_overview(f, area),
             "Agents" => self.draw_agents(f, area),
             "Tasks" => self.draw_tasks(f, area),
+            #[cfg(feature = "workflows")]
+            "Workflows" => self.draw_workflows_tab(f, area),
             "Routing" => self.draw_routing(f, area),
             "Memory" => self.draw_memory(f, area),
             // Trace, Context, and Feedback are Settings subpages, not tabs.

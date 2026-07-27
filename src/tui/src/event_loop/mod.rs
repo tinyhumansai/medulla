@@ -122,6 +122,20 @@ pub(crate) async fn run(
                         app.set_memory_ingest_done(status);
                     }
                     AppMsg::TasksLoaded(document) => app.set_tasks(document),
+                    #[cfg(feature = "workflows")]
+                    AppMsg::CopilotStatus { workflow, line } => {
+                        app.copilot_status(&workflow, line);
+                    }
+                    #[cfg(feature = "workflows")]
+                    AppMsg::CopilotDone {
+                        workflow,
+                        reply,
+                        changes,
+                    } => app.copilot_finished(&workflow, reply, changes),
+                    #[cfg(feature = "workflows")]
+                    AppMsg::CopilotFailed { workflow, error } => {
+                        app.copilot_failed(&workflow, error);
+                    }
                     AppMsg::MemoryResults { hits, query } => {
                         let n = hits.len();
                         app.set_memory_results(hits, query);

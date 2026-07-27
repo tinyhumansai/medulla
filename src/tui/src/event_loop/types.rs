@@ -49,6 +49,36 @@ pub(super) enum AppMsg {
     MemoryIngestDone(String),
     /// Current local task document.
     TasksLoaded(medulla::tasks::TaskDocument),
+    /// A progress line from a running copilot turn.
+    ///
+    /// Addressed by workflow rather than applied to whatever is selected: the
+    /// operator may have moved the rail on while the turn runs, and the line
+    /// belongs to the thread that asked for it.
+    #[cfg(feature = "workflows")]
+    CopilotStatus {
+        /// The workflow whose turn reported it.
+        workflow: String,
+        /// The progress line.
+        line: String,
+    },
+    /// A copilot turn finished.
+    #[cfg(feature = "workflows")]
+    CopilotDone {
+        /// The workflow the turn was scoped to.
+        workflow: String,
+        /// The agent's reply.
+        reply: String,
+        /// What the turn changed in the stored graph.
+        changes: Vec<String>,
+    },
+    /// A copilot turn failed.
+    #[cfg(feature = "workflows")]
+    CopilotFailed {
+        /// The workflow the turn was scoped to.
+        workflow: String,
+        /// Why it failed.
+        error: String,
+    },
 }
 
 /// Why the event loop stopped.

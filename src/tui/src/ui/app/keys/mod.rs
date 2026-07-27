@@ -25,12 +25,16 @@ mod memory;
 mod routing;
 mod settings;
 mod tasks;
+#[cfg(feature = "workflows")]
+mod workflows;
 
 use agents::AgentsKey;
 use memory::MemoryKey;
 use routing::RoutingKey;
 use settings::SettingsKey;
 use tasks::TasksKey;
+#[cfg(feature = "workflows")]
+use workflows::WorkflowsKey;
 
 impl App {
     /// Handle a key press for the current overlay/tab, producing any follow-up
@@ -162,6 +166,15 @@ impl App {
         }
         if tab == "Memory" {
             if let MemoryKey::Handled(cmd) = self.on_memory_key(k.code) {
+                return cmd;
+            }
+        }
+        // Workflows owns three panes, one of which is a composer, so it gets
+        // first refusal on every key that is not a global chord — exactly as
+        // Settings and Routing do for their subpages.
+        #[cfg(feature = "workflows")]
+        if tab == "Workflows" {
+            if let WorkflowsKey::Handled(cmd) = self.on_workflows_key(k.code, shift, alt) {
                 return cmd;
             }
         }

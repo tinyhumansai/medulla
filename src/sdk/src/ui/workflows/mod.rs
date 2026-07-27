@@ -20,5 +20,7 @@ pub mod rows;
 
 pub use copilot::{CopilotState, CopilotTurn, TurnRole};
 pub use graph::{GraphLayout, Move, PlacedEdge, PlacedNode};
-pub use inspect::{node_detail, DetailRow, NodeRun, NodeRunState, RunOverlay};
+pub use inspect::{
+    find_node as find_node_in, node_detail, DetailRow, NodeRun, NodeRunState, RunOverlay,
+};
 pub use rows::{run_rows, status_color, status_label, workflow_rows, WorkflowRow};

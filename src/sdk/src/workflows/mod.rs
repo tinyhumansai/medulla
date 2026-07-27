@@ -46,6 +46,11 @@ pub use store::{
     new_run_record, parse_workflow, require, require_run, validate_graph, FileWorkflowStore,
     LoadReport, WorkflowStore,
 };
+// The engine's own graph model, re-exported so hosts above this crate (the TUI)
+// can name a workflow's graph without taking a direct dependency on the engine.
+// The type is the shared contract, not a Medulla type, so re-exporting it is the
+// alternative to a parallel copy that would drift.
+pub use tinyflows::model::WorkflowGraph;
 pub use types::{
     RunId, RunRecord, RunStatus, RunStep, WorkflowError, WorkflowId, WorkflowRecord,
     WorkflowSummary,

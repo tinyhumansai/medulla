@@ -12,9 +12,6 @@ use super::super::types::{
     RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
 };
 
-#[cfg(feature = "workflows")]
-use super::super::types::RP_WORKFLOWS;
-
 impl App {
     /// Handle Routing navigation and the active pane's actions.
     pub(super) fn on_routing_key(&mut self, code: KeyCode) -> RoutingKey {
@@ -40,13 +37,6 @@ impl App {
                 // without this the page showed only this device's directories
                 // until the operator happened to visit Harnesses or Templates
                 // first — which reads as "the fleet has no workspaces".
-                // The workflow store is files on this machine, so entering the
-                // page reads them rather than asking the runtime for anything.
-                #[cfg(feature = "workflows")]
-                if self.routing_index == RP_WORKFLOWS {
-                    self.reload_workflows();
-                    return RoutingKey::Handled(None);
-                }
                 let cmd = matches!(
                     self.routing_index,
                     RP_HARNESSES | RP_TEMPLATES | RP_WORKSPACES
@@ -65,8 +55,6 @@ impl App {
             RP_HOSTS => self.hosts_key(code),
             RP_WORKSPACES => self.workspaces_key(code),
             RP_TEMPLATES => self.templates_key(code),
-            #[cfg(feature = "workflows")]
-            RP_WORKFLOWS => self.workflows_key(code),
             RP_ADD_HOST => self.add_host_key(code),
             RP_HARNESSES => self.harnesses_key(code),
             RP_STRATEGIES => self.strategies_key(code),
@@ -199,43 +187,6 @@ impl App {
                 self.set_status("Refreshing fleet…");
                 RoutingKey::Handled(Some(Cmd::RefreshFleet))
             }
-            _ => RoutingKey::Unhandled,
-        }
-    }
-
-    /// Browse the installed workflows and run one.
-    #[cfg(feature = "workflows")]
-    fn workflows_key(&mut self, code: KeyCode) -> RoutingKey {
-        let count = self.workflow_row_count();
-        match code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.workflow_index = crate::ui::selection::moved(self.workflow_index, count, true);
-                RoutingKey::Handled(None)
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.workflow_index =
-                    crate::ui::selection::moved(self.workflow_index, count, false);
-                RoutingKey::Handled(None)
-            }
-            // Re-read the store: the usual way a workflow changes is the
-            // operator's own editor, or an agent writing one, and neither
-            // leaves anything to poll.
-            KeyCode::Char('r') => {
-                self.reload_workflows();
-                RoutingKey::Handled(None)
-            }
-            KeyCode::Enter => match self.selected_workflow() {
-                Some(workflow) if !workflow.enabled => {
-                    self.set_status(format!("{} is disabled", workflow.name));
-                    RoutingKey::Handled(None)
-                }
-                Some(workflow) => {
-                    let id = workflow.id.clone();
-                    self.set_status(format!("Running {}…", workflow.name));
-                    RoutingKey::Handled(Some(Cmd::RunWorkflow { id }))
-                }
-                None => RoutingKey::Unhandled,
-            },
             _ => RoutingKey::Unhandled,
         }
     }

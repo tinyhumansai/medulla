@@ -22,6 +22,12 @@ fn app() -> App {
     App::new(rt, loaded)
 }
 
+/// The index of the tab named `name`. Looked up rather than written down: the
+/// tab bar's order is a product decision that has changed before.
+fn tab(name: &str) -> usize {
+    TABS.iter().position(|t| *t == name).expect("a known tab")
+}
+
 fn render(app: &mut App) -> String {
     let backend = TestBackend::new(100, 32);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -280,7 +286,7 @@ fn clicking_a_context_chunk_selects_it() {
 #[test]
 fn routing_strategies_render_host_and_subscription_groups() {
     let mut a = app();
-    a.tab_index = 3;
+    a.tab_index = tab("Routing");
     a.routing_index = types::RP_STRATEGIES;
     a.routing_focused = true;
 
@@ -296,7 +302,7 @@ fn subscription_strategy_navigation_persists_and_emits_its_own_operation() {
     let dir = tempfile::tempdir().unwrap();
     let mut a = app();
     a.set_config_path(dir.path().join("config.toml"));
-    a.tab_index = 3;
+    a.tab_index = tab("Routing");
     a.routing_index = types::RP_STRATEGIES;
     a.routing_focused = true;
 

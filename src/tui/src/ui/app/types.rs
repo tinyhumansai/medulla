@@ -32,6 +32,26 @@ use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 /// what an operation was doing on one tab and steering it on another, with two
 /// scroll positions and no way to answer an agent's question from where the
 /// question was visible.
+///
+/// Workflows used to be a Routing subpage. It is a tab because it is not a
+/// management surface: Routing is where an operator declares what capacity
+/// exists, and a workflow is *work* — a plan they read, edit, and run, with a
+/// graph to navigate and a copilot to edit it by. Three panes' worth of surface
+/// does not fit in a subpage of something else.
+#[cfg(feature = "workflows")]
+pub const TABS: [&str; 7] = [
+    "Overview",
+    "Agents",
+    "Tasks",
+    "Workflows",
+    "Routing",
+    "Memory",
+    "Settings",
+];
+
+/// Without the workflow engine. A slim build must not offer a tab that cannot
+/// draw anything.
+#[cfg(not(feature = "workflows"))]
 pub const TABS: [&str; 6] = [
     "Overview", "Agents", "Tasks", "Routing", "Memory", "Settings",
 ];
@@ -49,21 +69,8 @@ pub const TABS: [&str; 6] = [
 ///
 /// There is no `Fleet` page: the whole declared tree lives in the Agents rail,
 /// beside the lanes running on it. These pages are the *management* surfaces —
-/// what you register, authenticate, and choose — not the picture.
-/// With the workflow engine compiled in.
-#[cfg(feature = "workflows")]
-pub const ROUTING_SUBPAGES: [&str; 7] = [
-    "Hosts",
-    "Harnesses",
-    "Workspaces",
-    "Agent Templates",
-    "Workflows",
-    "Add Host",
-    "Strategies",
-];
-
-/// Without it. A slim build must not offer a page that cannot draw anything.
-#[cfg(not(feature = "workflows"))]
+/// what you register, authenticate, and choose — not the picture. Workflows is
+/// not here either: it is a tab of its own (see [`TABS`]).
 pub const ROUTING_SUBPAGES: [&str; 6] = [
     "Hosts",
     "Harnesses",
@@ -77,16 +84,7 @@ pub(super) const RP_HOSTS: usize = 0;
 pub(super) const RP_HARNESSES: usize = 1;
 pub(super) const RP_WORKSPACES: usize = 2;
 pub(super) const RP_TEMPLATES: usize = 3;
-#[cfg(feature = "workflows")]
-pub(super) const RP_WORKFLOWS: usize = 4;
-// The two trailing pages shift down when Workflows is not compiled in.
-#[cfg(feature = "workflows")]
-pub(super) const RP_ADD_HOST: usize = 5;
-#[cfg(feature = "workflows")]
-pub(super) const RP_STRATEGIES: usize = 6;
-#[cfg(not(feature = "workflows"))]
 pub(super) const RP_ADD_HOST: usize = 4;
-#[cfg(not(feature = "workflows"))]
 pub(super) const RP_STRATEGIES: usize = 5;
 
 /// The Tasks tab's left-nav pages.
@@ -233,6 +231,67 @@ pub enum AgentsFocus {
     Rail,
 }
 
+/// Which pane of the Workflows tab has the keyboard.
+///
+/// Three panes, one cursor. The rail picks *what* is being looked at, the canvas
+/// walks the graph, and the copilot is a composer that takes every printable
+/// key — so which one is focused has to be explicit, exactly as it is on Agents.
+/// `Tab` cycles them and `Esc` steps back out toward the rail.
+#[cfg(feature = "workflows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WorkflowFocus {
+    /// The catalogue rail: arrows walk workflows and their runs.
+    #[default]
+    Rail,
+    /// The graph canvas: arrows walk nodes along their edges.
+    Canvas,
+    /// The copilot composer: printable keys type, Enter sends.
+    Copilot,
+}
+
+/// Everything the Workflows tab holds that is not the catalogue itself.
+///
+/// Grouped into one struct rather than a dozen `workflow_*` fields on [`App`]:
+/// the tab has three panes with their own cursors, and a flat namespace made it
+/// impossible to see which cursor belonged to which pane.
+#[cfg(feature = "workflows")]
+#[derive(Debug, Default)]
+pub struct WorkflowsState {
+    /// Which pane has the keyboard.
+    pub(super) focus: WorkflowFocus,
+    /// The selected workflow's run, when the rail cursor is on one of the run
+    /// rows nested under it rather than on the workflow itself.
+    ///
+    /// A tree cursor rather than an index into a flattened row list: the rows
+    /// under a workflow only exist while it is selected, so a flat index would
+    /// have to be reinterpreted every time the cursor crossed a workflow
+    /// boundary — and gets it wrong the moment a run appears mid-scroll.
+    pub(super) run_index: Option<usize>,
+    /// The selected workflow's graph, as last read from the store. Cached
+    /// because a render pass must not touch the disk, and re-laying it out every
+    /// frame would move boxes under the cursor.
+    pub(super) graph: Option<Box<medulla::workflows::WorkflowGraph>>,
+    /// The laid-out form of [`graph`](Self::graph).
+    pub(super) layout: medulla::ui::workflows::GraphLayout,
+    /// Selected node in the canvas, in the layout's reading order.
+    pub(super) node_index: usize,
+    /// Horizontal scroll of the canvas, in layers.
+    pub(super) canvas_layer: usize,
+    /// Vertical scroll of the canvas, in lanes.
+    pub(super) canvas_lane: usize,
+    /// Whether the inspector below the canvas is expanded over it.
+    pub(super) inspector_open: bool,
+    /// The run being overlaid on the graph, when a run row is selected.
+    pub(super) overlay: Option<medulla::workflows::RunId>,
+    /// One copilot thread per workflow, so switching in the rail does not show
+    /// the previous workflow's conversation or lose this one's.
+    pub(super) copilots: std::collections::HashMap<String, medulla::ui::workflows::CopilotState>,
+    /// The copilot composer's draft.
+    pub(super) draft: Draft,
+    /// Scroll offset in the copilot transcript, in lines from the bottom.
+    pub(super) copilot_scroll: usize,
+}
+
 /// An async action the event loop must run on the app's behalf.
 #[derive(Debug)]
 pub enum Cmd {
@@ -298,6 +357,24 @@ pub enum Cmd {
     #[cfg(feature = "workflows")]
     RunWorkflow {
         /// The workflow to run.
+        id: String,
+    },
+    /// Ask the copilot to change or explain a workflow.
+    ///
+    /// Off-thread for the same reason a run is: the turn starts a real harness
+    /// session, and the pane it reports into has to keep repainting while it
+    /// does.
+    #[cfg(feature = "workflows")]
+    CopilotTurn {
+        /// The workflow the turn is scoped to.
+        workflow: String,
+        /// The operator's instruction, verbatim.
+        instruction: String,
+    },
+    /// Simulate a workflow without dispatching anything, and report the result.
+    #[cfg(feature = "workflows")]
+    DryRunWorkflow {
+        /// The workflow to simulate.
         id: String,
     },
     /// Submit new feedback to the board.
@@ -494,6 +571,20 @@ pub struct App {
     /// Why the run history could not be read, if it could not.
     #[cfg(feature = "workflows")]
     pub(super) workflow_runs_error: Option<String>,
+    /// The Workflows tab's panes, cursors, and copilot threads.
+    #[cfg(feature = "workflows")]
+    pub(super) wf: WorkflowsState,
+    /// A workflow store attached directly, overriding the layered one this
+    /// client would otherwise resolve.
+    ///
+    /// The layered store always includes the *current directory's*
+    /// `.medulla/workflows`, which is right in use — a workflow checked into the
+    /// repository you are working in should be listed — and wrong under test,
+    /// where it makes the catalogue depend on whatever happens to be in the
+    /// developer's checkout. `None` resolves the layered store, as a real
+    /// session does.
+    #[cfg(feature = "workflows")]
+    pub(super) workflow_store_override: Option<Arc<dyn medulla::workflows::WorkflowStore>>,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.

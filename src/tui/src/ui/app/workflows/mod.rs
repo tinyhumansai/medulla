@@ -1,9 +1,28 @@
-//! The Workflows page's state: reading the installed catalog, and running one.
+//! The Workflows tab's state: the catalogue, the graph, and the copilot thread.
 //!
-//! The workflows themselves are the SDK's ([`medulla::workflows`]); this is the
-//! app-side half — which store this client reads, and what `r` and `Enter` do to
-//! it. Reading is cached rather than done per frame, because the store is files
-//! and a render pass should not touch the disk.
+//! The workflows themselves are the SDK's ([`medulla::workflows`]), and so is
+//! every judgement about how they are laid out and described
+//! ([`medulla::ui::workflows`]). This is the app-side half: which store this
+//! client reads, which of the three panes has the cursor, and what each pane's
+//! cursor is on.
+//!
+//! Everything is cached rather than read per frame — the store is files, and a
+//! render pass must not touch the disk. The cache is refreshed when the
+//! selection changes, when `r` is pressed, and after anything that could have
+//! written to the store (a run, a copilot turn).
+//!
+//! - [`rail`] — the catalogue cursor, and the runs nested under it.
+//! - [`canvas`] — the graph cache and the node cursor over it.
+//! - [`copilot`] — the per-workflow conversation and its turns.
+
+mod canvas;
+mod copilot;
+mod rail;
+
+pub(in crate::ui::app) use rail::WorkflowRailRow;
+
+#[cfg(test)]
+mod tests;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,6 +39,9 @@ impl App {
     /// user-global directory, then the project-local one, so a workflow checked
     /// into a repository shadows a personal one of the same id.
     pub(in crate::ui::app) fn workflow_store(&self) -> Arc<dyn WorkflowStore> {
+        if let Some(store) = &self.workflow_store_override {
+            return store.clone();
+        }
         let env: HashMap<String, String> = std::env::vars().collect();
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         match &self.medulla_home {
@@ -35,6 +57,14 @@ impl App {
             )),
             None => medulla::workflows::discover_store(&env, &cwd),
         }
+    }
+
+    /// Read and write workflows through `store` rather than the layered one.
+    ///
+    /// The seam a test uses to get a catalogue that is only what it installed;
+    /// see [`App::workflow_store_override`](super::types::App).
+    pub fn set_workflow_store(&mut self, store: Arc<dyn WorkflowStore>) {
+        self.workflow_store_override = Some(store);
     }
 
     /// The workflows currently listed on the page.
@@ -76,6 +106,13 @@ impl App {
                 self.workflow_runs_error = Some(err.to_string());
             }
         }
+        // A run that has gone (a pruned history, a different workflow) must not
+        // leave the cursor pointing past the end of the list.
+        let count = self.workflow_runs.len();
+        if self.wf.run_index.is_some_and(|index| index >= count) {
+            self.wf.run_index = None;
+            self.wf.overlay = None;
+        }
     }
 
     /// Re-read the workflow store into the page.
@@ -90,6 +127,7 @@ impl App {
                 self.workflows = workflows;
                 self.workflow_index = self.workflow_index.min(count.saturating_sub(1));
                 self.reload_workflow_runs();
+                self.reload_workflow_graph();
                 self.set_status(format!(
                     "{count} workflow{} in {}",
                     if count == 1 { "" } else { "s" },
@@ -98,6 +136,8 @@ impl App {
             }
             Err(err) => {
                 self.workflows.clear();
+                self.wf.graph = None;
+                self.wf.layout = Default::default();
                 self.set_status(format!("Cannot read workflows: {err}"));
             }
         }

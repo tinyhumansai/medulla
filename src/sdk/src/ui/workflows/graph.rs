@@ -411,6 +411,18 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
     }
 }
 
+/// The colour for a node kind named by its wire string.
+///
+/// The layout carries a node's kind as a string rather than the engine enum, so
+/// a renderer holding a [`PlacedNode`] has the name and not the variant. An
+/// unrecognised kind — one a newer document declares and this build has never
+/// heard of — is drawn in the default colour rather than not drawn at all.
+pub fn color_for_kind(wire: &str) -> &'static str {
+    serde_json::from_value::<NodeKind>(serde_json::Value::String(wire.to_string()))
+        .map(|kind| kind_color(&kind))
+        .unwrap_or("white")
+}
+
 /// The one line of a node's config worth showing beside its name.
 ///
 /// Per kind, because what identifies a node differs: an HTTP request is its URL,

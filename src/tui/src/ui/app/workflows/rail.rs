@@ -1,0 +1,147 @@
+//! The catalogue rail: the workflows, and the selected one's runs beneath it.
+//!
+//! Only the selected workflow's runs are listed. A rail that expanded every
+//! workflow would be mostly history — a machine with ten workflows and a nightly
+//! schedule has hundreds of runs — and the question the rail answers is "which
+//! plan am I looking at", with "and how did it last go" as the follow-up.
+//!
+//! The cursor is a tree position (a workflow, optionally a run under it) rather
+//! than an index into a flattened list, because the run rows only exist while
+//! their workflow is selected.
+
+use medulla::ui::workflows::{run_rows, workflow_rows, WorkflowRow};
+
+use super::super::types::App;
+
+/// One row of the rail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkflowRailRow {
+    /// An installed workflow.
+    Workflow {
+        /// Its position in the catalogue.
+        index: usize,
+        /// The listing row.
+        row: WorkflowRow,
+    },
+    /// One run of the selected workflow, indented beneath it.
+    Run {
+        /// Its position in the run history, newest first.
+        index: usize,
+        /// The listing row.
+        row: WorkflowRow,
+    },
+    /// A non-selectable line under a selected workflow that has no history.
+    Note(&'static str),
+}
+
+impl App {
+    /// The rail's rows, top to bottom.
+    pub(in crate::ui::app) fn workflow_rail_rows(&self) -> Vec<WorkflowRailRow> {
+        let mut rows = Vec::new();
+        for (index, row) in workflow_rows(self.workflow_summaries())
+            .into_iter()
+            .enumerate()
+        {
+            let selected = index == self.workflow_index;
+            rows.push(WorkflowRailRow::Workflow { index, row });
+            if !selected {
+                continue;
+            }
+            if let Some(error) = self.workflow_runs_error() {
+                // Distinct from "no runs yet": one of these is fine and the
+                // other is something an operator should go and look at.
+                let _ = error;
+                rows.push(WorkflowRailRow::Note("run history unreadable"));
+                continue;
+            }
+            let runs = run_rows(self.workflow_runs());
+            if runs.is_empty() {
+                rows.push(WorkflowRailRow::Note("no runs yet"));
+                continue;
+            }
+            for (index, row) in runs.into_iter().enumerate() {
+                rows.push(WorkflowRailRow::Run { index, row });
+            }
+        }
+        rows
+    }
+
+    /// Whether the rail cursor is on `row`.
+    pub(in crate::ui::app) fn workflow_rail_selected(&self, row: &WorkflowRailRow) -> bool {
+        match row {
+            WorkflowRailRow::Workflow { index, .. } => {
+                *index == self.workflow_index && self.wf.run_index.is_none()
+            }
+            WorkflowRailRow::Run { index, .. } => self.wf.run_index == Some(*index),
+            WorkflowRailRow::Note(_) => false,
+        }
+    }
+
+    /// Move the rail cursor one row.
+    ///
+    /// Walks into a workflow's runs and back out of them, so one pair of arrow
+    /// keys covers the whole rail — there is no separate "expand" gesture to
+    /// learn, and no way to be on a run whose workflow is not selected.
+    pub(in crate::ui::app) fn move_workflow_rail(&mut self, up: bool) {
+        let runs = self.workflow_runs().len();
+        let workflows = self.workflows.len();
+        if workflows == 0 {
+            return;
+        }
+        match (up, self.wf.run_index) {
+            // Up from the first run, or from a workflow with none above it,
+            // lands on the workflow itself.
+            (true, Some(0)) => self.wf.run_index = None,
+            (true, Some(index)) => self.wf.run_index = Some(index - 1),
+            (true, None) => {
+                if self.workflow_index == 0 {
+                    return;
+                }
+                self.workflow_index -= 1;
+                // Entering a workflow from below lands on its last run, which is
+                // its oldest — the row physically above the next workflow.
+                self.select_workflow(self.workflow_index);
+                self.wf.run_index = self.workflow_runs().len().checked_sub(1);
+            }
+            (false, None) if runs > 0 => self.wf.run_index = Some(0),
+            (false, Some(index)) if index + 1 < runs => self.wf.run_index = Some(index + 1),
+            (false, _) => {
+                if self.workflow_index + 1 >= workflows {
+                    return;
+                }
+                self.select_workflow(self.workflow_index + 1);
+            }
+        }
+        self.sync_workflow_overlay();
+    }
+
+    /// Select workflow `index`, reloading everything that hangs off it.
+    pub(in crate::ui::app) fn select_workflow(&mut self, index: usize) {
+        self.workflow_index = index;
+        self.wf.run_index = None;
+        self.wf.overlay = None;
+        self.wf.node_index = 0;
+        self.wf.canvas_layer = 0;
+        self.wf.canvas_lane = 0;
+        self.wf.copilot_scroll = 0;
+        self.reload_workflow_runs();
+        self.reload_workflow_graph();
+    }
+
+    /// Point the graph overlay at the run under the cursor, or at nothing.
+    fn sync_workflow_overlay(&mut self) {
+        self.wf.overlay = self
+            .wf
+            .run_index
+            .and_then(|index| self.workflow_runs().get(index))
+            .map(|run| run.id.clone());
+    }
+
+    /// The run the graph is currently overlaid with, if any.
+    pub(in crate::ui::app) fn selected_workflow_run(
+        &self,
+    ) -> Option<&medulla::workflows::RunRecord> {
+        let id = self.wf.overlay.as_ref()?;
+        self.workflow_runs().iter().find(|run| &run.id == id)
+    }
+}

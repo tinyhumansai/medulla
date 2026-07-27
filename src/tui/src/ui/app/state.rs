@@ -78,6 +78,10 @@ impl App {
             workflow_runs: Vec::new(),
             #[cfg(feature = "workflows")]
             workflow_runs_error: None,
+            #[cfg(feature = "workflows")]
+            wf: Default::default(),
+            #[cfg(feature = "workflows")]
+            workflow_store_override: None,
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index,
@@ -417,10 +421,18 @@ impl App {
     /// Context, Feedback, and Usage all fetch on entry; since they are now
     /// Settings subpages rather than tabs, the Settings arm dispatches on the
     /// active subpage.
-    pub(super) fn tab_enter_cmd(&self) -> Option<Cmd> {
+    pub(super) fn tab_enter_cmd(&mut self) -> Option<Cmd> {
         match self.tab() {
             "Memory" => Some(Cmd::LoadMemory),
             "Tasks" => Some(Cmd::LoadTasks),
+            // The workflow store is files on this machine, so entering the tab
+            // reads them rather than asking the runtime for anything — which is
+            // why this arm returns no command and does the work here.
+            #[cfg(feature = "workflows")]
+            "Workflows" => {
+                self.reload_workflows();
+                None
+            }
             "Settings" => match self.settings_index {
                 SP_USAGE => Some(Cmd::LoadUsage),
                 SP_CONTEXT => Some(Cmd::InspectContext),

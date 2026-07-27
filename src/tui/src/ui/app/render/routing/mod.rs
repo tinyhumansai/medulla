@@ -2,7 +2,8 @@
 //! it, the harnesses (and the credentials they spend), the directories there are
 //! to work in, the template catalog —
 //! plus host onboarding and the default-host strategy. The declared tree itself
-//! is rendered in the Agents rail, not here.
+//! is rendered in the Agents rail, not here, and workflows have a tab of their
+//! own — they are work rather than capacity.
 
 use ratatui::layout::Rect;
 use ratatui::Frame;
@@ -19,12 +20,7 @@ mod hosts;
 mod nav;
 mod strategies;
 mod templates;
-#[cfg(feature = "workflows")]
-mod workflows;
 mod workspaces;
-
-#[cfg(feature = "workflows")]
-use super::super::types::RP_WORKFLOWS;
 
 impl App {
     /// Draw the Routing nav and active content pane.
@@ -36,8 +32,6 @@ impl App {
             RP_HARNESSES => self.draw_harnesses(f, content),
             RP_WORKSPACES => self.draw_workspaces(f, content),
             RP_TEMPLATES => self.draw_templates(f, content),
-            #[cfg(feature = "workflows")]
-            RP_WORKFLOWS => self.draw_workflows(f, content),
             RP_ADD_HOST => self.draw_add_host(f, content),
             RP_STRATEGIES => self.draw_strategies(f, content),
             _ => self.draw_hosts(f, content),

@@ -183,6 +183,13 @@ pub(super) fn run_cmd(
         }
         #[cfg(feature = "workflows")]
         Cmd::RunWorkflow { id } => workflows::spawn_run(id, msg_tx),
+        #[cfg(feature = "workflows")]
+        Cmd::DryRunWorkflow { id } => workflows::spawn_dry_run(id, msg_tx),
+        #[cfg(feature = "workflows")]
+        Cmd::CopilotTurn {
+            workflow,
+            instruction,
+        } => workflows::spawn_copilot(workflow, instruction, msg_tx),
         Cmd::RefreshFleet => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

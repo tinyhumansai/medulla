@@ -268,7 +268,7 @@ impl App {
     pub(super) fn toggle_mouse(&mut self) {
         self.mouse_capture = !self.mouse_capture;
         self.set_status(if self.mouse_capture {
-            "Mouse captured — click tabs/lanes to navigate, wheel scrolls (Shift/Option-drag to copy)"
+            "Mouse captured — click tabs/pages/lanes, wheel scrolls, drag to select and copy"
         } else {
             "Mouse released — native click-drag selection & copy restored"
         });

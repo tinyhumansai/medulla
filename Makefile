@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help init fmt clippy test build check ci e2e-image e2e-docker e2e-live
+.PHONY: help init public-boundary fmt clippy test build check ci e2e-image e2e-docker e2e-live
 
 # Tag for the containerized e2e harness image (see e2e/coordination/Dockerfile).
 E2E_IMAGE ?= medulla-e2e:latest
@@ -20,6 +20,9 @@ init: ## Initialize submodules, Rust tooling, dependencies, and Git hooks
 fmt: ## Check Rust formatting
 	cargo fmt --all -- --check
 
+public-boundary: ## Check for private implementation references
+	bash scripts/check-public-boundary.sh
+
 clippy: ## Run Clippy with warnings denied
 	cargo clippy --locked --all-targets -- -D warnings
 
@@ -29,9 +32,9 @@ test: ## Run the offline test suite
 build: ## Build all targets
 	cargo build --locked --all-targets
 
-check: fmt clippy ## Run the pre-push checks
+check: public-boundary fmt clippy ## Run the pre-push checks
 
-ci: fmt clippy test build ## Run the complete CI gate locally
+ci: public-boundary fmt clippy test build ## Run the complete CI gate locally
 
 e2e-image: ## Build the containerized e2e harness image (slow cold; needs submodules)
 	docker build -t $(E2E_IMAGE) -f e2e/coordination/Dockerfile .

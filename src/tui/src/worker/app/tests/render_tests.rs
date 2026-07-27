@@ -29,7 +29,7 @@ fn the_header_shows_this_daemons_address() {
     let mut app = app_with(PtyManager::new(), None);
     let out = render(&mut app, 110, 16);
     assert!(out.contains("So1anaWa11et"), "got: {out}");
-    assert!(out.contains("MEDULLA WORKER"));
+    assert!(out.contains("WORKER"));
 }
 
 #[test]

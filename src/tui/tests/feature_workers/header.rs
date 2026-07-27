@@ -1,16 +1,16 @@
-//! Header stream-health indicator coverage: the glyph is suppressed while the
-//! runtime is idle and surfaces the stream state only while a cycle is running.
+//! Status-line connection-dot coverage: the dot beside the backend host reports
+//! the stream's health whether or not a cycle is running — a connection that
+//! dropped while idle is exactly the thing worth seeing.
 
 use crate::helpers::*;
 
 #[test]
-fn idle_header_omits_stream_health() {
-    // Stream health only shows while a cycle runs; the demo mock is idle.
+fn an_idle_runtime_still_reports_its_connection() {
     let mut app = app_with_workers(Some(StreamState::Resyncing));
     let out = render(&mut app, 120, 40);
     assert!(
-        !out.contains("resyncing"),
-        "idle header omits stream health"
+        out.contains("◌ api.tinyhumans.ai"),
+        "idle status line still shows the connection dot: {out}"
     );
 }
 
@@ -65,7 +65,7 @@ fn header_shows_stream_glyph_for_running_cycle() {
     let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
     let out = render(&mut app, 120, 40);
     assert!(
-        out.contains("stalled"),
-        "running header shows stream health"
+        out.contains("✕ api.tinyhumans.ai"),
+        "a stalled stream shows a stalled dot: {out}"
     );
 }

@@ -1,5 +1,5 @@
 //! The ratatui render surface for [`App`]. This module owns the outer chrome —
-//! the [`App::draw`] layout, header/tabs/footer, the shared [`App::panel`] block
+//! the [`App::draw`] layout, hints/tabs/status line, the shared [`App::panel`] block
 //! builder, and content dispatch — plus the small styling helpers ([`color`],
 //! [`styled_to_tline`], [`event_color`], [`chat_lines`], [`App::event_line`])
 //! reused by the per-tab submodules. Each tab's body lives in a sibling module.
@@ -23,6 +23,7 @@ mod memory;
 mod overview;
 mod prompt;
 mod routing;
+mod selection;
 mod settings;
 mod tasks;
 mod template_modal;
@@ -273,8 +274,14 @@ pub(super) fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLi
 }
 
 impl App {
-    /// Draw the whole screen: header, tabs, the active tab's content, the
-    /// composer/prompt/resume overlay when applicable, and the footer.
+    /// Draw the whole screen: the shortcut hints, tabs, the active tab's
+    /// content, the composer/prompt/resume overlay when applicable, and the
+    /// identity/status line.
+    ///
+    /// The hints ride at the top and the backend/status line at the bottom: the
+    /// keys are what a new operator reads, and pinning them under the cursor's
+    /// resting place — the tab strip — puts them where the eye already is, while
+    /// "which backend am I on, and what is it doing" is a glance-down check.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
         // The composer now lives inside the Agents pane, so the only things that
@@ -292,15 +299,21 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1), // header
+                Constraint::Length(1), // shortcut hints
                 Constraint::Length(1), // tabs
                 Constraint::Min(0),    // content
                 Constraint::Length(extra),
-                Constraint::Length(1), // footer
+                Constraint::Length(1), // backend + status
             ])
             .split(self.area);
 
-        self.draw_header(f, rows[0]);
+        // Each frame re-records where the panes landed; a stale rect from the
+        // previous layout would confine a drag to a pane that has moved.
+        self.panes.clear();
+        for row in [rows[0], rows[1], rows[2], rows[4]] {
+            self.note_pane(row);
+        }
+        self.draw_shortcuts(f, rows[0]);
         self.draw_tabs(f, rows[1]);
         self.draw_content(f, rows[2]);
         if self.decision_open {
@@ -314,7 +327,10 @@ impl App {
         } else if picking {
             self.draw_resume(f, rows[3]);
         }
-        self.draw_footer(f, rows[4]);
+        self.draw_status_line(f, rows[4]);
+        // Last: the pointer selection paints over whatever the tabs drew, and
+        // reads its text back out of the finished buffer.
+        self.paint_selection(f);
     }
 
     /// The height reserved below the content for the composer or resume picker.
@@ -328,23 +344,22 @@ impl App {
         }
     }
 
-    /// Draw the top header: the MEDULLA wordmark, the backend host, async/update
-    /// badges, and the right-aligned stream-health + status text.
-    pub(super) fn draw_header(&mut self, f: &mut Frame, area: Rect) {
+    /// Draw the bottom status line: the connection dot and backend host, the
+    /// update badge, and the right-aligned status text.
+    ///
+    /// No product name — the wordmark is already on the Overview tab, and a
+    /// status bar that opens by telling you which program you are running spends
+    /// its first columns on the one thing you cannot be unsure of.
+    pub(super) fn draw_status_line(&mut self, f: &mut Frame, area: Rect) {
         let halves = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(area);
+        let (dot, dot_color) = self.connection_dot();
         let mut spans = vec![
-            Span::styled(
-                "MEDULLA",
-                Style::default()
-                    .fg(self.theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
+            Span::styled(format!("{dot} "), Style::default().fg(dot_color)),
             // The backend the session is attached to. Host only — the scheme and
-            // path are noise in a one-line header, and the host is what
+            // path are noise in a one-line status bar, and the host is what
             // distinguishes prod from staging from a local dev server.
             Span::styled(
                 medulla::config::display_host(&self.loaded.config.backend.base_url),
@@ -362,30 +377,34 @@ impl App {
             ));
         }
         f.render_widget(Paragraph::new(TLine::from(spans)), halves[0]);
-        // Stream health sits right next to the status when a cycle runs under a
-        // runtime that tracks one (the core runtime); otherwise just the status.
-        let mut right: Vec<Span> = Vec::new();
-        if self.snapshot.running {
-            if let Some(st) = self.runtime.stream_state() {
-                let c = match st {
-                    medulla::runtime::StreamState::Live => Color::Green,
-                    medulla::runtime::StreamState::Resyncing => Color::Yellow,
-                    medulla::runtime::StreamState::Stalled => Color::Red,
-                };
-                right.push(Span::styled(
-                    format!("{} {}  ", st.glyph(), st.label()),
-                    Style::default().fg(c),
-                ));
-            }
-        }
-        right.push(Span::styled(
-            self.status.clone(),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
         f.render_widget(
-            Paragraph::new(TLine::from(right)).alignment(Alignment::Right),
+            Paragraph::new(TLine::from(Span::styled(
+                self.status.clone(),
+                Style::default().add_modifier(Modifier::DIM),
+            )))
+            .alignment(Alignment::Right),
             halves[1],
         );
+    }
+
+    /// The connection glyph and colour for the status line's backend host.
+    ///
+    /// Read from the runtime's event-stream health, which is the closest thing
+    /// to a live socket state the UI can see: the core runtime reports `Live`
+    /// once its stream is attached and contiguous, `Resyncing` while connecting,
+    /// reconnecting, or recovering a sequence gap, and `Stalled` when the
+    /// transport is unavailable.
+    ///
+    /// Runtimes with no stream to track (the mock and plain-HTTP backends)
+    /// report nothing, and get a dim hollow dot rather than a green one — an
+    /// unknown connection must not read as a healthy one.
+    fn connection_dot(&self) -> (char, Color) {
+        match self.runtime.stream_state() {
+            Some(medulla::runtime::StreamState::Live) => ('●', Color::Green),
+            Some(medulla::runtime::StreamState::Resyncing) => ('◌', Color::Yellow),
+            Some(medulla::runtime::StreamState::Stalled) => ('✕', Color::Red),
+            None => ('○', Color::DarkGray),
+        }
     }
 
     /// Draw the tab bar and record each tab's column span for click hit-testing.
@@ -409,31 +428,23 @@ impl App {
         f.render_widget(Paragraph::new(TLine::from(spans)), area);
     }
 
-    /// Draw the footer hint line.
+    /// Draw the keyboard-shortcut hint line that heads the screen.
     ///
-    /// Per tab, because the bindings are: the Agents steering chords do nothing
-    /// on Workflows, and a footer that advertised them would be teaching keys
-    /// that are not there.
-    pub(super) fn draw_footer(&mut self, f: &mut Frame, area: Rect) {
-        let mouse = if self.mouse_capture { "●" } else { "○" };
+    /// Only keys that act on the surface in front of you — which is also why it
+    /// differs per tab: the Agents steering chords do nothing on Workflows, and
+    /// advertising them there teaches keys that are not bound. `^O` and `/help`
+    /// are still bound; they are just discoverable elsewhere, and a hint line
+    /// long enough to wrap stops being read at all.
+    pub(super) fn draw_shortcuts(&mut self, f: &mut Frame, area: Rect) {
         #[cfg(feature = "workflows")]
-        if self.tab() == "Workflows" {
-            let text = format!(
-                "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh · ^O mouse {mouse} · /help",
-            );
-            f.render_widget(
-                Paragraph::new(TLine::from(Span::styled(
-                    text,
-                    Style::default().add_modifier(Modifier::DIM),
-                )))
-                .wrap(Wrap { trim: true }),
-                area,
-            );
-            return;
-        }
-        let text = format!(
-            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^O mouse {mouse} · /help",
-        );
+        let workflows = self.tab() == "Workflows";
+        #[cfg(not(feature = "workflows"))]
+        let workflows = false;
+        let text = if workflows {
+            "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
+        } else {
+            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
+        };
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(
                 text,

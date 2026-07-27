@@ -65,32 +65,15 @@ impl App {
                 self.move_agent_index(matches!(k.code, KeyCode::Up));
                 AgentsKey::Handled(None)
             }
-            // A template row has no transcript, so Enter opens its declaration
-            // rather than dropping focus into a composer that would submit to
-            // the orchestrator instead — the same rule the composer applies.
-            KeyCode::Enter
-                if self
-                    .selected_fleet_node()
-                    .is_some_and(|node| node.key.starts_with("template:")) =>
-            {
-                self.template_modal = !self.template_modal;
-                self.template_scroll = 0;
-                AgentsKey::Handled(None)
-            }
             // Enter is "I have found the row I wanted; let me type".
             KeyCode::Enter => {
                 self.focus_agents_composer();
                 AgentsKey::Handled(None)
             }
-            // Esc closes the popup if one is up, else returns to the composer,
-            // so the key that moved focus out also brings it back.
+            // Esc returns focus to the composer, so the key that moved focus out
+            // also brings it back.
             KeyCode::Esc => {
-                if self.template_modal {
-                    self.template_modal = false;
-                    self.template_scroll = 0;
-                } else {
-                    self.focus_agents_composer();
-                }
+                self.focus_agents_composer();
                 AgentsKey::Handled(None)
             }
             // Typing is never swallowed: the character lands in the composer and

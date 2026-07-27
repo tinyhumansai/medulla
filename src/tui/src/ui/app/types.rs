@@ -694,6 +694,23 @@ pub struct App {
     /// The threads strip's hit box and its first visible row, for click-to-switch.
     pub(super) hit_threads: Option<(Rect, usize)>,
     pub(super) hit_context: Option<Rect>,
+    /// Where the active tab's subpage nav drew its page rows. Only one nav is on
+    /// screen at a time, so one field serves Tasks, Routing, Memory, and
+    /// Settings.
+    pub(super) hit_nav: crate::ui::multi_pane::NavHits,
+    /// Every pane drawn this frame, in draw order. A pointer selection is
+    /// clamped to whichever of these it started in, so a drag reads one pane's
+    /// text instead of splicing its neighbour's columns into every row.
+    pub(super) panes: Vec<Rect>,
+    /// A drag in progress: where the button went down. Kept apart from
+    /// [`Self::selection`] so a click that never moves leaves no selection.
+    pub(super) drag_anchor: Option<(u16, u16)>,
+    /// The block of cells the pointer has swept, normalized to
+    /// `(left, top, right, bottom)` inclusive.
+    pub(super) selection: Option<(u16, u16, u16, u16)>,
+    /// Set when the button is released over a live selection: the next draw
+    /// copies what the selection covers, since only then is the buffer readable.
+    pub(super) copy_selection: bool,
     pub(super) last_events_len: usize,
 
     // Test-only clipboard capture: when set, `copy_chat` records the copied text

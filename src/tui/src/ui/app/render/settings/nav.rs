@@ -16,7 +16,7 @@ impl App {
     /// stays a plain index into the selectable rows and never has to skip over
     /// non-selectable ones.
     pub(super) fn draw_settings_nav(&mut self, f: &mut Frame, area: Rect) {
-        multi_pane::draw_nav(
+        self.hit_nav = multi_pane::draw_nav(
             f,
             area,
             self.panel("Settings"),

@@ -30,6 +30,8 @@ impl App {
     /// subpage on the right.
     pub(super) fn draw_settings(&mut self, f: &mut Frame, area: Rect) {
         let (nav, content) = multi_pane::split(area);
+        self.note_pane(nav);
+        self.note_pane(content);
         self.draw_settings_nav(f, nav);
 
         match self.settings_index {

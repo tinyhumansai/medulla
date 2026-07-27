@@ -8,7 +8,9 @@ use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
 use crate::ui::agents::{agent_row_model, AgentRow};
 use crate::ui::composer::Draft;
 
-use super::types::{App, Cmd};
+use super::types::{
+    App, Cmd, MEMORY_SUBPAGES, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TASKS_SUBPAGES,
+};
 
 impl App {
     /// Route a terminal event to the key or mouse handler, producing any command
@@ -28,39 +30,115 @@ impl App {
         if self.resume_picker.is_some() {
             return None; // modal swallows mouse
         }
-        let tab = self.tab();
         match m.kind {
-            // Trace and Context are Settings subpages, not tabs, so they are
-            // matched on the subpage rather than on `tab` — which is always
-            // "Settings" for both, and used to make these arms unreachable.
-            MouseEventKind::ScrollUp => match (tab, self.settings_subpage()) {
-                ("Agents", _) => self.scroll_transcript(true, 3),
-                ("Memory", _) if self.memory_focused => {
-                    self.memory_index = self.memory_index.saturating_sub(1)
-                }
-                ("Settings", "Trace") => self.selected = self.selected.saturating_sub(3),
-                ("Settings", "Context") => {
-                    self.context_index = self.context_index.saturating_sub(1)
-                }
-                _ => {}
-            },
-            MouseEventKind::ScrollDown => match (tab, self.settings_subpage()) {
-                ("Agents", _) => self.scroll_transcript(false, 3),
-                ("Memory", _) if self.memory_focused => {
-                    let max = self.memory_page_entries().len().saturating_sub(1);
-                    self.memory_index = (self.memory_index + 1).min(max);
-                }
-                ("Settings", "Trace") => self.selected += 3,
-                ("Settings", "Context") => {
-                    let max = self.contexts.len().saturating_sub(1);
-                    self.context_index = (self.context_index + 1).min(max);
-                }
-                _ => {}
-            },
-            MouseEventKind::Down(MouseButton::Left) => return self.handle_click(m.column, m.row),
+            MouseEventKind::ScrollUp => self.scroll_at(m.column, m.row, true),
+            MouseEventKind::ScrollDown => self.scroll_at(m.column, m.row, false),
+            // A press both acts on what is under it and arms a drag. The click
+            // fires here rather than on release so navigation stays immediate;
+            // a drag that follows selects text without undoing it.
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.drag_anchor = Some((m.column, m.row));
+                self.selection = None;
+                return self.handle_click(m.column, m.row);
+            }
+            MouseEventKind::Drag(MouseButton::Left) => self.extend_selection(m.column, m.row),
+            // Copy on release, the way tmux does it — no second keystroke to
+            // confirm. The copy itself waits for the next draw, when the
+            // selected cells can be read back out of the rendered buffer.
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.drag_anchor = None;
+                self.copy_selection = self.selection.is_some();
+            }
             _ => {}
         }
         None
+    }
+
+    /// Scroll whatever the pointer is over, rather than whatever has focus.
+    ///
+    /// A wheel event carries a position, so it should act on the list under it —
+    /// scrolling the rail while the pointer sits on the transcript is the kind of
+    /// thing that makes a mouse feel bolted on. Focus is left alone: the wheel
+    /// looks around, it does not move where typing goes.
+    pub(super) fn scroll_at(&mut self, x: u16, y: u16, up: bool) {
+        // The subpage menu scrolls through its pages, whichever tab drew it.
+        if self.hit_nav.area.contains((x, y).into()) {
+            self.scroll_subpage(up);
+            return;
+        }
+        match self.tab() {
+            // Over the rail, the wheel walks the cursor over lanes and fleet
+            // rows; anywhere else on the tab it scrolls the transcript.
+            "Agents" => match self.hit_agents {
+                Some((rail, _)) if rail.contains((x, y).into()) => self.move_agent_index(up),
+                _ => self.scroll_transcript(up, 3),
+            },
+            "Memory" if self.memory_focused => {
+                self.memory_index = if up {
+                    self.memory_index.saturating_sub(1)
+                } else {
+                    (self.memory_index + 1).min(self.memory_page_entries().len().saturating_sub(1))
+                };
+            }
+            // Trace and Context are Settings subpages, not tabs, so they are
+            // matched on the subpage rather than on the tab — which is always
+            // "Settings" for both.
+            "Settings" => match self.settings_subpage() {
+                "Trace" => {
+                    self.selected = if up {
+                        self.selected.saturating_sub(3)
+                    } else {
+                        self.selected + 3
+                    }
+                }
+                "Context" => {
+                    self.context_index = if up {
+                        self.context_index.saturating_sub(1)
+                    } else {
+                        (self.context_index + 1).min(self.contexts.len().saturating_sub(1))
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    /// Move the active tab's subpage selection by one, for a wheel over its menu.
+    fn scroll_subpage(&mut self, up: bool) {
+        let step = |index: usize, len: usize| {
+            if up {
+                index.saturating_sub(1)
+            } else {
+                (index + 1).min(len.saturating_sub(1))
+            }
+        };
+        match self.tab() {
+            "Tasks" => self.tasks_index = step(self.tasks_index, TASKS_SUBPAGES.len()),
+            "Routing" => self.routing_index = step(self.routing_index, ROUTING_SUBPAGES.len()),
+            "Memory" => {
+                self.memory_subpage_index = step(self.memory_subpage_index, MEMORY_SUBPAGES.len());
+            }
+            "Settings" => self.settings_index = step(self.settings_index, SETTINGS_SUBPAGES.len()),
+            _ => {}
+        }
+    }
+
+    /// Grow the selection block from the drag anchor to `(x, y)`.
+    ///
+    /// The block is normalized so a drag up or leftwards selects the same cells
+    /// as the same drag made in reverse, and clamped to the pane the drag
+    /// started in: panes sit side by side, so an unclamped block would splice
+    /// the rail's labels into every line of the transcript beside it.
+    pub(super) fn extend_selection(&mut self, x: u16, y: u16) {
+        let Some((ax, ay)) = self.drag_anchor else {
+            return;
+        };
+        let pane = self.pane_at(ax, ay);
+        let clamp_x = |v: u16| v.clamp(pane.x, pane.right().saturating_sub(1));
+        let clamp_y = |v: u16| v.clamp(pane.y, pane.bottom().saturating_sub(1));
+        let (x, y) = (clamp_x(x), clamp_y(y));
+        self.selection = Some((ax.min(x), ay.min(y), ax.max(x), ay.max(y)));
     }
 
     /// Resolve a left click at `(x, y)` to a tab switch or a row selection in the
@@ -78,6 +156,20 @@ impl App {
             return None;
         }
         let tab = self.tab();
+        // Subpage nav. Clicking a page both selects it and takes focus, which is
+        // what Enter does from the keyboard — a click that only moved the
+        // highlight would leave the arrows driving the menu the pointer just
+        // left.
+        if let Some(page) = self.hit_nav.page_at(x, y) {
+            match tab {
+                "Tasks" => (self.tasks_index, self.tasks_focused) = (page, true),
+                "Routing" => (self.routing_index, self.routing_focused) = (page, true),
+                "Memory" => (self.memory_subpage_index, self.memory_focused) = (page, true),
+                "Settings" => (self.settings_index, self.settings_focused) = (page, true),
+                _ => {}
+            }
+            return None;
+        }
         if tab == "Agents" {
             // The rail stacks two hit boxes — threads above lanes — so both are
             // tried; an `else if` here would leave the strip unclickable.
@@ -228,7 +320,7 @@ impl App {
     pub(super) fn toggle_mouse(&mut self) {
         self.mouse_capture = !self.mouse_capture;
         self.set_status(if self.mouse_capture {
-            "Mouse captured — click tabs/lanes to navigate, wheel scrolls (Shift/Option-drag to copy)"
+            "Mouse captured — click tabs/pages/lanes, wheel scrolls, drag to select and copy"
         } else {
             "Mouse released — native click-drag selection & copy restored"
         });

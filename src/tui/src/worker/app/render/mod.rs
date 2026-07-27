@@ -131,7 +131,7 @@ impl WorkerApp {
     fn draw_header_identity(&self, f: &mut Frame, area: Rect) {
         let mut spans = vec![
             Span::styled(
-                "MEDULLA WORKER",
+                "WORKER",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),

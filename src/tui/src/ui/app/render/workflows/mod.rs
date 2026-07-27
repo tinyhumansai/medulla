@@ -82,6 +82,14 @@ impl App {
             .constraints([Constraint::Min(0), Constraint::Length(inspector)])
             .split(columns[1]);
 
+        // Each pane is noted so a pointer drag reads one of them rather than
+        // splicing three columns' text into every row. The canvas especially:
+        // its rows are box-drawing characters interleaved with two neighbours'
+        // prose, and a selection across all three is unreadable.
+        for pane in [columns[0], middle[0], middle[1], columns[2]] {
+            self.note_pane(pane);
+        }
+
         self.draw_workflow_rail(f, columns[0]);
         self.draw_workflow_canvas(f, middle[0]);
         self.draw_workflow_inspector(f, middle[1]);

@@ -39,6 +39,18 @@ impl App {
     pub(super) fn draw_agents(&mut self, f: &mut Frame, area: Rect) {
         let selection = self.agents_selection();
         let panes = self.agents_panes(area, &selection);
+        for pane in [
+            Some(panes.threads),
+            Some(panes.rail),
+            Some(panes.pane),
+            panes.work,
+            Some(panes.composer),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            self.note_pane(pane);
+        }
         self.draw_agents_rail(f, &panes, &selection);
         self.draw_agents_pane(f, panes.pane, &selection);
         // Cloned rather than borrowed: the draw takes `&mut self`, and the

@@ -265,7 +265,7 @@ fn each_tab_renders_its_signature() {
         let (mut app, _rt) = demo_app();
         app.tab_index = TABS.iter().position(|t| *t == name).unwrap();
         let out = render(&mut app, 120, 40);
-        assert!(out.contains("MEDULLA"), "{name}: missing header");
+        assert!(out.contains("Tab views"), "{name}: missing shortcut line");
         assert!(out.contains(sig), "{name}: missing signature {sig:?}");
     }
 }
@@ -314,10 +314,24 @@ fn wheel_scroll_adjusts_offset_by_three() {
     app.tab_index = 1;
     let _ = render(&mut app, 80, 24);
 
-    let _ = app.on_event(mouse(MouseEventKind::ScrollUp, 10, 10));
+    // Over the transcript, not the rail: the wheel acts on the pane under the
+    // pointer, and column 10 is the rail on an 80-column screen.
+    let _ = app.on_event(mouse(MouseEventKind::ScrollUp, 60, 10));
     assert_eq!(app.chat_scroll(), 3);
-    let _ = app.on_event(mouse(MouseEventKind::ScrollDown, 10, 10));
+    let _ = app.on_event(mouse(MouseEventKind::ScrollDown, 60, 10));
     assert_eq!(app.chat_scroll(), 0);
+}
+
+#[test]
+fn a_wheel_over_the_rail_walks_the_rail_not_the_transcript() {
+    let (mut app, rt) = empty_app();
+    script_many_chat(&rt, 40);
+    app.refresh_snapshot();
+    app.tab_index = 1;
+    let _ = render(&mut app, 80, 24);
+
+    let _ = app.on_event(mouse(MouseEventKind::ScrollDown, 5, 6));
+    assert_eq!(app.chat_scroll(), 0, "the transcript stays where it was");
 }
 
 // --- 5. working indicator ---------------------------------------------------

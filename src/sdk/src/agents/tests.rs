@@ -351,10 +351,17 @@ fn install_reports_a_directory_it_cannot_create() {
     std::fs::write(&blocker, "not a directory").expect("write");
 
     let err = install_default_templates(&blocker.join("agents")).unwrap_err();
+    // The three spellings the platforms give this: unix reports NotADirectory
+    // (or PermissionDenied under a restrictive umask), while Windows reports
+    // AlreadyExists — it objects to the existing *file* standing where the
+    // directory would go, rather than to the path having a non-directory
+    // component. What matters is that installing failed and said so.
     assert!(
         matches!(
             err.kind(),
-            std::io::ErrorKind::NotADirectory | std::io::ErrorKind::PermissionDenied
+            std::io::ErrorKind::NotADirectory
+                | std::io::ErrorKind::PermissionDenied
+                | std::io::ErrorKind::AlreadyExists
         ),
         "{err:?}"
     );

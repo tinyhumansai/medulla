@@ -112,8 +112,8 @@ fn empty_lines() -> Vec<TLine<'static>> {
     [
         "No workflows installed.",
         "",
-        "The copilot beside the",
-        "canvas can write one.",
+        "Write one to",
+        ".medulla/workflows/.",
     ]
     .into_iter()
     .map(|line| TLine::from(Span::styled(line, dim)))

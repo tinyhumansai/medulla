@@ -85,11 +85,14 @@ impl App {
     fn draw_copilot_composer(&self, f: &mut Frame, area: Rect, focused: bool, busy: bool) {
         let dim = Style::default().add_modifier(Modifier::DIM);
         let hint = if busy {
-            "working — ⌃X aborts"
+            // Not "⌃X aborts": a busy turn runs on its own host, off the chat
+            // runtime Ctrl-X actually aborts, so promising cancellation here
+            // would be a lie the operator only discovers by waiting on it.
+            "working…"
         } else if focused {
             "⏎ send · Esc leave"
         } else {
-            "Tab to type"
+            "c to type"
         };
         let mut lines = vec![TLine::from(Span::styled(hint, dim))];
         if busy {

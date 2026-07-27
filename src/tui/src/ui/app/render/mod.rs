@@ -1,5 +1,5 @@
 //! The ratatui render surface for [`App`]. This module owns the outer chrome —
-//! the [`App::draw`] layout, header/tabs/footer, the shared [`App::panel`] block
+//! the [`App::draw`] layout, hints/tabs/status line, the shared [`App::panel`] block
 //! builder, and content dispatch — plus the small styling helpers ([`color`],
 //! [`styled_to_tline`], [`event_color`], [`chat_lines`], [`App::event_line`])
 //! reused by the per-tab submodules. Each tab's body lives in a sibling module.
@@ -271,8 +271,14 @@ pub(super) fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLi
 }
 
 impl App {
-    /// Draw the whole screen: header, tabs, the active tab's content, the
-    /// composer/prompt/resume overlay when applicable, and the footer.
+    /// Draw the whole screen: the shortcut hints, tabs, the active tab's
+    /// content, the composer/prompt/resume overlay when applicable, and the
+    /// identity/status line.
+    ///
+    /// The hints ride at the top and the backend/status line at the bottom: the
+    /// keys are what a new operator reads, and pinning them under the cursor's
+    /// resting place — the tab strip — puts them where the eye already is, while
+    /// "which backend am I on, and what is it doing" is a glance-down check.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
         // The composer now lives inside the Agents pane, so the only things that
@@ -290,15 +296,15 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1), // header
+                Constraint::Length(1), // shortcut hints
                 Constraint::Length(1), // tabs
                 Constraint::Min(0),    // content
                 Constraint::Length(extra),
-                Constraint::Length(1), // footer
+                Constraint::Length(1), // backend + status
             ])
             .split(self.area);
 
-        self.draw_header(f, rows[0]);
+        self.draw_shortcuts(f, rows[0]);
         self.draw_tabs(f, rows[1]);
         self.draw_content(f, rows[2]);
         if self.decision_open {
@@ -312,7 +318,7 @@ impl App {
         } else if picking {
             self.draw_resume(f, rows[3]);
         }
-        self.draw_footer(f, rows[4]);
+        self.draw_status_line(f, rows[4]);
     }
 
     /// The height reserved below the content for the composer or resume picker.
@@ -326,9 +332,9 @@ impl App {
         }
     }
 
-    /// Draw the top header: the MEDULLA wordmark, the backend host, async/update
-    /// badges, and the right-aligned stream-health + status text.
-    pub(super) fn draw_header(&mut self, f: &mut Frame, area: Rect) {
+    /// Draw the bottom status line: the MEDULLA wordmark, the backend host, the
+    /// update badge, and the right-aligned stream-health + status text.
+    pub(super) fn draw_status_line(&mut self, f: &mut Frame, area: Rect) {
         let halves = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
@@ -342,7 +348,7 @@ impl App {
             ),
             Span::raw("  "),
             // The backend the session is attached to. Host only — the scheme and
-            // path are noise in a one-line header, and the host is what
+            // path are noise in a one-line status bar, and the host is what
             // distinguishes prod from staging from a local dev server.
             Span::styled(
                 medulla::config::display_host(&self.loaded.config.backend.base_url),
@@ -407,8 +413,8 @@ impl App {
         f.render_widget(Paragraph::new(TLine::from(spans)), area);
     }
 
-    /// Draw the footer hint line.
-    pub(super) fn draw_footer(&mut self, f: &mut Frame, area: Rect) {
+    /// Draw the keyboard-shortcut hint line that heads the screen.
+    pub(super) fn draw_shortcuts(&mut self, f: &mut Frame, area: Rect) {
         let text = format!(
             "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^O mouse {} · /help",
             if self.mouse_capture { "●" } else { "○" },

@@ -18,21 +18,11 @@ impl LoginScreen {
     }
 
     /// Render the centered login panel.
+    ///
+    /// The panel is built before it is placed: every phase shows a different
+    /// number of rows of a different width, and sizing the box to whichever one
+    /// is up keeps a two-line "verifying…" from being framed like a full menu.
     pub fn draw(&mut self, f: &mut Frame) {
-        // 52 columns: the widest thing the panel has to show is a 34-column menu
-        // row, so the old 64 left a wide empty gutter down the right-hand side.
-        let area = crate::ui::layout::centered_fixed(52, 24, f.area());
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Cyan))
-            .title(Span::styled(
-                " login ",
-                Style::default().add_modifier(Modifier::DIM),
-            ));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-
         let mut lines: Vec<Line> = Vec::new();
         for row in crate::ui::LOGO {
             lines.push(Line::from(Span::styled(
@@ -144,6 +134,20 @@ impl LoginScreen {
             )));
         }
 
+        let screen = f.area();
+        let width = panel_width(&lines, screen.width);
+        let height = panel_height(&lines, width, screen.height);
+        let area = crate::ui::layout::centered_fixed(width, height, screen);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(Span::styled(
+                " login ",
+                Style::default().add_modifier(Modifier::DIM),
+            ));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
         f.render_widget(
             Paragraph::new(lines)
                 .alignment(Alignment::Left)
@@ -151,6 +155,30 @@ impl LoginScreen {
             inner,
         );
     }
+}
+
+/// The panel width that fits `lines`: the widest row plus both borders, held
+/// wide enough for the `" login "` title and never wider than the terminal.
+fn panel_width(lines: &[Line<'_>], screen_width: u16) -> u16 {
+    const TITLE: u16 = 11;
+    const BORDERS: u16 = 2;
+    let widest = lines.iter().map(Line::width).max().unwrap_or(0) as u16;
+    widest
+        .saturating_add(BORDERS)
+        .max(TITLE)
+        .min(screen_width.max(1))
+}
+
+/// The panel height that fits `lines` at `width`, counting the extra rows a
+/// too-long line costs once [`Wrap`] has folded it.
+fn panel_height(lines: &[Line<'_>], width: u16, screen_height: u16) -> u16 {
+    const BORDERS: u16 = 2;
+    let inner = width.saturating_sub(BORDERS).max(1);
+    let rows: u16 = lines
+        .iter()
+        .map(|line| ((line.width() as u16).div_ceil(inner)).max(1))
+        .sum();
+    rows.saturating_add(BORDERS).min(screen_height.max(1))
 }
 
 /// Dim/truncate a token for display (no masking): show a leading window with an

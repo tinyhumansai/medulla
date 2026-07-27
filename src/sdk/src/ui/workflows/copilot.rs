@@ -19,6 +19,14 @@ pub enum TurnRole {
     Agent,
     /// Progress the harness reported mid-turn.
     Status,
+    /// A tool the copilot called, already summarised to one line.
+    ///
+    /// Separate from [`Self::Status`] because it is the substantive half of a
+    /// turn's progress: "read the graph, then patched two nodes" is the record
+    /// of what happened, while "thinking" is chatter that ages out. The
+    /// orchestrator's transcript has drawn tool calls this way since it existed;
+    /// this is the copilot reading the same.
+    Tool,
     /// A change the turn made to the graph.
     Change,
     /// The turn failed.
@@ -32,6 +40,7 @@ impl TurnRole {
             Self::User => "❯",
             Self::Agent => "⏺",
             Self::Status => "·",
+            Self::Tool => "⏺",
             Self::Change => "±",
             Self::Error => "✗",
         }
@@ -43,6 +52,7 @@ impl TurnRole {
             Self::User => "cyan",
             Self::Agent => "green",
             Self::Status => "gray",
+            Self::Tool => "magenta",
             Self::Change => "yellow",
             Self::Error => "red",
         }
@@ -50,7 +60,7 @@ impl TurnRole {
 
     /// Whether the line is secondary — progress chatter rather than substance.
     pub fn dim(self) -> bool {
-        matches!(self, Self::Status)
+        matches!(self, Self::Status | Self::Tool)
     }
 }
 
@@ -128,6 +138,28 @@ impl CopilotState {
         }
         self.turns.push(CopilotTurn::new(TurnRole::Status, text));
         self.trim_status();
+    }
+
+    /// Record a tool the turn called.
+    ///
+    /// Kept even when the same tool is called twice in a row — unlike
+    /// [`Self::status`], where a repeat is a poll. Two calls to the same tool
+    /// are two things that happened, and collapsing them would under-report the
+    /// work.
+    pub fn tool(&mut self, text: impl Into<String>) {
+        self.turns.push(CopilotTurn::new(TurnRole::Tool, text));
+    }
+
+    /// Record a progress frame the harness reported, as the kind of line it is.
+    ///
+    /// The single entry point the app crate calls for anything arriving on the
+    /// status channel, so the decision of what counts as a tool call is made
+    /// once ([`super::progress::classify`]) rather than at each call site.
+    pub fn progress(&mut self, frame: &str) {
+        match super::progress::classify(frame) {
+            super::progress::Progress::Tool(text) => self.tool(text),
+            super::progress::Progress::Status(text) => self.status(text),
+        }
     }
 
     /// Record the reply and end the turn.

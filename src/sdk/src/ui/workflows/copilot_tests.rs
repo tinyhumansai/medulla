@@ -102,16 +102,76 @@ fn changes_are_their_own_kind_of_line() {
 }
 
 #[test]
-fn every_role_has_a_glyph_and_a_colour_and_only_status_is_dim() {
+fn a_progress_frame_naming_a_tool_becomes_a_tool_line() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("running workflow_apply_ops: add node notify");
+
+    assert_eq!(state.turns[0].role, TurnRole::Tool);
+    // The prefix is the producer's framing, not part of the call.
+    assert_eq!(state.turns[0].text, "workflow_apply_ops: add node notify");
+}
+
+#[test]
+fn ordinary_progress_frames_stay_status_lines() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("thinking");
+
+    assert_eq!(state.turns[0].role, TurnRole::Status);
+    assert_eq!(state.turns[0].text, "thinking");
+}
+
+#[test]
+fn the_same_tool_called_twice_is_two_lines() {
+    // Unlike a repeated status frame, which is a poll. Two calls are two things
+    // that happened, and collapsing them under-reports the work.
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("running workflow_get: sweep");
+    state.progress("running workflow_get: sweep");
+
+    assert_eq!(state.turns.len(), 2);
+    assert!(state.turns.iter().all(|turn| turn.role == TurnRole::Tool));
+}
+
+#[test]
+fn tool_lines_survive_the_status_chatter_being_trimmed() {
+    // Tool calls are the record of what the turn did. Status lines are what it
+    // said on the way, and only those age out.
+    let mut state = CopilotState::new("sweep");
+
+    state.tool("workflow_get: sweep");
+    for i in 0..200 {
+        state.progress(&format!("thinking {i}"));
+    }
+
+    assert_eq!(state.turns[0].role, TurnRole::Tool);
+    assert!(
+        state
+            .turns
+            .iter()
+            .filter(|t| t.role == TurnRole::Status)
+            .count()
+            <= 40
+    );
+}
+
+#[test]
+fn every_role_has_a_glyph_and_a_colour_and_only_progress_is_dim() {
     for role in [
         TurnRole::User,
         TurnRole::Agent,
         TurnRole::Status,
+        TurnRole::Tool,
         TurnRole::Change,
         TurnRole::Error,
     ] {
         assert!(!role.glyph().is_empty(), "{role:?}");
         assert!(!role.color().is_empty(), "{role:?}");
-        assert_eq!(role.dim(), role == TurnRole::Status, "{role:?}");
+        // Both kinds of progress are secondary to what was asked, said, and
+        // changed — the three the eye should land on first.
+        let secondary = matches!(role, TurnRole::Status | TurnRole::Tool);
+        assert_eq!(role.dim(), secondary, "{role:?}");
     }
 }

@@ -6,12 +6,20 @@
 use crate::harness_work::WorkSnapshot;
 use crate::tinyplace::{HarnessEvent, HarnessEventKind};
 
+/// What a tool-call status frame starts with.
+///
+/// Exported because the wording is a wire format in practice: the copilot reads
+/// its own progress channel back to tell a tool call from ordinary chatter
+/// ([`crate::ui::workflows::progress`]), and a producer that reworded this
+/// without the reader following would silently stop rendering tool calls.
+pub const TOOL_PREFIX: &str = "running ";
+
 /// Derive a short status string from a semantic event (or none). Ported from the
 /// TS `statusDetail`.
 pub fn status_detail(event: &HarnessEvent) -> Option<String> {
     match event.decoded() {
         HarnessEventKind::ToolCall(payload) => Some(cap(
-            &format!("running {}: {}", payload.tool_name, payload.display),
+            &format!("{TOOL_PREFIX}{}: {}", payload.tool_name, payload.display),
             200,
         )),
         HarnessEventKind::ToolResult(payload) => Some(

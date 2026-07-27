@@ -244,8 +244,10 @@ roles — `plan-writer`, `implementer`, `test-writer`, `code-reviewer`, `debugge
 `verifier`, `doc-writer`, `refactorer`, `merge-resolver`, `pr-manager`,
 `triager`, `repo-orchestrator` — so a fresh install has something to provision.
 
-Those roles are editable. Press `i` on **Routing › Agent Templates** to install
-them as one TOML file per role under `~/.medulla/agents/`:
+Those roles ship as TOML documents — the same format the store reads — so the
+built-in catalog and an installed one are the same files. Press `i` on
+**Routing › Agent Templates** to copy them into `~/.medulla/agents/`, one file
+per role:
 
 ```toml
 id = "code-reviewer"

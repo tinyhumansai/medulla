@@ -196,3 +196,37 @@ fn the_context_meter_splits_input_output_and_cache() {
     assert!(out.contains("out "), "{out}");
     assert!(out.contains("cache 70%"), "the reported cache share: {out}");
 }
+
+#[test]
+fn a_store_that_cannot_be_written_or_read_says_so_rather_than_failing_quietly() {
+    let dir = std::env::temp_dir().join("medulla-tui-template-errors");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    // A file where the home directory should be: the store can be neither
+    // created nor read, and both paths have to reach the status line.
+    let blocker = dir.join("home");
+    std::fs::write(&blocker, "not a directory").expect("write");
+
+    let mut app = app_with_workers(None);
+    app.set_medulla_home(blocker.clone());
+    app.focus_routing_subpage("Agent Templates");
+    assert!(app.on_event(key(KeyCode::Char('i'))).is_none());
+    assert!(
+        app.status().contains("Cannot install templates"),
+        "status: {}",
+        app.status()
+    );
+
+    // Reading a store that is a file, not a directory, is reported too — and
+    // leaves the catalog it could not replace alone.
+    let before = app.template_row_count();
+    app.reload_templates();
+    assert!(
+        app.status().contains("Template store"),
+        "status: {}",
+        app.status()
+    );
+    assert_eq!(app.template_row_count(), before, "catalog survives");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -121,34 +121,42 @@ fn is_toml(path: &Path) -> bool {
             .unwrap_or(false)
 }
 
-/// Parse one template file.
-///
-/// `id` defaults to the file stem and `description` to empty, so the smallest
-/// useful file is a name and some instructions. Every other field is optional
-/// already. Errors name the path, because that is the only thing that helps.
+/// Read and parse one template file, naming errors by path.
 fn read_template(path: &Path) -> Result<AgentTemplate, String> {
     let text = std::fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
-    let parsed: toml::Value =
-        toml::from_str(&text).map_err(|err| format!("{}: invalid TOML: {err}", path.display()))?;
-    let mut value: Value = serde_json::to_value(parsed)
-        .map_err(|err| format!("{}: invalid TOML: {err}", path.display()))?;
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    parse_template(&text, stem).map_err(|err| format!("{}: {err}", path.display()))
+}
 
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| format!("{}: expected a table of template fields", path.display()))?;
-    if !object.contains_key("id") {
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string();
-        object.insert("id".into(), Value::String(stem));
+/// Parse one template document.
+///
+/// `id` defaults to `id_fallback` — the filename, for a file — and
+/// `description` to empty, so the smallest useful document is a description and
+/// some instructions. Every other field is optional already.
+///
+/// Shared with the built-in catalog, which is the same TOML compiled in: one
+/// parser means a document that works on disk works as a default and vice
+/// versa.
+pub(super) fn parse_template(text: &str, id_fallback: &str) -> Result<AgentTemplate, String> {
+    let parsed: toml::Value = toml::from_str(text).map_err(|err| format!("invalid TOML: {err}"))?;
+    let mut value: Value =
+        serde_json::to_value(parsed).map_err(|err| format!("invalid TOML: {err}"))?;
+
+    // A TOML document is always a table, so this is where the two optional
+    // fields get their defaults; anything else `from_value` will explain itself.
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("id")
+            .or_insert_with(|| Value::String(id_fallback.to_string()));
+        object
+            .entry("description")
+            .or_insert_with(|| Value::String(String::new()));
     }
-    object
-        .entry("description")
-        .or_insert_with(|| Value::String(String::new()));
 
-    serde_json::from_value(value).map_err(|err| format!("{}: {err}", path.display()))
+    serde_json::from_value(value).map_err(|err| err.to_string())
 }
 
 /// Add `template` to `templates`, replacing any entry with the same id in place

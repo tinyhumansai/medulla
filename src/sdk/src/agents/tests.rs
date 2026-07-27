@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::defaults::default_templates;
-use super::install::install_default_templates;
+use super::defaults::{default_template_files, default_templates};
+use super::install::{install_default_templates, InstallOutcome};
 use super::store::{load_templates, merge_templates, template_dirs};
 use crate::runtime::fleet::{AgentTemplate, CapacitySnapshot};
 
@@ -177,6 +177,13 @@ description = "Named itself."
 }
 
 #[test]
+fn a_document_with_the_wrong_shape_is_rejected_with_its_error() {
+    // Right TOML, wrong types: the serde message is what reaches the operator.
+    let err = super::store::parse_template("tools = 3\n", "fallback").unwrap_err();
+    assert!(err.contains("expected a sequence"), "{err}");
+}
+
+#[test]
 fn a_broken_file_costs_only_itself() {
     let dir = TempDir::new("broken");
     dir.write("good.toml", "description = \"fine\"\n");
@@ -246,10 +253,17 @@ fn install_writes_editable_files_and_never_overwrites_them() {
         reviewer.instructions.as_deref().map(str::trim),
         original.instructions.as_deref().map(str::trim)
     );
-    // Instructions are a literal block, not one escaped line, because the point
-    // of installing is to get a file a human can edit.
+    // The bytes are the shipped document, comments and all — installing copies
+    // it rather than re-serializing a parsed template.
     let text = std::fs::read_to_string(store_dir.join("code-reviewer.toml")).expect("read");
+    let shipped = default_template_files()
+        .iter()
+        .find(|(name, _)| *name == "code-reviewer.toml")
+        .expect("shipped document")
+        .1;
+    assert_eq!(text, shipped);
     assert!(text.contains("instructions = '''"), "{text}");
+    assert!(text.starts_with("# A medulla agent template"), "{text}");
 
     // An edit survives a second install, which only reports what it skipped.
     std::fs::write(
@@ -294,4 +308,72 @@ fn the_dirs_are_home_then_project_and_collapse_when_they_are_one() {
         template_dirs(&dev, Path::new(".")),
         vec![PathBuf::from(".medulla/agents")]
     );
+}
+
+#[test]
+fn every_shipped_document_parses_and_names_its_own_id() {
+    // The catalog is only as good as its documents: a typo in one would drop a
+    // role silently, since parsing skips what it cannot read.
+    let files = default_template_files();
+    assert_eq!(
+        files.len(),
+        default_templates().len(),
+        "a document failed to parse"
+    );
+    for (name, body) in files {
+        let stem = name.strip_suffix(".toml").expect("a .toml document");
+        let parsed = super::store::parse_template(body, "unused-fallback")
+            .unwrap_or_else(|err| panic!("{name}: {err}"));
+        // Every shipped document names its id explicitly, so the filename and
+        // the id can never drift apart.
+        assert_eq!(parsed.id, stem, "{name} names a different id");
+    }
+}
+
+#[test]
+fn a_directory_that_cannot_be_read_is_reported_rather_than_skipped() {
+    // A file where a directory is expected fails with something other than
+    // NotFound, which is the branch that has to reach the operator.
+    let dir = TempDir::new("not-a-dir");
+    let path = dir.path().join("agents");
+    std::fs::write(&path, "I am a file").expect("write");
+
+    let store = load_templates(std::slice::from_ref(&path));
+    assert!(store.is_empty());
+    assert_eq!(store.errors.len(), 1);
+    assert!(store.errors[0].contains("agents"), "{:?}", store.errors);
+}
+
+#[test]
+fn install_reports_a_directory_it_cannot_create() {
+    let dir = TempDir::new("blocked");
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, "not a directory").expect("write");
+
+    let err = install_default_templates(&blocker.join("agents")).unwrap_err();
+    assert!(
+        matches!(
+            err.kind(),
+            std::io::ErrorKind::NotADirectory | std::io::ErrorKind::PermissionDenied
+        ),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn the_install_summary_says_what_happened() {
+    let mut outcome = InstallOutcome {
+        dir: PathBuf::from("/tmp/agents"),
+        ..Default::default()
+    };
+    assert!(outcome.summary().starts_with("No templates to install"));
+
+    outcome.written = vec!["a.toml".into()];
+    assert!(outcome.summary().contains("Installed 1 template into"));
+
+    outcome.skipped = vec!["b.toml".into(), "c.toml".into()];
+    assert!(outcome.summary().contains("(2 already there)"));
+
+    outcome.written.clear();
+    assert!(outcome.summary().contains("2 templates already installed"));
 }

@@ -27,6 +27,11 @@ impl App {
         }
     }
 
+    /// How many templates the catalog page is listing. Test/inspection seam.
+    pub fn template_row_count(&self) -> usize {
+        crate::ui::fleet::template_rows(&self.fleet_capacity(), &self.fleet_roster()).len()
+    }
+
     /// Write the built-in catalog into the store, then re-read it.
     ///
     /// Existing files are left alone, so this is safe to run on a store the

@@ -332,8 +332,8 @@ impl App {
         }
     }
 
-    /// Draw the bottom status line: the backend host, the update badge, and the
-    /// right-aligned stream-health + status text.
+    /// Draw the bottom status line: the connection dot and backend host, the
+    /// update badge, and the right-aligned status text.
     ///
     /// No product name — the wordmark is already on the Overview tab, and a
     /// status bar that opens by telling you which program you are running spends
@@ -343,7 +343,9 @@ impl App {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(area);
+        let (dot, dot_color) = self.connection_dot();
         let mut spans = vec![
+            Span::styled(format!("{dot} "), Style::default().fg(dot_color)),
             // The backend the session is attached to. Host only — the scheme and
             // path are noise in a one-line status bar, and the host is what
             // distinguishes prod from staging from a local dev server.
@@ -363,30 +365,34 @@ impl App {
             ));
         }
         f.render_widget(Paragraph::new(TLine::from(spans)), halves[0]);
-        // Stream health sits right next to the status when a cycle runs under a
-        // runtime that tracks one (the core runtime); otherwise just the status.
-        let mut right: Vec<Span> = Vec::new();
-        if self.snapshot.running {
-            if let Some(st) = self.runtime.stream_state() {
-                let c = match st {
-                    medulla::runtime::StreamState::Live => Color::Green,
-                    medulla::runtime::StreamState::Resyncing => Color::Yellow,
-                    medulla::runtime::StreamState::Stalled => Color::Red,
-                };
-                right.push(Span::styled(
-                    format!("{} {}  ", st.glyph(), st.label()),
-                    Style::default().fg(c),
-                ));
-            }
-        }
-        right.push(Span::styled(
-            self.status.clone(),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
         f.render_widget(
-            Paragraph::new(TLine::from(right)).alignment(Alignment::Right),
+            Paragraph::new(TLine::from(Span::styled(
+                self.status.clone(),
+                Style::default().add_modifier(Modifier::DIM),
+            )))
+            .alignment(Alignment::Right),
             halves[1],
         );
+    }
+
+    /// The connection glyph and colour for the status line's backend host.
+    ///
+    /// Read from the runtime's event-stream health, which is the closest thing
+    /// to a live socket state the UI can see: the core runtime reports `Live`
+    /// once its stream is attached and contiguous, `Resyncing` while connecting,
+    /// reconnecting, or recovering a sequence gap, and `Stalled` when the
+    /// transport is unavailable.
+    ///
+    /// Runtimes with no stream to track (the mock and plain-HTTP backends)
+    /// report nothing, and get a dim hollow dot rather than a green one — an
+    /// unknown connection must not read as a healthy one.
+    fn connection_dot(&self) -> (char, Color) {
+        match self.runtime.stream_state() {
+            Some(medulla::runtime::StreamState::Live) => ('●', Color::Green),
+            Some(medulla::runtime::StreamState::Resyncing) => ('◌', Color::Yellow),
+            Some(medulla::runtime::StreamState::Stalled) => ('✕', Color::Red),
+            None => ('○', Color::DarkGray),
+        }
     }
 
     /// Draw the tab bar and record each tab's column span for click hit-testing.

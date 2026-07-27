@@ -14,13 +14,19 @@
 //! the whole UI layer, neither of which is unix-only.
 //!
 //! [`demo`] holds the env-gated stand-in fleet used to exercise the UI without a
-//! backend; nothing in this module reads it.
+//! backend; nothing in this module reads it. [`builtin`] holds the default
+//! agent-template catalog every install starts with — additive, and always
+//! outranked by a declared template of the same id.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod builtin;
+#[cfg(test)]
+mod builtin_tests;
 mod demo;
 
+pub use builtin::{builtin_templates, with_builtin_templates};
 pub use demo::{
     demo_agents, demo_capacity, demo_fleet_requested, demo_requested_from, DEMO_FLEET_ENV,
 };

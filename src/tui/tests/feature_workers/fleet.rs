@@ -83,6 +83,45 @@ fn the_demo_flag_stands_a_fleet_in_only_when_nothing_is_declared() {
 }
 
 #[test]
+fn the_catalog_carries_the_built_in_coding_roles_beside_the_declared_ones() {
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("Agent Templates");
+    let out = render(&mut app, 160, 44);
+
+    // The scripted runtime declares one template; the built-ins fill the rest,
+    // so the page is useful before anyone writes a catalog.
+    assert!(out.contains("Implementer"), "declared role: {out}");
+    for role in ["Code Reviewer", "Debugger", "Doc Writer"] {
+        assert!(out.contains(role), "missing built-in {role}: {out}");
+    }
+    assert!(
+        !out.contains("No agent templates declared"),
+        "the catalog is never empty now: {out}"
+    );
+}
+
+#[test]
+fn a_declared_template_replaces_the_built_in_of_the_same_id() {
+    // The mock declares `implementer`, which is also a built-in id: the
+    // declared record wins, so the catalog lists it once.
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("Agent Templates");
+    let out = render(&mut app, 200, 44);
+    assert_eq!(
+        out.matches("Implementer").count(),
+        1,
+        "one row per template id: {out}"
+    );
+    // Built-ins are additive, not privileged: the mock harness allowlists only
+    // `implementer`, and the defaults respect that rather than routing around it.
+    assert!(out.contains("Implementer · reasoning · 1 place"), "{out}");
+    assert!(
+        out.contains("Code Reviewer · reasoning · nowhere allows it"),
+        "an allowlist still binds the built-ins: {out}"
+    );
+}
+
+#[test]
 fn the_selected_agent_shows_its_placement_and_compact_meters() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Agents");

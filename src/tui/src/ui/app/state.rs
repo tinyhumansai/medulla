@@ -548,6 +548,11 @@ impl App {
     /// reports none (the mock, or a backend that has not answered yet). They are
     /// not merged: two half-descriptions of one fleet interleaved would be
     /// harder to trust than whichever one is authoritative.
+    ///
+    /// The template catalog is the exception. Its built-in coding roles are
+    /// merged into whatever wins, by id, so a fresh install has a catalog to
+    /// provision from without anyone declaring one — and an operator who
+    /// declares a role of the same id still gets theirs.
     pub(super) fn fleet_capacity(&self) -> medulla::runtime::CapacitySnapshot {
         let mut declared = if self.snapshot.capacity.is_empty() {
             self.loaded.config.fleet.capacity()
@@ -563,7 +568,11 @@ impl App {
         // The locally registered peers are hosts too, and they are frequently
         // the only capacity a hub-backed session has. Declared records win on a
         // collision; the registry only ever adds machines nothing else named.
-        merge_capacity(&declared, &registry_capacity(&self.runtime.workers()))
+        let merged = merge_capacity(&declared, &registry_capacity(&self.runtime.workers()));
+        // The built-in coding roles come last and only fill gaps: a declared
+        // template of the same id wins, so the catalog is never empty on a fresh
+        // install and never overrides what an operator actually said.
+        medulla::runtime::with_builtin_templates(&merged)
     }
 
     /// The agent identities the fleet surfaces place.

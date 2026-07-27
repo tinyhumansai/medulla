@@ -118,6 +118,7 @@ The full documentation is at **[tinyhumans.gitbook.io/medulla](https://tinyhuman
 
 - [Getting Started](https://tinyhumans.gitbook.io/medulla/developers/getting-started): install, build, run, first login.
 - [CLI Reference](https://tinyhumans.gitbook.io/medulla/developers/cli-reference): the TUI, the daemon, the harness wrappers, self-update.
+- [ACP harness transport](docs/acp-harnesses.md): use one standard protocol for Claude Code, Codex, and OpenCode.
 - [Configuration](https://tinyhumans.gitbook.io/medulla/developers/configuration): the Medulla home, layered config, and the three runtimes.
 - [Authentication](https://tinyhumans.gitbook.io/medulla/developers/authentication): the browser loopback login flow and token handling.
 - [Architecture](https://tinyhumans.gitbook.io/medulla/developers/architecture): the SDK/TUI split, runtime adapters, RLM, and the tiny.place bridge.

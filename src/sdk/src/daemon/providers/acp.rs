@@ -1,0 +1,269 @@
+//! ACP-backed harness execution.
+//!
+//! This module is the provider-neutral process boundary for daemon tasks. Claude
+//! Code and Codex are reached through their official ACP adapters; OpenCode
+//! exposes ACP directly. Everything above this module continues to consume the
+//! stable Medulla semantic-event surface.
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use agent_client_protocol::schema::v1::{
+    CancelNotification, ContentBlock, Error as AcpError, InitializeRequest, LoadSessionRequest,
+    NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionNotification, SessionUpdate,
+};
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
+use serde_json::{json, Value};
+
+use crate::daemon::mappers::HarnessSemanticEvent;
+use crate::tinyplace::{HarnessEvent, HarnessProvider};
+
+use super::types::{OnEvent, RunTaskOptions, RunTaskResult};
+
+/// Environment switch selecting ACP instead of legacy provider JSONL.
+pub const HARNESS_PROTOCOL_ENV: &str = "MEDULLA_HARNESS_PROTOCOL";
+
+/// Whether this task explicitly requests the ACP transport.
+pub(super) fn uses_acp(options: &RunTaskOptions) -> bool {
+    options
+        .env
+        .get(HARNESS_PROTOCOL_ENV)
+        .is_some_and(|value| value.eq_ignore_ascii_case("acp"))
+}
+
+/// Execute one task through the standard Agent Client Protocol.
+pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
+    let agent = agent_for(&options);
+    let state = Arc::new(Mutex::new(FoldState::new(options.on_event)));
+    let notification_state = state.clone();
+    let approve = options.skip_permissions;
+    let cwd = PathBuf::from(&options.cwd);
+    let resume = options.resume_session_id.clone();
+    let prompt = options.prompt.clone();
+    let abort = options.abort.clone();
+    let provider = options.provider;
+    let timeout = Duration::from_millis(options.timeout_ms);
+
+    agent_client_protocol::Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                notification_state.lock().unwrap().fold(notification.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |request: RequestPermissionRequest, responder, _cx| {
+                let outcome = if approve {
+                    request
+                        .options
+                        .first()
+                        .map(|option| {
+                            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                                option.option_id.clone(),
+                            ))
+                        })
+                        .unwrap_or(RequestPermissionOutcome::Cancelled)
+                } else {
+                    RequestPermissionOutcome::Cancelled
+                };
+                responder.respond(RequestPermissionResponse::new(outcome))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+
+            let session_id = match resume {
+                Some(id) => {
+                    connection
+                        .send_request(LoadSessionRequest::new(id.clone(), cwd.clone()))
+                        .block_task()
+                        .await?;
+                    id.into()
+                }
+                None => {
+                    connection
+                        .send_request(NewSessionRequest::new(cwd))
+                        .block_task()
+                        .await?
+                        .session_id
+                }
+            };
+
+            let request = connection
+                .send_request(PromptRequest::new(
+                    session_id.clone(),
+                    vec![ContentBlock::from(prompt)],
+                ))
+                .block_task();
+            let idle_state = state.clone();
+            let idle = async move {
+                loop {
+                    let deadline = idle_state.lock().unwrap().last_activity + timeout;
+                    tokio::time::sleep_until(deadline.into()).await;
+                    if Instant::now().duration_since(idle_state.lock().unwrap().last_activity)
+                        >= timeout
+                    {
+                        break;
+                    }
+                }
+            };
+            tokio::pin!(request);
+            tokio::pin!(idle);
+            tokio::select! {
+                result = &mut request => {
+                    result?;
+                }
+                _ = abort.cancelled() => {
+                    connection
+                        .send_notification(CancelNotification::new(session_id.clone()))
+                        ?;
+                    return Err(AcpError::request_cancelled());
+                }
+                _ = &mut idle => {
+                    connection.send_notification(CancelNotification::new(session_id.clone()))?;
+                    return Err(AcpError::new(
+                        -32603,
+                        format!("ACP task idle for {}ms (no updates)", timeout.as_millis()),
+                    ));
+                }
+            }
+
+            let state = state.lock().unwrap();
+            Ok(RunTaskResult {
+                provider,
+                reply: state.reply(),
+                events: state.events,
+                usage: None,
+                session_id: Some(session_id.to_string()),
+            })
+        })
+        .await
+        .map_err(|error| format!("{} ACP error: {error}", provider.as_str()))
+}
+
+/// Construct the ACP server command for a supported harness.
+fn agent_for(options: &RunTaskOptions) -> AcpAgent {
+    let config = match options.provider {
+        HarnessProvider::Claude => {
+            AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])
+        }
+        HarnessProvider::Codex => {
+            AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/codex-acp@latest"])
+        }
+        HarnessProvider::Opencode => AcpAgentConfig::new(crate::tinyplace::env::provider_bin(
+            HarnessProvider::Opencode,
+            &options.env,
+        ))
+        .arg("acp"),
+    };
+    AcpAgent::new(config.envs(options.env.clone()))
+}
+
+pub(super) struct FoldState {
+    text: String,
+    events: usize,
+    on_event: Option<OnEvent>,
+    last_activity: Instant,
+}
+
+impl FoldState {
+    pub(super) fn new(on_event: Option<OnEvent>) -> Self {
+        Self {
+            text: String::new(),
+            events: 0,
+            on_event,
+            last_activity: Instant::now(),
+        }
+    }
+
+    /// Fold a standard ACP update into Medulla's existing semantic event model.
+    pub(super) fn fold(&mut self, update: SessionUpdate) {
+        self.last_activity = Instant::now();
+        let value = serde_json::to_value(&update).unwrap_or(Value::Null);
+        let kind = value
+            .get("sessionUpdate")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let (event_kind, role, payload) = match kind {
+            "agent_message_chunk" => {
+                let text = content_text(value.get("content"));
+                self.text.push_str(&text);
+                ("agent_message", "agent", json!({ "text": text }))
+            }
+            "agent_thought_chunk" => (
+                "agent_thought",
+                "agent",
+                json!({ "text": content_text(value.get("content")) }),
+            ),
+            "tool_call" => (
+                "tool_call",
+                "agent",
+                json!({
+                    "call_id": value.get("toolCallId"),
+                    "tool_name": value.get("kind"),
+                    "display": value.get("title"),
+                    "input": value.get("rawInput"),
+                }),
+            ),
+            "tool_call_update" => (
+                "tool_result",
+                "tool",
+                json!({
+                    "call_id": value.get("toolCallId"),
+                    "status": value.get("status"),
+                    "output": value.get("rawOutput"),
+                }),
+            ),
+            "plan" => ("plan", "agent", value.clone()),
+            "usage_update" => ("usage", "system", value.clone()),
+            _ => ("status", "system", value.clone()),
+        };
+        let semantic = HarnessSemanticEvent {
+            line: self.events as i64,
+            timestamp_ms: now_ms(),
+            record_type: format!("acp:{kind}"),
+            event: HarnessEvent {
+                kind: event_kind.to_string(),
+                role: role.to_string(),
+                payload,
+                ..Default::default()
+            },
+        };
+        self.events += 1;
+        if let Some(callback) = self.on_event.as_mut() {
+            callback(&semantic);
+        }
+    }
+
+    pub(super) fn reply(&self) -> String {
+        if self.text.trim().is_empty() {
+            "ACP agent completed without a text response.".to_string()
+        } else {
+            self.text.clone()
+        }
+    }
+}
+
+fn content_text(content: Option<&Value>) -> String {
+    content
+        .and_then(|value| value.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
+}

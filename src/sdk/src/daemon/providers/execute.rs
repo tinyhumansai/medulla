@@ -56,6 +56,9 @@ pub fn with_auth_hint(message: &str) -> String {
 /// Run one delegated task headlessly, retrying transient opencode SQLite-lock
 /// exits with jittered exponential backoff.
 pub async fn run_provider_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
+    if super::acp::uses_acp(&options) {
+        return super::acp::run_acp_task(options).await;
+    }
     let mut on_event = options.on_event;
     let mut on_stdin = options.on_stdin;
     let spec = RunSpec {

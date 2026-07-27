@@ -35,6 +35,7 @@ anyhow = "1"
 tracing = "0.1"
 base64 = "0.22"
 async-trait = "0.1"
+agent-client-protocol = "2"
 dirs = "6"
 # Advisory file locks that work on both unix (flock) and Windows (LockFileEx)
 # and are released by the OS when the holding process dies — what lets a

@@ -46,7 +46,10 @@ fn digest(value: &str) -> String {
 impl StateStore for FileStateStore {
     async fn load(&self, key: &str) -> Result<Option<Value>> {
         let path = self.path(key);
-        match std::fs::read(&path) {
+        // `tokio::fs` rather than `std::fs`: these run on the runtime's worker
+        // threads alongside every other node in the graph, and a blocking read
+        // here stalls whatever else is scheduled there.
+        match tokio::fs::read(&path).await {
             Ok(body) => serde_json::from_slice(&body)
                 .map(Some)
                 .map_err(|err| EngineError::Capability(format!("state: {key}: {err}"))),
@@ -56,11 +59,13 @@ impl StateStore for FileStateStore {
     }
 
     async fn store(&self, key: &str, value: Value) -> Result<()> {
-        std::fs::create_dir_all(&self.dir)
+        tokio::fs::create_dir_all(&self.dir)
+            .await
             .map_err(|err| EngineError::Capability(format!("state: {key}: {err}")))?;
         let body = serde_json::to_vec(&value)
             .map_err(|err| EngineError::Capability(format!("state: {key}: {err}")))?;
-        std::fs::write(self.path(key), body)
+        tokio::fs::write(self.path(key), body)
+            .await
             .map_err(|err| EngineError::Capability(format!("state: {key}: {err}")))
     }
 }

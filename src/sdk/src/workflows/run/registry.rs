@@ -6,14 +6,58 @@
 //! RAII guard so no exit path can forget to clean up.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tokio::sync::Notify;
 
 use crate::workflows::RunId;
 
+/// A run's cancellation state.
+///
+/// The flag is what makes a cancel durable. `Notify::notify_waiters` wakes only
+/// the tasks already waiting and stores no permit, so a cancel arriving between
+/// the guard being claimed and the run reaching its `select!` would be dropped
+/// on the floor — precisely the window claiming early was supposed to protect.
+/// The flag records that it happened; the notify only wakes whoever is asleep.
+#[derive(Debug, Default)]
+pub struct CancelSignal {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+impl CancelSignal {
+    /// Mark the run cancelled and wake anyone waiting.
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    /// Whether a cancel has already been signalled.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Resolve as soon as the run is cancelled, now or later.
+    ///
+    /// Returns immediately for a cancel that arrived before this was awaited,
+    /// which is the whole point of the flag.
+    pub async fn cancelled(&self) {
+        if self.is_cancelled() {
+            return;
+        }
+        // Register interest *before* re-checking: a cancel landing between the
+        // check above and the await would otherwise be missed too.
+        let waiting = self.notify.notified();
+        if self.is_cancelled() {
+            return;
+        }
+        waiting.await;
+    }
+}
+
 /// Cancellation signals for runs currently executing in this process.
-type Registry = Mutex<HashMap<RunId, Arc<Notify>>>;
+type Registry = Mutex<HashMap<RunId, Arc<CancelSignal>>>;
 
 /// The process-wide registry.
 fn registry() -> &'static Registry {
@@ -28,7 +72,7 @@ fn registry() -> &'static Registry {
 /// happens to reuse its id.
 pub struct RunGuard {
     id: RunId,
-    signal: Arc<Notify>,
+    signal: Arc<CancelSignal>,
 }
 
 impl RunGuard {
@@ -37,8 +81,8 @@ impl RunGuard {
     /// Call this *before* the run starts, not inside it: a cancel that arrives
     /// while the run is still being set up must find something to cancel, or it
     /// is silently lost.
-    pub fn register(id: &str) -> (Self, Arc<Notify>) {
-        let signal = Arc::new(Notify::new());
+    pub fn register(id: &str) -> (Self, Arc<CancelSignal>) {
+        let signal = Arc::new(CancelSignal::default());
         registry()
             .lock()
             .expect("run registry lock")
@@ -58,12 +102,12 @@ impl RunGuard {
     /// safe against two frames arriving together — a `is_running` test followed
     /// by a `register` would let both through the gap. Returns `None` when the
     /// id is taken, which the caller should report rather than run.
-    pub fn claim(id: &str) -> Option<(Self, Arc<Notify>)> {
+    pub fn claim(id: &str) -> Option<(Self, Arc<CancelSignal>)> {
         let mut runs = registry().lock().expect("run registry lock");
         if runs.contains_key(id) {
             return None;
         }
-        let signal = Arc::new(Notify::new());
+        let signal = Arc::new(CancelSignal::default());
         runs.insert(id.to_string(), signal.clone());
         Some((
             Self {
@@ -103,7 +147,7 @@ pub fn cancel(id: &str) -> bool {
     let runs = registry().lock().expect("run registry lock");
     match runs.get(id) {
         Some(signal) => {
-            signal.notify_waiters();
+            signal.cancel();
             true
         }
         None => false,

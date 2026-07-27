@@ -168,7 +168,7 @@ pub async fn run_workflow(
     // happened to look at first.
     let settled = tokio::select! {
         biased;
-        _ = cancelled.notified() => Err(Settle::Cancelled),
+        _ = cancelled.cancelled() => Err(Settle::Cancelled),
         result = &mut bounded => match result {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(err)) => Err(Settle::Failed(err)),
@@ -240,12 +240,16 @@ pub async fn resume_workflow(
             record.status
         )));
     }
-    if !approvals
+    // Either decision counts: rejecting the only gate a run is holding is a
+    // legitimate way to settle it, so requiring an approval would make
+    // `--reject` unusable on a single-gate workflow.
+    let names_a_pending_gate = approvals
         .iter()
-        .any(|id| record.pending_approvals.contains(id))
-    {
+        .chain(rejections.iter())
+        .any(|id| record.pending_approvals.contains(id));
+    if !names_a_pending_gate {
         return Err(WorkflowError::Engine(format!(
-            "run '{run_id}' is waiting on {}; the approvals given name none of them",
+            "run '{run_id}' is waiting on {}; the decisions given name none of them",
             record.pending_approvals.join(", ")
         )));
     }
@@ -293,7 +297,7 @@ pub async fn resume_workflow(
 
     let settled = tokio::select! {
         biased;
-        _ = cancelled.notified() => Err(Settle::Cancelled),
+        _ = cancelled.cancelled() => Err(Settle::Cancelled),
         result = &mut bounded => match result {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(err)) => Err(Settle::Failed(err)),

@@ -555,3 +555,71 @@ async fn the_same_run_id_cannot_start_twice_concurrently() {
     cancel("dup");
     assert_eq!(first.await.unwrap().unwrap().status, RunStatus::Cancelled);
 }
+
+#[tokio::test]
+async fn a_cancel_that_arrives_before_the_run_waits_is_not_lost() {
+    // `notify_waiters` wakes only tasks already waiting and stores no permit,
+    // so without a durable flag a cancel landing in the setup window would be
+    // dropped and the run would carry on regardless.
+    let harness = Harness::new();
+    harness.install(&gated(), "gated");
+    let (guard, signal) = super::RunGuard::register("early");
+    assert!(cancel("early"), "the run is registered");
+    assert!(
+        signal.is_cancelled(),
+        "the cancel must be recorded, not just signalled"
+    );
+
+    // Awaiting afterwards resolves immediately rather than hanging forever.
+    tokio::time::timeout(std::time::Duration::from_secs(2), signal.cancelled())
+        .await
+        .expect("a cancel that already happened must not block");
+    drop(guard);
+}
+
+#[tokio::test]
+async fn a_resume_may_reject_the_only_gate_without_approving_anything() {
+    let harness = Harness::new();
+    harness.install(&gated(), "gated");
+    run_workflow(
+        harness.context(Arc::new(StubDispatch::default())),
+        "gated",
+        "run-reject",
+        json!({}),
+    )
+    .await
+    .unwrap();
+
+    // Rejecting is a legitimate way to settle a run; requiring an approval
+    // would make --reject unusable on a single-gate workflow.
+    let settled = resume_workflow(
+        harness.context(Arc::new(StubDispatch::default())),
+        "run-reject",
+        Vec::new(),
+        vec!["review".into()],
+    )
+    .await
+    .expect("a rejection is a decision");
+
+    assert!(settled.status.is_settled(), "got {:?}", settled.status);
+}
+
+#[tokio::test]
+async fn a_disabled_sub_workflow_is_refused_during_resolution() {
+    use tinyflows::caps::WorkflowResolver;
+
+    let harness = Harness::new();
+    let mut child = parse_workflow(&gated(), "child").unwrap();
+    // The fixture document declares its own id, which wins over the filename.
+    child.id = "child".into();
+    child.enabled = false;
+    harness.store.save(&child).unwrap();
+
+    let resolver = StoreWorkflowResolver::new(harness.store.clone());
+    let err = resolver
+        .resolve("child")
+        .await
+        .expect_err("disabling must hold for a child too");
+
+    assert!(err.to_string().contains("disabled"), "got {err}");
+}

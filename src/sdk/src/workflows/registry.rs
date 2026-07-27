@@ -32,6 +32,12 @@ impl StoreWorkflowResolver {
 impl WorkflowResolver for StoreWorkflowResolver {
     async fn resolve(&self, workflow_id: &str) -> Result<WorkflowGraph> {
         match self.store.get(workflow_id) {
+            // Disabling a workflow has to mean it does not run, including as
+            // somebody else's child: the check in `run_workflow` guards only
+            // the root graph.
+            Ok(Some(record)) if !record.enabled => Err(EngineError::Capability(format!(
+                "sub_workflow: workflow '{workflow_id}' is disabled"
+            ))),
             Ok(Some(record)) => Ok(record.graph),
             Ok(None) => Err(EngineError::Capability(format!(
                 "sub_workflow: no saved workflow found for workflow_id '{workflow_id}'"

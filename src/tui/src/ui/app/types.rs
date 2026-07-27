@@ -487,6 +487,13 @@ pub struct App {
     /// pass should not do I/O. `r` re-reads it, as it does for templates.
     #[cfg(feature = "workflows")]
     pub(super) workflows: Vec<medulla::workflows::WorkflowSummary>,
+    /// The selected workflow's runs, read when the selection changes rather
+    /// than on every frame.
+    #[cfg(feature = "workflows")]
+    pub(super) workflow_runs: Vec<medulla::workflows::RunRecord>,
+    /// Why the run history could not be read, if it could not.
+    #[cfg(feature = "workflows")]
+    pub(super) workflow_runs_error: Option<String>,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.

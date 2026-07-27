@@ -19,6 +19,7 @@
 //! injection that could choose the `agent_ref` would be choosing which machine
 //! runs the next instruction.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -100,6 +101,13 @@ pub struct HarnessAgentRunner {
     settings: Arc<CapabilitySettings>,
     /// The run this belongs to, used to build ids a `task_abort` can match.
     run_id: String,
+    /// Distinguishes one dispatch from the next within this run.
+    ///
+    /// Two parallel nodes routed to the same worker — the common case, since
+    /// both may omit `agent_ref` — would otherwise share a wire id, and a
+    /// worker dedupes on `sender + taskId`. One of the two would be rejected as
+    /// a duplicate of the other.
+    sequence: AtomicU64,
 }
 
 impl HarnessAgentRunner {
@@ -114,6 +122,7 @@ impl HarnessAgentRunner {
             dispatch,
             settings,
             run_id: run_id.into(),
+            sequence: AtomicU64::new(0),
         }
     }
 
@@ -130,7 +139,11 @@ impl HarnessAgentRunner {
             AgentRoute::Template(name) => name.clone(),
             AgentRoute::Default => "default".to_string(),
         };
-        let task_id = format!("wf:{}:{suffix}", self.run_id);
+        // The sequence is what keeps two concurrent nodes on one worker
+        // distinguishable; the route name is there so a worker-side log says
+        // which step it is looking at.
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let task_id = format!("wf:{}:{suffix}#{sequence}", self.run_id);
         TaskRequest {
             // Distinct ids on purpose: the worker dedupes on the wire id, while
             // the orchestrator aborts by the run id — so aborting the run

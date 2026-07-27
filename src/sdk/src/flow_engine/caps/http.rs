@@ -162,13 +162,28 @@ impl AllowlistHttpClient {
 /// workflow means reaching services that trusted the network boundary.
 pub fn is_private_addr(addr: &std::net::IpAddr) -> bool {
     match addr {
-        std::net::IpAddr::V4(v4) => {
-            v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
-        }
+        std::net::IpAddr::V4(v4) => is_private_v4(v4),
         std::net::IpAddr::V6(v6) => {
-            v6.is_loopback() || v6.is_unspecified() || v6.segments()[0] & 0xffc0 == 0xfe80
+            // An IPv4-mapped address is an IPv4 address wearing a hat:
+            // `::ffff:127.0.0.1` reaches loopback just as `127.0.0.1` does, so
+            // it must be judged by the same rules rather than falling through
+            // the v6 checks below.
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_private_v4(&mapped);
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // link-local fe80::/10
+                || v6.segments()[0] & 0xffc0 == 0xfe80
+                // unique-local fc00::/7 — the v6 answer to RFC 1918
+                || v6.segments()[0] & 0xfe00 == 0xfc00
         }
     }
+}
+
+/// The IPv4 ranges a workflow must never reach.
+fn is_private_v4(addr: &std::net::Ipv4Addr) -> bool {
+    addr.is_loopback() || addr.is_private() || addr.is_link_local() || addr.is_unspecified()
 }
 
 /// Every address `host` resolves to, refused if any is private.

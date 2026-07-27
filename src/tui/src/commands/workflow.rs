@@ -100,9 +100,9 @@ async fn resume(
     cwd: &std::path::Path,
     run_id: &str,
 ) -> anyhow::Result<Value> {
-    if parsed.approve.is_empty() {
+    if parsed.approve.is_empty() && parsed.reject.is_empty() {
         anyhow::bail!(
-            "resume: name at least one gate to release with --approve <node-id> \
+            "resume: name at least one gate with --approve <node-id> or --reject <node-id> \
              (medulla workflow get-run {run_id} lists what it is waiting on)"
         );
     }

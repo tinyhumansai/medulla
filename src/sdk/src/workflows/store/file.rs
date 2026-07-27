@@ -330,6 +330,12 @@ fn read_workflow(path: &Path) -> Result<WorkflowRecord, String> {
         .unwrap_or_default();
     let mut record =
         parse_workflow(&text, stem).map_err(|err| format!("{}: {err}", path.display()))?;
+    // A document can deserialize cleanly and still be a graph the engine will
+    // not compile — no trigger, an edge to a node that is not there. Catching
+    // it here means a listing only ever shows workflows that would actually
+    // run, and the operator hears about the broken file by name.
+    validate_graph(&record.id, &record.graph)
+        .map_err(|err| format!("{}: {err}", path.display()))?;
     record.source_path = Some(path.to_path_buf());
     Ok(record)
 }
@@ -434,9 +440,11 @@ fn write_atomic(path: &Path, body: &[u8]) -> Result<(), WorkflowError> {
         })?;
     }
     // Appended rather than substituted for the extension, so an id containing a
-    // dot cannot collide with a different workflow's temporary file.
+    // dot cannot collide with a different workflow's temporary file — and
+    // carrying a unique token, so two writers racing on the *same* id cannot
+    // scribble over each other's scratch file before either rename lands.
     let mut tmp_name = path.as_os_str().to_os_string();
-    tmp_name.push(TMP_SUFFIX);
+    tmp_name.push(format!("{TMP_SUFFIX}.{}", uuid::Uuid::new_v4()));
     let tmp = PathBuf::from(tmp_name);
     std::fs::write(&tmp, body).map_err(|source| WorkflowError::Io {
         path: tmp.clone(),

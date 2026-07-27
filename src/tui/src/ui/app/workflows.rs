@@ -42,6 +42,42 @@ impl App {
         &self.workflows
     }
 
+    /// The selected workflow's runs, as last read.
+    pub(in crate::ui::app) fn workflow_runs(&self) -> &[medulla::workflows::RunRecord] {
+        &self.workflow_runs
+    }
+
+    /// Why the run history could not be read, if it could not.
+    ///
+    /// Kept so the page can say "unreadable" rather than silently showing the
+    /// same thing it shows for "never run" — those are different problems and
+    /// only one of them is fine.
+    pub(in crate::ui::app) fn workflow_runs_error(&self) -> Option<&str> {
+        self.workflow_runs_error.as_deref()
+    }
+
+    /// Re-read the selected workflow's run history.
+    ///
+    /// Called when the selection or the catalogue changes, never from a render
+    /// pass: drawing a frame must not touch the disk.
+    pub(in crate::ui::app) fn reload_workflow_runs(&mut self) {
+        let Some(workflow) = self.selected_workflow().map(|w| w.id.clone()) else {
+            self.workflow_runs.clear();
+            self.workflow_runs_error = None;
+            return;
+        };
+        match self.workflow_store().list_runs(&workflow) {
+            Ok(runs) => {
+                self.workflow_runs = runs;
+                self.workflow_runs_error = None;
+            }
+            Err(err) => {
+                self.workflow_runs.clear();
+                self.workflow_runs_error = Some(err.to_string());
+            }
+        }
+    }
+
     /// Re-read the workflow store into the page.
     ///
     /// An unreadable store leaves the page empty and says so, rather than
@@ -53,6 +89,7 @@ impl App {
                 let count = workflows.len();
                 self.workflows = workflows;
                 self.workflow_index = self.workflow_index.min(count.saturating_sub(1));
+                self.reload_workflow_runs();
                 self.set_status(format!(
                     "{count} workflow{} in {}",
                     if count == 1 { "" } else { "s" },

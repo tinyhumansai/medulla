@@ -523,3 +523,69 @@ async fn an_allowlisted_name_that_resolves_to_loopback_is_still_refused() {
         "got {message}"
     );
 }
+
+#[test]
+fn an_ipv4_mapped_ipv6_loopback_is_recognised_as_private() {
+    // `::ffff:127.0.0.1` reaches loopback exactly as `127.0.0.1` does, so
+    // judging it by the v6 rules alone would let it through.
+    for mapped in [
+        "::ffff:127.0.0.1",
+        "::ffff:10.0.0.1",
+        "::ffff:169.254.169.254",
+    ] {
+        let addr: std::net::IpAddr = mapped.parse().unwrap();
+        assert!(super::caps::http::is_private_addr(&addr), "{mapped}");
+    }
+    // Unique-local fc00::/7 — the v6 answer to RFC 1918.
+    let ula: std::net::IpAddr = "fd00::1".parse().unwrap();
+    assert!(super::caps::http::is_private_addr(&ula));
+
+    let public: std::net::IpAddr = "::ffff:8.8.8.8".parse().unwrap();
+    assert!(!super::caps::http::is_private_addr(&public));
+}
+
+#[tokio::test]
+async fn two_nodes_on_one_worker_get_distinct_wire_ids() {
+    // A worker dedupes on sender + taskId, so two parallel nodes sharing an id
+    // would have one silently rejected as a duplicate of the other.
+    let root = tempfile::tempdir().unwrap();
+    let dispatch = RecordingDispatch::replying("ok");
+    let caps = build_capabilities(
+        settings(root.path()),
+        HostServices {
+            dispatch: dispatch.clone(),
+            resolver: empty_resolver(root.path()),
+            http_credentials: HashMap::new(),
+        },
+        "workflow:demo",
+        "run-dup",
+    );
+
+    let graph: WorkflowGraph = serde_json::from_value(json!({
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "start" },
+            { "id": "left", "kind": "agent", "name": "L", "config": { "prompt": "a" } },
+            { "id": "right", "kind": "agent", "name": "R", "config": { "prompt": "b" } }
+        ],
+        "edges": [
+            { "from_node": "t", "to_node": "left" },
+            { "from_node": "t", "to_node": "right" }
+        ]
+    }))
+    .unwrap();
+    let compiled = tinyflows::compiler::compile(&graph).unwrap();
+    tinyflows::engine::run(&compiled, json!({}), &caps)
+        .await
+        .expect("runs");
+
+    let ids: Vec<String> = dispatch
+        .requests()
+        .iter()
+        .map(|r| r.task_id.clone())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert_ne!(
+        ids[0], ids[1],
+        "both nodes routed to the default worker: {ids:?}"
+    );
+}

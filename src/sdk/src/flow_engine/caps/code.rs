@@ -70,6 +70,10 @@ impl CodeRunner for ProcessCodeRunner {
             .arg(&script)
             .arg(&input_path)
             .current_dir(dir.path())
+            // Tokio does not kill a child when its future is dropped, so a
+            // timeout would otherwise leave an infinite script running forever
+            // with nothing holding a handle to it.
+            .kill_on_drop(true)
             .output();
         let output = tokio::time::timeout(self.timeout, run)
             .await

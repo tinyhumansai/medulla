@@ -97,17 +97,26 @@ impl App {
         );
     }
 
-    /// Append the selected workflow's recent runs.
+    /// Append the selected workflow's recent runs, from the cache.
+    ///
+    /// Reads nothing: the history is re-read when the selection or the
+    /// catalogue changes, because a render pass must not touch the disk.
     fn push_recent_runs(&self, lines: &mut Vec<TLine<'static>>, width: usize) {
-        let Some(workflow) = self.selected_workflow() else {
+        if self.selected_workflow().is_none() {
             return;
-        };
-        let runs = self
-            .workflow_store()
-            .list_runs(&workflow.id)
-            .unwrap_or_default();
-
+        }
         lines.push(TLine::from(""));
+        if let Some(error) = self.workflow_runs_error() {
+            // Distinct from "no runs yet": one of these is fine and the other
+            // is something an operator should go and look at.
+            lines.push(TLine::from(Span::styled(
+                clip(&format!("run history unreadable: {error}"), width.max(8)),
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+            return;
+        }
+        let runs = self.workflow_runs();
+
         if runs.is_empty() {
             lines.push(TLine::from(Span::styled(
                 "No runs yet.",
@@ -120,7 +129,7 @@ impl App {
             format!("recent runs · {}", runs.len()),
             Style::default().add_modifier(Modifier::DIM),
         )));
-        for row in run_rows(&runs).iter().take(RECENT_RUNS) {
+        for row in run_rows(runs).iter().take(RECENT_RUNS) {
             let mut style = Style::default();
             if row.degraded {
                 style = style.add_modifier(Modifier::DIM);

@@ -164,9 +164,12 @@ fn refresh_key_requests_usage_and_c_toggles_config() {
 fn tab_cycle_into_usage_requests_load() {
     let (mut app, _rt) = usage_app();
     // Walk the tab ring one full lap; entering Usage must yield LoadUsage.
+    // Generous headroom on the press count: a tab may spend a press or two on
+    // its own panes before handing Tab back (Workflows walks three), so a lap is
+    // longer than the number of tabs.
     app.tab_index = 0;
     let mut saw_load = false;
-    for _ in 0..TABS.len() {
+    for _ in 0..(TABS.len() * 4) {
         if let Some(medulla_tui::ui::app::Cmd::LoadUsage) = key(&mut app, KeyCode::Tab) {
             saw_load = true;
         }

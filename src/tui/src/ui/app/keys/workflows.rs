@@ -1,12 +1,14 @@
 //! Keyboard handling for the Workflows tab.
 //!
-//! Three panes share one keyboard, so which one has it decides what a key means
-//! — the same settlement the Agents tab makes for its composer. `Tab` cycles the
-//! panes and `Esc` steps back toward the rail; inside the copilot every
-//! printable key types, so no instruction loses a character to a shortcut.
+//! Two levels of focus, split by *mode*, exactly as Settings and Routing split
+//! theirs: the left-hand sidebar owns the keyboard until you step into the
+//! content with `Enter` (or `→`), and `Esc` steps back out. The sidebar is the
+//! catalogue rather than a fixed page list, so `↑↓` walk workflows and their
+//! runs and the digits jump straight to one.
 //!
-//! The pane-independent actions (`r` to re-read the store, `Enter` to run) are
-//! bound on the rail and the canvas only, for that reason.
+//! `Tab` is deliberately *not* bound here. It is the one gesture for walking the
+//! top-level views, and a tab that consumed it would be a tab inside a tab —
+//! the copilot is reached with `c` instead, and `Esc` comes back.
 
 use crossterm::event::KeyCode;
 
@@ -32,25 +34,26 @@ impl App {
         shift: bool,
         alt: bool,
     ) -> WorkflowsKey {
-        // Tab cycles the panes rather than the top-level tabs while this tab is
-        // open. Shift+Tab still leaves, so a keyboard is never trapped here.
-        if code == KeyCode::Tab && !shift {
-            self.wf.focus = match self.wf.focus {
-                WorkflowFocus::Rail => WorkflowFocus::Canvas,
-                WorkflowFocus::Canvas => WorkflowFocus::Copilot,
-                WorkflowFocus::Copilot => WorkflowFocus::Rail,
-            };
-            return WorkflowsKey::Handled(None);
-        }
         match self.wf.focus {
-            WorkflowFocus::Rail => self.workflow_rail_key(code),
+            WorkflowFocus::Sidebar => self.workflow_sidebar_key(code),
             WorkflowFocus::Canvas => self.workflow_canvas_key(code),
             WorkflowFocus::Copilot => self.workflow_copilot_key(code, shift, alt),
         }
     }
 
-    /// The catalogue rail: browse, run, simulate, re-read.
-    fn workflow_rail_key(&mut self, code: KeyCode) -> WorkflowsKey {
+    /// The catalogue sidebar: browse, jump, open, run, simulate, re-read.
+    fn workflow_sidebar_key(&mut self, code: KeyCode) -> WorkflowsKey {
+        // The digits jump to a workflow by position, as they jump to a subpage
+        // everywhere else. Handled before the shared navigator because that one
+        // indexes a fixed page list and this list is the store's.
+        if let KeyCode::Char(digit @ '1'..='9') = code {
+            let index = digit as usize - '1' as usize;
+            if index < self.workflows.len() {
+                self.select_workflow(index);
+                self.wf.focus = WorkflowFocus::Canvas;
+            }
+            return WorkflowsKey::Handled(None);
+        }
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_workflow_rail(true);
@@ -60,10 +63,15 @@ impl App {
                 self.move_workflow_rail(false);
                 WorkflowsKey::Handled(None)
             }
-            // Right steps into the graph, which is where the cursor was heading
-            // — the rail is a chooser and the canvas is the thing chosen.
-            KeyCode::Right | KeyCode::Char('l') => {
+            // Enter and `→` both step into the content, which is what the rest
+            // of the app's sidebars do.
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                 self.wf.focus = WorkflowFocus::Canvas;
+                self.set_status("Graph · Esc to go back to the list");
+                WorkflowsKey::Handled(None)
+            }
+            KeyCode::Char('c') => {
+                self.wf.focus = WorkflowFocus::Copilot;
                 WorkflowsKey::Handled(None)
             }
             KeyCode::Char('r') => {
@@ -71,7 +79,10 @@ impl App {
                 WorkflowsKey::Handled(None)
             }
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
-            KeyCode::Enter => WorkflowsKey::Handled(self.run_selected_workflow()),
+            KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
+            // Every other character is swallowed so a stray letter cannot fire a
+            // content-pane action from the menu — the settlement Settings makes.
+            KeyCode::Char(_) => WorkflowsKey::Handled(None),
             _ => WorkflowsKey::Unhandled,
         }
     }
@@ -79,16 +90,23 @@ impl App {
     /// The canvas: walk the graph, open the inspector, act on the workflow.
     fn workflow_canvas_key(&mut self, code: KeyCode) -> WorkflowsKey {
         match code {
+            // Esc steps back out to the list, the same gesture every other
+            // content pane in the app answers to.
+            KeyCode::Esc => {
+                self.wf.focus = WorkflowFocus::Sidebar;
+                self.set_status("Workflows · list");
+                WorkflowsKey::Handled(None)
+            }
             KeyCode::Left | KeyCode::Char('h') => {
-                // Left off the first node steps back to the rail rather than
-                // doing nothing, which is what makes the three panes feel like
-                // one surface.
+                // Left off the first node steps back to the list rather than
+                // doing nothing, which is what makes the panes feel like one
+                // surface.
                 if self
                     .workflow_layout()
                     .moved(self.wf.node_index, Move::Back)
                     .is_none()
                 {
-                    self.wf.focus = WorkflowFocus::Rail;
+                    self.wf.focus = WorkflowFocus::Sidebar;
                 } else {
                     self.move_graph_cursor(Move::Back);
                 }
@@ -110,16 +128,16 @@ impl App {
                 self.wf.inspector_open = !self.wf.inspector_open;
                 WorkflowsKey::Handled(None)
             }
+            KeyCode::Char('c') => {
+                self.wf.focus = WorkflowFocus::Copilot;
+                WorkflowsKey::Handled(None)
+            }
             KeyCode::Char('r') => {
                 self.reload_workflows();
                 WorkflowsKey::Handled(None)
             }
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
-            KeyCode::Enter => WorkflowsKey::Handled(self.run_selected_workflow()),
-            KeyCode::Esc => {
-                self.wf.focus = WorkflowFocus::Rail;
-                WorkflowsKey::Handled(None)
-            }
+            KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
             _ => WorkflowsKey::Unhandled,
         }
     }
@@ -155,10 +173,10 @@ impl App {
             }
             // Esc clears a draft first — that is the destructive-looking action
             // and must stay one keypress from a half-typed instruction. With
-            // nothing to clear it steps back out to the rail.
+            // nothing to clear it steps back to the graph it is about.
             KeyCode::Esc => {
                 if self.wf.draft.text.is_empty() {
-                    self.wf.focus = WorkflowFocus::Rail;
+                    self.wf.focus = WorkflowFocus::Canvas;
                 } else {
                     self.wf.draft = Draft::new();
                 }

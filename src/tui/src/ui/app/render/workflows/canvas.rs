@@ -83,7 +83,7 @@ impl App {
         if let Some(run) = self.selected_workflow_run() {
             title.push_str(&format!(
                 " · run {} {}",
-                short_run_id(&run.id),
+                medulla::ui::workflows::rows::short_run_id(&run.id),
                 medulla::ui::workflows::status_label(run.status)
             ));
         }
@@ -261,14 +261,4 @@ fn pad(text: &str, width: usize) -> String {
 /// Map a colour name from the SDK's vocabulary to a ratatui colour.
 fn color_named(name: &str) -> Color {
     super::super::color(name)
-}
-
-/// A run id shortened to something a panel title has room for.
-fn short_run_id(id: &str) -> String {
-    id.rsplit('-')
-        .next()
-        .unwrap_or(id)
-        .chars()
-        .take(8)
-        .collect()
 }

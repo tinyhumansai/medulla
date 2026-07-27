@@ -295,13 +295,85 @@ fn the_footer_teaches_this_tabs_bindings_rather_than_the_agents_tabs() {
     let screen = render(&mut app);
 
     assert!(
-        screen.contains("Tab panes"),
-        "Tab cycles this tab's panes, not the top-level views: {screen}"
+        screen.contains("c copilot"),
+        "the copilot is reached with c, not Tab: {screen}"
     );
     assert!(screen.contains("i inspect"), "{screen}");
     assert!(
         !screen.contains("⌥A answer"),
         "the Agents-tab steering keys do nothing here"
+    );
+}
+
+#[test]
+fn tab_leaves_the_view_rather_than_cycling_panes_inside_it() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+    let workflows = app.tab_index;
+
+    app.on_event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+
+    assert_ne!(
+        app.tab_index, workflows,
+        "Tab belongs to the top-level view ring; a tab inside a tab would trap it"
+    );
+}
+
+#[test]
+fn enter_opens_the_graph_and_esc_unwinds_one_level_at_a_time() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+    let press = |app: &mut App, code| {
+        app.on_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    };
+    assert_eq!(app.wf_focus(), WorkflowFocus::Sidebar);
+
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.wf_focus(), WorkflowFocus::Canvas);
+
+    press(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.wf_focus(), WorkflowFocus::Copilot);
+
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.wf_focus(), WorkflowFocus::Canvas);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.wf_focus(), WorkflowFocus::Sidebar);
+}
+
+#[test]
+fn a_digit_jumps_straight_to_that_workflow_and_opens_it() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let (_home, mut app) = app_with(&[diamond("first"), diamond("second")], &[]);
+
+    app.on_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('2'),
+        KeyModifiers::NONE,
+    )));
+
+    assert_eq!(
+        app.workflow_summaries()[app.selected_workflow_index()].id,
+        "second"
+    );
+    assert_eq!(
+        app.wf_focus(),
+        WorkflowFocus::Canvas,
+        "a digit opens the page it jumps to, as it does on every other nav"
+    );
+}
+
+#[test]
+fn a_stray_letter_in_the_sidebar_does_not_fire_a_content_action() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+
+    app.on_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('i'),
+        KeyModifiers::NONE,
+    )));
+
+    assert!(
+        !app.wf_inspector_open(),
+        "the inspector belongs to the canvas; the menu swallows its letters"
     );
 }
 

@@ -411,15 +411,15 @@ impl App {
 
     /// Draw the footer hint line.
     ///
-    /// Per tab, because the bindings are. `Tab` cycles the top-level views
-    /// everywhere except Workflows, where it cycles that tab's three panes — a
-    /// footer that claimed otherwise would be teaching the wrong key.
+    /// Per tab, because the bindings are: the Agents steering chords do nothing
+    /// on Workflows, and a footer that advertised them would be teaching keys
+    /// that are not there.
     pub(super) fn draw_footer(&mut self, f: &mut Frame, area: Rect) {
         let mouse = if self.mouse_capture { "●" } else { "○" };
         #[cfg(feature = "workflows")]
         if self.tab() == "Workflows" {
             let text = format!(
-                "Tab panes · ⇧Tab views · ←→ follow edges · ↑↓ lanes · i inspect · ⏎ run · d dry-run · r refresh · ^O mouse {mouse} · /help",
+                "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh · ^O mouse {mouse} · /help",
             );
             f.render_widget(
                 Paragraph::new(TLine::from(Span::styled(

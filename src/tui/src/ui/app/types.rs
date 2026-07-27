@@ -233,16 +233,20 @@ pub enum AgentsFocus {
 
 /// Which pane of the Workflows tab has the keyboard.
 ///
-/// Three panes, one cursor. The rail picks *what* is being looked at, the canvas
+/// Focus is split by *mode*, the way Settings and Routing split theirs: the
+/// sidebar picks what is being looked at and hands over with `Enter`, the canvas
 /// walks the graph, and the copilot is a composer that takes every printable
-/// key — so which one is focused has to be explicit, exactly as it is on Agents.
-/// `Tab` cycles them and `Esc` steps back out toward the rail.
+/// key. `Esc` steps back out one level at a time.
+///
+/// `Tab` is not part of this. It belongs to the top-level view ring, and a tab
+/// that cycled its own panes with it would be a tab inside a tab — `c` reaches
+/// the copilot instead.
 #[cfg(feature = "workflows")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorkflowFocus {
-    /// The catalogue rail: arrows walk workflows and their runs.
+    /// The catalogue sidebar: arrows walk workflows and their runs.
     #[default]
-    Rail,
+    Sidebar,
     /// The graph canvas: arrows walk nodes along their edges.
     Canvas,
     /// The copilot composer: printable keys type, Enter sends.

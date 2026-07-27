@@ -156,6 +156,23 @@ impl App {
         self.workflows.get(self.workflow_index)
     }
 
+    /// Which of the tab's three panes has the keyboard. Test seam.
+    #[cfg(test)]
+    pub(in crate::ui::app) fn wf_focus(&self) -> super::types::WorkflowFocus {
+        self.wf.focus
+    }
+
+    /// Whether the node inspector is expanded. Test seam.
+    #[cfg(test)]
+    pub(in crate::ui::app) fn wf_inspector_open(&self) -> bool {
+        self.wf.inspector_open
+    }
+
+    /// Which workflow the rail cursor is on. Test/inspection seam.
+    pub fn selected_workflow_index(&self) -> usize {
+        self.workflow_index
+    }
+
     /// How many workflows the page is listing. Test/inspection seam.
     pub fn workflow_row_count(&self) -> usize {
         self.workflows.len()

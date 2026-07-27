@@ -12,6 +12,8 @@ pub mod clock;
 pub mod config;
 pub mod contacts;
 pub mod daemon;
+#[cfg(feature = "workflows")]
+pub mod flow_engine;
 pub mod harness_contract;
 pub mod harness_work;
 pub mod history_upload;

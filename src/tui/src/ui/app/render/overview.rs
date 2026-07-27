@@ -1,5 +1,5 @@
-//! The Overview tab: the logo, the session/orchestration/tiny.place panels, and
-//! the live-activity feed.
+//! The Overview tab: the logo, the this-device/orchestration panels, and the
+//! live-activity feed.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -18,79 +18,35 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(4),
+                Constraint::Length(5),
                 Constraint::Length(7),
                 Constraint::Min(0),
             ])
             .split(area);
-        let logo: Vec<TLine> = crate::ui::LOGO
-            .iter()
-            .map(|row| {
+        // The band is one row taller than the art so the wordmark gets a blank
+        // line of breathing room under the header/tab strip instead of butting
+        // straight up against it.
+        let logo: Vec<TLine> = std::iter::once(TLine::from(""))
+            .chain(crate::ui::LOGO.iter().map(|row| {
                 TLine::from(Span::styled(
                     *row,
                     Style::default()
                         .fg(self.theme.primary)
                         .add_modifier(Modifier::BOLD),
                 ))
-            })
+            }))
             .collect();
         f.render_widget(Paragraph::new(Text::from(logo)), rows[0]);
         let rows = &rows[1..];
+        // Two columns: what this device is running, and what the orchestration
+        // is doing with it. The old Session panel restated the worker harness's
+        // state a column over, so the two are one panel now.
         let top = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(33),
-                Constraint::Percentage(33),
-                Constraint::Percentage(34),
-            ])
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(rows[0]);
 
-        // Session panel.
-        let mut session = vec![
-            TLine::from(format!("id {}", clip(&self.snapshot.session_id, 24))),
-            TLine::from(format!(
-                "turns {}",
-                self.snapshot.messages.len().div_ceil(2)
-            )),
-            TLine::from(Span::styled(
-                if self.snapshot.running {
-                    "● running"
-                } else {
-                    "● idle"
-                },
-                Style::default().fg(if self.snapshot.running {
-                    Color::Yellow
-                } else {
-                    Color::Green
-                }),
-            )),
-        ];
-        session.push(if self.snapshot.async_mode {
-            TLine::from(Span::styled(
-                "async ● on",
-                Style::default().fg(Color::Magenta),
-            ))
-        } else {
-            TLine::from(Span::styled(
-                "async ○ off",
-                Style::default().add_modifier(Modifier::DIM),
-            ))
-        });
-        session.push(if self.snapshot.tracing {
-            TLine::from(Span::styled(
-                "langfuse ● tracing",
-                Style::default().fg(Color::Green),
-            ))
-        } else {
-            TLine::from(Span::styled(
-                "langfuse ○ off",
-                Style::default().add_modifier(Modifier::DIM),
-            ))
-        });
-        f.render_widget(
-            Paragraph::new(Text::from(session)).block(self.panel("Session")),
-            top[0],
-        );
+        self.draw_this_device(f, top[0]);
 
         // Orchestration panel.
         let running_calls = stream::running_calls(&self.snapshot.events);
@@ -118,13 +74,13 @@ impl App {
                 Style::default().fg(Color::Yellow),
             )));
         }
+        // tiny.place is a property of the wider run rather than of this device,
+        // so its presence summary rides along in this column when enabled.
+        orch.extend(self.tinyplace_lines());
         f.render_widget(
             Paragraph::new(Text::from(orch)).block(self.panel("Orchestration")),
             top[1],
         );
-
-        // Third panel: tiny.place presence, or the local worker harness.
-        self.draw_overview_third(f, top[2]);
 
         // Live activity.
         let take = self.visible_count().saturating_sub(1).max(5);
@@ -147,83 +103,123 @@ impl App {
         );
     }
 
-    /// The Overview tab's third top panel: the tiny.place presence summary, or
-    /// the local worker-harness configuration when tiny.place is not enabled.
-    pub(super) fn draw_overview_third(&self, f: &mut Frame, area: Rect) {
-        if let Some(tp) = &self.loaded.config.tinyplace {
-            let peers: Vec<_> = self
-                .snapshot
-                .roster
-                .iter()
-                .filter(|a| a.metadata.get("harness").and_then(|v| v.as_str()) == Some("tinyplace"))
-                .collect();
-            let readings = peers
-                .iter()
-                .filter(|a| self.snapshot.presence.contains_key(&a.id))
-                .count();
-            let online = peers
-                .iter()
-                .filter(|a| {
-                    self.snapshot
-                        .presence
-                        .get(&a.id)
-                        .map(|p| p.online)
-                        .unwrap_or(false)
-                })
-                .count();
-            let all_sessions: Vec<_> = self.snapshot.sessions.values().flatten().collect();
-            let live = all_sessions.iter().filter(|s| s.state != "ended").count();
-            let mut lines = vec![TLine::from(tp.base_url.clone())];
-            if readings > 0 {
-                lines.push(TLine::from(Span::styled(
-                    format!("agents {online}/{} online", peers.len()),
-                    Style::default().fg(if online > 0 { Color::Green } else { Color::Red }),
-                )));
-            } else {
-                lines.push(TLine::from(format!(
-                    "agents {} · presence pending",
-                    peers.len()
-                )));
-            }
-            if !all_sessions.is_empty() {
-                lines.push(TLine::from(format!(
-                    "sessions {live} live / {} known",
-                    all_sessions.len()
-                )));
-            }
-            if let Some(me) = &self.snapshot.tinyplace {
-                let who = me.handle.clone().unwrap_or_else(|| clip(&me.agent_id, 24));
-                lines.push(TLine::from(format!("me {who}")));
-            } else {
-                lines.push(TLine::from(Span::styled(
-                    "me · connecting…",
+    /// The Overview tab's left panel: what this machine is running right now —
+    /// the live session, the worker harness driving it, and the run-wide toggles
+    /// that change how work leaves this device.
+    pub(super) fn draw_this_device(&self, f: &mut Frame, area: Rect) {
+        let worker = self.loaded.config.opencode.clone().unwrap_or_default();
+        let lines = vec![
+            TLine::from(vec![
+                Span::styled(
+                    if self.snapshot.running {
+                        "● running"
+                    } else {
+                        "● idle"
+                    },
+                    Style::default().fg(if self.snapshot.running {
+                        Color::Yellow
+                    } else {
+                        Color::Green
+                    }),
+                ),
+                Span::styled(
+                    format!(
+                        " · {} turns · {}",
+                        self.snapshot.messages.len().div_ceil(2),
+                        clip(&self.snapshot.session_id, 16)
+                    ),
                     Style::default().add_modifier(Modifier::DIM),
-                )));
-            }
-            f.render_widget(
-                Paragraph::new(Text::from(lines)).block(self.panel("tiny.place")),
-                area,
-            );
-        } else {
-            let worker = self.loaded.config.opencode.clone().unwrap_or_default();
-            let lines = vec![
-                TLine::from(vec![
-                    Span::styled("harness ", Style::default().fg(Color::Magenta)),
-                    Span::raw(worker_harness_label(&worker.command)),
-                ]),
-                TLine::from(if worker.model.is_empty() {
-                    "model —".to_string()
+                ),
+            ]),
+            TLine::from(vec![
+                Span::styled("harness ", Style::default().fg(Color::Magenta)),
+                Span::raw(worker_harness_label(&worker.command)),
+            ]),
+            TLine::from(if worker.model.is_empty() {
+                "model —".to_string()
+            } else {
+                format!("model {}", worker.model)
+            }),
+            TLine::from(format!(
+                "agent {} · concurrency {}",
+                worker.agent, worker.max_concurrency
+            )),
+            // async and tracing share a row: both are one-bit run modes, and
+            // splitting them cost two of the five lines this panel has.
+            TLine::from(vec![
+                if self.snapshot.async_mode {
+                    Span::styled("async ● on", Style::default().fg(Color::Magenta))
                 } else {
-                    format!("model {}", worker.model)
-                }),
-                TLine::from(format!("agent {}", worker.agent)),
-                TLine::from(format!("concurrency {}", worker.max_concurrency)),
-            ];
-            f.render_widget(
-                Paragraph::new(Text::from(lines)).block(self.panel("Workers")),
-                area,
-            );
+                    Span::styled("async ○ off", Style::default().add_modifier(Modifier::DIM))
+                },
+                Span::styled(" · ", Style::default().add_modifier(Modifier::DIM)),
+                if self.snapshot.tracing {
+                    Span::styled("langfuse ● tracing", Style::default().fg(Color::Green))
+                } else {
+                    Span::styled(
+                        "langfuse ○ off",
+                        Style::default().add_modifier(Modifier::DIM),
+                    )
+                },
+            ]),
+        ];
+        f.render_widget(
+            Paragraph::new(Text::from(lines)).block(self.panel("This device")),
+            area,
+        );
+    }
+
+    /// The tiny.place presence summary appended to the Orchestration panel, or
+    /// nothing at all when tiny.place is not configured.
+    ///
+    /// Kept to two lines — peers online and who this node is — because the panel
+    /// it joins already spends most of its height on the run's own counters.
+    pub(super) fn tinyplace_lines(&self) -> Vec<TLine<'static>> {
+        if self.loaded.config.tinyplace.is_none() {
+            return Vec::new();
         }
+        let peers: Vec<_> = self
+            .snapshot
+            .roster
+            .iter()
+            .filter(|a| a.metadata.get("harness").and_then(|v| v.as_str()) == Some("tinyplace"))
+            .collect();
+        let readings = peers
+            .iter()
+            .filter(|a| self.snapshot.presence.contains_key(&a.id))
+            .count();
+        let online = peers
+            .iter()
+            .filter(|a| {
+                self.snapshot
+                    .presence
+                    .get(&a.id)
+                    .map(|p| p.online)
+                    .unwrap_or(false)
+            })
+            .count();
+        let mut lines = Vec::new();
+        if readings > 0 {
+            lines.push(TLine::from(Span::styled(
+                format!("tiny.place {online}/{} online", peers.len()),
+                Style::default().fg(if online > 0 { Color::Green } else { Color::Red }),
+            )));
+        } else {
+            lines.push(TLine::from(format!(
+                "tiny.place {} peers · presence pending",
+                peers.len()
+            )));
+        }
+        if let Some(me) = &self.snapshot.tinyplace {
+            let who = me.handle.clone().unwrap_or_else(|| clip(&me.agent_id, 24));
+            lines.push(TLine::from(format!("me {who}")));
+        } else {
+            lines.push(TLine::from(Span::styled(
+                "me · connecting…",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
+        lines
     }
 }
 

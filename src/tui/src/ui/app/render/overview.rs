@@ -18,11 +18,9 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                // The art's own top row is sparse — only the ascenders of "d",
-                // "l" and "ll" reach it — so the wordmark already reads as
-                // having space above it. The spare row goes underneath, where
-                // the glyphs sit hard on the baseline.
-                Constraint::Length(4),
+                // Exactly the art: no spare row above or below it. The panels
+                // below open with a border, which is separation enough.
+                Constraint::Length(3),
                 Constraint::Length(7),
                 Constraint::Min(0),
             ])

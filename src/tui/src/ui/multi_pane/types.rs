@@ -27,6 +27,59 @@ impl NavHits {
     }
 }
 
+/// One row of a navigation sidebar.
+///
+/// The intermediate form every sidebar in the app is built from, so a fixed page
+/// list (Settings, Routing) and a list read from a store (Workflows) render
+/// identically rather than approximately. Before this the Workflows rail
+/// reimplemented the marker, the selection styling, and the hint line, and had
+/// already drifted on two of the three.
+#[derive(Debug, Clone)]
+pub(crate) struct NavRow<'a> {
+    /// The text of the row, without marker, digit, or indent.
+    pub(crate) label: &'a str,
+    /// The digit that jumps here, when the row is one a digit can reach.
+    /// `None` for a heading or a child row, which are not jump targets.
+    pub(crate) jump: Option<usize>,
+    /// Leading spaces, for rows nested under the one above them.
+    pub(crate) indent: usize,
+    /// Whether the cursor is on this row.
+    pub(crate) selected: bool,
+    /// Whether the row is secondary — a heading, or an entry that is disabled
+    /// or otherwise not actionable.
+    pub(crate) dim: bool,
+    /// Whether a click on the row should select something. Headings are drawn
+    /// but inert, which is what keeps a click on one from selecting whichever
+    /// entry happens to share its offset.
+    pub(crate) selectable: bool,
+}
+
+impl<'a> NavRow<'a> {
+    /// A plain selectable row carrying `label`.
+    pub(crate) fn new(label: &'a str) -> Self {
+        Self {
+            label,
+            jump: None,
+            indent: 0,
+            selected: false,
+            dim: false,
+            selectable: true,
+        }
+    }
+
+    /// A display-only heading.
+    pub(crate) fn heading(label: &'a str) -> Self {
+        Self {
+            label,
+            jump: None,
+            indent: 0,
+            selected: false,
+            dim: true,
+            selectable: false,
+        }
+    }
+}
+
 /// What shared navigation did with one key press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NavAction {

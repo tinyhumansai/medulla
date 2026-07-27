@@ -1,10 +1,11 @@
 //! The catalogue sidebar: every installed workflow, with the selected one's runs
 //! indented beneath it.
 //!
-//! Styled like the Settings and Routing navs — a `▸` marker on the focused row,
-//! digits to jump, and a hint line that changes with focus — because it does the
-//! same job. The difference is that its entries come from the store rather than
-//! a fixed list, so it cannot use [`crate::ui::multi_pane::draw_nav`] directly.
+//! Drawn by [`crate::ui::multi_pane::draw_rows`], the same renderer behind the
+//! Settings and Routing navs, so the `▸` marker, the selection styling, the
+//! viewport, and the hint line are one implementation rather than three that
+//! agree only by inspection. What this module owns is the part that is genuinely
+//! specific: turning a workflow, and the runs nested under it, into rows.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -12,97 +13,83 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::ui::util::clip;
+use crate::ui::multi_pane::{self, NavRow};
 
 use super::super::super::types::{App, WorkflowFocus};
 use super::super::super::workflows::WorkflowRailRow;
+
+/// How far a run sits under the workflow it belongs to.
+const RUN_INDENT: usize = 2;
 
 impl App {
     /// Draw the catalogue and the selected workflow's run history.
     pub(super) fn draw_workflow_rail(&mut self, f: &mut Frame, area: Rect) {
         let focused = self.wf.focus == WorkflowFocus::Sidebar;
-        let rows = self.workflow_rail_rows();
         let block = crate::ui::widgets::panel(
             &self.theme,
-            format!("Workflows · {}", self.workflows.len()),
+            format!("Workflows · {}", self.workflow_summaries().len()),
             focused,
         );
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        if inner.height == 0 {
-            return;
-        }
-        let width = inner.width as usize;
 
+        let rows = self.workflow_rail_rows();
         if rows.is_empty() {
+            let inner = block.inner(area);
+            f.render_widget(block, area);
             f.render_widget(Paragraph::new(Text::from(empty_lines())), inner);
             return;
         }
 
-        // The cursor's row drives the viewport, so scrolling past the bottom of
-        // a long catalogue keeps the selection visible rather than the top.
-        let cursor = rows
-            .iter()
-            .position(|row| self.workflow_rail_selected(row))
-            .unwrap_or(0);
-        let capacity = (inner.height as usize).saturating_sub(1).max(1);
-        let start = crate::ui::selection::viewport_start(cursor, rows.len(), capacity);
+        // Labels are formatted per row and live nowhere on `App`, so they are
+        // built as owned strings first and the borrowing `NavRow`s point into
+        // them.
+        let labels: Vec<String> = rows.iter().map(rail_label).collect();
+        let nav_rows: Vec<NavRow> =
+            rows.iter()
+                .zip(labels.iter())
+                .map(|(row, label)| NavRow {
+                    label,
+                    jump: match row {
+                        // Only workflows are digit-jumpable. A run has no number an
+                        // operator could have read off the screen.
+                        WorkflowRailRow::Workflow { index, .. } => Some(index + 1),
+                        _ => None,
+                    },
+                    indent: match row {
+                        WorkflowRailRow::Workflow { .. } => 0,
+                        _ => RUN_INDENT,
+                    },
+                    selected: self.workflow_rail_selected(row),
+                    dim: match row {
+                        WorkflowRailRow::Workflow { row, .. }
+                        | WorkflowRailRow::Run { row, .. } => row.degraded,
+                        WorkflowRailRow::Note(_) => true,
+                    },
+                    selectable: !matches!(row, WorkflowRailRow::Note(_)),
+                })
+                .collect();
 
-        let mut lines: Vec<TLine> = Vec::new();
-        for row in rows.iter().skip(start).take(capacity) {
-            lines.push(self.rail_line(row, width, focused));
-        }
-        lines.push(TLine::from(Span::styled(
-            clip(
-                if focused {
-                    "↑↓ nav · ⏎ open · 1-9 jump"
-                } else {
-                    "Esc list · c copilot"
-                },
-                width,
-            ),
-            Style::default().add_modifier(Modifier::DIM),
-        )));
-        f.render_widget(Paragraph::new(Text::from(lines)), inner);
-    }
-
-    /// One sidebar row, styled for what it is and whether the cursor is on it.
-    ///
-    /// The marker distinguishes "this is the selection" from "the selection is
-    /// here *and* the sidebar has the keyboard", which is the same two-state
-    /// highlight the other navs use.
-    fn rail_line(&self, row: &WorkflowRailRow, width: usize, focused: bool) -> TLine<'static> {
-        let selected = self.workflow_rail_selected(row);
-        let (text, degraded) = match row {
-            WorkflowRailRow::Workflow { row, .. } => {
-                (format!("{} · {}", row.label, row.detail), row.degraded)
-            }
-            // A run is indented under its workflow, led by enough of its id to
-            // find it again with `medulla workflow get-run` and then by its
-            // status, which is what anyone scanning the rail is looking for.
-            WorkflowRailRow::Run { row, .. } => (
-                format!(
-                    "  {} {}",
-                    medulla::ui::workflows::rows::short_run_id(&row.label),
-                    row.detail
-                ),
-                row.degraded,
-            ),
-            WorkflowRailRow::Note(note) => (format!("  {note}"), true),
+        let hint = if focused {
+            "↑↓ nav · ⏎ open · 1-9 jump"
+        } else {
+            "Esc list · c copilot"
         };
-        let mut style = Style::default();
-        if degraded {
-            style = style.add_modifier(Modifier::DIM);
-        }
-        if selected {
-            style = if focused {
-                self.theme.selection()
-            } else {
-                Style::default().add_modifier(Modifier::BOLD)
-            };
-        }
-        let marker = if selected && focused { "▸" } else { " " };
-        TLine::from(Span::styled(clip(&format!("{marker}{text}"), width), style))
+        multi_pane::draw_rows(f, area, block, &self.theme, &nav_rows, focused, hint, 0);
+    }
+}
+
+/// The text of one rail row, without marker, digit, or indent.
+fn rail_label(row: &WorkflowRailRow) -> String {
+    match row {
+        WorkflowRailRow::Workflow { row, .. } => format!("{} · {}", row.label, row.detail),
+        // Led by enough of the run's id to find it again with
+        // `medulla workflow get-run`, then by its status — which is what anyone
+        // scanning the rail is actually looking for.
+        WorkflowRailRow::Run { row, .. } => format!(
+            "{} {}",
+            medulla::ui::workflows::rows::short_run_id(&row.label),
+            row.detail
+        ),
+        WorkflowRailRow::Note(note) => (*note).to_string(),
     }
 }
 

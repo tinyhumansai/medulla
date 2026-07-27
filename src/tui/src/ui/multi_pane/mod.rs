@@ -16,7 +16,7 @@ use crate::ui::theme::Theme;
 
 mod types;
 
-pub(crate) use types::{NavAction, NavHits};
+pub(crate) use types::{NavAction, NavHits, NavRow};
 
 #[cfg(test)]
 mod tests;
@@ -123,46 +123,121 @@ pub(crate) fn draw_nav(
     selected: usize,
     focused: bool,
 ) -> NavHits {
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    let dim = Style::default().add_modifier(Modifier::DIM);
     // The leading column exists to sit pages under their heading. A flat menu
     // has nothing to sit under, so indenting it only pushes every row a column
     // away from the border for no reason.
-    let pad = if groups.is_empty() { "" } else { " " };
-    let mut lines = Vec::new();
-    let mut hits = Vec::new();
+    let pad = usize::from(!groups.is_empty());
+    let mut rows: Vec<NavRow> = Vec::new();
     for (index, page) in pages.iter().enumerate() {
         if let Some((heading, _)) = groups.iter().find(|(_, start)| *start == index) {
-            lines.push(TLine::from(Span::styled(format!(" {heading}"), dim)));
+            rows.push(NavRow::heading(heading));
         }
-        // Recorded before the row is pushed: `lines.len()` is its offset from the
-        // top of the inner area, headings included.
-        if (lines.len() as u16) < inner.height {
-            hits.push((inner.y + lines.len() as u16, index));
+        rows.push(NavRow {
+            jump: Some(index + 1),
+            indent: pad,
+            selected: index == selected,
+            ..NavRow::new(page)
+        });
+    }
+    let hint = if focused {
+        "Esc menu".to_string()
+    } else {
+        format!("↑↓ nav · ⏎ open · 1-{} jump", pages.len())
+    };
+    // `focused` here means the *content* pane holds the keyboard — the sense
+    // this function has always been called with. `draw_rows` asks about the
+    // menu, so it is the negation.
+    draw_rows(f, area, block, theme, &rows, !focused, &hint, pad)
+}
+
+/// Draw an arbitrary list of [`NavRow`]s as a navigation sidebar.
+///
+/// The renderer behind [`draw_nav`], exposed because not every sidebar's rows
+/// come from a fixed page list — the Workflows catalogue reads its own from the
+/// store, and nesting a workflow's runs under it needs a row shape a `&[&str]`
+/// cannot express.
+///
+/// The viewport follows the cursor, so a catalogue longer than the pane keeps
+/// the selection on screen rather than the top of the list. Returns each
+/// selectable row's `(screen_row, index)` for click hit-testing, where the index
+/// counts selectable rows only — headings are drawn but never hit.
+///
+/// `nav_focused` asks whether *this menu* holds the keyboard — note that
+/// [`draw_nav`]'s own `focused` parameter asks the opposite question, about the
+/// content pane, and negates before calling here. The two sidebars in the app
+/// had disagreed about which state gets the `▸` marker and which gets the
+/// highlight; unified here so the marker always follows the keyboard.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_rows(
+    f: &mut Frame,
+    area: Rect,
+    block: Block<'_>,
+    theme: &Theme,
+    rows: &[NavRow<'_>],
+    nav_focused: bool,
+    hint: &str,
+    pad: usize,
+) -> NavHits {
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if inner.height == 0 || inner.width == 0 {
+        return NavHits::default();
+    }
+    let dim = Style::default().add_modifier(Modifier::DIM);
+    let width = inner.width as usize;
+
+    // One row is spent on the hint and one on the blank above it, so the list
+    // gets what remains.
+    let capacity = (inner.height as usize).saturating_sub(2).max(1);
+    let cursor = rows.iter().position(|row| row.selected).unwrap_or(0);
+    let start = crate::ui::selection::viewport_start(cursor, rows.len(), capacity);
+
+    let mut lines = Vec::new();
+    let mut hits = Vec::new();
+    // Counts selectable rows from the top of the whole list, not the viewport,
+    // so a click reports the same index whatever is scrolled into view.
+    let mut selectable = rows.iter().take(start).filter(|row| row.selectable).count();
+    for row in rows.iter().skip(start).take(capacity) {
+        if row.selectable {
+            // Recorded before the line is pushed: `lines.len()` is its offset
+            // from the top of the inner area, headings included.
+            hits.push((inner.y + lines.len() as u16, selectable));
+            selectable += 1;
         }
-        let style = match (index == selected, focused) {
-            (true, false) => theme.selection(),
-            (true, true) => Style::default().add_modifier(Modifier::BOLD),
+        let style = match (row.selected, nav_focused, row.dim) {
+            (true, true, _) => theme.selection(),
+            // Bold rather than the selection highlight: the cursor is still
+            // here, but the keyboard is in the content pane beside it.
+            (true, false, _) => Style::default().add_modifier(Modifier::BOLD),
+            (false, _, true) => dim,
             _ => Style::default(),
         };
-        let marker = if index == selected && focused {
+        let marker = if row.selected && nav_focused {
             "▸"
         } else {
             " "
         };
-        lines.push(TLine::from(Span::styled(
-            format!("{pad}{marker}{} {page} ", index + 1),
-            style,
-        )));
+        let jump = row.jump.map(|n| format!("{n} ")).unwrap_or_default();
+        let prefix = format!("{}{marker}{jump}", " ".repeat(row.indent));
+        // Only the label is clipped. `clip` collapses runs of whitespace, so
+        // clipping the whole composed row would eat the indent that says a run
+        // belongs to the workflow above it — and every nested row would sit
+        // flush against the border.
+        let text = format!(
+            "{prefix}{}",
+            crate::ui::util::clip(row.label, width.saturating_sub(prefix.chars().count()))
+        );
+        lines.push(TLine::from(Span::styled(text, style)));
     }
     lines.push(TLine::from(""));
+    // Same reason the row above clips only its label: the pad would not survive
+    // `clip`'s whitespace collapse.
+    let pad = " ".repeat(pad);
     lines.push(TLine::from(Span::styled(
-        if focused {
-            format!("{pad}Esc menu")
-        } else {
-            format!("{pad}↑↓ nav · ⏎ open · 1-{} jump", pages.len())
-        },
+        format!(
+            "{pad}{}",
+            crate::ui::util::clip(hint, width.saturating_sub(pad.chars().count()))
+        ),
         dim,
     )));
     f.render_widget(Paragraph::new(Text::from(lines)), inner);

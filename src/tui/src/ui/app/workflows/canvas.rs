@@ -89,14 +89,23 @@ impl App {
 
     /// How many layers the canvas can show at the current terminal width.
     ///
-    /// The rail and the copilot take fixed shares of the width, and a node box
-    /// plus the gutter between columns is a known number of cells, so this is
-    /// arithmetic rather than a measurement — which means the key handler can
-    /// scroll without waiting for a frame to have been drawn.
+    /// A node box plus the gutter between columns is a known number of cells, so
+    /// this is arithmetic rather than a measurement — which means the key
+    /// handler can scroll without waiting for a frame to have been drawn. The
+    /// rail is measured the same way the layout measures it, and the copilot
+    /// only takes a column on a terminal wide enough to seat it.
     pub(in crate::ui::app) fn visible_layers(&self) -> usize {
+        let rail = crate::ui::multi_pane::sidebar_width(
+            self.area.width,
+            self.workflow_rail_rows()
+                .iter()
+                .map(|row| self.workflow_rail_width(row))
+                .max()
+                .unwrap_or(0),
+        );
         let canvas = (self.area.width as usize)
-            .saturating_sub(super::super::render::workflows::RAIL_WIDTH as usize)
-            .saturating_sub(super::super::render::workflows::COPILOT_WIDTH as usize)
+            .saturating_sub(rail as usize)
+            .saturating_sub(self.copilot_column_width() as usize)
             .saturating_sub(2);
         (canvas / super::super::render::workflows::LAYER_STRIDE).max(1)
     }

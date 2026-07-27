@@ -393,13 +393,46 @@ fn a_stray_letter_in_the_sidebar_does_not_fire_a_content_action() {
 }
 
 #[test]
-fn a_narrow_terminal_still_draws_every_pane_without_panicking() {
+fn a_wide_terminal_seats_the_copilot_beside_the_graph() {
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+
+    let screen = render_sized(&mut app, 140, 24);
+
+    assert!(screen.contains("Workflows"), "{screen}");
+    assert!(screen.contains("Copilot"), "{screen}");
+    assert!(screen.contains("Start"), "the graph too: {screen}");
+}
+
+#[test]
+fn a_narrow_terminal_gives_the_canvas_the_room_instead_of_squeezing_three_panes() {
+    // Three columns on an 80-wide terminal left the canvas twelve columns —
+    // less than one node box. So the copilot yields until it is focused.
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 
     let screen = render_sized(&mut app, 80, 24);
 
-    assert!(screen.contains("Workflows"));
-    assert!(screen.contains("Copilot"));
+    assert!(screen.contains("Workflows"), "{screen}");
+    assert!(
+        screen.contains("Start"),
+        "the graph is readable rather than crushed: {screen}"
+    );
+    assert!(
+        !screen.contains("Copilot"),
+        "the copilot waits for focus on a narrow screen: {screen}"
+    );
+}
+
+#[test]
+fn a_focused_copilot_takes_the_content_pane_on_a_narrow_terminal() {
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+
+    app.wf.focus = WorkflowFocus::Copilot;
+    let screen = render_sized(&mut app, 80, 24);
+
+    assert!(screen.contains("Copilot"), "{screen}");
+    // The rail stays: it is how you get back, and which workflow the copilot is
+    // about is the one thing the conversation does not say.
+    assert!(screen.contains("Workflows"), "{screen}");
 }
 
 #[test]

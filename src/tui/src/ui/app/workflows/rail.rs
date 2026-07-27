@@ -66,6 +66,33 @@ impl App {
         rows
     }
 
+    /// The columns `row` wants, so the sidebar can be sized to its content.
+    ///
+    /// Counts the marker and the indent as well as the text, because those are
+    /// what a row is actually drawn with — sizing to the label alone clips every
+    /// row by the width of its own decoration.
+    pub(in crate::ui::app) fn workflow_rail_width(&self, row: &WorkflowRailRow) -> usize {
+        const MARKER: usize = 1;
+        const RUN_INDENT: usize = 2;
+        let (text, indent) = match row {
+            WorkflowRailRow::Workflow { index, row } => (
+                // The jump digit is drawn ahead of the label.
+                format!("{} {} · {}", index + 1, row.label, row.detail),
+                0,
+            ),
+            WorkflowRailRow::Run { row, .. } => (
+                format!(
+                    "{} {}",
+                    medulla::ui::workflows::rows::short_run_id(&row.label),
+                    row.detail
+                ),
+                RUN_INDENT,
+            ),
+            WorkflowRailRow::Note(note) => ((*note).to_string(), RUN_INDENT),
+        };
+        MARKER + indent + text.chars().count()
+    }
+
     /// Whether the rail cursor is on `row`.
     pub(in crate::ui::app) fn workflow_rail_selected(&self, row: &WorkflowRailRow) -> bool {
         match row {

@@ -20,6 +20,7 @@
 //! trait, so a remote catalog is a new implementation rather than a rewrite.
 
 mod registry;
+pub mod run;
 pub mod store;
 mod types;
 
@@ -27,6 +28,7 @@ mod types;
 mod tests;
 
 pub use registry::StoreWorkflowResolver;
+pub use run::{dry_run, resume_workflow, run_workflow, RunContext};
 pub use store::{
     new_run_record, parse_workflow, require, require_run, validate_graph, FileWorkflowStore,
     LoadReport, WorkflowStore,

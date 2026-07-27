@@ -252,10 +252,10 @@ mod tests;
 
 mod types;
 pub use fleet::{
-    builtin_templates, demo_agents, demo_capacity, demo_fleet_requested, demo_requested_from,
-    with_builtin_templates, AgentPlacement, AgentTemplate, AgentTemplateHarnessOverride,
-    CapacitySnapshot, HarnessBudget, HarnessDescriptor, HostDescriptor, HostResources,
-    WorkspaceDescriptor, WorkspaceProfile, DEMO_FLEET_ENV,
+    demo_agents, demo_capacity, demo_fleet_requested, demo_requested_from, AgentPlacement,
+    AgentTemplate, AgentTemplateHarnessOverride, CapacitySnapshot, HarnessBudget,
+    HarnessDescriptor, HostDescriptor, HostResources, WorkspaceDescriptor, WorkspaceProfile,
+    DEMO_FLEET_ENV,
 };
 pub use types::AgentDescriptor;
 pub use types::AgentPresence;

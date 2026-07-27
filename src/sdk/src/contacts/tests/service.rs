@@ -280,3 +280,119 @@ async fn spawn_contact_poll_fills_the_shared_book_and_stops_when_aborted() {
         "aborting the handle ends the loop"
     );
 }
+
+#[tokio::test]
+async fn a_master_paired_mid_session_is_admitted_without_a_restart() {
+    // The bug this prevents: the allowlist was seeded once, from the peers the
+    // config named at boot. Pairing a master from the daemon's Master tab wrote
+    // the config and told the operator it had worked, but the running desk had
+    // never heard of it — so the master's answering contact request queued as a
+    // stranger's, the Master row never came up, and the pairing only completed
+    // the next time the worker was restarted.
+    let relay = FakeRelay::with_incoming(&["master"]);
+    let desk = ContactDesk::new(
+        relay.clone() as Arc<dyn ContactRelay>,
+        AdmissionPolicy::Allowlist,
+        Vec::<String>::new(),
+    )
+    .with_now(clock());
+
+    desk.refresh().await;
+    assert_eq!(desk.pending_count(), 1, "not paired yet, so nothing admits");
+
+    desk.allow("master");
+    desk.refresh().await;
+
+    assert_eq!(relay.calls(), vec!["accept:master".to_string()]);
+    assert_eq!(desk.pending_count(), 0);
+    assert!(
+        desk.accepted().iter().any(|c| c.agent_id == "master"),
+        "the paired master is a contact now: {:?}",
+        desk.accepted()
+    );
+}
+
+#[tokio::test]
+async fn an_established_contact_is_narrated_by_id_not_only_counted() {
+    // "1 new contact" is not answerable: a peer that pairs itself settles with
+    // nobody deciding anything here, so the log has to say which peer it was.
+    let relay = FakeRelay::with_incoming(&["master"]);
+    let said = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = {
+        let said = said.clone();
+        Arc::new(move |line: &str| said.lock().unwrap().push(line.to_string()))
+    };
+    let desk = ContactDesk::new(
+        relay.clone() as Arc<dyn ContactRelay>,
+        AdmissionPolicy::All,
+        Vec::<String>::new(),
+    )
+    .with_now(clock())
+    .with_log(sink);
+
+    desk.refresh().await;
+
+    let lines = said.lock().unwrap().clone();
+    assert!(
+        lines.iter().any(|line| line.contains("master")),
+        "got {lines:?}"
+    );
+
+    // A second poll finds the same contact and must not narrate it again.
+    said.lock().unwrap().clear();
+    desk.refresh().await;
+    assert!(said.lock().unwrap().is_empty(), "got {:?}", said.lock());
+}
+
+#[tokio::test]
+async fn an_automatic_accept_the_relay_refused_is_retried_on_the_next_poll() {
+    // Where nobody is watching — the hub identity has no operator screen — a
+    // single transient `accept` failure used to strand the peer for the life of
+    // the process: `decide` recorded it as Failed, and only Pending records were
+    // candidates for auto-admission.
+    let relay = FakeRelay::with_incoming(&["worker"]);
+    *relay.fail_decision.lock().unwrap() = true;
+    let book = ContactBook::new(AdmissionPolicy::All, Vec::<String>::new());
+    let now = clock();
+
+    poll_once(relay.as_ref(), &book, &now).await.unwrap();
+    assert_eq!(book.get("worker").unwrap().state, RequestState::Failed);
+
+    *relay.fail_decision.lock().unwrap() = false;
+    poll_once(relay.as_ref(), &book, &now).await.unwrap();
+
+    assert_eq!(book.get("worker").unwrap().state, RequestState::Accepted);
+}
+
+#[tokio::test]
+async fn an_operator_decision_the_relay_refused_is_not_retried_as_an_accept() {
+    // The retry above must not reach across and re-decide for the operator: a
+    // decline that failed is theirs to repeat, and silently converting it into
+    // an auto-accept would be the opposite of what they asked for.
+    let relay = FakeRelay::with_incoming(&["stranger"]);
+    let book = ContactBook::default();
+    let now = clock();
+    poll_once(relay.as_ref(), &book, &now).await.unwrap();
+
+    *relay.fail_decision.lock().unwrap() = true;
+    let refused = decide(
+        relay.as_ref(),
+        &book,
+        "stranger",
+        ContactDecision::Decline,
+        false,
+        &now,
+    )
+    .await;
+    assert!(refused.is_err());
+    *relay.fail_decision.lock().unwrap() = false;
+
+    book.set_policy(AdmissionPolicy::All);
+    poll_once(relay.as_ref(), &book, &now).await.unwrap();
+
+    assert_eq!(
+        book.get("stranger").unwrap().state,
+        RequestState::Failed,
+        "an operator's failed decision waits for the operator"
+    );
+}

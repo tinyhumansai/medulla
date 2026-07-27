@@ -31,10 +31,13 @@ impl TaskRunner {
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
             let (sender, receiver) = oneshot::channel();
-            self.capabilities_waiters
-                .lock()
-                .await
-                .insert(correlation_id.clone(), sender);
+            self.capabilities_waiters.lock().await.insert(
+                correlation_id.clone(),
+                super::Probe {
+                    from: address.to_string(),
+                    tx: sender,
+                },
+            );
             let body = encode_task_frame(EncodeFrameInput {
                 kind: TaskFrameKind::Capabilities,
                 task_id: correlation_id.clone(),

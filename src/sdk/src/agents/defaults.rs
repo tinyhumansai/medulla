@@ -1,30 +1,24 @@
-//! The built-in agent-template catalog: a starting set of coding roles every
-//! install has, so the Templates surface is useful before anyone declares a
-//! catalog of their own.
+//! The built-in agent-template catalog: the coding roles every install knows
+//! without any files on disk.
 //!
-//! A fleet with no templates is a supported configuration, but an unhelpful
-//! first run: provisioning stays free-text and the catalog page has nothing to
-//! read. These are the roles that recur in nearly every repository — plan,
-//! implement, review, debug, verify, document, resolve conflicts, triage — each
-//! declared the same way an operator would declare it, so they are examples as
-//! much as defaults.
+//! These are what a client with no `.medulla/agents` store declares, and the
+//! corpus [`super::install`] writes into that store. They are deliberately
+//! ordinary — the roles that recur in nearly every repository, in the order the
+//! work happens — because a default catalog is read as an example of how to
+//! declare a template as much as it is used directly.
 //!
-//! Two rules keep them from getting in the way. They are **additive**: a
-//! declared template with the same id wins outright, which is how an operator
-//! retunes one without forking the list. And they claim **no harness kind** —
-//! an empty `harnesses` map means "runs anywhere", so a built-in template is
-//! never the reason a workspace has nothing it may provision.
+//! Two rules keep them out of the way. They claim **no harness kind**: an empty
+//! `harnesses` map means "runs anywhere", so a built-in role is never the reason
+//! a workspace has nothing it may provision. And they are always **outranked**
+//! by a template of the same id from the store or the config file.
 
 use serde_json::Map;
 
-use super::{AgentTemplate, CapacitySnapshot};
+use crate::runtime::fleet::AgentTemplate;
 
-/// The default template catalog: coding roles available on every install.
-///
-/// Ordered from the work that comes first (planning) to the work that closes a
-/// change out (triage, conflicts), because the catalog is rendered in
-/// declaration order and that is the order the roles are used in.
-pub fn builtin_templates() -> Vec<AgentTemplate> {
+/// The default coding catalog, in the order the work happens: plan, implement,
+/// test, review, then the roles that close a change out.
+pub fn default_templates() -> Vec<AgentTemplate> {
     vec![
         template(
             "plan-writer",
@@ -53,6 +47,20 @@ pub fn builtin_templates() -> Vec<AgentTemplate> {
             &["read", "search", "edit", "write", "shell"],
             "high",
             &["code", "implementation"],
+        ),
+        template(
+            "test-writer",
+            "Test Writer",
+            "Adds the tests a change is missing, covering the branches that actually matter.",
+            "Write the tests the code you are given is missing. Cover the behaviour and the \
+             branches that would break in production — error paths, boundaries, and the case \
+             the change was written for — not lines for a coverage number. Match the \
+             repository's test framework, layout, and naming. Every test must fail if the \
+             behaviour it names regresses; assert on real output, never on a mock you just \
+             configured.",
+            &["read", "search", "edit", "write", "shell"],
+            "medium",
+            &["code", "testing"],
         ),
         template(
             "code-reviewer",
@@ -96,20 +104,6 @@ pub fn builtin_templates() -> Vec<AgentTemplate> {
             &["code", "verification"],
         ),
         template(
-            "test-writer",
-            "Test Writer",
-            "Adds the tests a change is missing, covering the branches that actually matter.",
-            "Write the tests the code you are given is missing. Cover the behaviour and the \
-             branches that would break in production — error paths, boundaries, and the case \
-             the change was written for — not lines for a coverage number. Match the \
-             repository's test framework, layout, and naming. Every test must fail if the \
-             behaviour it names regresses; assert on real output, never on a mock you just \
-             configured.",
-            &["read", "search", "edit", "write", "shell"],
-            "medium",
-            &["code", "testing"],
-        ),
-        template(
             "doc-writer",
             "Doc Writer",
             "Documents modules, types, and public APIs in the repository's own style.",
@@ -149,6 +143,19 @@ pub fn builtin_templates() -> Vec<AgentTemplate> {
             &["code", "git"],
         ),
         template(
+            "pr-manager",
+            "PR Manager",
+            "Drives a pull request from its current state to a clean review handoff.",
+            "Take the pull request you are given to a clean handoff. Read its checks and its \
+             unresolved feedback, diagnose every failure at the root rather than skipping the \
+             check that caught it, fix what you are authorized to fix, and validate locally \
+             before pushing. Keep commits scoped and reply to the feedback you addressed. \
+             Report what remains, and never merge without explicit authority.",
+            &["read", "search", "edit", "shell"],
+            "high",
+            &["code", "pull-request"],
+        ),
+        template(
             "triager",
             "Triager",
             "Triages an issue or pull request: valid, duplicate, actionable, and what it needs next.",
@@ -162,30 +169,28 @@ pub fn builtin_templates() -> Vec<AgentTemplate> {
             "medium",
             &["code", "triage"],
         ),
+        template(
+            "repo-orchestrator",
+            "Repository Orchestrator",
+            "Triages a repository's open work and routes each bounded task to the right role.",
+            "Build an evidence-based picture of this repository's open work — issues, pull \
+             requests, failing checks — and classify each item by what it actually needs. \
+             Route bounded tasks to the role that fits, one owner per item, and track what you \
+             dispatched. Do not do the work yourself, do not start new implementation without \
+             authorization, and require validation evidence before treating anything as done.",
+            &["read", "search", "shell"],
+            "high",
+            &["code", "orchestration"],
+        ),
     ]
-}
-
-/// `capacity` with every built-in template it does not already declare.
-///
-/// Matched on id, and the declared record wins: an operator who ships their own
-/// `code-reviewer` gets theirs, not this one. Built-ins are appended after the
-/// declared catalog so an operator's own roles read first.
-pub fn with_builtin_templates(capacity: &CapacitySnapshot) -> CapacitySnapshot {
-    let mut out = capacity.clone();
-    for template in builtin_templates() {
-        if out.templates.iter().any(|t| t.id == template.id) {
-            continue;
-        }
-        out.templates.push(template);
-    }
-    out
 }
 
 /// One built-in template, with the fields these defaults never set left empty.
 ///
 /// `harnesses` stays empty on purpose: a non-empty map is an allowlist, and a
-/// default role that only ran on one CLI kind would silently vanish for
-/// everyone on another.
+/// default role that only ran on one CLI kind would silently vanish for everyone
+/// on another. `model` is the abstract `reasoning` tier for every role — the
+/// roles differ in effort, not in the kind of thinking they need.
 fn template(
     id: &str,
     name: &str,

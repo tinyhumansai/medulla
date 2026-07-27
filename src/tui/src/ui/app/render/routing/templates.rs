@@ -48,6 +48,14 @@ impl App {
                 "Provisioning stays unrestricted until a catalog exists.",
                 Style::default().add_modifier(Modifier::DIM),
             )));
+            lines.push(TLine::from(""));
+            lines.push(TLine::from(Span::styled(
+                format!(
+                    "i installs the built-in coding roles into {}",
+                    self.template_store_dir().display()
+                ),
+                Style::default().add_modifier(Modifier::DIM),
+            )));
         } else {
             let capacity_rows = (inner.height as usize).saturating_sub(2).max(1);
             let start = crate::ui::selection::viewport_start(selected, rows.len(), capacity_rows);
@@ -69,7 +77,7 @@ impl App {
             }
             lines.push(TLine::from(""));
             lines.push(TLine::from(Span::styled(
-                "↑↓/jk browse · Enter open · r refresh",
+                "↑↓/jk browse · Enter open · i install defaults · r refresh",
                 Style::default().add_modifier(Modifier::DIM),
             )));
         }

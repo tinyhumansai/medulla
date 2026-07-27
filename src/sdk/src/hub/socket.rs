@@ -408,57 +408,22 @@ async fn handle_capabilities(
         };
         found.cloned()
     };
-    let (providers, summary, address) = match &worker {
-        Some(w) => (
-            vec![w.harness.clone()],
-            format!("{} daemon", w.harness),
-            Some(w.address.clone()),
-        ),
-        None => (Vec::new(), String::new(), None),
+    let (harness, address) = match &worker {
+        Some(w) => (w.harness.clone(), Some(w.address.clone())),
+        None => (String::new(), None),
     };
-    let mut capabilities = json!({ "providers": providers, "summary": summary });
-    // Real path: probe the worker for its budgets/readiness and decorate. Fails
-    // open — a probe error leaves only the static facts.
-    if let Some(address) = address {
-        if let Ok(caps) = runner.capabilities(&address).await {
-            decorate_with_budgets(&mut capabilities, &caps);
-        }
-    }
+    // Ask the worker what it can actually do, and answer with that. Fails open:
+    // a transport error, timeout, or malformed reply leaves only the static
+    // facts the roster already knows. See [`super::probe`].
+    let caps = match address {
+        Some(address) => runner.capabilities(&address).await.ok(),
+        None => None,
+    };
+    let capabilities = super::probe::capabilities_payload(&harness, caps.as_ref());
     let _ = socket
         .emit(
             "medulla:capabilities_result",
             json!({ "probeId": probe_id, "capabilities": capabilities }),
         )
         .await;
-}
-
-/// Map a worker's [`AgentCapabilities`] budgets/readiness onto the backend-shaped
-/// `capabilities` payload the backend's `sanitizeCapabilities` reads.
-///
-/// The worker frame carries a per-provider `readiness` array and a `budgets`
-/// array; the backend's `AgentCapabilities` bag carries a flat `harnessBudgets`
-/// array plus a single advisory `ready`/`readyReason` pair. The `HarnessBudget`
-/// entries already serialize in the camelCase the backend's `parseHarnessBudget`
-/// accepts, so `harnessBudgets` is the budget array verbatim. `ready` is the AND
-/// of the readiness entries (usable only when every installed harness is), and
-/// `readyReason` surfaces the first not-ready reason.
-pub(super) fn decorate_with_budgets(
-    capabilities: &mut Value,
-    caps: &crate::tinyplace::AgentCapabilities,
-) {
-    let Some(obj) = capabilities.as_object_mut() else {
-        return;
-    };
-    if !caps.budgets.is_empty() {
-        if let Ok(budgets) = serde_json::to_value(&caps.budgets) {
-            obj.insert("harnessBudgets".to_string(), budgets);
-        }
-    }
-    if !caps.readiness.is_empty() {
-        let not_ready = caps.readiness.iter().find(|r| !r.ready);
-        obj.insert("ready".to_string(), Value::Bool(not_ready.is_none()));
-        if let Some(reason) = not_ready.and_then(|r| r.reason.clone()) {
-            obj.insert("readyReason".to_string(), Value::String(reason));
-        }
-    }
 }

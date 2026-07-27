@@ -66,6 +66,7 @@ impl App {
             chat_scroll: 0,
             command_index: 0,
             host_index: 0,
+            workspace_index: 0,
             template_index: 0,
             template_scroll: 0,
             template_modal: false,
@@ -549,10 +550,11 @@ impl App {
     /// not merged: two half-descriptions of one fleet interleaved would be
     /// harder to trust than whichever one is authoritative.
     ///
-    /// The template catalog is the exception. Its built-in coding roles are
-    /// merged into whatever wins, by id, so a fresh install has a catalog to
-    /// provision from without anyone declaring one — and an operator who
-    /// declares a role of the same id still gets theirs.
+    /// The template catalog is the exception. This client's own catalog — the
+    /// `.medulla/agents` store, or the built-in coding roles when nothing is
+    /// installed — is merged into whatever wins, by id, because it is what this
+    /// client declares it can provision. A runtime that names the same id keeps
+    /// its own record.
     pub(super) fn fleet_capacity(&self) -> medulla::runtime::CapacitySnapshot {
         let mut declared = if self.snapshot.capacity.is_empty() {
             self.loaded.config.fleet.capacity()
@@ -562,17 +564,19 @@ impl App {
         // Last resort, and opt-in only: with `MEDULLA_DEMO_FLEET` set and nothing
         // real declared, stand in a small fake fleet so the surfaces can be
         // exercised without a backend. It never overrides a real reading.
-        if declared.is_empty() && medulla::runtime::demo_fleet_requested() {
+        if (declared.is_empty() || self.loaded.config.fleet.declares_only_templates())
+            && medulla::runtime::demo_fleet_requested()
+        {
             declared = medulla::runtime::demo_capacity();
         }
         // The locally registered peers are hosts too, and they are frequently
         // the only capacity a hub-backed session has. Declared records win on a
         // collision; the registry only ever adds machines nothing else named.
         let merged = merge_capacity(&declared, &registry_capacity(&self.runtime.workers()));
-        // The built-in coding roles come last and only fill gaps: a declared
-        // template of the same id wins, so the catalog is never empty on a fresh
-        // install and never overrides what an operator actually said.
-        medulla::runtime::with_builtin_templates(&merged)
+        // This client's catalog comes last and only fills gaps: a template the
+        // runtime already declares under the same id wins, so the page is never
+        // empty on a fresh install and never overrides an authoritative record.
+        medulla::agents::merge_templates(&merged, &self.loaded.config.fleet.agent_templates)
     }
 
     /// The agent identities the fleet surfaces place.

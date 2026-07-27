@@ -132,6 +132,10 @@ fn config_file_layers(explicit_config: Option<&str>, home: &Path, cwd: &Path) ->
 /// `stateDir` and `tinyplace.identityDir` default to `<home>/state` and
 /// `<home>/tinyplace` when not explicitly configured; `MEDULLA_STATE_DIR`
 /// overrides `stateDir`.
+///
+/// `[fleet].agentTemplates` has one extra layer beneath it: when no config file
+/// names it, the `.medulla/agents` TOML store (see [`crate::agents`]) replaces
+/// the built-in catalog if it holds anything at all.
 pub fn load_config(
     explicit_config: Option<&str>,
     env: &HashMap<String, String>,
@@ -195,6 +199,21 @@ pub fn load_config(
         config.state_dir = dir.to_string();
     } else if !state_explicit {
         config.state_dir = home.join("state").to_string_lossy().into_owned();
+    }
+
+    // The `.medulla/agents` store supersedes the built-in catalog, but never an
+    // explicit `[fleet].agentTemplates` — a config file that names templates
+    // (including an empty list, which opts out) has already said what it wants.
+    let templates_explicit = merged
+        .get("fleet")
+        .and_then(|f| f.get("agentTemplates"))
+        .map(|v| !v.is_null())
+        .unwrap_or(false);
+    if !templates_explicit {
+        let store = crate::agents::load_templates(&crate::agents::template_dirs(env, cwd));
+        if !store.is_empty() {
+            config.fleet.agent_templates = store.templates;
+        }
     }
 
     let path = if let Some(explicit) = explicit_config {

@@ -423,9 +423,53 @@ fn fleet_parses_the_containment_chain_and_round_trips_in_camel_case() {
 }
 
 #[test]
-fn an_absent_fleet_section_declares_nothing_and_is_not_serialized() {
+fn an_absent_fleet_section_seeds_the_coding_catalog() {
     let cfg: TuiConfig = serde_json::from_str("{}").unwrap();
+    let ids: Vec<&str> = cfg
+        .fleet
+        .agent_templates
+        .iter()
+        .map(|template| template.id.as_str())
+        .collect();
+
+    assert_eq!(
+        ids,
+        [
+            "plan-writer",
+            "implementer",
+            "test-writer",
+            "code-reviewer",
+            "debugger",
+            "verifier",
+            "doc-writer",
+            "refactorer",
+            "merge-resolver",
+            "pr-manager",
+            "triager",
+            "repo-orchestrator",
+        ]
+    );
+    // Every seeded role declares what it may use and how hard to think, and
+    // none of them restricts itself to a harness kind.
+    assert!(cfg
+        .fleet
+        .agent_templates
+        .iter()
+        .all(|template| template.model.is_some()
+            && template.tools.is_some()
+            && template.harnesses.is_empty()));
+    assert!(cfg.fleet.declares_only_templates());
+    assert!(serde_json::to_string(&cfg)
+        .unwrap()
+        .contains("\"agentTemplates\""));
+}
+
+#[test]
+fn an_explicit_empty_template_catalog_opts_out_of_coding_defaults() {
+    let cfg: TuiConfig = serde_json::from_str(r#"{"fleet":{"agentTemplates":[]}}"#).unwrap();
+
     assert!(cfg.fleet.is_empty());
+    assert!(cfg.fleet.declares_only_templates());
     assert!(cfg.fleet.capacity().is_empty());
     assert!(!serde_json::to_string(&cfg).unwrap().contains("fleet"));
 }

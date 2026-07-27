@@ -4,11 +4,12 @@ use crossterm::event::KeyCode;
 
 use crate::ui::composer::{insert_at, Draft};
 use crate::ui::multi_pane::{self, NavAction};
+use medulla::daemon::pairing::REMOTE_JOIN_COMMAND;
 use medulla::runtime::WorkerOp;
 
 use super::super::types::{
     App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_HOST, RP_HARNESSES,
-    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, SUBSCRIPTION_STRATEGIES,
+    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
 };
 
 impl App {
@@ -31,9 +32,16 @@ impl App {
                     self.routing_subpage()
                 ));
                 // Capacity is declared, never streamed, so entering the page is
-                // the moment to go and read it.
-                let cmd = matches!(self.routing_index, RP_HARNESSES | RP_TEMPLATES)
-                    .then_some(Cmd::RefreshFleet);
+                // the moment to go and read it. Workspaces belongs here too: a
+                // backend session starts with an empty `snapshot.capacity`, so
+                // without this the page showed only this device's directories
+                // until the operator happened to visit Harnesses or Templates
+                // first — which reads as "the fleet has no workspaces".
+                let cmd = matches!(
+                    self.routing_index,
+                    RP_HARNESSES | RP_TEMPLATES | RP_WORKSPACES
+                )
+                .then_some(Cmd::RefreshFleet);
                 return RoutingKey::Handled(cmd);
             }
             NavAction::Left => {
@@ -45,6 +53,7 @@ impl App {
 
         match self.routing_index {
             RP_HOSTS => self.hosts_key(code),
+            RP_WORKSPACES => self.workspaces_key(code),
             RP_TEMPLATES => self.templates_key(code),
             RP_ADD_HOST => self.add_host_key(code),
             RP_HARNESSES => self.harnesses_key(code),
@@ -164,7 +173,17 @@ impl App {
                 self.template_scroll = 0;
                 RoutingKey::Handled(None)
             }
+            // Install the built-in catalog into the `.medulla/agents` store, so
+            // the roles become files the operator can edit rather than
+            // constants they cannot. Never overwrites what is already there.
+            KeyCode::Char('i') => {
+                self.install_default_templates();
+                RoutingKey::Handled(None)
+            }
             KeyCode::Char('r') => {
+                // Re-read the store first: the operator's own editor is the
+                // usual way a template changes, and it leaves nothing to poll.
+                self.reload_templates();
                 self.set_status("Refreshing fleet…");
                 RoutingKey::Handled(Some(Cmd::RefreshFleet))
             }
@@ -172,13 +191,57 @@ impl App {
         }
     }
 
-    /// Open the existing host-address prompt from the dedicated Add Host pane.
+    /// Browse the workspace list and change this device's half of it.
+    fn workspaces_key(&mut self, code: KeyCode) -> RoutingKey {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.workspace_index = crate::ui::selection::moved(
+                    self.workspace_index,
+                    self.workspace_rows().len(),
+                    true,
+                );
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.workspace_index = crate::ui::selection::moved(
+                    self.workspace_index,
+                    self.workspace_rows().len(),
+                    false,
+                );
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('a') => {
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::WorkspaceAdd,
+                    title: "Add workspace — absolute path to a directory".into(),
+                    draft: Draft::new(),
+                });
+                self.set_status("Add workspace · Enter save · Esc cancel");
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('d') => {
+                self.remove_selected_workspace();
+                RoutingKey::Handled(None)
+            }
+            _ => RoutingKey::Unhandled,
+        }
+    }
+
+    /// Open the existing host-address prompt from the dedicated Add Host pane,
+    /// or copy the line the operator has to run on the machine being added.
     fn add_host_key(&mut self, code: KeyCode) -> RoutingKey {
-        if matches!(code, KeyCode::Enter | KeyCode::Char('a')) {
-            self.open_add_host_prompt();
-            RoutingKey::Handled(None)
-        } else {
-            RoutingKey::Unhandled
+        match code {
+            KeyCode::Enter | KeyCode::Char('a') => {
+                self.open_add_host_prompt();
+                RoutingKey::Handled(None)
+            }
+            // Copying it here rather than retyping it there is the whole point:
+            // this end is a local terminal, so the copy is free.
+            KeyCode::Char('c') => {
+                self.copy_line("the worker install line", REMOTE_JOIN_COMMAND);
+                RoutingKey::Handled(None)
+            }
+            _ => RoutingKey::Unhandled,
         }
     }
 

@@ -443,3 +443,28 @@ async fn aborting_an_unknown_task_is_a_harmless_no_op() {
     let outcome = runner.run(req("x"), None).await.expect("ok");
     assert_eq!(outcome.reply, "done");
 }
+
+#[tokio::test]
+async fn a_frame_from_another_peer_cannot_settle_a_dispatch() {
+    // The inbox is shared by every peer holding a contact edge with this
+    // identity, and a correlation id is not a secret. Without binding each
+    // waiter to the worker it dispatched to, the first `reply` under the right
+    // id won — whoever sent it — so any contact could settle another worker's
+    // task with a result of its own.
+    let worker = FakeWorker::new(Mode::ImpostorThenReply {
+        impostor: "GRV1impostor".to_string(),
+        stolen: "STOLEN: everything is fine".to_string(),
+        reply: "REMOTE: 4 agents, 1 offline".to_string(),
+    });
+    let runner = TaskRunner::start(worker, Duration::from_millis(5));
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let outcome = runner.run(req("audit"), Some(tx)).await.expect("ok");
+
+    assert_eq!(
+        outcome.reply, "REMOTE: 4 agents, 1 offline",
+        "the worker's own reply settles the dispatch, not the impostor's"
+    );
+    // The impostor's status must not have reached the progress sink either.
+    assert_eq!(rx.recv().await.as_deref(), Some("running python audit.py"));
+}

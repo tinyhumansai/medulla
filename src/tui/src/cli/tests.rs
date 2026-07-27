@@ -222,10 +222,90 @@ fn parses_init_args() {
 }
 
 #[test]
+fn workspace_dispatches_on_its_own_verb() {
+    assert_eq!(parse_command(&argv(&["workspace"])), Command::Workspace);
+    assert_eq!(
+        parse_command(&argv(&["workspace", "add", "."])),
+        Command::Workspace
+    );
+    // The plural reads naturally enough that typing it should not launch the TUI.
+    assert_eq!(parse_command(&argv(&["workspaces"])), Command::Workspace);
+}
+
+#[test]
+fn parses_workspace_args() {
+    // A bare `workspace` lists, which is the read-only default.
+    let bare = parse_workspace_args(&argv(&[]));
+    assert_eq!(bare, WorkspaceArgs::default());
+    assert_eq!(bare.action, WorkspaceAction::List);
+
+    // `add` with no directory means the cwd, resolved by the runner.
+    assert_eq!(
+        parse_workspace_args(&argv(&["add"])).action,
+        WorkspaceAction::Add(None)
+    );
+
+    let add = parse_workspace_args(&argv(&[
+        "add",
+        "packages/api",
+        "--harness",
+        "gpu-box",
+        "--force",
+        "--offline",
+        "--config",
+        "/tmp/medulla.toml",
+    ]));
+    assert_eq!(
+        add.action,
+        WorkspaceAction::Add(Some("packages/api".to_string()))
+    );
+    assert_eq!(add.harness.as_deref(), Some("gpu-box"));
+    assert!(add.force);
+    assert!(add.offline);
+    assert_eq!(add.config.as_deref(), Some("/tmp/medulla.toml"));
+
+    assert!(parse_workspace_args(&argv(&["list", "--json"])).json);
+
+    // Remove takes a path or a registry id.
+    assert_eq!(
+        parse_workspace_args(&argv(&["remove", "ws-api-1234abcd"])).action,
+        WorkspaceAction::Remove("ws-api-1234abcd".to_string())
+    );
+    assert_eq!(
+        parse_workspace_args(&argv(&["rm", "."])).action,
+        WorkspaceAction::Remove(".".to_string())
+    );
+
+    // A `remove` with no target must never guess at one — it lists instead.
+    assert_eq!(
+        parse_workspace_args(&argv(&["remove"])).action,
+        WorkspaceAction::List
+    );
+
+    // Flag VALUES must not be mistaken for the action or its operand.
+    let cfg_only = parse_workspace_args(&argv(&["--config", "/tmp/c.toml"]));
+    assert_eq!(cfg_only.action, WorkspaceAction::List);
+    assert_eq!(cfg_only.config.as_deref(), Some("/tmp/c.toml"));
+    assert_eq!(
+        parse_workspace_args(&argv(&["add", "--harness", "laptop"])).action,
+        WorkspaceAction::Add(None)
+    );
+}
+
+#[test]
 fn help_lists_init() {
     let help = help_text();
     assert!(help.contains("medulla init"));
     assert!(help.contains("--offline"));
+}
+
+#[test]
+fn help_lists_the_workspace_registry_command() {
+    let help = help_text();
+    assert!(help.contains("medulla workspace"));
+    // The three actions must be discoverable without reading the source.
+    assert!(help.contains("add [dir]|list|remove"));
+    assert!(help.contains("--harness"));
 }
 
 #[test]

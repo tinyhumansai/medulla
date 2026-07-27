@@ -229,11 +229,49 @@ an allowlist only ever subtracts. A template's optional `harnesses` block holds
 per-harness overrides and, by its presence, restricts the harness kinds the
 template may run on.
 
-The section is optional and empty by default. When present it is declared to a
-local orchestration server at handshake time, and the Agents rail renders it
-whenever the runtime itself reports no capacity — so it is useful even on the
-mock runtime. A runtime that *does* report capacity (the hosted backend projects
-its connected-host roster onto the same chain) wins; the two are never merged.
+The section is optional. When present it is declared to a local orchestration
+server at handshake time, and the Agents rail renders it whenever the runtime
+itself reports no capacity — so it is useful even on the mock runtime. A runtime
+that *does* report capacity (the hosted backend projects its connected-host
+roster onto the same chain) wins; the two are never merged, except that this
+client's own template catalog is always merged in, by id, since it is what the
+client can offer.
+
+## Agent templates on disk
+
+`agentTemplates` is the only part of `fleet` with a default: a catalog of coding
+roles — `plan-writer`, `implementer`, `test-writer`, `code-reviewer`, `debugger`,
+`verifier`, `doc-writer`, `refactorer`, `merge-resolver`, `pr-manager`,
+`triager`, `repo-orchestrator` — so a fresh install has something to provision.
+
+Those roles are editable. Press `i` on **Routing › Agent Templates** to install
+them as one TOML file per role under `~/.medulla/agents/`:
+
+```toml
+id = "code-reviewer"
+name = "Code Reviewer"
+description = "Reviews a change or branch diff and reports what would break."
+model = "reasoning"
+effort = "high"
+tools = ["read", "search", "shell"]
+tags = ["code", "review"]
+
+instructions = '''
+Review the change you are given against its stated intent…
+'''
+```
+
+Templates are read from `~/.medulla/agents/*.toml` and then from a project-local
+`./.medulla/agents/*.toml`, which overrides the user-global store by `id`. `id`
+defaults to the filename, so the smallest useful file is a description and some
+instructions. A file that fails to parse costs only itself; the rest of the
+catalog still loads.
+
+Precedence, lowest to highest: the built-in catalog, the user-global store, the
+project-local store, and `[fleet].agentTemplates` in a config file — which wins
+outright, so an explicit empty list opts out of templates entirely. Installing
+never overwrites an existing file, and *any* file in a store replaces the
+built-in catalog, so a role you delete stays deleted.
 
 Locally registered peers are folded in as hosts on top of whichever of those
 applies, since a registered machine *is* the host level of the chain.

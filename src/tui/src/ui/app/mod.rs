@@ -7,7 +7,8 @@
 //! the keyboard dispatcher, [`commands`] slash-command and steering execution,
 //! [`feedback`] the feedback-board subpage's actions and setters,
 //! [`settings_edit`] the Config subpage's editable settings, [`account`] the
-//! logout action, and [`render`] the ratatui draw for each view. Public items
+//! logout action, [`templates`] the agent-template store's install/reload
+//! actions, and [`render`] the ratatui draw for each view. Public items
 //! are re-exported here so callers use `crate::ui::app::*`.
 
 mod account;
@@ -22,7 +23,9 @@ mod rail;
 mod render;
 mod settings_edit;
 mod state;
+mod templates;
 mod types;
+mod workspaces;
 
 #[cfg(test)]
 mod tests;

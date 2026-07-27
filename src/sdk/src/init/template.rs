@@ -48,10 +48,14 @@ fn routing_block(lines: &[String]) -> String {
 
 /// Render a drafted profile into the `MEDULLA.md` document.
 ///
+/// `layout` is the scanned file map from [`super::layout::scan_layout`] — the
+/// prose says what the workspace *is*, the layout says which paths it is made
+/// of, and the orchestrator needs both to route work at a file granularity.
+///
 /// The result is always parseable by the medulla SDK: empty lists render as
-/// empty flow sequences and an empty routing block renders a TODO line, so a
-/// stub draft still produces a valid, hand-editable file.
-pub fn render_medulla_md(draft: &DraftedProfile) -> String {
+/// empty flow sequences, and an empty routing block or layout renders a
+/// placeholder line, so a stub draft still produces a valid, hand-editable file.
+pub fn render_medulla_md(draft: &DraftedProfile, layout: &[String]) -> String {
     let summary = if draft.summary.trim().is_empty() {
         super::types::STUB_SUMMARY
     } else {
@@ -65,5 +69,6 @@ pub fn render_medulla_md(draft: &DraftedProfile) -> String {
         .replace("{{harnesses}}", &flow_list(&draft.harnesses))
         .replace("{{models_reasoning}}", &flow_list(&draft.models_reasoning))
         .replace("{{routing}}", &routing_block(&draft.routing))
+        .replace("{{layout}}", &super::layout::layout_block(layout))
         .replace("{{summary}}", summary)
 }

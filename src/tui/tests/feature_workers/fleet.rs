@@ -122,6 +122,50 @@ fn a_declared_template_replaces_the_built_in_of_the_same_id() {
 }
 
 #[test]
+fn installing_the_defaults_writes_an_editable_store_and_reloads_it() {
+    let home = std::env::temp_dir().join("medulla-tui-template-install");
+    let _ = std::fs::remove_dir_all(&home);
+
+    let mut app = app_with_workers(None);
+    app.set_medulla_home(home.clone());
+    app.focus_routing_subpage("Agent Templates");
+    // `i` on the catalog installs the built-in roles as files under the home.
+    assert!(app.on_event(key(KeyCode::Char('i'))).is_none());
+
+    let store = home.join("agents");
+    let reviewer = store.join("code-reviewer.toml");
+    assert!(reviewer.is_file(), "expected {}", reviewer.display());
+    let text = std::fs::read_to_string(&reviewer).expect("read");
+    assert!(text.contains("id = \"code-reviewer\""), "{text}");
+    assert!(
+        text.contains("instructions = '''"),
+        "editable prose: {text}"
+    );
+    assert!(
+        app.status().contains("Installed"),
+        "status: {}",
+        app.status()
+    );
+    assert!(
+        app.status().contains("agents"),
+        "names the dir: {}",
+        app.status()
+    );
+
+    // An edit to the store reaches the running catalog on the next read.
+    std::fs::write(
+        store.join("code-reviewer.toml"),
+        "id = \"code-reviewer\"\nname = \"House Reviewer\"\ndescription = \"ours\"\n",
+    )
+    .expect("edit");
+    app.reload_templates();
+    let out = render(&mut app, 200, 44);
+    assert!(out.contains("House Reviewer"), "{out}");
+
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn the_selected_agent_shows_its_placement_and_compact_meters() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Agents");

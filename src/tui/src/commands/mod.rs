@@ -1,10 +1,17 @@
 //! Non-TUI subcommand runners and the pre-app login screen driver.
 //!
 //! Holds the CLI verbs that do not enter the ratatui app — `medulla login`,
-//! `logout`, and `memory` — plus the credential persistence helper and the
-//! interactive login-screen loop the TUI runs before selecting a runtime. Each
-//! runner parses its own args, loads config, performs its work, and returns an
-//! `anyhow::Result`.
+//! `logout`, `memory`, `init`, and `workspace` — plus the credential persistence
+//! helper and the interactive login-screen loop the TUI runs before selecting a
+//! runtime. Each runner parses its own args, loads config, performs its work,
+//! and returns an `anyhow::Result`.
+//!
+//! [`workspace`] owns the registry verbs, which are large enough to warrant
+//! their own file; everything else lives here.
+
+pub(crate) mod workspace;
+
+pub(crate) use workspace::run_workspace;
 
 use std::io::Stdout;
 use std::path::Path;
@@ -162,11 +169,15 @@ pub(crate) async fn run_memory(args: &[String]) -> anyhow::Result<()> {
 
 /// `medulla init [dir]` — author a `MEDULLA.md` workspace profile.
 ///
-/// Reads the directory's `AGENTS.md` / `CLAUDE.md` / `README.md` and asks the
-/// configured model to distil them into a short, routing-oriented profile, then
-/// writes it for the operator to review. Falls back to an editable stub when
-/// `--offline` is set or no model is reachable, so `init` always leaves a valid
-/// file behind.
+/// Reads the directory's `AGENTS.md` / `CLAUDE.md` / `README.md`, scans its file
+/// layout, and asks the configured model to distil them into a short,
+/// routing-oriented profile, then writes it for the operator to review. Falls
+/// back to an editable stub when `--offline` is set or no model is reachable, so
+/// `init` always leaves a valid file behind.
+///
+/// This authors the file and stops there. `medulla workspace add` does the same
+/// *and* enrols the directory in the registry, which is what the orchestrator
+/// reads — see [`run_workspace`].
 pub(crate) async fn run_init(args: &[String]) -> anyhow::Result<()> {
     let parsed = parse_init_args(args);
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
@@ -195,18 +206,10 @@ pub(crate) async fn run_init(args: &[String]) -> anyhow::Result<()> {
     let outcome =
         medulla::init::init_workspace_with_settings(&dir, &settings, parsed.offline, parsed.force)
             .await?;
-
-    if outcome.drafted {
-        println!(
-            "Wrote {} (drafted from {})",
-            outcome.path.display(),
-            outcome.sources.join(", ")
-        );
-        println!("Review it — the summary is what the orchestrator reads.");
-    } else {
-        println!("Wrote {} (stub)", outcome.path.display());
-        println!("Fill in the summary and routing hints, then it is ready to use.");
-    }
+    workspace::report_profile(&outcome);
+    println!(
+        "Not registered — run `medulla workspace add` to let the orchestrator place work here."
+    );
     Ok(())
 }
 

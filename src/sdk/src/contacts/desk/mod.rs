@@ -83,7 +83,11 @@ impl ContactDesk {
     /// learn whether anything is arriving is not much of an answer.
     pub async fn refresh(&self) -> PollHealth {
         let before_pending = self.book.pending_count();
-        let before_contacts = self.accepted().len();
+        let before_contacts: std::collections::HashSet<String> = self
+            .accepted()
+            .into_iter()
+            .map(|contact| contact.agent_id)
+            .collect();
         let outcome = poll_once(self.relay.as_ref(), &self.book, &self.now).await;
         let at = (self.now)();
         let health = match outcome {
@@ -102,11 +106,22 @@ impl ContactDesk {
                         pending - before_pending,
                     ));
                 }
-                let contacts = self.accepted().len();
-                if contacts > before_contacts {
+                let established = self.accepted();
+                // Named, not just counted: a peer that pairs itself (a worker
+                // naming this identity as its master) settles without anyone
+                // deciding anything here, and "1 new contact" gives an operator
+                // nothing to check against who they expected.
+                let fresh: Vec<String> = established
+                    .iter()
+                    .map(|contact| contact.agent_id.clone())
+                    .filter(|id| !before_contacts.contains(id))
+                    .collect();
+                if !fresh.is_empty() {
                     self.say(&format!(
-                        "contacts: {} contact(s) known to the relay — {contacts} total",
-                        contacts - before_contacts,
+                        "contacts: {} contact(s) established — {} ({} total)",
+                        fresh.len(),
+                        fresh.join(", "),
+                        established.len(),
                     ));
                 }
                 PollHealth::Ok { at, seen }
@@ -161,6 +176,19 @@ impl ContactDesk {
     /// The active admission policy.
     pub fn policy(&self) -> AdmissionPolicy {
         self.book.policy()
+    }
+
+    /// Admit `agent_id` under the `allowlist` policy from now on.
+    ///
+    /// The allowlist is seeded once, at construction, from the peers the config
+    /// named — so a peer paired *during* the session was not on it, and its
+    /// request queued as though nobody had paired anything. Any pairing made at
+    /// runtime has to say so here, or the operator's decision only takes effect
+    /// after a restart. Already-settled requests are untouched: widening
+    /// admission never resurrects a declined peer (see
+    /// [`ContactBook::set_policy`](super::book::ContactBook::set_policy)).
+    pub fn allow(&self, agent_id: impl Into<String>) {
+        self.book.allow(agent_id);
     }
 
     /// Cycle the admission policy, returning the new one.

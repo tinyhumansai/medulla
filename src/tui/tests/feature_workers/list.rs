@@ -150,8 +150,10 @@ fn add_host_page_renders_guidance_and_opens_the_prompt() {
     app.focus_routing_subpage("Add Host");
 
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Connect a tiny.place host"));
-    assert!(out.contains("@build-box Primary build machine"));
+    assert!(out.contains("Connect another machine to this orchestrator."));
+    // The handle shortcut, which is the way to add a host without copying
+    // anything at all.
+    assert!(out.contains("@build-box"));
 
     assert!(app.on_event(key(KeyCode::Enter)).is_none());
     let (title, draft) = app.prompt_state().expect("add prompt");

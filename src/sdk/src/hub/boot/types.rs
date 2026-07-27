@@ -62,4 +62,6 @@ pub struct HubSession {
     pub handle: HubHandle,
     pub(super) _runner: Arc<TaskRunner>,
     pub(super) _client: Client,
+    /// The inbound-pairing poll, stopped with the session.
+    pub(super) _pairing: super::super::pairing::PairingPoll,
 }

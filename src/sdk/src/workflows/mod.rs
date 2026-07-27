@@ -19,6 +19,8 @@
 //! layering agent templates use. The store is behind the [`WorkflowStore`]
 //! trait, so a remote catalog is a new implementation rather than a rewrite.
 
+pub mod authoring;
+pub mod node_contracts;
 mod registry;
 pub mod run;
 pub mod store;
@@ -27,6 +29,10 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use authoring::{
+    apply_workflow_ops, create_workflow, preview_workflow_ops, validate_handle, GraphHandle,
+};
+pub use node_contracts::{all_node_kind_contracts, node_kind_contract};
 pub use registry::StoreWorkflowResolver;
 pub use run::{dry_run, resume_workflow, run_workflow, RunContext};
 pub use store::{

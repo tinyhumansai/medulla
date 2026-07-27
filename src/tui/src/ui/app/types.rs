@@ -253,6 +253,23 @@ pub enum WorkflowFocus {
     Copilot,
 }
 
+/// What the Workflows content pane is showing.
+///
+/// One view at a time, beside the catalogue sidebar — the same two-pane shape
+/// as Routing and Settings. Derived from [`WorkflowFocus`] and the inspector
+/// toggle by [`App::workflow_view`] rather than stored, so it cannot drift from
+/// the state that decides it.
+#[cfg(feature = "workflows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowView {
+    /// The laid-out graph, with any selected run overlaid on it.
+    Graph,
+    /// The selected node's declaration, and how a run left it.
+    Inspector,
+    /// The conversation that edits the graph.
+    Copilot,
+}
+
 /// Everything the Workflows tab holds that is not the catalogue itself.
 ///
 /// Grouped into one struct rather than a dozen `workflow_*` fields on [`App`]:

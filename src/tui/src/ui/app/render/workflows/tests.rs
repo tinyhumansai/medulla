@@ -112,7 +112,7 @@ fn medulla_tui_routing_subpages() -> &'static [&'static str] {
 }
 
 #[test]
-fn the_tab_draws_all_three_panes() {
+fn the_tab_is_a_sidebar_beside_one_content_pane() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 
     let screen = render(&mut app);
@@ -122,7 +122,31 @@ fn the_tab_draws_all_three_panes() {
         screen.contains("nightly sweep"),
         "the canvas title is missing"
     );
-    assert!(screen.contains("Copilot"), "the copilot pane is missing");
+    // One view at a time: the copilot is a keystroke away, not a third column
+    // competing with the graph for the width.
+    assert!(!screen.contains("Copilot"), "{screen}");
+}
+
+#[test]
+fn each_view_takes_the_content_pane_in_turn() {
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+
+    // The graph is what the tab falls back to.
+    assert!(render(&mut app).contains("▶ Start"));
+
+    app.wf.inspector_open = true;
+    let inspector = render(&mut app);
+    assert!(inspector.contains("trigger_kind"), "{inspector}");
+    assert!(!inspector.contains("▶ Start"), "one view at a time");
+
+    // The copilot wins over the inspector: it is the one you step into.
+    app.wf.focus = WorkflowFocus::Copilot;
+    let copilot = render(&mut app);
+    assert!(copilot.contains("Copilot"), "{copilot}");
+    assert!(!copilot.contains("trigger_kind"), "one view at a time");
+
+    // The sidebar is present throughout — it is how you get back.
+    assert!(copilot.contains("Workflows · 1"), "{copilot}");
 }
 
 #[test]
@@ -226,18 +250,20 @@ fn selecting_a_run_overlays_it_on_the_graph() {
 }
 
 #[test]
-fn the_inspector_is_a_strip_until_it_is_opened() {
+fn the_inspector_is_a_view_of_its_own_that_i_opens_and_closes() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 
+    // Closed, it is not on screen at all — the graph has the whole pane.
     let closed = render(&mut app);
-    assert!(closed.contains("i expands"), "{closed}");
+    assert!(!closed.contains("trigger_kind"), "{closed}");
 
     app.wf.inspector_open = true;
     let open = render(&mut app);
     assert!(
         open.contains("trigger_kind"),
-        "the open inspector shows the node's declaration"
+        "the open inspector shows the node's declaration: {open}"
     );
+    assert!(open.contains("i back to the graph"), "{open}");
 }
 
 #[test]
@@ -255,6 +281,7 @@ fn the_inspector_follows_the_canvas_cursor() {
 #[test]
 fn the_copilot_pane_invites_an_instruction_before_the_first_turn() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+    app.wf.focus = WorkflowFocus::Copilot;
 
     let screen = render(&mut app);
 
@@ -262,23 +289,24 @@ fn the_copilot_pane_invites_an_instruction_before_the_first_turn() {
 }
 
 #[test]
-fn the_unfocused_copilot_pane_advertises_the_key_that_actually_focuses_it() {
+fn the_sidebar_advertises_the_key_that_reaches_the_copilot() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
-    // Sidebar is the default focus, so the copilot pane starts unfocused.
-    assert_eq!(app.wf_focus(), WorkflowFocus::Sidebar);
+    app.wf.focus = WorkflowFocus::Canvas;
 
     let screen = render(&mut app);
 
-    // `c` is the binding (see `keys/workflows.rs`); Tab is deliberately
-    // unbound in this tab and would leave it instead of focusing the
-    // composer, so the hint must never name it.
-    assert!(screen.contains("c to type"), "{screen}");
+    // The copilot is no longer a column that can point at itself, so the
+    // binding has to be named where the operator is. `c` is it (see
+    // `keys/workflows.rs`); Tab is deliberately unbound in this tab and would
+    // leave it entirely, so nothing may suggest it.
+    assert!(screen.contains("c copilot"), "{screen}");
     assert!(!screen.contains("Tab to type"), "{screen}");
 }
 
 #[test]
 fn a_copilot_thread_is_drawn_with_a_marker_per_kind_of_line() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+    app.wf.focus = WorkflowFocus::Copilot;
     app.wf.draft = crate::ui::composer::insert_at("", 0, "add a step");
     app.submit_copilot().expect("turn");
     app.copilot_status("nightly", "applying ops".into());
@@ -393,46 +421,21 @@ fn a_stray_letter_in_the_sidebar_does_not_fire_a_content_action() {
 }
 
 #[test]
-fn a_wide_terminal_seats_the_copilot_beside_the_graph() {
-    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+fn every_view_draws_at_any_terminal_width() {
+    // What the old three-column layout could not do: on an 80-wide terminal it
+    // left the canvas about twelve columns, less than one node box.
+    for (width, height) in [(80, 24), (120, 30), (200, 50)] {
+        let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 
-    let screen = render_sized(&mut app, 140, 24);
+        let graph = render_sized(&mut app, width, height);
+        assert!(graph.contains("▶ Start"), "{width}x{height}: {graph}");
 
-    assert!(screen.contains("Workflows"), "{screen}");
-    assert!(screen.contains("Copilot"), "{screen}");
-    assert!(screen.contains("Start"), "the graph too: {screen}");
-}
+        app.wf.inspector_open = true;
+        assert!(render_sized(&mut app, width, height).contains("trigger_kind"));
 
-#[test]
-fn a_narrow_terminal_gives_the_canvas_the_room_instead_of_squeezing_three_panes() {
-    // Three columns on an 80-wide terminal left the canvas twelve columns —
-    // less than one node box. So the copilot yields until it is focused.
-    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
-
-    let screen = render_sized(&mut app, 80, 24);
-
-    assert!(screen.contains("Workflows"), "{screen}");
-    assert!(
-        screen.contains("Start"),
-        "the graph is readable rather than crushed: {screen}"
-    );
-    assert!(
-        !screen.contains("Copilot"),
-        "the copilot waits for focus on a narrow screen: {screen}"
-    );
-}
-
-#[test]
-fn a_focused_copilot_takes_the_content_pane_on_a_narrow_terminal() {
-    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
-
-    app.wf.focus = WorkflowFocus::Copilot;
-    let screen = render_sized(&mut app, 80, 24);
-
-    assert!(screen.contains("Copilot"), "{screen}");
-    // The rail stays: it is how you get back, and which workflow the copilot is
-    // about is the one thing the conversation does not say.
-    assert!(screen.contains("Workflows"), "{screen}");
+        app.wf.focus = WorkflowFocus::Copilot;
+        assert!(render_sized(&mut app, width, height).contains("Copilot"));
+    }
 }
 
 #[test]

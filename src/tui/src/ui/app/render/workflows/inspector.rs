@@ -1,9 +1,12 @@
-//! The strip under the canvas: what the node cursor is on.
+//! The node inspector: what the graph cursor is on, in full.
 //!
-//! Closed, it is one line — enough to know which node is selected without
-//! spending canvas rows on it. Open (`i`), it is the node's whole declaration
-//! plus, when a run is overlaid, how that run left it: the duration, and the
-//! diagnostics, which are the reason anyone opens a finished run.
+//! A view of its own rather than a strip under the canvas. It holds a node's
+//! whole declaration plus, when a run is overlaid, how that run left it — the
+//! duration and the diagnostics, which are the reason anyone opens a finished
+//! run. That is a screenful, and it used to be shown three rows at a time under
+//! a graph it was competing with.
+//!
+//! `i` opens and closes it; the graph is what it closes back to.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -20,18 +23,15 @@ use super::super::super::types::App;
 impl App {
     /// Draw the node inspector under the canvas.
     pub(super) fn draw_workflow_inspector(&mut self, f: &mut Frame, area: Rect) {
-        // The hint lives in the title because the closed strip is one content
-        // row, and that row belongs to the node rather than to the keybinding.
-        let hint = if self.wf.inspector_open {
-            "i collapses"
-        } else {
-            "i expands · ←→ follow edges · ↑↓ lanes"
-        };
+        // The hint lives in the title so every content row belongs to the node.
+        let hint = "i back to the graph";
         let title = match self.selected_graph_node() {
             Some(node) => format!("{} · {} · {hint}", node.name, node.kind),
             None => format!("Node · {hint}"),
         };
-        let block = crate::ui::widgets::panel(&self.theme, title, false);
+        // Focused: the inspector only exists while it is the thing being looked
+        // at, so a dim border would say it was somewhere else on screen.
+        let block = crate::ui::widgets::panel(&self.theme, title, true);
         let inner = block.inner(area);
         f.render_widget(block, area);
         if inner.height == 0 {

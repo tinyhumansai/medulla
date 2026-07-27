@@ -90,11 +90,17 @@ impl App {
     /// The canvas: walk the graph, open the inspector, act on the workflow.
     fn workflow_canvas_key(&mut self, code: KeyCode) -> WorkflowsKey {
         match code {
-            // Esc steps back out to the list, the same gesture every other
-            // content pane in the app answers to.
+            // Esc unwinds one level at a time, the same gesture every other
+            // content pane in the app answers to: the inspector closes back to
+            // the graph it is about, and the graph steps back out to the list.
             KeyCode::Esc => {
-                self.wf.focus = WorkflowFocus::Sidebar;
-                self.set_status("Workflows · list");
+                if self.wf.inspector_open {
+                    self.wf.inspector_open = false;
+                    self.set_status("Graph · Esc to go back to the list");
+                } else {
+                    self.wf.focus = WorkflowFocus::Sidebar;
+                    self.set_status("Workflows · list");
+                }
                 WorkflowsKey::Handled(None)
             }
             KeyCode::Left | KeyCode::Char('h') => {

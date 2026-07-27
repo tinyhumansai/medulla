@@ -37,8 +37,12 @@ const MAX_COMPOSER_ROWS: u16 = 7;
 
 impl App {
     /// Draw the copilot transcript and its composer.
+    ///
+    /// Only ever called while the copilot *is* the content pane
+    /// ([`App::workflow_view`]), which is also the only state that gives it the
+    /// keyboard — so there is no unfocused rendering of this pane to consider.
     pub(super) fn draw_workflow_copilot(&mut self, f: &mut Frame, area: Rect) {
-        let focused = self.wf.focus == WorkflowFocus::Copilot;
+        debug_assert_eq!(self.wf.focus, WorkflowFocus::Copilot);
         let busy = self.copilot_busy();
 
         let composer = chat::composer_height(&self.wf.draft.text).min(MAX_COMPOSER_ROWS);
@@ -47,14 +51,14 @@ impl App {
             .constraints([Constraint::Min(0), Constraint::Length(composer)])
             .split(area);
 
-        self.draw_copilot_transcript(f, rows[0], focused, busy);
+        self.draw_copilot_transcript(f, rows[0], busy);
         chat::draw_composer(
             f,
             rows[1],
             &self.wf.draft,
             &self.theme,
             ComposerChrome {
-                focused,
+                focused: true,
                 busy,
                 // Unlike the orchestrator's, this composer has no caption row
                 // naming its target, so the placeholder is where it says what
@@ -65,13 +69,13 @@ impl App {
     }
 
     /// The conversation so far, anchored to the bottom.
-    fn draw_copilot_transcript(&mut self, f: &mut Frame, area: Rect, focused: bool, busy: bool) {
+    fn draw_copilot_transcript(&mut self, f: &mut Frame, area: Rect, busy: bool) {
         let title = if busy {
             format!("Copilot {}", SPINNER[self.frame % SPINNER.len()])
         } else {
             "Copilot".to_string()
         };
-        let block = crate::ui::widgets::panel(&self.theme, title, focused);
+        let block = crate::ui::widgets::panel(&self.theme, title, true);
         let inner = block.inner(area);
         f.render_widget(block, area);
         if inner.height == 0 || inner.width == 0 {
@@ -80,9 +84,9 @@ impl App {
 
         let width = inner.width as usize;
         // The hint occupies the last row, so the transcript gets what is left.
-        // Drawn in every state, including the intro one, because "c to type" is
-        // the only place the key that focuses this pane is written down — and
-        // the intro is exactly when an operator has not found it yet.
+        // Drawn in every state, the intro one included: it is where `Esc` — the
+        // way back to the graph — is written down, and the intro is exactly when
+        // an operator has not found it yet.
         let body = Rect {
             height: inner.height.saturating_sub(1),
             ..inner
@@ -116,7 +120,7 @@ impl App {
 
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(
-                clip(&hint(focused, busy, below), width),
+                clip(&hint(busy, below), width),
                 Style::default().add_modifier(Modifier::DIM),
             ))),
             Rect {
@@ -133,7 +137,7 @@ impl App {
 /// Scrolled-back state wins over everything else: an operator who has walked up
 /// the transcript needs to know there is more below before they need to be told
 /// how to send.
-fn hint(focused: bool, busy: bool, below: usize) -> String {
+fn hint(busy: bool, below: usize) -> String {
     if below > 0 {
         let plural = if below == 1 { "" } else { "s" };
         return format!("↓ {below} more line{plural} below");
@@ -144,11 +148,7 @@ fn hint(focused: bool, busy: bool, below: usize) -> String {
         // be a lie the operator only discovers by waiting on it.
         return "working…".to_string();
     }
-    if focused {
-        "⏎ send · Esc leave".to_string()
-    } else {
-        "c to type".to_string()
-    }
+    "⏎ send · Esc leave".to_string()
 }
 
 /// One transcript turn, wrapped and marked by role.

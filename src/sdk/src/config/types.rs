@@ -16,7 +16,7 @@ use crate::runtime::fleet::{
     AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor, WorkspaceDescriptor,
 };
 use crate::runtime::{AgentDescriptor, RoutingStrategy, SubscriptionRoutingStrategy};
-use crate::tinyplace::BudgetWindow;
+use crate::tinyplace::{BudgetWindow, HarnessProvider};
 
 // --- serde default helpers -------------------------------------------------
 
@@ -265,12 +265,77 @@ fn d_host_address() -> String {
 }
 
 /// Workspace roots a daemon worker may expose to operator-managed sessions.
+///
+/// Named for the `workflow` key it parses, which predates the workflow engine
+/// and has nothing to do with it — authored workflows are configured by
+/// [`WorkflowsConfig`] under the plural `workflows` key.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct WorkflowConfig {
     /// Explicit local workspace roots available through the daemon TUI.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspaces: Vec<String>,
+}
+
+/// The `workflows` section: what authored workflows may do when they run.
+///
+/// Every capability defaults to off. A workflow arrives as a file — possibly
+/// written by an agent, possibly copied from somewhere — and the difference
+/// between a plan and an exploit is whether it can reach the network, run code,
+/// or call a third-party tool. Turning each on is an operator's decision.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WorkflowsConfig {
+    /// Whether workflows may be listed and run at all.
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    /// The worker `agent` nodes dispatch to when they name no `agentRef`.
+    /// Empty means a node must name one, and a run fails saying so.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_worker: String,
+    /// The harness hint sent with each dispatch. Absent uses the worker's own
+    /// default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<HarnessProvider>,
+    /// The model hint sent with each dispatch.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_model: String,
+    /// Whether `code` nodes may execute. This host has no sandbox, so enabling
+    /// it grants a workflow author the daemon's own privileges.
+    #[serde(default)]
+    pub allow_code: bool,
+    /// Tool slugs a `tool_call` node may invoke, beyond the built-in
+    /// `medulla:` operations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_allowlist: Vec<String>,
+    /// Hosts an `http_request` node may reach. A bare domain also permits its
+    /// subdomains.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http_allowlist: Vec<String>,
+    /// How long one run may take before the host abandons it.
+    #[serde(default = "d_run_timeout_secs")]
+    pub run_timeout_secs: u64,
+}
+
+/// A run may take ten minutes: long enough for real work on a coding harness,
+/// short enough that a wedged run does not pin its record forever.
+fn d_run_timeout_secs() -> u64 {
+    600
+}
+
+impl Default for WorkflowsConfig {
+    fn default() -> Self {
+        WorkflowsConfig {
+            enabled: true,
+            default_worker: String::new(),
+            default_provider: None,
+            default_model: String::new(),
+            allow_code: false,
+            tool_allowlist: Vec::new(),
+            http_allowlist: Vec::new(),
+            run_timeout_secs: d_run_timeout_secs(),
+        }
+    }
 }
 
 impl Default for OpencodeConfig {
@@ -647,6 +712,10 @@ pub struct TuiConfig {
     /// Workspace roots managed by the daemon worker TUI.
     #[serde(default)]
     pub workflow: WorkflowConfig,
+    /// What authored workflows may do when they run. Distinct from `workflow`
+    /// above, which despite the name is only a list of workspace roots.
+    #[serde(default)]
+    pub workflows: WorkflowsConfig,
     #[serde(default)]
     pub hub: HubSection,
     /// Whether this device also hosts the tasks the orchestrator hands out.
@@ -687,6 +756,7 @@ impl Default for TuiConfig {
             theme: ThemeConfig::default(),
             onboarding: OnboardingConfig::default(),
             workflow: WorkflowConfig::default(),
+            workflows: WorkflowsConfig::default(),
             hub: HubSection::default(),
             host: HostSection::default(),
             router: None,

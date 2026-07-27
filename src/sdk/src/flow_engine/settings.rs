@@ -80,4 +80,33 @@ impl CapabilitySettings {
     pub fn tool_allowed(&self, slug: &str) -> bool {
         self.tool_allowlist.iter().any(|allowed| allowed == slug)
     }
+
+    /// Settings from the operator's `workflows` config section, rooted under
+    /// `home`.
+    ///
+    /// The only place config becomes capability policy. Everything else in the
+    /// seam reads this struct, so there is one answer to "what is this run
+    /// allowed to do" rather than a config lookup at each call site.
+    pub fn from_config(config: &crate::config::WorkflowsConfig, home: impl Into<PathBuf>) -> Self {
+        let mut settings = Self::rooted_at(home);
+        settings.default_worker_address = config.default_worker.clone();
+        settings.default_provider = config.default_provider;
+        settings.default_model =
+            (!config.default_model.is_empty()).then(|| config.default_model.clone());
+        settings.allow_code = config.allow_code;
+        settings.tool_allowlist = config.tool_allowlist.clone();
+        settings.http_allowlist = config.http_allowlist.clone();
+        // A zero timeout would abandon every run instantly, which reads as the
+        // feature being broken rather than as a configuration mistake.
+        settings.run_timeout_secs = if config.run_timeout_secs == 0 {
+            DEFAULT_RUN_TIMEOUT_SECS
+        } else {
+            config.run_timeout_secs
+        };
+        settings
+    }
 }
+
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod tests;

@@ -208,3 +208,40 @@ fn the_observer_is_shareable_across_threads() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn a_finished_agent_node_does_not_stay_open_as_a_running_subagent() {
+    // The engine only tells us about an agent node once it has finished, so a
+    // lone start would leave the terminal snapshot showing work in flight after
+    // the run ended.
+    let (sink, fold) = folding_sink();
+    let observer = WorkflowRunObserver::new("demo", &graph(), sink);
+
+    observer.on_step_finish(&step("build", StepStatus::Success));
+
+    let fold = fold.lock().unwrap();
+    let snapshot = fold.snapshot();
+    assert_eq!(snapshot.subagents.len(), 1);
+    assert_eq!(
+        snapshot.running_subagents(),
+        0,
+        "the node has already finished: {:?}",
+        snapshot.subagents
+    );
+}
+
+#[test]
+fn a_failed_agent_node_settles_as_failed_rather_than_done() {
+    let (sink, fold) = folding_sink();
+    let observer = WorkflowRunObserver::new("demo", &graph(), sink);
+
+    observer.on_step_finish(&step("build", StepStatus::Error));
+
+    let fold = fold.lock().unwrap();
+    let subagent = &fold.snapshot().subagents[0];
+    assert_eq!(
+        subagent.status,
+        crate::harness_work::SubagentStatus::Failed,
+        "{subagent:?}"
+    );
+}

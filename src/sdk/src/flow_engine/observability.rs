@@ -14,7 +14,7 @@
 //! | --- | --- |
 //! | `on_run_start` | `plan_update` — one step per node, in graph order |
 //! | `on_step_finish` | `todo_update` — that node settled, the next one active |
-//! | `on_step_finish` (agent nodes) | `subagent_start` |
+//! | `on_step_finish` (agent nodes) | `subagent_start` + a settling `tool_result` |
 //! | `on_run_finish` | `run_result` |
 //!
 //! One wrinkle worth stating plainly: at the pinned engine version there is no
@@ -188,12 +188,30 @@ impl RunObserver for WorkflowRunObserver {
         drop(plan);
 
         if let Some((id, label)) = agent_finished {
+            let call_id = format!("{}:{id}", self.workflow_id);
             (self.sink)(
                 kinds::SUBAGENT_START,
                 json!({
-                    "call_id": format!("{}:{id}", self.workflow_id),
+                    "call_id": call_id,
                     "agent_type": "workflow_node",
                     "description": label,
+                }),
+            );
+            // Settle it in the same breath. The engine tells us about an agent
+            // node only once it has *finished*, so a lone start would leave the
+            // fold holding a sub-agent that never returns — and the terminal
+            // snapshot on the reply frame would show work still in flight after
+            // the run had ended. A sub-agent closes on an ordinary `tool_result`
+            // carrying its call id.
+            (self.sink)(
+                "tool_result",
+                json!({
+                    "call_id": call_id,
+                    "is_error": matches!(step.status, StepStatus::Error),
+                    "output": match step.status {
+                        StepStatus::Success => "completed",
+                        StepStatus::Error => "failed",
+                    },
                 }),
             );
         }

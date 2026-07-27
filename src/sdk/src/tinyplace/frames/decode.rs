@@ -47,6 +47,14 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .get("usage")
         .and_then(|v| serde_json::from_value::<TokenUsage>(v.clone()).ok());
 
+    // A malformed work snapshot is dropped rather than sinking the frame: the
+    // task result is the payload that matters, and a peer on a newer shape must
+    // not make its replies unreadable here.
+    let work = obj
+        .get("work")
+        .and_then(|v| serde_json::from_value::<crate::harness_work::WorkSnapshot>(v.clone()).ok())
+        .map(Box::new);
+
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
         kind,
@@ -58,6 +66,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         provider,
         model,
         usage,
+        work,
     })
 }
 

@@ -68,11 +68,16 @@ pub(super) async fn route_frame(
     // Recorded as well as logged: the log is for a human reading afterwards,
     // this is what the Agents view renders live.
     if let Some(activity) = activity {
-        activity.observed(
+        // The frame's work snapshot rides along with it: this is the only
+        // point where a remote worker's todo list, plan, and sub-agents enter
+        // this process, and dropping it here would leave the Agents view with
+        // the same one-line summary it had before.
+        activity.observed_with_work(
             &frame.task_id,
             frame.kind.as_str(),
             &frame.text,
             crate::clock::now_millis(),
+            frame.work.clone(),
         );
     }
     // Every frame a worker sends, as it arrives. The hub used to report only the

@@ -52,6 +52,7 @@ fn lane(question: bool) -> AgentLane {
             turn_blocks: vec![],
             attention: question.then(|| "confirm: use v2?".into()),
             question_id: question.then(|| "q1".into()),
+            work: None,
         }],
         context_tokens: None,
         usage: Default::default(),
@@ -61,6 +62,7 @@ fn lane(question: bool) -> AgentLane {
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 1,
+        work: None,
     }
 }
 

@@ -22,6 +22,7 @@ fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
         provider: None,
         model: None,
         usage: None,
+        work: None,
     }
 }
 

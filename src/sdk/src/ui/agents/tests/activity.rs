@@ -17,6 +17,7 @@ fn record(agent: &str, task: &str, kind: &str, content: &str, at: i64) -> Worker
         kind: kind.into(),
         content: content.into(),
         at,
+        work: None,
     }
 }
 
@@ -38,6 +39,7 @@ fn worker_lane(agent_id: &str) -> AgentLane {
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 0,
+        work: None,
     }
 }
 
@@ -168,4 +170,36 @@ fn a_tier_lane_is_never_given_worker_tasks() {
     );
     assert!(lanes[0].tasks.is_empty());
     assert_eq!(lanes[0].active_tasks, 0);
+}
+
+#[test]
+fn a_lane_shows_the_freshest_work_its_worker_reported() {
+    use crate::harness_work::{kinds, WorkFold};
+
+    let snapshot = |todo: &str| {
+        let mut fold = WorkFold::new();
+        fold.apply(
+            kinds::TODO_UPDATE,
+            &serde_json::json!({ "todos": [{ "content": todo, "status": "in_progress" }] }),
+            1,
+        );
+        Some(Box::new(fold.into_snapshot()))
+    };
+
+    let mut early = record("dev", "t1", "status", "starting", 10);
+    early.work = snapshot("read the code");
+    let mut late = record("dev", "t1", "status", "still going", 20);
+    late.work = snapshot("write the fold");
+    // A frame that reported nothing must not erase what the last one said.
+    let silent = record("dev", "t1", "status", "thinking", 30);
+
+    let mut lanes = vec![worker_lane("dev")];
+    merge_host_activity(&mut lanes, &[early, late, silent]);
+
+    let work = lanes[0].work.as_ref().expect("the lane carries the work");
+    assert_eq!(
+        work.current_todo().map(|t| t.text.as_str()),
+        Some("write the fold")
+    );
+    assert_eq!(lanes[0].tasks[0].work.as_ref(), Some(work));
 }

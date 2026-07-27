@@ -67,6 +67,7 @@ fn new_agent_lane(key: String, label: String) -> AgentLane {
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 0,
+        work: None,
     }
 }
 
@@ -84,6 +85,7 @@ fn touch_task(lane: &mut AgentLane, task_id: &str, at: i64, block: Option<TurnBl
                 turn_blocks: Vec::new(),
                 attention: None,
                 question_id: None,
+                work: None,
             });
             lane.tasks.len() - 1
         }
@@ -394,6 +396,7 @@ pub fn derive_agent_lanes(
             parent_agent_id: None,
             descriptor: None,
             active_tasks: 0,
+            work: None,
         });
     }
 

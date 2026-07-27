@@ -56,6 +56,14 @@ pub fn merge_host_activity(lanes: &mut [AgentLane], activity: &[WorkerActivity])
             .map(|t| t.last_at)
             .max()
             .unwrap_or(lane.last_at);
+        // The lane shows the most recently reported work across its tasks, so a
+        // machine running one thing reads correctly and a machine running
+        // several shows the freshest rather than an arbitrary one.
+        lane.work = tasks
+            .iter()
+            .filter(|task| task.work.is_some())
+            .max_by_key(|task| task.last_at)
+            .and_then(|task| task.work.clone());
         lane.tasks = tasks;
     }
 }
@@ -76,9 +84,16 @@ fn fold_tasks(records: &[&WorkerActivity]) -> Vec<TaskState> {
                 turn_blocks: Vec::new(),
                 attention: None,
                 question_id: None,
+                work: None,
             }
         });
         state.last_at = record.at;
+        // Latest-wins: each frame carries the worker's whole current picture,
+        // so the newest one that reported anything is the truth. A frame that
+        // reported nothing must not erase what an earlier one said.
+        if record.work.is_some() {
+            state.work = record.work.clone();
+        }
         match record.kind.as_str() {
             // An ack only says the worker admitted it; it is not progress and
             // showing it as a turn would make an idle task look busy.

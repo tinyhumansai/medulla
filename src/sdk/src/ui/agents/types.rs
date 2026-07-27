@@ -119,6 +119,17 @@ pub struct TaskState {
     /// The `questionId` of a pending `task_attention` — the handle `question.answer`
     /// needs. `None` when the task has no open question.
     pub question_id: Option<String>,
+    /// What the worker running this task says it is working on: its todo list,
+    /// plan, sub-agents, and file edits, as of the last frame it sent.
+    ///
+    /// `None` when the worker reported nothing structured — an older peer, or a
+    /// harness with no such surface — which renders as no work panel at all
+    /// rather than an empty one.
+    ///
+    /// Boxed because a [`TaskState`] is carried by value inside every
+    /// [`AgentRow`] the list model builds each frame, and a snapshot is far
+    /// larger than the rest of the row put together.
+    pub work: Option<Box<crate::harness_work::WorkSnapshot>>,
 }
 
 /// One lane in the Agents view: the orchestrator tier, a roster agent, an
@@ -154,6 +165,9 @@ pub struct AgentLane {
     pub descriptor: Option<AgentDescriptor>,
     /// Count of currently-active tasks.
     pub active_tasks: i64,
+    /// The most recent work snapshot across this lane's tasks, so a lane header
+    /// can show what the machine is doing without opening a task.
+    pub work: Option<Box<crate::harness_work::WorkSnapshot>>,
 }
 
 /// A single pre-styled display row.

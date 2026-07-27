@@ -35,6 +35,7 @@ fn lane(role: AgentRole) -> AgentLane {
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 0,
+        work: None,
     }
 }
 

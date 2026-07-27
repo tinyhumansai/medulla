@@ -77,6 +77,7 @@ pub(super) fn base_config() -> DaemonConfig {
 pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
         usage: None,
+        work: None,
         proto: TINYPLACE_PROTO.to_string(),
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
@@ -93,6 +94,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
 pub(super) fn input_frame(task_id: &str, text: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
         usage: None,
+        work: None,
         kind: TaskFrameKind::Input,
         ..task_frame(task_id, text, correlation)
     }
@@ -102,6 +104,7 @@ pub(super) fn input_frame(task_id: &str, text: &str, correlation: Option<&str>) 
 pub(super) fn abort_frame(task_id: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
         usage: None,
+        work: None,
         kind: TaskFrameKind::Abort,
         ..task_frame(task_id, "", correlation)
     }
@@ -262,6 +265,7 @@ pub(super) fn counting_capability_runner(count: Arc<AtomicUsize>) -> RunTaskFn {
 pub(super) fn capabilities_frame(task_id: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
         usage: None,
+        work: None,
         kind: TaskFrameKind::Capabilities,
         ..task_frame(task_id, "", correlation)
     }

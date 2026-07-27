@@ -249,7 +249,7 @@ pub struct HarnessReadiness {
 /// is the globally-unique dispatch key that responders must echo verbatim.
 /// `harness` names the provider that ran a task (set on responses); `provider`
 /// is an inbound-only hint naming the agent the orchestrator wants to run it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskFrame {
     /// Wire version tag ([`TINYPLACE_PROTO`]).
     pub proto: String,
@@ -284,6 +284,19 @@ pub struct TaskFrame {
     /// Reported on `reply` frames when the child harness surfaced token counts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TokenUsage>,
+    /// What the child harness is working on, as of this frame.
+    ///
+    /// Carried on `status` and `reply` frames so an orchestrator sees the
+    /// worker's todo list, plan, sub-agents, and file edits rather than only the
+    /// one-line detail `text` — the whole point of a master terminal is that the
+    /// remote screen is legible from here. Additive and optional in both
+    /// directions: a peer that predates it omits the key, and a peer that does
+    /// not understand it drops it.
+    ///
+    /// Boxed so a frame stays small in the enums that carry it by value: the
+    /// snapshot dwarfs every other field, and most frames have none.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub work: Option<Box<crate::harness_work::WorkSnapshot>>,
 }
 
 impl TaskFrame {

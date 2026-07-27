@@ -30,6 +30,8 @@ impl App {
     /// Draw the Routing nav and active content pane.
     pub(super) fn draw_routing(&mut self, f: &mut Frame, area: Rect) {
         let (nav, content) = multi_pane::split(area);
+        self.note_pane(nav);
+        self.note_pane(content);
         self.draw_routing_nav(f, nav);
         match self.routing_index {
             RP_HOSTS => self.draw_hosts(f, content),

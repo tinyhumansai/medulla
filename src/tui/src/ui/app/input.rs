@@ -81,11 +81,17 @@ impl App {
     /// Grow the selection block from the drag anchor to `(x, y)`.
     ///
     /// The block is normalized so a drag up or leftwards selects the same cells
-    /// as the same drag made in reverse.
+    /// as the same drag made in reverse, and clamped to the pane the drag
+    /// started in: panes sit side by side, so an unclamped block would splice
+    /// the rail's labels into every line of the transcript beside it.
     pub(super) fn extend_selection(&mut self, x: u16, y: u16) {
         let Some((ax, ay)) = self.drag_anchor else {
             return;
         };
+        let pane = self.pane_at(ax, ay);
+        let clamp_x = |v: u16| v.clamp(pane.x, pane.right().saturating_sub(1));
+        let clamp_y = |v: u16| v.clamp(pane.y, pane.bottom().saturating_sub(1));
+        let (x, y) = (clamp_x(x), clamp_y(y));
         self.selection = Some((ax.min(x), ay.min(y), ax.max(x), ay.max(y)));
     }
 

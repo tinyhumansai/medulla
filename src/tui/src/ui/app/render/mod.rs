@@ -305,6 +305,12 @@ impl App {
             ])
             .split(self.area);
 
+        // Each frame re-records where the panes landed; a stale rect from the
+        // previous layout would confine a drag to a pane that has moved.
+        self.panes.clear();
+        for row in [rows[0], rows[1], rows[2], rows[4]] {
+            self.note_pane(row);
+        }
         self.draw_shortcuts(f, rows[0]);
         self.draw_tabs(f, rows[1]);
         self.draw_content(f, rows[2]);

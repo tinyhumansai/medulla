@@ -603,6 +603,10 @@ pub struct App {
     /// screen at a time, so one field serves Tasks, Routing, Memory, and
     /// Settings.
     pub(super) hit_nav: crate::ui::multi_pane::NavHits,
+    /// Every pane drawn this frame, in draw order. A pointer selection is
+    /// clamped to whichever of these it started in, so a drag reads one pane's
+    /// text instead of splicing its neighbour's columns into every row.
+    pub(super) panes: Vec<Rect>,
     /// A drag in progress: where the button went down. Kept apart from
     /// [`Self::selection`] so a click that never moves leaves no selection.
     pub(super) drag_anchor: Option<(u16, u16)>,

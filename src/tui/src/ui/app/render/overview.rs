@@ -52,6 +52,9 @@ impl App {
             })
             .split(rows[0]);
         let orch_area = if hosting { top[1] } else { top[0] };
+        for pane in top.iter().chain(std::iter::once(&rows[1])) {
+            self.note_pane(*pane);
+        }
 
         if hosting {
             self.draw_host_panel(f, top[0]);

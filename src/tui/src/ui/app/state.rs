@@ -125,6 +125,7 @@ impl App {
             hit_threads: None,
             hit_context: None,
             hit_nav: Default::default(),
+            panes: Vec::new(),
             drag_anchor: None,
             selection: None,
             copy_selection: false,

@@ -9,11 +9,36 @@
 //! Consequently both halves of the job run at draw time, after every widget has
 //! painted: copy first if the button has been released, then highlight.
 
+use ratatui::layout::Rect;
 use ratatui::Frame;
 
 use super::super::types::App;
 
 impl App {
+    /// Record a pane the pointer may select inside.
+    ///
+    /// Called by each tab as it lays its panes out. Order does not matter — the
+    /// *smallest* pane containing the anchor wins, so noting an enclosing region
+    /// as well as its children is harmless and keeps the fallback honest.
+    pub(in crate::ui::app) fn note_pane(&mut self, area: Rect) {
+        if area.width > 0 && area.height > 0 {
+            self.panes.push(area);
+        }
+    }
+
+    /// The pane a drag starting at `(x, y)` is confined to.
+    ///
+    /// Falls back to the whole screen when the point is in no recorded pane —
+    /// the chrome rows, say — so a drag there still copies rather than dying.
+    pub(in crate::ui::app) fn pane_at(&self, x: u16, y: u16) -> Rect {
+        self.panes
+            .iter()
+            .filter(|pane| pane.contains((x, y).into()))
+            .min_by_key(|pane| pane.area())
+            .copied()
+            .unwrap_or(self.area)
+    }
+
     /// Copy the selected cells if the drag has ended, then invert them.
     ///
     /// Called last in `App::draw` so it paints over finished widgets instead of

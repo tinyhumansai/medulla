@@ -414,11 +414,12 @@ impl App {
     }
 
     /// Draw the keyboard-shortcut hint line that heads the screen.
+    ///
+    /// Only keys that act on the surface in front of you. `^O` and `/help` are
+    /// still bound — they are just discoverable elsewhere, and a hint line long
+    /// enough to wrap stops being read at all.
     pub(super) fn draw_shortcuts(&mut self, f: &mut Frame, area: Rect) {
-        let text = format!(
-            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^O mouse {} · /help",
-            if self.mouse_capture { "●" } else { "○" },
-        );
+        let text = "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort";
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(
                 text,

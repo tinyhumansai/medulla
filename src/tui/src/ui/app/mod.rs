@@ -25,6 +25,8 @@ mod settings_edit;
 mod state;
 mod templates;
 mod types;
+#[cfg(feature = "workflows")]
+mod workflows;
 mod workspaces;
 
 #[cfg(test)]

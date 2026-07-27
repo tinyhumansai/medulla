@@ -18,4 +18,6 @@ mod meters_tests;
 pub mod stream;
 pub mod util;
 pub mod work;
+#[cfg(feature = "workflows")]
+pub mod workflows;
 pub mod workspaces;

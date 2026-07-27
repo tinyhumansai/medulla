@@ -10,7 +10,8 @@ use ratatui::Frame;
 use crate::ui::multi_pane;
 
 use super::super::types::{
-    App, RP_ADD_HOST, RP_HARNESSES, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES,
+    App, RP_ADD_HOST, RP_HARNESSES, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKFLOWS,
+    RP_WORKSPACES,
 };
 
 mod add_host;
@@ -19,6 +20,8 @@ mod hosts;
 mod nav;
 mod strategies;
 mod templates;
+#[cfg(feature = "workflows")]
+mod workflows;
 mod workspaces;
 
 impl App {
@@ -31,6 +34,8 @@ impl App {
             RP_HARNESSES => self.draw_harnesses(f, content),
             RP_WORKSPACES => self.draw_workspaces(f, content),
             RP_TEMPLATES => self.draw_templates(f, content),
+            #[cfg(feature = "workflows")]
+            RP_WORKFLOWS => self.draw_workflows(f, content),
             RP_ADD_HOST => self.draw_add_host(f, content),
             RP_STRATEGIES => self.draw_strategies(f, content),
             _ => self.draw_hosts(f, content),

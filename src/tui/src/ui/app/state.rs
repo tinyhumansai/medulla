@@ -70,6 +70,8 @@ impl App {
             template_index: 0,
             template_scroll: 0,
             template_modal: false,
+            workflow_index: 0,
+            workflows: Vec::new(),
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index,

@@ -12,7 +12,7 @@ license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/medulla"
 
 [workspace.dependencies]
-medulla = { path = "src/sdk" }
+medulla = { path = "src/sdk", default-features = false }
 tinyplace = { path = "vendor/tinyplace/sdk/rust" }
 tinycortex = { path = "vendor/tinycortex", features = ["persona", "providers-http"] }
 # The workflow engine. Declared as a registry dependency and redirected to the

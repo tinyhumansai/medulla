@@ -13,6 +13,8 @@ use medulla_tui::ui::app::Cmd;
 use super::AppMsg;
 
 mod tasks;
+#[cfg(feature = "workflows")]
+mod workflows;
 
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so
@@ -179,6 +181,8 @@ pub(super) fn run_cmd(
                 let _ = tx.send(AppMsg::Status(status));
             });
         }
+        #[cfg(feature = "workflows")]
+        Cmd::RunWorkflow { id } => workflows::spawn_run(id, msg_tx),
         Cmd::RefreshFleet => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

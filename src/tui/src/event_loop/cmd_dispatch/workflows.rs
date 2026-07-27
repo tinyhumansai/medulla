@@ -130,21 +130,38 @@ pub(super) fn spawn_copilot(
 }
 
 /// Run one copilot turn to completion.
+///
+/// The host is started per turn and dropped with it, which unbinds the loopback
+/// endpoints so the next turn — or a workflow run — can bind them again.
 async fn copilot_turn(
     workflow: &str,
     instruction: &str,
     status: tokio::sync::mpsc::UnboundedSender<String>,
 ) -> anyhow::Result<medulla::workflows::CopilotOutcome> {
-    let env: HashMap<String, String> = std::env::vars().collect();
+    let mut env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let store = medulla::workflows::discover_store(&env, &cwd);
     let loaded = medulla::config::load_config(None, &env, &cwd)?;
+
+    // ACP, not the legacy provider transport — this is the whole reason the
+    // copilot can edit a graph at all. Medulla is an ACP *client*, so
+    // `session/new`'s `mcpServers` is the only channel it has for handing a
+    // harness the `medulla-workflows` tools; the legacy path has no equivalent
+    // and leaves the agent with nothing but the filesystem, which the prompt
+    // (rightly) forbids it from using. Forced here rather than left to the
+    // operator's environment because a copilot without its tools is not a
+    // degraded copilot, it is a chatbot that cannot do the one thing it is for.
+    env.insert(
+        medulla::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+        "acp".to_string(),
+    );
 
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: loaded.config.workflows.default_provider,
         model: (!loaded.config.workflows.default_model.is_empty())
             .then(|| loaded.config.workflows.default_model.clone()),
+        env,
         ..Default::default()
     })
     .map_err(anyhow::Error::msg)?;

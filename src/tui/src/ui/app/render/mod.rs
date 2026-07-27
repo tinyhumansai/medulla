@@ -23,6 +23,7 @@ mod memory;
 mod overview;
 mod prompt;
 mod routing;
+mod selection;
 mod settings;
 mod tasks;
 mod template_modal;
@@ -319,6 +320,9 @@ impl App {
             self.draw_resume(f, rows[3]);
         }
         self.draw_status_line(f, rows[4]);
+        // Last: the pointer selection paints over whatever the tabs drew, and
+        // reads its text back out of the finished buffer.
+        self.paint_selection(f);
     }
 
     /// The height reserved below the content for the composer or resume picker.

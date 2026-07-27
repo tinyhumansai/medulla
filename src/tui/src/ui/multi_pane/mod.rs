@@ -16,7 +16,7 @@ use crate::ui::theme::Theme;
 
 mod types;
 
-pub(crate) use types::NavAction;
+pub(crate) use types::{NavAction, NavHits};
 
 #[cfg(test)]
 mod tests;
@@ -107,6 +107,11 @@ pub(crate) fn navigate(
 ///
 /// `groups` contains display-only headings as `(label, first_page_index)`.
 /// Passing an empty slice renders a flat menu.
+///
+/// Returns each page row's `(screen_row, page_index)` so the caller can hit-test
+/// clicks against it. Group headings occupy rows of their own and are absent
+/// from the result, which is what keeps a click on a heading inert instead of
+/// selecting whichever page happens to share its offset.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_nav(
     f: &mut Frame,
@@ -117,7 +122,7 @@ pub(crate) fn draw_nav(
     groups: &[(&str, usize)],
     selected: usize,
     focused: bool,
-) {
+) -> NavHits {
     let inner = block.inner(area);
     f.render_widget(block, area);
     let dim = Style::default().add_modifier(Modifier::DIM);
@@ -126,9 +131,15 @@ pub(crate) fn draw_nav(
     // away from the border for no reason.
     let pad = if groups.is_empty() { "" } else { " " };
     let mut lines = Vec::new();
+    let mut hits = Vec::new();
     for (index, page) in pages.iter().enumerate() {
         if let Some((heading, _)) = groups.iter().find(|(_, start)| *start == index) {
             lines.push(TLine::from(Span::styled(format!(" {heading}"), dim)));
+        }
+        // Recorded before the row is pushed: `lines.len()` is its offset from the
+        // top of the inner area, headings included.
+        if (lines.len() as u16) < inner.height {
+            hits.push((inner.y + lines.len() as u16, index));
         }
         let style = match (index == selected, focused) {
             (true, false) => theme.selection(),
@@ -155,4 +166,8 @@ pub(crate) fn draw_nav(
         dim,
     )));
     f.render_widget(Paragraph::new(Text::from(lines)), inner);
+    NavHits {
+        area: inner,
+        rows: hits,
+    }
 }

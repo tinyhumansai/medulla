@@ -15,7 +15,7 @@ impl App {
     /// Render the Tasks menu and its active content page.
     pub(super) fn draw_tasks(&mut self, frame: &mut Frame, area: Rect) {
         let (nav, content) = multi_pane::split(area);
-        multi_pane::draw_nav(
+        self.hit_nav = multi_pane::draw_nav(
             frame,
             nav,
             self.panel("Tasks"),

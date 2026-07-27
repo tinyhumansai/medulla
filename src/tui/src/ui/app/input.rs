@@ -57,10 +57,36 @@ impl App {
                 }
                 _ => {}
             },
-            MouseEventKind::Down(MouseButton::Left) => return self.handle_click(m.column, m.row),
+            // A press both acts on what is under it and arms a drag. The click
+            // fires here rather than on release so navigation stays immediate;
+            // a drag that follows selects text without undoing it.
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.drag_anchor = Some((m.column, m.row));
+                self.selection = None;
+                return self.handle_click(m.column, m.row);
+            }
+            MouseEventKind::Drag(MouseButton::Left) => self.extend_selection(m.column, m.row),
+            // Copy on release, the way tmux does it — no second keystroke to
+            // confirm. The copy itself waits for the next draw, when the
+            // selected cells can be read back out of the rendered buffer.
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.drag_anchor = None;
+                self.copy_selection = self.selection.is_some();
+            }
             _ => {}
         }
         None
+    }
+
+    /// Grow the selection block from the drag anchor to `(x, y)`.
+    ///
+    /// The block is normalized so a drag up or leftwards selects the same cells
+    /// as the same drag made in reverse.
+    pub(super) fn extend_selection(&mut self, x: u16, y: u16) {
+        let Some((ax, ay)) = self.drag_anchor else {
+            return;
+        };
+        self.selection = Some((ax.min(x), ay.min(y), ax.max(x), ay.max(y)));
     }
 
     /// Resolve a left click at `(x, y)` to a tab switch or a row selection in the
@@ -78,6 +104,20 @@ impl App {
             return None;
         }
         let tab = self.tab();
+        // Subpage nav. Clicking a page both selects it and takes focus, which is
+        // what Enter does from the keyboard — a click that only moved the
+        // highlight would leave the arrows driving the menu the pointer just
+        // left.
+        if let Some(page) = self.hit_nav.page_at(x, y) {
+            match tab {
+                "Tasks" => (self.tasks_index, self.tasks_focused) = (page, true),
+                "Routing" => (self.routing_index, self.routing_focused) = (page, true),
+                "Memory" => (self.memory_subpage_index, self.memory_focused) = (page, true),
+                "Settings" => (self.settings_index, self.settings_focused) = (page, true),
+                _ => {}
+            }
+            return None;
+        }
         if tab == "Agents" {
             // The rail stacks two hit boxes — threads above lanes — so both are
             // tried; an `else if` here would leave the strip unclickable.

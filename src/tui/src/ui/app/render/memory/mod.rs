@@ -18,7 +18,7 @@ impl App {
     /// Draw the Memory menu, active page, and optional entry-detail modal.
     pub(super) fn draw_memory(&mut self, frame: &mut Frame, area: Rect) {
         let (nav, content) = multi_pane::split(area);
-        multi_pane::draw_nav(
+        self.hit_nav = multi_pane::draw_nav(
             frame,
             nav,
             self.panel("Memory"),

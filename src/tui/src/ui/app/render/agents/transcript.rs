@@ -73,6 +73,19 @@ impl App {
         let inner = block.inner(area);
         f.render_widget(block, area);
         let mut header: Vec<TLine> = Vec::new();
+        // What the selected agent is working on, in one line. The Work panel
+        // beside this shows the whole picture, but it needs columns a narrow
+        // terminal does not have — and the single most useful fact, what the
+        // agent is on right now, fits here either way.
+        if let Some(headline) = self
+            .selected_work(selection)
+            .and_then(crate::ui::work::work_headline)
+        {
+            header.push(TLine::from(Span::styled(
+                format!("work · {headline}"),
+                Style::default().fg(Color::Magenta),
+            )));
+        }
         // Harness task board: session-wide, shown only when the backend surfaces a
         // `HarnessStatus`. Degrades to nothing (empty vec) when absent or empty.
         if let Some(status) = &self.snapshot.harness {

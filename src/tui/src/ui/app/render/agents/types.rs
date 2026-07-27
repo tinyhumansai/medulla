@@ -48,6 +48,9 @@ pub(super) struct AgentsPanes {
     pub(super) rail: Rect,
     /// The transcript or declaration pane.
     pub(super) pane: Rect,
+    /// The work panel beside the transcript; `None` when the selection has no
+    /// work to show or the terminal is too narrow to spare the columns.
+    pub(super) work: Option<Rect>,
     /// The composer, under the pane it submits to.
     pub(super) composer: Rect,
 }

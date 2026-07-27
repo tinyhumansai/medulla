@@ -190,10 +190,20 @@ impl App {
                 } else {
                     style.fg(color(task.status.color()))
                 };
+                // The chip is what makes a row worth reading at a glance: a
+                // task that says "running · 12 turns" is indistinguishable from
+                // every other one, while "3/7 ⑂2" says where it has got to.
+                let chip = task
+                    .work
+                    .as_deref()
+                    .map(crate::ui::work::work_chip)
+                    .filter(|chip| !chip.is_empty())
+                    .map(|chip| format!(" · {chip}"))
+                    .unwrap_or_default();
                 TLine::from(vec![
                     Span::styled(format!("   {branch} {} · ", task.task_id), style),
                     Span::styled(task.status.label().to_string(), status_style),
-                    Span::styled(format!(" · {} turns", task.turns), style),
+                    Span::styled(format!(" · {} turns{chip}", task.turns), style),
                 ])
             }
             AgentRow::Lane { lane_index } => {
@@ -234,10 +244,20 @@ impl App {
                 if active {
                     style = self.theme.selection();
                 }
+                let work_note = item
+                    .work
+                    .as_deref()
+                    .map(crate::ui::work::work_chip)
+                    .filter(|chip| !chip.is_empty())
+                    .map(|chip| format!(" · {chip}"))
+                    .unwrap_or_default();
                 crate::ui::agent_lane::line(
                     marker,
                     item.label.clone(),
-                    format!(" · {}{ctx}{state}{sessions_note}", item.turns.len()),
+                    format!(
+                        " · {}{ctx}{state}{sessions_note}{work_note}",
+                        item.turns.len()
+                    ),
                     style,
                 )
             }

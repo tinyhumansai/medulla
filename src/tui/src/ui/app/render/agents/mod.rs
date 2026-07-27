@@ -11,8 +11,9 @@
 //!
 //! Split by responsibility: [`types`] resolves what the cursor is on and where
 //! the panes landed, [`rail`] draws the threads strip and the lane/fleet list,
-//! [`transcript`] the pane beside it, and [`composer`] the input under that.
-//! This module owns only the layout that decides how much room each one gets.
+//! [`transcript`] the pane beside it, [`work`] the panel showing what the
+//! selected agent is working on, and [`composer`] the input under that. This
+//! module owns only the layout that decides how much room each one gets.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
@@ -26,6 +27,10 @@ mod composer;
 mod rail;
 mod transcript;
 mod types;
+mod work;
+
+#[cfg(test)]
+mod work_tests;
 
 use types::{AgentsPanes, Selection};
 
@@ -36,6 +41,12 @@ impl App {
         let panes = self.agents_panes(area, &selection);
         self.draw_agents_rail(f, &panes, &selection);
         self.draw_agents_pane(f, panes.pane, &selection);
+        // Cloned rather than borrowed: the draw takes `&mut self`, and the
+        // snapshot lives inside the same state it is drawing from.
+        if let (Some(area), Some(snapshot)) = (panes.work, self.selected_work(&selection).cloned())
+        {
+            self.draw_agents_work(f, area, &snapshot);
+        }
         // What the composer submits depends on the cursor, so it says so.
         self.draw_agent_composer(f, panes.composer, &selection);
     }
@@ -115,10 +126,28 @@ impl App {
                 Constraint::Length(self.composer_height()),
             ])
             .split(columns[1]);
+        // The work panel splits the transcript row, not the whole column: the
+        // composer still spans the width it submits to, and a narrow terminal
+        // keeps the transcript whole rather than showing two cramped halves.
+        let show_work =
+            self.selected_work(selection).is_some() && area.width >= work::MIN_WIDTH_FOR_WORK_PANE;
+        let (pane, work_area) = if show_work {
+            let split = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Min(0),
+                    Constraint::Length(work::WORK_PANE_WIDTH),
+                ])
+                .split(right[0]);
+            (split[0], Some(split[1]))
+        } else {
+            (right[0], None)
+        };
         AgentsPanes {
             threads: left[0],
             rail: left[1],
-            pane: right[0],
+            pane,
+            work: work_area,
             composer: right[1],
         }
     }

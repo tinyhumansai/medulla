@@ -542,3 +542,11 @@ fn help_text_documents_the_workflow_command() {
     assert!(help.contains("medulla workflow"));
     assert!(help.contains("--approve"));
 }
+
+#[test]
+fn the_mcp_verb_is_parsed_so_an_acp_session_can_launch_the_tool_server() {
+    assert_eq!(
+        parse_workflow_args(&argv(&["mcp"])).action,
+        WorkflowAction::Mcp
+    );
+}

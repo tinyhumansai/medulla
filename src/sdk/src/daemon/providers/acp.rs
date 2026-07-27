@@ -23,6 +23,33 @@ use crate::tinyplace::{HarnessEvent, HarnessProvider};
 
 use super::types::{OnEvent, RunTaskOptions, RunTaskResult};
 
+/// The MCP servers offered to every ACP session.
+///
+/// Just the workflow tools, served by this same binary in a subprocess. Empty
+/// when the binary's path cannot be determined — a session without the tools is
+/// a session that can still do its actual job, which is better than failing to
+/// start one.
+fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
+    #[cfg(not(feature = "workflows"))]
+    {
+        Vec::new()
+    }
+    #[cfg(feature = "workflows")]
+    {
+        use agent_client_protocol::schema::v1::{McpServer, McpServerStdio};
+        let Ok(binary) = std::env::current_exe() else {
+            return Vec::new();
+        };
+        // The subprocess inherits this process's environment, which is what
+        // carries MEDULLA_HOME — so the harness edits the same workflow store
+        // the operator sees.
+        vec![McpServer::Stdio(
+            McpServerStdio::new(crate::workflows::mcp::SERVER_NAME, binary)
+                .args(vec!["workflow".to_string(), "mcp".to_string()]),
+        )]
+    }
+}
+
 /// Environment switch selecting ACP instead of legacy provider JSONL.
 pub const HARNESS_PROTOCOL_ENV: &str = "MEDULLA_HARNESS_PROTOCOL";
 
@@ -90,8 +117,14 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     id.into()
                 }
                 None => {
+                    let mut request = NewSessionRequest::new(cwd);
+                    // Offer the harness Medulla's own tools. Medulla is the ACP
+                    // *client* here, so this is the only way it can hand a
+                    // harness anything to call — and it is what lets a coding
+                    // agent author a workflow rather than only run one.
+                    request.mcp_servers = workflow_mcp_servers();
                     connection
-                        .send_request(NewSessionRequest::new(cwd))
+                        .send_request(request)
                         .block_task()
                         .await?
                         .session_id

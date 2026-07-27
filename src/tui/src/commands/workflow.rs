@@ -38,6 +38,14 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let store = ops::discover_store(&env, &cwd);
 
+    // The MCP server owns stdout for the whole session, so it returns straight
+    // from here rather than falling through to the JSON print below.
+    if matches!(parsed.action, WorkflowAction::Mcp) {
+        return medulla::workflows::mcp::serve_stdio(&env, &cwd)
+            .await
+            .map_err(anyhow::Error::from);
+    }
+
     let output = match &parsed.action {
         WorkflowAction::List => ops::list(&store)?,
         WorkflowAction::Get(id) => ops::get(&store, id)?,
@@ -61,6 +69,7 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
         WorkflowAction::Catalog(kind) => ops::catalog(kind.as_deref())?,
         WorkflowAction::Run(id) => execute(&parsed, &store, &env, &cwd, id).await?,
         WorkflowAction::Resume(run_id) => resume(&parsed, &store, &env, &cwd, run_id).await?,
+        WorkflowAction::Mcp => unreachable!("handled above, before stdout is claimed"),
     };
 
     println!("{}", serde_json::to_string_pretty(&output)?);

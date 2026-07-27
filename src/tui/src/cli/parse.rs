@@ -280,6 +280,7 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
         }
         Some("get-run") => operand.map_or(WorkflowAction::List, WorkflowAction::GetRun),
         Some("catalog") | Some("kinds") => WorkflowAction::Catalog(operand),
+        Some("mcp") => WorkflowAction::Mcp,
         _ => WorkflowAction::List,
     };
     out
@@ -359,6 +360,7 @@ medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <q
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
 medulla workspace <cmd> Workspace registry: add [dir]|list|remove <dir|id>\n  \
 medulla workflow <cmd>  Workflows: list|get|create|apply-ops|validate|dry-run|run|resume|cancel|catalog\n  \
+medulla workflow mcp    Serve the workflow tools over MCP (for ACP sessions)\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\

@@ -137,6 +137,11 @@ pub enum WorkflowAction {
     GetRun(String),
     /// `catalog [kind]` — the node kinds an author may use.
     Catalog(Option<String>),
+    /// `mcp` — serve the workflow tools over MCP on stdin/stdout.
+    ///
+    /// Not for a human to run: this is the command Medulla attaches to an ACP
+    /// session so the harness on the other end can author workflows.
+    Mcp,
 }
 
 /// Parsed `medulla workflow` flags.

@@ -9,9 +9,9 @@ use std::io::{self, IsTerminal};
 use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
-use crate::commands::{
-    run_hub, run_init, run_login, run_logout, run_memory, run_workflow_cmd, run_workspace,
-};
+#[cfg(feature = "workflows")]
+use crate::commands::run_workflow_cmd;
+use crate::commands::{run_hub, run_init, run_login, run_logout, run_memory, run_workspace};
 use crate::run::run_core;
 
 mod app_loop;
@@ -62,7 +62,16 @@ async fn main() -> anyhow::Result<()> {
         Command::Init => run_init(&raw[1..]).await,
         Command::Workspace => run_workspace(&raw[1..]).await,
         Command::Hub => run_hub(&raw[1..]).await,
+        #[cfg(feature = "workflows")]
         Command::Workflow => run_workflow_cmd(&raw[1..]).await,
+        // Built without the workflow engine: say so rather than starting the
+        // TUI, which is what an unhandled subcommand would otherwise do.
+        #[cfg(not(feature = "workflows"))]
+        Command::Workflow => {
+            anyhow::bail!(
+                "this build has no workflow support (built without the `workflows` feature)"
+            )
+        }
         Command::Update => {
             let args = medulla_tui::cli::parse_update_args(&raw[1..]);
             medulla::update::run_update(args.check).await

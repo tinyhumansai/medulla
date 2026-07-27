@@ -9,8 +9,11 @@ use medulla::runtime::WorkerOp;
 
 use super::super::types::{
     App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_HOST, RP_HARNESSES,
-    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKFLOWS, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
+    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
 };
+
+#[cfg(feature = "workflows")]
+use super::super::types::RP_WORKFLOWS;
 
 impl App {
     /// Handle Routing navigation and the active pane's actions.

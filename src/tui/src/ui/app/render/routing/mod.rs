@@ -10,8 +10,7 @@ use ratatui::Frame;
 use crate::ui::multi_pane;
 
 use super::super::types::{
-    App, RP_ADD_HOST, RP_HARNESSES, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKFLOWS,
-    RP_WORKSPACES,
+    App, RP_ADD_HOST, RP_HARNESSES, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES,
 };
 
 mod add_host;
@@ -23,6 +22,9 @@ mod templates;
 #[cfg(feature = "workflows")]
 mod workflows;
 mod workspaces;
+
+#[cfg(feature = "workflows")]
+use super::super::types::RP_WORKFLOWS;
 
 impl App {
     /// Draw the Routing nav and active content pane.

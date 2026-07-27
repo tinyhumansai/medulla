@@ -50,6 +50,8 @@ pub const TABS: [&str; 6] = [
 /// There is no `Fleet` page: the whole declared tree lives in the Agents rail,
 /// beside the lanes running on it. These pages are the *management* surfaces —
 /// what you register, authenticate, and choose — not the picture.
+/// With the workflow engine compiled in.
+#[cfg(feature = "workflows")]
 pub const ROUTING_SUBPAGES: [&str; 7] = [
     "Hosts",
     "Harnesses",
@@ -60,13 +62,32 @@ pub const ROUTING_SUBPAGES: [&str; 7] = [
     "Strategies",
 ];
 
+/// Without it. A slim build must not offer a page that cannot draw anything.
+#[cfg(not(feature = "workflows"))]
+pub const ROUTING_SUBPAGES: [&str; 6] = [
+    "Hosts",
+    "Harnesses",
+    "Workspaces",
+    "Agent Templates",
+    "Add Host",
+    "Strategies",
+];
+
 pub(super) const RP_HOSTS: usize = 0;
 pub(super) const RP_HARNESSES: usize = 1;
 pub(super) const RP_WORKSPACES: usize = 2;
 pub(super) const RP_TEMPLATES: usize = 3;
+#[cfg(feature = "workflows")]
 pub(super) const RP_WORKFLOWS: usize = 4;
+// The two trailing pages shift down when Workflows is not compiled in.
+#[cfg(feature = "workflows")]
 pub(super) const RP_ADD_HOST: usize = 5;
+#[cfg(feature = "workflows")]
 pub(super) const RP_STRATEGIES: usize = 6;
+#[cfg(not(feature = "workflows"))]
+pub(super) const RP_ADD_HOST: usize = 4;
+#[cfg(not(feature = "workflows"))]
+pub(super) const RP_STRATEGIES: usize = 5;
 
 /// The Tasks tab's left-nav pages.
 pub const TASKS_SUBPAGES: [&str; 2] = ["All Tasks", "Sources"];
@@ -458,11 +479,13 @@ pub struct App {
     /// Whether the agent-template popup is open over the catalog.
     pub(super) template_modal: bool,
     /// Selected row on the Routing Workflows page.
+    #[cfg(feature = "workflows")]
     pub(super) workflow_index: usize,
     /// The installed workflows, as last read from disk.
     ///
     /// Cached rather than re-read every frame: the store is files, and a render
     /// pass should not do I/O. `r` re-reads it, as it does for templates.
+    #[cfg(feature = "workflows")]
     pub(super) workflows: Vec<medulla::workflows::WorkflowSummary>,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,

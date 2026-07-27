@@ -30,4 +30,6 @@ pub mod tinyplace;
 pub mod ui;
 pub mod update;
 pub mod worker_profile;
+#[cfg(feature = "workflows")]
+pub mod workflows;
 pub mod wrapper;

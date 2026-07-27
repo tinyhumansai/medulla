@@ -262,6 +262,21 @@ fn the_copilot_pane_invites_an_instruction_before_the_first_turn() {
 }
 
 #[test]
+fn the_unfocused_copilot_pane_advertises_the_key_that_actually_focuses_it() {
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+    // Sidebar is the default focus, so the copilot pane starts unfocused.
+    assert_eq!(app.wf_focus(), WorkflowFocus::Sidebar);
+
+    let screen = render(&mut app);
+
+    // `c` is the binding (see `keys/workflows.rs`); Tab is deliberately
+    // unbound in this tab and would leave it instead of focusing the
+    // composer, so the hint must never name it.
+    assert!(screen.contains("c to type"), "{screen}");
+    assert!(!screen.contains("Tab to type"), "{screen}");
+}
+
+#[test]
 fn a_copilot_thread_is_drawn_with_a_marker_per_kind_of_line() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
     app.wf.draft = crate::ui::composer::insert_at("", 0, "add a step");

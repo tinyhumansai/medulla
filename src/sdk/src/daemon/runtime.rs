@@ -207,6 +207,7 @@ impl DaemonRuntime {
                 harness,
                 provider: None,
                 model: None,
+                workflow: None,
             },
             attachments.usage,
             attachments.work,

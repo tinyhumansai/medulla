@@ -19,6 +19,7 @@ fn encodes_a_minimal_frame() {
         harness: None,
         provider: None,
         model: None,
+        workflow: None,
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["proto"], TINYPLACE_PROTO);
@@ -44,6 +45,7 @@ fn encodes_optional_fields_when_present() {
         harness: Some(HarnessProvider::Codex),
         provider: Some(HarnessProvider::Claude),
         model: Some("anthropic/claude-opus-4.8".to_string()),
+        workflow: Some("nightly-sweep".to_string()),
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["kind"], "capabilities_result");
@@ -51,6 +53,7 @@ fn encodes_optional_fields_when_present() {
     assert_eq!(value["harness"], "codex");
     assert_eq!(value["provider"], "claude");
     assert_eq!(value["model"], "anthropic/claude-opus-4.8");
+    assert_eq!(value["workflow"], "nightly-sweep");
 }
 
 #[test]
@@ -76,6 +79,7 @@ fn round_trips_every_kind() {
             harness: None,
             provider: None,
             model: None,
+            workflow: None,
         });
         let decoded = decode_task_frame(&body).expect("valid frame decodes");
         assert_eq!(decoded.kind, kind);
@@ -115,6 +119,7 @@ fn carries_a_model_hint_through_encode_and_decode() {
         harness: None,
         provider: None,
         model: Some("openrouter/some-model".to_string()),
+        workflow: None,
     });
     let decoded = decode_task_frame(&body).unwrap();
     assert_eq!(decoded.model.as_deref(), Some("openrouter/some-model"));
@@ -402,6 +407,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
             harness: Some(HarnessProvider::Claude),
             provider: None,
             model: None,
+            workflow: None,
         },
         None,
         Some(snapshot.clone()),
@@ -422,6 +428,7 @@ fn an_empty_work_snapshot_is_left_off_the_wire() {
             harness: None,
             provider: None,
             model: None,
+            workflow: None,
         },
         None,
         Some(crate::harness_work::WorkSnapshot::default()),

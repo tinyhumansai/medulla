@@ -23,6 +23,7 @@ fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
         model: None,
         usage: None,
         work: None,
+        workflow: None,
     }
 }
 

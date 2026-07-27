@@ -87,6 +87,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
         harness: None,
         provider: None,
         model: None,
+        workflow: None,
     }
 }
 

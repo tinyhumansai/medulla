@@ -42,6 +42,7 @@ fn build(
         harness: input.harness,
         provider: input.provider,
         model: input.model,
+        workflow: input.workflow,
         usage,
         // An empty snapshot says nothing and would only cost bytes on every
         // status frame, so it is dropped rather than sent.

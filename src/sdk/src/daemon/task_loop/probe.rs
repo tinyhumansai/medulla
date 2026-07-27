@@ -9,7 +9,14 @@ use super::super::types::{DaemonRuntime, DEFAULT_CAPABILITY_TIMEOUT_MS};
 impl DaemonRuntime {
     /// Answer a `capabilities` probe with the cached [`AgentCapabilities`].
     pub(super) async fn handle_capabilities(&self, from: String, frame: TaskFrame) {
-        let capabilities = self.get_capabilities().await;
+        let mut capabilities = self.get_capabilities().await;
+        // Read fresh rather than cached: the harness probe is expensive and
+        // worth caching, but an operator who just installed a workflow expects
+        // the next probe to advertise it.
+        #[cfg(feature = "workflows")]
+        {
+            capabilities.workflows = self.installed_workflows();
+        }
         let text = serde_json::to_string(&capabilities).unwrap_or_else(|_| "{}".to_string());
         self.reply(
             &from,

@@ -47,6 +47,12 @@ pub struct TaskRequest {
     /// Optional model hint (the worker maps it to `--model`/`-m`, else its
     /// configured default).
     pub model: Option<String>,
+    /// Optional installed-workflow id: run that saved graph instead of handing
+    /// [`instruction`](Self::instruction) to a harness as a prompt.
+    ///
+    /// This is what lets one dispatch be a whole plan. The instruction becomes
+    /// the workflow's trigger payload.
+    pub workflow: Option<String>,
 }
 
 /// The terminal result of a dispatched task.

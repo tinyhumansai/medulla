@@ -73,6 +73,7 @@ impl Relay for FakeWorker {
                         harness: None,
                         provider: None,
                         model: None,
+                        workflow: None,
                     },
                     None,
                 ),
@@ -93,6 +94,7 @@ impl Relay for FakeWorker {
                             harness: None,
                             provider: None,
                             model: None,
+                            workflow: None,
                         },
                         None,
                     ),
@@ -127,6 +129,7 @@ impl Relay for FakeWorker {
                     harness: None,
                     provider: None,
                     model: None,
+                    workflow: None,
                 },
                 usage,
             ),
@@ -159,6 +162,7 @@ impl Relay for FakeWorker {
                             harness: None,
                             provider: None,
                             model: None,
+                            workflow: None,
                         },
                         None,
                     ),
@@ -245,6 +249,7 @@ pub(super) fn req(instruction: &str) -> TaskRequest {
         worker_address: "GRV1worker".to_string(),
         provider: None,
         model: None,
+        workflow: None,
     }
 }
 

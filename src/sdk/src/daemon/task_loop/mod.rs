@@ -12,6 +12,8 @@ mod control;
 mod probe;
 mod run;
 mod system_info;
+#[cfg(feature = "workflows")]
+mod workflow;
 
 use crate::tinyplace::{HarnessProvider, TaskFrame, TaskFrameKind};
 
@@ -21,6 +23,13 @@ impl DaemonRuntime {
     /// Route a decoded task frame to its handler; responses are ignored.
     pub(super) async fn handle_frame(&self, from: String, frame: TaskFrame) {
         match frame.kind {
+            // A frame naming a workflow runs that saved graph instead of
+            // handing its text to a harness as an instruction.
+            #[cfg(feature = "workflows")]
+            TaskFrameKind::Task if frame.workflow.is_some() => {
+                let id = frame.workflow.clone().unwrap_or_default();
+                self.handle_workflow_task(from, frame, id).await
+            }
             TaskFrameKind::Task => self.handle_task(from, frame).await,
             TaskFrameKind::Input => self.handle_input(from, frame).await,
             TaskFrameKind::Abort => self.handle_abort(from, frame).await,

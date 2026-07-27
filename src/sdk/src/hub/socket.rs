@@ -335,6 +335,9 @@ async fn handle_task_run(
         worker_address,
         provider,
         model,
+        // The hosted orchestrator dispatches instructions; naming a workflow is
+        // a separate call it makes deliberately, not something inferred here.
+        workflow: None,
     };
 
     let outcome = runner.run(req, Some(tx)).await;

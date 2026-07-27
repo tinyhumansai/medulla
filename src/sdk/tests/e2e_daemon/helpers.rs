@@ -109,6 +109,7 @@ pub fn frame(
         harness: None,
         provider: None,
         model: None,
+        workflow: None,
     }
 }
 

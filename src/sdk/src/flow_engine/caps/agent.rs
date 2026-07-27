@@ -142,6 +142,10 @@ impl HarnessAgentRunner {
             worker_address,
             provider: self.settings.default_provider,
             model: self.settings.default_model.clone(),
+            // A node dispatches an instruction, never another workflow: nesting
+            // is expressed with a `sub_workflow` node, which the engine expands
+            // itself and applies its own depth limit to.
+            workflow: None,
         }
     }
 

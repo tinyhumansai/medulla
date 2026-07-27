@@ -282,6 +282,7 @@ impl TaskRunner {
                 harness: None,
                 provider: req.provider,
                 model: req.model.clone(),
+                workflow: req.workflow.clone(),
             });
 
             if let Err(e) = self.relay.send(&req.worker_address, &body).await {
@@ -379,6 +380,7 @@ async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) 
         harness: None,
         provider: None,
         model: None,
+        workflow: None,
     });
     let _ = relay.send(address, &body).await;
 }

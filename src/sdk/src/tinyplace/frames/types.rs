@@ -281,6 +281,18 @@ pub struct TaskFrame {
     /// on responses.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub model: Option<String>,
+    /// Inbound-only: run this installed *workflow* instead of handing `text` to
+    /// a harness as an instruction.
+    ///
+    /// A workflow is a saved multi-step graph, so naming one turns a single task
+    /// frame into a whole plan the worker executes, dispatching each `agent` node
+    /// to its own harness. `text` becomes the trigger payload (JSON, or a bare
+    /// string the workflow can read as `=run.trigger.text`). Additive and
+    /// optional in both directions: a peer that predates workflows omits the key,
+    /// and a worker without the workflow feature replies with an error naming the
+    /// id it could not find.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub workflow: Option<String>,
     /// Reported on `reply` frames when the child harness surfaced token counts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TokenUsage>,
@@ -327,6 +339,9 @@ pub struct EncodeFrameInput {
     /// Inbound-only advisory model hint (parallels `provider`); `None` on the
     /// responses a worker daemon emits.
     pub model: Option<String>,
+    /// Inbound-only: the installed workflow to run instead of treating `text` as
+    /// an instruction. `None` on every response and on ordinary tasks.
+    pub workflow: Option<String>,
 }
 
 /// What an agent reports it can do, merged with facts its host establishes.
@@ -377,6 +392,34 @@ pub struct AgentCapabilities {
     /// absent/empty is tolerated in both directions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub readiness: Vec<HarnessReadiness>,
+    /// Workflows this worker has installed and can be asked to run (see
+    /// [`WorkflowAdvert`]).
+    ///
+    /// This is how an orchestrator learns that a worker can do more than take an
+    /// instruction: each entry is an id it may name in a task frame's `workflow`
+    /// field. Same backward-compatibility contract as the two vectors above.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflows: Vec<WorkflowAdvert>,
+}
+
+/// One workflow a worker advertises as runnable.
+///
+/// Deliberately just enough for an orchestrator to choose one and explain the
+/// choice — the graph itself stays on the worker, where it is authored and
+/// validated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct WorkflowAdvert {
+    /// The id to name in a task frame's `workflow` field.
+    pub id: String,
+    /// Display name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// What the workflow does, for an orchestrator deciding whether it fits.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// How many steps it has — a rough cost signal.
+    #[serde(rename = "nodeCount", default)]
+    pub node_count: usize,
 }
 
 /// Deserialize a `Vec<String>`, discarding non-string and blank entries.

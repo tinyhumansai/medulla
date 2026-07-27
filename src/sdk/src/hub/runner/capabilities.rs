@@ -47,6 +47,7 @@ impl TaskRunner {
                 harness: None,
                 provider: None,
                 model: None,
+                workflow: None,
             });
             if let Err(error) = self.relay.send(address, &body).await {
                 self.capabilities_waiters

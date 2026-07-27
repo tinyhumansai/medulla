@@ -15,6 +15,12 @@ repository = "https://github.com/tinyhumansai/medulla"
 medulla = { path = "src/sdk" }
 tinyplace = { path = "vendor/tinyplace/sdk/rust" }
 tinycortex = { path = "vendor/tinycortex", features = ["persona", "providers-http"] }
+# The workflow engine. Declared as a registry dependency and redirected to the
+# vendored submodule by `[patch.crates-io]` below, matching how the sibling
+# openhuman host consumes it — one shared pin, one shared upgrade cadence.
+# `mock` is a normal (not dev-only) feature: dry-run authoring uses the engine's
+# deterministic capability stand-ins in ordinary builds.
+tinyflows = { version = "0.5", features = ["mock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -44,3 +50,10 @@ fs2 = "0.4"
 regex = "1"
 sha2 = "0.10"
 tempfile = "3"
+
+# `tinyflows` is not published at the version we track (crates.io lags the
+# branch we pin), so the registry coordinate above is redirected to the vendored
+# submodule. Vendored code stays out of `members` via `exclude`, so it keeps its
+# own lints and tests instead of joining this workspace's CI gates.
+[patch.crates-io]
+tinyflows = { path = "vendor/tinyflows" }

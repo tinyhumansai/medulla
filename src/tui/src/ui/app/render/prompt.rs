@@ -2,12 +2,12 @@
 //! Chat composer, and the resume-picker modal.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::ui::composer::caret_row_col;
+use crate::ui::chat::ComposerChrome;
 
 use super::super::types::App;
 
@@ -24,58 +24,26 @@ impl App {
         );
     }
 
-    /// Draw the Chat composer with its caret-highlighted draft lines.
+    /// Draw the Chat composer.
     ///
-    /// The caret is drawn solid only while the composer holds the keyboard. When
-    /// focus has stepped out to the rail a reversed block would still read as
-    /// "your typing goes here", which is exactly the thing that is no longer
-    /// true — two visible carets and no way to tell which one is live.
+    /// The widget itself is [`crate::ui::chat::draw_composer`], shared with the
+    /// workflow copilot. What is decided here is only what the orchestrator
+    /// means by its three states: focus belongs to the composer whenever the
+    /// rail does not hold it, and "busy" is the chat runtime running.
     pub(super) fn draw_composer(&mut self, f: &mut Frame, area: Rect) {
-        let focused = !self.agents_rail_focused();
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if self.snapshot.running {
-                Color::Yellow
-            } else if focused {
-                self.theme.primary
-            } else {
-                self.theme.dim_border
-            }));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        let caret = caret_row_col(&self.draft.text, self.draft.cursor);
-        let mut lines: Vec<TLine> = Vec::new();
-        for (index, row) in self.draft.text.split('\n').enumerate() {
-            let prefix = if index == 0 { "❯ " } else { "  " };
-            let mut spans = vec![Span::styled(
-                prefix,
-                Style::default().fg(self.theme.primary),
-            )];
-            if index == caret.row {
-                let chars: Vec<char> = row.chars().collect();
-                let before: String = chars.iter().take(caret.col).collect();
-                let at: String = chars
-                    .get(caret.col)
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| " ".into());
-                let after: String = chars.iter().skip(caret.col + 1).collect();
-                spans.push(Span::raw(before));
-                spans.push(Span::styled(
-                    at,
-                    if focused {
-                        Style::default().add_modifier(Modifier::REVERSED)
-                    } else {
-                        Style::default().add_modifier(Modifier::DIM)
-                    },
-                ));
-                spans.push(Span::raw(after));
-            } else {
-                spans.push(Span::raw(row.to_string()));
-            }
-            lines.push(TLine::from(spans));
-        }
-        f.render_widget(Paragraph::new(Text::from(lines)), inner);
+        crate::ui::chat::draw_composer(
+            f,
+            area,
+            &self.draft,
+            &self.theme,
+            ComposerChrome {
+                focused: !self.agents_rail_focused(),
+                busy: self.snapshot.running,
+                // None: the caption row above already names what Enter submits
+                // to, and a placeholder under it would say it twice.
+                placeholder: None,
+            },
+        );
     }
 
     /// Draw the resume-picker modal listing resumable chats.

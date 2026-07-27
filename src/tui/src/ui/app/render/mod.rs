@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::agents::Line as StyledLine;
+use crate::ui::chat::tool_call;
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::util::{clip, clock, wrap};
 
@@ -27,7 +28,6 @@ mod selection;
 mod settings;
 mod tasks;
 mod template_modal;
-mod tool_call;
 #[cfg(feature = "workflows")]
 pub(super) mod workflows;
 

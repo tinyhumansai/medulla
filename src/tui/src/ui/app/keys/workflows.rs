@@ -163,12 +163,16 @@ impl App {
                     (self.wf.draft.cursor + 1).min(self.wf.draft.text.chars().count());
                 WorkflowsKey::Handled(None)
             }
+            // A page, not a fixed five rows. The render clamps the offset to
+            // what the content can actually scroll by and writes it back, so
+            // holding PageUp settles at the top rather than banking presses
+            // PageDown then has to spend before anything moves.
             KeyCode::PageUp => {
-                self.wf.copilot_scroll = self.wf.copilot_scroll.saturating_add(5);
+                self.wf.copilot_scroll = self.wf.copilot_scroll.saturating_add(self.copilot_page());
                 WorkflowsKey::Handled(None)
             }
             KeyCode::PageDown => {
-                self.wf.copilot_scroll = self.wf.copilot_scroll.saturating_sub(5);
+                self.wf.copilot_scroll = self.wf.copilot_scroll.saturating_sub(self.copilot_page());
                 WorkflowsKey::Handled(None)
             }
             // Esc clears a draft first — that is the destructive-looking action

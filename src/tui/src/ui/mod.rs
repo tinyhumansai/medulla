@@ -17,6 +17,7 @@ pub use medulla::ui::{
 
 pub(crate) mod agent_lane;
 pub mod app;
+pub mod chat;
 pub mod composer;
 pub(crate) mod layout;
 pub mod login;

@@ -404,8 +404,14 @@ fn left_and_right_move_the_cursor_without_editing_the_draft() {
 fn page_up_and_page_down_scroll_the_transcript_and_stop_at_zero() {
     let (_home, mut app) = app_in_copilot("");
 
+    // A page, sized from the terminal, rather than a fixed five rows — so the
+    // step matches what the pane actually shows. The render clamps it to what
+    // the content can scroll by.
+    let page = app.copilot_page();
+    assert!(page > 0, "a page must move at least one row");
+
     key(&mut app, KeyCode::PageUp);
-    assert_eq!(app.wf.copilot_scroll, 5);
+    assert_eq!(app.wf.copilot_scroll, page);
 
     key(&mut app, KeyCode::PageDown);
     key(&mut app, KeyCode::PageDown);

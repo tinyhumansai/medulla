@@ -36,6 +36,25 @@ impl App {
         self.copilot().is_some_and(|thread| thread.busy)
     }
 
+    /// Rows one `PageUp`/`PageDown` moves the copilot transcript by.
+    ///
+    /// A page less one row, so the line the operator was reading stays on
+    /// screen and gives them their place back. Derived from the last drawn area
+    /// rather than a constant: the pane's height depends on the terminal, and a
+    /// fixed step pages twice on a tall one and overshoots on a short one.
+    pub(in crate::ui::app) fn copilot_page(&self) -> usize {
+        // The header, tab strip, footer, and status row above the tab, then the
+        // pane's own borders, its hint row, and the smallest composer. An
+        // estimate rather than the measured rect, because the transcript's
+        // height is only known inside a draw pass — and being a row out only
+        // changes how far one keypress travels, which the render then clamps.
+        const CHROME: usize = 11;
+        const MIN_STEP: usize = 1;
+        (self.area.height as usize)
+            .saturating_sub(CHROME)
+            .max(MIN_STEP)
+    }
+
     /// Send the composer's draft to the copilot.
     ///
     /// Refuses while a turn is in flight rather than queueing: the agent is
@@ -66,9 +85,13 @@ impl App {
     /// Addressed by workflow id rather than applied to the selection: the
     /// operator may well have moved the rail on while the turn runs, and the
     /// line belongs to the thread that asked for it.
+    ///
+    /// Handed to [`CopilotState::progress`] rather than `status` so a frame
+    /// announcing a tool call becomes a tool line — the same `⏺` the
+    /// orchestrator's transcript draws — instead of dim chatter that ages out.
     pub fn copilot_status(&mut self, workflow: &str, line: String) {
         if let Some(thread) = self.wf.copilots.get_mut(workflow) {
-            thread.status(line);
+            thread.progress(&line);
         }
     }
 

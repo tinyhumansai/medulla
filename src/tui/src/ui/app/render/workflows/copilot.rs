@@ -1,13 +1,18 @@
 //! The copilot pane: the conversation that edits the graph beside it.
 //!
-//! A transcript above a composer, like the Agents tab — deliberately, because it
-//! is the same gesture. The difference is scope: this thread is about one
-//! workflow, and the agent behind it holds the workflow tools rather than the
-//! whole machine.
+//! A transcript above a composer, like the Agents tab — and now literally the
+//! same widgets ([`crate::ui::chat`]) rather than a second implementation of the
+//! idea. The difference is scope: this thread is about one workflow, and the
+//! agent behind it holds the workflow tools rather than the whole machine.
 //!
 //! The transcript is anchored to the bottom. A copilot turn's useful part is its
 //! end (the reply, and what changed), and a pane that kept the top would show
 //! the instruction and scroll the answer away.
+//!
+//! The composer is a sibling of the transcript panel rather than nested inside
+//! it, so it carries its own border. That border is the only thing that says
+//! whether typing goes here — the Agents composer has always worked this way,
+//! and the copilot reading differently made the two panes feel unrelated.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -15,17 +20,52 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use medulla::ui::workflows::CopilotTurn;
+use medulla::ui::workflows::{CopilotTurn, TurnRole};
 
-use crate::ui::util::{wrap, SPINNER};
+use crate::ui::chat::{self, ComposerChrome};
+use crate::ui::util::{clip, wrap, SPINNER};
 
 use super::super::super::types::{App, WorkflowFocus};
+
+/// Rows the composer may claim before the transcript starts losing more than it
+/// can spare.
+///
+/// The shared widget grows with the draft on purpose; a pane this narrow cannot
+/// honour that indefinitely, so a long instruction scrolls within the cap rather
+/// than eating the conversation above it.
+const MAX_COMPOSER_ROWS: u16 = 7;
 
 impl App {
     /// Draw the copilot transcript and its composer.
     pub(super) fn draw_workflow_copilot(&mut self, f: &mut Frame, area: Rect) {
         let focused = self.wf.focus == WorkflowFocus::Copilot;
         let busy = self.copilot_busy();
+
+        let composer = chat::composer_height(&self.wf.draft.text).min(MAX_COMPOSER_ROWS);
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(composer)])
+            .split(area);
+
+        self.draw_copilot_transcript(f, rows[0], focused, busy);
+        chat::draw_composer(
+            f,
+            rows[1],
+            &self.wf.draft,
+            &self.theme,
+            ComposerChrome {
+                focused,
+                busy,
+                // Unlike the orchestrator's, this composer has no caption row
+                // naming its target, so the placeholder is where it says what
+                // asking here does.
+                placeholder: Some("Ask for a change to this workflow"),
+            },
+        );
+    }
+
+    /// The conversation so far, anchored to the bottom.
+    fn draw_copilot_transcript(&mut self, f: &mut Frame, area: Rect, focused: bool, busy: bool) {
         let title = if busy {
             format!("Copilot {}", SPINNER[self.frame % SPINNER.len()])
         } else {
@@ -34,85 +74,80 @@ impl App {
         let block = crate::ui::widgets::panel(&self.theme, title, focused);
         let inner = block.inner(area);
         f.render_widget(block, area);
-        if inner.height < 2 || inner.width == 0 {
+        if inner.height == 0 || inner.width == 0 {
             return;
         }
 
-        // The composer takes as many rows as the draft has lines, so a long
-        // instruction is visible while it is being written.
-        let draft_rows = (self.wf.draft.text.split('\n').count() as u16).clamp(1, 5);
-        let rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(draft_rows + 1)])
-            .split(inner);
-
-        self.draw_copilot_transcript(f, rows[0]);
-        self.draw_copilot_composer(f, rows[1], focused, busy);
-    }
-
-    /// The conversation so far, anchored to the bottom.
-    fn draw_copilot_transcript(&self, f: &mut Frame, area: Rect) {
-        let width = area.width as usize;
-        let dim = Style::default().add_modifier(Modifier::DIM);
-        let Some(thread) = self.copilot() else {
-            f.render_widget(
-                Paragraph::new(Text::from(intro_lines(self.selected_workflow().is_some()))),
-                area,
-            );
-            return;
+        let width = inner.width as usize;
+        // The hint occupies the last row, so the transcript gets what is left.
+        // Drawn in every state, including the intro one, because "c to type" is
+        // the only place the key that focuses this pane is written down — and
+        // the intro is exactly when an operator has not found it yet.
+        let body = Rect {
+            height: inner.height.saturating_sub(1),
+            ..inner
         };
-        if thread.turns.is_empty() {
-            f.render_widget(Paragraph::new(Text::from(intro_lines(true))), area);
-            return;
-        }
 
         let mut lines: Vec<TLine> = Vec::new();
-        for turn in &thread.turns {
-            lines.extend(turn_lines(turn, width));
+        if let Some(thread) = self.copilot() {
+            for turn in &thread.turns {
+                lines.extend(turn_lines(turn, width));
+            }
         }
-        // Anchored to the bottom, minus whatever the operator has scrolled back
-        // by. A scroll past the top stops at the top rather than emptying the
-        // pane.
-        let height = area.height as usize;
-        let overflow = lines.len().saturating_sub(height);
-        let start = overflow.saturating_sub(self.wf.copilot_scroll);
-        let visible: Vec<TLine> = lines.into_iter().skip(start).take(height).collect();
-        let _ = dim;
-        f.render_widget(Paragraph::new(Text::from(visible)), area);
-    }
 
-    /// The instruction composer, and what it is waiting on.
-    fn draw_copilot_composer(&self, f: &mut Frame, area: Rect, focused: bool, busy: bool) {
-        let dim = Style::default().add_modifier(Modifier::DIM);
-        let hint = if busy {
-            // Not "⌃X aborts": a busy turn runs on its own host, off the chat
-            // runtime Ctrl-X actually aborts, so promising cancellation here
-            // would be a lie the operator only discovers by waiting on it.
-            "working…"
-        } else if focused {
-            "⏎ send · Esc leave"
+        let below = if lines.is_empty() {
+            // Nothing said yet: the pane explains itself instead. Top-anchored,
+            // unlike a transcript — this is a standing invitation rather than a
+            // conversation whose end matters.
+            let has_workflow = self.selected_workflow().is_some();
+            f.render_widget(
+                Paragraph::new(Text::from(intro_lines(has_workflow, width))),
+                body,
+            );
+            self.wf.copilot_scroll = 0;
+            0
         } else {
-            "c to type"
+            let fit = chat::draw_transcript(f, body, lines, self.wf.copilot_scroll);
+            // Written back so a held PageUp stops at the top instead of banking
+            // presses that PageDown then has to spend before anything moves.
+            self.wf.copilot_scroll = fit.scroll;
+            fit.below
         };
-        let mut lines = vec![TLine::from(Span::styled(hint, dim))];
-        if busy {
-            lines.push(TLine::from(Span::styled(
-                self.wf.draft.text.clone(),
+
+        f.render_widget(
+            Paragraph::new(TLine::from(Span::styled(
+                clip(&hint(focused, busy, below), width),
                 Style::default().add_modifier(Modifier::DIM),
-            )));
-        } else if focused {
-            lines.push(crate::ui::widgets::prompt_line(&self.wf.draft, &self.theme));
-        } else {
-            lines.push(TLine::from(Span::styled(
-                if self.wf.draft.text.is_empty() {
-                    "Ask for a change to this workflow".to_string()
-                } else {
-                    self.wf.draft.text.clone()
-                },
-                dim,
-            )));
-        }
-        f.render_widget(Paragraph::new(Text::from(lines)), area);
+            ))),
+            Rect {
+                y: inner.y + inner.height.saturating_sub(1),
+                height: 1,
+                ..inner
+            },
+        );
+    }
+}
+
+/// The one-line hint under the transcript.
+///
+/// Scrolled-back state wins over everything else: an operator who has walked up
+/// the transcript needs to know there is more below before they need to be told
+/// how to send.
+fn hint(focused: bool, busy: bool, below: usize) -> String {
+    if below > 0 {
+        let plural = if below == 1 { "" } else { "s" };
+        return format!("↓ {below} more line{plural} below");
+    }
+    if busy {
+        // Not "⌃X aborts": a busy turn runs on its own host, off the chat
+        // runtime Ctrl-X actually aborts, so promising cancellation here would
+        // be a lie the operator only discovers by waiting on it.
+        return "working…".to_string();
+    }
+    if focused {
+        "⏎ send · Esc leave".to_string()
+    } else {
+        "c to type".to_string()
     }
 }
 
@@ -122,8 +157,15 @@ fn turn_lines(turn: &CopilotTurn, width: usize) -> Vec<TLine<'static>> {
     if turn.role.dim() {
         style = style.add_modifier(Modifier::DIM);
     }
+    // A tool call is one line: its summary is already the short form, and
+    // wrapping a call across three rows buries the reply it happened before.
+    let text = if turn.role == TurnRole::Tool {
+        clip(&turn.text, width.saturating_sub(2))
+    } else {
+        turn.text.clone()
+    };
     let glyph = turn.role.glyph();
-    wrap(&turn.text, width.saturating_sub(2))
+    wrap(&text, width.saturating_sub(2))
         .into_iter()
         .enumerate()
         .map(|(index, row)| {
@@ -138,24 +180,29 @@ fn turn_lines(turn: &CopilotTurn, width: usize) -> Vec<TLine<'static>> {
 }
 
 /// What the pane says before the first instruction.
-fn intro_lines(has_workflow: bool) -> Vec<TLine<'static>> {
+fn intro_lines(has_workflow: bool, width: usize) -> Vec<TLine<'static>> {
     let dim = Style::default().add_modifier(Modifier::DIM);
-    let body = if has_workflow {
-        vec![
-            "Ask for a change to this",
-            "workflow and it will be made",
-            "with the same tools a coding",
-            "agent uses — then validated",
-            "and saved.",
-            "",
-            "\"add a Slack step at the end\"",
-            "\"why does the build step fail?\"",
-            "\"split the review into two\"",
-        ]
-    } else {
-        vec!["Select a workflow first."]
-    };
-    body.into_iter()
-        .map(|line| TLine::from(Span::styled(line, dim)))
-        .collect()
+    if !has_workflow {
+        return vec![TLine::from(Span::styled("Select a workflow first.", dim))];
+    }
+    // Wrapped to the pane rather than hard-broken at the width it happened to
+    // have when it was written, so a wider terminal does not show a ragged
+    // column of short lines.
+    let mut lines: Vec<TLine> = wrap(
+        "Ask for a change to this workflow and it will be made with the same \
+         tools a coding agent uses — then validated and saved.",
+        width,
+    )
+    .into_iter()
+    .map(|row| TLine::from(Span::styled(row, dim)))
+    .collect();
+    lines.push(TLine::from(""));
+    for sample in [
+        "\"add a Slack step at the end\"",
+        "\"why does the build step fail?\"",
+        "\"split the review into two\"",
+    ] {
+        lines.push(TLine::from(Span::styled(clip(sample, width), dim)));
+    }
+    lines
 }

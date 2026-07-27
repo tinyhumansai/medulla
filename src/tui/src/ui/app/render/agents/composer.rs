@@ -25,8 +25,8 @@ impl App {
     /// The composer's height: the peek (when open), the caption row, the
     /// draft's lines, and the border.
     pub(super) fn composer_height(&self) -> u16 {
-        let draft = (self.draft.text.split('\n').count() as u16).max(1);
-        draft + 3 + self.peek_height()
+        const CAPTION: u16 = 1;
+        crate::ui::chat::composer_height(&self.draft.text) + CAPTION + self.peek_height()
     }
 
     /// Rows the command peek claims, or zero when it is closed.

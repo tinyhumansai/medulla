@@ -26,7 +26,7 @@ const DETAIL_MAX: usize = 60;
 /// array is read straight from the JSON. `args` is accepted either as an object
 /// or as a JSON-encoded string — providers differ, and a string that does not
 /// parse is passed through as a plain scalar rather than dropped.
-pub(super) fn calls_from_payload(data: &serde_json::Map<String, Value>) -> Vec<(String, Value)> {
+pub(crate) fn calls_from_payload(data: &serde_json::Map<String, Value>) -> Vec<(String, Value)> {
     let Some(calls) = data.get("toolCalls").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -52,7 +52,7 @@ pub(super) fn calls_from_payload(data: &serde_json::Map<String, Value>) -> Vec<(
 ///
 /// `args` is the call's arguments as parsed JSON — `Value::Null` when the tool
 /// takes none, or when a half-streamed fragment never parsed.
-pub(super) fn summarize(name: &str, args: &Value) -> String {
+pub(crate) fn summarize(name: &str, args: &Value) -> String {
     let name = name.trim();
     if name.is_empty() {
         // A call whose name never arrived. The generic verb is honest; naming

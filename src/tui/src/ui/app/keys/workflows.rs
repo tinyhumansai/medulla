@@ -216,3 +216,7 @@ impl App {
         Some(Cmd::DryRunWorkflow { id })
     }
 }
+
+#[cfg(test)]
+#[path = "workflows_tests.rs"]
+mod tests;

@@ -18,23 +18,26 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(4),
+                Constraint::Length(3),
                 Constraint::Length(7),
                 Constraint::Min(0),
+                // The live feed used to run straight into the footer while the
+                // wordmark had a blank row above it, so the page read as if it
+                // had been pushed down off its own bottom edge. The spare row
+                // belongs here, not at the top.
+                Constraint::Length(1),
             ])
             .split(area);
-        // The band is exactly the art plus one blank row above it: enough that
-        // the wordmark does not butt up against the tab strip, and no more —
-        // the panels below open with a border, which is separation enough.
-        let logo: Vec<TLine> = std::iter::once(TLine::from(""))
-            .chain(crate::ui::LOGO.iter().map(|row| {
+        let logo: Vec<TLine> = crate::ui::LOGO
+            .iter()
+            .map(|row| {
                 TLine::from(Span::styled(
                     *row,
                     Style::default()
                         .fg(self.theme.primary)
                         .add_modifier(Modifier::BOLD),
                 ))
-            }))
+            })
             .collect();
         f.render_widget(Paragraph::new(Text::from(logo)), rows[0]);
         let rows = &rows[1..];

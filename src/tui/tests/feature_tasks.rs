@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
 use ratatui::style::Color;
 use ratatui::Terminal;
 
@@ -196,16 +197,33 @@ fn selected_task_status_uses_one_continuous_highlight() {
     );
 }
 
+/// The *cell* index where `needle` starts in a rendered buffer.
+///
+/// Not a byte offset into the concatenated symbols: a chrome row full of `·`,
+/// `⇧⏎`, or box-drawing glyphs puts several bytes in one cell, and indexing
+/// `content()` by a byte offset then reads whichever cell happens to sit that
+/// many bytes along.
+fn cell_index_of(buffer: &Buffer, needle: &str) -> Option<usize> {
+    let symbols: Vec<&str> = buffer.content().iter().map(|cell| cell.symbol()).collect();
+    (0..symbols.len()).find(|start| {
+        let mut seen = String::new();
+        for symbol in &symbols[*start..] {
+            seen.push_str(symbol);
+            if seen.len() >= needle.len() {
+                break;
+            }
+        }
+        seen.starts_with(needle)
+    })
+}
+
 #[test]
 fn all_tasks_panel_uses_the_active_theme() {
     let mut app = app();
     focus_tasks(&mut app);
 
     let buffer = render(&mut app);
-    let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
-    let title = text
-        .find("All Tasks · a add")
-        .expect("All Tasks panel title");
+    let title = cell_index_of(&buffer, "All Tasks · a add").expect("All Tasks panel title");
     assert_eq!(
         buffer.content()[title].fg,
         Color::Cyan,

@@ -179,7 +179,7 @@ fn each_settings_subpage_renders_its_signature() {
         let mut app = settings_app();
         let _ = app.focus_settings_subpage(name);
         let out = text_of(&draw(&mut app, 160, 50));
-        assert!(out.contains("MEDULLA"), "{name}: missing header");
+        assert!(out.contains("Tab views"), "{name}: missing shortcut line");
         assert!(
             out.contains(sig),
             "{name}: missing signature {sig:?}: {out}"

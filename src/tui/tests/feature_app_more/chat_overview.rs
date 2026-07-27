@@ -1,57 +1,15 @@
 //! Chat transcript, Overview, Trace, tiny.place merge, and events-seam coverage:
-//! the worker third panel, the `events_changed` baseline seam, observation
+//! the `events_changed` baseline seam, observation
 //! merge into the snapshot, error/wrapped/spinner/thread-badge chat rendering,
 //! the Trace JSON detail row, and Overview active-call/completed-task lines.
 
 use crate::helpers::*;
 
-// --- overview rendering: worker third panel ---------------------------------
-
-/// A LoadedConfig whose worker harness is `command`, with tiny.place disabled so
-/// the Overview third panel takes the worker branch.
-fn worker_config(command: &str) -> LoadedConfig {
-    let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-    l.config.opencode = Some(medulla::config::OpencodeConfig {
-        command: command.into(),
-        ..Default::default()
-    });
-    l
-}
-
-#[test]
-fn overview_renders_worker_panel_without_tinyplace() {
-    let rt = Arc::new(MockRuntime::empty());
-    let mut app = App::new(rt, worker_config("opencode"));
-    app.tab_index = 0; // Overview
-    let out = render(&mut app, 120, 40);
-    assert!(out.contains("Workers"), "worker third panel");
-    assert!(
-        !out.contains("OpenCode workers"),
-        "the panel title must not be provider-specific: {out}"
-    );
-    assert!(out.contains("OpenCode"), "harness row names the provider");
-}
-
-#[test]
-fn overview_worker_panel_names_each_harness() {
-    // The panel is provider-agnostic: the label follows the configured command.
-    for (command, expected) in [
-        ("claude", "Claude Code"),
-        ("codex", "Codex"),
-        ("/usr/local/bin/opencode", "OpenCode"),
-        // An unrecognized binary is still worth naming, verbatim.
-        ("my-custom-agent", "my-custom-agent"),
-    ] {
-        let rt = Arc::new(MockRuntime::empty());
-        let mut app = App::new(rt, worker_config(command));
-        app.tab_index = 0;
-        let out = render(&mut app, 120, 40);
-        assert!(
-            out.contains(expected),
-            "command {command} should render harness {expected}: {out}"
-        );
-    }
-}
+// --- overview rendering ------------------------------------------------------
+//
+// The Overview's worker/harness panel was folded away: the tab now shows the
+// host observer's "This Device" column beside Orchestration, and the configured
+// harness is named on the Routing tab instead. The panel's tests went with it.
 
 #[test]
 fn overview_header_shows_the_backend_host_without_scheme() {

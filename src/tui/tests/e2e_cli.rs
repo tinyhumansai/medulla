@@ -187,7 +187,10 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
             }
             let mut buffered = drain_sink.lock().unwrap();
             buffered.extend_from_slice(&chunk[..n]);
-            if !announced && buffered.windows(7).any(|window| window == b"MEDULLA") {
+            // The shortcut line heads every frame. The wordmark used to be the
+            // sentinel, but it is block art on the Overview tab now and never
+            // reaches the wire as the letters "MEDULLA".
+            if !announced && buffered.windows(9).any(|window| window == b"Tab views") {
                 announced = true;
                 ready_tx.send(()).ok();
             }
@@ -255,7 +258,7 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
                 "TUI exited with {status:?}: {}",
                 String::from_utf8_lossy(&output)
             );
-            assert!(String::from_utf8_lossy(&output).contains("MEDULLA"));
+            assert!(String::from_utf8_lossy(&output).contains("Tab views"));
             return;
         }
         std::thread::sleep(Duration::from_millis(50));

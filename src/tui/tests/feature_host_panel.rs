@@ -52,7 +52,7 @@ fn an_idle_host_reports_itself_ready_with_what_it_runs_and_where() {
 
     let screen = render(&mut app, 120, 40);
 
-    assert!(screen.contains("This device"), "missing panel: {screen}");
+    assert!(screen.contains("This Device"), "missing panel: {screen}");
     assert!(screen.contains("ready"), "an idle host is ready: {screen}");
     assert!(screen.contains("this-device"), "missing address: {screen}");
     assert!(screen.contains("claude, codex"), "missing harnesses");

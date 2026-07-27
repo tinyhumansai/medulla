@@ -265,7 +265,7 @@ fn each_tab_renders_its_signature() {
         let (mut app, _rt) = demo_app();
         app.tab_index = TABS.iter().position(|t| *t == name).unwrap();
         let out = render(&mut app, 120, 40);
-        assert!(out.contains("MEDULLA"), "{name}: missing header");
+        assert!(out.contains("Tab views"), "{name}: missing shortcut line");
         assert!(out.contains(sig), "{name}: missing signature {sig:?}");
     }
 }

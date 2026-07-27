@@ -36,7 +36,12 @@ fn every_tab_renders() {
         let mut a = app();
         a.tab_index = i;
         let out = render(&mut a);
-        assert!(out.contains("MEDULLA"), "tab {name} missing header");
+        // The chrome, not the product name: the shortcut line heads every tab
+        // and the status line closes it, so a tab that drew nothing fails here.
+        assert!(
+            out.contains("Tab views"),
+            "tab {name} missing shortcut line"
+        );
     }
 }
 

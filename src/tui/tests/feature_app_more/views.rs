@@ -236,11 +236,13 @@ fn workers_render_with_harness_and_stream_health() {
     assert!(out.contains("CLAUDE"), "worker harness badge upper-cased");
     assert!(out.contains("primary"), "worker label renders");
 
-    // The header shows stream health when a cycle runs under a stream-tracking runtime.
+    // The status line shows stream health as a dot beside the backend host when
+    // the runtime tracks one — the spelled-out label it replaced cost a third of
+    // the line to say what a glyph says.
     tab(&mut app, "Overview");
     let out = render(&mut app, 120, 40);
     assert!(
-        out.contains("live"),
-        "stream-state label in header: {out:.0}"
+        out.contains("● api.tinyhumans.ai"),
+        "live connection dot on the status line: {out:.0}"
     );
 }

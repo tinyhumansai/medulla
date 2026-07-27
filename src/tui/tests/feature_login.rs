@@ -123,7 +123,7 @@ fn token_input_mode_edits_and_submits() {
         "the API-key row opens the input"
     );
     assert!(
-        render(&mut s).contains("Paste an API key"),
+        render(&mut s).contains("Paste API key"),
         "input prompt shown"
     );
     for c in "jwt.token".chars() {

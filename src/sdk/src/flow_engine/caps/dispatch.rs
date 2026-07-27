@@ -19,6 +19,24 @@ use crate::hub::{RunError, TaskOutcome, TaskRequest, TaskRunner};
 pub trait HarnessDispatch: Send + Sync {
     /// Run `request` to completion, returning the worker's reply.
     async fn dispatch(&self, request: TaskRequest) -> Result<TaskOutcome, RunError>;
+
+    /// Run `request`, forwarding the worker's progress frames to `status`.
+    ///
+    /// Defaulted to plain [`dispatch`](Self::dispatch) because a workflow *node*
+    /// has no use for them — its progress is reported per node by the run
+    /// observer, and forwarding token-level chatter would double-report the same
+    /// work. The copilot is the caller that does want them: its whole pane is
+    /// one turn, and a turn that takes a minute in silence reads as a hang.
+    ///
+    /// A dropped receiver is normal, not an error — the caller stopped watching.
+    async fn dispatch_with_status(
+        &self,
+        request: TaskRequest,
+        status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ) -> Result<TaskOutcome, RunError> {
+        let _ = status;
+        self.dispatch(request).await
+    }
 }
 
 /// Dispatch over the real hub task runner.
@@ -40,5 +58,13 @@ impl HarnessDispatch for TaskRunnerDispatch {
         // run observer, and forwarding a harness's token-level chatter here as
         // well would double-report the same work.
         self.runner.run(request, None).await
+    }
+
+    async fn dispatch_with_status(
+        &self,
+        request: TaskRequest,
+        status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ) -> Result<TaskOutcome, RunError> {
+        self.runner.run(request, status).await
     }
 }

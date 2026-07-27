@@ -20,6 +20,7 @@
 //! trait, so a remote catalog is a new implementation rather than a rewrite.
 
 pub mod authoring;
+pub mod copilot;
 pub mod local;
 pub mod mcp;
 pub mod node_contracts;
@@ -35,6 +36,7 @@ mod tests;
 pub use authoring::{
     apply_workflow_ops, create_workflow, preview_workflow_ops, validate_handle, GraphHandle,
 };
+pub use copilot::{CopilotOutcome, CopilotSession};
 pub use local::{LocalWorkflowHost, LOCAL_WORKER_ADDRESS};
 pub use node_contracts::{all_node_kind_contracts, node_kind_contract};
 pub use ops::discover_store;

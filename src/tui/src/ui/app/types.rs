@@ -350,6 +350,16 @@ pub enum Cmd {
     InspectContext,
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
+    /// Retarget the live screen subscription: stop watching one task, start
+    /// watching another. Both halves ride one command so the change is atomic
+    /// from the loop's point of view — a stop that landed without its start
+    /// would leave the pane blank with nothing on the way.
+    WatchTask {
+        /// The `(worker address, task id)` to stop streaming, if any.
+        stop: Option<(String, String)>,
+        /// The `(worker address, task id)` to start streaming, if any.
+        start: Option<(String, String)>,
+    },
     /// Load the persona-memory status + directives for the Memory tab.
     LoadMemory,
     /// Fetch account-level usage from the backend for the Usage tab.
@@ -598,6 +608,12 @@ pub struct App {
     pub(super) contexts: Vec<ContextItem>,
     pub(super) context_index: usize,
     pub(super) agent_index: usize,
+    /// The `(worker address, task id)` whose screen is currently subscribed.
+    ///
+    /// Held so a selection change can stop the old stream as well as start the
+    /// new one: a subscription nobody is looking at costs the worker a sample,
+    /// a ratchet advance and a send on every tick.
+    pub(super) watching: Option<(String, String)>,
     /// Which half of the Agents tab the keyboard is driving.
     pub(super) agents_focus: AgentsFocus,
     pub(super) agent_scroll: usize,

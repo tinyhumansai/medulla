@@ -5,7 +5,8 @@
 
 use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
 
-use crate::ui::agents::{agent_row_model, AgentRow};
+use super::rail::RailRow;
+use crate::ui::agents::{agent_row_model, AgentRole, AgentRow};
 use crate::ui::composer::Draft;
 
 use super::types::{
@@ -212,6 +213,10 @@ impl App {
                             // A click is a focus gesture: the arrows should now
                             // continue from the row that was just picked.
                             self.focus_agents_rail();
+                            // Clicking a task is the request to watch it.
+                            if let Some(cmd) = self.retarget_watch() {
+                                return Some(cmd);
+                            }
                         }
                     }
                 }
@@ -332,5 +337,66 @@ impl App {
         } else {
             "Mouse released — native click-drag selection & copy restored"
         });
+    }
+}
+
+impl App {
+    /// Point the live screen subscription at whatever is selected now.
+    ///
+    /// Returns a command only when the target changed, so this is safe to call
+    /// after every selection move: every subscribe carries `resync: true`, and
+    /// re-issuing one per keystroke would make the worker resend a full frame
+    /// each time — the expensive thing the protocol exists to avoid.
+    ///
+    /// Only a selected *task* subscribes. A worker lane names no task, and
+    /// streams are addressed by task: there is nothing to ask for, and guessing
+    /// one of a worker's tasks would watch work the operator did not point at.
+    pub(super) fn retarget_watch(&mut self) -> Option<Cmd> {
+        let desired = self.watch_target();
+        if desired == self.watching {
+            return None;
+        }
+        let stop = self.watching.take();
+        self.watching = desired.clone();
+        Some(Cmd::WatchTask {
+            stop,
+            start: desired,
+        })
+    }
+
+    /// The `(worker address, task id)` the current selection asks to watch.
+    fn watch_target(&self) -> Option<(String, String)> {
+        // Only on the Agents tab: leaving it releases the subscription.
+        if self.tab() != "Agents" {
+            return None;
+        }
+        let rows = self.rail_rows();
+        let row = rows.get(self.agent_index.min(rows.len().saturating_sub(1)))?;
+        let RailRow::Agent(AgentRow::Sub {
+            task, lane_index, ..
+        }) = row
+        else {
+            return None;
+        };
+        let lanes = self.lanes();
+        let lane = lanes.get(*lane_index)?;
+        // `Agent` is main's name for a roster agent / delegated task / peer
+        // session — the tiers above it (orchestrator, reasoning, compress) run
+        // no watchable harness.
+        if lane.role != AgentRole::Agent {
+            return None;
+        }
+        let agent_id = lane.agent_id.as_deref()?;
+        // Streams are addressed to the worker's tiny.place address; a lane
+        // carries its roster id. A worker added by address is registered under
+        // it, so that is the fallback.
+        let address = self
+            .runtime
+            .workers()
+            .into_iter()
+            .find(|w| w.id == agent_id)
+            .map(|w| w.address)
+            .unwrap_or_else(|| agent_id.to_string());
+        Some((address, task.task_id.clone()))
     }
 }

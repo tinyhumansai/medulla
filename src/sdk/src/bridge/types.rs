@@ -74,6 +74,17 @@ pub trait Bridge: Send + Sync {
 
     /// Reset transport-specific session state for `peer`.
     async fn reset_session(&self, peer: &str);
+
+    /// Wait until there may be inbound mail, or `poll` elapses.
+    ///
+    /// Defaulted to a plain sleep, which is exactly what every pump did before
+    /// there was anything to wait *on* — so a local or fake bridge needs no
+    /// changes. The tiny.place bridge overrides it to also return the moment
+    /// the relay's push channel delivers, which is what takes a pump's latency
+    /// floor off its poll interval.
+    async fn wait_for_inbox(&self, poll: std::time::Duration) {
+        tokio::time::sleep(poll).await;
+    }
 }
 
 /// A runtime-selected bridge without dynamic dispatch.

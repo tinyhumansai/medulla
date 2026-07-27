@@ -107,6 +107,16 @@ impl Bridge for RoutingBridge {
         messages
     }
 
+    async fn wait_for_inbox(&self, poll: std::time::Duration) {
+        // Only the remote side is worth blocking on: the local bus is
+        // in-process, so anything arriving there is already here by the time
+        // the next tick comes round.
+        match &self.remote {
+            Some(remote) => remote.wait_for_inbox(poll).await,
+            None => tokio::time::sleep(poll).await,
+        }
+    }
+
     async fn request_contact(&self, peer: &str) -> Result<(), String> {
         if self.is_local(peer).await {
             return self.local.request_contact(peer).await;

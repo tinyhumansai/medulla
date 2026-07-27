@@ -93,6 +93,7 @@ fn options(
         router: None,
         on_event: None,
         on_stdin: None,
+        on_session: None,
     }
 }
 

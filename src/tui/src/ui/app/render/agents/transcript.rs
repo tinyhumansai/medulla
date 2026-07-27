@@ -25,6 +25,15 @@ use super::types::Selection;
 impl App {
     /// Draw the transcript or declaration for whatever the cursor is on.
     pub(super) fn draw_agents_pane(&mut self, f: &mut Frame, area: Rect, selection: &Selection) {
+        // A watched screen supersedes the transcript. The transcript says what a
+        // worker reported; the screen shows what it is actually doing —
+        // including the states it never reports at all, like a harness stopped
+        // on a permission dialog, which writes no transcript records and so
+        // reads as "thinking" until the task times out.
+        if let Some(screen) = self.selected_screen(selection) {
+            self.draw_worker_screen(f, area, &screen);
+            return;
+        }
         let lane = selection.lane();
         let pane_width = ((area.width as usize).saturating_sub(4)).max(24);
         let on_orchestrator = selection.on_orchestrator;
@@ -236,5 +245,51 @@ impl App {
             )));
         }
         f.render_widget(Paragraph::new(Text::from(out)), inner);
+    }
+}
+
+impl App {
+    /// The screen held for whatever the cursor is on, if it is being watched.
+    ///
+    /// Only a selected *task* resolves one: streams are addressed by task id,
+    /// which is the requester's own key, so a lane on its own names nothing to
+    /// look up and guessing one of a worker's tasks would show work the
+    /// operator did not point at.
+    pub(super) fn selected_screen(
+        &self,
+        selection: &Selection,
+    ) -> Option<medulla::hub::WatchedScreen> {
+        let task = selection.task.as_ref()?;
+        self.runtime
+            .worker_screens()
+            .into_iter()
+            .find(|held| held.task_id == task.task_id)
+    }
+
+    /// Draw a watched worker's screen into `area`.
+    ///
+    /// No cursor is drawn and no scrollback is offered, matching the worker's
+    /// own pane: this is a window, not a keyboard, and the protocol never
+    /// synchronised history in the first place.
+    fn draw_worker_screen(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+        screen: &medulla::hub::WatchedScreen,
+    ) {
+        let age = medulla::clock::now_millis().saturating_sub(screen.updated_at);
+        let block = self.panel(crate::ui::screen::screen_title(
+            &screen.task_id,
+            screen.seq,
+            age,
+        ));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        // Clipped, never rewrapped. The grid is a framebuffer: reflowing it to
+        // a narrower pane would not be the screen the worker is showing.
+        f.render_widget(
+            Paragraph::new(Text::from(crate::ui::screen::grid_lines(&screen.grid))),
+            inner,
+        );
     }
 }

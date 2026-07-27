@@ -61,6 +61,7 @@ impl App {
             contexts: Vec::new(),
             context_index: 0,
             agent_index: 0,
+            watching: None,
             agents_focus: super::types::AgentsFocus::default(),
             agent_scroll: 0,
             chat_scroll: 0,

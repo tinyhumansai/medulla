@@ -231,17 +231,36 @@ pub(super) fn worker_runtime(
 }
 
 /// Drain the encrypted inbox into the runtime until aborted.
+///
+/// Screen messages are claimed **before** the runtime sees the body, and that
+/// ordering is load-bearing rather than tidy: `DaemonRuntime::handle_message`
+/// routes anything that is not a task frame to the plain-text path, which types
+/// it into a harness as a prompt. An unclaimed screen message would not be
+/// ignored — it would be executed.
 pub(super) fn spawn_inbox_drain(
     transport: SignalTransport,
     runtime: DaemonRuntime,
+    mut screens: medulla_tui::worker::stream::ScreenRouter,
+    push: Option<medulla::daemon::ListenerGuard>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        // Held here so the push channel dies with the loop it feeds. A detached
+        // listener would keep a socket open for a drain that no longer exists —
+        // and a `JoinHandle` dropped on its own detaches rather than aborting.
+        let _push = push;
         loop {
             for message in transport.drain_inbox(50).await {
+                if let Some(screen) = medulla::tinyplace::parse_screen_message(&message.text) {
+                    screens.handle(&message.from, screen);
+                    continue;
+                }
                 let frame = decode_task_frame(&message.text);
                 runtime.handle_message(message.from, message.text, frame);
             }
-            tokio::time::sleep(INBOX_POLL).await;
+            // Returns early when the relay's push channel delivers, so a
+            // subscribe is acted on at about a round trip rather than up to a
+            // poll interval later. The interval stays the correctness floor.
+            transport.wait_for_inbox(INBOX_POLL).await;
         }
     })
 }

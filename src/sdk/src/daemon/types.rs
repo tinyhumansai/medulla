@@ -92,6 +92,9 @@ pub(super) struct RunningTask {
     pub(super) stdin: Option<mpsc::UnboundedSender<String>>,
     /// Input buffered before the child's stdin became available.
     pub(super) pending_input: Vec<String>,
+    /// The worker-local session this task is running in, once the executor has
+    /// opened one. What a screen subscription naming this task resolves to.
+    pub(super) session_id: Option<String>,
     /// Stops this task. Held per-task rather than only in the global controller
     /// map so an `abort` frame can cancel exactly the task it names.
     pub(super) abort: super::providers::Abort,

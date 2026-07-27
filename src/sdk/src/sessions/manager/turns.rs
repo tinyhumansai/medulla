@@ -344,6 +344,7 @@ impl SessionManager {
             router: self.inner.config.router.clone(),
             on_event: None,
             on_stdin: None,
+            on_session: None,
         };
         let result = (self.inner.run_task)(options).await?;
         Ok(TurnOutcome {

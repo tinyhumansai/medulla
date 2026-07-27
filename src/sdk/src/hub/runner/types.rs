@@ -61,6 +61,8 @@ pub(super) struct AbortGuard {
 /// dispatches; dropping it aborts the pump.
 pub struct TaskRunner {
     pub(super) relay: Arc<dyn Relay>,
+    /// The worker screens this hub is watching, filled by the pump.
+    pub(super) screens: crate::hub::ScreenStore,
     pub(super) waiters: Waiters,
     /// System-information probes waiting for a worker response.
     pub(super) system_info_waiters: SystemInfoWaiters,

@@ -22,6 +22,14 @@ pub type OnEvent = Box<dyn FnMut(&HarnessSemanticEvent) + Send>;
 /// A one-shot registration of a child-stdin sender for `input` forwarding.
 pub type OnStdin = Box<dyn FnOnce(mpsc::UnboundedSender<String>) + Send>;
 
+/// Called once with the worker-local session id, as soon as the executor has
+/// opened (or claimed) the session that will run the task.
+///
+/// Reported early rather than with the result: the point of knowing it is to
+/// watch the task *while* it runs, which a session id delivered at the end
+/// cannot serve.
+pub type OnSession = Box<dyn FnOnce(String) + Send>;
+
 /// A PATH-lookup predicate (injectable for tests).
 pub type ExistsOnPath = Box<dyn Fn(&str) -> bool + Send + Sync>;
 
@@ -117,6 +125,8 @@ pub struct RunTaskOptions {
     pub on_event: Option<OnEvent>,
     /// Register a stdin channel for `input`-frame forwarding into the child.
     pub on_stdin: Option<OnStdin>,
+    /// Reports the session serving this task, once it exists.
+    pub on_session: Option<OnSession>,
 }
 
 /// The outcome of a headless run.

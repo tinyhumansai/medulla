@@ -71,6 +71,7 @@ impl HarnessDispatch for RuntimeDispatch {
             // harness's token-level chatter as well would double-report it.
             on_event: None,
             on_stdin: None,
+            on_session: None,
         };
 
         let result = (inner.run_task)(options).await.map_err(RunError::Worker)?;

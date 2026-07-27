@@ -134,6 +134,11 @@ impl TaskRunner {
         Self::build(relay, poll, ACK_WINDOW, idle_window, None, None)
     }
 
+    /// The screens this hub is holding, for the view that renders them.
+    pub fn screens(&self) -> super::ScreenStore {
+        self.screens.clone()
+    }
+
     fn build(
         relay: Arc<dyn Relay>,
         poll: Duration,
@@ -145,6 +150,7 @@ impl TaskRunner {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
         let system_info_waiters: SystemInfoWaiters = Arc::new(Mutex::new(HashMap::new()));
         let capabilities_waiters: CapabilitiesWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let screens = super::ScreenStore::new();
         let pump = tokio::spawn(pump::pump_loop(
             relay.clone(),
             waiters.clone(),
@@ -153,9 +159,11 @@ impl TaskRunner {
             poll,
             log,
             activity,
+            screens.clone(),
         ));
         TaskRunner {
             relay,
+            screens,
             waiters,
             system_info_waiters,
             capabilities_waiters,

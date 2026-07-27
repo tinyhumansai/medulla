@@ -316,6 +316,16 @@ pub async fn run_daemon(
     let presence =
         spawn_presence_heartbeat(client.clone(), std::time::Duration::from_millis(poll_ms));
 
+    // Best-effort push channel: it only shortens the wait between a peer
+    // sending and the serve loop looking, so a failure to open it costs latency
+    // and nothing else. Held to the end of the run; dropping it closes the
+    // socket and reverts to fetching.
+    let _push = crate::daemon::listener::ws_inbox_enabled(&env).then(|| {
+        transport.spawn_inbox_listener(Some(Arc::new(|line: &str| {
+            eprintln!("medulla daemon: {line}")
+        })))
+    });
+
     if once {
         // Probe hook: accept pending contacts, drain the inbox once, wait for
         // every started task to settle, then exit.
@@ -363,7 +373,10 @@ pub async fn run_daemon(
                     log(&format!("periodic key maintenance failed: {e}"));
                 }
             }
-            _ = tokio::time::sleep(poll) => {
+            // Returns early when the relay's push channel delivers, so a task
+            // frame is picked up at about a round trip rather than up to a poll
+            // interval later. The interval stays the correctness floor.
+            _ = transport.wait_for_inbox(poll) => {
                 for message in transport.drain_inbox(50).await {
                     let frame = decode_task_frame(&message.text);
                     runtime.handle_message(message.from, message.text, frame);

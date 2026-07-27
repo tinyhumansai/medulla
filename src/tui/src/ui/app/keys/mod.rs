@@ -290,6 +290,10 @@ impl App {
                 self.agent_scroll = 0;
                 self.chat_scroll = 0;
                 self.move_agent_index(matches!(k.code, KeyCode::Up));
+                // Arrowing onto a task watches it, exactly as clicking does.
+                if let Some(cmd) = self.retarget_watch() {
+                    return Some(cmd);
+                }
             }
             // Agents steering: cancel the selected running task, answer a pending
             // question through the modal prompt. Enter answers it inline too.

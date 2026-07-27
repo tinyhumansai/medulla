@@ -9,6 +9,8 @@
 //! - [`frames`] — the `medulla-tinyplace/1` task frame protocol (delegated work
 //!   over encrypted DMs).
 //! - [`control`] — owner→machine harness control frames (session-targeted input).
+//! - [`screen`] — the `medulla.screen.v1` protocol, streaming a worker's live
+//!   terminal to a watching orchestrator as mosh-style synchronised state.
 //! - [`consumer`] — receiver-side fold of the SDK's v2 harness stream into a live
 //!   [`consumer::SessionView`].
 //! - [`status`] — the derived session-status state machine over SDK events.
@@ -25,6 +27,7 @@ pub mod control;
 pub mod env;
 pub mod frames;
 pub mod runtime;
+pub mod screen;
 pub mod service;
 pub mod status;
 pub mod system_info;
@@ -55,6 +58,12 @@ pub use runtime::{
     acquire_identity, acquire_identity_at, load_or_create_identity, spawn_contact_auto_accepter,
     spawn_mailbox_poll, spawn_presence_heartbeat, AcquiredIdentity, FileSessionStore, IdentityLock,
     MailboxItem, MailboxPoll, RuntimeError, RuntimeResult, IDENTITY_FILE,
+};
+pub use screen::{
+    apply_frame, build_frame, changed_rows, coalesce_runs, encode_screen_message,
+    parse_screen_message, ApplyOutcome, Color, FrameDecision, RowUpdate, RunStyle, ScreenFrame,
+    ScreenGrid, ScreenMessage, ScreenRun, ScreenView, ATTR_BOLD, ATTR_INVERSE, ATTR_ITALIC,
+    ATTR_UNDERLINE, SCREEN_PROTO,
 };
 pub use status::{
     initial_status, reduce_status, tick_status, SemanticEvent, SessionStatusState, StatusStep,

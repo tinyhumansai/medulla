@@ -19,6 +19,7 @@ pub mod executor;
 mod executor_tests;
 pub mod pty;
 pub mod screen;
+pub mod stream;
 pub mod trust;
 
 pub use app::{WorkerApp, WorkerWiring};

@@ -65,6 +65,7 @@ async fn run(
             sink.lock().unwrap().push(ev.event.kind.clone());
         })),
         on_stdin: None,
+        on_session: None,
     };
     let result = run_provider_task(options).await;
     let events = kinds.lock().unwrap().clone();
@@ -180,6 +181,7 @@ async fn spawn_failure_for_missing_binary() {
         router: None,
         on_event: None,
         on_stdin: None,
+        on_session: None,
     };
     let err = run_provider_task(options)
         .await
@@ -210,6 +212,7 @@ async fn abort_before_start_returns_immediately() {
         router: None,
         on_event: None,
         on_stdin: None,
+        on_session: None,
     };
     let err = run_provider_task(options).await.expect_err("aborted");
     assert!(err.contains("aborted before start"), "got: {err}");
@@ -244,6 +247,7 @@ async fn abort_mid_run_kills_child() {
         router: None,
         on_event: None,
         on_stdin: None,
+        on_session: None,
     };
     let err = run_provider_task(options).await.expect_err("aborted");
     assert!(err.contains("aborted"), "got: {err}");
@@ -280,6 +284,7 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
             on_stdin: Some(Box::new(move |tx| {
                 *register.lock().unwrap() = Some(tx);
             })),
+            on_session: None,
         };
         // Feed stdin shortly after the run starts.
         let feeder = stdin_tx.clone();
@@ -324,6 +329,7 @@ async fn stdin_is_immediate_eof_for_batch_cli() {
             agent: None,
             extra_args: Vec::new(),
             skip_permissions: false,
+            on_session: None,
             abort: Abort::new(),
             router: None,
             on_event: None,

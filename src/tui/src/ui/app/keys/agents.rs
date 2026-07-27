@@ -63,7 +63,8 @@ impl App {
                 self.agent_scroll = 0;
                 self.chat_scroll = 0;
                 self.move_agent_index(matches!(k.code, KeyCode::Up));
-                AgentsKey::Handled(None)
+                // Arrowing onto a task watches it, exactly as clicking does.
+                AgentsKey::Handled(self.retarget_watch())
             }
             // Enter is "I have found the row I wanted; let me type".
             KeyCode::Enter => {

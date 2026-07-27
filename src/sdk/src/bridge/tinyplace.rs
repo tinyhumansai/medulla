@@ -45,6 +45,10 @@ impl Bridge for TinyplaceBridge {
         self.transport.drain_inbox(limit).await
     }
 
+    async fn wait_for_inbox(&self, poll: std::time::Duration) {
+        self.transport.wait_for_inbox(poll).await
+    }
+
     async fn request_contact(&self, peer: &str) -> Result<(), String> {
         self.transport.request_contact(peer).await
     }

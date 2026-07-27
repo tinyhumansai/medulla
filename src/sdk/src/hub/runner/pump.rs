@@ -22,6 +22,13 @@ use super::{CapabilitiesWaiters, SystemInfoWaiters, Waiters};
 /// How many inbound messages to drain per pump tick.
 const DRAIN_LIMIT: i64 = 50;
 
+/// Frames per second asked for when subscribing to a worker's screen.
+///
+/// One, because the pump learns of a frame no faster than the relay pushes it:
+/// a higher rate would spend a worker's ratchet advances and this hub's drains
+/// on frames that arrive in a burst and are stale on arrival.
+const DEFAULT_SCREEN_FPS: u8 = 1;
+
 /// Route one decoded frame from `from` to its waiter, keyed by `correlationId`
 /// (falling back to `taskId`). Any frame pokes the waiter's `activity` (sign of
 /// life); `reply`/`error` then settle and remove it; `status` forwards; `ack`
@@ -181,6 +188,47 @@ async fn expected_sender(
 
 /// The pump: drain the inbox, decode each message, route it, then sleep. Runs
 /// until the owning [`TaskRunner`](super::TaskRunner) is dropped (which aborts it).
+/// Fold one screen frame into the store, asking the worker to resynchronise
+/// when it cannot be applied.
+///
+/// The resync request is sent from here rather than left to the store because
+/// the store has no transport — and a swallowed `NeedsResync` is the one
+/// failure that looks like nothing at all: the pane simply stops updating, with
+/// no error anywhere.
+///
+/// Anything other than a frame is ignored. The hub is the viewer; a subscribe
+/// or an ack arriving here is a peer with the protocol backwards.
+async fn route_screen(
+    relay: &dyn Relay,
+    screens: &crate::hub::ScreenStore,
+    from: &str,
+    message: crate::tinyplace::ScreenMessage,
+    log: &Option<HubLog>,
+) {
+    let crate::tinyplace::ScreenMessage::Frame(frame) = message else {
+        return;
+    };
+    let task_id = frame.task_id.clone();
+    if screens.apply(from, &frame, crate::clock::now_millis())
+        == crate::tinyplace::ApplyOutcome::NeedsResync
+    {
+        if let Some(log) = log {
+            log(&format!(
+                "hub ← screen {task_id} from {from}: out of step at seq {} — resyncing",
+                frame.seq
+            ));
+        }
+        let body =
+            crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Subscribe {
+                task_id,
+                max_fps: DEFAULT_SCREEN_FPS,
+                resync: true,
+            });
+        let _ = relay.send(from, &body).await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn pump_loop(
     relay: Arc<dyn Relay>,
     waiters: Waiters,
@@ -189,9 +237,16 @@ pub(super) async fn pump_loop(
     poll: Duration,
     log: Option<HubLog>,
     activity: Option<ActivityLog>,
+    screens: crate::hub::ScreenStore,
 ) {
     loop {
         for msg in relay.drain_inbox(DRAIN_LIMIT).await {
+            // Screen frames are claimed first — they share this channel with
+            // task frames and would otherwise be dropped as unrecognised.
+            if let Some(screen) = crate::tinyplace::parse_screen_message(&msg.text) {
+                route_screen(relay.as_ref(), &screens, &msg.from, screen, &log).await;
+                continue;
+            }
             if let Some(frame) = decode_task_frame(&msg.text) {
                 route_frame(
                     &waiters,
@@ -205,6 +260,9 @@ pub(super) async fn pump_loop(
                 .await;
             }
         }
-        tokio::time::sleep(poll).await;
+        // Not a bare sleep: this also returns the moment the relay's push
+        // channel delivers, so a worker's reply or screen frame is routed at
+        // about a round trip instead of up to a full poll interval later.
+        relay.wait_for_inbox(poll).await;
     }
 }

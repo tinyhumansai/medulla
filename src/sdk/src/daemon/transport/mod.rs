@@ -94,12 +94,70 @@ impl SignalTransport {
             our_agent_id,
             our_ed25519_pub: *signer.public_key(),
             lock: Arc::new(Mutex::new(())),
+            push: crate::daemon::listener::PushInbox::new(),
+            seen: crate::daemon::listener::SeenIds::new(),
+            last_fetch: Arc::new(std::sync::Mutex::new(
+                std::time::Instant::now() - crate::daemon::listener::RECONCILE_INTERVAL,
+            )),
         }
     }
 
     /// This wallet's agent id.
     pub fn agent_id(&self) -> &str {
         &self.our_agent_id
+    }
+
+    /// Open the relay's push channel, so envelopes are delivered here instead
+    /// of fetched on the poll interval.
+    ///
+    /// Best-effort: the socket carries no state this transport depends on — the
+    /// mailbox still holds every envelope until it is acknowledged — so a
+    /// failure to open it costs latency and nothing else. Dropping the returned
+    /// guard closes it and reverts to fetching.
+    pub fn spawn_inbox_listener(
+        &self,
+        log: Option<super::LogFn>,
+    ) -> crate::daemon::listener::ListenerGuard {
+        crate::daemon::listener::spawn_inbox_listener(
+            self.client.clone(),
+            self.our_agent_id.clone(),
+            self.push.clone(),
+            log,
+        )
+    }
+
+    /// Whether the push channel is currently open.
+    pub fn is_push_listening(&self) -> bool {
+        self.push.is_listening()
+    }
+
+    /// Wait until envelopes have been delivered, or `poll` elapses.
+    ///
+    /// Replaces a bare `sleep(poll)` in a drain loop. The timeout remains the
+    /// correctness floor — a delivery is an optimisation, never the sole way
+    /// something is learned.
+    pub async fn wait_for_inbox(&self, poll: std::time::Duration) {
+        self.push.wait(poll).await;
+    }
+
+    /// Whether this drain should fetch the mailbox over HTTPS.
+    ///
+    /// Skipped only when the socket is delivering, owes nothing, and was
+    /// reconciled recently. Every other case fetches, which is what keeps the
+    /// socket an optimisation rather than a second source of truth.
+    fn should_fetch(&self) -> bool {
+        if !self.push.is_listening() || self.push.take_must_fetch() {
+            return true;
+        }
+        let mut last = self.last_fetch.lock().expect("last fetch lock");
+        if last.elapsed() >= crate::daemon::listener::RECONCILE_INTERVAL {
+            *last = std::time::Instant::now();
+            return true;
+        }
+        // The socket is up, owes nothing, and was reconciled recently — so the
+        // mailbox is quiet and asking again would just be the poll this
+        // replaced.
+        false
     }
 
     /// Drop the local Signal session with `peer` so the next send re-runs X3DH
@@ -298,19 +356,42 @@ impl SignalTransport {
     /// Destructively read the inbox (up to `limit`): decrypt each message, hand
     /// back the plaintext, and acknowledge (delete) every delivered message so
     /// the relay does not redeliver it.
+    ///
+    /// Envelopes the push socket already delivered are taken from it rather than
+    /// fetched, which is what removes the poll interval from the latency of a
+    /// task frame or a screen delta. The fetch is skipped only while the socket
+    /// is healthy, has nothing outstanding, and has been reconciled against
+    /// recently — so an envelope is never known *only* from the socket.
+    ///
+    /// Every envelope is deduplicated by message id before decryption. A
+    /// reconnect replays the mailbox snapshot and a reconciliation fetch can
+    /// race a delete that has not landed, so the same envelope legitimately
+    /// arrives twice; handing a screen delta to the fold twice would fail its
+    /// `base_seq` check and force a needless resync.
     pub async fn drain_inbox(&self, limit: i64) -> Vec<InboundMessage> {
         let _guard = self.lock.lock().await;
-        let response = match self
-            .client
-            .messages
-            .list(&self.our_agent_id, Some(limit))
-            .await
-        {
-            Ok(response) => response,
-            Err(_) => return Vec::new(),
-        };
+
+        let mut envelopes = self.push.take();
+        if self.should_fetch() {
+            match self
+                .client
+                .messages
+                .list(&self.our_agent_id, Some(limit))
+                .await
+            {
+                Ok(response) => envelopes.extend(response.messages),
+                // A failed fetch is not fatal when the socket is up: it has
+                // delivered what it delivered, and the next drain retries.
+                Err(_) if !envelopes.is_empty() => {}
+                Err(_) => return Vec::new(),
+            }
+        }
+
         let mut out = Vec::new();
-        for message in response.messages {
+        for message in envelopes {
+            if !self.seen.insert(&message.id) {
+                continue; // already handled; the ack for it is already in flight
+            }
             match self.decrypt(&message).await {
                 Ok(text) => out.push(InboundMessage {
                     from: message.from.clone(),

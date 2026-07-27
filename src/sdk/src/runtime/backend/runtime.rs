@@ -143,6 +143,34 @@ impl Runtime for BackendRuntime {
         })
     }
 
+    fn worker_screens(&self) -> Vec<crate::hub::WatchedScreen> {
+        let handle = self.hub.lock().unwrap().clone();
+        match handle {
+            Some(h) => h.screens().snapshot(),
+            None => Vec::new(),
+        }
+    }
+
+    fn watch_task(
+        &self,
+        worker: String,
+        task_id: String,
+        watch: bool,
+    ) -> crate::runtime::BoxFuture<'static, anyhow::Result<()>> {
+        let handle = self.hub.lock().unwrap().clone();
+        Box::pin(async move {
+            let Some(hub) = handle else {
+                return Ok(());
+            };
+            let result = if watch {
+                hub.watch(&worker, &task_id).await
+            } else {
+                hub.unwatch(&worker, &task_id).await
+            };
+            result.map_err(|e| anyhow::anyhow!(e))
+        })
+    }
+
     fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
         let handle = self.hub.lock().unwrap().clone();
         match handle {

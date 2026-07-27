@@ -96,6 +96,7 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         router: options.router.clone(),
         on_event: None,
         on_stdin: None,
+        on_session: None,
     };
 
     let reply = match (options.run_task)(run_options).await {

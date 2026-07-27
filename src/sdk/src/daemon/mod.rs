@@ -26,6 +26,7 @@
 pub mod capabilities;
 pub mod dir_context;
 pub mod embedded;
+pub mod listener;
 pub mod mappers;
 pub mod pairing;
 pub mod providers;
@@ -42,5 +43,6 @@ mod types;
 mod tests;
 
 pub use entry::run_daemon;
+pub use listener::{spawn_inbox_listener, ws_inbox_enabled, ListenerGuard, PushInbox, SeenIds};
 pub use status::{status_detail, work_detail, TOOL_PREFIX};
 pub use types::{DaemonConfig, DaemonRuntime, LogFn, NowFn, SendFn};

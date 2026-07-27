@@ -90,7 +90,24 @@ fn start_worker(
         )
     });
     let daemon = worker_runtime(start, mode, provider, &transport);
-    *inbox = Some(spawn_inbox_drain(transport, daemon.clone()));
+    // Screens are only worth streaming when there are screens: the headless
+    // executor runs harnesses without a pty, so a subscriber finds nothing.
+    let screens =
+        medulla_tui::worker::stream::ScreenRouter::new(start.sessions.clone(), daemon.clone(), {
+            let sender = transport.clone();
+            medulla_tui::worker::stream::send_fn(move |to: String, body: String| {
+                let sender = sender.clone();
+                async move {
+                    let _ = sender.send(&to, &body).await;
+                }
+            })
+        })
+        .with_log(start.logs.sink());
+    // Best-effort push channel. Nothing below depends on it: it only shortens
+    // the wait between a peer sending and this loop looking.
+    let push = medulla::daemon::ws_inbox_enabled(&start.env)
+        .then(|| transport.spawn_inbox_listener(Some(start.logs.sink())));
+    *inbox = Some(spawn_inbox_drain(transport, daemon.clone(), screens, push));
     *runtime = Some(daemon);
     app.set_status(format!(
         "Serving peers · {} on {}",

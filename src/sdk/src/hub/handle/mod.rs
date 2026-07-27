@@ -74,6 +74,43 @@ pub(super) fn cache_system_info_if_current(
 }
 
 impl HubHandle {
+    /// The worker screens this hub is holding, for the view that renders them.
+    pub fn screens(&self) -> super::ScreenStore {
+        self.runner.screens()
+    }
+
+    /// Ask `worker` to start streaming the screen of the session running
+    /// `task_id`, and to send a full frame.
+    ///
+    /// Always a resync: the hub may hold a stale screen from an earlier
+    /// subscription, and a delta against that would apply to the wrong base.
+    pub async fn watch(&self, worker: &str, task_id: &str) -> Result<(), String> {
+        let body =
+            crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Subscribe {
+                task_id: task_id.to_string(),
+                max_fps: 1,
+                resync: true,
+            });
+        (self.log)(&format!("hub: watching task {task_id} on {worker}"));
+        self.relay.send(worker, &body).await
+    }
+
+    /// Ask `worker` to stop streaming `task_id`, and drop what we hold.
+    ///
+    /// Forgotten locally even when the request fails to send: a pane left
+    /// showing a screen that will never update again reads as a hung worker
+    /// rather than an ended subscription.
+    pub async fn unwatch(&self, worker: &str, task_id: &str) -> Result<(), String> {
+        let body = crate::tinyplace::encode_screen_message(
+            &crate::tinyplace::ScreenMessage::Unsubscribe {
+                task_id: task_id.to_string(),
+            },
+        );
+        let sent = self.relay.send(worker, &body).await;
+        self.runner.screens().forget(worker, task_id);
+        sent
+    }
+
     /// Build a handle from its wiring.
     pub(super) fn new(wiring: HandleWiring) -> Self {
         HubHandle {

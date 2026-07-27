@@ -145,6 +145,13 @@ impl PtySessionExecutor {
             };
         }
         let id = opened.id;
+        // Tell the daemon which session serves this task, as soon as it exists.
+        // A screen subscription names a task, so until this lands there is
+        // nothing for it to resolve — and the whole point is to watch the task
+        // while it runs, not to learn where it ran once it is over.
+        if let Some(report) = options.on_session {
+            report(id.clone());
+        }
 
         // Latch the tailer *before* typing. Locating is lazy, and a resumed tail
         // takes its start offset from the file's length at the moment it

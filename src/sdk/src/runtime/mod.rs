@@ -136,6 +136,26 @@ pub trait Runtime: Send + Sync {
         Vec::new()
     }
 
+    /// The worker screens this runtime's hub is currently holding. Empty when
+    /// the runtime has no hub, or when nothing is being watched.
+    fn worker_screens(&self) -> Vec<crate::hub::WatchedScreen> {
+        Vec::new()
+    }
+
+    /// Start or stop streaming the screen of the session running `task_id` on
+    /// `worker`.
+    ///
+    /// A no-op success without a hub, so a runtime that cannot watch anything
+    /// is not something every caller has to special-case.
+    fn watch_task(
+        &self,
+        _worker: String,
+        _task_id: String,
+        _watch: bool,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// The managed worker-peer registry snapshot (`worker.list`). Empty when the
     /// runtime has no worker surface.
     fn workers(&self) -> Vec<WorkerInfo> {

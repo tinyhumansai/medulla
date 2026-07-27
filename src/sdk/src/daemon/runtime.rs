@@ -127,6 +127,29 @@ impl DaemonRuntime {
     }
 
     /// The map key for a running task: `sender + taskId`.
+    /// The worker-local session running `task_id` for `from`, if any.
+    ///
+    /// The key is `(authenticated sender, task id)`, which is what makes this
+    /// safe to expose: a peer can only ever resolve a task it dispatched
+    /// itself, so screen subscriptions need no ownership check of their own.
+    /// `None` once the task settles — the record is removed then, so a stream
+    /// keyed on it ends with the work rather than outliving it.
+    pub fn session_for_task(&self, from: &str, task_id: &str) -> Option<String> {
+        self.inner
+            .running
+            .lock()
+            .unwrap()
+            .get(&Self::task_key(from, task_id))
+            .and_then(|task| task.session_id.clone())
+    }
+
+    /// Record the session an executor opened for a running task.
+    pub(super) fn record_task_session(&self, key: &str, session_id: String) {
+        if let Some(task) = self.inner.running.lock().unwrap().get_mut(key) {
+            task.session_id = Some(session_id);
+        }
+    }
+
     pub(super) fn task_key(from: &str, task_id: &str) -> String {
         format!("{from} {task_id}")
     }

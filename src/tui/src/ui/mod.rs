@@ -23,6 +23,7 @@ pub(crate) mod layout;
 pub mod login;
 pub(crate) mod multi_pane;
 pub mod onboarding;
+pub mod screen;
 pub(crate) mod selection;
 pub mod theme;
 pub mod welcome;

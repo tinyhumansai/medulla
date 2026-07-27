@@ -90,6 +90,7 @@ impl DaemonRuntime {
                 correlation_id: correlation.clone(),
                 stdin: None,
                 pending_input: Vec::new(),
+                session_id: None,
             },
         );
         self.inner.admitted.fetch_add(1, Ordering::SeqCst);
@@ -177,6 +178,16 @@ impl DaemonRuntime {
             }) as Box<dyn FnOnce(mpsc::UnboundedSender<String>) + Send>
         };
 
+        // Reported as soon as the executor opens a session, not with the
+        // result: the point of knowing it is to watch the task while it runs.
+        let on_session = {
+            let this = self.clone();
+            let key = key.clone();
+            Box::new(move |session_id: String| {
+                this.record_task_session(&key, session_id);
+            }) as Box<dyn FnOnce(String) + Send>
+        };
+
         let options = RunTaskOptions {
             // The *authenticated* sender, never anything from the frame body: a
             // frame cannot be trusted to name its own author, and this value
@@ -201,6 +212,7 @@ impl DaemonRuntime {
             router: self.inner.config.router.clone(),
             on_event: Some(on_event),
             on_stdin: Some(on_stdin),
+            on_session: Some(on_session),
         };
 
         // Consume status details in order while the task runs.
@@ -331,6 +343,7 @@ impl DaemonRuntime {
             router: self.inner.config.router.clone(),
             on_event: None,
             on_stdin: None,
+            on_session: None,
         };
         let result = (self.inner.run_task)(options).await;
         match result {

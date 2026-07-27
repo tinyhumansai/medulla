@@ -16,6 +16,7 @@ mod probe;
 mod relay;
 mod roster;
 mod runner;
+mod screens;
 mod socket;
 mod types;
 
@@ -28,4 +29,5 @@ pub use handle::HubHandle;
 pub use relay::Relay;
 pub use roster::HubWorker;
 pub use runner::TaskRunner;
+pub use screens::{ScreenStore, WatchedScreen};
 pub use types::{stderr_log, HubLog, RosterSink, RunError, TaskOutcome, TaskRequest};

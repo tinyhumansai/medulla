@@ -178,6 +178,24 @@ pub(super) fn run_cmd(
                 let _ = tx.send(msg);
             });
         }
+        Cmd::WatchTask { stop, start } => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                // Stop first: a worker streaming a task nobody is looking at
+                // spends a sample, a ratchet advance and a send every tick.
+                if let Some((worker, task_id)) = stop {
+                    let _ = rt.watch_task(worker, task_id, false).await;
+                }
+                if let Some((worker, task_id)) = start {
+                    if let Err(e) = rt.watch_task(worker, task_id.clone(), true).await {
+                        // Worth saying: the pane would otherwise just stay
+                        // empty, which reads as a worker doing nothing.
+                        let _ = tx.send(AppMsg::Status(format!("Cannot watch {task_id}: {e}")));
+                    }
+                }
+            });
+        }
         Cmd::WorkerOp(op) => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

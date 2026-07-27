@@ -222,7 +222,11 @@ impl ContactBook {
     }
 
     /// Record a decision that failed, leaving it retryable.
-    pub fn fail(&self, agent_id: &str, message: impl Into<String>, now: i64) {
+    ///
+    /// `auto` says whether the attempt was policy-driven, and is what lets a
+    /// later poll tell a transient relay failure it may retry on its own from an
+    /// operator's decision that failed and is theirs to repeat.
+    pub fn fail(&self, agent_id: &str, message: impl Into<String>, auto: bool, now: i64) {
         let mut inner = self.inner.lock().unwrap();
         if let Some(request) = inner
             .requests
@@ -232,6 +236,7 @@ impl ContactBook {
             request.state = RequestState::Failed;
             request.updated_at = now;
             request.last_error = Some(message.into());
+            request.auto = auto;
         }
     }
 

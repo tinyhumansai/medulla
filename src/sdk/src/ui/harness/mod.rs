@@ -129,8 +129,8 @@ pub fn task_board_lines(status: &HarnessStatus, width: usize) -> Vec<Line> {
 }
 
 /// Compact token count that scales into millions (`980` · `1.2k` · `34k` · `1.2M`).
-/// Mirrors the TS `formatTokens` in `core/budgetRoster.ts` so the TUI note reads
-/// the same as the orchestrator-facing budget note.
+/// Uses the public budget display convention so the TUI and orchestrator-facing
+/// notes read consistently.
 fn fmt_headroom(tokens: u64) -> String {
     if tokens >= 1_000_000 {
         format!("{:.1}M", tokens as f64 / 1_000_000.0)

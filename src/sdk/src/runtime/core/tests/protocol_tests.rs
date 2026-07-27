@@ -148,7 +148,7 @@ fn hello_carries_static_roster_and_agent_templates() {
             template_id: Some("reviewer".into()),
             ..AgentDescriptor::default()
         }],
-        agent_templates: vec![super::super::types::AgentTemplate {
+        agent_templates: vec![crate::runtime::AgentTemplate {
             id: "reviewer".into(),
             name: Some("Reviewer".into()),
             description: "Reviews diffs without writing.".into(),
@@ -169,4 +169,26 @@ fn hello_carries_static_roster_and_agent_templates() {
     assert_eq!(hello["roster"][0]["templateId"], "reviewer");
     assert_eq!(hello["templates"][0]["id"], "reviewer");
     assert_eq!(hello["templates"][0]["model"], "reasoning");
+}
+
+#[test]
+fn hello_carries_the_catalog_a_default_config_declares() {
+    // The orchestrator can only provision what the handshake advertises, so an
+    // install that has declared nothing must still offer its built-in roles —
+    // otherwise the catalog exists in the UI and nowhere else.
+    let fleet = crate::config::FleetConfig::default();
+    let declarations = CoreDeclarations {
+        agent_templates: fleet.agent_templates.clone(),
+        ..CoreDeclarations::default()
+    };
+
+    let hello = hello_params(&declarations);
+    let ids: Vec<&str> = hello["templates"]
+        .as_array()
+        .expect("templates array")
+        .iter()
+        .filter_map(|t| t["id"].as_str())
+        .collect();
+    assert!(ids.contains(&"code-reviewer"), "{ids:?}");
+    assert_eq!(ids.len(), crate::agents::default_templates().len());
 }

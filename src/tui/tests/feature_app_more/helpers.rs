@@ -59,9 +59,6 @@ impl medulla::runtime::Runtime for FleetRuntime {
     fn new_session(&self) {
         self.inner.new_session()
     }
-    fn fork(&self, name: Option<String>) -> String {
-        self.inner.fork(name)
-    }
     fn set_active_thread(&self, id: String) {
         self.inner.set_active_thread(id)
     }
@@ -75,9 +72,6 @@ impl medulla::runtime::Runtime for FleetRuntime {
     }
     fn resume_chat(&self, id: String) -> futures::future::BoxFuture<'static, anyhow::Result<()>> {
         self.inner.resume_chat(id)
-    }
-    fn set_async_mode(&self, on: bool) -> bool {
-        self.inner.set_async_mode(on)
     }
     fn inspect_context(
         &self,
@@ -107,6 +101,7 @@ pub fn fleet_app() -> App {
             handle: Some("@dev".into()),
             label: Some("primary".into()),
             harness: Some("claude".into()),
+            workspace: None,
             peer_id: None,
             cpu_cores: Some(8),
             memory_total_bytes: Some(32 * 1024 * 1024 * 1024),
@@ -122,6 +117,12 @@ pub fn fleet_app() -> App {
 
 pub fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+/// An `Alt`-modified key: the Agents tab's steering and lane-selection chord,
+/// since the bare keys now belong to the composer.
+pub fn alt_key(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::ALT))
 }
 
 pub fn ctrl(code: KeyCode) -> Event {
@@ -191,7 +192,7 @@ pub fn app_with_selected_task() -> (App, Arc<MockRuntime>) {
         if app.selected_task_id().is_some() {
             break;
         }
-        let _ = app.on_event(key(KeyCode::Down));
+        let _ = app.on_event(alt_key(KeyCode::Down));
     }
     (app, rt)
 }

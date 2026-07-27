@@ -99,6 +99,7 @@ pub fn frame(
 ) -> TaskFrame {
     TaskFrame {
         usage: None,
+        work: None,
         proto: TINYPLACE_PROTO.to_string(),
         kind,
         task_id: task_id.to_string(),
@@ -108,6 +109,7 @@ pub fn frame(
         harness: None,
         provider: None,
         model: None,
+        workflow: None,
     }
 }
 

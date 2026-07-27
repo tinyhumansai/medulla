@@ -177,7 +177,8 @@ pub async fn run_daemon(
 
     // Onboard (publish keys, register handle, upsert directory card) unless
     // suppressed. Key publishing is what lets peers open an encrypted channel.
-    if !flags.is_set("no-onboard") {
+    let onboarded = !flags.is_set("no-onboard");
+    if onboarded {
         let git = read_git_facts(&workspace).await;
         let bio = format!(
             "Headless coding-agent daemon serving {} over tiny.place.{} cwd:{workspace}",
@@ -213,6 +214,37 @@ pub async fn run_daemon(
             "onboarded {agent_id} (skills: {})",
             skills.join(", ")
         ));
+    }
+
+    // Pairing hand-off. Adding this worker to an orchestrator needs exactly one
+    // string to travel — this address — and the machine printing it is usually
+    // one the operator reached over SSH, where selecting it by hand is the step
+    // that makes people give up. So it goes to their terminal's clipboard and
+    // onto a line of its own. `--no-pair` opts out for scripted runs that parse
+    // this output. See [`super::pairing`].
+    if !flags.is_set("no-pair") {
+        let stdout_is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        let handoff = super::pairing::clipboard_handoff(&agent_id, stdout_is_terminal);
+        if let Some(escape) = &handoff {
+            use std::io::Write;
+            let mut out = std::io::stdout();
+            let _ = out.write_all(escape.as_bytes());
+            let _ = out.flush();
+        }
+        // The handle is only offered when onboarding actually registered it.
+        // `--handle` is read inside the onboard block, so under `--no-onboard`
+        // it names something no directory resolves — and "type @build-box on the
+        // orchestrator" would be advice that silently fails. The address itself
+        // stays valid either way: `--no-onboard` is for a daemon whose keys were
+        // published on an earlier run.
+        eprint!(
+            "{}",
+            super::pairing::pairing_banner(
+                &agent_id,
+                onboarded.then_some(handle.as_deref()).flatten(),
+                handoff.is_some()
+            )
+        );
     }
 
     // Runtime + transport-backed send.

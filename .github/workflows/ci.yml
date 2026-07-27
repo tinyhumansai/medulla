@@ -51,6 +51,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check public boundary
+        run: bash scripts/check-public-boundary.sh
+
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 

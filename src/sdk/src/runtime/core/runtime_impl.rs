@@ -31,7 +31,6 @@ impl Runtime for CoreRuntime {
         // §1 "one session per connection").
         let threads = vec![ThreadSummary {
             id: "core".into(),
-            parent_id: None,
             name: "main".into(),
             running: s.running,
             turns: s.messages.len().div_ceil(2),
@@ -50,11 +49,11 @@ impl Runtime for CoreRuntime {
             messages: s.messages.clone(),
             last_result: s.last_result.clone(),
             tracing: false,
-            roster: Vec::new(),
+            roster: self.declarations.agents.clone(),
+            capacity: self.declarations.capacity(),
             presence: Default::default(),
             sessions: Default::default(),
             tinyplace: None,
-            async_mode: s.async_mode,
             threads,
             active_thread_id: "core".into(),
             harness: s.harness.clone(),
@@ -118,10 +117,12 @@ impl Runtime for CoreRuntime {
     }
 
     fn new_session(&self) {
-        // No serve frame resets a session in place — serve owns the harness and
-        // rehydrates from the host `sessions` port (serve-protocol §7). Clear the
-        // local transcript so the view starts fresh; the durable session is
-        // untouched.
+        // Unlike the mock and backend runtimes this opens no thread: serve is
+        // one session per connection (serve-protocol §1), so there is nowhere
+        // for a second one to live. And no serve frame resets a session in place
+        // — serve owns the harness and rehydrates from the host `sessions` port
+        // (§7) — so this clears the local transcript for a fresh view and leaves
+        // the durable session untouched.
         {
             let mut s = self.state.lock().unwrap();
             s.messages.clear();
@@ -131,12 +132,6 @@ impl Runtime for CoreRuntime {
             s.running = false;
         }
         self.ping();
-    }
-
-    fn fork(&self, _name: Option<String>) -> String {
-        // No-op: serve is one session per connection (serve-protocol §1); there
-        // is no fork frame. Return the current session id unchanged.
-        self.state.lock().unwrap().session_id.clone()
     }
 
     fn set_active_thread(&self, _id: String) {
@@ -153,15 +148,6 @@ impl Runtime for CoreRuntime {
         // No-op: serve resumes its own session from the `sessions` port on
         // respawn (serve-protocol §7); the host has no resume frame to send.
         Box::pin(async move { Ok(()) })
-    }
-
-    fn set_async_mode(&self, on: bool) -> bool {
-        // Local flag only; no serve op backs it (mirrors the backend runtime).
-        {
-            self.state.lock().unwrap().async_mode = on;
-        }
-        self.ping();
-        on
     }
 
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {

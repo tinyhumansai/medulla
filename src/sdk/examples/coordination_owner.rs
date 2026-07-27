@@ -228,6 +228,7 @@ async fn run() -> Result<(), String> {
         harness: None,
         provider: args.provider,
         model: args.model.clone(),
+        workflow: None,
     });
     transport
         .send(&to, &frame)

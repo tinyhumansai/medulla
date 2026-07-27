@@ -1,7 +1,9 @@
 //! Status-line derivation: turn a semantic harness event into the short,
 //! human-facing detail string the daemon forwards as a `status` frame. Ported
-//! from the TypeScript `statusDetail`.
+//! from provider status details, and extended with the work-derived line the
+//! newer structured events need.
 
+use crate::harness_work::WorkSnapshot;
 use crate::tinyplace::{HarnessEvent, HarnessEventKind};
 
 /// Derive a short status string from a semantic event (or none). Ported from the
@@ -42,4 +44,31 @@ fn cap(value: &str, max_chars: usize) -> String {
     } else {
         value.chars().take(max_chars).collect()
     }
+}
+
+/// A status line describing what the harness is working on, for the structured
+/// work events that have no wording of their own.
+///
+/// A `todo_update` or a `subagent_start` decodes to nothing in
+/// [`status_detail`] — the published event vocabulary predates them — so
+/// without this a harness could rewrite its whole plan and the peer would see
+/// no status change at all. Prefers the item the agent says it is on, then the
+/// stated goal, then the counts.
+pub fn work_detail(work: &WorkSnapshot) -> Option<String> {
+    let (done, total) = work.todo_progress();
+    let running = work.running_subagents();
+    if let Some(current) = work.current_todo() {
+        return Some(cap(
+            &format!("{} · todo {done}/{total}", current.display()),
+            200,
+        ));
+    }
+    if running > 0 {
+        let plural = if running == 1 { "" } else { "s" };
+        return Some(format!("{running} sub-agent{plural} running"));
+    }
+    if total > 0 {
+        return Some(format!("todo {done}/{total}"));
+    }
+    work.goal.as_deref().map(|goal| cap(goal, 200))
 }

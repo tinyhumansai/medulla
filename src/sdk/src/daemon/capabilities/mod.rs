@@ -1,4 +1,4 @@
-//! Capability discovery, ported from the tinyplace CLI `daemon/capabilities.ts`.
+//! Capability discovery for supported local harnesses.
 //!
 //! An orchestrator picking a lane needs the repo, branch, accessible dirs, and
 //! the tools/MCP servers an agent can reach. Config heuristics get that wrong, so
@@ -58,6 +58,9 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         providers: options.providers.clone(),
         tools: Vec::new(),
         mcp_servers: Vec::new(),
+        // Filled in by the daemon from its own workflow store: this probe
+        // describes the harness, not what has been authored on top of it.
+        workflows: Vec::new(),
         // Deterministic digest of CLAUDE.md/AGENTS.md/README.md — the summary
         // of last resort so a failed probe still carries project context.
         summary: dir.fallback_summary.clone(),

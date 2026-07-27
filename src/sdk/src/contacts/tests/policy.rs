@@ -93,7 +93,7 @@ fn only_actionable_requests_can_begin_a_decision() {
     assert!(book.begin("peer", 2), "pending is actionable");
     assert!(!book.begin("peer", 3), "a decision is already in flight");
 
-    book.fail("peer", "relay unreachable", 4);
+    book.fail("peer", "relay unreachable", false, 4);
     assert!(book.begin("peer", 5), "a failed decision is retryable");
     assert!(!book.begin("ghost", 6), "an unknown peer is not actionable");
 }

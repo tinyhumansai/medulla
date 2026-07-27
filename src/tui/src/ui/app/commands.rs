@@ -4,7 +4,7 @@
 //! into runtime calls and follow-up [`Cmd`]s.
 
 use crate::ui::agents::{AgentRow, TaskState};
-use crate::ui::clipboard::{copy_to_clipboard, current_platform, OSC_52};
+use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform, OSC_52};
 use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::Draft;
 use crate::ui::theme::{color_to_string, THEME_ROLES};
@@ -17,12 +17,12 @@ use super::types::{
 
 impl App {
     /// The worker under the Workers-list cursor, if the fleet is non-empty.
-    pub(super) fn selected_worker(&self) -> Option<WorkerInfo> {
+    pub(super) fn selected_host(&self) -> Option<WorkerInfo> {
         let ws = self.runtime.workers();
         if ws.is_empty() {
             return None;
         }
-        ws.get(self.worker_index.min(ws.len() - 1)).cloned()
+        ws.get(self.host_index.min(ws.len() - 1)).cloned()
     }
 
     /// The task under the Agents-list cursor, when a `Sub` (task) row is selected.
@@ -52,6 +52,31 @@ impl App {
     }
 
     /// Open the answer prompt for the selected task's pending question.
+    /// Send the composer's text as an answer when the cursor sits on a task with
+    /// an open question, consuming the draft.
+    ///
+    /// Returns `Some(None)` when it handled the key (an answer was sent, or the
+    /// draft was empty and there was nothing to send) and `None` when the caller
+    /// should treat the text as an ordinary instruction instead. The distinction
+    /// matters: typing into an agent's lane must not silently start a new
+    /// orchestrator cycle.
+    pub(super) fn answer_from_composer(&mut self, text: &str) -> Option<Option<Cmd>> {
+        let task = self.selected_agent_task()?;
+        let question_id = task.question_id.clone()?;
+        let cycle_id = crate::ui::agents::parse_task_key(&task.task_id)
+            .0?
+            .to_string();
+        if text.trim().is_empty() {
+            self.set_status("Type an answer for the pending question");
+            return Some(None);
+        }
+        self.runtime
+            .answer_question(cycle_id, question_id, text.to_string());
+        self.draft = Draft::new();
+        self.set_status(format!("Answer sent to {}", task.task_id));
+        Some(None)
+    }
+
     pub(super) fn answer_selected_task(&mut self) {
         match self.selected_agent_task() {
             Some(t) => match (
@@ -148,7 +173,7 @@ impl App {
                 self.set_status(format!("Memory · searching “{text}”…"));
                 Some(Cmd::SearchMemory(text))
             }
-            PromptKind::WorkerAdd => match WorkerOp::parse_add(&text) {
+            PromptKind::HostAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
                     self.set_status("Adding worker…");
                     Some(Cmd::WorkerOp(op))
@@ -158,7 +183,11 @@ impl App {
                     None
                 }
             },
-            PromptKind::WorkerEditLabel(id) => {
+            PromptKind::WorkspaceAdd => {
+                self.add_workspace(&text);
+                None
+            }
+            PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text));
                 self.set_status("Updating label…");
@@ -270,6 +299,34 @@ impl App {
         });
     }
 
+    /// Copy one short line — a command, an address — to the clipboard, naming it
+    /// in the status line.
+    ///
+    /// Kept apart from [`App::copy_chat`] in two ways. It reports *what* was
+    /// copied rather than a size, because for one line the size says nothing.
+    /// And it goes to the terminal first
+    /// ([`copy_for_operator`](medulla::clipboard::copy_for_operator)): the
+    /// orchestrator itself may be running over SSH, and a short line is exactly
+    /// what an operator then pastes somewhere else. A transcript keeps the
+    /// local-writer-first path, since terminals cap how much an OSC 52 escape
+    /// may carry and a long chat would be truncated or dropped outright.
+    pub(in crate::ui::app) fn copy_line(&mut self, what: &str, text: &str) {
+        if let Some(sink) = &self.copy_capture {
+            sink.lock().expect("copy sink").push(text.to_string());
+            self.set_status(format!("Copied {what} (captured)"));
+            return;
+        }
+        let via = copy_for_operator(text, current_platform(), |osc| {
+            use std::io::Write;
+            let _ = std::io::stdout().write_all(osc.as_bytes());
+            let _ = std::io::stdout().flush();
+        });
+        self.set_status(match via {
+            Some(writer) => format!("Copied {what} → clipboard ({writer})"),
+            None => format!("Sent {what} → terminal (OSC 52); check your clipboard"),
+        });
+    }
+
     /// Handle a submitted composer line (a plain turn or a slash command).
     pub(super) fn execute(&mut self, value: String) -> Option<Cmd> {
         let clean = value.trim().to_string();
@@ -297,13 +354,7 @@ impl App {
         match command {
             SlashCommand::Quit => self.should_quit = true,
             SlashCommand::NewSession => {
-                self.runtime.new_session();
-                self.refresh_snapshot();
-                self.set_status("Started a fresh conversation session");
-            }
-            SlashCommand::Fork(name) => {
-                self.fork_thread(name);
-                self.tab_index = tab_pos("Chat");
+                self.new_thread();
             }
             SlashCommand::Resume => return Some(Cmd::ListChats),
             SlashCommand::Abort => {
@@ -348,16 +399,6 @@ impl App {
             }
             SlashCommand::ToggleMouse => self.toggle_mouse(),
             SlashCommand::Copy(scope) => self.copy_chat(scope),
-            SlashCommand::Async(setting) => {
-                let on = setting.unwrap_or(!self.snapshot.async_mode);
-                self.runtime.set_async_mode(on);
-                self.refresh_snapshot();
-                self.set_status(if on {
-                    "async ON — delegations detach; chat stays free while sub-agents work"
-                } else {
-                    "async OFF — delegations await their results before the reply"
-                });
-            }
             SlashCommand::BadUsage(usage) => self.set_status(usage),
             SlashCommand::Unknown(input) => self.set_status(format!("Unknown command: {input}")),
         }
@@ -418,6 +459,30 @@ impl App {
             }
             None => self.set_status(format!(
                 "Applying {strategy:?} routing strategy… (not persisted)"
+            )),
+        }
+    }
+
+    /// Persist and remember the provider-subscription routing strategy.
+    pub(super) fn persist_subscription_strategy_now(
+        &mut self,
+        strategy: medulla::runtime::SubscriptionRoutingStrategy,
+    ) {
+        self.loaded.config.subscription_routing_strategy = Some(strategy);
+        match &self.config_path {
+            Some(path) => {
+                match medulla::config::persist_subscription_routing_strategy(
+                    path,
+                    strategy.as_wire(),
+                ) {
+                    Ok(()) => self.set_status(format!(
+                        "Applying {strategy:?} subscription strategy… (saved)"
+                    )),
+                    Err(e) => self.set_status(format!("Subscription strategy save failed: {e}")),
+                }
+            }
+            None => self.set_status(format!(
+                "Applying {strategy:?} subscription strategy… (not persisted)"
             )),
         }
     }

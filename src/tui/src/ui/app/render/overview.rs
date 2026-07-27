@@ -1,5 +1,5 @@
-//! The Overview tab: the logo, the this-device/orchestration panels, and the
-//! live-activity feed.
+//! The Overview tab: the logo, the this-device/orchestration panels, the local
+//! host strip, and the live-activity feed.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -15,14 +15,28 @@ use super::super::types::App;
 impl App {
     /// Draw the Overview tab: logo, top panels, and live activity.
     pub(super) fn draw_overview(&mut self, f: &mut Frame, area: Rect) {
+        // The host strip is only laid out when this device is actually hosting.
+        // A permanently-reserved empty band would cost the live feed several
+        // rows to say nothing, on every run that orchestrates but does not host.
+        //
+        // Two borders plus three fixed lines, and a fourth only once the host
+        // has a status worth showing — reserving that row up front would leave a
+        // blank line under the counters for the whole of an idle session.
+        let host_rows = match &self.host_obs {
+            Some(host) => 5 + u16::from(host.stats().last_status.is_some()),
+            None => 0,
+        };
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(5),
                 Constraint::Length(7),
+                Constraint::Length(host_rows),
                 Constraint::Min(0),
             ])
             .split(area);
+        let host_area = rows[2];
+        let rows = [rows[0], rows[1], rows[3]];
         // The band is one row taller than the art so the wordmark gets a blank
         // line of breathing room under the header/tab strip instead of butting
         // straight up against it.
@@ -82,6 +96,9 @@ impl App {
             top[1],
         );
 
+        // The hosting strip, when this device is also running the work.
+        self.draw_host_panel(f, host_area);
+
         // Live activity.
         let take = self.visible_count().saturating_sub(1).max(5);
         let start = self.snapshot.events.len().saturating_sub(take);
@@ -103,9 +120,83 @@ impl App {
         );
     }
 
+    /// The "Local host" strip: what this machine will run for the fleet, where,
+    /// and what it has run so far.
+    ///
+    /// Present only while a host is actually running in this process. The panel
+    /// answers the question an operator asks first — "is my own laptop part of
+    /// the fleet, and is it doing anything?" — which was previously only
+    /// answerable by reading the orchestrator log. It sits below the "This
+    /// device" column, which covers the same machine as a worker rather than as
+    /// a host.
+    pub(super) fn draw_host_panel(&self, f: &mut Frame, area: Rect) {
+        let Some(host) = &self.host_obs else {
+            return;
+        };
+        if area.height == 0 {
+            return;
+        }
+        let stats = host.stats();
+        let running = stats.tasks_running();
+        let providers = host
+            .providers()
+            .iter()
+            .map(|provider| provider.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let mut lines = vec![
+            TLine::from(vec![
+                Span::styled(
+                    if running > 0 {
+                        "● busy "
+                    } else {
+                        "● ready "
+                    },
+                    Style::default().fg(if running > 0 {
+                        Color::Yellow
+                    } else {
+                        Color::Green
+                    }),
+                ),
+                Span::styled(
+                    host.address().to_string(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {providers}"),
+                    Style::default().fg(self.theme.primary),
+                ),
+            ]),
+            // Clipped to the panel: a deep workspace path is common and wrapping
+            // it would push the counters out of a fixed-height strip.
+            TLine::from(Span::styled(
+                clip(host.workspace(), area.width.saturating_sub(4) as usize),
+                Style::default().add_modifier(Modifier::DIM),
+            )),
+            TLine::from(format!(
+                "running {running} · done {} · failed {} · probes {}",
+                stats.tasks_completed, stats.tasks_failed, stats.probes_answered
+            )),
+        ];
+        if let Some(status) = &stats.last_status {
+            lines.push(TLine::from(Span::styled(
+                clip(
+                    &format!("▸ {status}"),
+                    area.width.saturating_sub(4) as usize,
+                ),
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
+        f.render_widget(
+            Paragraph::new(Text::from(lines)).block(self.panel("Local host")),
+            area,
+        );
+    }
+
     /// The Overview tab's left panel: what this machine is running right now —
-    /// the live session, the worker harness driving it, and the run-wide toggles
-    /// that change how work leaves this device.
+    /// the live session, the worker harness driving it, and whether the run is
+    /// being traced.
     pub(super) fn draw_this_device(&self, f: &mut Frame, area: Rect) {
         let worker = self.loaded.config.opencode.clone().unwrap_or_default();
         let lines = vec![
@@ -144,24 +235,17 @@ impl App {
                 "agent {} · concurrency {}",
                 worker.agent, worker.max_concurrency
             )),
-            // async and tracing share a row: both are one-bit run modes, and
-            // splitting them cost two of the five lines this panel has.
-            TLine::from(vec![
-                if self.snapshot.async_mode {
-                    Span::styled("async ● on", Style::default().fg(Color::Magenta))
-                } else {
-                    Span::styled("async ○ off", Style::default().add_modifier(Modifier::DIM))
-                },
-                Span::styled(" · ", Style::default().add_modifier(Modifier::DIM)),
-                if self.snapshot.tracing {
-                    Span::styled("langfuse ● tracing", Style::default().fg(Color::Green))
-                } else {
-                    Span::styled(
-                        "langfuse ○ off",
-                        Style::default().add_modifier(Modifier::DIM),
-                    )
-                },
-            ]),
+            if self.snapshot.tracing {
+                TLine::from(Span::styled(
+                    "langfuse ● tracing",
+                    Style::default().fg(Color::Green),
+                ))
+            } else {
+                TLine::from(Span::styled(
+                    "langfuse ○ off",
+                    Style::default().add_modifier(Modifier::DIM),
+                ))
+            },
         ];
         f.render_widget(
             Paragraph::new(Text::from(lines)).block(self.panel("This device")),

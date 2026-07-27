@@ -6,18 +6,23 @@
 
 use crate::runtime::AgentDescriptor;
 
-/// A cognitive tier / worker classification for a lane. Drives the lane colour
-/// and whether the lane is a delegatable agent or a graph-invoked function.
+/// What a lane represents. Drives the lane colour and whether the lane is a
+/// delegatable agent or a graph-invoked function.
+///
+/// [`Reasoning`](AgentRole::Reasoning) and [`Compress`](AgentRole::Compress) are
+/// no longer produced by the fold — the manager tier and the compress function
+/// are hidden from this view — and are kept so a runtime that starts streaming
+/// them again has a role to land on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentRole {
-    /// The orchestrator tier.
+    /// The orchestrator tier: the only tier the operator sees.
     Orchestrator,
-    /// The reasoning tier.
+    /// The reasoning (manager) tier. Not currently rendered.
     Reasoning,
-    /// The compress/summarizer function tier.
+    /// The compress/summarizer function tier. Not currently rendered.
     Compress,
-    /// A delegated worker / roster agent / session lane.
-    Worker,
+    /// A roster agent, an anonymous delegated task, or a peer session.
+    Agent,
 }
 
 impl AgentRole {
@@ -26,7 +31,7 @@ impl AgentRole {
         match self {
             AgentRole::Orchestrator | AgentRole::Reasoning => "yellow",
             AgentRole::Compress => "blue",
-            AgentRole::Worker => "magenta",
+            AgentRole::Agent => "magenta",
         }
     }
     /// A real (delegatable) agent, or a graph-invoked function (`compress`).
@@ -114,9 +119,20 @@ pub struct TaskState {
     /// The `questionId` of a pending `task_attention` — the handle `question.answer`
     /// needs. `None` when the task has no open question.
     pub question_id: Option<String>,
+    /// What the worker running this task says it is working on: its todo list,
+    /// plan, sub-agents, and file edits, as of the last frame it sent.
+    ///
+    /// `None` when the worker reported nothing structured — an older peer, or a
+    /// harness with no such surface — which renders as no work panel at all
+    /// rather than an empty one.
+    ///
+    /// Boxed because a [`TaskState`] is carried by value inside every
+    /// [`AgentRow`] the list model builds each frame, and a snapshot is far
+    /// larger than the rest of the row put together.
+    pub work: Option<Box<crate::harness_work::WorkSnapshot>>,
 }
 
-/// One lane in the Agents view: a cognitive tier, a roster/worker agent, an
+/// One lane in the Agents view: the orchestrator tier, a roster agent, an
 /// anonymous task, or a peer session.
 #[derive(Debug, Clone)]
 pub struct AgentLane {
@@ -134,6 +150,9 @@ pub struct AgentLane {
     pub tasks: Vec<TaskState>,
     /// Last-known context token count, if reported.
     pub context_tokens: Option<i64>,
+    /// Token usage accumulated for this lane: the current prompt, the output
+    /// summed over its life, and the cache share when the provider reports one.
+    pub usage: crate::ui::meters::LaneUsage,
     /// A harness label tag, if learned.
     pub harness_label: Option<String>,
     /// The backing agent id, if any.
@@ -146,6 +165,9 @@ pub struct AgentLane {
     pub descriptor: Option<AgentDescriptor>,
     /// Count of currently-active tasks.
     pub active_tasks: i64,
+    /// The most recent work snapshot across this lane's tasks, so a lane header
+    /// can show what the machine is doing without opening a task.
+    pub work: Option<Box<crate::harness_work::WorkSnapshot>>,
 }
 
 /// A single pre-styled display row.

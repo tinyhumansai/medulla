@@ -15,8 +15,7 @@ use crate::client::{
     FeedbackType, MedullaClient, Role,
 };
 use crate::runtime::{
-    AgentDescriptor, AgentPresence, ContextItem, PeerSession, Runtime, RuntimeSnapshot,
-    TinyplaceIdentity,
+    AgentPresence, ContextItem, PeerSession, Runtime, RuntimeSnapshot, TinyplaceIdentity,
 };
 use crate::ui::chat_store::{now_millis, ChatMessage, MainChatSummary};
 use crate::ui::events::{EventEnvelope, TuiEvent};
@@ -89,7 +88,8 @@ impl BackendRuntime {
             active_id: "t1".into(),
             seq: 0,
             next_thread: 2,
-            async_mode: false,
+            roster: Vec::new(),
+            capacity: Default::default(),
         }));
         let rt = BackendRuntime {
             client,
@@ -120,6 +120,27 @@ impl Runtime for BackendRuntime {
             Some(h) => h.activity().snapshot(),
             None => Vec::new(),
         }
+    }
+
+    /// Pull the connected-worker roster and project it onto the capacity chain.
+    ///
+    /// A failed read leaves the previous fleet in place rather than blanking it:
+    /// a transient 5xx should not make the operator's fleet appear to vanish.
+    fn refresh_fleet(&self) -> BoxFuture<'static, anyhow::Result<()>> {
+        let client = self.client.clone();
+        let state = self.state.clone();
+        let tx = self.tx.clone();
+        Box::pin(async move {
+            let workers = client.roster().await?;
+            let (roster, capacity) = super::fleet::project_roster(&workers);
+            {
+                let mut s = state.lock().unwrap();
+                s.roster = roster;
+                s.capacity = capacity;
+            }
+            let _ = tx.send(());
+            Ok(())
+        })
     }
 
     fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
@@ -217,7 +238,8 @@ impl Runtime for BackendRuntime {
             messages: active.messages.clone(),
             last_result: active.last_result.clone(),
             tracing: false,
-            roster: Vec::<AgentDescriptor>::new(),
+            roster: s.roster.clone(),
+            capacity: s.capacity.clone(),
             presence: HashMap::<String, AgentPresence>::new(),
             sessions: HashMap::<String, Vec<PeerSession>>::new(),
             // The hub's own identity, so the operator can read off the address a
@@ -232,7 +254,6 @@ impl Runtime for BackendRuntime {
                     public_key: h.public_key().to_string(),
                     handle: None,
                 }),
-            async_mode: s.async_mode,
             threads,
             active_thread_id: s.active_id.clone(),
             harness: None,
@@ -295,65 +316,26 @@ impl Runtime for BackendRuntime {
         self.ping();
     }
 
+    /// Open a *new* thread on a fresh backend session and focus it.
+    ///
+    /// Additive rather than in-place: the point of several threads is running
+    /// more than one conversation at a time, and resetting the active one would
+    /// throw away the transcript the operator was keeping. Nothing is inherited
+    /// — a new thread starts empty, which is the whole difference from the fork
+    /// this replaced.
     fn new_session(&self) {
         let thread_id = {
             let mut s = self.state.lock().unwrap();
-            let t = s.active_mut();
-            t.reset();
-            t.session_id.clear();
-            t.id.clone()
-        };
-        let client = self.client.clone();
-        let state = self.state.clone();
-        let tx = self.tx.clone();
-        let profiles = self.workspace_profiles.clone();
-        tokio::spawn(async move {
-            if let Ok(created) = client.create_session_with(None, &profiles).await {
-                {
-                    let mut s = state.lock().unwrap();
-                    if let Some(t) = s.by_id(&thread_id) {
-                        t.session_id = created.session_id;
-                    }
-                }
-                start_stream_on(&client, &state, &tx, &thread_id, None);
-                let _ = tx.send(());
-            }
-        });
-        self.ping();
-    }
-
-    fn fork(&self, name: Option<String>) -> String {
-        let new_id = {
-            let mut s = self.state.lock().unwrap();
             let id = format!("t{}", s.next_thread);
             s.next_thread += 1;
-            let (parent_id, messages, chat_events) = {
-                let active = s.active();
-                (
-                    active.id.clone(),
-                    active.messages.clone(),
-                    active.chat_events.clone(),
-                )
-            };
-            let mut child = Thread::new(
-                &id,
-                &name.unwrap_or_else(|| format!("fork {id}")),
-                String::new(),
-            );
-            child.parent_id = Some(parent_id);
-            // Copy the parent transcript locally; the backend has no fork, so the
-            // fresh session below starts empty and diverges from here on.
-            child.messages = messages;
-            child.events = chat_events.clone();
-            child.chat_events = chat_events;
-            s.threads.push(child);
+            let name = format!("thread {}", s.threads.len() + 1);
+            s.threads.push(Thread::new(&id, &name, String::new()));
             s.active_id = id.clone();
             id
         };
         let client = self.client.clone();
         let state = self.state.clone();
         let tx = self.tx.clone();
-        let thread_id = new_id.clone();
         let profiles = self.workspace_profiles.clone();
         tokio::spawn(async move {
             if let Ok(created) = client.create_session_with(None, &profiles).await {
@@ -368,7 +350,6 @@ impl Runtime for BackendRuntime {
             }
         });
         self.ping();
-        new_id
     }
 
     fn set_active_thread(&self, id: String) {
@@ -450,15 +431,6 @@ impl Runtime for BackendRuntime {
             let _ = tx.send(());
             Ok(())
         })
-    }
-
-    fn set_async_mode(&self, on: bool) -> bool {
-        {
-            let mut s = self.state.lock().unwrap();
-            s.async_mode = on;
-        }
-        self.ping();
-        on
     }
 
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {

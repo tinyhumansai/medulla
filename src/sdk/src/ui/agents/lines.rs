@@ -77,7 +77,7 @@ fn blocks_to_lines(turns: &[TurnBlock], cols: usize) -> Vec<Line> {
 pub fn lane_lines(lane: Option<&AgentLane>, width: usize) -> Vec<Line> {
     let Some(lane) = lane else { return Vec::new() };
     let cols = width.max(20);
-    if lane.role == AgentRole::Worker && lane.key.starts_with("agent:") && !lane.tasks.is_empty() {
+    if lane.role == AgentRole::Agent && lane.key.starts_with("agent:") && !lane.tasks.is_empty() {
         let mut lines = Vec::new();
         for task in ordered_tasks(&lane.tasks) {
             lines.push(Line {

@@ -44,6 +44,12 @@ impl DaemonRuntime {
                 None => false,
             }
         };
+        // A workflow run is not in `running` — it holds no harness slot of its
+        // own, its nodes do. Cancelling it by run id (which is this frame's
+        // task id) is what stops the graph and, through the dropped future,
+        // whichever node is in flight.
+        #[cfg(feature = "workflows")]
+        let aborted = aborted || crate::workflows::run::cancel(&frame.task_id);
         let detail = if aborted {
             "task aborted"
         } else {

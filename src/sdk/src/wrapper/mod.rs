@@ -10,7 +10,7 @@
 //! inbound input is enabled it also polls the mailbox for owner→session control
 //! frames and types their text into the child.
 //!
-//! This is the single-terminal `--raw` mode of the TypeScript `tinyplace codex`
+//! This is the single-terminal `--raw` mode of the `tinyplace codex`
 //! command, ported to Rust. It reuses the existing medulla pieces rather than
 //! duplicating them: transcript discovery ([`crate::session_history`]), record →
 //! event mapping ([`crate::daemon::mappers`]), the derived status machine
@@ -20,7 +20,7 @@
 //!
 //! ## Scope cuts (deliberately not built here)
 //!
-//! These parts of the TypeScript wrapper are out of scope for this single-terminal
+//! These parts of the full wrapper are out of scope for this single-terminal
 //! slice and are intentionally omitted:
 //! - the tinyplace TUI chrome mode and the `--agent` plugin mode;
 //! - the **machine bus** multi-terminal coordination (wallet lock, session spool,

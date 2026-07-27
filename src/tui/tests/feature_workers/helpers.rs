@@ -59,9 +59,6 @@ impl Runtime for FleetRuntime {
     fn new_session(&self) {
         self.inner.new_session()
     }
-    fn fork(&self, name: Option<String>) -> String {
-        self.inner.fork(name)
-    }
     fn set_active_thread(&self, id: String) {
         self.inner.set_active_thread(id)
     }
@@ -70,9 +67,6 @@ impl Runtime for FleetRuntime {
     }
     fn resume_chat(&self, id: String) -> BoxFuture<'static, anyhow::Result<()>> {
         self.inner.resume_chat(id)
-    }
-    fn set_async_mode(&self, on: bool) -> bool {
-        self.inner.set_async_mode(on)
     }
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {
         self.inner.inspect_context()
@@ -100,6 +94,7 @@ pub fn worker(id: &str, selected: bool) -> WorkerInfo {
         handle: Some(format!("@{id}")),
         label: Some(format!("{id} label")),
         harness: Some("codex".into()),
+        workspace: None,
         peer_id: Some(format!("peer-{id}")),
         cpu_cores: Some(8),
         memory_total_bytes: Some(32 * 1024 * 1024 * 1024),
@@ -128,6 +123,12 @@ pub fn app_with_roster(workers: Vec<WorkerInfo>, stream: Option<StreamState>) ->
 /// A plain (no-modifier) key event.
 pub fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+/// An `Alt`-modified key: lane and rail navigation on the Agents tab, since the
+/// bare arrows belong to the composer.
+pub fn alt_key(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::ALT))
 }
 
 /// Jump the app to the named top-level tab.

@@ -10,8 +10,16 @@ repository.workspace = true
 name = "medulla"
 path = "src/lib.rs"
 
+[features]
+default = ["workflows"]
+# The workflow engine and everything built on it. Kept behind a feature so a
+# slim build can drop the engine and its jq expression stack; on by default
+# because the shipped TUI exposes workflows.
+workflows = ["dep:tinyflows"]
+
 [dependencies]
 tinyplace = { workspace = true }
+tinyflows = { workspace = true, optional = true }
 tinycortex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -24,6 +32,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }
 async-trait = { workspace = true }
+agent-client-protocol = { workspace = true }
 rust_socketio = { version = "0.6", features = ["async"] }
 dirs = { workspace = true }
 fs2 = { workspace = true }

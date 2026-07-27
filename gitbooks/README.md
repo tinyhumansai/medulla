@@ -32,7 +32,7 @@ layout:
 
 # Medulla - The First Orchestrator Model
 
-Medulla v1 brings three capabilities together for the first time:
+Medulla brings three capabilities together for the first time:
 
 1. **A 10-million-token effective context**, handled efficiently through [RLM (Recursive Language Model)](https://arxiv.org/abs/2512.24601) techniques, so accuracy holds at a scale where single-context models collapse.
 2. **Live streaming input from every running harness** — [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/sst/opencode), and their peers — so fleet awareness is continuous rather than post-hoc.
@@ -59,6 +59,6 @@ Building on Medulla? The [Developers](developers/) section covers installing the
 
 ## What Comes Next
 
-Models are updated at such a pace that it is easy to forget the harder problem was never any single model's intelligence. It is coordination: making a hundred capable harnesses behave like one coherent operation. Medulla v1 is our first step toward orchestration as a first-class capability, and the numbers in these pages are not projections. They are runs you can reproduce.
+Models are updated at such a pace that it is easy to forget the harder problem was never any single model's intelligence. It is coordination: making a hundred capable harnesses behave like one coherent operation. Medulla is our first step toward orchestration as a first-class capability, and the numbers in these pages are not projections. They are runs you can reproduce.
 
 Fleets with everyone.

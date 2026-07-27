@@ -87,4 +87,7 @@ pub(crate) struct SessionWiring {
         Option<tokio::sync::mpsc::UnboundedReceiver<medulla_tui::ui::welcome::WelcomeEvent>>,
     /// Where to record onboarding once a backgrounded share settles.
     pub onboarding_path: std::path::PathBuf,
+    /// A read-only view of the host running on this device, when one is. `None`
+    /// means this machine orchestrates but does not run the work itself.
+    pub host: Option<medulla::daemon::embedded::HostObservation>,
 }

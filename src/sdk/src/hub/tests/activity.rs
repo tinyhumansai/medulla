@@ -82,6 +82,7 @@ fn observed_records_the_frame_verbatim() {
             kind: "ack".to_string(),
             content: "picked it up".to_string(),
             at: 42,
+            work: None,
         }
     );
 }

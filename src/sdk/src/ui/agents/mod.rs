@@ -23,10 +23,10 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use activity::merge_worker_activity;
+pub use activity::merge_host_activity;
 pub use keys::parse_task_key;
 pub use lanes::derive_agent_lanes;
 pub use lines::{lane_lines, task_lines};
-pub use roster::{merge_worker_roster, worker_descriptor};
+pub use roster::{host_descriptor, merge_host_roster};
 pub use rows::{agent_row_model, ordered_tasks};
 pub use types::{AgentLane, AgentRole, AgentRow, Line, TaskState, TaskStatus, TurnBlock};

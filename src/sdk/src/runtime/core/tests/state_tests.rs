@@ -191,7 +191,6 @@ fn reset_for_replay_clears_fold_derived_state_but_keeps_identity() {
     let mut s = CoreState::new();
     s.session_id = "agent".into();
     s.serve_version = Some("3.12.0".into());
-    s.async_mode = true;
     // Fold a full cycle so counters, tasks, and the event log are all populated.
     fold_event(
         &mut s,
@@ -220,10 +219,9 @@ fn reset_for_replay_clears_fold_derived_state_but_keeps_identity() {
     assert!(s.last_result.is_none());
     assert!(!s.running);
     assert_eq!(s.seq, 0);
-    // Connection-spanning identity and local toggles survive.
+    // Connection-spanning identity survives.
     assert_eq!(s.session_id, "agent");
     assert_eq!(s.serve_version.as_deref(), Some("3.12.0"));
-    assert!(s.async_mode);
 }
 
 #[test]

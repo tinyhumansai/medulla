@@ -46,9 +46,10 @@ pub use control::{
     HARNESS_CONTROL_VERSION,
 };
 pub use frames::{
-    decode_task_frame, encode_task_frame, encode_task_frame_with_usage, parse_agent_capabilities,
-    AgentCapabilities, BudgetSource, BudgetWindow, EncodeFrameInput, HarnessBudget,
-    HarnessProvider, HarnessReadiness, TaskFrame, TaskFrameKind, TokenUsage, TINYPLACE_PROTO,
+    decode_task_frame, encode_task_frame, encode_task_frame_with_usage,
+    encode_task_frame_with_work, parse_agent_capabilities, AgentCapabilities, BudgetSource,
+    BudgetWindow, EncodeFrameInput, HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrame,
+    TaskFrameKind, TokenUsage, WorkflowAdvert, TINYPLACE_PROTO,
 };
 pub use runtime::{
     acquire_identity, acquire_identity_at, load_or_create_identity, spawn_contact_auto_accepter,

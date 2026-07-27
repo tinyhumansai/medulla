@@ -8,7 +8,7 @@
 use serde_json::{json, Map};
 
 use crate::runtime::{AgentDescriptor, WorkerInfo};
-use crate::ui::agents::{merge_worker_roster, worker_descriptor};
+use crate::ui::agents::{host_descriptor, merge_host_roster};
 
 /// A registry worker at `address`, identified by `id`.
 fn worker(id: &str, address: &str) -> WorkerInfo {
@@ -18,6 +18,7 @@ fn worker(id: &str, address: &str) -> WorkerInfo {
         handle: None,
         label: None,
         harness: Some("claude".into()),
+        workspace: None,
         peer_id: None,
         cpu_cores: None,
         memory_total_bytes: None,
@@ -45,7 +46,7 @@ fn descriptor(id: &str, address: Option<&str>) -> AgentDescriptor {
 
 #[test]
 fn a_registry_worker_absent_from_the_roster_is_appended() {
-    let merged = merge_worker_roster(&[], &[worker("w-1", "addr-1")]);
+    let merged = merge_host_roster(&[], &[worker("w-1", "addr-1")]);
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].id, "w-1");
     // The harness metadata is what tags the lane label downstream.
@@ -60,7 +61,7 @@ fn a_registry_worker_absent_from_the_roster_is_appended() {
 #[test]
 fn the_backend_roster_wins_and_is_never_duplicated() {
     let roster = vec![descriptor("w-1", None)];
-    let merged = merge_worker_roster(&roster, &[worker("w-1", "addr-1")]);
+    let merged = merge_host_roster(&roster, &[worker("w-1", "addr-1")]);
     assert_eq!(merged.len(), 1);
     // The advertised descriptor survives untouched.
     assert_eq!(merged[0], roster[0]);
@@ -72,13 +73,13 @@ fn one_peer_under_two_names_is_still_one_lane() {
     // the backend advertises it by address. Same destination, one lane.
     let roster = vec![descriptor("addr-1", None)];
     assert_eq!(
-        merge_worker_roster(&roster, &[worker("alpha", "addr-1")]).len(),
+        merge_host_roster(&roster, &[worker("alpha", "addr-1")]).len(),
         1
     );
     // And the mirror image: matched through the descriptor's address metadata.
     let roster = vec![descriptor("dev-1", Some("addr-1"))];
     assert_eq!(
-        merge_worker_roster(&roster, &[worker("addr-1", "addr-1")]).len(),
+        merge_host_roster(&roster, &[worker("addr-1", "addr-1")]).len(),
         1
     );
 }
@@ -88,21 +89,21 @@ fn two_addressless_entries_are_not_assumed_to_be_the_same_peer() {
     // Blank must never match blank, or the first unaddressed worker would
     // swallow every other one.
     let roster = vec![descriptor("dev-1", None)];
-    let merged = merge_worker_roster(&roster, &[worker("w-1", "")]);
+    let merged = merge_host_roster(&roster, &[worker("w-1", "")]);
     assert_eq!(merged.len(), 2);
 }
 
 #[test]
 fn the_name_prefers_the_operators_label_then_the_handle_then_the_address() {
     let mut w = worker("w-1", "addr-1");
-    assert_eq!(worker_descriptor(&w).name, "addr-1");
+    assert_eq!(host_descriptor(&w).name, "addr-1");
     w.handle = Some("@build-box".into());
-    assert_eq!(worker_descriptor(&w).name, "@build-box");
+    assert_eq!(host_descriptor(&w).name, "@build-box");
     w.label = Some("build box".into());
-    assert_eq!(worker_descriptor(&w).name, "build box");
+    assert_eq!(host_descriptor(&w).name, "build box");
     // A blank label is not a name; the next-best identifier stands.
     w.label = Some("   ".into());
-    assert_eq!(worker_descriptor(&w).name, "@build-box");
+    assert_eq!(host_descriptor(&w).name, "@build-box");
 }
 
 #[test]
@@ -110,7 +111,7 @@ fn a_harnessless_worker_carries_no_harness_metadata() {
     // An empty harness must not tag the lane with an empty `[]` prefix.
     let mut w = worker("w-1", "addr-1");
     w.harness = Some(String::new());
-    let d = worker_descriptor(&w);
+    let d = host_descriptor(&w);
     assert!(d.metadata.get("harness").is_none());
     assert_eq!(d.description, "");
 }

@@ -27,6 +27,21 @@ use crate::commands::{run_login_screen, save_credentials};
 use crate::event_loop::{run, SessionExit, SessionWiring};
 use crate::terminal::{restore, TermGuard};
 
+/// The operator's `[fleet]` section as the declarations the core handshake
+/// carries. Unix-only because `CoreDeclarations` ships with the socket runtime.
+#[cfg(unix)]
+fn core_declarations(
+    fleet: &medulla::config::FleetConfig,
+) -> medulla::runtime::core::CoreDeclarations {
+    medulla::runtime::core::CoreDeclarations {
+        hosts: fleet.hosts.clone(),
+        harnesses: fleet.harnesses.clone(),
+        workspaces: fleet.workspaces.clone(),
+        agents: fleet.agents.clone(),
+        agent_templates: fleet.agent_templates.clone(),
+    }
+}
+
 /// Parse TUI args, select a runtime, set up the terminal, optionally run the
 /// login screen, start background services, and drive the event loop to exit.
 pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
@@ -130,9 +145,14 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 "attaching to medulla-serve at {}",
                 socket.display()
             ));
-            runtime = Some(Arc::new(medulla::runtime::core::CoreRuntime::attach(
-                socket,
-            )));
+            // Declare the operator's configured fleet at handshake time: serve
+            // has no other way to learn what this client can run work on.
+            runtime = Some(Arc::new(
+                medulla::runtime::core::CoreRuntime::attach_with_declarations(
+                    socket,
+                    core_declarations(&loaded.config.fleet),
+                ),
+            ));
         }
     }
     if runtime.is_none() {
@@ -314,8 +334,68 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // carries the current account's JWT and its roster handle is that account's.
     // On a relogin (below) it is torn down and re-started for the new account so
     // no worker mutation or task relay ever targets a revoked/stale session.
+    // This device also *runs* the work, unless `[host].enabled = false` /
+    // `MEDULLA_HOST=0`. The host binds an address on a bus the hub dispatches
+    // over, so a task for this machine is delivered in-process — no relay, no
+    // second identity, no contact edge between two programs on one laptop.
+    //
+    // Started before the hub because the hub advertises it: the roster it
+    // registers with the backend has to name this host from the first moment, or
+    // the orchestrator's opening move has nowhere to send work.
+    let local_network = medulla::bridge::LocalBridgeNetwork::new();
+    // A bad `[host]` section is reported exactly like a failed start: this
+    // machine does not host, and the operator is told why. `and_then` keeps the
+    // two failure kinds — unparseable config, unstartable host — on one path.
+    let local_host = match crate::local_host::options_from_config(
+        &loaded.config.host,
+        &env,
+        loaded.config.router.clone(),
+        loaded.config.budget.clone(),
+        Some(hub_logs.sink()),
+    )
+    .and_then(|options| {
+        crate::local_host::start(&loaded.config.host, &env, &local_network, options)
+    }) {
+        Ok(host) => host,
+        Err(e) => {
+            // Not fatal: the orchestrator still drives remote workers. But it is
+            // the difference between "nothing happens" and "nothing happens
+            // *here*", so it goes on the status line rather than only the log.
+            hub_logs.push(format!("host: not hosting on this device ({e})"));
+            startup_status.get_or_insert(format!("not hosting on this device ({e})"));
+            None
+        }
+    };
+    if let Some(host) = &local_host {
+        hub_logs.push(format!(
+            "host: serving [{}] as {} in {}",
+            host.providers()
+                .iter()
+                .map(|provider| provider.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            host.address(),
+            host.workspace()
+        ));
+    }
+    let local_dispatch = crate::hub_relay::LocalDispatch {
+        network: local_network,
+        hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
+        // Always known, even with hosting off — it is what identifies a
+        // remembered local roster entry that must not be inherited.
+        host_address: crate::local_host::host_address(&loaded.config.host),
+        host: local_host.as_ref().map(|host| host.spec().clone()),
+    };
+
     let mut _hub_session = if backend_client.is_some() {
-        crate::hub_relay::start(&env, &home, hub_slot.clone(), hub_logs.clone()).await
+        crate::hub_relay::start(
+            &env,
+            &home,
+            hub_slot.clone(),
+            hub_logs.clone(),
+            Some(local_dispatch.clone()),
+        )
+        .await
     } else {
         None
     };
@@ -341,6 +421,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // relogin happens it has long finished.
                 sharing: sharing.take(),
                 onboarding_path: active_config_path.clone(),
+                // Cloned per session rather than moved: a relogin starts a new
+                // session, and the machine did not stop hosting because the
+                // account changed.
+                host: local_host.as_ref().map(|host| host.observation()),
             },
         )
         .await;
@@ -382,11 +466,15 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         status = save_credentials(&home, &base_url, &jwt);
                         // Creds are now persisted, so the hub can read the new
                         // account's JWT: start it fresh, scoped to this session.
+                        // Same bus and same host as the first session: only the
+                        // account changed, and the machine the operator is
+                        // sitting at did not stop being able to run work.
                         _hub_session = crate::hub_relay::start(
                             &env,
                             &home,
                             hub_slot.clone(),
                             hub_logs.clone(),
+                            Some(local_dispatch.clone()),
                         )
                         .await;
                     }

@@ -151,7 +151,7 @@ fn slash_memory_with_query_triggers_search() {
     }]);
     let mut app = App::new(rt.clone(), loaded());
     // Compose the slash command on the Chat tab and submit it.
-    app.tab_index = TABS.iter().position(|t| *t == "Chat").unwrap();
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
     type_str(&mut app, "/memory commit style");
     let cmd = app.on_event(key(KeyCode::Enter));
     assert_eq!(app.tab(), "Memory", "search jumps to the Memory tab");
@@ -234,7 +234,7 @@ fn slash_memory_bare_requests_load() {
     let rt = Arc::new(MockRuntime::empty());
     rt.set_memory_status(scripted_status());
     let mut app = App::new(rt, loaded());
-    app.tab_index = TABS.iter().position(|t| *t == "Chat").unwrap();
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
     type_str(&mut app, "/memory");
     let cmd = app.on_event(key(KeyCode::Enter));
     assert_eq!(app.tab(), "Memory");

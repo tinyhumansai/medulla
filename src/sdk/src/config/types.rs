@@ -12,8 +12,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
-use crate::runtime::RoutingStrategy;
-use crate::tinyplace::BudgetWindow;
+use crate::runtime::fleet::{
+    AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor, WorkspaceDescriptor,
+};
+use crate::runtime::{AgentDescriptor, RoutingStrategy, SubscriptionRoutingStrategy};
+use crate::tinyplace::{BudgetWindow, HarnessProvider};
 
 // --- serde default helpers -------------------------------------------------
 
@@ -191,13 +194,148 @@ pub struct OpencodeConfig {
     pub max_concurrency: u32,
 }
 
+/// The `host` section: whether this machine also *runs* the work the
+/// orchestrator hands out, and how.
+///
+/// A plain `medulla` is both orchestrator and host by default — the common case
+/// is one person on one laptop, and needing a second `medulla daemon` process
+/// beside the TUI to get any work done was a step nobody should have to know
+/// about. Every field has a working default; the whole section is optional.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HostSection {
+    /// Whether to host tasks on this device. `MEDULLA_HOST=0` overrides it off
+    /// for a single run without editing the file.
+    pub enabled: bool,
+    /// The address the host binds on the device-local bus. Orchestrator-facing
+    /// only — it never leaves this machine — so it is a readable name rather
+    /// than a key.
+    pub address: String,
+    /// Working directory tasks run in. Empty means the directory `medulla` was
+    /// launched from, which is the one the operator is looking at.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub workspace: String,
+    /// Other directories this device is willing to work in.
+    ///
+    /// Advertised to the orchestrator as `capabilities.accessibleDirs`, so it
+    /// knows this machine has more than one project on it rather than inferring
+    /// the whole device from the folder `medulla` happened to be launched in.
+    /// Advisory routing context: a delegated task still runs in
+    /// [`workspace`](Self::workspace).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<String>,
+    /// Coding-agent CLIs to serve. Empty detects whatever is installed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<String>,
+    /// The CLI used when a task names none. Empty takes the first detected.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub default_provider: String,
+    /// Maximum tasks run at once on this machine.
+    pub concurrency: u32,
+    /// Per-task execution timeout, in ms.
+    pub task_timeout_ms: u64,
+    /// Default model hint passed to the harness. Empty leaves the CLI's own.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    /// Whether the harness runs with its permission prompts bypassed. On by
+    /// default because a hosted task is unattended: nobody is in the pane to
+    /// answer a prompt, so a task that hits one has hung until it times out.
+    pub skip_permissions: bool,
+}
+
+impl Default for HostSection {
+    fn default() -> Self {
+        HostSection {
+            enabled: true,
+            address: d_host_address(),
+            workspace: String::new(),
+            workspaces: Vec::new(),
+            providers: Vec::new(),
+            default_provider: String::new(),
+            concurrency: 2,
+            task_timeout_ms: 600_000,
+            model: String::new(),
+            skip_permissions: true,
+        }
+    }
+}
+
+fn d_host_address() -> String {
+    "this-device".into()
+}
+
 /// Workspace roots a daemon worker may expose to operator-managed sessions.
+///
+/// Named for the `workflow` key it parses, which predates the workflow engine
+/// and has nothing to do with it — authored workflows are configured by
+/// [`WorkflowsConfig`] under the plural `workflows` key.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct WorkflowConfig {
     /// Explicit local workspace roots available through the daemon TUI.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspaces: Vec<String>,
+}
+
+/// The `workflows` section: what authored workflows may do when they run.
+///
+/// Every capability defaults to off. A workflow arrives as a file — possibly
+/// written by an agent, possibly copied from somewhere — and the difference
+/// between a plan and an exploit is whether it can reach the network, run code,
+/// or call a third-party tool. Turning each on is an operator's decision.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WorkflowsConfig {
+    /// Whether workflows may be listed and run at all.
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    /// The worker `agent` nodes dispatch to when they name no `agentRef`.
+    /// Empty means a node must name one, and a run fails saying so.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_worker: String,
+    /// The harness hint sent with each dispatch. Absent uses the worker's own
+    /// default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<HarnessProvider>,
+    /// The model hint sent with each dispatch.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_model: String,
+    /// Whether `code` nodes may execute. This host has no sandbox, so enabling
+    /// it grants a workflow author the daemon's own privileges.
+    #[serde(default)]
+    pub allow_code: bool,
+    /// Tool slugs a `tool_call` node may invoke, beyond the built-in
+    /// `medulla:` operations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_allowlist: Vec<String>,
+    /// Hosts an `http_request` node may reach. A bare domain also permits its
+    /// subdomains.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http_allowlist: Vec<String>,
+    /// How long one run may take before the host abandons it.
+    #[serde(default = "d_run_timeout_secs")]
+    pub run_timeout_secs: u64,
+}
+
+/// A run may take ten minutes: long enough for real work on a coding harness,
+/// short enough that a wedged run does not pin its record forever.
+fn d_run_timeout_secs() -> u64 {
+    600
+}
+
+impl Default for WorkflowsConfig {
+    fn default() -> Self {
+        WorkflowsConfig {
+            enabled: true,
+            default_worker: String::new(),
+            default_provider: None,
+            default_model: String::new(),
+            allow_code: false,
+            tool_allowlist: Vec::new(),
+            http_allowlist: Vec::new(),
+            run_timeout_secs: d_run_timeout_secs(),
+        }
+    }
 }
 
 impl Default for OpencodeConfig {
@@ -317,8 +455,8 @@ impl Default for BackendConfig {
 /// Anthropic-passthrough URL, codex/opencode an OpenAI-compatible one), so the
 /// endpoint can be steered per provider while the API key stays shared.
 ///
-/// Mirrors medulla-v1's `RouterProviderConfig` and the backend's stored shape so
-/// one config document round-trips across all three modules.
+/// Matches the public router configuration contract so one config document
+/// round-trips across clients and the backend.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RouterProviderConfig {
@@ -332,8 +470,8 @@ pub struct RouterProviderConfig {
 /// metered, and re-routable without hand-editing each harness's on-disk config.
 ///
 /// camelCase on the wire (`baseUrl`, `apiKeyEnv`, `models`,
-/// `providers.<p>.baseUrl`), matching the published contract that medulla-v1
-/// resolves and the backend serves at `GET/PUT /medulla/v1/router`. Absent
+/// `providers.<p>.baseUrl`), matching the contract served at
+/// `GET/PUT /medulla/v1/router`. Absent
 /// entirely means the feature is off — zero behaviour change.
 ///
 /// The API key is referenced by env-var **name** (`apiKeyEnv`), never inlined:
@@ -472,6 +610,83 @@ pub struct OnboardingConfig {
     pub welcome_completed: bool,
 }
 
+/// Operator-declared capacity: the `Host → Harness → Workspace → Agent`
+/// containment chain plus the agent templates that may be provisioned into it.
+///
+/// Declared, never probed — this is what the client *offers* the orchestrator
+/// when it attaches to `medulla-serve`, and what the TUI's Fleet page renders
+/// when no backend supplies a fleet of its own. The default declares only the
+/// built-in coding template catalog; it provisions no agents and advertises no
+/// host capacity. An explicit empty template list opts out of that catalog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FleetConfig {
+    /// Machines this client declares.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<HostDescriptor>,
+    /// Agent CLI runtimes installed on those machines.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub harnesses: Vec<HarnessDescriptor>,
+    /// Folders those runtimes expose.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<WorkspaceDescriptor>,
+    /// Durable agent identities deployed into them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<AgentDescriptor>,
+    /// Kinds of agent that may be provisioned onto this chain.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agent_templates: Vec<AgentTemplate>,
+}
+
+impl Default for FleetConfig {
+    fn default() -> Self {
+        Self {
+            hosts: Vec::new(),
+            harnesses: Vec::new(),
+            workspaces: Vec::new(),
+            agents: Vec::new(),
+            agent_templates: crate::agents::default_templates(),
+        }
+    }
+}
+
+impl FleetConfig {
+    /// Whether the operator declared nothing at all.
+    pub fn is_empty(&self) -> bool {
+        self.hosts.is_empty()
+            && self.harnesses.is_empty()
+            && self.workspaces.is_empty()
+            && self.agents.is_empty()
+            && self.agent_templates.is_empty()
+    }
+
+    /// Whether a catalog is all this config declares — no hosts, harnesses,
+    /// workspaces, or agents.
+    ///
+    /// A template catalog says what *may* be provisioned, never where. So a
+    /// config carrying only one has declared no fleet, and the opt-in demo
+    /// fleet may still stand in: this is what lets the built-in catalog (or an
+    /// installed `.medulla/agents` store) coexist with `MEDULLA_DEMO_FLEET`
+    /// instead of suppressing it.
+    pub fn declares_only_templates(&self) -> bool {
+        self.hosts.is_empty()
+            && self.harnesses.is_empty()
+            && self.workspaces.is_empty()
+            && self.agents.is_empty()
+    }
+
+    /// The declared chain as the UI-facing roll-up (agents excluded — they reach
+    /// the UI through the snapshot roster).
+    pub fn capacity(&self) -> CapacitySnapshot {
+        CapacitySnapshot {
+            hosts: self.hosts.clone(),
+            harnesses: self.harnesses.clone(),
+            workspaces: self.workspaces.clone(),
+            templates: self.agent_templates.clone(),
+        }
+    }
+}
+
 /// The whole parsed config document (`medulla.tui.json` / `medulla.toml`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -497,8 +712,15 @@ pub struct TuiConfig {
     /// Workspace roots managed by the daemon worker TUI.
     #[serde(default)]
     pub workflow: WorkflowConfig,
+    /// What authored workflows may do when they run. Distinct from `workflow`
+    /// above, which despite the name is only a list of workspace roots.
+    #[serde(default)]
+    pub workflows: WorkflowsConfig,
     #[serde(default)]
     pub hub: HubSection,
+    /// Whether this device also hosts the tasks the orchestrator hands out.
+    #[serde(default)]
+    pub host: HostSection,
     /// Custom OpenAI-compatible router. Absent means routing is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub router: Option<RouterConfig>,
@@ -511,6 +733,13 @@ pub struct TuiConfig {
     /// when present. Absent means no local preference (defaults to `manual`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub routing_strategy: Option<RoutingStrategy>,
+    /// How the orchestrator chooses among ready provider subscriptions after
+    /// selecting a host. Absent preserves the requested or host-default provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_routing_strategy: Option<SubscriptionRoutingStrategy>,
+    /// Operator-declared hosts, harnesses, workspaces, agents, and templates.
+    #[serde(default, skip_serializing_if = "FleetConfig::is_empty")]
+    pub fleet: FleetConfig,
 }
 
 impl Default for TuiConfig {
@@ -527,10 +756,14 @@ impl Default for TuiConfig {
             theme: ThemeConfig::default(),
             onboarding: OnboardingConfig::default(),
             workflow: WorkflowConfig::default(),
+            workflows: WorkflowsConfig::default(),
             hub: HubSection::default(),
+            host: HostSection::default(),
             router: None,
             budget: None,
             routing_strategy: None,
+            subscription_routing_strategy: None,
+            fleet: FleetConfig::default(),
         }
     }
 }

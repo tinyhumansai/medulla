@@ -10,7 +10,7 @@
 //!
 //! The orchestrator hub has the truth in-process — it dispatched the task and
 //! every frame comes back through its inbox. This module projects that onto the
-//! lanes it belongs to, the same way [`merge_worker_roster`](super::roster) puts
+//! lanes it belongs to, the same way [`merge_host_roster`](super::roster) puts
 //! locally-registered workers on the tab in the first place.
 
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ use super::types::{AgentLane, AgentRole, TaskState, TaskStatus, TurnBlock};
 /// Only lanes that already exist are filled: a lane is a roster entry, and
 /// inventing one from a stray task would put a worker on screen that this hub
 /// does not actually have.
-pub fn merge_worker_activity(lanes: &mut [AgentLane], activity: &[WorkerActivity]) {
+pub fn merge_host_activity(lanes: &mut [AgentLane], activity: &[WorkerActivity]) {
     if activity.is_empty() {
         return;
     }
@@ -37,7 +37,7 @@ pub fn merge_worker_activity(lanes: &mut [AgentLane], activity: &[WorkerActivity
     }
 
     for lane in lanes.iter_mut() {
-        if lane.role != AgentRole::Worker {
+        if lane.role != AgentRole::Agent {
             continue;
         }
         let Some(agent_id) = lane.agent_id.clone() else {
@@ -56,6 +56,14 @@ pub fn merge_worker_activity(lanes: &mut [AgentLane], activity: &[WorkerActivity
             .map(|t| t.last_at)
             .max()
             .unwrap_or(lane.last_at);
+        // The lane shows the most recently reported work across its tasks, so a
+        // machine running one thing reads correctly and a machine running
+        // several shows the freshest rather than an arbitrary one.
+        lane.work = tasks
+            .iter()
+            .filter(|task| task.work.is_some())
+            .max_by_key(|task| task.last_at)
+            .and_then(|task| task.work.clone());
         lane.tasks = tasks;
     }
 }
@@ -76,9 +84,16 @@ fn fold_tasks(records: &[&WorkerActivity]) -> Vec<TaskState> {
                 turn_blocks: Vec::new(),
                 attention: None,
                 question_id: None,
+                work: None,
             }
         });
         state.last_at = record.at;
+        // Latest-wins: each frame carries the worker's whole current picture,
+        // so the newest one that reported anything is the truth. A frame that
+        // reported nothing must not erase what an earlier one said.
+        if record.work.is_some() {
+            state.work = record.work.clone();
+        }
         match record.kind.as_str() {
             // An ack only says the worker admitted it; it is not progress and
             // showing it as a turn would make an idle task look busy.

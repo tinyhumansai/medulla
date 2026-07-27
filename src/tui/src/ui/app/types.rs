@@ -18,25 +18,76 @@ use crate::ui::theme::Theme;
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackQuery, FeedbackType};
 use medulla::config::LoadedConfig;
 use medulla::memory::{MemoryHit, MemoryStatus};
-use medulla::runtime::RoutingStrategy;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
+use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 
 /// The ordered top-level tab names. The tab index selects into this array.
 ///
 /// Trace, Context, and Feedback used to live here. They are secondary surfaces —
 /// two of them diagnostic — so they now sit under Settings, keeping the tab bar
 /// to the views a session is actually driven from.
-pub const TABS: [&str; 7] = [
-    "Overview", "Chat", "Agents", "Tasks", "Routing", "Memory", "Settings",
+///
+/// Chat used to live here too, and is now the Agents tab: talking to the
+/// orchestrator *is* selecting its lane and typing. Splitting them meant reading
+/// what an operation was doing on one tab and steering it on another, with two
+/// scroll positions and no way to answer an agent's question from where the
+/// question was visible.
+pub const TABS: [&str; 6] = [
+    "Overview", "Agents", "Tasks", "Routing", "Memory", "Settings",
 ];
 
 /// The Routing tab's left-nav pages.
-pub const ROUTING_SUBPAGES: [&str; 4] = ["List Workers", "Add Worker", "Manage Keys", "Strategies"];
+///
+/// Ordered by the containment chain. `Hosts` is the machine level the operator
+/// registers and steers by hand; `Harnesses` is the runtime level, which is
+/// where credentials live — a subscription or an API key is a property of the
+/// CLI runtime that spends it, not of the machine it happens to sit on;
+/// `Workspaces` is the folder level, which is what the orchestrator actually
+/// reasons about — a machine is capacity, a directory is *work*; `Agent
+/// Templates` is the catalog of what may be provisioned onto any of it. `Add
+/// Host` and `Strategies` are the two actions that belong to no level.
+///
+/// There is no `Fleet` page: the whole declared tree lives in the Agents rail,
+/// beside the lanes running on it. These pages are the *management* surfaces —
+/// what you register, authenticate, and choose — not the picture.
+/// With the workflow engine compiled in.
+#[cfg(feature = "workflows")]
+pub const ROUTING_SUBPAGES: [&str; 7] = [
+    "Hosts",
+    "Harnesses",
+    "Workspaces",
+    "Agent Templates",
+    "Workflows",
+    "Add Host",
+    "Strategies",
+];
 
-pub(super) const RP_WORKERS: usize = 0;
-pub(super) const RP_ADD_WORKER: usize = 1;
-pub(super) const RP_KEYS: usize = 2;
-pub(super) const RP_STRATEGIES: usize = 3;
+/// Without it. A slim build must not offer a page that cannot draw anything.
+#[cfg(not(feature = "workflows"))]
+pub const ROUTING_SUBPAGES: [&str; 6] = [
+    "Hosts",
+    "Harnesses",
+    "Workspaces",
+    "Agent Templates",
+    "Add Host",
+    "Strategies",
+];
+
+pub(super) const RP_HOSTS: usize = 0;
+pub(super) const RP_HARNESSES: usize = 1;
+pub(super) const RP_WORKSPACES: usize = 2;
+pub(super) const RP_TEMPLATES: usize = 3;
+#[cfg(feature = "workflows")]
+pub(super) const RP_WORKFLOWS: usize = 4;
+// The two trailing pages shift down when Workflows is not compiled in.
+#[cfg(feature = "workflows")]
+pub(super) const RP_ADD_HOST: usize = 5;
+#[cfg(feature = "workflows")]
+pub(super) const RP_STRATEGIES: usize = 6;
+#[cfg(not(feature = "workflows"))]
+pub(super) const RP_ADD_HOST: usize = 4;
+#[cfg(not(feature = "workflows"))]
+pub(super) const RP_STRATEGIES: usize = 5;
 
 /// The Tasks tab's left-nav pages.
 pub const TASKS_SUBPAGES: [&str; 2] = ["All Tasks", "Sources"];
@@ -70,7 +121,7 @@ pub(super) const ROUTING_STRATEGIES: [RoutingStrategyOption; 4] = [
     RoutingStrategyOption {
         strategy: RoutingStrategy::Manual,
         label: "Manual",
-        description: "Keep the worker explicitly selected in List Workers.",
+        description: "Keep the host explicitly selected on the Hosts page.",
     },
     RoutingStrategyOption {
         strategy: RoutingStrategy::Balanced,
@@ -80,12 +131,42 @@ pub(super) const ROUTING_STRATEGIES: [RoutingStrategyOption; 4] = [
     RoutingStrategyOption {
         strategy: RoutingStrategy::CpuFirst,
         label: "CPU First",
-        description: "Choose the worker with the most logical CPU cores.",
+        description: "Choose the host with the most logical CPU cores.",
     },
     RoutingStrategyOption {
         strategy: RoutingStrategy::MemoryFirst,
         label: "Memory First",
-        description: "Choose the worker with the most currently available RAM.",
+        description: "Choose the host with the most currently available RAM.",
+    },
+];
+
+/// Display metadata for one subscription-level selection rule.
+#[derive(Clone, Copy)]
+pub(super) struct SubscriptionStrategyOption {
+    /// Runtime strategy sent when the option is applied.
+    pub(super) strategy: SubscriptionRoutingStrategy,
+    /// Short label rendered in the strategy chooser.
+    pub(super) label: &'static str,
+    /// Operator-facing explanation of the budget comparison.
+    pub(super) description: &'static str,
+}
+
+/// Subscription strategy options in the order shown by the chooser.
+pub(super) const SUBSCRIPTION_STRATEGIES: [SubscriptionStrategyOption; 3] = [
+    SubscriptionStrategyOption {
+        strategy: SubscriptionRoutingStrategy::Manual,
+        label: "Manual",
+        description: "Keep the requested provider or the host's configured default.",
+    },
+    SubscriptionStrategyOption {
+        strategy: SubscriptionRoutingStrategy::Balanced,
+        label: "Balanced",
+        description: "Choose the ready subscription with the most remaining percentage.",
+    },
+    SubscriptionStrategyOption {
+        strategy: SubscriptionRoutingStrategy::MostAvailableBudget,
+        label: "Most Available Budget",
+        description: "Choose the ready subscription with the most remaining tokens.",
     },
 ];
 
@@ -129,6 +210,27 @@ pub(super) const SP_HELP: usize = 7;
 /// list grows.
 pub(super) fn tab_pos(name: &str) -> usize {
     TABS.iter().position(|t| *t == name).unwrap_or(0)
+}
+
+/// Which half of the Agents tab the keyboard is driving.
+///
+/// The tab merges a list (the rail) with a text input (the composer), and a
+/// terminal has one keyboard for both. Typing has to work the instant the tab
+/// opens — that is the point of folding chat in here — so the composer holds
+/// focus by default and the bare arrows belong to the caret.
+///
+/// That left the rail reachable only by `Alt`+`↑`/`↓`, which most macOS
+/// terminals do not send at all unless the user has rebound the Option key.
+/// Focus is therefore explicit and movable, matching the menu/content model
+/// Settings and Routing already use: `Esc` steps out to the rail, `Enter` (or
+/// simply typing) steps back in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentsFocus {
+    /// The composer has the keyboard: arrows move the caret, Enter submits.
+    #[default]
+    Composer,
+    /// The rail has the keyboard: arrows walk the rows, Enter returns below.
+    Rail,
 }
 
 /// An async action the event loop must run on the app's behalf.
@@ -186,6 +288,18 @@ pub enum Cmd {
         /// The comment text.
         body: String,
     },
+    /// Re-read the declared fleet (roster + capacity) from the runtime.
+    RefreshFleet,
+    /// Run an installed workflow on this machine.
+    ///
+    /// Off-thread like every other filesystem/process command: a workflow run
+    /// dispatches real harness sessions and takes minutes, so doing it on the
+    /// render thread would freeze the app for the whole run.
+    #[cfg(feature = "workflows")]
+    RunWorkflow {
+        /// The workflow to run.
+        id: String,
+    },
     /// Submit new feedback to the board.
     SubmitFeedback {
         /// Feature request or bug report.
@@ -222,7 +336,7 @@ pub(super) enum MemoryEntry {
     Hit(MemoryHit),
 }
 
-/// The action a small inline prompt (Workers add/edit, Agents answer) submits.
+/// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
     /// Create a task from a title line.
     TaskCreate,
@@ -233,9 +347,11 @@ pub(super) enum PromptKind {
     /// Search local persona memory with a natural-language query.
     MemorySearch,
     /// Add a worker from an address/@handle line.
-    WorkerAdd,
+    HostAdd,
     /// Edit the label of the worker with the given id.
-    WorkerEditLabel(String),
+    HostEditLabel(String),
+    /// Declare another directory this device may work in.
+    WorkspaceAdd,
     /// Answer a pending sub-agent question.
     AnswerQuestion {
         /// The cycle the question belongs to.
@@ -346,15 +462,48 @@ pub struct App {
     pub(super) contexts: Vec<ContextItem>,
     pub(super) context_index: usize,
     pub(super) agent_index: usize,
+    /// Which half of the Agents tab the keyboard is driving.
+    pub(super) agents_focus: AgentsFocus,
     pub(super) agent_scroll: usize,
     pub(super) chat_scroll: usize,
-    pub(super) worker_index: usize,
+    /// Selected row in the command peek, while it is open.
+    pub(super) command_index: usize,
+    /// Selected row on the Routing Hosts page.
+    pub(super) host_index: usize,
+    /// Selected row on the Routing Workspaces page.
+    pub(super) workspace_index: usize,
+    /// Selected row on the Routing Agent Templates page.
+    pub(super) template_index: usize,
+    /// Scroll offset inside the open agent-template popup.
+    pub(super) template_scroll: usize,
+    /// Whether the agent-template popup is open over the catalog.
+    pub(super) template_modal: bool,
+    /// Selected row on the Routing Workflows page.
+    #[cfg(feature = "workflows")]
+    pub(super) workflow_index: usize,
+    /// The installed workflows, as last read from disk.
+    ///
+    /// Cached rather than re-read every frame: the store is files, and a render
+    /// pass should not do I/O. `r` re-reads it, as it does for templates.
+    #[cfg(feature = "workflows")]
+    pub(super) workflows: Vec<medulla::workflows::WorkflowSummary>,
+    /// The selected workflow's runs, read when the selection changes rather
+    /// than on every frame.
+    #[cfg(feature = "workflows")]
+    pub(super) workflow_runs: Vec<medulla::workflows::RunRecord>,
+    /// Why the run history could not be read, if it could not.
+    #[cfg(feature = "workflows")]
+    pub(super) workflow_runs_error: Option<String>,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.
     pub(super) routing_focused: bool,
     /// Selected row on the Routing strategy page.
     pub(super) routing_strategy_index: usize,
+    /// Selected subscription rule on the Routing strategy page.
+    pub(super) subscription_strategy_index: usize,
+    /// Whether the subscription group, rather than the host group, has focus.
+    pub(super) subscription_strategy_focused: bool,
     /// Credential presence captured on startup and refreshed when its pane opens.
     pub(super) credential_status: CredentialStatus,
     /// The active Tasks subpage (index into [`TASKS_SUBPAGES`]).
@@ -447,8 +596,9 @@ pub struct App {
     pub(super) hit_tabs: Vec<(u16, u16)>,
     pub(super) hit_tabs_row: u16,
     pub(super) hit_agents: Option<(Rect, usize)>,
-    pub(super) hit_context: Option<Rect>,
+    /// The threads strip's hit box and its first visible row, for click-to-switch.
     pub(super) hit_threads: Option<(Rect, usize)>,
+    pub(super) hit_context: Option<Rect>,
     pub(super) last_events_len: usize,
 
     // Test-only clipboard capture: when set, `copy_chat` records the copied text
@@ -461,4 +611,9 @@ pub struct App {
     // up without the runtime having to know about tiny.place.
     pub(super) tinyplace_obs:
         Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
+    // A read-only view of the task host running on this device, when one is.
+    // Read live at render rather than merged into the snapshot: its counters
+    // move on the host's own schedule, and the snapshot is the *runtime's*
+    // picture of the world — the host is a peer to it, not part of it.
+    pub(super) host_obs: Option<medulla::daemon::embedded::HostObservation>,
 }

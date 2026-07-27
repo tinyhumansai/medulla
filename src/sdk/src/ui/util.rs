@@ -25,6 +25,28 @@ pub fn clip(value: &str, width: usize) -> String {
     }
 }
 
+/// Like [`clip`], but drops characters from the *front*.
+///
+/// For filesystem paths, where the tail identifies the thing and the head is
+/// usually a home directory every candidate shares: clipping a path from the
+/// right leaves several rows reading `/Users/someone/work/…`, which distinguishes
+/// nothing.
+pub fn clip_left(value: &str, width: usize) -> String {
+    let single = collapse_ws(value);
+    let len = single.chars().count();
+    if len <= width {
+        return single;
+    }
+    // One char is spent on the leading ellipsis, so keep `width - 1` from the
+    // tail. A width of 0 or 1 leaves nothing meaningful; return just the marker
+    // rather than panicking on the arithmetic.
+    let keep = width.saturating_sub(1);
+    let skip = len.saturating_sub(keep);
+    let mut out = String::from("…");
+    out.extend(single.chars().skip(skip));
+    out
+}
+
 fn collapse_ws(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }

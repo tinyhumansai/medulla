@@ -139,3 +139,17 @@ pub struct DaemonRuntime {
     /// Shared state; see [`Inner`].
     pub(super) inner: Arc<Inner>,
 }
+
+/// Optional payloads a task frame can carry beyond its text.
+///
+/// Grouped into one value rather than threaded as parameters because the list
+/// grows with the protocol: token usage was the first, the child harness's work
+/// snapshot the second, and every addition would otherwise widen four call
+/// signatures.
+#[derive(Debug, Clone, Default)]
+pub(super) struct FrameAttachments {
+    /// Token counts the child harness reported, on reply frames.
+    pub(super) usage: Option<crate::tinyplace::TokenUsage>,
+    /// What the child harness is working on as of this frame.
+    pub(super) work: Option<crate::harness_work::WorkSnapshot>,
+}

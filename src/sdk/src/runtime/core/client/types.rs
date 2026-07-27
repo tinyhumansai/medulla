@@ -14,6 +14,9 @@ pub struct CoreRuntime {
     pub(in super::super) cmd_tx: mpsc::UnboundedSender<Command>,
     /// The attached socket path, for diagnostics.
     pub(in super::super) socket_path: PathBuf,
+    /// The capacity and template catalog this client declared at handshake
+    /// time, mirrored onto every snapshot so the fleet surfaces can render it.
+    pub(in super::super) declarations: Arc<CoreDeclarations>,
     /// The driver task handle, aborted on drop.
     pub(super) driver: Mutex<Option<JoinHandle<()>>>,
 }

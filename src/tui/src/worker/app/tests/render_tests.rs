@@ -33,6 +33,51 @@ fn the_header_shows_this_daemons_address() {
 }
 
 #[test]
+fn the_header_says_what_this_worker_runs_and_where() {
+    // The three questions an operator asks after "who am I": what can this run,
+    // in which directory, and through which relay. The workspace matters most —
+    // a peer's task edits files there.
+    let mut app = app_with(PtyManager::new(), None);
+
+    let out = render(&mut app, 130, 16);
+
+    assert!(out.contains("claude, codex"), "missing harnesses: {out}");
+    assert!(out.contains("/workspace"), "missing workspace: {out}");
+    assert!(out.contains("relay.test"), "missing relay: {out}");
+    // No peer is approved yet, so nothing can dispatch to this worker — said
+    // plainly rather than left to be inferred from an empty Master tab.
+    assert!(
+        out.contains("0 approved peers"),
+        "missing peer count: {out}"
+    );
+}
+
+#[test]
+fn a_worker_with_no_harness_says_so_in_the_header_too() {
+    // The Agents tab already says it, but a worker that accepts peers and then
+    // fails every task should say why from the chrome, on any tab.
+    let mut app = WorkerApp::new(WorkerWiring {
+        logs: crate::log::LogBuffer::new(),
+        sessions: PtyManager::new(),
+        contacts: None,
+        agent_id: None,
+        providers: Vec::new(),
+        startup_status: None,
+        primary_workspace: "/workspace".into(),
+        workspaces: vec![],
+        masters: Vec::new(),
+        config_path: "/tmp/config.toml".into(),
+        credential_dir: "/tmp/wallet".into(),
+        endpoint: None,
+        theme: crate::ui::theme::Theme::default(),
+    });
+
+    let out = render(&mut app, 130, 16);
+
+    assert!(out.contains("no agent CLI found"), "got: {out}");
+}
+
+#[test]
 fn an_empty_fleet_says_what_fills_it() {
     // The operator does not open sessions here — peer work does — so the empty
     // state must not offer a key that no longer exists.

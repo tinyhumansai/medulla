@@ -29,14 +29,15 @@ mod urls_tests;
 pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
 pub use load::{default_tinyplace_config, load_config};
 pub use persist::{
-    clear_setting, persist_hub_workers, persist_routing_strategy, persist_section, persist_setting,
+    clear_setting, persist_host_workspaces, persist_hub_workers, persist_routing_strategy,
+    persist_section, persist_setting, persist_subscription_routing_strategy,
     persist_tinyplace_peers, persist_welcome_completed, persist_workflow_workspaces,
 };
 pub use types::{
-    BackendConfig, BudgetConfig, CoreConfig, HubSection, HubWorkerConfig, LoadedConfig,
-    MedullaConfig, MemoryConfigSection, OnboardingConfig, OpencodeConfig, Peer,
+    BackendConfig, BudgetConfig, CoreConfig, FleetConfig, HostSection, HubSection, HubWorkerConfig,
+    LoadedConfig, MedullaConfig, MemoryConfigSection, OnboardingConfig, OpencodeConfig, Peer,
     ProviderBudgetConfig, RouterConfig, RouterProviderConfig, ThemeConfig, TinyplaceConfig,
-    TuiConfig, UpdateConfig, WorkflowConfig,
+    TuiConfig, UpdateConfig, WorkflowConfig, WorkflowsConfig,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, display_host, is_staging,

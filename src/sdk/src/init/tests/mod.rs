@@ -11,6 +11,8 @@ use tinycortex::memory::score::extract::{ChatPrompt, ChatProvider};
 use super::*;
 use crate::init::types::STUB_SUMMARY;
 
+mod layout;
+mod registry;
 mod types;
 use types::StubProvider;
 
@@ -103,7 +105,7 @@ fn build_user_prompt_includes_each_found_file() {
     let dir = scratch("prompt");
     fs::write(dir.join("AGENTS.md"), "agent rules here").unwrap();
     fs::write(dir.join("README.md"), "readme text here").unwrap();
-    let prompt = build_user_prompt(&read_sources(&dir));
+    let prompt = build_user_prompt(&read_sources(&dir), &[]);
     assert!(prompt.contains("AGENTS.md"));
     assert!(prompt.contains("agent rules here"));
     assert!(prompt.contains("readme text here"));
@@ -115,7 +117,7 @@ fn build_user_prompt_includes_each_found_file() {
 fn build_user_prompt_clips_a_huge_source_file() {
     let dir = scratch("clip");
     fs::write(dir.join("README.md"), "x".repeat(50_000)).unwrap();
-    let prompt = build_user_prompt(&read_sources(&dir));
+    let prompt = build_user_prompt(&read_sources(&dir), &[]);
     assert!(prompt.contains("(truncated)"));
     assert!(prompt.len() < 20_000, "prompt was {} chars", prompt.len());
     let _ = fs::remove_dir_all(&dir);
@@ -126,7 +128,7 @@ fn build_user_prompt_clips_a_huge_source_file() {
 #[test]
 fn render_produces_frontmatter_and_body() {
     let draft = parse_draft(GOOD_JSON).unwrap();
-    let rendered = render_medulla_md(&draft);
+    let rendered = render_medulla_md(&draft, &[]);
     assert!(rendered.starts_with("---\n"));
     assert!(rendered.contains("harnesses: [claude-code, opencode]"));
     assert!(rendered.contains("routing: |"));
@@ -142,7 +144,7 @@ fn render_never_emits_carriage_returns() {
     // parsed and shipped over the wire, so it must be LF on every platform —
     // this is what broke the Windows CI job.
     for draft in [parse_draft(GOOD_JSON).unwrap(), DraftedProfile::stub()] {
-        let rendered = render_medulla_md(&draft);
+        let rendered = render_medulla_md(&draft, &[]);
         assert!(!rendered.contains('\r'), "rendered document contained CR");
         assert!(rendered.starts_with("---\n"));
     }
@@ -150,7 +152,7 @@ fn render_never_emits_carriage_returns() {
 
 #[test]
 fn render_of_a_stub_is_still_a_valid_editable_document() {
-    let rendered = render_medulla_md(&DraftedProfile::stub());
+    let rendered = render_medulla_md(&DraftedProfile::stub(), &[]);
     assert!(rendered.starts_with("---\n"));
     assert!(rendered.contains("harnesses: []"));
     assert!(rendered.contains("routing: |"));
@@ -182,7 +184,7 @@ fn write_refuses_to_clobber_without_force() {
 fn read_medulla_md_round_trips_and_is_none_when_absent() {
     let dir = scratch("roundtrip");
     assert_eq!(read_medulla_md(&dir), None);
-    let rendered = render_medulla_md(&parse_draft(GOOD_JSON).unwrap());
+    let rendered = render_medulla_md(&parse_draft(GOOD_JSON).unwrap(), &[]);
     write_medulla_md(&dir, &rendered, false).unwrap();
     assert_eq!(read_medulla_md(&dir).as_deref(), Some(rendered.as_str()));
     let _ = fs::remove_dir_all(&dir);

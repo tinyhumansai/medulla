@@ -13,6 +13,8 @@ use medulla_tui::ui::app::Cmd;
 use super::AppMsg;
 
 mod tasks;
+#[cfg(feature = "workflows")]
+mod workflows;
 
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so
@@ -177,6 +179,19 @@ pub(super) fn run_cmd(
                     Err(e) => e.to_string(),
                 };
                 let _ = tx.send(AppMsg::Status(status));
+            });
+        }
+        #[cfg(feature = "workflows")]
+        Cmd::RunWorkflow { id } => workflows::spawn_run(id, msg_tx),
+        Cmd::RefreshFleet => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                // A failed refresh keeps the previous fleet on screen; the
+                // status line is where the failure belongs, not the tree.
+                if let Err(e) = rt.refresh_fleet().await {
+                    let _ = tx.send(AppMsg::Status(format!("fleet refresh failed: {e}")));
+                }
             });
         }
         Cmd::LoadUsage => {

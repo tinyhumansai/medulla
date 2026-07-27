@@ -1,7 +1,18 @@
-//! The event-stream fold: turn the flat event log into one lane per cognitive
-//! tier plus one lane per connected roster agent / anonymous task / peer session.
+//! The event-stream fold: turn the flat event log into the orchestrator lane
+//! plus one lane per connected roster agent / anonymous task / peer session.
 //! A port of the TS `deriveAgentLanes` essentials. Owns [`derive_agent_lanes`]
 //! and the private lane-collection machinery it drives.
+//!
+//! **The reasoning tier is not a lane.** Since the manager refactor the tier
+//! between the orchestrator and a harness task is 0..N concurrent *managers*,
+//! and the backend deliberately does not stream them: what reaches this client
+//! is the orchestrator and the agents it is managing. A manager is an
+//! implementation detail of how the orchestrator fanned work out, not a
+//! participant the operator talks to or steers, and rendering one lane labelled
+//! "reasoning" for N of them described the pre-4.0.0 topology anyway. Inference
+//! turns on the `reasoning` and `compress` tiers are therefore dropped here
+//! rather than folded into a lane nothing feeds. They remain visible verbatim
+//! under Settings › Trace, which is where a hidden layer belongs.
 
 use std::collections::HashMap;
 
@@ -40,21 +51,23 @@ impl Lanes {
 }
 
 /// Build a fresh worker-role lane with all optional fields cleared.
-fn new_worker_lane(key: String, label: String) -> AgentLane {
+fn new_agent_lane(key: String, label: String) -> AgentLane {
     AgentLane {
         key,
         label,
-        role: AgentRole::Worker,
+        role: AgentRole::Agent,
         turns: Vec::new(),
         last_at: 0,
         tasks: Vec::new(),
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: None,
         session_id: None,
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 0,
+        work: None,
     }
 }
 
@@ -72,6 +85,7 @@ fn touch_task(lane: &mut AgentLane, task_id: &str, at: i64, block: Option<TurnBl
                 turn_blocks: Vec::new(),
                 attention: None,
                 question_id: None,
+                work: None,
             });
             lane.tasks.len() - 1
         }
@@ -92,19 +106,21 @@ pub fn derive_agent_lanes(
     harness: &str,
     roster: &[AgentDescriptor],
 ) -> Vec<AgentLane> {
-    // Tier accumulators, in fixed order.
-    let mut tier_turns: [(AgentRole, &str, Vec<TurnBlock>); 3] = [
-        (AgentRole::Orchestrator, "orchestrator", Vec::new()),
-        (AgentRole::Reasoning, "reasoning", Vec::new()),
-        (AgentRole::Compress, "summarizer", Vec::new()),
-    ];
+    // Tier accumulators. Only the orchestrator gets one: the manager tier and
+    // the compress function are deliberately hidden from this view (see the
+    // module doc), so their inference turns are folded nowhere.
+    let mut tier_turns: [(AgentRole, &str, Vec<TurnBlock>); 1] =
+        [(AgentRole::Orchestrator, "orchestrator", Vec::new())];
     let mut tier_tokens: HashMap<usize, i64> = HashMap::new();
+    let mut tier_usage: HashMap<usize, crate::ui::meters::LaneUsage> = HashMap::new();
     let mut workers = Lanes::new();
     let mut task_agent: HashMap<String, String> = HashMap::new();
+    // Per-task work folds, applied onto the tasks once the lanes are built.
+    let mut task_work: HashMap<String, crate::harness_work::WorkFold> = HashMap::new();
 
     // Seed one lane per connected roster agent (roster order).
     for agent in roster {
-        let mut lane = new_worker_lane(format!("agent:{}", agent.id), {
+        let mut lane = new_agent_lane(format!("agent:{}", agent.id), {
             if agent.name.is_empty() {
                 agent.id.clone()
             } else {
@@ -124,11 +140,10 @@ pub fn derive_agent_lanes(
         workers.insert(lane);
     }
 
+    // `None` for every hidden tier, which drops that inference turn.
     let tier_index = |role: &str| -> Option<usize> {
         match role {
             "orchestrator" => Some(0),
-            "reasoning" => Some(1),
-            "compress" => Some(2),
             _ => None,
         }
     };
@@ -172,6 +187,7 @@ pub fn derive_agent_lanes(
                 tier_turns[ti].2.push(block);
                 if let Some(u) = usage {
                     tier_tokens.insert(ti, u.input_tokens);
+                    tier_usage.entry(ti).or_default().accumulate(u);
                 }
             }
             TuiEvent::TaskStart {
@@ -186,7 +202,7 @@ pub fn derive_agent_lanes(
                 }
                 let key = lane_key_for(task_id, &task_agent);
                 if !workers.contains(&key) {
-                    let mut lane = new_worker_lane(
+                    let mut lane = new_agent_lane(
                         key.clone(),
                         task_agent
                             .get(task_id)
@@ -235,6 +251,28 @@ pub fn derive_agent_lanes(
             } => {
                 let key = lane_key_for(task_id, &task_agent);
                 ensure_lane(&mut workers, &key, task_id, &task_agent, at);
+                // A structured work event carries its payload as the event's
+                // JSON content. Folding it here is what lets a backend that
+                // forwards a harness's todo list reach the same panel a
+                // locally-hosted worker fills — one surface, either route.
+                //
+                // It is folded *instead of* being appended to the transcript:
+                // rendered as a turn it is a wall of raw JSON, and the panel is
+                // where that same content is legible.
+                if crate::harness_work::kinds::is_work_kind(event_kind) {
+                    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(content) {
+                        task_work
+                            .entry(task_id.clone())
+                            .or_default()
+                            .apply(event_kind, &payload, at);
+                        let lane = workers.get_mut(&key).unwrap();
+                        lane.last_at = at;
+                        // The task must still exist for the fold to attach to,
+                        // and its clock must move — work is activity.
+                        touch_task(lane, task_id, at, None);
+                        continue;
+                    }
+                }
                 let lane = workers.get_mut(&key).unwrap();
                 let block = TurnBlock {
                     at,
@@ -307,6 +345,7 @@ pub fn derive_agent_lanes(
                 lane.active_tasks = (lane.active_tasks - 1).max(0);
                 if let Some(u) = &digest.usage {
                     lane.context_tokens = Some(u.input_tokens);
+                    lane.usage.accumulate(u);
                 }
                 let idx = touch_task(lane, &digest.task_id, at, Some(block));
                 lane.tasks[idx].status = status;
@@ -371,6 +410,7 @@ pub fn derive_agent_lanes(
             label: label.to_string(),
             role,
             context_tokens: tier_tokens.get(&ti).copied(),
+            usage: tier_usage.get(&ti).copied().unwrap_or_default(),
             turns,
             last_at,
             tasks: Vec::new(),
@@ -380,12 +420,27 @@ pub fn derive_agent_lanes(
             parent_agent_id: None,
             descriptor: None,
             active_tasks: 0,
+            work: None,
         });
     }
 
-    // Tag worker lanes with their harness.
+    // Tag worker lanes with their harness, and attach each task's folded work
+    // to the task it belongs to — plus the freshest of them to the lane, so a
+    // rail row can show progress without the operator opening anything.
     let mut worker_lanes = workers.into_ordered();
     for lane in &mut worker_lanes {
+        for task in lane.tasks.iter_mut() {
+            let snapshot = task_work.get(&task.task_id).map(|fold| fold.snapshot());
+            if let Some(snapshot) = snapshot.filter(|snapshot| !snapshot.is_empty()) {
+                task.work = Some(Box::new(snapshot.clone()));
+            }
+        }
+        lane.work = lane
+            .tasks
+            .iter()
+            .filter(|task| task.work.is_some())
+            .max_by_key(|task| task.last_at)
+            .and_then(|task| task.work.clone());
         let tag = lane
             .harness_label
             .clone()
@@ -459,7 +514,7 @@ fn ensure_lane(
     at: i64,
 ) {
     if !workers.contains(key) {
-        let mut lane = new_worker_lane(
+        let mut lane = new_agent_lane(
             key.to_string(),
             task_agent
                 .get(task_id)
@@ -477,7 +532,7 @@ fn ensure_lane(
 /// Ensure a session lane exists for `key`, tagging its parent machine.
 fn ensure_session_lane(workers: &mut Lanes, key: &str, agent_id: &str, session_id: &str, at: i64) {
     if !workers.contains(key) {
-        let mut lane = new_worker_lane(key.to_string(), format!("↳ {session_id}"));
+        let mut lane = new_agent_lane(key.to_string(), format!("↳ {session_id}"));
         lane.last_at = at;
         lane.session_id = Some(session_id.to_string());
         lane.parent_agent_id = Some(agent_id.to_string());

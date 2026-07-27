@@ -68,7 +68,7 @@ fn type_str(app: &mut App, s: &str) {
     }
 }
 
-/// Compose `s` on the Chat tab and press Enter, returning the resulting `Cmd`.
+/// Compose `s` on the Agents tab and press Enter, returning the resulting `Cmd`.
 fn submit_line(app: &mut App, s: &str) -> Option<Cmd> {
     app.tab_index = 1;
     type_str(app, s);
@@ -189,16 +189,6 @@ fn slash_help_and_config_switch_tabs() {
 }
 
 #[test]
-fn slash_async_toggles_flag() {
-    let (mut app, _rt) = empty_app();
-    assert!(!app.snapshot.async_mode);
-    let _ = submit_line(&mut app, "/async");
-    assert!(app.snapshot.async_mode);
-    let _ = submit_line(&mut app, "/async");
-    assert!(!app.snapshot.async_mode);
-}
-
-#[test]
 fn slash_copy_empty_chat_reports_nothing_to_copy() {
     let (mut app, _rt) = empty_app();
     let _ = submit_line(&mut app, "/copy");
@@ -243,11 +233,11 @@ fn tab_and_backtab_cycle_tabs() {
     let (mut app, _rt) = demo_app();
     assert_eq!(app.tab(), "Overview");
     let _ = app.on_event(key(KeyCode::Tab));
-    assert_eq!(app.tab(), "Chat");
-    let _ = app.on_event(key(KeyCode::Tab));
     assert_eq!(app.tab(), "Agents");
+    let _ = app.on_event(key(KeyCode::Tab));
+    assert_eq!(app.tab(), "Tasks");
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert_eq!(app.tab(), "Chat");
+    assert_eq!(app.tab(), "Agents");
     // Wrap backwards from Overview to the last tab (Settings).
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
@@ -259,15 +249,15 @@ fn clicking_tab_bar_selects_tab() {
     let (mut app, _rt) = demo_app();
     // Draw first so the tab hit-boxes are recorded, then click within "Agents".
     let _ = render(&mut app, 120, 40);
-    let _ = app.on_event(mouse(MouseEventKind::Down(MouseButton::Left), 20, 1));
+    let _ = app.on_event(mouse(MouseEventKind::Down(MouseButton::Left), 12, 1));
     assert_eq!(app.tab(), "Agents");
 }
 
 #[test]
 fn each_tab_renders_its_signature() {
     let signatures = [
-        ("Chat", "Threads"),
         ("Agents", "Agents ·"),
+        ("Agents", "orchestrator"),
         ("Routing", "Routing"),
         ("Settings", "Settings"),
     ];
@@ -409,30 +399,52 @@ fn resume_picker_esc_closes_without_resuming() {
     assert!(!app.resume_open());
 }
 
-// --- 7. thread / fork UX ----------------------------------------------------
+// --- 7. thread UX -----------------------------------------------------------
 
 #[test]
-fn ctrl_f_forks_thread_and_focuses_chat() {
-    let (mut app, rt) = demo_app();
+fn ctrl_n_opens_a_thread_and_ctrl_up_down_switches_between_them() {
+    let (mut app, _rt) = demo_app();
     assert_eq!(app.snapshot.threads.len(), 1);
-    let _ = app.on_event(ctrl(KeyCode::Char('f')));
-    assert_eq!(app.tab(), "Chat", "fork should focus the Chat tab");
-    assert_eq!(app.snapshot.threads.len(), 2, "fork should add a thread");
-    assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
+
+    // A new thread is opened beside the first, not in place of it, and takes
+    // focus. Nothing is inherited: the transcript starts empty.
+    let _ = app.on_event(ctrl(KeyCode::Char('n')));
+    assert_eq!(app.snapshot.threads.len(), 2);
+    let opened = app.snapshot.active_thread_id.clone();
+    assert_ne!(opened, "t1");
+    assert!(
+        app.snapshot.messages.is_empty(),
+        "a new thread starts empty"
+    );
+    assert_eq!(app.tab(), "Agents", "and lands on the conversation");
+
+    // Ctrl-Up walks back to the first thread, whose transcript is intact.
+    let _ = app.on_event(ctrl(KeyCode::Up));
+    assert_eq!(app.snapshot.active_thread_id, "t1");
+    assert!(
+        !app.snapshot.messages.is_empty(),
+        "the first thread survives"
+    );
+
+    // Ctrl-Down returns.
+    let _ = app.on_event(ctrl(KeyCode::Down));
+    assert_eq!(app.snapshot.active_thread_id, opened);
 }
 
 #[test]
-fn ctrl_up_down_switches_threads() {
+fn the_threads_strip_appears_once_there_is_a_choice_to_make() {
     let (mut app, _rt) = demo_app();
-    // Fork to create a second thread; the fork becomes active.
-    let _ = app.on_event(ctrl(KeyCode::Char('f')));
-    let active_after_fork = app.snapshot.active_thread_id.clone();
-    // Ctrl-Up moves to the previous (parent) thread.
-    let _ = app.on_event(ctrl(KeyCode::Up));
-    assert_eq!(app.snapshot.active_thread_id, "t1");
-    // Ctrl-Down returns to the forked thread.
-    let _ = app.on_event(ctrl(KeyCode::Down));
-    assert_eq!(app.snapshot.active_thread_id, active_after_fork);
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
+    let out = render(&mut app, 120, 40);
+    assert!(
+        !out.contains("Threads ·"),
+        "one thread needs no strip: {out}"
+    );
+
+    let _ = app.on_event(ctrl(KeyCode::Char('n')));
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("Threads · 2"), "{out}");
+    assert!(out.contains("thread 2"), "{out}");
 }
 
 // --- 8. abort / new-session keys -------------------------------------------
@@ -444,7 +456,7 @@ fn ctrl_x_aborts_and_ctrl_n_starts_new_session() {
     assert!(app.status().contains("Abort"), "status: {}", app.status());
 
     let _ = app.on_event(ctrl(KeyCode::Char('n')));
-    assert!(app.status().contains("fresh"), "status: {}", app.status());
+    assert!(app.status().contains("Opened"), "status: {}", app.status());
 
     let calls = rt.recorded_calls();
     assert!(calls.iter().any(|c| c == "abort"), "calls: {calls:?}");

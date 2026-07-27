@@ -13,7 +13,7 @@ use std::time::Duration;
 use ::tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
 use rust_socketio::asynchronous::Client;
 
-use crate::bridge::TinyplaceBridge;
+use crate::bridge::{RoutingBridge, TinyplaceBridge};
 use crate::daemon::transport::SignalTransport;
 use crate::tinyplace::{load_or_create_identity, resolve_endpoint};
 
@@ -21,6 +21,9 @@ use super::handle::HubHandle;
 use super::roster::{HubWorker, SharedRoster};
 use super::runner::TaskRunner;
 use super::socket::connect_harness;
+
+/// The address a hub binds on the device-local bus when the caller names none.
+pub const DEFAULT_LOCAL_HUB_ADDRESS: &str = "medulla-orchestrator";
 
 /// Build the transport + runner, connect the harness client, and return a
 /// [`HubSession`]. Errors only on fatal setup (bad identity, unreachable
@@ -39,7 +42,17 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         signer: Some(signer.clone() as Arc<dyn Signer>),
         ..Default::default()
     });
-    let transport = SignalTransport::new(client, &signer, &config.identity_dir);
+    let transport = SignalTransport::new(client.clone(), &signer, &config.identity_dir);
+
+    // Inbound pairing. A worker that names this hub as its master requests
+    // contact *here*, and until something reads that queue the relay keeps
+    // refusing DMs in both directions — see [`super::pairing`] for why this
+    // admits every request rather than an allowlist.
+    let pairing = super::pairing::spawn_pairing(
+        Arc::new(crate::contacts::ClientContacts::new(client)),
+        config.log.clone(),
+        config.poll,
+    );
 
     // Publish pre-keys so a worker can run X3DH against us (best-effort).
     if let Err(e) = transport.publish_keys(&signer).await {
@@ -62,7 +75,26 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
     // One transport, shared: the runner dispatches through it and the handle
     // opens contact edges through it. A second on the same wallet would be a
     // second writer to one Signal session store.
-    let relay: Arc<dyn super::relay::Relay> = Arc::new(TinyplaceBridge::new(transport));
+    let remote: Arc<dyn super::relay::Relay> = Arc::new(TinyplaceBridge::new(transport));
+    // With a local bus attached the relay becomes a router: workers hosted in
+    // this process are reached in memory and never touch the relay, while remote
+    // ones fall through unchanged. Binding is fatal rather than best-effort —
+    // a failure means something else already holds this address, and silently
+    // continuing remote-only would look exactly like a host that never answers.
+    let relay: Arc<dyn super::relay::Relay> = match &config.local_network {
+        Some(network) => {
+            let address = match config.local_address.trim() {
+                "" => DEFAULT_LOCAL_HUB_ADDRESS,
+                value => value,
+            };
+            let local = network.bind(address).map_err(|e| {
+                anyhow::anyhow!("hub: could not bind local address {address} ({e})")
+            })?;
+            (config.log)(&format!("hub: also hosting on the local bus as {address}"));
+            Arc::new(RoutingBridge::new(local, remote))
+        }
+        None => remote,
+    };
     // One activity log, shared by the pump that observes frames and the socket
     // that dispatches them — the Agents view reads what both write.
     let activity = super::ActivityLog::new();
@@ -84,9 +116,11 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
                 harness: w.harness.clone(),
                 label: (w.name != "tinyplace-worker").then(|| w.name.clone()),
                 selected: false,
+                workspace: w.workspace.clone(),
             })
             .collect(),
     ));
+    let subscription_strategy = Arc::new(Mutex::new(config.subscription_strategy));
 
     (config.log)(&format!(
         "hub: connecting to {} ({} worker(s))",
@@ -98,6 +132,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         &config.jwt,
         roster.clone(),
         runner.clone(),
+        subscription_strategy.clone(),
         config.log.clone(),
         Some(activity.clone()),
     )
@@ -114,11 +149,13 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         log: config.log.clone(),
         persist: config.persist.clone(),
         activity,
+        subscription_strategy,
     });
     Ok(HubSession {
         handle,
         _runner: runner,
         _client: socket,
+        _pairing: pairing,
     })
 }
 

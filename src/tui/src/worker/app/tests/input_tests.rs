@@ -123,7 +123,8 @@ fn tab_labels_can_be_clicked() {
     let mut app = app_with(PtyManager::new(), None);
     let _ = render(&mut app, 100, 30);
 
-    app.on_event(click(37, 1));
+    // Row 2: the header is two lines (identity, then what this worker serves).
+    app.on_event(click(37, 2));
 
     assert_eq!(app.tab(), "Requests");
 }
@@ -135,7 +136,8 @@ async fn list_rows_can_be_clicked() {
     app.set_tab(3);
     let _ = render(&mut app, 100, 30);
 
-    app.on_event(click(3, 4));
+    // Two header rows + tab bar + panel border puts the second row at y=5.
+    app.on_event(click(3, 5));
 
     assert_eq!(app.selected_request().unwrap().agent_id, "bob");
 }
@@ -149,7 +151,7 @@ fn narrow_master_rows_stay_aligned_with_their_hitboxes() {
 
     let lines = render_lines(&mut app, 40, 12);
 
-    assert!(lines[4].contains("bob"), "{}", lines[4]);
-    app.on_event(click(3, 4));
+    assert!(lines[5].contains("bob"), "{}", lines[5]);
+    app.on_event(click(3, 5));
     assert_eq!(app.selected_master_address().as_deref(), Some("bob"));
 }

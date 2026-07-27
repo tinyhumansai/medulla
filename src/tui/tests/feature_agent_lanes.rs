@@ -113,6 +113,7 @@ fn local_worker(address: &str, label: Option<&str>) -> WorkerInfo {
         handle: None,
         label: label.map(str::to_string),
         harness: Some("claude".into()),
+        workspace: None,
         peer_id: None,
         cpu_cores: None,
         memory_total_bytes: None,
@@ -167,10 +168,17 @@ fn a_registered_worker_prefers_its_label_and_is_not_listed_twice() {
     ]);
     let out = render(&mut app, 140, 40);
     assert!(out.contains("build box"), "the label names the lane: {out}");
+    // Twice, and only twice: once as the lane it can be delegated to, once as
+    // the host it is in the fleet below. Never twice within either half.
     assert_eq!(
         out.matches("build box").count(),
+        2,
+        "one peer, one lane, one host: {out}"
+    );
+    assert_eq!(
+        out.matches("claude · ready").count(),
         1,
-        "one peer, one lane: {out}"
+        "one peer, one harness: {out}"
     );
 }
 

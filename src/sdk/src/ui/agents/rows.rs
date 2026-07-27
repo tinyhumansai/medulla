@@ -30,9 +30,7 @@ pub fn agent_row_model(lanes: &[AgentLane], max_subtasks: usize) -> Vec<AgentRow
             rows.push(AgentRow::Separator);
         }
         rows.push(AgentRow::Lane { lane_index });
-        if lane.role == AgentRole::Worker
-            && lane.key.starts_with("agent:")
-            && !lane.tasks.is_empty()
+        if lane.role == AgentRole::Agent && lane.key.starts_with("agent:") && !lane.tasks.is_empty()
         {
             let ordered = ordered_tasks(&lane.tasks);
             let shown = ordered.len().min(max_subtasks);

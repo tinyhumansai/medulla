@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::*;
 /// One thing a worker did, as the hub observed it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WorkerActivity {
     /// The roster id of the worker this belongs to, when the task's dispatch
     /// was seen. Empty when a frame arrives for a task this hub never sent —
@@ -16,6 +16,12 @@ pub struct WorkerActivity {
     pub content: String,
     /// Epoch ms when the hub saw it.
     pub at: i64,
+    /// What the worker was working on as of this frame, when it reported one.
+    ///
+    /// A worker that predates the work surface, or one running a harness that
+    /// reports nothing structured, leaves this absent — which the UI renders as
+    /// no work panel rather than an empty one.
+    pub work: Option<Box<crate::harness_work::WorkSnapshot>>,
 }
 /// A bounded, shared record of worker activity.
 ///

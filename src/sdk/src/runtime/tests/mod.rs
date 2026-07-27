@@ -156,7 +156,6 @@ fn value_types_are_debug_clone_eq() {
 
     let thread = ThreadSummary {
         id: "t1".into(),
-        parent_id: None,
         name: "main".into(),
         running: false,
         turns: 2,
@@ -178,6 +177,7 @@ fn value_types_are_debug_clone_eq() {
         handle: None,
         label: None,
         harness: None,
+        workspace: None,
         peer_id: None,
         cpu_cores: None,
         memory_total_bytes: None,
@@ -237,18 +237,12 @@ impl Runtime for BareRuntime {
     }
     fn abort(&self) {}
     fn new_session(&self) {}
-    fn fork(&self, _name: Option<String>) -> String {
-        String::new()
-    }
     fn set_active_thread(&self, _id: String) {}
     fn list_main_chats(&self) -> BoxFuture<'static, anyhow::Result<Vec<MainChatSummary>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
     fn resume_chat(&self, _main_session_id: String) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
-    }
-    fn set_async_mode(&self, _on: bool) -> bool {
-        false
     }
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {
         Box::pin(async { Ok(Vec::new()) })
@@ -384,4 +378,25 @@ fn routing_strategy_wire_round_trips_and_reconciles() {
         RoutingStrategy::Manual,
         "absent both, Manual preserves the operator's selection"
     );
+}
+
+#[test]
+fn subscription_routing_strategy_round_trips_wire_values() {
+    use crate::runtime::SubscriptionRoutingStrategy;
+
+    for strategy in [
+        SubscriptionRoutingStrategy::Manual,
+        SubscriptionRoutingStrategy::Balanced,
+        SubscriptionRoutingStrategy::MostAvailableBudget,
+    ] {
+        assert_eq!(
+            SubscriptionRoutingStrategy::from_wire(strategy.as_wire()),
+            Some(strategy)
+        );
+    }
+    assert_eq!(
+        SubscriptionRoutingStrategy::MostAvailableBudget.as_wire(),
+        "mostAvailableBudget"
+    );
+    assert_eq!(SubscriptionRoutingStrategy::from_wire("nonsense"), None);
 }

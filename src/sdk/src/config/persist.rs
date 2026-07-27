@@ -78,6 +78,17 @@ pub fn persist_routing_strategy(path: &Path, wire_value: &str) -> anyhow::Result
     write_document(path, &doc)
 }
 
+/// Persist the top-level `subscriptionRoutingStrategy` key while preserving
+/// every other key and section.
+pub fn persist_subscription_routing_strategy(path: &Path, wire_value: &str) -> anyhow::Result<()> {
+    let mut doc = read_document(path)?;
+    doc.insert(
+        "subscriptionRoutingStrategy".to_string(),
+        toml::Value::String(wire_value.to_string()),
+    );
+    write_document(path, &doc)
+}
+
 /// Parse `path` into a TOML table, treating an absent file as an empty document.
 fn read_document(path: &Path) -> anyhow::Result<toml::Table> {
     match std::fs::read_to_string(path) {
@@ -149,6 +160,26 @@ pub fn persist_workflow_workspaces(path: &Path, workspaces: &[String]) -> anyhow
     persist_setting(
         path,
         "workflow",
+        "workspaces",
+        toml::Value::Array(
+            workspaces
+                .iter()
+                .cloned()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    )
+}
+
+/// Replace the extra directories this device advertises (`[host].workspaces`).
+///
+/// Replacing rather than merging is what makes a removal durable: a merge would
+/// leave a directory the operator deleted from the list still on disk, and it
+/// would come back on the next launch.
+pub fn persist_host_workspaces(path: &Path, workspaces: &[String]) -> anyhow::Result<()> {
+    persist_setting(
+        path,
+        "host",
         "workspaces",
         toml::Value::Array(
             workspaces

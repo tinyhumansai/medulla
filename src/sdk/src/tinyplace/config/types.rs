@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::*;
 use serde::{Deserialize, Serialize};
-/// The persisted CLI config. JSON field names match the TypeScript SDK
+/// The persisted CLI config. JSON field names match the public tiny.place
 /// (camelCase for the multi-word keys).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TinyplaceFileConfig {

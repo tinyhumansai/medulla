@@ -34,7 +34,6 @@ async fn connects_with_one_active_thread_and_describes_itself() {
     assert_eq!(snap.active_thread_id, "t1");
     assert!(!snap.session_id.is_empty());
     assert!(!snap.running);
-    assert!(!snap.async_mode);
 
     assert!(!runtime.describe().is_empty());
 }
@@ -103,64 +102,53 @@ async fn plain_connect_omits_workspace_profiles_from_the_mint() {
 }
 
 #[tokio::test]
-async fn forking_adds_a_thread_and_switching_changes_the_active_one() {
+async fn switching_threads_changes_the_active_one() {
     let backend = MockBackend::start().await;
     let runtime = runtime(&backend).await;
 
-    let forked = runtime.fork(Some("review".to_string()));
-    assert_ne!(forked, "t1");
-
-    let snap = runtime.snapshot();
-    assert_eq!(snap.threads.len(), 2);
-    assert!(snap.threads.iter().any(|t| t.id == forked));
-    // A fork takes focus immediately — the backend has no fork primitive, so the
-    // child is a local branch the user is dropped into.
-    assert_eq!(snap.active_thread_id, forked);
-
-    // Switching back to the parent works...
+    // Switching to the only thread is a no-op that keeps the selection...
     runtime.set_active_thread("t1".to_string());
     assert_eq!(runtime.snapshot().active_thread_id, "t1");
 
-    // ...while an unknown id is ignored rather than clearing the selection.
+    // ...while an unknown id is ignored rather than clearing it.
     runtime.set_active_thread("nope".to_string());
     assert_eq!(runtime.snapshot().active_thread_id, "t1");
 }
 
 #[tokio::test]
-async fn async_mode_toggles_and_is_reflected_in_the_snapshot() {
-    let backend = MockBackend::start().await;
+async fn a_new_session_opens_a_thread_rather_than_clearing_one() {
+    // Distinct session ids per mint, so "the new thread got its own" is checkable.
+    let backend = MockBackend::start_with(support::mock_backend::MockConfig {
+        unique_sessions: true,
+        ..Default::default()
+    })
+    .await;
     let runtime = runtime(&backend).await;
+    let first = runtime.snapshot().session_id;
+    assert!(!first.is_empty());
 
-    assert!(runtime.set_async_mode(true));
-    assert!(runtime.snapshot().async_mode);
-    assert!(!runtime.set_async_mode(false));
-    assert!(!runtime.snapshot().async_mode);
-}
-
-#[tokio::test]
-async fn a_new_session_replaces_the_active_thread_session() {
-    let backend = MockBackend::start().await;
-    let runtime = runtime(&backend).await;
-    let before = runtime.snapshot().session_id;
-    assert!(!before.is_empty());
-
-    // The id is cleared synchronously and refilled by a spawned task, so the
-    // thread is briefly session-less; wait for the replacement to land.
+    // The thread is added synchronously and its session minted by a spawned
+    // task, so it is briefly session-less; wait for the id to land.
     runtime.new_session();
-    let mut after = String::new();
+    let mut second = String::new();
     for _ in 0..80 {
-        after = runtime.snapshot().session_id;
-        if !after.is_empty() {
+        second = runtime.snapshot().session_id;
+        if !second.is_empty() {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
-    assert!(
-        !after.is_empty(),
-        "a new session id should replace the old one"
-    );
-    // The thread survives the swap.
-    assert_eq!(runtime.snapshot().threads.len(), 1);
+    assert!(!second.is_empty(), "the new thread gets its own session");
+    assert_ne!(second, first, "and it is not the old one");
+
+    // Both threads are open, and the new one has focus.
+    let snap = runtime.snapshot();
+    assert_eq!(snap.threads.len(), 2, "a thread is opened, not replaced");
+    assert_ne!(snap.active_thread_id, "t1");
+
+    // The first thread is intact and switchable back to.
+    runtime.set_active_thread("t1".to_string());
+    assert_eq!(runtime.snapshot().session_id, first);
 }
 
 #[tokio::test]
@@ -323,7 +311,7 @@ async fn subscribing_yields_a_receiver_that_wakes_on_change() {
 
     let mut rx = runtime.subscribe();
     // Any state mutation pings subscribers so the UI redraws.
-    runtime.set_async_mode(true);
+    runtime.new_session();
     tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .expect("a subscriber is notified promptly")

@@ -232,3 +232,48 @@ fn fold_sorts_by_seq_defensively() {
     // The result landed on the seq-2 call.
     assert!(view.tools[2].done);
 }
+
+#[test]
+fn a_wrapped_sessions_todo_list_folds_into_its_view() {
+    use crate::harness_work::kinds;
+
+    let mut view = initial_session_view();
+    let envelope = |seq: i64, kind: &str, payload: serde_json::Value| {
+        let mut env = ::tinyplace::types::SessionEnvelopeV2 {
+            envelope_version: ::tinyplace::types::SESSION_ENVELOPE_VERSION_V2.to_string(),
+            version: 2,
+            ..Default::default()
+        };
+        env.scope.harness_session_id = "s-1".into();
+        env.event.seq = seq;
+        env.event.kind = kind.to_string();
+        env.event.payload = payload;
+        ::tinyplace::types::AnySessionEnvelope::V2(env)
+    };
+
+    apply_session_envelope(
+        &mut view,
+        &envelope(
+            0,
+            kinds::TODO_UPDATE,
+            serde_json::json!({ "todos": [
+                { "content": "read it", "status": "completed" },
+                { "content": "write it", "status": "in_progress" },
+            ]}),
+        ),
+        DEFAULT_LIMITS,
+    );
+    apply_session_envelope(
+        &mut view,
+        &envelope(
+            1,
+            kinds::SUBAGENT_START,
+            serde_json::json!({ "call_id": "s1", "description": "review it" }),
+        ),
+        DEFAULT_LIMITS,
+    );
+
+    // Accumulated across envelopes, not reset by the later one.
+    assert_eq!(view.work.todo_progress(), (1, 2));
+    assert_eq!(view.work.running_subagents(), 1);
+}

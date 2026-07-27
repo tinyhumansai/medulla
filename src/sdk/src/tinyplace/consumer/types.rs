@@ -43,6 +43,12 @@ pub struct SessionView {
     pub tools: Vec<ToolActivity>,
     /// Most-recent feed entries, newest last, capped at `limits.feed`.
     pub feed: Vec<FeedEntry>,
+    /// What the session is working on: its todo list, plan, sub-agents, and file
+    /// edits, folded from the structured work events on the same stream.
+    ///
+    /// Empty for a harness that reports none of it, which is what a renderer
+    /// checks before drawing the surface at all.
+    pub work: crate::harness_work::WorkSnapshot,
 }
 /// Caps for the retained tool and feed histories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

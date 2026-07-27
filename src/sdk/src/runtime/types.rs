@@ -35,7 +35,7 @@ pub struct AgentDescriptor {
     /// Model-facing capability tags.
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Opaque harness-owned metadata, never interpreted by medulla-v1.
+    /// Opaque harness-owned metadata, never interpreted by this client.
     #[serde(default)]
     pub metadata: Map<String, Value>,
 }
@@ -58,7 +58,6 @@ pub struct PeerSession {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadSummary {
     pub id: String,
-    pub parent_id: Option<String>,
     pub name: String,
     pub running: bool,
     pub turns: usize,
@@ -90,6 +89,10 @@ pub struct WorkerInfo {
     pub handle: Option<String>,
     pub label: Option<String>,
     pub harness: Option<String>,
+    /// Absolute path this worker runs tasks in, when the hub knows it — the
+    /// device-local host reports its own; a remote peer's is unknown until it
+    /// answers a capability probe.
+    pub workspace: Option<String>,
     pub peer_id: Option<String>,
     /// Logical CPU cores reported by the worker.
     pub cpu_cores: Option<u32>,
@@ -107,7 +110,7 @@ pub struct WorkerInfo {
     /// when none were reported. Display-only.
     pub readiness: Vec<crate::tinyplace::HarnessReadiness>,
 }
-/// How the hub chooses a default worker from captured capacity details.
+/// How the hub chooses a default host from captured capacity details.
 ///
 /// Wire values are camelCase (`manual` / `balanced` / `cpuFirst` / `memoryFirst`),
 /// matching the backend's `GET/PUT /medulla/v1/routing/strategy` contract and the
@@ -116,7 +119,7 @@ pub struct WorkerInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RoutingStrategy {
-    /// Preserve the operator's explicit worker selection.
+    /// Preserve the operator's explicit host selection.
     Manual,
     /// Prefer CPU, using available memory as the tie-breaker.
     Balanced,
@@ -159,6 +162,42 @@ impl RoutingStrategy {
         backend.or(local).unwrap_or(RoutingStrategy::Manual)
     }
 }
+/// How the hub chooses a provider subscription after it has selected a host.
+///
+/// This is deliberately separate from [`RoutingStrategy`]: CPU and memory
+/// describe a host, while token headroom and readiness describe a subscription
+/// on that host. Wire values are camelCase for config and future backend parity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubscriptionRoutingStrategy {
+    /// Preserve an explicitly requested provider or the host's configured default.
+    Manual,
+    /// Prefer the ready subscription with the greatest remaining percentage.
+    Balanced,
+    /// Prefer the ready subscription with the greatest absolute token headroom.
+    MostAvailableBudget,
+}
+
+impl SubscriptionRoutingStrategy {
+    /// The camelCase wire token used by configuration and runtime adapters.
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            SubscriptionRoutingStrategy::Manual => "manual",
+            SubscriptionRoutingStrategy::Balanced => "balanced",
+            SubscriptionRoutingStrategy::MostAvailableBudget => "mostAvailableBudget",
+        }
+    }
+
+    /// Parse a camelCase wire token, or `None` when unrecognized.
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "manual" => Some(SubscriptionRoutingStrategy::Manual),
+            "balanced" => Some(SubscriptionRoutingStrategy::Balanced),
+            "mostAvailableBudget" => Some(SubscriptionRoutingStrategy::MostAvailableBudget),
+            _ => None,
+        }
+    }
+}
 /// A mutation on the worker-peer registry (`worker.add`/`select`/`update`/`remove`).
 #[derive(Debug, Clone)]
 pub enum WorkerOp {
@@ -187,6 +226,10 @@ pub enum WorkerOp {
     /// Choose the default worker according to captured capacity details.
     ApplyStrategy {
         strategy: RoutingStrategy,
+    },
+    /// Choose provider subscriptions independently from host resources.
+    ApplySubscriptionStrategy {
+        strategy: SubscriptionRoutingStrategy,
     },
 }
 /// The event stream's health, surfaced in the header when a cycle runs under the
@@ -219,14 +262,17 @@ pub struct RuntimeSnapshot {
     pub last_result: Option<CycleResultSummary>,
     pub tracing: bool,
     pub roster: Vec<AgentDescriptor>,
+    /// The declared capacity the roster's agents sit in: hosts, harnesses,
+    /// workspaces, and the agent-template catalog. Empty on runtimes that
+    /// declare none, which every fleet surface reads as "nothing declared".
+    pub capacity: crate::runtime::fleet::CapacitySnapshot,
     pub presence: HashMap<String, AgentPresence>,
     pub sessions: HashMap<String, Vec<PeerSession>>,
     pub tinyplace: Option<TinyplaceIdentity>,
-    pub async_mode: bool,
     pub threads: Vec<ThreadSummary>,
     pub active_thread_id: String,
-    /// Latest agent-harness status, when the backing runtime fronts a medulla-v1
-    /// agent harness. `None` until (and unless) the backend surfaces one; the
+    /// Latest agent-harness status, when the backing runtime exposes the public
+    /// harness contract. `None` until (and unless) the backend surfaces one; the
     /// Agents view renders the compact task board only while it is `Some`.
     pub harness: Option<crate::harness_contract::HarnessStatus>,
     /// Bumped each time the backing runtime rebaselines its folded event log —

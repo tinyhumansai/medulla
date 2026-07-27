@@ -1,5 +1,5 @@
 //! Provider detection + headless one-shot task execution, ported from the
-//! tinyplace CLI `daemon/providers.ts`.
+//! supported local harness providers.
 //!
 //! The daemon runs a delegated task by spawning the requested coding-agent CLI
 //! once, non-interactively, and folding its streaming JSONL output through the
@@ -13,6 +13,7 @@
 //! spawn-and-stream run loop with its transient-lock retry. All public items are
 //! re-exported here so callers use `medulla::daemon::providers::*`.
 
+mod acp;
 mod detect;
 mod execute;
 mod types;
@@ -20,6 +21,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use acp::{run_acp_task, HARNESS_PROTOCOL_ENV};
 pub use detect::{
     build_run_args, detect_providers, make_path_lookup, provider_bin, provider_name,
     supports_stdin, DAEMON_PROVIDERS,

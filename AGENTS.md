@@ -7,6 +7,7 @@ This repository is a two-crate Cargo workspace: the `medulla` SDK library at `sr
 - `src/sdk/src/client/` implements the backend HTTP/SSE client and protocol types.
 - `src/sdk/src/runtime/` contains backend, core-socket, and scripted mock runtime adapters.
 - `src/sdk/src/daemon/` and `src/sdk/src/tinyplace_support/` implement provider and tiny.place integration.
+- `src/sdk/src/workflows/` owns authored multi-step workflows (store, execution, authoring, MCP tools); `src/sdk/src/flow_engine/` is the adapter seam onto the vendored `tinyflows` engine. Keep engine coupling in the seam.
 - `src/sdk/src/ui/` holds the UI-facing data surface (events, agent lanes, chat store, onboarding screen, util); the app crate re-exports it under `crate::ui`.
 - `src/tui/src/ui/` owns ratatui state, rendering, input, and theming; `src/tui/src/cli.rs` owns argument parsing; `src/tui/src/main.rs` owns process wiring.
 - `src/sdk/tests/` and `src/tui/tests/` contain feature and mocked end-to-end suites; reusable stand-ins live in `src/sdk/tests/support/` (the app crate's tests reach them via `#[path]`).

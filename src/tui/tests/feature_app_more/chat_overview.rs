@@ -161,7 +161,7 @@ fn chat_renders_error_and_wrapped_turns() {
         message: "it broke".into(),
     });
     app.refresh_snapshot();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     // Render narrow to force wrapping across multiple rows.
     let out = render(&mut app, 60, 24);
     assert!(out.contains("cycle: it broke"), "error line renders");
@@ -175,7 +175,7 @@ fn chat_shows_thinking_spinner_with_and_without_calls() {
     let (mut app, rt) = empty_app();
     rt.set_running(true);
     app.refresh_snapshot();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     // No inference in flight → "working…".
     let out = render(&mut app, 120, 40);
     assert!(out.contains("working"), "idle-stream spinner: {out:.0}");
@@ -191,33 +191,6 @@ fn chat_shows_thinking_spinner_with_and_without_calls() {
 }
 
 // --- thread badges & fork indentation ---------------------------------------
-
-#[test]
-fn chat_thread_sidebar_shows_badges_and_indent() {
-    let (mut app, rt) = demo_app();
-    // Fork so a child thread renders one level deep (⑃ indent).
-    rt.fork(Some("child".into()));
-    // A running task + a pending question on the child drives the badges.
-    rt.script_event(TuiEvent::TaskStart {
-        task_id: "cyc-1/t:t9".into(),
-        instruction: "go".into(),
-        depth: 2,
-        agent_id: Some("dev-1".into()),
-        contract: None,
-    });
-    rt.script_event(TuiEvent::TaskAttention {
-        task_id: "cyc-1/t:t9".into(),
-        reason: "confirm".into(),
-        content: "?".into(),
-        question_id: Some("q".into()),
-    });
-    app.refresh_snapshot();
-    tab(&mut app, "Chat");
-    let out = render(&mut app, 120, 40);
-    assert!(out.contains("run"), "running-task badge");
-    assert!(out.contains('⚠'), "attention badge");
-    assert!(out.contains('⑃'), "fork indent glyph");
-}
 
 // --- Trace tab renders the JSON detail row ----------------------------------
 
@@ -259,6 +232,7 @@ fn overview_shows_active_model_calls_and_completed_task() {
             usage: Some(Usage {
                 input_tokens: 10,
                 output_tokens: 2,
+                ..Default::default()
             }),
             depth: 2,
             contract: None,

@@ -17,7 +17,7 @@ fn slash_resume_emits_list_chats_cmd() {
 fn slash_new_and_abort_and_clear_set_status() {
     let (mut app, rt) = demo_app();
     let _ = submit_line(&mut app, "/new");
-    assert!(app.status().contains("fresh"), "status: {}", app.status());
+    assert!(app.status().contains("Opened"), "status: {}", app.status());
     let _ = submit_line(&mut app, "/abort");
     assert!(app.status().contains("Abort"), "status: {}", app.status());
     let _ = submit_line(&mut app, "/clear");
@@ -29,19 +29,6 @@ fn slash_new_and_abort_and_clear_set_status() {
     let calls = rt.recorded_calls();
     assert!(calls.iter().any(|c| c == "new_session"));
     assert!(calls.iter().any(|c| c == "abort"));
-}
-
-#[test]
-fn slash_fork_with_name_focuses_chat_and_names_thread() {
-    let (mut app, rt) = demo_app();
-    // Start from a non-Chat tab to prove the fork focuses Chat.
-    tab(&mut app, "Agents");
-    let _ = submit_line(&mut app, "/fork My Branch");
-    assert_eq!(app.tab(), "Chat");
-    assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
-    // The forked thread carried the (case-preserved) name.
-    let out = render(&mut app, 120, 40);
-    assert!(out.contains("My Branch"), "thread name should render");
 }
 
 #[test]
@@ -74,21 +61,6 @@ fn slash_copy_last_without_reply_reports_nothing() {
     let _ = submit_line(&mut app, "/copy last");
     assert!(
         app.status().contains("No assistant reply"),
-        "status: {}",
-        app.status()
-    );
-}
-
-#[test]
-fn slash_async_explicit_on_off_and_bad_arg() {
-    let (mut app, _rt) = empty_app();
-    let _ = submit_line(&mut app, "/async on");
-    assert!(app.snapshot.async_mode);
-    let _ = submit_line(&mut app, "/async off");
-    assert!(!app.snapshot.async_mode);
-    let _ = submit_line(&mut app, "/async maybe");
-    assert!(
-        app.status().contains("Usage: /async"),
         "status: {}",
         app.status()
     );
@@ -156,7 +128,7 @@ fn chat_left_right_backspace_and_esc() {
 #[test]
 fn control_chords_route() {
     let (mut app, rt) = demo_app();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     // Ctrl-O toggles mouse capture (and back).
     let before = app.mouse_capture;
     let _ = app.on_event(ctrl(KeyCode::Char('o')));
@@ -167,34 +139,14 @@ fn control_chords_route() {
     let sink = app.capture_clipboard();
     let _ = app.on_event(ctrl(KeyCode::Char('y')));
     assert_eq!(sink.lock().unwrap().len(), 1);
-    // Ctrl-X aborts, Ctrl-N starts a fresh session.
+    // Ctrl-X aborts, Ctrl-N opens a thread.
     let _ = app.on_event(ctrl(KeyCode::Char('x')));
     assert!(app.status().contains("Abort"));
     let _ = app.on_event(ctrl(KeyCode::Char('n')));
-    assert!(app.status().contains("fresh"));
+    assert!(app.status().contains("Opened"));
     let calls = rt.recorded_calls();
     assert!(calls.iter().any(|c| c == "abort"));
     assert!(calls.iter().any(|c| c == "new_session"));
-}
-
-#[test]
-fn ctrl_f_forks_and_focuses_chat() {
-    let (mut app, rt) = demo_app();
-    tab(&mut app, "Agents");
-    let _ = app.on_event(ctrl(KeyCode::Char('f')));
-    assert_eq!(app.tab(), "Chat");
-    assert!(rt.recorded_calls().iter().any(|c| c == "fork"));
-}
-
-#[test]
-fn ctrl_updown_switches_threads_on_chat() {
-    let (mut app, rt) = demo_app();
-    rt.fork(Some("branch".into()));
-    app.refresh_snapshot();
-    tab(&mut app, "Chat");
-    let _ = app.on_event(ctrl(KeyCode::Up));
-    let _ = app.on_event(ctrl(KeyCode::Down));
-    assert!(rt.recorded_calls().iter().any(|c| c == "set_active_thread"));
 }
 
 // --- prompt-history recall on the composer ----------------------------------
@@ -223,7 +175,7 @@ fn up_down_recall_prompt_history() {
 #[test]
 fn multiline_draft_caret_walk_and_render() {
     let (mut app, _rt) = empty_app();
-    tab(&mut app, "Chat");
+    tab(&mut app, "Agents");
     type_str(&mut app, "line one");
     let _ = app.on_event(Event::Key(KeyEvent::new(
         KeyCode::Enter,

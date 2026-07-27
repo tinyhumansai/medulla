@@ -15,6 +15,9 @@
 //! - [`status`] — semantic-event → status-line derivation ([`status_detail`]).
 //! - [`flags`] + [`entry`] — CLI flag parsing and the entry ([`run_daemon`]) that
 //!   wires the SDK transport in.
+//! - [`embedded`] — the same runtime driven over any
+//!   [`Bridge`](crate::bridge::Bridge) inside another process, so the
+//!   orchestrator TUI can host tasks on this device without a second daemon.
 //!
 //! The interactive PTY wrapper/bridge (node-pty equivalent), the machine bus, the
 //! terminal-envelope writer, and the opencode SSE server are intentionally out of
@@ -22,7 +25,9 @@
 
 pub mod capabilities;
 pub mod dir_context;
+pub mod embedded;
 pub mod mappers;
+pub mod pairing;
 pub mod providers;
 pub mod transport;
 
@@ -37,5 +42,5 @@ mod types;
 mod tests;
 
 pub use entry::run_daemon;
-pub use status::status_detail;
+pub use status::{status_detail, work_detail};
 pub use types::{DaemonConfig, DaemonRuntime, LogFn, NowFn, SendFn};

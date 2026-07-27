@@ -17,7 +17,6 @@ use crate::ui::util::{clip, clock, wrap};
 use super::types::{App, TABS};
 
 mod agents;
-mod chat;
 mod decisions;
 mod feedback;
 mod memory;
@@ -26,6 +25,8 @@ mod prompt;
 mod routing;
 mod settings;
 mod tasks;
+mod template_modal;
+mod tool_call;
 
 /// Map a named color from the agent-lane model to a ratatui [`Color`].
 pub(super) fn color(name: &str) -> Color {
@@ -82,20 +83,25 @@ pub(super) fn event_color(env: &EventEnvelope) -> Option<&'static str> {
 /// Render the assembled tool calls, newest last, and clear them.
 fn flush_calls(pending: &mut Vec<(i64, PendingCall)>, cols: usize, out: &mut Vec<StyledLine>) {
     for (_, call) in pending.drain(..) {
+        // A nameless call is not worth a line. Some providers never send
+        // `tool_call_start`, so a whole inference streams as anonymous argument
+        // fragments — rendering those gave a column of identical "calling a
+        // tool" rows that said nothing the spinner did not. They are replaced
+        // by the named list when the inference closes; until then the spinner
+        // is the liveness signal.
+        if call.name.trim().is_empty() {
+            continue;
+        }
         // A one-line summary, not the payload: the arguments are frequently
         // kilobytes of JSON, and a transcript that reproduces them whole buries
         // the answer the user is reading for.
-        let name = if call.name.is_empty() {
-            "tool".to_string()
-        } else {
-            call.name.clone()
-        };
-        let args = compact_args(&call.args);
-        let text = if args.is_empty() {
-            format!("⏺ {name}")
-        } else {
-            format!("⏺ {name}({args})")
-        };
+        //
+        // Streamed arguments are parsed leniently — a call still in flight has
+        // a half-written object, which is normal rather than an error, and
+        // `summarize` degrades to the verb alone.
+        let args = serde_json::from_str::<serde_json::Value>(call.args.trim())
+            .unwrap_or(serde_json::Value::Null);
+        let text = format!("⏺ {}", tool_call::summarize(&call.name, &args));
         let text = truncate(&text, cols.saturating_sub(2));
         out.push(StyledLine {
             text,
@@ -103,31 +109,6 @@ fn flush_calls(pending: &mut Vec<(i64, PendingCall)>, cols: usize, out: &mut Vec
             dim: true,
         });
     }
-}
-
-/// The interesting part of a tool call's JSON arguments, on one line.
-///
-/// Values only, keys dropped: `{"command":"ls -la"}` reads as `ls -la`, which is
-/// what an operator scanning the transcript actually wants. Falls back to the
-/// raw text when it is not the object this expects — a half-streamed fragment is
-/// normal, not an error.
-fn compact_args(raw: &str) -> String {
-    let flat: String = raw
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
-    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&flat)
-    else {
-        return flat;
-    };
-    map.values()
-        .map(|v| match v {
-            serde_json::Value::String(s) => s.clone(),
-            other => other.to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Clip to `max` display columns, marking that it was clipped.
@@ -146,14 +127,42 @@ pub(super) fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLi
     // order, so they appear between the turns they happened between.
     let mut pending: Vec<(i64, PendingCall)> = Vec::new();
     for env in events {
+        // `InferenceEnd` is excluded because it *supersedes* the streamed
+        // assembly rather than following it: flushing here would render every
+        // call twice, once from the deltas and once from the authoritative list.
         if !matches!(
             env.event,
-            TuiEvent::ToolCallDelta { .. } | TuiEvent::Unknown { .. }
+            TuiEvent::ToolCallDelta { .. }
+                | TuiEvent::Unknown { .. }
+                | TuiEvent::InferenceEnd { .. }
         ) {
             flush_calls(&mut pending, cols, &mut out);
         }
         match &env.event {
             // The name arrives once, ahead of its argument fragments.
+            // `inference_end` carries the tool calls the model actually made,
+            // each with its name and complete arguments. On the backend runtime
+            // it arrives untyped — `EventKind` models no variant for it — so it
+            // is read from the raw payload here as well as from the typed event
+            // below. Either way the named list supersedes the streamed
+            // fragments, which are the same calls seen in pieces and often
+            // without names.
+            TuiEvent::Unknown { kind, data } if kind == "inference_end" => {
+                let calls = tool_call::calls_from_payload(data);
+                if calls.is_empty() {
+                    flush_calls(&mut pending, cols, &mut out);
+                } else {
+                    pending.clear();
+                    for (name, args) in calls {
+                        let text = format!("⏺ {}", tool_call::summarize(&name, &args));
+                        out.push(StyledLine {
+                            text: truncate(&text, cols.saturating_sub(2)),
+                            color: Some("magenta".into()),
+                            dim: true,
+                        });
+                    }
+                }
+            }
             TuiEvent::Unknown { kind, data } if kind == "tool_call_start" => {
                 let index = data
                     .get("index")
@@ -192,6 +201,30 @@ pub(super) fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLi
                             args: args_delta.clone(),
                         },
                     )),
+                }
+            }
+            // The close of an inference carries the tool calls it actually
+            // made, each with its name and complete arguments. The streamed
+            // deltas are the same calls seen in pieces — and lossily, since a
+            // provider may omit `tool_call_start` and leave the name blank — so
+            // the authoritative list replaces them outright.
+            TuiEvent::InferenceEnd { tool_calls, .. } => {
+                match tool_calls.as_ref().filter(|calls| !calls.is_empty()) {
+                    Some(calls) => {
+                        pending.clear();
+                        for call in calls {
+                            let text =
+                                format!("⏺ {}", tool_call::summarize(&call.name, &call.args));
+                            out.push(StyledLine {
+                                text: truncate(&text, cols.saturating_sub(2)),
+                                color: Some("magenta".into()),
+                                dim: true,
+                            });
+                        }
+                    }
+                    // No tool calls reported: whatever the deltas assembled is
+                    // all there is, so let it stand.
+                    None => flush_calls(&mut pending, cols, &mut out),
                 }
             }
             TuiEvent::User { body } => {
@@ -242,11 +275,14 @@ impl App {
     /// composer/prompt/resume overlay when applicable, and the footer.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
-        let chat = self.tab() == "Chat";
+        // The composer now lives inside the Agents pane, so the only things that
+        // still claim a row of their own below the content are the inline prompt
+        // and the resume picker.
         let has_prompt = self.prompt.is_some();
+        let picking = self.resume_picker.is_some();
         let extra = if has_prompt {
             3
-        } else if chat {
+        } else if picking {
             self.extra_height()
         } else {
             0
@@ -268,14 +304,13 @@ impl App {
         if self.decision_open {
             self.draw_decisions(f, rows[2]);
         }
+        if self.template_modal {
+            self.draw_template_modal(f, rows[2]);
+        }
         if has_prompt {
             self.draw_prompt(f, rows[3]);
-        } else if chat {
-            if self.resume_picker.is_some() {
-                self.draw_resume(f, rows[3]);
-            } else {
-                self.draw_composer(f, rows[3]);
-            }
+        } else if picking {
+            self.draw_resume(f, rows[3]);
         }
         self.draw_footer(f, rows[4]);
     }
@@ -315,19 +350,6 @@ impl App {
             ),
             Span::raw("  "),
         ];
-        if self.snapshot.async_mode {
-            spans.push(Span::styled(
-                "⚡ ASYNC ON",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            spans.push(Span::styled(
-                "async off",
-                Style::default().add_modifier(Modifier::DIM),
-            ));
-        }
         if let Some(notice) = &self.update_notice {
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
@@ -388,9 +410,8 @@ impl App {
     /// Draw the footer hint line.
     pub(super) fn draw_footer(&mut self, f: &mut Frame, area: Rect) {
         let text = format!(
-            "Tab views · ↑↓ history/nav · ⇧⏎ newline · ^Y copy · ^F fork · ^↑↓ thread · ^X abort · ^O mouse {} · /async {} · /help",
+            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^O mouse {} · /help",
             if self.mouse_capture { "●" } else { "○" },
-            if self.snapshot.async_mode { "on" } else { "off" },
         );
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(
@@ -411,7 +432,6 @@ impl App {
     pub(super) fn draw_content(&mut self, f: &mut Frame, area: Rect) {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
-            "Chat" => self.draw_chat(f, area),
             "Agents" => self.draw_agents(f, area),
             "Tasks" => self.draw_tasks(f, area),
             "Routing" => self.draw_routing(f, area),

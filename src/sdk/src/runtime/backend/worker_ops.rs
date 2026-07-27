@@ -27,6 +27,7 @@ pub(super) fn hub_worker_to_info(
             .starts_with('@')
             .then(|| worker.address.clone()),
         id: worker.id,
+        workspace: worker.workspace,
         address: worker.address,
         label: worker.label,
         harness: Some(worker.harness),
@@ -66,12 +67,19 @@ pub(super) async fn apply_worker_op(
                     harness: harness.unwrap_or_else(|| "claude".to_string()),
                     label,
                     selected: false,
+                    // A peer added by address: this hub has no idea where it
+                    // runs tasks. The backend falls back to its probed cwd.
+                    workspace: None,
                 })
                 .await
         }
         WorkerOp::Remove { id } => handle.remove(&id).await,
         WorkerOp::RefreshDetails { id } => handle.refresh_system_info(&id).await,
         WorkerOp::ApplyStrategy { strategy } => handle.apply_strategy(strategy),
+        WorkerOp::ApplySubscriptionStrategy { strategy } => {
+            handle.apply_subscription_strategy(strategy);
+            Ok(())
+        }
         WorkerOp::Update { id, patch } => {
             let label = label_from_patch(&patch)?;
             handle.set_label(&id, label).await

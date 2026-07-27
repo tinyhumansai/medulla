@@ -6,7 +6,7 @@
 //! a worker running a fan-out renders exactly as idle as one doing nothing.
 
 use crate::hub::WorkerActivity;
-use crate::ui::agents::merge_worker_activity;
+use crate::ui::agents::merge_host_activity;
 use crate::ui::agents::{AgentLane, AgentRole, TaskStatus};
 
 /// One observed frame.
@@ -17,6 +17,7 @@ fn record(agent: &str, task: &str, kind: &str, content: &str, at: i64) -> Worker
         kind: kind.into(),
         content: content.into(),
         at,
+        work: None,
     }
 }
 
@@ -26,24 +27,26 @@ fn worker_lane(agent_id: &str) -> AgentLane {
     AgentLane {
         key: format!("agent:{agent_id}"),
         label: agent_id.into(),
-        role: AgentRole::Worker,
+        role: AgentRole::Agent,
         turns: Vec::new(),
         last_at: 0,
         tasks: Vec::new(),
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: Some(agent_id.into()),
         session_id: None,
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 0,
+        work: None,
     }
 }
 
 #[test]
 fn a_running_task_makes_its_worker_busy() {
     let mut lanes = vec![worker_lane("claude-worker")];
-    merge_worker_activity(
+    merge_host_activity(
         &mut lanes,
         &[
             record("claude-worker", "t1", "ack", "task accepted", 10),
@@ -67,7 +70,7 @@ fn a_running_task_makes_its_worker_busy() {
 #[test]
 fn a_reply_settles_the_task_and_frees_the_worker() {
     let mut lanes = vec![worker_lane("claude-worker")];
-    merge_worker_activity(
+    merge_host_activity(
         &mut lanes,
         &[
             record("claude-worker", "t1", "ack", "task accepted", 10),
@@ -86,7 +89,7 @@ fn a_reply_settles_the_task_and_frees_the_worker() {
 #[test]
 fn an_error_is_distinguishable_from_a_reply() {
     let mut lanes = vec![worker_lane("claude-worker")];
-    merge_worker_activity(
+    merge_host_activity(
         &mut lanes,
         &[record(
             "claude-worker",
@@ -103,7 +106,7 @@ fn an_error_is_distinguishable_from_a_reply() {
 #[test]
 fn concurrent_tasks_are_counted_and_kept_apart() {
     let mut lanes = vec![worker_lane("claude-worker")];
-    merge_worker_activity(
+    merge_host_activity(
         &mut lanes,
         &[
             record("claude-worker", "t1", "status", "one", 10),
@@ -121,7 +124,7 @@ fn concurrent_tasks_are_counted_and_kept_apart() {
 #[test]
 fn activity_lands_on_the_worker_that_ran_it() {
     let mut lanes = vec![worker_lane("claude-worker"), worker_lane("codex-worker")];
-    merge_worker_activity(
+    merge_host_activity(
         &mut lanes,
         &[
             record("codex-worker", "t9", "status", "running", 10),
@@ -143,7 +146,7 @@ fn a_worker_lane_without_an_agent_id_cannot_be_attributed_activity() {
     let mut lane = worker_lane("claude-worker");
     lane.agent_id = None;
     let mut lanes = vec![lane];
-    merge_worker_activity(
+    merge_host_activity(
         &mut lanes,
         &[record("claude-worker", "t1", "status", "running", 10)],
     );
@@ -161,10 +164,42 @@ fn a_tier_lane_is_never_given_worker_tasks() {
     let mut tier = worker_lane("claude-worker");
     tier.role = AgentRole::Orchestrator;
     let mut lanes = vec![tier];
-    merge_worker_activity(
+    merge_host_activity(
         &mut lanes,
         &[record("claude-worker", "t1", "status", "running", 10)],
     );
     assert!(lanes[0].tasks.is_empty());
     assert_eq!(lanes[0].active_tasks, 0);
+}
+
+#[test]
+fn a_lane_shows_the_freshest_work_its_worker_reported() {
+    use crate::harness_work::{kinds, WorkFold};
+
+    let snapshot = |todo: &str| {
+        let mut fold = WorkFold::new();
+        fold.apply(
+            kinds::TODO_UPDATE,
+            &serde_json::json!({ "todos": [{ "content": todo, "status": "in_progress" }] }),
+            1,
+        );
+        Some(Box::new(fold.into_snapshot()))
+    };
+
+    let mut early = record("dev", "t1", "status", "starting", 10);
+    early.work = snapshot("read the code");
+    let mut late = record("dev", "t1", "status", "still going", 20);
+    late.work = snapshot("write the fold");
+    // A frame that reported nothing must not erase what the last one said.
+    let silent = record("dev", "t1", "status", "thinking", 30);
+
+    let mut lanes = vec![worker_lane("dev")];
+    merge_host_activity(&mut lanes, &[early, late, silent]);
+
+    let work = lanes[0].work.as_ref().expect("the lane carries the work");
+    assert_eq!(
+        work.current_todo().map(|t| t.text.as_str()),
+        Some("write the fold")
+    );
+    assert_eq!(lanes[0].tasks[0].work.as_ref(), Some(work));
 }

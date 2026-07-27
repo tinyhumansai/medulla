@@ -12,12 +12,12 @@ use crate::client::{
     FeedbackComment, FeedbackDetail, FeedbackItem, FeedbackPage, FeedbackQuery, FeedbackSubmission,
     FeedbackType,
 };
-use crate::runtime::event_log::ThreadEventLog;
 use crate::runtime::{ContextItem, CycleResultSummary, Runtime, RuntimeSnapshot};
 use crate::ui::chat_store::{ChatMessage, MainChatSummary};
 use crate::ui::events::{TuiEvent, Usage};
 
 use super::types::{gen_id, now_millis, MockRuntime, Thread};
+use crate::runtime::event_log::ThreadEventLog;
 
 impl Runtime for MockRuntime {
     fn snapshot(&self) -> RuntimeSnapshot {
@@ -33,10 +33,10 @@ impl Runtime for MockRuntime {
             last_result: active.last_result.clone(),
             tracing: s.tracing,
             roster: s.roster.clone(),
+            capacity: s.capacity.clone(),
             presence: s.presence.clone(),
             sessions: s.sessions.clone(),
             tinyplace: s.tinyplace.clone(),
-            async_mode: s.async_mode,
             threads,
             active_thread_id: s.active_id.clone(),
             harness: s.harness.clone(),
@@ -96,6 +96,7 @@ impl Runtime for MockRuntime {
                     usage: Some(Usage {
                         input_tokens: 800,
                         output_tokens: 120,
+                        ..Default::default()
                     }),
                     content: Some("Here is my reasoning.".into()),
                     reasoning: None,
@@ -145,50 +146,20 @@ impl Runtime for MockRuntime {
         self.record("new_session");
         {
             let mut s = self.state.lock().unwrap();
-            let session_id = gen_id("tui");
-            let t = s.active_mut();
-            t.messages.clear();
-            t.events.clear();
-            t.chat_events.clear();
-            t.running = false;
-            t.last_result = None;
-            t.session_id = session_id;
-        }
-        self.ping();
-    }
-
-    fn fork(&self, name: Option<String>) -> String {
-        self.record("fork");
-        let id = {
-            let mut s = self.state.lock().unwrap();
-            let next = format!("t{}", s.threads.len() + 1);
-            let (parent_id, messages, chat_events) = {
-                let active = s.active();
-                (
-                    active.id.clone(),
-                    active.messages.clone(),
-                    active.chat_events.clone(),
-                )
-            };
-            let child = Thread {
-                id: next.clone(),
-                parent_id: Some(parent_id),
-                name: name.unwrap_or_else(|| format!("fork {next}")),
+            let id = format!("t{}", s.threads.len() + 1);
+            let name = format!("thread {}", s.threads.len() + 1);
+            s.threads.push(Thread {
+                id: id.clone(),
+                name,
                 session_id: gen_id("tui"),
-                messages,
-                event_log: ThreadEventLog {
-                    events: chat_events.clone(),
-                    chat_events,
-                },
+                messages: Vec::new(),
+                event_log: ThreadEventLog::default(),
                 running: false,
                 last_result: None,
-            };
-            s.threads.push(child);
-            s.active_id = next.clone();
-            next
-        };
+            });
+            s.active_id = id;
+        }
         self.ping();
-        id
     }
 
     fn set_active_thread(&self, id: String) {
@@ -288,16 +259,6 @@ impl Runtime for MockRuntime {
             let _ = tx.send(());
             Ok(())
         })
-    }
-
-    fn set_async_mode(&self, on: bool) -> bool {
-        self.record("set_async_mode");
-        {
-            let mut s = self.state.lock().unwrap();
-            s.async_mode = on;
-        }
-        self.ping();
-        on
     }
 
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>> {

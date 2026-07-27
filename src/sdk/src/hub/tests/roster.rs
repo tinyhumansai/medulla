@@ -5,10 +5,13 @@
 //! and a tiny.place address, so these pin the resolution rules rather than the
 //! transport — dispatch itself is covered in [`super::super::dispatch`].
 
-use super::super::roster::worker_for_strategy;
 use super::super::roster::{address_of, register_payload, HubWorker};
-use crate::runtime::RoutingStrategy;
-use crate::tinyplace::WorkerSystemInfo;
+use super::super::roster::{subscription_for_strategy, worker_for_strategy};
+use crate::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
+use crate::tinyplace::{
+    AgentCapabilities, BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider,
+    HarnessReadiness, WorkerSystemInfo,
+};
 
 fn worker(id: &str, addr: &str) -> HubWorker {
     HubWorker {
@@ -17,6 +20,7 @@ fn worker(id: &str, addr: &str) -> HubWorker {
         harness: "claude".to_string(),
         label: None,
         selected: false,
+        workspace: None,
     }
 }
 
@@ -93,6 +97,87 @@ fn balanced_uses_memory_to_break_cpu_ties_while_cpu_first_does_not() {
     );
 }
 
+fn provider_budget(
+    provider: HarnessProvider,
+    limit_tokens: i64,
+    remaining_tokens: i64,
+) -> HarnessBudget {
+    HarnessBudget {
+        provider,
+        seat: None,
+        window: BudgetWindow::Weekly,
+        limit_tokens: Some(limit_tokens),
+        used_tokens: Some(limit_tokens - remaining_tokens),
+        remaining_tokens: Some(remaining_tokens),
+        cooldown_until: None,
+        source: BudgetSource::Configured,
+    }
+}
+
+#[test]
+fn subscription_strategies_compare_percentage_and_absolute_budget_independently() {
+    let capabilities = AgentCapabilities {
+        providers: vec![HarnessProvider::Claude, HarnessProvider::Codex],
+        budgets: vec![
+            provider_budget(HarnessProvider::Claude, 1_000, 800),
+            provider_budget(HarnessProvider::Codex, 10_000, 2_000),
+        ],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        subscription_for_strategy(&capabilities, SubscriptionRoutingStrategy::Balanced),
+        Some(HarnessProvider::Claude),
+        "balanced compares normalized headroom"
+    );
+    assert_eq!(
+        subscription_for_strategy(
+            &capabilities,
+            SubscriptionRoutingStrategy::MostAvailableBudget
+        ),
+        Some(HarnessProvider::Codex),
+        "most-available compares absolute remaining tokens"
+    );
+    assert_eq!(
+        subscription_for_strategy(&capabilities, SubscriptionRoutingStrategy::Manual),
+        None,
+        "manual preserves the task hint or daemon default"
+    );
+}
+
+#[test]
+fn subscription_routing_excludes_not_ready_and_fails_open_without_numbers() {
+    let capabilities = AgentCapabilities {
+        providers: vec![HarnessProvider::Claude, HarnessProvider::Codex],
+        budgets: vec![
+            provider_budget(HarnessProvider::Claude, 1_000, 900),
+            provider_budget(HarnessProvider::Codex, 1_000, 100),
+        ],
+        readiness: vec![HarnessReadiness {
+            provider: HarnessProvider::Claude,
+            ready: false,
+            reason: Some("cooldown".into()),
+        }],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        subscription_for_strategy(&capabilities, SubscriptionRoutingStrategy::Balanced),
+        Some(HarnessProvider::Codex)
+    );
+    assert_eq!(
+        subscription_for_strategy(
+            &AgentCapabilities {
+                providers: vec![HarnessProvider::Claude],
+                ..Default::default()
+            },
+            SubscriptionRoutingStrategy::MostAvailableBudget
+        ),
+        None,
+        "missing advisory budget data falls back to the daemon default"
+    );
+}
+
 #[test]
 fn register_payload_advertises_id_address_and_harness() {
     let payload = register_payload(&[worker("w1", "GRVaddr")]);
@@ -101,6 +186,35 @@ fn register_payload_advertises_id_address_and_harness() {
     assert_eq!(agents[0]["id"], "w1");
     assert_eq!(agents[0]["metadata"]["address"], "GRVaddr");
     assert_eq!(agents[0]["metadata"]["harness"], "claude");
+}
+
+/// A worker whose workspace this hub knows must advertise it, because that is
+/// what the backend turns into a `WorkspaceDescriptor` and places the agent in.
+/// Without it the orchestrator reads the fleet as "no workspaces declared" and
+/// declines work it could have delegated.
+#[test]
+fn register_payload_advertises_a_known_workspace() {
+    let mut w = worker("this-device", "this-device");
+    w.workspace = Some("/srv/repos/medulla".to_string());
+    let payload = register_payload(&[w]);
+    let agents = payload.get("agents").unwrap().as_array().unwrap();
+    assert_eq!(agents[0]["metadata"]["workspace"], "/srv/repos/medulla");
+}
+
+/// An unknown workspace omits the key rather than sending an empty string: the
+/// backend falls back to the worker's probed `capabilities.cwd`, and `""` would
+/// win that fallback and place the agent nowhere.
+#[test]
+fn register_payload_omits_an_unknown_or_blank_workspace() {
+    let payload = register_payload(&[worker("w1", "GRVaddr")]);
+    let agents = payload.get("agents").unwrap().as_array().unwrap();
+    assert!(agents[0]["metadata"].get("workspace").is_none());
+
+    let mut blank = worker("w2", "ADDR2");
+    blank.workspace = Some("   ".to_string());
+    let payload = register_payload(&[blank]);
+    let agents = payload.get("agents").unwrap().as_array().unwrap();
+    assert!(agents[0]["metadata"].get("workspace").is_none());
 }
 
 #[test]
@@ -215,6 +329,7 @@ fn hw(id: &str, address: &str) -> HubWorker {
         harness: "claude".to_string(),
         label: None,
         selected: false,
+        workspace: None,
     }
 }
 

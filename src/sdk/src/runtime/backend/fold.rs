@@ -121,7 +121,6 @@ impl State {
                 }
                 ThreadSummary {
                     id: t.id.clone(),
-                    parent_id: t.parent_id.clone(),
                     name: t.name.clone(),
                     running: t.running,
                     turns: t.messages.len().div_ceil(2),

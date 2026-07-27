@@ -67,8 +67,13 @@ fn clip(text: &str) -> String {
     format!("{}\n…(truncated)", &text[..end])
 }
 
-/// Assemble the user prompt from whichever instruction files were found.
-pub fn build_user_prompt(sources: &InitSources) -> String {
+/// Assemble the user prompt from whichever instruction files were found, plus
+/// the scanned file layout.
+///
+/// The layout is included so the summary can name real paths: instruction files
+/// describe conventions, and a model that has also seen the tree writes entry
+/// points an orchestrator can actually route against instead of guesses.
+pub fn build_user_prompt(sources: &InitSources, layout: &[String]) -> String {
     let mut parts = Vec::new();
     parts.push(format!(
         "Repository directory: {}",
@@ -77,6 +82,9 @@ pub fn build_user_prompt(sources: &InitSources) -> String {
             |name| name.to_string_lossy().to_string()
         )
     ));
+    if !layout.is_empty() {
+        parts.push(format!("\n--- file layout ---\n{}", layout.join("\n")));
+    }
     for (label, body) in [
         ("AGENTS.md", &sources.agents_md),
         ("CLAUDE.md", &sources.claude_md),
@@ -124,10 +132,11 @@ pub fn parse_draft(response: &str) -> Result<DraftedProfile> {
 pub async fn draft_profile(
     provider: &dyn ChatProvider,
     sources: &InitSources,
+    layout: &[String],
 ) -> Result<DraftedProfile> {
     let prompt = ChatPrompt {
         system: SYSTEM.to_string(),
-        user: build_user_prompt(sources),
+        user: build_user_prompt(sources, layout),
         temperature: TEMPERATURE,
         kind: "medulla-init-profile",
         max_tokens: Some(MAX_TOKENS),

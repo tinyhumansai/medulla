@@ -41,7 +41,7 @@ fn lane(question: bool) -> AgentLane {
     AgentLane {
         key: "agent:dev".into(),
         label: "dev".into(),
-        role: AgentRole::Worker,
+        role: AgentRole::Agent,
         turns: vec![],
         last_at: 0,
         tasks: vec![TaskState {
@@ -52,14 +52,17 @@ fn lane(question: bool) -> AgentLane {
             turn_blocks: vec![],
             attention: question.then(|| "confirm: use v2?".into()),
             question_id: question.then(|| "q1".into()),
+            work: None,
         }],
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: Some("dev".into()),
         session_id: None,
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 1,
+        work: None,
     }
 }
 

@@ -42,16 +42,17 @@ fn script_usage(rt: &Arc<MockRuntime>) {
     rt.script_event(TuiEvent::InferenceStart {
         tier: "orchestrator".into(),
         op: "decide".into(),
-        model: Some("medulla-v1".into()),
+        model: Some("orchestrator-model".into()),
     });
     rt.script_event(TuiEvent::InferenceEnd {
         tier: "orchestrator".into(),
         op: "decide".into(),
-        model: Some("medulla-v1".into()),
+        model: Some("orchestrator-model".into()),
         duration_ms: 10,
         usage: Some(Usage {
             input_tokens: 1200,
             output_tokens: 340,
+            ..Default::default()
         }),
         content: None,
         reasoning: None,
@@ -65,6 +66,7 @@ fn script_usage(rt: &Arc<MockRuntime>) {
         usage: Some(Usage {
             input_tokens: 800,
             output_tokens: 90,
+            ..Default::default()
         }),
         content: None,
         reasoning: None,
@@ -79,6 +81,7 @@ fn script_usage(rt: &Arc<MockRuntime>) {
             usage: Some(Usage {
                 input_tokens: 5000,
                 output_tokens: 700,
+                ..Default::default()
             }),
             depth: 2,
             contract: None,

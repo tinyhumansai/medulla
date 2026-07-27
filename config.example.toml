@@ -52,6 +52,49 @@ tokenEnv = "MEDULLA_TOKEN"
 # token = "eyJ..."
 
 # ---------------------------------------------------------------------------
+# host — run the work on this machine, not only orchestrate it
+# ---------------------------------------------------------------------------
+# A plain `medulla` is both halves of the system: the orchestrator that decides
+# what work to hand out, and a host that runs it. The host binds an address on
+# an in-process bus the orchestrator dispatches over, so a task for this machine
+# never touches the network — no tiny.place identity, no contact request, no
+# second `medulla daemon` process. Remote workers still go over tiny.place, and
+# the orchestrator picks per address.
+#
+# It is on by default and needs no configuration: it serves whichever coding
+# agent CLIs it finds (claude / codex / opencode), in the directory you launched
+# from. The Overview tab's "This device" panel shows what it is doing.
+#
+# Env override: MEDULLA_HOST=0 turns hosting off for one run (MEDULLA_HOST=1
+# forces it on). This mirrors MEDULLA_HUB=0, which turns the orchestrator half
+# off — set both and you have a plain chat client.
+# [host]
+# Whether this device hosts tasks. Default: true
+# enabled = true
+# The address the orchestrator dispatches to. Local to this process; it never
+# goes on a wire, so it is a readable name rather than a key. Default: this-device
+# address = "this-device"
+# Where tasks run. Empty (the default) means the directory `medulla` was
+# launched from — the repo you are looking at. Anything a task edits, it edits
+# here, so this is the most consequential key in the section.
+# workspace = "/absolute/path/to/repo"
+# Which agent CLIs to serve. Empty (the default) detects whatever is installed.
+# An explicit list is still filtered by what is actually on PATH.
+# providers = ["claude", "codex"]
+# The CLI used when a task names none. Empty takes the first detected.
+# defaultProvider = "claude"
+# Maximum tasks run at once on this machine. Default: 2
+# concurrency = 2
+# Per-task execution timeout, in ms. Default: 600000 (10 minutes)
+# taskTimeoutMs = 600000
+# Default model hint passed to the harness. Empty leaves the CLI's own default.
+# model = "claude-sonnet-4-5"
+# Whether the harness runs with its permission prompts bypassed. On by default
+# because a hosted task is unattended: nobody is in the pane to answer a prompt,
+# so a task that hits one has hung until it times out.
+# skipPermissions = true
+
+# ---------------------------------------------------------------------------
 # core — the medulla-serve NDJSON orchestration socket (optional)
 # ---------------------------------------------------------------------------
 # [core]
@@ -132,3 +175,53 @@ tokenEnv = "MEDULLA_TOKEN"
 # accent = "magenta"      # inline overlay borders (prompt / resume picker)
 # selectionFg = "black"   # text drawn on top of the primary selection background
 # dimBorder = "darkgray"  # panel borders
+
+# ---------------------------------------------------------------------------
+# fleet — operator-declared capacity: the Host → Harness → Workspace → Agent
+# containment chain plus the agent templates that may be provisioned onto it.
+# Declared, never probed. The terminal app declares this to a local
+# orchestration server at handshake time, and the Agents rail renders it
+# whenever the runtime itself reports no capacity of its own.
+#
+# Every level names exactly one parent (hostId on a harness, harnessId on a
+# workspace, workspaceId on an agent). An agent with no workspaceId is a local
+# agent and may name a hostId directly instead. templateIds narrows the catalog
+# for a place; absent means inherit, so an allowlist only ever subtracts.
+#
+# To see the surfaces with no fleet at all, set MEDULLA_DEMO_FLEET=1 (here or in
+# .env) for a small stand-in fleet. It is opt-in and never overrides a real one.
+# ---------------------------------------------------------------------------
+# [[fleet.hosts]]
+# id = "workshop"
+# name = "workshop"
+# availability = "online"
+# resources = { cpuCores = 10, availableMemoryBytes = 12884901888 }
+
+# [[fleet.harnesses]]
+# id = "workshop-claude"
+# hostId = "workshop"
+# kind = "claude-code"       # claude-code · codex · opencode · tinyplace · …
+# availability = "online"
+# ready = true
+# providers = ["anthropic"]
+# budgets = [{ provider = "anthropic", window = "5h", limitTokens = 1000000, remainingTokens = 760000, source = "configured" }]
+
+# [[fleet.workspaces]]
+# id = "medulla"
+# name = "medulla"
+# path = "/srv/repos/medulla"
+# harnessId = "workshop-claude"
+
+# [[fleet.agents]]
+# id = "dev-1"
+# name = "dev-1"
+# description = "Implements scoped changes in the medulla repo."
+# availability = "online"
+# workspaceId = "medulla"
+# templateId = "implementer"
+
+# [[fleet.agentTemplates]]
+# id = "implementer"
+# name = "Implementer"
+# description = "Implements a scoped change and reports what it did."
+# model = "reasoning"        # an abstract tier, never a concrete SKU

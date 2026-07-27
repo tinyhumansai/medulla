@@ -1,12 +1,12 @@
-//! The serde data types that mirror the medulla-v1 (TypeScript) agent-harness
-//! wire shapes. Field renames pin every struct to the TS JSON exactly
+//! Serde data types for the public agent-harness wire shapes. Field renames pin
+//! every struct to the JSON contract
 //! (`rename_all = "camelCase"`); enum renames pin the lowercase status/state
-//! strings the TS unions emit. Only shapes and their trivial impls live here —
+//! strings used on the wire. Only shapes and their trivial impls live here —
 //! the reserved tool-name vocabulary and re-exports live in the parent module.
 //!
-//! Two payloads are intentionally opaque: `HarnessStatus::last_result` mirrors
-//! the TS `CycleResult` and `HarnessEvent::CycleEvent { event }` mirrors the TS
-//! `CycleEvent`. Neither is a cross-repo contract this crate consumes, so both
+//! Two payloads are intentionally opaque: `HarnessStatus::last_result` and
+//! `HarnessEvent::CycleEvent { event }`. Neither payload is a contract this
+//! crate consumes, so both
 //! are kept as [`serde_json::Value`] rather than mirrored field-by-field; this
 //! preserves them losslessly without coupling the client to their internals.
 
@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// Lifecycle of a tracked task. Mirrors the TS `TrackedTaskStatus` union; the
-/// lowercase rename matches the wire strings (`"open"`, `"active"`, …).
+/// Lifecycle of a tracked task. The lowercase rename matches the wire strings
+/// (`"open"`, `"active"`, …).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackedTaskStatus {
@@ -69,8 +69,8 @@ pub struct VerificationEvidence {
     pub summary: String,
 }
 
-/// One unit of intended work on the session task board. Mirrors the TS
-/// `TrackedTask`; `created_at`/`updated_at` are ISO-8601 strings and
+/// One unit of intended work on the session task board.
+/// `created_at`/`updated_at` are ISO-8601 strings and
 /// `delegated_task_ids`/`notes` are always-present arrays (never omitted).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,8 +105,8 @@ pub struct TrackedTask {
     pub evidence: Option<Vec<VerificationEvidence>>,
 }
 
-/// The run state of the agent harness. Mirrors the TS `HarnessStatus["state"]`
-/// union; the lowercase rename matches the wire strings.
+/// The run state of the agent harness. The lowercase rename matches the wire
+/// strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HarnessState {
@@ -118,7 +118,7 @@ pub enum HarnessState {
     Stopped,
 }
 
-/// Rolled-up token/cycle accounting. Mirrors the TS `HarnessStatus["usage"]`.
+/// Rolled-up token/cycle accounting.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessUsage {
@@ -130,10 +130,10 @@ pub struct HarnessUsage {
     pub output_tokens: u64,
 }
 
-/// A synchronous snapshot of the agent harness. Mirrors the TS `HarnessStatus`.
+/// A synchronous snapshot of the agent harness.
 ///
-/// `last_result` mirrors the TS `CycleResult` and is kept opaque (see the module
-/// doc): present after the first cycle settles, omitted before then.
+/// `last_result` is kept opaque (see the module doc): present after the first
+/// cycle settles, omitted before then.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessStatus {
@@ -163,12 +163,11 @@ pub struct HarnessStatus {
     pub escalations: Vec<String>,
 }
 
-/// A harness observability event. Mirrors the TS `HarnessEvent` union, tagged by
-/// its `kind` field. The three lifecycle kinds share a shape but stay distinct
+/// A harness observability event, tagged by its `kind` field. The three
+/// lifecycle kinds share a shape but stay distinct
 /// variants so the `kind` string round-trips exactly.
 ///
-/// `CycleEvent { event }` mirrors the TS `{ kind: "cycle_event"; event: CycleEvent }`
-/// and keeps the inner `CycleEvent` opaque (see the module doc).
+/// `CycleEvent { event }` keeps its inner event opaque (see the module doc).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 // Keep the public `task: TrackedTask` field source-compatible; boxing only this
 // wire variant would impose an unrelated API migration on an additive schema.
@@ -212,9 +211,7 @@ pub enum HarnessEvent {
     },
 }
 
-/// The receipt returned when an instruction is queued. Mirrors the serialisable
-/// fields of the TS `InstructionReceipt` (the `result` promise is not part of
-/// the wire shape).
+/// The serialisable receipt returned when an instruction is queued.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstructionReceipt {
@@ -225,8 +222,7 @@ pub struct InstructionReceipt {
 }
 
 /// Machine-readable seat attribution stamped onto an agent descriptor at
-/// `metadata.budget`. Mirrors the TS `AgentBudgetMetadata` from
-/// `core/budgetRoster.ts`.
+/// `metadata.budget`.
 ///
 /// Note the timestamp contrast with [`SeatHeadroom`]: here `primary_resets_at`
 /// is an **ISO-8601 string** (formatted at the roster boundary), whereas
@@ -261,8 +257,8 @@ pub struct WindowHeadroom {
     pub resets_at: i64,
 }
 
-/// Live headroom for one connected seat. Mirrors the TS `SeatHeadroom` from
-/// `ports/budgets.ts`. All timestamps are epoch-milliseconds numbers (contrast
+/// Live headroom for one connected seat. All timestamps are epoch-milliseconds
+/// numbers (contrast
 /// [`AgentBudgetMetadata`], which formats `primary_resets_at` to an ISO string).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

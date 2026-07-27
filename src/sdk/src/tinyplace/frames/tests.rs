@@ -19,6 +19,7 @@ fn encodes_a_minimal_frame() {
         harness: None,
         provider: None,
         model: None,
+        workflow: None,
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["proto"], TINYPLACE_PROTO);
@@ -44,6 +45,7 @@ fn encodes_optional_fields_when_present() {
         harness: Some(HarnessProvider::Codex),
         provider: Some(HarnessProvider::Claude),
         model: Some("anthropic/claude-opus-4.8".to_string()),
+        workflow: Some("nightly-sweep".to_string()),
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["kind"], "capabilities_result");
@@ -51,6 +53,7 @@ fn encodes_optional_fields_when_present() {
     assert_eq!(value["harness"], "codex");
     assert_eq!(value["provider"], "claude");
     assert_eq!(value["model"], "anthropic/claude-opus-4.8");
+    assert_eq!(value["workflow"], "nightly-sweep");
 }
 
 #[test]
@@ -76,6 +79,7 @@ fn round_trips_every_kind() {
             harness: None,
             provider: None,
             model: None,
+            workflow: None,
         });
         let decoded = decode_task_frame(&body).expect("valid frame decodes");
         assert_eq!(decoded.kind, kind);
@@ -115,6 +119,7 @@ fn carries_a_model_hint_through_encode_and_decode() {
         harness: None,
         provider: None,
         model: Some("openrouter/some-model".to_string()),
+        workflow: None,
     });
     let decoded = decode_task_frame(&body).unwrap();
     assert_eq!(decoded.model.as_deref(), Some("openrouter/some-model"));
@@ -370,4 +375,85 @@ fn new_capabilities_round_trip_budgets_and_readiness() {
     assert_eq!(back.budgets, caps.budgets);
     assert_eq!(back.readiness, caps.readiness);
     assert_eq!(back.providers, caps.providers);
+}
+
+#[test]
+fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
+    use crate::harness_work::{kinds, WorkFold};
+
+    let mut fold = WorkFold::new();
+    fold.apply(
+        kinds::TODO_UPDATE,
+        &json!({ "todos": [
+            { "content": "read the code", "status": "completed" },
+            { "content": "write the fold", "status": "in_progress" },
+        ]}),
+        1,
+    );
+    fold.apply(
+        kinds::SUBAGENT_START,
+        &json!({ "call_id": "t1", "description": "review it" }),
+        2,
+    );
+    let snapshot = fold.into_snapshot();
+
+    let body = crate::tinyplace::encode_task_frame_with_work(
+        EncodeFrameInput {
+            kind: TaskFrameKind::Status,
+            task_id: "cycle-1".to_string(),
+            text: "write the fold · todo 1/2".to_string(),
+            ts: "2026-07-18T00:00:00.000Z".to_string(),
+            correlation_id: None,
+            harness: Some(HarnessProvider::Claude),
+            provider: None,
+            model: None,
+            workflow: None,
+        },
+        None,
+        Some(snapshot.clone()),
+    );
+    let decoded = decode_task_frame(&body).expect("the frame decodes");
+    assert_eq!(decoded.work.as_deref(), Some(&snapshot));
+}
+
+#[test]
+fn an_empty_work_snapshot_is_left_off_the_wire() {
+    let body = crate::tinyplace::encode_task_frame_with_work(
+        EncodeFrameInput {
+            kind: TaskFrameKind::Status,
+            task_id: "cycle-1".to_string(),
+            text: "thinking".to_string(),
+            ts: "2026-07-18T00:00:00.000Z".to_string(),
+            correlation_id: None,
+            harness: None,
+            provider: None,
+            model: None,
+            workflow: None,
+        },
+        None,
+        Some(crate::harness_work::WorkSnapshot::default()),
+    );
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(
+        value.get("work").is_none(),
+        "an empty snapshot costs bytes for nothing"
+    );
+}
+
+#[test]
+fn a_malformed_work_snapshot_does_not_sink_the_frame() {
+    // A peer on a shape we cannot read must still deliver its reply: the task
+    // result is the payload that matters.
+    let body = json!({
+        "proto": TINYPLACE_PROTO,
+        "kind": "reply",
+        "taskId": "cycle-1",
+        "text": "done",
+        "ts": "2026-07-18T00:00:00.000Z",
+        "work": "not an object",
+    })
+    .to_string();
+    let decoded = decode_task_frame(&body).expect("the frame still decodes");
+    assert_eq!(decoded.text, "done");
+    assert!(decoded.work.is_none());
 }

@@ -1,4 +1,4 @@
-//! Recent-session history, ported from the tinyplace CLI `session-history.ts`.
+//! Recent-session history for local harness sessions.
 //!
 //! The read model behind a "resume" pane: it scans the agents' own session dirs
 //! (`~/.claude/projects`, `~/.codex/sessions`) — the same transcript files the

@@ -14,7 +14,7 @@ use ::tinyplace::auth::timestamp;
 use crate::tinyplace::{EncodeFrameInput, HarnessProvider, TaskFrame, TaskFrameKind};
 
 use super::providers::{Abort, RunTaskFn};
-use super::types::{DaemonConfig, DaemonRuntime, Inner, LogFn, NowFn, SendFn};
+use super::types::{DaemonConfig, DaemonRuntime, FrameAttachments, Inner, LogFn, NowFn, SendFn};
 
 impl DaemonRuntime {
     /// Build a runtime from `config`, an executor (`run_task`), and a
@@ -158,7 +158,7 @@ impl DaemonRuntime {
             .await;
     }
 
-    /// Encode and send a task frame, optionally carrying token usage.
+    /// Send a frame carrying token usage and nothing else.
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn reply_with_usage(
         &self,
@@ -170,7 +170,34 @@ impl DaemonRuntime {
         harness: Option<HarnessProvider>,
         usage: Option<crate::tinyplace::TokenUsage>,
     ) {
-        let body = crate::tinyplace::encode_task_frame_with_usage(
+        self.reply_with(
+            to,
+            kind,
+            task_id,
+            text,
+            correlation,
+            harness,
+            FrameAttachments {
+                usage,
+                ..Default::default()
+            },
+        )
+        .await;
+    }
+
+    /// Encode and send a task frame with its optional attachments.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn reply_with(
+        &self,
+        to: &str,
+        kind: TaskFrameKind,
+        task_id: &str,
+        text: &str,
+        correlation: Option<&str>,
+        harness: Option<HarnessProvider>,
+        attachments: FrameAttachments,
+    ) {
+        let body = crate::tinyplace::encode_task_frame_with_work(
             EncodeFrameInput {
                 kind,
                 task_id: task_id.to_string(),
@@ -180,8 +207,10 @@ impl DaemonRuntime {
                 harness,
                 provider: None,
                 model: None,
+                workflow: None,
             },
-            usage,
+            attachments.usage,
+            attachments.work,
         );
         // Narrate the terminal frames only. Status and ack are throttled chatter
         // whose whole point is that nobody reads them one by one; a reply or an

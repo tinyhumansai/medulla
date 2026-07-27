@@ -11,11 +11,11 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use rust_socketio::asynchronous::{Client, ClientBuilder};
-use rust_socketio::{Event, Payload};
+use rust_socketio::{Event, Payload, TransportType};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::roster::{address_of, register_payload, SharedRoster};
+use super::roster::{address_of, register_payload, SharedRoster, SharedSubscriptionStrategy};
 use super::runner::TaskRunner;
 use super::types::{RunError, TaskRequest};
 
@@ -70,6 +70,7 @@ pub async fn connect_harness(
     jwt: &str,
     roster: SharedRoster,
     runner: Arc<TaskRunner>,
+    subscription_strategy: SharedSubscriptionStrategy,
     log: super::types::HubLog,
     activity: Option<super::ActivityLog>,
 ) -> anyhow::Result<Client> {
@@ -81,9 +82,27 @@ pub async fn connect_harness(
     let cap_runner = runner.clone();
     let abort_runner = runner.clone();
     let abort_log = log.clone();
+    let run_subscription_strategy = subscription_strategy.clone();
 
     let client = ClientBuilder::new(backend_url.to_string())
         .auth(json!({ "token": jwt }))
+        // Websocket only — never engine.io's polling handshake.
+        //
+        // That handshake mints a session id on ONE server process and requires
+        // every following poll to reach the same one. Behind a load balancer
+        // fronting several replicas that only holds if the client returns the
+        // balancer's affinity cookie, and `rust_engineio` implements no cookie
+        // handling at all: it sends none, so each poll is routed afresh and the
+        // server answers `{"code":1,"message":"Session ID unknown"}`. Observed
+        // against production, where the hub failed to connect roughly half the
+        // time and was dropped seconds later when it did — leaving the agent
+        // roster unregistered and the orchestrator reporting no hosts at all.
+        //
+        // A websocket is one connection: it is established once and stays on
+        // the process that accepted it, so no affinity is required. The cost is
+        // that a network which blocks websockets can no longer fall back to
+        // polling — an acceptable trade, since polling cannot work here anyway.
+        .transport_type(TransportType::Websocket)
         // (Re)advertise the current roster on connect.
         .on(Event::Connect, move |_payload, socket| {
             let roster = connect_roster.clone();
@@ -104,12 +123,14 @@ pub async fn connect_harness(
             let runner = runner.clone();
             let roster = run_roster.clone();
             let run_activity = run_activity.clone();
+            let subscription_strategy = run_subscription_strategy.clone();
             async move {
                 tokio::spawn(handle_task_run(
                     payload,
                     socket,
                     runner,
                     roster,
+                    subscription_strategy,
                     run_log,
                     run_activity,
                 ));
@@ -182,6 +203,7 @@ async fn handle_task_run(
     socket: Client,
     runner: Arc<TaskRunner>,
     roster: SharedRoster,
+    subscription_strategy: SharedSubscriptionStrategy,
     log: super::types::HubLog,
     activity: Option<super::ActivityLog>,
 ) {
@@ -194,6 +216,10 @@ async fn handle_task_run(
     let instruction = str_field(&obj, "instruction").unwrap_or_default();
     let cycle_id = str_field(&obj, "cycleId");
     let agent_id = str_field(&obj, "agentId").unwrap_or_default();
+    let requested_provider = str_field(&obj, "provider")
+        .as_deref()
+        .and_then(crate::tinyplace::HarnessProvider::from_wire);
+    let model = str_field(&obj, "model");
     // The frame's own `timeoutMs` is deliberately ignored: that is the BACKEND's
     // task deadline, and the backend now enforces it (aborting a running task via
     // `medulla:task_abort`, which the hub relays). The hub owns no task deadline —
@@ -234,6 +260,28 @@ async fn handle_task_run(
             )
             .await;
         return;
+    };
+
+    // An explicit provider is authoritative. Only an untargeted task consults
+    // the subscription strategy, and a failed/unknown budget probe falls open
+    // to the daemon's own configured default.
+    let provider = match requested_provider {
+        Some(provider) => Some(provider),
+        None => {
+            let strategy = *subscription_strategy
+                .lock()
+                .expect("subscription strategy lock");
+            if strategy == crate::runtime::SubscriptionRoutingStrategy::Manual {
+                None
+            } else {
+                match runner.capabilities(&worker_address).await {
+                    Ok(capabilities) => {
+                        super::roster::subscription_for_strategy(&capabilities, strategy)
+                    }
+                    Err(_) => None,
+                }
+            }
+        }
     };
 
     let wire_task_id = wire_task_id(&task_id);
@@ -285,8 +333,18 @@ async fn handle_task_run(
         cycle_id,
         instruction,
         worker_address,
-        provider: None,
-        model: None,
+        provider,
+        model,
+        // Forwarded rather than dropped: a worker advertises the workflows it
+        // has installed, so the orchestrator naming one here is the other half
+        // of that conversation. Blank is treated as absent so an emitter that
+        // always writes the key still dispatches an ordinary instruction.
+        workflow: obj
+            .get("workflow")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string),
     };
 
     let outcome = runner.run(req, Some(tx)).await;
@@ -360,57 +418,22 @@ async fn handle_capabilities(
         };
         found.cloned()
     };
-    let (providers, summary, address) = match &worker {
-        Some(w) => (
-            vec![w.harness.clone()],
-            format!("{} daemon", w.harness),
-            Some(w.address.clone()),
-        ),
-        None => (Vec::new(), String::new(), None),
+    let (harness, address) = match &worker {
+        Some(w) => (w.harness.clone(), Some(w.address.clone())),
+        None => (String::new(), None),
     };
-    let mut capabilities = json!({ "providers": providers, "summary": summary });
-    // Real path: probe the worker for its budgets/readiness and decorate. Fails
-    // open — a probe error leaves only the static facts.
-    if let Some(address) = address {
-        if let Ok(caps) = runner.capabilities(&address).await {
-            decorate_with_budgets(&mut capabilities, &caps);
-        }
-    }
+    // Ask the worker what it can actually do, and answer with that. Fails open:
+    // a transport error, timeout, or malformed reply leaves only the static
+    // facts the roster already knows. See [`super::probe`].
+    let caps = match address {
+        Some(address) => runner.capabilities(&address).await.ok(),
+        None => None,
+    };
+    let capabilities = super::probe::capabilities_payload(&harness, caps.as_ref());
     let _ = socket
         .emit(
             "medulla:capabilities_result",
             json!({ "probeId": probe_id, "capabilities": capabilities }),
         )
         .await;
-}
-
-/// Map a worker's [`AgentCapabilities`] budgets/readiness onto the backend-shaped
-/// `capabilities` payload the backend's `sanitizeCapabilities` reads.
-///
-/// The worker frame carries a per-provider `readiness` array and a `budgets`
-/// array; the backend's `AgentCapabilities` bag carries a flat `harnessBudgets`
-/// array plus a single advisory `ready`/`readyReason` pair. The `HarnessBudget`
-/// entries already serialize in the camelCase the backend's `parseHarnessBudget`
-/// accepts, so `harnessBudgets` is the budget array verbatim. `ready` is the AND
-/// of the readiness entries (usable only when every installed harness is), and
-/// `readyReason` surfaces the first not-ready reason.
-pub(super) fn decorate_with_budgets(
-    capabilities: &mut Value,
-    caps: &crate::tinyplace::AgentCapabilities,
-) {
-    let Some(obj) = capabilities.as_object_mut() else {
-        return;
-    };
-    if !caps.budgets.is_empty() {
-        if let Ok(budgets) = serde_json::to_value(&caps.budgets) {
-            obj.insert("harnessBudgets".to_string(), budgets);
-        }
-    }
-    if !caps.readiness.is_empty() {
-        let not_ready = caps.readiness.iter().find(|r| !r.ready);
-        obj.insert("ready".to_string(), Value::Bool(not_ready.is_none()));
-        if let Some(reason) = not_ready.and_then(|r| r.reason.clone()) {
-            obj.insert("readyReason".to_string(), Value::String(reason));
-        }
-    }
 }

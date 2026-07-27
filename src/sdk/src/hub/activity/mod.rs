@@ -49,8 +49,21 @@ impl ActivityLog {
         }
     }
 
-    /// Record one frame observed for `task_id`.
+    /// Record one frame observed for `task_id`, with no work snapshot attached.
     pub fn observed(&self, task_id: &str, kind: &str, content: &str, at: i64) {
+        self.observed_with_work(task_id, kind, content, at, None);
+    }
+
+    /// Record one frame observed for `task_id`, carrying whatever the worker
+    /// said it was working on.
+    pub fn observed_with_work(
+        &self,
+        task_id: &str,
+        kind: &str,
+        content: &str,
+        at: i64,
+        work: Option<Box<crate::harness_work::WorkSnapshot>>,
+    ) {
         let agent_id = self
             .attribution
             .lock()
@@ -67,6 +80,7 @@ impl ActivityLog {
             kind: kind.to_string(),
             content: content.to_string(),
             at,
+            work,
         });
         while entries.len() > CAPACITY {
             entries.pop_front();

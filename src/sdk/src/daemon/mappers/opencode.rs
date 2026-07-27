@@ -8,6 +8,7 @@ use super::events::{semantic, tool_call_payload, tool_result_payload};
 use super::shared::{parse_json_object, safe_stringify, truncate};
 use super::timestamp::parse_timestamp_ms;
 use super::types::HarnessSemanticEvent;
+use super::work::work_events_for_tool;
 
 /// Tool `state.status` values that mean the call has finished (→ tool_result).
 const OPENCODE_TERMINAL_STATES: [&str; 3] = ["completed", "error", "done"];
@@ -104,7 +105,10 @@ pub(super) fn opencode_events_from_line(raw: &str, line: i64) -> Vec<HarnessSema
                 .and_then(|s| s.get("input"))
                 .cloned()
                 .unwrap_or(Value::Null);
-            return vec![semantic(
+            // OpenCode names the same ideas in lowercase — `todowrite`, `task`,
+            // `edit` — so the shared recognizer covers it without a second
+            // vocabulary here.
+            let mut events = vec![semantic(
                 line,
                 ts,
                 "opencode:tool_call",
@@ -112,6 +116,15 @@ pub(super) fn opencode_events_from_line(raw: &str, line: i64) -> Vec<HarnessSema
                 "agent",
                 tool_call_payload(call_id, tool_name, &input),
             )];
+            events.extend(work_events_for_tool(
+                line,
+                ts,
+                "opencode:tool_call",
+                call_id,
+                tool_name,
+                &input,
+            ));
+            return events;
         }
     }
 

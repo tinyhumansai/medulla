@@ -28,6 +28,7 @@ fn capacity_details_are_cached_only_for_the_peer_that_was_probed() {
         harness: "claude".to_string(),
         label: None,
         selected: false,
+        workspace: None,
     }]));
     let cache = Mutex::new(HashMap::new());
 

@@ -33,6 +33,22 @@ pub(crate) fn split(area: Rect) -> (Rect, Rect) {
     (columns[0], columns[1])
 }
 
+/// The width a list sidebar should take for its content.
+///
+/// A percentage split reads badly at both ends: on an 80-column terminal 36%
+/// leaves the transcript too narrow to wrap prose, and on a 200-column one it
+/// hands half the screen to a column of short labels. So the sidebar is sized to
+/// what it holds — the widest row plus the panel's own borders — and then held
+/// between a floor that keeps labels legible and a ceiling of a third of the
+/// screen so a long workspace path can never crowd out the content beside it.
+pub(crate) fn sidebar_width(total: u16, widest_row: usize) -> u16 {
+    const FLOOR: u16 = 22;
+    const BORDERS: u16 = 2;
+    let ceiling = (total / 3).max(FLOOR);
+    let wanted = (widest_row as u16).saturating_add(BORDERS);
+    wanted.clamp(FLOOR, ceiling).min(total.saturating_sub(20))
+}
+
 /// Apply shared digit, arrow, Enter, and Escape navigation.
 ///
 /// When the menu has focus, character keys are consumed so an accidental page

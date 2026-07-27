@@ -1,15 +1,17 @@
 //! Executing one delegated task: slots, status forwarding, fallback.
 
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 
+use crate::harness_work::{WorkFold, WorkSnapshot};
 use crate::tinyplace::{TaskFrame, TaskFrameKind};
 
 use super::super::mappers;
 use super::super::providers::{Abort, RunTaskOptions};
-use super::super::status::status_detail;
-use super::super::types::{DaemonRuntime, RunningTask};
+use super::super::status::{status_detail, work_detail};
+use super::super::types::{DaemonRuntime, FrameAttachments, RunningTask};
 
 impl DaemonRuntime {
     /// Admit, execute, and reply to a `task` frame, forwarding throttled status.
@@ -113,25 +115,50 @@ impl DaemonRuntime {
             .await
             .expect("semaphore is never closed");
 
+        // What the harness is working on, folded from its own stream. Shared
+        // with the reply below so the terminal frame carries the final picture
+        // even when the last change was throttled away.
+        let work = Arc::new(Mutex::new(WorkFold::new()));
+
         // Status frames: onEvent (sync) throttles + forwards details over a
-        // channel; a consumer sends them in order before the final reply.
-        let (status_tx, mut status_rx) = mpsc::unbounded_channel::<String>();
+        // channel; a consumer sends them in order before the final reply. Each
+        // frame carries the current work snapshot, so a dropped update is
+        // corrected by the next one rather than lost.
+        let (status_tx, mut status_rx) =
+            mpsc::unbounded_channel::<(String, Option<WorkSnapshot>)>();
         let on_event = {
             let now = self.inner.now.clone();
             let throttle = self.inner.config.status_throttle_ms;
             let mut last_status_at: i64 = i64::MIN;
             let status_tx = status_tx.clone();
+            let work = work.clone();
             Box::new(move |semantic: &mappers::HarnessSemanticEvent| {
+                // Fold first, unconditionally: throttling governs how often the
+                // peer is told, never what this worker knows.
+                let mut fold = work.lock().expect("work fold lock");
+                let changed = fold.apply(
+                    &semantic.event.kind,
+                    &semantic.event.payload,
+                    semantic.timestamp_ms,
+                );
+                // A todo write or a sub-agent spawn has no status wording of its
+                // own; describing the work is what makes it visible at all.
                 let detail = match status_detail(&semantic.event) {
                     Some(detail) => detail,
+                    None if changed => match work_detail(fold.snapshot()) {
+                        Some(detail) => detail,
+                        None => return,
+                    },
                     None => return,
                 };
+                let snapshot = fold.snapshot().clone();
+                drop(fold);
                 let current = now();
                 if current.saturating_sub(last_status_at) < throttle {
                     return;
                 }
                 last_status_at = current;
-                let _ = status_tx.send(detail);
+                let _ = status_tx.send((detail, Some(snapshot)));
             }) as Box<dyn FnMut(&mappers::HarnessSemanticEvent) + Send>
         };
         drop(status_tx);
@@ -183,14 +210,18 @@ impl DaemonRuntime {
             let task_id = frame.task_id.clone();
             let correlation = correlation.clone();
             tokio::spawn(async move {
-                while let Some(detail) = status_rx.recv().await {
-                    this.reply(
+                while let Some((detail, snapshot)) = status_rx.recv().await {
+                    this.reply_with(
                         &from,
                         TaskFrameKind::Status,
                         &task_id,
                         &detail,
                         correlation.as_deref(),
                         Some(provider),
+                        FrameAttachments {
+                            usage: None,
+                            work: snapshot,
+                        },
                     )
                     .await;
                 }
@@ -204,14 +235,21 @@ impl DaemonRuntime {
 
         match result {
             Ok(run) => {
-                self.reply_with_usage(
+                // The reply carries the finished picture — the completed todo
+                // list, every sub-agent, every file touched — so a caller that
+                // only ever reads terminal frames still gets the whole story.
+                let final_work = work.lock().expect("work fold lock").snapshot().clone();
+                self.reply_with(
                     &from,
                     TaskFrameKind::Reply,
                     &frame.task_id,
                     &run.reply,
                     correlation.as_deref(),
                     Some(provider),
-                    run.usage,
+                    FrameAttachments {
+                        usage: run.usage,
+                        work: Some(final_work),
+                    },
                 )
                 .await;
                 // The captured turn content, as it was read out of the harness's

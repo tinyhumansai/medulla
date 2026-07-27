@@ -37,9 +37,9 @@ fn agent_role_color_and_function() {
     assert_eq!(AgentRole::Orchestrator.color(), "yellow");
     assert_eq!(AgentRole::Reasoning.color(), "yellow");
     assert_eq!(AgentRole::Compress.color(), "blue");
-    assert_eq!(AgentRole::Worker.color(), "magenta");
+    assert_eq!(AgentRole::Agent.color(), "magenta");
     assert!(AgentRole::Compress.is_function());
-    assert!(!AgentRole::Worker.is_function());
+    assert!(!AgentRole::Agent.is_function());
     assert!(!AgentRole::Orchestrator.is_function());
 }
 
@@ -59,6 +59,7 @@ fn ordered_tasks_puts_running_first_then_recency() {
         turn_blocks: Vec::new(),
         attention: None,
         question_id: None,
+        work: None,
     };
     let tasks = vec![
         mk("done-old", TaskStatus::Done, 10),
@@ -122,6 +123,7 @@ fn task_lines_empty_and_populated() {
         turn_blocks: Vec::new(),
         attention: None,
         question_id: None,
+        work: None,
     };
     let lines = task_lines(&empty, 40);
     assert_eq!(lines.len(), 1);
@@ -155,7 +157,7 @@ fn lane_lines_agent_task_with_no_turns_shows_placeholder() {
     let lane = AgentLane {
         key: "agent:dev".into(),
         label: "Dev".into(),
-        role: AgentRole::Worker,
+        role: AgentRole::Agent,
         turns: Vec::new(),
         last_at: 0,
         tasks: vec![TaskState {
@@ -166,14 +168,17 @@ fn lane_lines_agent_task_with_no_turns_shows_placeholder() {
             turn_blocks: Vec::new(),
             attention: None,
             question_id: None,
+            work: None,
         }],
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: Some("dev".into()),
         session_id: None,
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 1,
+        work: None,
     };
     let lines = lane_lines(Some(&lane), 60);
     let joined: String = lines
@@ -204,6 +209,7 @@ fn task_lines_truncate_long_header_and_default_color() {
         }],
         attention: None,
         question_id: None,
+        work: None,
     };
     let lines = task_lines(&task, 30);
     assert!(lines[0].text.ends_with('…'));

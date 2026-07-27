@@ -25,6 +25,8 @@ pub struct HubHandle {
     pub(super) persist: Option<super::super::types::RosterSink>,
     /// What the workers are doing, for the Agents view.
     pub(super) activity: super::super::ActivityLog,
+    /// Live provider-subscription selection policy used by task dispatch.
+    pub(super) subscription_strategy: super::super::roster::SharedSubscriptionStrategy,
 }
 /// Everything a [`HubHandle`] is built from.
 ///
@@ -51,4 +53,6 @@ pub(in super::super) struct HandleWiring {
     pub persist: Option<super::super::types::RosterSink>,
     /// What the workers are doing, for the Agents view.
     pub activity: super::super::ActivityLog,
+    /// Initial live provider-subscription selection policy.
+    pub subscription_strategy: super::super::roster::SharedSubscriptionStrategy,
 }

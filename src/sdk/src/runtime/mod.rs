@@ -9,6 +9,8 @@ pub mod capabilities;
 #[cfg(unix)]
 pub mod core;
 mod event_log;
+/// The declared-capacity containment chain and agent-template catalog.
+pub mod fleet;
 /// The non-interactive one-instruction driver for scripting / e2e automation.
 pub mod headless;
 pub mod mock;
@@ -106,13 +108,9 @@ pub trait Runtime: Send + Sync {
     }
     fn abort(&self);
     fn new_session(&self);
-    /// Fork the active thread, inheriting its history but with a fresh session.
-    /// Returns the new thread id.
-    fn fork(&self, name: Option<String>) -> String;
     fn set_active_thread(&self, id: String);
     fn list_main_chats(&self) -> BoxFuture<'static, anyhow::Result<Vec<MainChatSummary>>>;
     fn resume_chat(&self, main_session_id: String) -> BoxFuture<'static, anyhow::Result<()>>;
-    fn set_async_mode(&self, on: bool) -> bool;
     fn inspect_context(&self) -> BoxFuture<'static, anyhow::Result<Vec<ContextItem>>>;
     fn shutdown(&self) -> BoxFuture<'static, anyhow::Result<()>>;
 
@@ -146,6 +144,18 @@ pub trait Runtime: Send + Sync {
 
     /// Apply a worker-registry mutation (`worker.*`). A no-op success elsewhere.
     fn worker_op(&self, _op: WorkerOp) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Re-read the declared fleet — the connected roster and the capacity chain
+    /// it sits in — from the backing service, updating what the next
+    /// [`snapshot`](Runtime::snapshot) reports.
+    ///
+    /// Pull rather than push because capacity is declared, not streamed: no
+    /// runtime today emits an event when a host appears. A no-op success on
+    /// runtimes whose capacity is fixed at attach time (core, mock), so callers
+    /// may poll it unconditionally.
+    fn refresh_fleet(&self) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -241,12 +251,17 @@ fn no_feedback_backend() -> anyhow::Error {
 mod tests;
 
 mod types;
+pub use fleet::{
+    demo_agents, demo_capacity, demo_fleet_requested, demo_requested_from, AgentPlacement,
+    AgentTemplate, AgentTemplateHarnessOverride, CapacitySnapshot, HarnessBudget,
+    HarnessDescriptor, HostDescriptor, HostResources, WorkspaceDescriptor, WorkspaceProfile,
+    DEMO_FLEET_ENV,
+};
 pub use types::AgentDescriptor;
 pub use types::AgentPresence;
 pub use types::ContextItem;
 pub use types::CycleResultSummary;
 pub use types::PeerSession;
-pub use types::RoutingStrategy;
 pub use types::RuntimeSnapshot;
 pub use types::StreamState;
 pub use types::SubmitReceipt;
@@ -254,3 +269,4 @@ pub use types::ThreadSummary;
 pub use types::TinyplaceIdentity;
 pub use types::WorkerInfo;
 pub use types::WorkerOp;
+pub use types::{RoutingStrategy, SubscriptionRoutingStrategy};

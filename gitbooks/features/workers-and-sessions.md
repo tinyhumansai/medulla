@@ -12,7 +12,7 @@ capacity, meaning something that can be handed a task. A session is a
 conversation thread, meaning the durable history you return to.
 
 Workers are long-lived and shared across sessions. Sessions accumulate history
-and can be resumed, forked, and archived. A single instruction you type runs as
+and can be resumed and archived. A single instruction you type runs as
 one cycle against a session, and inside that cycle work fans out to workers.
 
 ## Workers
@@ -33,16 +33,18 @@ them.
 
 ### Managing them
 
-Fleet management lives on the **Routing** tab, which has four pages: `List
-Workers`, `Add Worker`, `Manage Keys`, and `Strategies`. The list page shows each
-registered peer with its handle, label, harness, and — once capacity is
-refreshed — its CPU cores and available memory. Press `a` to add a peer, where
+Fleet management lives on the **Routing** tab, whose pages follow the chain
+itself: `Fleet`, `Hosts`, `Harnesses`, `Templates`, `Add Host`, and `Strategies`.
+The `Hosts` page shows each
+registered machine with its handle, label, harness, and — once capacity is
+refreshed — its CPU cores and available memory. Press `a` to add a host, where
 the first token is the address or `@handle` and the rest is a label. `Enter` or
 `s` selects, `e` edits the label, `d` removes, and a refresh pulls fresh
 capacity. A worker carries several identifiers that are deliberately kept
 distinct — a stable registry ID for edit/select/remove, a messaging address for
 delivery, and a wallet peer ID as identity metadata — and none stands in for
-another. The roster persists under the `hub` config section, so a selected
+another. A registered machine is also a host in the chain, so it appears on the
+`Fleet` page as one, carrying the harnesses it advertises. The roster persists under the `hub` config section, so a selected
 default survives a restart.
 
 Fleet peer management and task steering require a runtime that exposes a worker
@@ -50,6 +52,69 @@ surface — the hosted backend wired to a live hub, or the local core runtime �
 covered in [Configuration](../developers/configuration.md#runtimes). Without one,
 worker management reports itself unavailable rather than silently mutating
 unrelated state.
+
+### Seeing the whole fleet
+
+`Hosts` is the machines this hub can dispatch to. The declared picture those
+dispatches land in lives on the **Agents** tab, under the lanes — one rail over
+the work and the capacity running it, as the containment chain Medulla actually
+models.
+
+```
+Host  →  Harness  →  Workspace  →  Agent
+```
+
+A **host** is a machine, with the cores, memory, and disk it declares. A
+**harness** is an agent CLI runtime installed on that host — `claude-code`,
+`codex`, `opencode`, `tinyplace`, `openhuman`, or something it names itself —
+carrying its providers, its readiness, and its token **budgets**. A **workspace**
+is a folder that harness exposes, optionally with a parsed
+[`MEDULLA.md`](workspace-profiles.md) profile. An **agent** is a durable identity
+deployed into one workspace. Each level names exactly one parent, so an agent's
+host is derived by walking up rather than declared twice.
+
+Beside the chain sits the **agent template** catalog, on the Routing tab's
+`Agent Templates` page and as its own section at the foot of the Agents rail. Where the chain declares *where* an agent can be stood up, a template
+declares *what* may be stood up there — a description, default tools, an abstract
+model tier, and optional per-harness overrides whose presence also restricts
+which harness kinds the template may run on. Each row says where the template may
+run and how many agents currently exist because of it; a template no declared
+place admits is dimmed, because nothing can be provisioned from it. `Enter` opens
+the full declaration — tools, model tier, instructions, per-harness overrides,
+and the agents standing because of it — as a popup over whichever surface you
+opened it from, since that is read once and dismissed rather than kept on screen.
+
+Credentials live on the `Harnesses` page rather than a page of their own, because
+that is where they belong: a Claude subscription or an `ANTHROPIC_API_KEY` is
+spent by the CLI runtime, not by the machine under it. One host can run three
+harnesses on three providers, and one subscription can back harnesses on several
+hosts. The page reads per harness kind — what authenticates it, whether this
+machine has that, and the declared instances of that kind with their host,
+readiness, and budget. Secret values are never rendered.
+
+The rail is an index; the pane beside it is the full declaration. Select a
+harness to read every budget window and seat, a workspace to read its profile, or
+an agent to see its resolved placement and the template it came from. `Alt`+`↑↓`
+walks the rail, `PgUp`/`PgDn` scrolls the pane. Capacity is declared, never
+streamed, so it is pulled: the Harnesses and Templates pages re-read it on entry
+and on `r`.
+
+Nothing is invented and nothing is dropped. A harness whose host is not declared
+still renders, under the id it claims, marked as a dangling parent. An agent with
+no resolvable placement lands in an `unplaced agents` group rather than being
+adopted by an arbitrary host. And an agent with no workspace at all is not a
+mistake: that is how a local agent is declared, and the detail pane says so.
+
+Everything on this page is declared rather than probed, which is the point — it
+is visible on pass one, for every agent, with no capability round-trip. Against
+the hosted backend the connected-worker roster is projected onto the same chain,
+so the page is populated even where the manager reports one flat row per worker.
+You can also declare a chain yourself in the
+[`fleet` config section](../developers/configuration.md#fleet), which the
+terminal app declares to a local orchestrator at handshake time and renders when
+the runtime reports no capacity of its own. To see the surfaces with no fleet at
+all, `MEDULLA_DEMO_FLEET=1` stands in a small fake one — opt-in, and never
+preferred over a real reading.
 
 ### Choosing a default worker
 
@@ -97,6 +162,36 @@ Growing the fleet grows the number of addressable workers, not the parallelism
 ceiling. Concurrency is a separate, pool-wide cap, covered in
 [Token Efficiency and Budgets](token-efficiency.md).
 
+### Seeing what a worker is working on
+
+A worker is a full harness with its own screen, and that screen has always shown
+more than the transcript it streams back: a live todo list, a stated plan, the
+sub-agents it fanned work out to, the files it is rewriting. Medulla reads all of
+it, from every supported harness, and renders one surface rather than three.
+
+Each harness spells it differently. Claude Code writes `TodoWrite`, `Task`, and
+`ExitPlanMode` tool calls and announces its model, working directory, tools, and
+MCP servers on a startup record. Codex emits `todo_list` and `file_change` items
+and calls `update_plan`. OpenCode uses lowercase `todowrite` and `task`. All of
+them fold onto the same shape, so the panel reads the same whichever CLI is
+behind it, and a harness that reports none of it simply shows nothing rather than
+an empty frame.
+
+On the **Agents** tab this appears in three places. Each rail row carries a
+compact chip — `2/4 ⑂1`, meaning two of four tasks done and one sub-agent still
+running — so you can tell which machine to open without opening any of them. The
+transcript header carries a one-line headline naming the item the agent says it
+is on right now. And beside the transcript, when the terminal is wide enough, a
+**Work** panel shows the whole picture: the goal, the todo list with its
+checkboxes, each sub-agent and whether it finished, the files touched, the
+model and working directory the harness reported, and how the run ended with its
+turn count, duration, and cost.
+
+The snapshot travels with the worker's own status and reply frames, so a remote
+machine's todo list is as visible from here as a local one's. Workers that
+predate this surface, and harnesses that report nothing structured, are handled
+by absence rather than by guessing: no chip, no headline, no panel.
+
 ### Failure is a first-class outcome
 
 When a worker fails, Medulla notices and re-delegates. Cancelling one task aborts
@@ -109,15 +204,23 @@ dropped.
 
 A session is the thread: its message history, the cycles that have run against
 it, and enough metadata to find it again. You can create one, list them, resume
-one, fork one, or archive it.
+one, resume one, or archive it.
 
-Forking is worth calling out. A fork starts a new thread that inherits the
-parent's history up to a point, then diverges. When an operation is about to go
-one of two ways and you want both, you fork rather than lose the setup.
+Typing `/` in the composer opens the command list, filtered as you type: `↑↓`
+picks, `Tab` completes, `Enter` runs the highlighted one, `Esc` dismisses. The
+same list is on the Help page, rendered from the same catalog so the two cannot
+disagree.
 
-In the TUI, `/new` starts a fresh session, `/fork [name]` branches the current
-one, `/resume` picks an earlier thread, and `/abort` stops the running cycle.
-`Ctrl-N` is the shortcut for a new session.
+Several threads can be open at once. `/new` (or `^N`) opens a **new thread** beside the
+current one and focuses it — a fresh session with an empty transcript, inheriting
+nothing. The threads you already have keep running and keep their history; a
+strip above the lane list shows them with their running-task and attention
+badges, `^↑↓` walks between them, and clicking one switches. `/resume` picks up
+an earlier session, and `/abort` stops the running cycle.
+
+Against a local orchestration server this is single-threaded by construction —
+that wire is one session per connection — so `/new` clears the view rather than
+opening a second thread.
 
 ### What survives
 
@@ -139,28 +242,46 @@ resumable session in its original working directory.
 ### Steering mid-flight
 
 Sessions are not fire-and-forget. While a fleet is running you can correct the
-plan, answer a worker's question with `A`, or cancel a task with `X`, and the
-operation absorbs the change rather than restarting. This is what the multi-turn
-steering benchmarks in [Benchmarks](../benchmarks.md) measure.
+plan, answer an agent's question by selecting its lane and typing (or `Alt`+`A`
+for the prompt), or cancel a task with `Alt`+`X`, and the operation absorbs the
+change rather than restarting. This is what the multi-turn steering benchmarks in
+[Benchmarks](../benchmarks.md) measure.
 
-Work can also run detached, so a delegation returns immediately and the operation
-continues while you keep going, instead of blocking until the fan-out drains. The
-`/async` command toggles the default.
+Work runs detached: a delegation returns immediately and the operation continues
+while you keep going, rather than blocking until the fan-out drains. This is not
+a mode — it is how delegation works.
 
 ## What you see
 
-The terminal app organizes this into seven tabs: Overview, Chat, Agents, Tasks,
-Routing, Memory, and Settings — the last of which holds Usage, Appearance,
-Config, Feedback, Trace, Context, Account, and Help, grouped under General,
-Debug, and About headings. Overview is the at-a-glance panel: runtime identity
-and health, the active cycle, recent events, the last cycle's results, the task
-ledger, and any pending decision. The Tasks tab is the planning surface, covered
-in [Tasks and Sources](tasks-and-sources.md); Routing is the fleet surface
-described above.
+The terminal app organizes this into six tabs: Overview, Agents, Tasks, Routing,
+Memory, and Settings — the last of which holds Usage, Appearance, Config,
+Feedback, Trace, Context, Account, and Help, grouped under General, Debug, and
+About headings. Overview is the at-a-glance panel: runtime identity and health,
+the active cycle, recent events, the last cycle's results, the task ledger, and
+any pending decision. The Tasks tab is the planning surface, covered in
+[Tasks and Sources](tasks-and-sources.md); Routing holds the fleet's management
+pages described above.
 
-The Agents tab is where an operation becomes legible. There is one lane per
-agent, idle until its first task and busy while in flight, with context usage
-shown per row. What reaches you is assistant text and short status lines, since
+The Agents tab is where an operation becomes legible, and where you drive it:
+this is the conversation surface too. There is one lane for the orchestrator and
+one per agent, idle until its first task and busy while in flight. Selecting one
+shows where it runs — host, harness, workspace path, and the template it was
+provisioned from — above compact meters for the machine's load and memory and for
+the lane's own context window, split into prompt, output, and the cache share
+when the provider reports one. Every reading is omitted rather than zeroed when
+it was not reported: a bar at 0% would claim a measurement nobody took. Under the lanes is the declared fleet; under the transcript
+is the composer.
+
+Selecting the orchestrator and typing is the conversation. Selecting an agent
+shows that agent's own turns, and if it has raised a question, Enter answers it
+rather than starting a new cycle — you answer where the question appeared.
+Printable keys always type, so the shortcuts take a modifier: `Alt`+`↑↓` walks
+the rail, `Alt`+`X` cancels the selected task, `Alt`+`A` opens the answer prompt,
+and `^X` aborts the cycle. There is deliberately no lane for
+the layer between them: the orchestrator deploys 0..N concurrent managers per
+cycle, and what reaches this client is the orchestrator and the agents it is
+managing. A manager is how work was fanned out, not something you talk to or
+steer — its model calls are still visible verbatim under Settings › Trace. What reaches you is assistant text and short status lines, since
 raw tool payloads are filtered out before they hit your screen, on the same
 principle that keeps them out of the orchestrator's context.
 

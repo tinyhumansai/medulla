@@ -1,8 +1,8 @@
 ![Hero Image](./docs/screen.png)
 
-# Medulla v1: The First Orchestrator Model
+# Medulla: The First Orchestrator Model
 
-Medulla v1 is the first model of its kind: not a chat model, not another agent harness, but an **orchestrator model**, purpose-built to command fleets of agent harnesses like [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), and their peers. Medulla v1 brings three capabilities together for the first time:
+Medulla is the first model of its kind: not a chat model, not another agent harness, but an **orchestrator model**, purpose-built to command fleets of agent harnesses like [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), and their peers. It brings three capabilities together for the first time:
 
 1. **A 10-million-token effective context**, handled efficiently through [RLM (Recursive Language Model)](https://arxiv.org/abs/2512.24601) techniques, so accuracy holds at a scale where single-context models collapse.
 2. **Live streaming input from every running harness**, so fleet awareness is continuous rather than post-hoc.
@@ -33,6 +33,42 @@ medulla daemon
 
 On a terminal this opens the reduced daemon TUI. Choose the execution mode and installed harness, then use its four tabs to watch agent lanes, connect and message a master, manage the workspace roots advertised to that master, and approve incoming requests. The daemon creates and stores a worker-level tiny.place wallet locally; it does not need the master's backend token. Workspace and master choices are saved to the Medulla config, so the usual setup does not require environment variables. Use `medulla daemon --headless` for a service process; non-terminal launches select headless mode automatically.
 
+### Adding another machine
+
+Pairing needs one string to travel — the worker's address — and both halves are
+copied in the direction that is easy.
+
+1. In the orchestrator, open **Routing › Add Host** and press `c`. That copies a
+   single line which installs `medulla` if it is missing and starts the worker.
+   Paste it into an SSH session on the machine you want to add.
+2. The worker prints its address and hands it to **your** terminal's clipboard
+   rather than the remote machine's, using OSC 52, so it survives the SSH
+   boundary. Back in the orchestrator, press `a` and paste it, optionally
+   followed by a label.
+
+   The clipboard step needs a terminal that accepts OSC 52 — most do, but tmux
+   wants `set -g set-clipboard on` and some terminals disable it for security.
+   It is also skipped when the daemon's output is piped rather than attached to
+   a terminal. Either way the address is printed on a line of its own, so you
+   can select it by hand.
+
+To skip the copy entirely, name the worker: run `medulla daemon --handle
+build-box` and type `@build-box` into Add Host. Pass `--no-pair` when the
+daemon's output is being parsed by a script.
+
+### Telling the orchestrator what there is to work on
+
+This device hosts a harness as well as orchestrating, so it usually has more than
+one project on it. **Routing › Workspaces** lists every directory the fleet can
+work in — this machine's, which you add with `a` and remove with `d`, and every
+other host's, which that machine declares and this page shows read-only.
+
+What is listed here for this device is exactly what reaches the orchestrator as
+`capabilities.accessibleDirs`, alongside the harness's own summary of each
+project. It is routing context, not a permission grant: a delegated task still
+runs in `[host].workspace`. The list persists to `[host].workspaces` and is
+advertised from the next launch.
+
 Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
 ## What It Does
@@ -41,9 +77,9 @@ Five capabilities do most of the work. Each has a full page in the [documentatio
 
 **[Memory](https://tinyhumans.gitbook.io/medulla/features/memory).** Medulla reads the coding-agent history already on your machine, meaning Claude Code transcripts, Codex rollouts, and your instruction files, then distils it into a compact persona pack covering your standing rules, your stack, and how you like code written. You have already explained yourself hundreds of times to harnesses that forgot. Separately, the reasoning tier keeps a durable scratch space so a hard-won fact survives to the next cycle instead of being derived twice.
 
-**[Workers and sessions](https://tinyhumans.gitbook.io/medulla/features/workers-and-sessions).** A worker is capacity, meaning a real harness running with your credentials in your workspace. A session is the thread you return to, resumable and forkable, surviving the terminal app that started it. Unassigned tasks go to the least-loaded healthy worker, failed ones get re-delegated, and every task settles into a definite state.
+**[Workers and sessions](https://tinyhumans.gitbook.io/medulla/features/workers-and-sessions).** A worker is capacity, meaning a real harness running with your credentials in your workspace. A session is the thread you return to, resumable, surviving the terminal app that started it. Unassigned tasks go to the least-loaded healthy worker, failed ones get re-delegated, and every task settles into a definite state.
 
-**[MEDULLA.md](https://tinyhumans.gitbook.io/medulla/features/workspace-profiles).** A short authored file at a repository root telling the orchestrator what the directory is and how to route work over it. `AGENTS.md` is written for an agent working inside a repo, so it is too long and silent on routing. This is roughly 100 to 200 tokens the orchestrator reads every cycle, and `medulla init` drafts one from what your repo already has.
+**[MEDULLA.md](https://tinyhumans.gitbook.io/medulla/features/workspace-profiles).** A short authored file at a repository root telling the orchestrator what the directory is and how to route work over it. `AGENTS.md` is written for an agent working inside a repo, so it is too long and silent on routing. This is roughly 100 to 200 tokens the orchestrator reads every cycle, and `medulla workspace add` drafts one from what your repo already has and registers the directory so the orchestrator can place work there.
 
 **[Routing](https://tinyhumans.gitbook.io/medulla/features/routing).** Deciding how to decompose a problem, executing a step, and compressing a transcript are different jobs. Medulla splits them across three cognitive tiers, orchestrator, reasoning, and compress, and routes each to a model sized for it. Workspace profiles and per-task hints steer harness and model choice as advisory guidance rather than hard gates.
 
@@ -53,7 +89,7 @@ Validated head-to-head against a leading open-source agent harness with strict o
 
 ## Availability
 
-Medulla v1 is in **early alpha**, and access is exclusive and gated. It is rolling out to a small group of OpenHuman subscribers first, alongside gated API access for select teams building serious agentic systems. Alpha partners get direct access to the team, and their workloads shape what Medulla becomes.
+Medulla is in **early alpha**, and access is exclusive and gated. It is rolling out to a small group of OpenHuman subscribers first, alongside gated API access for select teams building serious agentic systems. Alpha partners get direct access to the team, and their workloads shape what Medulla becomes.
 
 Request access and tell us what you are orchestrating.
 
@@ -82,6 +118,8 @@ The full documentation is at **[tinyhumans.gitbook.io/medulla](https://tinyhuman
 
 - [Getting Started](https://tinyhumans.gitbook.io/medulla/developers/getting-started): install, build, run, first login.
 - [CLI Reference](https://tinyhumans.gitbook.io/medulla/developers/cli-reference): the TUI, the daemon, the harness wrappers, self-update.
+- [ACP harness transport](docs/acp-harnesses.md): use one standard protocol for Claude Code, Codex, and OpenCode.
+- [Workflows](docs/workflows.md): author multi-step plans whose steps each run on a real harness, and let agents build them.
 - [Configuration](https://tinyhumans.gitbook.io/medulla/developers/configuration): the Medulla home, layered config, and the three runtimes.
 - [Authentication](https://tinyhumans.gitbook.io/medulla/developers/authentication): the browser loopback login flow and token handling.
 - [Architecture](https://tinyhumans.gitbook.io/medulla/developers/architecture): the SDK/TUI split, runtime adapters, RLM, and the tiny.place bridge.

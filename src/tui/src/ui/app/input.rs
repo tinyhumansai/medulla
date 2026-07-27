@@ -1,7 +1,7 @@
 //! Event routing and pointer input for [`App`]: the top-level [`App::on_event`]
 //! dispatch, mouse scroll/click handling, tab hit-testing, and the small
-//! navigation helpers (agent-row movement, prompt-history recall, mouse toggle,
-//! thread fork). Keyboard handling proper lives in [`super::keys`].
+//! navigation helpers (rail movement, prompt-history recall, mouse toggle).
+//! Keyboard handling proper lives in [`super::keys`].
 
 use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
 
@@ -34,8 +34,7 @@ impl App {
             // matched on the subpage rather than on `tab` — which is always
             // "Settings" for both, and used to make these arms unreachable.
             MouseEventKind::ScrollUp => match (tab, self.settings_subpage()) {
-                ("Chat", _) => self.chat_scroll += 3,
-                ("Agents", _) => self.agent_scroll += 3,
+                ("Agents", _) => self.scroll_transcript(true, 3),
                 ("Memory", _) if self.memory_focused => {
                     self.memory_index = self.memory_index.saturating_sub(1)
                 }
@@ -46,8 +45,7 @@ impl App {
                 _ => {}
             },
             MouseEventKind::ScrollDown => match (tab, self.settings_subpage()) {
-                ("Chat", _) => self.chat_scroll = self.chat_scroll.saturating_sub(3),
-                ("Agents", _) => self.agent_scroll = self.agent_scroll.saturating_sub(3),
+                ("Agents", _) => self.scroll_transcript(false, 3),
                 ("Memory", _) if self.memory_focused => {
                     let max = self.memory_page_entries().len().saturating_sub(1);
                     self.memory_index = (self.memory_index + 1).min(max);
@@ -81,15 +79,39 @@ impl App {
         }
         let tab = self.tab();
         if tab == "Agents" {
+            // The rail stacks two hit boxes — threads above lanes — so both are
+            // tried; an `else if` here would leave the strip unclickable.
+            if let Some((rect, window_start)) = self.hit_threads {
+                if rect.contains((x, y).into()) {
+                    let rel = (y - rect.y) as usize;
+                    let idx = window_start + rel;
+                    if let Some(t) = self.snapshot.threads.get(idx) {
+                        let id = t.id.clone();
+                        self.runtime.set_active_thread(id);
+                        self.chat_scroll = 0;
+                        self.agent_scroll = 0;
+                        self.refresh_snapshot();
+                    }
+                }
+            }
             if let Some((rect, window_start)) = self.hit_agents {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
-                    let rows = self.agent_rows();
+                    // The *rail's* rows, not the lane rows: the rail also holds
+                    // the dividers, the declared fleet, and the template
+                    // catalog, and `agent_index` indexes all of it. Reading the
+                    // shorter list here meant every click below the lanes fell
+                    // off the end and silently did nothing.
+                    let rows = self.rail_rows();
                     let idx = window_start + rel;
                     if let Some(row) = rows.get(idx) {
                         if row.selectable() {
                             self.agent_scroll = 0;
+                            self.chat_scroll = 0;
                             self.agent_index = idx;
+                            // A click is a focus gesture: the arrows should now
+                            // continue from the row that was just picked.
+                            self.focus_agents_rail();
                         }
                     }
                 }
@@ -102,19 +124,6 @@ impl App {
                     let rel = (y - rect.y) as usize;
                     if rel < self.contexts.len() {
                         self.context_index = rel;
-                    }
-                }
-            }
-        } else if tab == "Chat" {
-            if let Some((rect, window_start)) = self.hit_threads {
-                if rect.contains((x, y).into()) {
-                    let rel = (y - rect.y) as usize;
-                    let idx = window_start + rel;
-                    if let Some(t) = self.snapshot.threads.get(idx) {
-                        let id = t.id.clone();
-                        self.runtime.set_active_thread(id);
-                        self.chat_scroll = 0;
-                        self.refresh_snapshot();
                     }
                 }
             }
@@ -133,9 +142,12 @@ impl App {
         (self.area.height as usize).saturating_sub(13).max(5)
     }
 
-    /// Move the Agents-list cursor to the next/previous selectable row.
+    /// Move the Agents-rail cursor to the next/previous selectable row.
+    ///
+    /// The rail spans the lanes and the declared fleet, so this walks straight
+    /// from the last agent into the first host rather than stopping short.
     pub(super) fn move_agent_index(&mut self, up: bool) {
-        let rows = self.agent_rows();
+        let rows = self.rail_rows();
         if rows.is_empty() {
             return;
         }
@@ -150,6 +162,29 @@ impl App {
         } else {
             next as usize
         };
+    }
+
+    /// Open a new thread and focus the conversation.
+    ///
+    /// A thread is opened, not reset: several conversations can be in flight at
+    /// once, and clearing the one you were in would throw away the transcript
+    /// you were keeping. Nothing is inherited from the current thread — that is
+    /// the whole difference from the fork this replaced.
+    pub(super) fn new_thread(&mut self) {
+        self.runtime.new_session();
+        self.draft = crate::ui::composer::Draft::new();
+        self.chat_scroll = 0;
+        self.agent_scroll = 0;
+        self.agent_index = 0;
+        self.tab_index = super::types::tab_pos("Agents");
+        self.refresh_snapshot();
+        let name = self
+            .snapshot
+            .threads
+            .get(self.active_thread_idx())
+            .map(|t| t.name.clone())
+            .unwrap_or_else(|| "main".into());
+        self.set_status(format!("Opened {name} · ^↑↓ switches threads"));
     }
 
     /// Recall an older prompt from history into the composer.
@@ -197,14 +232,5 @@ impl App {
         } else {
             "Mouse released — native click-drag selection & copy restored"
         });
-    }
-
-    /// Fork the active thread (optionally named), reset chat scroll, and refresh.
-    pub(super) fn fork_thread(&mut self, name: Option<String>) {
-        let label = name.clone().unwrap_or_else(|| "new thread".into());
-        self.runtime.fork(name);
-        self.chat_scroll = 0;
-        self.refresh_snapshot();
-        self.set_status(format!("Forked → {label} (inherits history; fresh fleet)"));
     }
 }

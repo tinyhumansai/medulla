@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::tinyplace::HarnessProvider;
 
+use super::acp::FoldState;
 use super::detect::{
     build_run_args, detect_providers, make_path_lookup, provider_bin, provider_name,
 };
@@ -284,4 +285,36 @@ async fn abort_cancelled_resolves_when_signalled() {
         .unwrap();
     // Already-aborted: cancelled returns immediately.
     abort.cancelled().await;
+}
+
+#[test]
+fn acp_agent_message_chunks_form_one_reply() {
+    let mut state = FoldState::new(None);
+    for text in ["hello ", "world"] {
+        let update = serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": text}
+        }))
+        .unwrap();
+        state.fold(update);
+    }
+    assert_eq!(state.reply(), "hello world");
+}
+
+#[test]
+fn acp_non_text_updates_do_not_pollute_the_reply() {
+    let mut state = FoldState::new(None);
+    let update = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-1",
+        "title": "Run tests",
+        "kind": "execute",
+        "status": "pending"
+    }))
+    .unwrap();
+    state.fold(update);
+    assert_eq!(
+        state.reply(),
+        "ACP agent completed without a text response."
+    );
 }

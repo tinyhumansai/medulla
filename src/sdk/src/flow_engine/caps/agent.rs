@@ -1,0 +1,231 @@
+//! `agent` nodes, run on a real harness.
+//!
+//! This is where Medulla's integration differs from every other host embedding
+//! this engine. Elsewhere an `agent` node is a model call, or an in-process
+//! agent loop. Here it is a *task dispatched to a coding harness* — Claude Code,
+//! Codex, or OpenCode, local or on another machine — over the same bridge the
+//! orchestrator already uses. A workflow is therefore a plan whose steps are
+//! real harness sessions, not a chain of completions.
+//!
+//! Two routes, chosen by [`route_for_agent_ref`]:
+//!
+//! - **Template** — `agent_ref` names an agent template, whose id becomes the
+//!   worker address the task is sent to.
+//! - **Default** — no `agent_ref`, so the node runs on the host's default
+//!   worker.
+//!
+//! `agent_ref` is read from the node's *config*, never from model output. That
+//! is the engine's own guard and it matters more here than upstream: a prompt
+//! injection that could choose the `agent_ref` would be choosing which machine
+//! runs the next instruction.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use tinyflows::caps::{AgentRunner, LlmProvider};
+use tinyflows::error::{EngineError, Result};
+
+use crate::flow_engine::settings::CapabilitySettings;
+use crate::hub::{RunError, TaskRequest};
+
+use super::dispatch::HarnessDispatch;
+
+/// Where an `agent` node's work should go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentRoute {
+    /// A named template, dispatched to the worker of that name.
+    Template(String),
+    /// The host's configured default worker.
+    Default,
+}
+
+/// Choose a route for an `agent_ref`.
+///
+/// An empty or absent reference is the default route rather than an error: a
+/// graph that just says "run this prompt" is the common case and should not
+/// require an operator to name a worker in every node.
+pub fn route_for_agent_ref(agent_ref: Option<&str>) -> AgentRoute {
+    match agent_ref.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(reference) => AgentRoute::Template(reference.to_string()),
+        None => AgentRoute::Default,
+    }
+}
+
+/// The instruction text an `agent` node carries.
+///
+/// `prompt` is the engine's own field name for it; `instruction` is accepted
+/// because that is what the rest of Medulla calls the same thing, and an author
+/// moving between the two surfaces should not be caught out.
+pub fn instruction_of(request: &Value) -> Result<String> {
+    for key in ["prompt", "instruction", "input"] {
+        if let Some(text) = request.get(key).and_then(Value::as_str) {
+            let text = text.trim();
+            if !text.is_empty() {
+                return Ok(text.to_string());
+            }
+        }
+    }
+    Err(EngineError::Capability(
+        "agent node: no prompt — set `prompt` in the node config".to_string(),
+    ))
+}
+
+/// Shape a harness reply into the value the `agent` node expects.
+///
+/// The engine wraps this in its `{ json, text, raw }` envelope and reads `text`
+/// out of a `text` field, so putting the reply there is what makes
+/// `=item.text` work downstream. A reply that happens to be JSON is *also*
+/// surfaced structurally, so `=item.json.…` works without a parser node.
+pub fn reply_to_value(reply: &str, worker: &str) -> Value {
+    let structured: Option<Value> = serde_json::from_str(reply.trim()).ok();
+    json!({
+        "text": reply,
+        "json": structured,
+        "worker": worker,
+    })
+}
+
+/// Map a dispatch failure onto a capability error.
+///
+/// An abort keeps its identity in the message because it is the one failure a
+/// retry must not paper over: the orchestrator cancelled the work deliberately.
+fn dispatch_error(node_kind: &str, err: RunError) -> EngineError {
+    EngineError::Capability(format!("{node_kind}: {err}"))
+}
+
+/// An [`AgentRunner`] that dispatches each node to a harness.
+pub struct HarnessAgentRunner {
+    dispatch: Arc<dyn HarnessDispatch>,
+    settings: Arc<CapabilitySettings>,
+    /// The run this belongs to, used to build ids a `task_abort` can match.
+    run_id: String,
+    /// Distinguishes one dispatch from the next within this run.
+    ///
+    /// Two parallel nodes routed to the same worker — the common case, since
+    /// both may omit `agent_ref` — would otherwise share a wire id, and a
+    /// worker dedupes on `sender + taskId`. One of the two would be rejected as
+    /// a duplicate of the other.
+    sequence: AtomicU64,
+}
+
+impl HarnessAgentRunner {
+    /// A runner dispatching through `dispatch` under `settings`, tagging every
+    /// task with `run_id`.
+    pub fn new(
+        dispatch: Arc<dyn HarnessDispatch>,
+        settings: Arc<CapabilitySettings>,
+        run_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            dispatch,
+            settings,
+            run_id: run_id.into(),
+            sequence: AtomicU64::new(0),
+        }
+    }
+
+    /// Build the task frame for one node.
+    ///
+    /// The task id carries the run and the route so a worker-side log, and an
+    /// operator reading it, can tell which workflow step a session belongs to.
+    fn request(&self, route: &AgentRoute, instruction: String) -> TaskRequest {
+        let worker_address = match route {
+            AgentRoute::Template(name) => name.clone(),
+            AgentRoute::Default => self.settings.default_worker_address.clone(),
+        };
+        let suffix = match route {
+            AgentRoute::Template(name) => name.clone(),
+            AgentRoute::Default => "default".to_string(),
+        };
+        // The sequence is what keeps two concurrent nodes on one worker
+        // distinguishable; the route name is there so a worker-side log says
+        // which step it is looking at.
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let task_id = format!("wf:{}:{suffix}#{sequence}", self.run_id);
+        TaskRequest {
+            // Distinct ids on purpose: the worker dedupes on the wire id, while
+            // the orchestrator aborts by the run id — so aborting the run
+            // cancels whichever node is in flight.
+            task_id,
+            abort_id: self.run_id.clone(),
+            cycle_id: Some(self.run_id.clone()),
+            instruction,
+            worker_address,
+            provider: self.settings.default_provider,
+            model: self.settings.default_model.clone(),
+            // A node dispatches an instruction, never another workflow: nesting
+            // is expressed with a `sub_workflow` node, which the engine expands
+            // itself and applies its own depth limit to.
+            workflow: None,
+        }
+    }
+
+    /// Dispatch `instruction` along `route` and shape the reply.
+    async fn run_on_harness(&self, route: AgentRoute, instruction: String) -> Result<Value> {
+        let request = self.request(&route, instruction);
+        if request.worker_address.trim().is_empty() {
+            return Err(EngineError::Capability(
+                "agent node: no worker to dispatch to — set an `agent_ref` on the node or a \
+                 default worker in the workflows config"
+                    .to_string(),
+            ));
+        }
+        let worker = request.worker_address.clone();
+        let outcome = self
+            .dispatch
+            .dispatch(request)
+            .await
+            .map_err(|err| dispatch_error("agent node", err))?;
+        Ok(reply_to_value(&outcome.reply, &worker))
+    }
+}
+
+#[async_trait]
+impl AgentRunner for HarnessAgentRunner {
+    async fn run_agent(
+        &self,
+        agent_ref: &str,
+        request: Value,
+        _conn: Option<&str>,
+    ) -> Result<Value> {
+        let instruction = instruction_of(&request)?;
+        self.run_on_harness(route_for_agent_ref(Some(agent_ref)), instruction)
+            .await
+    }
+}
+
+/// An [`LlmProvider`] that also dispatches to a harness.
+///
+/// The engine falls back to this when a node names no `agent_ref`, and uses it
+/// for `output_parser` repair passes. Both are "run this text somewhere and give
+/// me the answer", which on this host means the default worker — Medulla has no
+/// bare model client of its own, and inventing one would give a workflow a
+/// second, ungoverned way to reach a provider.
+pub struct HarnessLlm {
+    inner: HarnessAgentRunner,
+}
+
+impl HarnessLlm {
+    /// A provider over the same dispatch the agent runner uses.
+    pub fn new(
+        dispatch: Arc<dyn HarnessDispatch>,
+        settings: Arc<CapabilitySettings>,
+        run_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            inner: HarnessAgentRunner::new(dispatch, settings, run_id),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for HarnessLlm {
+    async fn complete(&self, request: Value, _conn: Option<&str>) -> Result<Value> {
+        let instruction = instruction_of(&request)?;
+        self.inner
+            .run_on_harness(AgentRoute::Default, instruction)
+            .await
+    }
+}

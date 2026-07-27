@@ -3,6 +3,9 @@
 use super::*;
 /// A registered dispatch awaiting its terminal frame.
 pub(super) struct Waiter {
+    /// The worker address this dispatch was sent to — the only sender whose
+    /// frames may settle it. See [`Probe::from`].
+    pub(super) from: String,
     /// Resolved with the terminal outcome (`reply`) or the worker's error text.
     pub(super) reply: oneshot::Sender<Result<TaskOutcome, String>>,
     /// Optional progress sink fed by `status` frames while the task runs.
@@ -13,14 +16,25 @@ pub(super) struct Waiter {
 }
 /// Shared registry of in-flight dispatches, keyed by `correlationId`.
 pub(super) type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
+/// A probe waiting on one worker's answer.
+///
+/// The address is carried, not just the channel, because a correlation id is not
+/// a secret: probe ids are predictable counters, and the inbox is shared by every
+/// peer this identity has a contact edge with. Binding the waiter to the address
+/// the probe was sent to is what stops a peer that guesses an id from answering
+/// on another worker's behalf.
+pub(super) struct Probe<T> {
+    /// The worker address the probe was dispatched to.
+    pub(super) from: String,
+    /// Resolved with the worker's answer, or its error text.
+    pub(super) tx: oneshot::Sender<Result<T, String>>,
+}
 /// In-flight lightweight system probes, keyed by correlation id.
-pub(super) type SystemInfoWaiters =
-    Arc<Mutex<HashMap<String, oneshot::Sender<Result<WorkerSystemInfo, String>>>>>;
+pub(super) type SystemInfoWaiters = Arc<Mutex<HashMap<String, Probe<WorkerSystemInfo>>>>;
 /// In-flight capability probes, keyed by correlation id. Each resolves with the
 /// worker's self-reported [`AgentCapabilities`] (carrying its budgets/readiness)
 /// or the worker's error text.
-pub(super) type CapabilitiesWaiters =
-    Arc<Mutex<HashMap<String, oneshot::Sender<Result<AgentCapabilities, String>>>>>;
+pub(super) type CapabilitiesWaiters = Arc<Mutex<HashMap<String, Probe<AgentCapabilities>>>>;
 /// Shared registry of abort signals, keyed by the orchestrator-facing task id
 /// (`medulla:task_abort.taskId`). One entry per in-flight [`TaskRunner::run`],
 /// registered for the whole call; notifying it makes that call stop the worker,

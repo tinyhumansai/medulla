@@ -1,16 +1,16 @@
-//! List Workers subpage coverage: roster rendering (capacity, probe readiness and
+//! Hosts subpage coverage: roster rendering (capacity, probe readiness and
 //! budget lines, missing-detail fallbacks, pagination), the add/edit/remove
-//! selection shortcuts, and the Manage Keys credential-source view.
+//! selection shortcuts, and the Harnesses credential/runtime view.
 
 use crate::helpers::*;
 
 #[test]
-fn workers_tab_lists_registered_peers() {
+fn hosts_tab_lists_registered_machines() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("List Workers · 3"), "worker count in title");
+    assert!(out.contains("Hosts · 3"), "host count in title");
     assert!(out.contains("@w1"));
     assert!(out.contains("CODEX"));
     assert!(out.contains("IP 10.0.0.1"));
@@ -20,7 +20,7 @@ fn workers_tab_lists_registered_peers() {
 }
 
 #[test]
-fn worker_row_shows_probe_readiness_and_budget_lines() {
+fn host_row_shows_probe_readiness_and_budget_lines() {
     // Step 7: the roster row folds the probe's per-harness readiness (ready/reason)
     // and budget headroom (remaining, window, cooldown) onto the capacity line.
     let mut w = worker("w1", true);
@@ -61,7 +61,7 @@ fn worker_row_shows_probe_readiness_and_budget_lines() {
     ];
 
     let mut app = app_with_roster(vec![w], None);
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     // Wide enough that the folded readiness + budget segments are not clipped.
     let out = render(&mut app, 200, 40);
 
@@ -87,7 +87,7 @@ fn worker_row_shows_probe_readiness_and_budget_lines() {
 }
 
 #[test]
-fn worker_row_sanitizes_probe_text_and_keeps_fractional_budget() {
+fn host_row_sanitizes_probe_text_and_keeps_fractional_budget() {
     // Readiness reasons and budgets are untrusted peer-supplied data. Terminal
     // control/escape sequences in a reason must be stripped before rendering, and
     // sub-million headroom must keep one fractional digit (1.5k, not a rounded 2k).
@@ -111,7 +111,7 @@ fn worker_row_sanitizes_probe_text_and_keeps_fractional_budget() {
     }];
 
     let mut app = app_with_roster(vec![w], None);
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     let out = render(&mut app, 200, 40);
 
     // The escape/OSC bytes are gone; only the printable tail survives.
@@ -128,10 +128,10 @@ fn worker_row_sanitizes_probe_text_and_keeps_fractional_budget() {
 }
 
 #[test]
-fn workers_r_refreshes_selected_machine_details() {
+fn hosts_r_refreshes_selected_machine_details() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     let _ = app.on_event(key(KeyCode::Down));
     let cmd = app.on_event(key(KeyCode::Char('r')));
     match cmd {
@@ -145,37 +145,39 @@ fn workers_r_refreshes_selected_machine_details() {
 }
 
 #[test]
-fn add_worker_page_renders_guidance_and_opens_the_prompt() {
+fn add_host_page_renders_guidance_and_opens_the_prompt() {
     let mut app = app_with_workers(None);
-    app.focus_routing_subpage("Add Worker");
+    app.focus_routing_subpage("Add Host");
 
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Connect a tiny.place worker"));
-    assert!(out.contains("@build-box Primary build worker"));
+    assert!(out.contains("Connect another machine to this orchestrator."));
+    // The handle shortcut, which is the way to add a host without copying
+    // anything at all.
+    assert!(out.contains("@build-box"));
 
     assert!(app.on_event(key(KeyCode::Enter)).is_none());
     let (title, draft) = app.prompt_state().expect("add prompt");
-    assert!(title.starts_with("Add worker"));
+    assert!(title.starts_with("Add host"));
     assert!(draft.is_empty());
 }
 
 #[test]
-fn worker_list_add_shortcut_opens_the_shared_prompt() {
+fn host_list_add_shortcut_opens_the_shared_prompt() {
     let mut app = app_with_workers(None);
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
 
     assert!(app.on_event(key(KeyCode::Char('a'))).is_none());
-    assert_eq!(app.routing_subpage(), "Add Worker");
+    assert_eq!(app.routing_subpage(), "Add Host");
     assert!(app.prompt_state().is_some());
 }
 
 #[test]
-fn empty_worker_list_explains_the_state_and_roster_actions_are_noops() {
+fn empty_host_list_explains_the_state_and_roster_actions_are_noops() {
     let mut app = app_with_roster(Vec::new(), None);
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
 
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("No workers registered"));
+    assert!(out.contains("No hosts registered"));
     for code in [
         KeyCode::Enter,
         KeyCode::Char('d'),
@@ -187,7 +189,7 @@ fn empty_worker_list_explains_the_state_and_roster_actions_are_noops() {
 }
 
 #[test]
-fn worker_list_formats_missing_details_and_megabytes() {
+fn host_list_formats_missing_details_and_megabytes() {
     let mut missing = worker("w1", true);
     missing.ip_address = None;
     missing.cpu_cores = None;
@@ -202,7 +204,7 @@ fn worker_list_formats_missing_details_and_megabytes() {
     small.memory_total_bytes = Some(768 * 1024 * 1024);
 
     let mut app = app_with_roster(vec![missing, small], None);
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     let out = render(&mut app, 120, 40);
 
     assert!(out.contains("details not captured"));
@@ -210,12 +212,12 @@ fn worker_list_formats_missing_details_and_megabytes() {
 }
 
 #[test]
-fn worker_list_paginates_by_two_line_rows() {
+fn host_list_paginates_by_two_line_rows() {
     let workers = (1..=12)
         .map(|index| worker(&format!("w{index}"), index == 1))
         .collect();
     let mut app = app_with_roster(workers, None);
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     for _ in 1..12 {
         let _ = app.on_event(key(KeyCode::Down));
     }
@@ -229,43 +231,52 @@ fn worker_list_paginates_by_two_line_rows() {
 }
 
 #[test]
-fn manage_keys_names_subscriptions_and_api_sources_without_values() {
+fn harnesses_page_names_credentials_per_runtime_without_values() {
     let mut app = app_with_workers(None);
-    app.focus_routing_subpage("Manage Keys");
+    app.focus_routing_subpage("Harnesses");
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Provider subscriptions"));
+    // Credentials read per harness kind, because that is what spends them.
     assert!(out.contains("Claude Code"));
-    assert!(out.contains("Codex"));
+    assert!(out.contains("Claude subscription"));
+    assert!(out.contains("Codex subscription"));
     assert!(out.contains("Anthropic"));
     assert!(out.contains("OpenRouter"));
+    // The declared claude-code harness renders under its own kind, with the host
+    // it runs on and the budget it reports.
+    assert!(out.contains("workshop · ready"), "{out}");
+    assert!(out.contains("anthropic 5h · 760k left"), "{out}");
     assert!(out.contains("Press r to refresh"));
     assert!(out.contains("Secret values are never rendered"));
-    assert!(app.on_event(key(KeyCode::Char('r'))).is_none());
-    assert_eq!(app.status(), "Credential status refreshed");
+    // `r` re-reads both halves: local credentials and declared capacity.
+    assert!(matches!(
+        app.on_event(key(KeyCode::Char('r'))),
+        Some(Cmd::RefreshFleet)
+    ));
+    assert_eq!(app.status(), "Harnesses refreshed");
 }
 
 #[test]
-fn workers_up_down_moves_selection() {
+fn hosts_up_down_moves_selection() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("List Workers");
-    assert_eq!(app.worker_index(), 0);
+    app.focus_routing_subpage("Hosts");
+    assert_eq!(app.host_index(), 0);
     let _ = app.on_event(key(KeyCode::Down));
-    assert_eq!(app.worker_index(), 1);
+    assert_eq!(app.host_index(), 1);
     let _ = app.on_event(key(KeyCode::Down));
-    assert_eq!(app.worker_index(), 2);
+    assert_eq!(app.host_index(), 2);
     // Clamp at the last worker.
     let _ = app.on_event(key(KeyCode::Down));
-    assert_eq!(app.worker_index(), 2);
+    assert_eq!(app.host_index(), 2);
     let _ = app.on_event(key(KeyCode::Up));
-    assert_eq!(app.worker_index(), 1);
+    assert_eq!(app.host_index(), 1);
 }
 
 #[test]
-fn workers_enter_selects_and_d_removes() {
+fn hosts_enter_selects_and_d_removes() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     let _ = app.on_event(key(KeyCode::Down)); // select w2
     let cmd = app.on_event(key(KeyCode::Enter));
     match cmd {
@@ -280,10 +291,10 @@ fn workers_enter_selects_and_d_removes() {
 }
 
 #[test]
-fn workers_s_and_x_are_select_and_remove_aliases() {
+fn hosts_s_and_x_are_select_and_remove_aliases() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     let cmd = app.on_event(key(KeyCode::Char('s')));
     assert!(matches!(cmd, Some(Cmd::WorkerOp(_))));
     let cmd = app.on_event(key(KeyCode::Char('x')));
@@ -291,10 +302,10 @@ fn workers_s_and_x_are_select_and_remove_aliases() {
 }
 
 #[test]
-fn workers_e_opens_edit_label_prompt_prefilled() {
+fn hosts_e_opens_edit_label_prompt_prefilled() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Routing");
-    app.focus_routing_subpage("List Workers");
+    app.focus_routing_subpage("Hosts");
     let _ = app.on_event(key(KeyCode::Char('e')));
     let (title, draft) = app.prompt_state().expect("edit prompt open");
     assert!(title.starts_with("Edit label"));

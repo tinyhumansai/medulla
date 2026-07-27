@@ -19,3 +19,9 @@ mod routing;
 
 #[path = "feature_workers/header.rs"]
 mod header;
+
+#[path = "feature_workers/fleet.rs"]
+mod fleet;
+
+#[path = "feature_workers/workspaces.rs"]
+mod workspaces;

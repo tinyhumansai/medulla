@@ -7,6 +7,10 @@ use std::collections::HashMap;
 
 use serde_json::{json, Map};
 
+use crate::runtime::fleet::{
+    AgentTemplate, CapacitySnapshot, HarnessBudget, HarnessDescriptor, HostDescriptor,
+    HostResources, WorkspaceDescriptor,
+};
 use crate::runtime::{
     AgentDescriptor, AgentPresence, CycleResultSummary, PeerSession, TinyplaceIdentity,
 };
@@ -31,12 +35,15 @@ impl MockRuntime {
                 name: "dev-1".into(),
                 description: "A remote coding agent for delegated implementation work.".into(),
                 availability: "online".into(),
-                workspace_id: None,
+                // Placed in the demo chain below, so the Fleet page shows the
+                // agent under the workspace it is deployed into.
+                workspace_id: Some("ws-1".into()),
                 host_id: None,
-                template_id: None,
+                template_id: Some("implementer".into()),
                 tags: vec!["code".into()],
                 metadata: meta,
             }];
+            s.capacity = demo_capacity();
             s.presence.insert(
                 "dev-1".into(),
                 AgentPresence {
@@ -70,6 +77,10 @@ impl MockRuntime {
                 usage: Some(Usage {
                     input_tokens: 1200,
                     output_tokens: 90,
+                    // A provider that reports its cache, so the demo exercises
+                    // the context meter's cache segment.
+                    cache_read_tokens: Some(840),
+                    cache_creation_tokens: None,
                 }),
                 content: None,
                 reasoning: None,
@@ -88,6 +99,18 @@ impl MockRuntime {
                 content: "Reading auth module…".into(),
                 harness: Some("CODEX".into()),
             });
+            // The worker's own screen, as this one now reads it: what it plans
+            // to do, what it has ticked off, who it delegated to, and what it
+            // rewrote. Without these the demo shows a transcript and nothing
+            // about the work behind it.
+            for (kind, payload) in demo_work_events() {
+                s.emit(TuiEvent::TaskEvent {
+                    task_id: "task-1".into(),
+                    event_kind: kind.into(),
+                    content: payload.to_string(),
+                    harness: Some("CODEX".into()),
+                });
+            }
             s.emit(TuiEvent::TaskComplete {
                 digest: TaskDigest {
                     task_id: "task-1".into(),
@@ -97,6 +120,8 @@ impl MockRuntime {
                     usage: Some(Usage {
                         input_tokens: 6400,
                         output_tokens: 420,
+                        cache_read_tokens: Some(5_100),
+                        cache_creation_tokens: None,
                     }),
                     depth: 2,
                     contract: None,
@@ -125,6 +150,8 @@ impl MockRuntime {
                     usage: Some(Usage {
                         input_tokens: 6400,
                         output_tokens: 420,
+                        cache_read_tokens: Some(5_100),
+                        cache_creation_tokens: None,
                     }),
                     depth: 2,
                     contract: None,
@@ -147,4 +174,108 @@ impl MockRuntime {
         }
         rt
     }
+}
+
+/// The demo containment chain: one host running one harness that exposes one
+/// workspace, plus a template that may be provisioned onto it. Deliberately
+/// small — it exists so every fleet surface has a shape to render, not to
+/// exercise the caps.
+fn demo_capacity() -> CapacitySnapshot {
+    CapacitySnapshot {
+        hosts: vec![HostDescriptor {
+            id: "host-1".into(),
+            name: "workshop".into(),
+            availability: "online".into(),
+            address: Some("10.0.0.4".into()),
+            resources: Some(HostResources {
+                cpu_cores: Some(10.0),
+                total_memory_bytes: Some(32 * 1024 * 1024 * 1024),
+                available_memory_bytes: Some(12 * 1024 * 1024 * 1024),
+                disk_free_bytes: Some(220 * 1024 * 1024 * 1024),
+                load_average_1m: Some(2.1),
+            }),
+            metadata: Map::new(),
+        }],
+        harnesses: vec![HarnessDescriptor {
+            id: "harness-1".into(),
+            host_id: "host-1".into(),
+            kind: "claude-code".into(),
+            availability: "online".into(),
+            ready: true,
+            ready_reason: None,
+            providers: vec!["anthropic".into()],
+            template_ids: vec!["implementer".into()],
+            budgets: vec![HarnessBudget {
+                provider: "anthropic".into(),
+                window: "5h".into(),
+                seat: Some("seat-1".into()),
+                limit_tokens: Some(1_000_000),
+                used_tokens: Some(240_000),
+                remaining_tokens: Some(760_000),
+                cooldown_until: None,
+                source: "provider_reported".into(),
+            }],
+            metadata: Map::new(),
+        }],
+        workspaces: vec![WorkspaceDescriptor {
+            id: "ws-1".into(),
+            name: "medulla".into(),
+            path: "/srv/repos/medulla".into(),
+            harness_id: "harness-1".into(),
+            profile: None,
+            project: Some("medulla".into()),
+            template_ids: Vec::new(),
+            metadata: Map::new(),
+        }],
+        templates: vec![AgentTemplate {
+            id: "implementer".into(),
+            name: Some("Implementer".into()),
+            description: "Implements a scoped change and reports what it did.".into(),
+            instructions: None,
+            tools: None,
+            model: Some("reasoning".into()),
+            effort: None,
+            params: Map::new(),
+            tags: vec!["code".into()],
+            metadata: Map::new(),
+            harnesses: Default::default(),
+        }],
+    }
+}
+
+/// The structured work a demo worker reports: a plan, a half-finished todo list,
+/// a sub-agent still running, and the files it has rewritten.
+fn demo_work_events() -> Vec<(&'static str, serde_json::Value)> {
+    use crate::harness_work::kinds;
+    vec![
+        (
+            kinds::SESSION_INFO,
+            json!({ "model": "gpt-5-codex", "cwd": "/srv/repos/auth", "tools": ["shell", "apply_patch", "web_search"] }),
+        ),
+        (
+            kinds::PLAN_UPDATE,
+            json!({ "goal": "Split auth into focused modules" }),
+        ),
+        (
+            kinds::TODO_UPDATE,
+            json!({ "todos": [
+                { "content": "map the auth surface", "status": "completed" },
+                { "content": "extract the token store", "status": "completed" },
+                { "content": "split the session guard", "status": "in_progress", "activeForm": "Splitting the session guard" },
+                { "content": "update the callers", "status": "pending" },
+            ]}),
+        ),
+        (
+            kinds::SUBAGENT_START,
+            json!({ "call_id": "sub-1", "agent_type": "code-reviewer", "description": "review the extracted token store" }),
+        ),
+        (
+            kinds::FILE_CHANGE,
+            json!({ "path": "src/auth/tokens.rs", "change": "added" }),
+        ),
+        (
+            kinds::FILE_CHANGE,
+            json!({ "path": "src/auth/mod.rs", "change": "modified" }),
+        ),
+    ]
 }

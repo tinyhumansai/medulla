@@ -47,6 +47,23 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .get("usage")
         .and_then(|v| serde_json::from_value::<TokenUsage>(v.clone()).ok());
 
+    // A malformed work snapshot is dropped rather than sinking the frame: the
+    // task result is the payload that matters, and a peer on a newer shape must
+    // not make its replies unreadable here.
+    let work = obj
+        .get("work")
+        .and_then(|v| serde_json::from_value::<crate::harness_work::WorkSnapshot>(v.clone()).ok())
+        .map(Box::new);
+
+    // A blank workflow id is treated as absent: an encoder that always writes
+    // the key should not turn every task into a lookup for "".
+    let workflow = obj
+        .get("workflow")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
         kind,
@@ -57,7 +74,9 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         harness,
         provider,
         model,
+        workflow,
         usage,
+        work,
     })
 }
 

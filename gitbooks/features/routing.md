@@ -20,7 +20,7 @@ it.
 | Tier | Job |
 | --- | --- |
 | **Orchestrator** | Holds the operation. Decides what happens next, reads the distilled picture, funds and reviews delegations. |
-| **Reasoning** | Does the thinking inside a step, and owns delegation. This is the tier that actually fans work out. |
+| **Reasoning** | Does the thinking inside a step, and owns delegation. This is the tier that actually fans work out — as 0..N concurrent **managers** per cycle, each deployed by the orchestrator, each choosing its own harness and agents. |
 | **Compress** | Turns bulk into signal: pass summaries, fleet output, anything verbose enough to crowd a context window. |
 
 Every model call names its tier, and the tier is what gets routed. The
@@ -32,7 +32,15 @@ detail.
 
 Note the division of labour. The orchestrator does not fan out; the reasoning
 tier delegates. The orchestrator decides that work should be decomposed and
-reviews what comes back.
+reviews what comes back. Concretely: the orchestrator chooses *where* a manager
+works — the host and workspace, frozen for that manager's whole run — and the
+manager chooses *who* does the work and *on what runtime*, selecting the harness,
+targeting or spawning agents, and delegating tasks to them.
+
+Managers are not shown in the terminal app. The event stream carries the
+orchestrator and the agents it is managing; a manager's thinking and intermediate
+tool calls never ride upward, only the message from its last turn. See
+[Workers and Sessions](workers-and-sessions.md#what-you-see).
 
 ## Routing to models
 

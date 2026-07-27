@@ -28,12 +28,14 @@ fn lane(role: AgentRole) -> AgentLane {
         last_at: 0,
         tasks: Vec::new(),
         context_tokens: None,
+        usage: Default::default(),
         harness_label: None,
         agent_id: None,
         session_id: None,
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 0,
+        work: None,
     }
 }
 
@@ -48,7 +50,7 @@ fn presence(online: bool) -> AgentPresence {
 #[test]
 fn a_function_lane_is_always_marked_with_the_function_glyph() {
     let a = app();
-    assert_eq!(a.lane_marker(&lane(AgentRole::Worker), true), "ƒ");
+    assert_eq!(a.lane_marker(&lane(AgentRole::Agent), true), "ƒ");
 }
 
 #[test]
@@ -67,8 +69,8 @@ fn non_worker_tiers_render_as_present() {
 fn an_unbacked_worker_is_unknown_and_a_roster_seeded_one_is_idle() {
     let a = app();
     // Nothing known at all.
-    assert_eq!(a.lane_marker(&lane(AgentRole::Worker), false), "◆");
-    assert_eq!(a.lane_state(&lane(AgentRole::Worker)), " · idle");
+    assert_eq!(a.lane_marker(&lane(AgentRole::Agent), false), "◆");
+    assert_eq!(a.lane_state(&lane(AgentRole::Agent)), " · idle");
 }
 
 #[test]
@@ -81,16 +83,16 @@ fn presence_drives_the_glyph_for_an_agent_backed_worker() {
         .presence
         .insert("agent-2".to_string(), presence(false));
 
-    let mut online = lane(AgentRole::Worker);
+    let mut online = lane(AgentRole::Agent);
     online.agent_id = Some("agent-1".to_string());
     assert_eq!(a.lane_marker(&online, false), "●");
 
-    let mut offline = lane(AgentRole::Worker);
+    let mut offline = lane(AgentRole::Agent);
     offline.agent_id = Some("agent-2".to_string());
     assert_eq!(a.lane_marker(&offline, false), "○");
 
     // Known id, no presence record yet → unknown rather than claimed-offline.
-    let mut unseen = lane(AgentRole::Worker);
+    let mut unseen = lane(AgentRole::Agent);
     unseen.agent_id = Some("agent-3".to_string());
     assert_eq!(a.lane_marker(&unseen, false), "◆");
 }
@@ -116,7 +118,7 @@ fn a_session_lane_reflects_its_peer_session_state() {
         ],
     );
 
-    let mut live = lane(AgentRole::Worker);
+    let mut live = lane(AgentRole::Agent);
     live.session_id = Some("s-live".to_string());
     live.parent_agent_id = Some("machine-1".to_string());
     assert_eq!(a.session_state(&live).as_deref(), Some("running"));
@@ -124,7 +126,7 @@ fn a_session_lane_reflects_its_peer_session_state() {
     assert_eq!(a.lane_state(&live), " · running");
 
     // An ended session is hollow and reads as inactive.
-    let mut done = lane(AgentRole::Worker);
+    let mut done = lane(AgentRole::Agent);
     done.session_id = Some("s-done".to_string());
     done.parent_agent_id = Some("machine-1".to_string());
     assert_eq!(a.lane_marker(&done, false), "○");
@@ -132,14 +134,14 @@ fn a_session_lane_reflects_its_peer_session_state() {
 
     // A session id whose parent machine is unknown resolves to nothing, and the
     // row degrades to the pending suffix instead of claiming a state.
-    let mut orphan = lane(AgentRole::Worker);
+    let mut orphan = lane(AgentRole::Agent);
     orphan.session_id = Some("s-live".to_string());
     orphan.parent_agent_id = Some("machine-nope".to_string());
     assert_eq!(a.session_state(&orphan), None);
     assert_eq!(a.lane_state(&orphan), " · …");
 
     // No parent at all → the lookup short-circuits.
-    let mut parentless = lane(AgentRole::Worker);
+    let mut parentless = lane(AgentRole::Agent);
     parentless.session_id = Some("s-live".to_string());
     assert_eq!(a.session_state(&parentless), None);
 }
@@ -246,8 +248,10 @@ fn a_tool_call_still_streaming_is_not_rendered_early() {
         .map(|l| l.text)
         .collect();
     // The log ended, so it flushes — with whatever it has, not a lie about it.
+    // A half-written argument object does not parse, so the name renders alone
+    // rather than showing the fragment `sle` as if it were the whole command.
     assert_eq!(lines.len(), 1, "got {lines:?}");
-    assert!(lines[0].starts_with("⏺ Bash("), "got {lines:?}");
+    assert_eq!(lines[0], "⏺ Bash", "got {lines:?}");
 }
 
 #[test]
@@ -313,5 +317,10 @@ fn a_huge_argument_payload_is_clipped_not_dumped() {
         "got {} chars",
         call.chars().count()
     );
-    assert!(call.ends_with('…'), "clipping must be visible: {call}");
+    // The elision marker sits inside the parentheses, which close the call.
+    assert!(call.contains('…'), "clipping must be visible: {call}");
+    assert!(
+        !call.contains('{') && !call.contains('}'),
+        "the payload must be summarised, never dumped: {call}"
+    );
 }

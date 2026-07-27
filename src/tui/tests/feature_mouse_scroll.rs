@@ -116,7 +116,7 @@ fn the_wheel_scrolls_the_memory_tab() {
 fn the_wheel_is_swallowed_by_the_resume_picker() {
     // A modal owns the pointer; scrolling the list behind it would be wrong.
     let mut app = seeded_app();
-    app.tab_index = TABS.iter().position(|t| *t == "Chat").unwrap();
+    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
     app.open_resume(Vec::new());
     assert!(app.on_event(wheel(MouseEventKind::ScrollDown)).is_none());
     assert!(app

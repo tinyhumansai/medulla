@@ -52,8 +52,23 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
             name: w.label.unwrap_or_else(|| "tinyplace-worker".to_string()),
             description: format!("{} daemon", w.harness),
             harness: w.harness,
+            // Remembered rosters carry no workspace: the local host's is
+            // injected fresh each launch (see `build_hub_config_with_host`),
+            // and a remote peer's is unknown here.
+            workspace: None,
         })
         .collect()
+}
+
+/// Subscription routing remembered beside the roster.
+fn subscription_strategy_from_config(home: &Path) -> medulla::runtime::SubscriptionRoutingStrategy {
+    let Ok(text) = std::fs::read_to_string(roster_path(home)) else {
+        return medulla::runtime::SubscriptionRoutingStrategy::Manual;
+    };
+    toml::from_str::<medulla::config::TuiConfig>(&text)
+        .ok()
+        .and_then(|config| config.subscription_routing_strategy)
+        .unwrap_or(medulla::runtime::SubscriptionRoutingStrategy::Manual)
 }
 
 /// A sink that writes roster changes back to the config file.
@@ -61,11 +76,22 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
 /// Best-effort and narrated: failing to save a roster must not take the hub down
 /// with it, but a silent failure would leave the operator re-adding the same
 /// worker every launch with no idea why.
-fn roster_sink(home: &Path, log: medulla::hub::HubLog) -> medulla::hub::RosterSink {
+/// `local_address` names the device-local host, which is deliberately *not*
+/// saved: it is derived from `[host]` on every launch, so remembering it would
+/// outlive the setting that produced it. A roster that kept it would, on the
+/// next run with hosting off, advertise a worker whose address nothing binds —
+/// and the router, finding no local endpoint, would send its tasks over
+/// tiny.place to a name no relay can resolve.
+fn roster_sink(
+    home: &Path,
+    log: medulla::hub::HubLog,
+    local_address: String,
+) -> medulla::hub::RosterSink {
     let path = roster_path(home);
     Arc::new(move |workers: &[medulla::hub::HubWorker]| {
         let rows: Vec<medulla::config::HubWorkerConfig> = workers
             .iter()
+            .filter(|w| w.address != local_address)
             .map(|w| medulla::config::HubWorkerConfig {
                 id: w.id.clone(),
                 address: w.address.clone(),
@@ -96,6 +122,7 @@ fn workers_from_env(env: &HashMap<String, String>) -> Vec<WorkerSpec> {
         name: "tinyplace-worker".to_string(),
         description: format!("{provider} daemon"),
         harness: provider.clone(),
+        workspace: None,
     };
     if let Some(list) = env
         .get("MEDULLA_HUB_WORKERS")
@@ -146,6 +173,23 @@ pub(crate) fn build_hub_config_with_log(
     home: &Path,
     log: medulla::hub::HubLog,
 ) -> Option<HubConfig> {
+    build_hub_config_with_host(env, home, log, None)
+}
+
+/// Like [`build_hub_config_with_log`], additionally dispatching over `local` —
+/// the device-local bus a host in this same process is bound to.
+///
+/// `local` carries the bus and, when a host is running on it, the roster entry
+/// naming that host. The entry is prepended rather than appended so the machine
+/// the operator is sitting at leads the list, and it replaces any remembered
+/// entry with the same address so restarting never accumulates duplicates of
+/// itself.
+pub(crate) fn build_hub_config_with_host(
+    env: &HashMap<String, String>,
+    home: &Path,
+    log: medulla::hub::HubLog,
+    local: Option<LocalDispatch>,
+) -> Option<HubConfig> {
     if !hub_enabled(env) {
         return None;
     }
@@ -155,6 +199,23 @@ pub(crate) fn build_hub_config_with_log(
     if workers.is_empty() {
         workers = workers_from_config(home);
     }
+    // The device-local host is injected fresh, never inherited. Remembered
+    // entries at its address are dropped first — including when no host is
+    // running now, which is the case that mattered: a roster saved while
+    // hosting was on would otherwise keep advertising `this-device` after
+    // `MEDULLA_HOST=0`, and its tasks would be routed to a relay that has never
+    // heard the name.
+    let (local_network, local_address) = match &local {
+        Some(dispatch) => {
+            workers.retain(|worker| worker.address != dispatch.host_address);
+            if let Some(host) = &dispatch.host {
+                workers.retain(|worker| worker.address != host.address);
+                workers.insert(0, host.clone());
+            }
+            (Some(dispatch.network.clone()), dispatch.hub_address.clone())
+        }
+        None => (None, String::new()),
+    };
     let creds = medulla::auth::CredentialStore::at_home(home).load_or_legacy()?;
     let identity_dir = env
         .get("MEDULLA_HUB_IDENTITY_DIR")
@@ -164,14 +225,21 @@ pub(crate) fn build_hub_config_with_log(
         .get("MEDULLA_HUB_POLL_MS")
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_MS);
+    let persisted_local = local
+        .as_ref()
+        .map(|dispatch| dispatch.host_address.clone())
+        .unwrap_or_default();
     Some(HubConfig {
-        persist: Some(roster_sink(home, log.clone())),
+        persist: Some(roster_sink(home, log.clone(), persisted_local)),
         log,
         backend_url: creds.base_url,
         jwt: creds.jwt,
         identity_dir,
         workers,
         poll: Duration::from_millis(poll_ms),
+        local_network,
+        local_address,
+        subscription_strategy: subscription_strategy_from_config(home),
     })
 }
 
@@ -184,12 +252,13 @@ pub(crate) async fn start(
     home: &Path,
     slot: HubSlot,
     logs: medulla_tui::log::LogBuffer,
+    local: Option<LocalDispatch>,
 ) -> Option<HubSession> {
     // The hub must never write to the terminal here: the TUI owns the alternate
     // screen, and ratatui only repaints the cells it manages, so a stray line
     // lands on top of the UI and is never cleared. Capturing them keeps the
     // screen intact and the diagnostics readable.
-    let config = build_hub_config_with_log(env, home, logs.sink())?;
+    let config = build_hub_config_with_host(env, home, logs.sink(), local)?;
     match start_hub(config).await {
         Ok(session) => {
             *slot.lock().expect("hub slot") = Some(session.handle.clone());
@@ -206,4 +275,4 @@ pub(crate) async fn start(
 mod tests;
 
 mod types;
-pub(crate) use types::HubSlot;
+pub(crate) use types::{HubSlot, LocalDispatch};

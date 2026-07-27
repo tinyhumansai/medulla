@@ -40,6 +40,10 @@ impl LoginScreen {
                     .add_modifier(Modifier::BOLD),
             )));
         }
+        // A blank row between the wordmark and the backend line: the logo's
+        // block glyphs sit right on the baseline, so without it the header
+        // reads as a fourth row of the art.
+        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             format!("backend {}", self.base_url),
             Style::default().add_modifier(Modifier::DIM),

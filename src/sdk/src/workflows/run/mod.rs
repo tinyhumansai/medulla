@@ -36,12 +36,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use tinyflows::engine::{
-    resume_with_checkpointer_journaled_observed, run_with_checkpointer_journaled_observed,
-    InMemoryGraphEventJournal,
-};
-use tinyflows::observability::RunObserver;
 
+use crate::flow_engine::execute;
 use crate::flow_engine::observability::{WorkEventSink, WorkflowRunObserver};
 use crate::flow_engine::{build_capabilities, open_checkpointer, CapabilitySettings, HostServices};
 use crate::workflows::store::{new_run_record, require, require_run};
@@ -112,6 +108,11 @@ pub async fn run_workflow(
     run_id: &str,
     input: Value,
 ) -> Result<RunRecord, WorkflowError> {
+    if !context.settings.enabled {
+        return Err(WorkflowError::Engine(
+            "workflows are disabled on this host (workflows.enabled = false)".to_string(),
+        ));
+    }
     let workflow = require(context.store.as_ref(), workflow_id)?;
     if !workflow.enabled {
         return Err(WorkflowError::Engine(format!(
@@ -119,12 +120,17 @@ pub async fn run_workflow(
         )));
     }
 
-    let compiled = tinyflows::compiler::compile(&workflow.graph)
-        .map_err(|err| WorkflowError::Engine(err.to_string()))?;
+    let compiled = execute::compile(&workflow.graph).map_err(WorkflowError::Engine)?;
 
-    // Registered before anything can await, so a cancel arriving during setup
-    // is not dropped on the floor.
-    let (_guard, cancelled) = RunGuard::register(run_id);
+    // Claimed before anything can await, so a cancel arriving during setup is
+    // not dropped on the floor — and so two dispatches of the same run id
+    // cannot both start, which would run every node's side effects twice and
+    // race to overwrite one run record.
+    let Some((_guard, cancelled)) = RunGuard::claim(run_id) else {
+        return Err(WorkflowError::Engine(format!(
+            "run '{run_id}' is already executing"
+        )));
+    };
 
     let record = new_run_record(run_id, workflow_id, crate::clock::now_millis() as u64);
     context.store.record_run(&record)?;
@@ -141,15 +147,14 @@ pub async fn run_workflow(
         &format!("workflow:{workflow_id}"),
         run_id,
     );
-    let as_observer: Arc<dyn RunObserver> = observer.clone();
+    let as_observer = observer.clone() as Arc<dyn tinyflows::observability::RunObserver>;
 
-    let engine_run = run_with_checkpointer_journaled_observed(
+    let engine_run = execute::run(
         &compiled,
         input,
         &capabilities,
         open_checkpointer(&context.settings),
         run_id,
-        Arc::new(InMemoryGraphEventJournal::default()),
         &as_observer,
     );
     let bounded = tokio::time::timeout(
@@ -165,8 +170,8 @@ pub async fn run_workflow(
         biased;
         _ = cancelled.notified() => Err(Settle::Cancelled),
         result = &mut bounded => match result {
-            Ok(Ok(journaled)) => Ok(journaled.outcome),
-            Ok(Err(err)) => Err(Settle::Failed(err.to_string())),
+            Ok(Ok(outcome)) => Ok(outcome),
+            Ok(Err(err)) => Err(Settle::Failed(err)),
             Err(_) => Err(Settle::TimedOut(context.settings.run_timeout_secs)),
         },
     };
@@ -223,6 +228,11 @@ pub async fn resume_workflow(
     approvals: Vec<String>,
     rejections: Vec<String>,
 ) -> Result<RunRecord, WorkflowError> {
+    if !context.settings.enabled {
+        return Err(WorkflowError::Engine(
+            "workflows are disabled on this host (workflows.enabled = false)".to_string(),
+        ));
+    }
     let mut record = require_run(context.store.as_ref(), run_id)?;
     if record.status != RunStatus::PendingApproval {
         return Err(WorkflowError::Engine(format!(
@@ -241,10 +251,13 @@ pub async fn resume_workflow(
     }
 
     let workflow = require(context.store.as_ref(), &record.workflow_id)?;
-    let compiled = tinyflows::compiler::compile(&workflow.graph)
-        .map_err(|err| WorkflowError::Engine(err.to_string()))?;
+    let compiled = execute::compile(&workflow.graph).map_err(WorkflowError::Engine)?;
 
-    let (_guard, cancelled) = RunGuard::register(run_id);
+    let Some((_guard, cancelled)) = RunGuard::claim(run_id) else {
+        return Err(WorkflowError::Engine(format!(
+            "run '{run_id}' is already executing"
+        )));
+    };
     record.status = RunStatus::Running;
     record.finished_at = None;
     context.store.record_run(&record)?;
@@ -261,16 +274,15 @@ pub async fn resume_workflow(
         &format!("workflow:{}", record.workflow_id),
         run_id,
     );
-    let as_observer: Arc<dyn RunObserver> = observer.clone();
+    let as_observer = observer.clone() as Arc<dyn tinyflows::observability::RunObserver>;
 
-    let engine_run = resume_with_checkpointer_journaled_observed(
+    let engine_run = execute::resume(
         &compiled,
         &capabilities,
         open_checkpointer(&context.settings),
         run_id,
         approvals,
         rejections,
-        Arc::new(InMemoryGraphEventJournal::default()),
         &as_observer,
     );
     let bounded = tokio::time::timeout(
@@ -283,8 +295,8 @@ pub async fn resume_workflow(
         biased;
         _ = cancelled.notified() => Err(Settle::Cancelled),
         result = &mut bounded => match result {
-            Ok(Ok(journaled)) => Ok(journaled.outcome),
-            Ok(Err(err)) => Err(Settle::Failed(err.to_string())),
+            Ok(Ok(outcome)) => Ok(outcome),
+            Ok(Err(err)) => Err(Settle::Failed(err)),
             Err(_) => Err(Settle::TimedOut(context.settings.run_timeout_secs)),
         },
     };
@@ -332,12 +344,11 @@ pub async fn dry_run(
     input: Value,
 ) -> Result<Value, WorkflowError> {
     let workflow = require(store.as_ref(), workflow_id)?;
-    let compiled = tinyflows::compiler::compile(&workflow.graph)
-        .map_err(|err| WorkflowError::Engine(err.to_string()))?;
+    let compiled = execute::compile(&workflow.graph).map_err(WorkflowError::Engine)?;
     let capabilities = crate::flow_engine::build_dry_run_capabilities(resolver);
 
-    tinyflows::engine::run(&compiled, input, &capabilities)
+    execute::simulate(&compiled, input, &capabilities)
         .await
         .map(|outcome| outcome.output)
-        .map_err(|err| WorkflowError::Engine(err.to_string()))
+        .map_err(WorkflowError::Engine)
 }

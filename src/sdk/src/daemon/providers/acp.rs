@@ -37,6 +37,16 @@ fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
     #[cfg(feature = "workflows")]
     {
         use agent_client_protocol::schema::v1::{McpServer, McpServerStdio};
+        // An operator who turned workflows off should not have harnesses handed
+        // tools that would be refused.
+        let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let enabled = crate::config::load_config(None, &env, &cwd)
+            .map(|loaded| loaded.config.workflows.enabled)
+            .unwrap_or(true);
+        if !enabled {
+            return Vec::new();
+        }
         let Ok(binary) = std::env::current_exe() else {
             return Vec::new();
         };

@@ -482,3 +482,44 @@ async fn a_dry_run_starts_no_harness_session_but_still_satisfies_declared_schema
         outcome.output
     );
 }
+
+#[test]
+fn private_address_detection_covers_the_cloud_metadata_endpoint() {
+    // The one an SSRF is usually aiming for, and the reason link-local is
+    // refused rather than only loopback.
+    let metadata: std::net::IpAddr = "169.254.169.254".parse().unwrap();
+    assert!(super::caps::http::is_private_addr(&metadata));
+
+    for private in ["127.0.0.1", "10.0.0.1", "192.168.1.1", "172.16.0.1", "::1"] {
+        let addr: std::net::IpAddr = private.parse().unwrap();
+        assert!(super::caps::http::is_private_addr(&addr), "{private}");
+    }
+    for public in ["8.8.8.8", "1.1.1.1"] {
+        let addr: std::net::IpAddr = public.parse().unwrap();
+        assert!(!super::caps::http::is_private_addr(&addr), "{public}");
+    }
+}
+
+#[tokio::test]
+async fn an_allowlisted_name_that_resolves_to_loopback_is_still_refused() {
+    // The textual guard cannot catch this: `localtest.me` and friends are
+    // ordinary names whose DNS answer is 127.0.0.1. Resolving is what closes
+    // the rebinding gap.
+    let root = tempfile::tempdir().unwrap();
+    let mut allowed = CapabilitySettings::rooted_at(root.path());
+    allowed.http_allowlist = vec!["localtest.me".into()];
+    let client = AllowlistHttpClient::new(Arc::new(allowed), HashMap::new());
+
+    let result = client
+        .request(json!({ "url": "http://localtest.me/x" }), None)
+        .await;
+
+    // Either it resolved to loopback and was refused for that, or this machine
+    // has no DNS for the name and it was refused for that — never sent.
+    let err = result.expect_err("must not be sent");
+    let message = err.to_string();
+    assert!(
+        message.contains("loopback or private") || message.contains("cannot resolve"),
+        "got {message}"
+    );
+}

@@ -505,3 +505,53 @@ async fn two_runs_of_one_workflow_cancel_independently() {
     let second = second.await.unwrap().unwrap();
     assert_eq!(second.status, RunStatus::Cancelled);
 }
+
+#[tokio::test]
+async fn a_host_with_workflows_disabled_runs_nothing() {
+    let harness = Harness::new();
+    harness.install(&diamond(), "diamond");
+    let mut context = harness.context(Arc::new(StubDispatch::default()));
+    let mut off = (*harness.settings).clone();
+    off.enabled = false;
+    context.settings = Arc::new(off);
+
+    let err = run_workflow(context, "diamond", "run-off", json!({}))
+        .await
+        .expect_err("the operator turned it off");
+
+    assert!(err.to_string().contains("disabled"), "got {err}");
+}
+
+#[tokio::test]
+async fn the_same_run_id_cannot_start_twice_concurrently() {
+    // A resent frame, or a sender reusing an active id, would otherwise run
+    // every node's side effects twice and race to overwrite one run record.
+    let harness = Harness::new();
+    harness.install(&gated(), "gated");
+    let first_context = harness.context(Arc::new(HangingDispatch));
+    let second_context = harness.context(Arc::new(HangingDispatch));
+
+    let first = tokio::spawn(async move {
+        run_workflow(
+            first_context,
+            "gated",
+            "dup",
+            json!({ "approvals": ["review"] }),
+        )
+        .await
+    });
+    while !is_running("dup") {
+        tokio::task::yield_now().await;
+    }
+
+    let second = run_workflow(second_context, "gated", "dup", json!({}))
+        .await
+        .expect_err("the id is taken");
+    assert!(
+        second.to_string().contains("already executing"),
+        "got {second}"
+    );
+
+    cancel("dup");
+    assert_eq!(first.await.unwrap().unwrap().status, RunStatus::Cancelled);
+}

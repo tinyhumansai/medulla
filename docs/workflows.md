@@ -76,8 +76,15 @@ medulla workflow dry-run triage       # simulate: no harness, no network
 medulla workflow run triage           # for real, on this machine's CLIs
 medulla workflow list-runs triage     # history
 medulla workflow resume <run-id> --approve review
-medulla workflow cancel <run-id>
+medulla workflow cancel <run-id>   # only reaches runs in this process — see below
 ```
+
+`cancel` is process-local. A run started by `medulla workflow run` in one shell
+cannot be cancelled from another, because there is no control channel between two
+CLI invocations; the command says so rather than reporting a bare failure. The
+paths that can always cancel are the ones that own the running process: the TUI
+cancels the run it started, and an orchestrator's abort frame reaches the daemon
+executing it.
 
 `dry-run` is the one to reach for while authoring. Validation catches a malformed
 graph; a dry run catches a *well-formed* graph that is wired wrong — every
@@ -158,11 +165,20 @@ runTimeoutSecs = 600
 Note this is `workflows`, plural. The older `workflow` key is unrelated — despite
 the name it is only a list of workspace roots.
 
-Two guards are not configurable. Loopback and private addresses are refused for
-`http_request` whatever the allowlist says, because reaching them from a workflow
-means reaching services that trusted the network boundary. And `code` nodes have
-no sandbox on this host, so enabling them grants a workflow author the daemon's
-own privileges — the refusal message says as much.
+Two guards are not configurable:
+
+- **Loopback and private addresses** are refused for `http_request` whatever the
+  allowlist says — checked both by literal *and* against every address the host
+  resolves to, so an allowlisted name answering `127.0.0.1` is caught. Redirects
+  are not followed, since only the first URL is ever checked. A name that cannot
+  be resolved is refused rather than attempted.
+- **`code` nodes have no sandbox** on this host, so enabling them grants a
+  workflow author the daemon's own privileges. The refusal message says as much.
+
+Workflow ids and run ids both become filenames and are validated as single path
+components before use: a document's `id` overrides the caller's, and a run id can
+arrive on a task frame from a peer, so neither is trusted to stay inside its
+directory.
 
 Credentials never appear in a graph: a node names one with
 `connection_ref: "http_cred:<name>"`, and the header is injected after any

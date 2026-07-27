@@ -18,6 +18,7 @@
 //! [`open_checkpointer`] — plus the settings that govern them.
 
 pub mod caps;
+pub mod execute;
 pub mod observability;
 pub mod settings;
 
@@ -25,5 +26,6 @@ pub mod settings;
 mod tests;
 
 pub use caps::{build_capabilities, build_dry_run_capabilities, open_checkpointer, HostServices};
+pub use execute::{Compiled, Outcome};
 pub use observability::{folding_sink, null_sink, WorkEventSink, WorkflowRunObserver};
 pub use settings::{CapabilitySettings, DEFAULT_RUN_TIMEOUT_SECS};

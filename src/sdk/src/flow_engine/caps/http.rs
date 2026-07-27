@@ -103,7 +103,15 @@ impl AllowlistHttpClient {
         Self {
             settings,
             credentials,
-            client: reqwest::Client::new(),
+            // Redirects are refused rather than followed. A permitted host that
+            // 302s to `169.254.169.254` or to an unlisted domain would
+            // otherwise walk straight past both guards, since only the first
+            // URL is ever checked. A workflow that genuinely needs to follow one
+            // can make the second request itself, where it is checked again.
+            client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -136,29 +144,73 @@ impl AllowlistHttpClient {
                 "http_request: '{host}' is not in the configured http allowlist"
             )));
         }
+        // Last, because it is the only check that touches the network: an
+        // allowlisted name must not resolve into a range the guard above
+        // refuses by literal.
+        let port = url
+            .port_or_known_default()
+            .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+        refuse_private_resolution(host, port)?;
         Ok(url)
     }
 }
 
-/// Whether a host names loopback, a link-local address, or an RFC 1918 range.
+/// Whether an address is one a workflow must never reach.
 ///
-/// Textual rather than resolved: a name that resolves into a private range is
-/// still caught by the allowlist, and doing DNS here would make the guard depend
-/// on the network it is guarding.
+/// Loopback, link-local (which includes the cloud metadata endpoint at
+/// `169.254.169.254`), and the RFC 1918 ranges. Reaching any of them from a
+/// workflow means reaching services that trusted the network boundary.
+pub fn is_private_addr(addr: &std::net::IpAddr) -> bool {
+    match addr {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.is_unspecified() || v6.segments()[0] & 0xffc0 == 0xfe80
+        }
+    }
+}
+
+/// Every address `host` resolves to, refused if any is private.
+///
+/// The textual check alone is not enough: an allowlisted name whose DNS answer
+/// is `127.0.0.1` would otherwise pass both guards. Resolving makes the guard
+/// depend on the network it is guarding, which is the trade — but the failure
+/// mode of not resolving is an authored workflow reaching internal services,
+/// and that is worse than a lookup.
+///
+/// A name that cannot be resolved at all is refused rather than allowed: the
+/// request would fail anyway, and failing here says why.
+fn refuse_private_resolution(host: &str, port: u16) -> Result<()> {
+    use std::net::ToSocketAddrs;
+
+    let resolved: Vec<std::net::SocketAddr> = (host, port)
+        .to_socket_addrs()
+        .map_err(|err| {
+            EngineError::Capability(format!("http_request: cannot resolve '{host}': {err}"))
+        })?
+        .collect();
+
+    if let Some(private) = resolved.iter().find(|addr| is_private_addr(&addr.ip())) {
+        return Err(EngineError::Capability(format!(
+            "http_request: refusing '{host}': it resolves to {}, which is loopback or private",
+            private.ip()
+        )));
+    }
+    Ok(())
+}
+
+/// Whether a host *names* loopback, a link-local address, or an RFC 1918 range.
+///
+/// The cheap textual guard, applied before any lookup. The authoritative check
+/// is [`refuse_private_resolution`], which catches the names this cannot.
 pub fn is_private_host(host: &str) -> bool {
     let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
     if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".internal") {
         return true;
     }
     if let Ok(addr) = host.parse::<std::net::IpAddr>() {
-        return match addr {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
-            }
-            std::net::IpAddr::V6(v6) => {
-                v6.is_loopback() || v6.is_unspecified() || v6.segments()[0] & 0xffc0 == 0xfe80
-            }
-        };
+        return is_private_addr(&addr);
     }
     false
 }

@@ -127,9 +127,26 @@ pub fn get_run(store: &Arc<dyn WorkflowStore>, run_id: &str) -> Result<Value, Wo
     Ok(serde_json::to_value(record).unwrap_or(Value::Null))
 }
 
-/// Cancel a run executing in this process.
+/// Cancel a run executing in *this* process.
+///
+/// The registry is process-local, so a `medulla workflow cancel` typed in one
+/// shell cannot reach a run started in another: there is no control channel
+/// between two CLI invocations. Rather than report a bare `false` that reads as
+/// "cancelled nothing, all good", the result says which case it was, so a
+/// caller can tell "already finished" from "not mine to cancel".
+///
+/// The paths that *can* always cancel are the ones that own the running
+/// process: the TUI cancels the run it started, and an orchestrator's abort
+/// frame reaches the daemon that is executing it.
 pub fn cancel_run(run_id: &str) -> Value {
-    json!({ "cancelled": crate::workflows::run::cancel(run_id), "runId": run_id })
+    if crate::workflows::run::cancel(run_id) {
+        return json!({ "cancelled": true, "runId": run_id });
+    }
+    json!({
+        "cancelled": false,
+        "runId": run_id,
+        "reason": "no run with this id is executing in this process; a run started by another                    process must be cancelled where it runs (the TUI that started it, or an                    orchestrator abort to the daemon executing it)",
+    })
 }
 
 /// The node kinds an author may use, with this host's notes.

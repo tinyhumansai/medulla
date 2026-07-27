@@ -12,6 +12,13 @@ use crate::tinyplace::HarnessProvider;
 /// Settings governing one workflow run's capabilities.
 #[derive(Debug, Clone)]
 pub struct CapabilitySettings {
+    /// Whether workflows may run at all on this host.
+    ///
+    /// An operator's off switch. Listing and validating a workflow is still
+    /// allowed when this is false — an operator turning the feature off should
+    /// still be able to see and repair what is installed — but nothing
+    /// executes.
+    pub enabled: bool,
     /// Where [`StateStore`](tinyflows::caps::StateStore) keys are persisted.
     pub state_dir: PathBuf,
     /// Where the engine's run checkpoints live. Checkpoints are what make an
@@ -52,6 +59,7 @@ impl CapabilitySettings {
         let home = home.into();
         let base = home.join("state").join("workflows");
         Self {
+            enabled: true,
             state_dir: base.join("state"),
             checkpoint_dir: base.join("checkpoints"),
             default_worker_address: String::new(),
@@ -89,6 +97,7 @@ impl CapabilitySettings {
     /// allowed to do" rather than a config lookup at each call site.
     pub fn from_config(config: &crate::config::WorkflowsConfig, home: impl Into<PathBuf>) -> Self {
         let mut settings = Self::rooted_at(home);
+        settings.enabled = config.enabled;
         settings.default_worker_address = config.default_worker.clone();
         settings.default_provider = config.default_provider;
         settings.default_model =

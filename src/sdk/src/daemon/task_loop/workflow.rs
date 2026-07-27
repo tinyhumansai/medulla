@@ -92,6 +92,11 @@ impl DaemonRuntime {
     /// failing the probe, because a worker with an unreadable workflow directory
     /// is still a perfectly good worker for ordinary tasks.
     pub(super) fn installed_workflows(&self) -> Vec<WorkflowAdvert> {
+        // A host with workflows off advertises none: an orchestrator should not
+        // be told about work it will be refused.
+        if !self.workflow_settings().enabled {
+            return Vec::new();
+        }
         self.workflow_store()
             .list()
             .unwrap_or_default()
@@ -116,6 +121,20 @@ impl DaemonRuntime {
     /// Run the workflow a `task` frame named, replying with its outcome.
     pub(super) async fn handle_workflow_task(&self, from: String, frame: TaskFrame, id: String) {
         let correlation = frame.correlation_id.clone();
+
+        let settings = self.workflow_settings();
+        if !settings.enabled {
+            self.reply(
+                &from,
+                TaskFrameKind::Error,
+                &frame.task_id,
+                "workflows are disabled on this worker (workflows.enabled = false)",
+                correlation.as_deref(),
+                None,
+            )
+            .await;
+            return;
+        }
 
         if self.inner.admitted.load(Ordering::SeqCst) >= self.inner.config.max_pending {
             self.reply(
@@ -160,6 +179,22 @@ impl DaemonRuntime {
             return;
         }
 
+        // A resent frame (a lost ack) or a sender reusing an active id must not
+        // start the graph twice: both copies would run every node's side
+        // effects and race to overwrite the same run record.
+        if crate::workflows::run::is_running(&frame.task_id) {
+            self.reply(
+                &from,
+                TaskFrameKind::Error,
+                &frame.task_id,
+                &format!("workflow {} is already running", frame.task_id),
+                correlation.as_deref(),
+                None,
+            )
+            .await;
+            return;
+        }
+
         self.inner.admitted.fetch_add(1, Ordering::SeqCst);
         self.reply(
             &from,
@@ -172,7 +207,6 @@ impl DaemonRuntime {
         .await;
         self.log(&format!("workflow {} → {id}", frame.task_id));
 
-        let settings = self.workflow_settings();
         let (sink, fold) = folding_sink();
         let context = RunContext {
             store: store.clone(),
@@ -231,13 +265,16 @@ impl DaemonRuntime {
 
     /// Capability settings for workflows run on this worker.
     ///
-    /// The daemon carries no workflows config of its own, so the safe defaults
-    /// apply: no code execution, no outbound HTTP, no third-party tools. Only
-    /// the worker address is filled in, because a node with no `agent_ref` must
-    /// still reach this worker's own harness.
+    /// Read from the operator's layered config so `workflows.enabled` and the
+    /// allowlists mean the same thing here as they do on the CLI. A config that
+    /// cannot be loaded falls back to the safe defaults — no code execution, no
+    /// outbound HTTP, no third-party tools — rather than to permissive ones.
     fn workflow_settings(&self) -> Arc<CapabilitySettings> {
         let home = crate::home::medulla_home(&self.inner.config.env);
-        let mut settings = CapabilitySettings::rooted_at(home);
+        let cwd = std::path::Path::new(&self.inner.config.workspace);
+        let mut settings = crate::config::load_config(None, &self.inner.config.env, cwd)
+            .map(|loaded| CapabilitySettings::from_config(&loaded.config.workflows, &home))
+            .unwrap_or_else(|_| CapabilitySettings::rooted_at(home));
         settings.default_worker_address = self.inner.config.default_provider.as_str().to_string();
         settings.default_provider = Some(self.inner.config.default_provider);
         settings.default_model = self.inner.config.model.clone();

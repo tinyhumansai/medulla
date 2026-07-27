@@ -51,6 +51,28 @@ impl RunGuard {
             signal,
         )
     }
+
+    /// Register `id` only if no run is executing under it.
+    ///
+    /// The claim and the check happen under one lock, which is what makes this
+    /// safe against two frames arriving together — a `is_running` test followed
+    /// by a `register` would let both through the gap. Returns `None` when the
+    /// id is taken, which the caller should report rather than run.
+    pub fn claim(id: &str) -> Option<(Self, Arc<Notify>)> {
+        let mut runs = registry().lock().expect("run registry lock");
+        if runs.contains_key(id) {
+            return None;
+        }
+        let signal = Arc::new(Notify::new());
+        runs.insert(id.to_string(), signal.clone());
+        Some((
+            Self {
+                id: id.to_string(),
+                signal: signal.clone(),
+            },
+            signal,
+        ))
+    }
 }
 
 impl Drop for RunGuard {

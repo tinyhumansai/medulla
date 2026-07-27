@@ -166,13 +166,17 @@ impl FileWorkflowStore {
     }
 
     /// The path a workflow with `id` is written to.
-    fn definition_path(&self, id: &str) -> PathBuf {
-        self.write_dir().join(format!("{id}.json"))
+    fn definition_path(&self, id: &str) -> Result<PathBuf, WorkflowError> {
+        Ok(self
+            .write_dir()
+            .join(format!("{}.json", safe_component(id)?)))
     }
 
     /// The path a run record is written to.
-    fn run_path(&self, run_id: &str) -> PathBuf {
-        self.runs_dir.join(format!("{run_id}.json"))
+    fn run_path(&self, run_id: &str) -> Result<PathBuf, WorkflowError> {
+        Ok(self
+            .runs_dir
+            .join(format!("{}.json", safe_component(run_id)?)))
     }
 }
 
@@ -191,9 +195,12 @@ impl WorkflowStore for FileWorkflowStore {
     }
 
     fn save(&self, record: &WorkflowRecord) -> Result<(), WorkflowError> {
+        // The id decides a filename, so it is checked before anything else:
+        // a document's own `id` overrides what the caller asked for, and a
+        // document may have been written by an agent.
+        let path = self.definition_path(&record.id)?;
         // Validate before writing so a listing can be trusted to be runnable.
         validate_graph(&record.id, &record.graph)?;
-        let path = self.definition_path(&record.id);
         let document = to_document(record)?;
         write_atomic(&path, &document)
     }
@@ -208,20 +215,22 @@ impl WorkflowStore for FileWorkflowStore {
             .into_iter()
             .find(|w| w.id == id)
             .ok_or_else(|| WorkflowError::NotFound(id.to_string()))?;
-        let path = existing
-            .source_path
-            .unwrap_or_else(|| self.definition_path(id));
+        let path = match existing.source_path {
+            Some(path) => path,
+            None => self.definition_path(id)?,
+        };
         std::fs::remove_file(&path).map_err(|source| WorkflowError::Io { path, source })
     }
 
     fn record_run(&self, run: &RunRecord) -> Result<(), WorkflowError> {
+        let path = self.run_path(&run.id)?;
         let body = serde_json::to_vec_pretty(run)
             .map_err(|err| WorkflowError::Malformed(err.to_string()))?;
-        write_atomic(&self.run_path(&run.id), &body)
+        write_atomic(&path, &body)
     }
 
     fn get_run(&self, run_id: &str) -> Result<Option<RunRecord>, WorkflowError> {
-        let path = self.run_path(run_id);
+        let path = self.run_path(run_id)?;
         let body = match std::fs::read(&path) {
             Ok(body) => body,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -256,6 +265,49 @@ impl WorkflowStore for FileWorkflowStore {
             .collect();
         runs.sort_by_key(|run| std::cmp::Reverse(run.started_at));
         Ok(runs)
+    }
+}
+
+/// An identifier's use as a single filename component, or an error.
+///
+/// Workflow ids and run ids both become filenames, and both are attacker-shaped
+/// input: a workflow document's `id` overrides whatever the caller asked for, a
+/// document may be written by an agent, and a run id can arrive on a task frame
+/// from a peer. Without this, an id of `../../authorized_keys` would let a save
+/// write outside the workflow directory with the daemon's privileges.
+///
+/// The rule is deliberately strict rather than sanitizing: an id that is not
+/// already a safe component is rejected, not silently rewritten into a
+/// different one. Rewriting would let two distinct ids collapse onto one file.
+pub fn safe_component(id: &str) -> Result<&str, WorkflowError> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return Err(WorkflowError::Malformed(
+            "identifier must not be empty".to_string(),
+        ));
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err(WorkflowError::Malformed(format!(
+            "identifier '{trimmed}' is not a usable filename"
+        )));
+    }
+    // Both separators, on every platform: a document written on one machine is
+    // read on another, and `a\..\b` must not become traversal on Windows just
+    // because it was authored on unix.
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains('\0') {
+        return Err(WorkflowError::Malformed(format!(
+            "identifier '{trimmed}' must not contain a path separator"
+        )));
+    }
+    // Catches drive-relative and other platform spellings the checks above miss
+    // by asking the platform itself whether this is one plain component.
+    let path = Path::new(trimmed);
+    let mut components = path.components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Ok(trimmed),
+        _ => Err(WorkflowError::Malformed(format!(
+            "identifier '{trimmed}' must be a single path component"
+        ))),
     }
 }
 

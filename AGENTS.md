@@ -26,6 +26,28 @@ This repository is a two-crate Cargo workspace: the `medulla` SDK library at `sr
 
 Run tests, Clippy, and formatting before handoff.
 
+### Driving the TUI under tmux
+
+Seeing a visible change means running the binary in a detached tmux session and
+capturing the pane. The developer is working in tmux too, so:
+
+- **Never `tmux kill-session` on a name you did not just create.** Not even with
+  `2>/dev/null` — that hides the "no such session" case and makes destroying
+  someone else's session look like a no-op. A killed session cannot be recovered.
+- **Give your session a name that cannot collide.** `medulla` and `med` are what
+  a human names theirs.
+
+```bash
+S=agent-medulla-$$
+tmux new-session -d -s "$S" -x 170 -y 42 "MEDULLA_HOME=$(mktemp -d) ./target/debug/medulla"
+tmux capture-pane -p -t "$S"
+tmux send-keys -t "$S" Tab            # drive it
+tmux kill-session -t "$S"             # only ever the name you created
+```
+
+Point `MEDULLA_HOME` at a scratch directory so the run reads its own workflow
+store, agent templates, and state rather than the developer's.
+
 ## Coding Style & Naming Conventions
 
 Use standard `rustfmt` output (four-space indentation). Name modules, functions, and files in `snake_case`; types and traits in `PascalCase`; constants in `SCREAMING_SNAKE_CASE`. Prefer explicit error types at library boundaries and `anyhow` for binary orchestration. Keep imports grouped at the top.

@@ -1,30 +1,28 @@
-# Agent-harness contract mirrors
+# Agent-harness wire contract
 
-The orchestration library (`medulla-v1`) exposes an **agent harness**: a
-long-lived agent that accepts natural-language instructions, keeps a durable task
-board, delegates to connected agents, and surfaces a status snapshot plus an
-event stream. When a backend fronts that harness, its JSON crosses the wire to
-this client. The SDK mirrors those shapes as serde types so the SDK and TUI can
-decode them without re-deriving the contract by hand.
+An **agent harness** is a long-lived agent that accepts natural-language
+instructions, keeps a durable task board, delegates to connected agents, and
+surfaces a status snapshot plus an event stream. When a backend fronts that
+harness, its JSON crosses the wire to this client. The SDK represents those
+public wire shapes as serde types so the SDK and TUI can decode them consistently.
 
 The mirrors live in [`medulla::harness_contract`](../src/sdk/src/harness_contract/).
-Field names match the TypeScript JSON exactly — every struct is
+Field names match the public JSON contract — every struct is
 `#[serde(rename_all = "camelCase")]` and the status/state enums are lowercase —
 and round-trip tests in `harness_contract/tests.rs` assert those names against
-hand-written JSON literals copied from the TS definitions. The format is owned by
-the library, so a shape change ships with a library upgrade rather than a client
-release.
+hand-written JSON literals. The format is versioned as a wire contract so clients
+can validate compatibility independently of any implementation.
 
 ## Mirrored types
 
-| Rust type | TS source | Notes |
-| --- | --- | --- |
-| `TrackedTask`, `TrackedTaskStatus` | `src/ports/taskTracker.ts` | Status is `open`/`active`/`blocked`/`done`/`cancelled`. `createdAt`/`updatedAt` are ISO-8601 strings; `delegatedTaskIds` and `notes` are always-present arrays. |
-| `HarnessStatus`, `HarnessState`, `HarnessUsage` | `src/agent/harness.ts` | State is `idle`/`running`/`stopped`. `lastResult` mirrors the TS `CycleResult` and is kept opaque (`serde_json::Value`). |
-| `HarnessEvent` | `src/agent/harness.ts` | Tagged by `kind`. The three lifecycle kinds (`instruction_queued`, `cycle_start`, `cycle_end`) are distinct variants; `task_board_changed` carries a `TrackedTask`; `cycle_event` wraps an opaque `CycleEvent`. |
-| `InstructionReceipt` | `src/agent/harness.ts` | The serialisable `{ instructionId, cycleId }` fields (the TS `result` promise is not part of the wire shape). |
-| `AgentBudgetMetadata` | `src/core/budgetRoster.ts` | The `metadata.budget` stamp on an agent descriptor. |
-| `SeatHeadroom`, `WindowHeadroom` | `src/ports/budgets.ts` | Live seat headroom with a per-window map. |
+| Rust type | Notes |
+| --- | --- |
+| `TrackedTask`, `TrackedTaskStatus` | Status is `open`/`active`/`blocked`/`done`/`cancelled`. `createdAt`/`updatedAt` are ISO-8601 strings; `delegatedTaskIds` and `notes` are always-present arrays. |
+| `HarnessStatus`, `HarnessState`, `HarnessUsage` | State is `idle`/`running`/`stopped`. `lastResult` is an opaque cycle-result payload (`serde_json::Value`). |
+| `HarnessEvent` | Tagged by `kind`. The three lifecycle kinds (`instruction_queued`, `cycle_start`, `cycle_end`) are distinct variants; `task_board_changed` carries a `TrackedTask`; `cycle_event` wraps an opaque event payload. |
+| `InstructionReceipt` | The serialisable `{ instructionId, cycleId }` fields. |
+| `AgentBudgetMetadata` | The `metadata.budget` stamp on an agent descriptor. |
+| `SeatHeadroom`, `WindowHeadroom` | Live seat headroom with a per-window map. |
 
 ### Two opaque payloads
 
@@ -35,8 +33,8 @@ them losslessly without coupling the client to their internals.
 
 ### Timestamp contrast: `AgentBudgetMetadata` vs `SeatHeadroom`
 
-Both describe seat headroom, but they format time differently, matching the TS
-source:
+Both describe seat headroom, but the public contract formats their timestamps
+differently:
 
 - **`SeatHeadroom`** carries **epoch-milliseconds numbers** throughout
   (`primaryResetsAt`, `throttledUntil`, and each window's `resetsAt`).
@@ -56,7 +54,7 @@ task_create   task_update   task_list
 memory_write  memory_read   memory_list
 ```
 
-They are kept in sync with `core/taskTools.ts` and `core/memoryTools.ts`.
+These names are part of the public harness contract.
 
 ## TUI rendering (read-only)
 

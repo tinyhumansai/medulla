@@ -1,8 +1,8 @@
 ![Hero Image](./docs/screen.png)
 
-# Medulla v1: The First Orchestrator Model
+# Medulla: The First Orchestrator Model
 
-Medulla v1 is the first model of its kind: not a chat model, not another agent harness, but an **orchestrator model**, purpose-built to command fleets of agent harnesses like [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), and their peers. Medulla v1 brings three capabilities together for the first time:
+Medulla is the first model of its kind: not a chat model, not another agent harness, but an **orchestrator model**, purpose-built to command fleets of agent harnesses like [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://github.com/openai/codex), and their peers. It brings three capabilities together for the first time:
 
 1. **A 10-million-token effective context**, handled efficiently through [RLM (Recursive Language Model)](https://arxiv.org/abs/2512.24601) techniques, so accuracy holds at a scale where single-context models collapse.
 2. **Live streaming input from every running harness**, so fleet awareness is continuous rather than post-hoc.
@@ -53,7 +53,7 @@ Validated head-to-head against a leading open-source agent harness with strict o
 
 ## Availability
 
-Medulla v1 is in **early alpha**, and access is exclusive and gated. It is rolling out to a small group of OpenHuman subscribers first, alongside gated API access for select teams building serious agentic systems. Alpha partners get direct access to the team, and their workloads shape what Medulla becomes.
+Medulla is in **early alpha**, and access is exclusive and gated. It is rolling out to a small group of OpenHuman subscribers first, alongside gated API access for select teams building serious agentic systems. Alpha partners get direct access to the team, and their workloads shape what Medulla becomes.
 
 Request access and tell us what you are orchestrating.
 

@@ -28,20 +28,21 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
     let concrete = Arc::new(MockRuntime::demo());
     let runtime: Arc<dyn Runtime> = concrete.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cfg = medulla::config::WorkflowsConfig::default();
 
-    run_cmd(Cmd::Quit, &runtime, None, &tx);
+    run_cmd(Cmd::Quit, &runtime, None, &cfg, &tx);
     assert!(rx.try_recv().is_err());
 
-    run_cmd(Cmd::Submit("hello".into()), &runtime, None, &tx);
+    run_cmd(Cmd::Submit("hello".into()), &runtime, None, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s == "Cycle complete"));
 
-    run_cmd(Cmd::Resume("tui-demo-1".into()), &runtime, None, &tx);
+    run_cmd(Cmd::Resume("tui-demo-1".into()), &runtime, None, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::Resumed(s) if s == "Resumed chat"));
 
-    run_cmd(Cmd::ListChats, &runtime, None, &tx);
+    run_cmd(Cmd::ListChats, &runtime, None, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::OpenResume(chats) if chats.len() == 2));
 
-    run_cmd(Cmd::InspectContext, &runtime, None, &tx);
+    run_cmd(Cmd::InspectContext, &runtime, None, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::Contexts(items) if items.len() == 2));
 
     run_cmd(
@@ -53,11 +54,12 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
         }),
         &runtime,
         None,
+        &cfg,
         &tx,
     );
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s == "Worker registry updated"));
 
-    run_cmd(Cmd::LoadUsage, &runtime, None, &tx);
+    run_cmd(Cmd::LoadUsage, &runtime, None, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::UsageLoaded(None)));
 }
 
@@ -77,18 +79,26 @@ fn context_refresh_tracks_the_nested_settings_page() {
 async fn dispatches_every_feedback_action() {
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cfg = medulla::config::WorkflowsConfig::default();
 
     run_cmd(
         Cmd::LoadFeedback(FeedbackQuery::default()),
         &runtime,
         None,
+        &cfg,
         &tx,
     );
     assert!(
         matches!(next(&mut rx).await, AppMsg::FeedbackLoaded(Some(page)) if !page.items.is_empty())
     );
 
-    run_cmd(Cmd::LoadFeedbackDetail("fb-2".into()), &runtime, None, &tx);
+    run_cmd(
+        Cmd::LoadFeedbackDetail("fb-2".into()),
+        &runtime,
+        None,
+        &cfg,
+        &tx,
+    );
     assert!(matches!(
         next(&mut rx).await,
         AppMsg::FeedbackComments { id, comments } if id == "fb-2" && !comments.is_empty()
@@ -101,6 +111,7 @@ async fn dispatches_every_feedback_action() {
         },
         &runtime,
         None,
+        &cfg,
         &tx,
     );
     assert!(matches!(next(&mut rx).await, AppMsg::FeedbackItemUpdated(item) if item.id == "fb-2"));
@@ -112,6 +123,7 @@ async fn dispatches_every_feedback_action() {
         },
         &runtime,
         None,
+        &cfg,
         &tx,
     );
     assert!(matches!(next(&mut rx).await, AppMsg::FeedbackChanged(s) if s.contains("comment")));
@@ -124,6 +136,7 @@ async fn dispatches_every_feedback_action() {
         },
         &runtime,
         None,
+        &cfg,
         &tx,
     );
     assert!(matches!(next(&mut rx).await, AppMsg::FeedbackChanged(s) if s.contains("submitted")));
@@ -134,6 +147,7 @@ async fn dispatcher_surfaces_feedback_and_resume_errors() {
     let concrete = Arc::new(MockRuntime::demo());
     let runtime: Arc<dyn Runtime> = concrete.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cfg = medulla::config::WorkflowsConfig::default();
 
     for cmd in [
         Cmd::LoadFeedbackDetail("missing".into()),
@@ -146,12 +160,12 @@ async fn dispatcher_surfaces_feedback_and_resume_errors() {
             body: "nope".into(),
         },
     ] {
-        run_cmd(cmd, &runtime, None, &tx);
+        run_cmd(cmd, &runtime, None, &cfg, &tx);
         assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s.contains("not found")));
     }
 
     concrete.set_running(true);
-    run_cmd(Cmd::Resume("any".into()), &runtime, None, &tx);
+    run_cmd(Cmd::Resume("any".into()), &runtime, None, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s.contains("cannot resume")));
     concrete.set_running(false);
 }
@@ -162,25 +176,38 @@ async fn dispatches_runtime_memory_reads_searches_and_missing_ingest() {
     concrete.set_memory_directives(vec!["Keep tests offline".into()]);
     let runtime: Arc<dyn Runtime> = concrete;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let cfg = medulla::config::WorkflowsConfig::default();
 
     let (status, directives) = read_memory(&runtime, None);
     assert!(status.is_none());
     assert_eq!(directives, ["Keep tests offline"]);
 
-    run_cmd(Cmd::LoadMemory, &runtime, None, &tx);
+    run_cmd(Cmd::LoadMemory, &runtime, None, &cfg, &tx);
     assert!(matches!(
         next(&mut rx).await,
         AppMsg::MemoryLoaded { status: None, directives } if directives == ["Keep tests offline"]
     ));
 
-    run_cmd(Cmd::SearchMemory("needle".into()), &runtime, None, &tx);
+    run_cmd(
+        Cmd::SearchMemory("needle".into()),
+        &runtime,
+        None,
+        &cfg,
+        &tx,
+    );
     assert!(matches!(next(&mut rx).await, AppMsg::MemoryLoaded { .. }));
     assert!(matches!(
         next(&mut rx).await,
         AppMsg::MemoryResults { hits, query } if hits.is_empty() && query == "needle"
     ));
 
-    run_cmd(Cmd::IngestMemory { backfill: false }, &runtime, None, &tx);
+    run_cmd(
+        Cmd::IngestMemory { backfill: false },
+        &runtime,
+        None,
+        &cfg,
+        &tx,
+    );
     assert!(matches!(
         next(&mut rx).await,
         AppMsg::MemoryIngestDone(s) if s.contains("no memory service")

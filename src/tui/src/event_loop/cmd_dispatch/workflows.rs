@@ -24,10 +24,19 @@ use medulla::workflows::{
 use super::AppMsg;
 
 /// Spawn a run of the workflow `id`, reporting the outcome on the status line.
-pub(super) fn spawn_run(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>) {
+///
+/// `workflows_config` is the `[workflows]` section the TUI already loaded at
+/// startup (respecting `--config`, if one was passed) — carried in rather than
+/// rediscovered, so a provider/model set only in an explicitly chosen config
+/// file is honored here too rather than silently falling back to defaults.
+pub(super) fn spawn_run(
+    id: String,
+    workflows_config: medulla::config::WorkflowsConfig,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let status = match run(&id).await {
+        let status = match run(&id, &workflows_config).await {
             Ok(summary) => summary,
             Err(err) => format!("workflow '{id}' failed: {err}"),
         };
@@ -36,23 +45,25 @@ pub(super) fn spawn_run(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSender<
 }
 
 /// Run the workflow to completion and describe how it ended.
-async fn run(id: &str) -> anyhow::Result<String> {
+async fn run(
+    id: &str,
+    workflows_config: &medulla::config::WorkflowsConfig,
+) -> anyhow::Result<String> {
     let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let store = medulla::workflows::discover_store(&env, &cwd);
-    let loaded = medulla::config::load_config(None, &env, &cwd)?;
 
     let home = medulla::home::medulla_home(&env);
-    let mut settings = CapabilitySettings::from_config(&loaded.config.workflows, &home);
+    let mut settings = CapabilitySettings::from_config(workflows_config, &home);
     if settings.default_worker_address.trim().is_empty() {
         settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
     }
 
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
-        default_provider: loaded.config.workflows.default_provider,
-        model: (!loaded.config.workflows.default_model.is_empty())
-            .then(|| loaded.config.workflows.default_model.clone()),
+        default_provider: workflows_config.default_provider,
+        model: (!workflows_config.default_model.is_empty())
+            .then(|| workflows_config.default_model.clone()),
         ..Default::default()
     })
     .map_err(anyhow::Error::msg)?;
@@ -90,6 +101,7 @@ async fn run(id: &str) -> anyhow::Result<String> {
 pub(super) fn spawn_copilot(
     workflow: String,
     instruction: String,
+    workflows_config: medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
     let tx = msg_tx.clone();
@@ -110,17 +122,18 @@ pub(super) fn spawn_copilot(
             }
         });
 
-        let message = match copilot_turn(&workflow, &instruction, status_tx).await {
-            Ok(outcome) => AppMsg::CopilotDone {
-                workflow: workflow.clone(),
-                reply: outcome.reply,
-                changes: outcome.changes,
-            },
-            Err(err) => AppMsg::CopilotFailed {
-                workflow: workflow.clone(),
-                error: err.to_string(),
-            },
-        };
+        let message =
+            match copilot_turn(&workflow, &instruction, status_tx, &workflows_config).await {
+                Ok(outcome) => AppMsg::CopilotDone {
+                    workflow: workflow.clone(),
+                    reply: outcome.reply,
+                    changes: outcome.changes,
+                },
+                Err(err) => AppMsg::CopilotFailed {
+                    workflow: workflow.clone(),
+                    error: err.to_string(),
+                },
+            };
         // The forwarder ends when the session drops its sender, which it has by
         // now; awaiting it keeps a trailing status line from arriving after the
         // reply and reading as part of the next turn.
@@ -133,15 +146,18 @@ pub(super) fn spawn_copilot(
 ///
 /// The host is started per turn and dropped with it, which unbinds the loopback
 /// endpoints so the next turn — or a workflow run — can bind them again.
+/// `workflows_config` is the already-loaded `[workflows]` section (see
+/// [`spawn_copilot`]) rather than a fresh [`medulla::config::load_config`] call
+/// — reloading with no explicit path would silently drop a `--config` override.
 async fn copilot_turn(
     workflow: &str,
     instruction: &str,
     status: tokio::sync::mpsc::UnboundedSender<String>,
+    workflows_config: &medulla::config::WorkflowsConfig,
 ) -> anyhow::Result<medulla::workflows::CopilotOutcome> {
     let mut env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let store = medulla::workflows::discover_store(&env, &cwd);
-    let loaded = medulla::config::load_config(None, &env, &cwd)?;
 
     // ACP, not the legacy provider transport — this is the whole reason the
     // copilot can edit a graph at all. Medulla is an ACP *client*, so
@@ -158,9 +174,9 @@ async fn copilot_turn(
 
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
-        default_provider: loaded.config.workflows.default_provider,
-        model: (!loaded.config.workflows.default_model.is_empty())
-            .then(|| loaded.config.workflows.default_model.clone()),
+        default_provider: workflows_config.default_provider,
+        model: (!workflows_config.default_model.is_empty())
+            .then(|| workflows_config.default_model.clone()),
         env,
         ..Default::default()
     })
@@ -170,9 +186,9 @@ async fn copilot_turn(
         store,
         dispatch: host.dispatch(),
         worker_address: LOCAL_WORKER_ADDRESS.to_string(),
-        provider: loaded.config.workflows.default_provider,
-        model: (!loaded.config.workflows.default_model.is_empty())
-            .then(|| loaded.config.workflows.default_model.clone()),
+        provider: workflows_config.default_provider,
+        model: (!workflows_config.default_model.is_empty())
+            .then(|| workflows_config.default_model.clone()),
     };
     Ok(session.turn(workflow, instruction, Some(status)).await?)
 }

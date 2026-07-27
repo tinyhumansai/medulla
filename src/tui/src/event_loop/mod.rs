@@ -92,7 +92,7 @@ pub(crate) async fn run(
             maybe_event = reader.next() => {
                 if let Some(Ok(ev)) = maybe_event {
                     if let Some(cmd) = app.on_event(ev) {
-                        run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
+                        run_cmd(cmd, &runtime, app.memory_service(), &app.loaded.config.workflows, &msg_tx);
                     }
                 }
             }
@@ -100,7 +100,7 @@ pub(crate) async fn run(
                 if recv.is_ok() {
                     app.refresh_snapshot();
                     if should_refresh_context(&mut app) {
-                        run_cmd(Cmd::InspectContext, &runtime, app.memory_service(), &msg_tx);
+                        run_cmd(Cmd::InspectContext, &runtime, app.memory_service(), &app.loaded.config.workflows, &msg_tx);
                     }
                 }
             }
@@ -145,7 +145,7 @@ pub(crate) async fn run(
                         app.set_feedback_page(page);
                         // Pull the newly selected row's comments in the same beat.
                         if let Some(cmd) = app.feedback_detail_cmd() {
-                            run_cmd(cmd, &runtime, app.memory_service(), &msg_tx);
+                            run_cmd(cmd, &runtime, app.memory_service(), &app.loaded.config.workflows, &msg_tx);
                         }
                     }
                     AppMsg::FeedbackComments { id, comments } => {
@@ -159,7 +159,7 @@ pub(crate) async fn run(
                         app.set_status(status);
                         // A comment or submission changes the board, so re-pull
                         // it rather than patching state locally.
-                        run_cmd(Cmd::LoadFeedback(app.feedback_query()), &runtime, app.memory_service(), &msg_tx);
+                        run_cmd(Cmd::LoadFeedback(app.feedback_query()), &runtime, app.memory_service(), &app.loaded.config.workflows, &msg_tx);
                     }
                     AppMsg::UpdateAvailable(notice) => {
                         app.set_update_notice(notice.clone());

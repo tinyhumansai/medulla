@@ -19,10 +19,18 @@ mod workflows;
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so
 /// they run on `spawn_blocking` off the UI thread.
+///
+/// `workflows_config` is the app's already-loaded `[workflows]` section,
+/// threaded in for the two commands that dispatch a harness off-thread
+/// ([`Cmd::RunWorkflow`] and [`Cmd::CopilotTurn`]) so they use the config the
+/// TUI actually started with — including an explicit `--config` — rather than
+/// rediscovering defaults from a fresh load. Named with a leading underscore
+/// because a build without the `workflows` feature has no arm that reads it.
 pub(super) fn run_cmd(
     cmd: Cmd,
     runtime: &Arc<dyn Runtime>,
     memory: Option<Arc<medulla::memory::MemoryService>>,
+    _workflows_config: &medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
     let cmd = match tasks::run_task_cmd(cmd, msg_tx) {
@@ -182,14 +190,14 @@ pub(super) fn run_cmd(
             });
         }
         #[cfg(feature = "workflows")]
-        Cmd::RunWorkflow { id } => workflows::spawn_run(id, msg_tx),
+        Cmd::RunWorkflow { id } => workflows::spawn_run(id, _workflows_config.clone(), msg_tx),
         #[cfg(feature = "workflows")]
         Cmd::DryRunWorkflow { id } => workflows::spawn_dry_run(id, msg_tx),
         #[cfg(feature = "workflows")]
         Cmd::CopilotTurn {
             workflow,
             instruction,
-        } => workflows::spawn_copilot(workflow, instruction, msg_tx),
+        } => workflows::spawn_copilot(workflow, instruction, _workflows_config.clone(), msg_tx),
         Cmd::RefreshFleet => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

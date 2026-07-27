@@ -121,6 +121,10 @@ pub(crate) fn draw_nav(
     let inner = block.inner(area);
     f.render_widget(block, area);
     let dim = Style::default().add_modifier(Modifier::DIM);
+    // The leading column exists to sit pages under their heading. A flat menu
+    // has nothing to sit under, so indenting it only pushes every row a column
+    // away from the border for no reason.
+    let pad = if groups.is_empty() { "" } else { " " };
     let mut lines = Vec::new();
     for (index, page) in pages.iter().enumerate() {
         if let Some((heading, _)) = groups.iter().find(|(_, start)| *start == index) {
@@ -137,16 +141,16 @@ pub(crate) fn draw_nav(
             " "
         };
         lines.push(TLine::from(Span::styled(
-            format!(" {marker}{} {page} ", index + 1),
+            format!("{pad}{marker}{} {page} ", index + 1),
             style,
         )));
     }
     lines.push(TLine::from(""));
     lines.push(TLine::from(Span::styled(
         if focused {
-            " Esc menu".to_string()
+            format!("{pad}Esc menu")
         } else {
-            format!(" ↑↓ nav · ⏎ open · 1-{} jump", pages.len())
+            format!("{pad}↑↓ nav · ⏎ open · 1-{} jump", pages.len())
         },
         dim,
     )));

@@ -94,8 +94,25 @@ capability stand-ins, with nothing dispatched.
 Every verb prints JSON and reads bulk input from stdin, so the command is usable
 by a person and by an agent without either being a special case.
 
-The TUI has the same surface on **Routing → Workflows**: the catalogue, the
-selected workflow's recent runs, `Enter` to run, `r` to re-read the store.
+## In the TUI
+
+Workflows is a top-level tab, in three panes:
+
+- **The rail** lists the installed workflows, with the selected one's runs
+  indented beneath it. `↑↓` walks both, `Enter` runs, `d` simulates, `r` re-reads
+  the store.
+- **The canvas** draws the selected workflow's graph — a box per node, laid out
+  left to right by how far each step is from the trigger, and a lane per
+  concurrent branch. `←→` follows edges, `↑↓` walks the lanes of a branch, and
+  `i` expands the strip below into the selected node's whole declaration.
+  Selecting a run in the rail overlays it: each box is recoloured by how that run
+  left it, and the steps it never reached are dimmed.
+- **The copilot** is a conversation that edits the graph. Ask for a change in
+  plain words and it is made by a real harness session holding the MCP tools
+  below — then the graph is re-read from the store and what actually changed is
+  reported in the transcript, rather than whatever the agent said it did.
+
+`Tab` cycles the three panes; `Esc` steps back out toward the rail.
 
 ## How an agent authors one
 

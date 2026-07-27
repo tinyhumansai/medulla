@@ -410,10 +410,29 @@ impl App {
     }
 
     /// Draw the footer hint line.
+    ///
+    /// Per tab, because the bindings are. `Tab` cycles the top-level views
+    /// everywhere except Workflows, where it cycles that tab's three panes — a
+    /// footer that claimed otherwise would be teaching the wrong key.
     pub(super) fn draw_footer(&mut self, f: &mut Frame, area: Rect) {
+        let mouse = if self.mouse_capture { "●" } else { "○" };
+        #[cfg(feature = "workflows")]
+        if self.tab() == "Workflows" {
+            let text = format!(
+                "Tab panes · ⇧Tab views · ←→ follow edges · ↑↓ lanes · i inspect · ⏎ run · d dry-run · r refresh · ^O mouse {mouse} · /help",
+            );
+            f.render_widget(
+                Paragraph::new(TLine::from(Span::styled(
+                    text,
+                    Style::default().add_modifier(Modifier::DIM),
+                )))
+                .wrap(Wrap { trim: true }),
+                area,
+            );
+            return;
+        }
         let text = format!(
-            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^O mouse {} · /help",
-            if self.mouse_capture { "●" } else { "○" },
+            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^O mouse {mouse} · /help",
         );
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(

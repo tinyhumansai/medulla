@@ -289,6 +289,23 @@ fn the_focused_pane_is_the_one_with_the_highlighted_border() {
 }
 
 #[test]
+fn the_footer_teaches_this_tabs_bindings_rather_than_the_agents_tabs() {
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+
+    let screen = render(&mut app);
+
+    assert!(
+        screen.contains("Tab panes"),
+        "Tab cycles this tab's panes, not the top-level views: {screen}"
+    );
+    assert!(screen.contains("i inspect"), "{screen}");
+    assert!(
+        !screen.contains("⌥A answer"),
+        "the Agents-tab steering keys do nothing here"
+    );
+}
+
+#[test]
 fn a_narrow_terminal_still_draws_every_pane_without_panicking() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 

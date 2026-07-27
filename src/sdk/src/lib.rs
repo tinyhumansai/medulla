@@ -13,6 +13,7 @@ pub mod config;
 pub mod contacts;
 pub mod daemon;
 pub mod harness_contract;
+pub mod harness_work;
 pub mod history_upload;
 pub mod home;
 pub mod hub;

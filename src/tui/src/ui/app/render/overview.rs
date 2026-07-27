@@ -15,28 +15,14 @@ use super::super::types::App;
 impl App {
     /// Draw the Overview tab: logo, top panels, and live activity.
     pub(super) fn draw_overview(&mut self, f: &mut Frame, area: Rect) {
-        // The host strip is only laid out when this device is actually hosting.
-        // A permanently-reserved empty band would cost the live feed several
-        // rows to say nothing, on every run that orchestrates but does not host.
-        //
-        // Two borders plus three fixed lines, and a fourth only once the host
-        // has a status worth showing — reserving that row up front would leave a
-        // blank line under the counters for the whole of an idle session.
-        let host_rows = match &self.host_obs {
-            Some(host) => 5 + u16::from(host.stats().last_status.is_some()),
-            None => 0,
-        };
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(5),
                 Constraint::Length(7),
-                Constraint::Length(host_rows),
                 Constraint::Min(0),
             ])
             .split(area);
-        let host_area = rows[2];
-        let rows = [rows[0], rows[1], rows[3]];
         // The band is one row taller than the art so the wordmark gets a blank
         // line of breathing room under the header/tab strip instead of butting
         // straight up against it.
@@ -52,12 +38,25 @@ impl App {
             .collect();
         f.render_widget(Paragraph::new(Text::from(logo)), rows[0]);
         let rows = &rows[1..];
-        // Two columns: what this device is running, and what the orchestration
-        // is doing with it. The old Session panel restated the worker harness's
-        // state a column over, so the two are one panel now.
+        // One row of panels: what this device is running, what the orchestration
+        // is doing with it, and — only while this process is hosting — what it
+        // is hosting. The old Session panel restated the worker harness's state
+        // a column over, so those two are one panel now, and the host strip is a
+        // third column rather than a band of its own so it costs the live feed
+        // no rows at all.
+        let hosting = self.host_obs.is_some();
         let top = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints(if hosting {
+                [
+                    Constraint::Percentage(33),
+                    Constraint::Percentage(33),
+                    Constraint::Percentage(34),
+                ]
+                .to_vec()
+            } else {
+                [Constraint::Percentage(50), Constraint::Percentage(50)].to_vec()
+            })
             .split(rows[0]);
 
         self.draw_this_device(f, top[0]);
@@ -96,8 +95,10 @@ impl App {
             top[1],
         );
 
-        // The hosting strip, when this device is also running the work.
-        self.draw_host_panel(f, host_area);
+        // The third column, when this device is also hosting the work.
+        if hosting {
+            self.draw_host_panel(f, top[2]);
+        }
 
         // Live activity.
         let take = self.visible_count().saturating_sub(1).max(5);
@@ -120,15 +121,15 @@ impl App {
         );
     }
 
-    /// The "Local host" strip: what this machine will run for the fleet, where,
+    /// The "Local host" column: what this machine will run for the fleet, where,
     /// and what it has run so far.
     ///
-    /// Present only while a host is actually running in this process. The panel
-    /// answers the question an operator asks first — "is my own laptop part of
-    /// the fleet, and is it doing anything?" — which was previously only
-    /// answerable by reading the orchestrator log. It sits below the "This
-    /// device" column, which covers the same machine as a worker rather than as
-    /// a host.
+    /// Present only while a host is actually running in this process, as the
+    /// third panel of the top row. The panel answers the question an operator
+    /// asks first — "is my own laptop part of the fleet, and is it doing
+    /// anything?" — which was previously only answerable by reading the
+    /// orchestrator log. Its neighbour "This device" covers the same machine as
+    /// a worker rather than as a host.
     pub(super) fn draw_host_panel(&self, f: &mut Frame, area: Rect) {
         let Some(host) = &self.host_obs else {
             return;

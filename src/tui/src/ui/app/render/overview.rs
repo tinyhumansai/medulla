@@ -18,14 +18,13 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),
+                // The art's own top row is sparse — only the ascenders of "d",
+                // "l" and "ll" reach it — so the wordmark already reads as
+                // having space above it. The spare row goes underneath, where
+                // the glyphs sit hard on the baseline.
+                Constraint::Length(4),
                 Constraint::Length(7),
                 Constraint::Min(0),
-                // The live feed used to run straight into the footer while the
-                // wordmark had a blank row above it, so the page read as if it
-                // had been pushed down off its own bottom edge. The spare row
-                // belongs here, not at the top.
-                Constraint::Length(1),
             ])
             .split(area);
         let logo: Vec<TLine> = crate::ui::LOGO

@@ -19,7 +19,9 @@ impl LoginScreen {
 
     /// Render the centered login panel.
     pub fn draw(&mut self, f: &mut Frame) {
-        let area = crate::ui::layout::centered_fixed(64, 24, f.area());
+        // 52 columns: the widest thing the panel has to show is a 34-column menu
+        // row, so the old 64 left a wide empty gutter down the right-hand side.
+        let area = crate::ui::layout::centered_fixed(52, 24, f.area());
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -105,10 +107,10 @@ impl LoginScreen {
             }
             Phase::TokenEntry => {
                 lines.push(Line::from(Span::styled(
-                    "Paste an API key, JWT, or 64-hex login token — Enter to submit:",
+                    "Paste API key, JWT, or login token · Enter submits",
                     Style::default().add_modifier(Modifier::DIM),
                 )));
-                let shown = token_display(&self.input, 56);
+                let shown = token_display(&self.input, 46);
                 lines.push(Line::from(vec![
                     Span::raw("> "),
                     Span::styled(shown, Style::default().add_modifier(Modifier::DIM)),

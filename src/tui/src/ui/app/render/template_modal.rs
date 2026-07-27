@@ -7,9 +7,8 @@
 //! pane would spend a third of the width being empty attention while you scan
 //! the catalog.
 //!
-//! It renders over both surfaces that can reach a template — the Routing catalog
-//! and the Agents rail — so a template reads identically whichever one you came
-//! from.
+//! The Routing tab's Agent Templates page is the only surface that reaches it;
+//! the Agents rail lists what is running, not what could be.
 
 use ratatui::layout::Layout;
 use ratatui::layout::{Constraint, Direction, Rect};
@@ -44,17 +43,12 @@ fn popup_area(area: Rect) -> Rect {
 }
 
 impl App {
-    /// The template the popup is showing, by selection key.
+    /// The template the popup is showing, by selection key: whatever the
+    /// catalog's cursor sits on.
     ///
-    /// The Agents rail names one directly; on the catalog page it is whatever
-    /// the cursor sits on. `None` closes the popup rather than showing an empty
-    /// frame — a catalog that emptied under a stale selection has nothing to say.
+    /// `None` closes the popup rather than showing an empty frame — a catalog
+    /// that emptied under a stale selection has nothing to say.
     pub(super) fn open_template_key(&self) -> Option<String> {
-        if let Some(node) = self.selected_fleet_node() {
-            if node.key.starts_with("template:") {
-                return Some(node.key);
-            }
-        }
         let rows = template_rows(&self.fleet_capacity(), &self.fleet_roster());
         rows.get(self.template_index.min(rows.len().saturating_sub(1)))
             .map(|row| row.key.clone())

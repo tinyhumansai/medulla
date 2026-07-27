@@ -1,5 +1,5 @@
-//! The Overview tab: the logo, the this-device/orchestration panels, the local
-//! host strip, and the live-activity feed.
+//! The Overview tab: the logo, the this-device and orchestration panels, and
+//! the live-activity feed.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -38,28 +38,24 @@ impl App {
             .collect();
         f.render_widget(Paragraph::new(Text::from(logo)), rows[0]);
         let rows = &rows[1..];
-        // One row of panels: what this device is running, what the orchestration
-        // is doing with it, and — only while this process is hosting — what it
-        // is hosting. The old Session panel restated the worker harness's state
-        // a column over, so those two are one panel now, and the host strip is a
-        // third column rather than a band of its own so it costs the live feed
-        // no rows at all.
+        // Two panels: this device, and what the orchestration is doing with it.
+        // The device panel is the host observer's, so it is only laid out while
+        // this process is actually hosting — otherwise Orchestration takes the
+        // whole row rather than leaving half of it empty.
         let hosting = self.host_obs.is_some();
         let top = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(if hosting {
-                [
-                    Constraint::Percentage(33),
-                    Constraint::Percentage(33),
-                    Constraint::Percentage(34),
-                ]
-                .to_vec()
-            } else {
                 [Constraint::Percentage(50), Constraint::Percentage(50)].to_vec()
+            } else {
+                [Constraint::Percentage(100)].to_vec()
             })
             .split(rows[0]);
+        let orch_area = if hosting { top[1] } else { top[0] };
 
-        self.draw_this_device(f, top[0]);
+        if hosting {
+            self.draw_host_panel(f, top[0]);
+        }
 
         // Orchestration panel.
         let running_calls = stream::running_calls(&self.snapshot.events);
@@ -92,13 +88,8 @@ impl App {
         orch.extend(self.tinyplace_lines());
         f.render_widget(
             Paragraph::new(Text::from(orch)).block(self.panel("Orchestration")),
-            top[1],
+            orch_area,
         );
-
-        // The third column, when this device is also hosting the work.
-        if hosting {
-            self.draw_host_panel(f, top[2]);
-        }
 
         // Live activity.
         let take = self.visible_count().saturating_sub(1).max(5);
@@ -121,15 +112,18 @@ impl App {
         );
     }
 
-    /// The "Local host" column: what this machine will run for the fleet, where,
-    /// and what it has run so far.
+    /// The "This Device" column: what this machine will run for the fleet,
+    /// where, and what it has run so far.
     ///
     /// Present only while a host is actually running in this process, as the
-    /// third panel of the top row. The panel answers the question an operator
-    /// asks first — "is my own laptop part of the fleet, and is it doing
-    /// anything?" — which was previously only answerable by reading the
-    /// orchestrator log. Its neighbour "This device" covers the same machine as
-    /// a worker rather than as a host.
+    /// left panel of the top row. It answers the question an operator asks first
+    /// — "is my own laptop part of the fleet, and is it doing anything?" — which
+    /// was previously only answerable by reading the orchestrator log.
+    ///
+    /// One fact per line: the address, the harnesses, the workspace, and the
+    /// counters each want the full column width, and cramming the first three
+    /// onto one row made the panel unreadable as soon as it became a column
+    /// rather than a full-width strip.
     pub(super) fn draw_host_panel(&self, f: &mut Frame, area: Rect) {
         let Some(host) = &self.host_obs else {
             return;
@@ -146,6 +140,7 @@ impl App {
             .collect::<Vec<_>>()
             .join(", ");
 
+        let width = area.width.saturating_sub(4) as usize;
         let mut lines = vec![
             TLine::from(vec![
                 Span::styled(
@@ -161,18 +156,18 @@ impl App {
                     }),
                 ),
                 Span::styled(
-                    host.address().to_string(),
+                    clip(host.address(), width.saturating_sub(8)),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    format!("  {providers}"),
-                    Style::default().fg(self.theme.primary),
-                ),
             ]),
-            // Clipped to the panel: a deep workspace path is common and wrapping
-            // it would push the counters out of a fixed-height strip.
             TLine::from(Span::styled(
-                clip(host.workspace(), area.width.saturating_sub(4) as usize),
+                clip(&providers, width),
+                Style::default().fg(self.theme.primary),
+            )),
+            // Clipped to the panel: a deep workspace path is common and wrapping
+            // it would push the counters out of a fixed-height panel.
+            TLine::from(Span::styled(
+                clip(host.workspace(), width),
                 Style::default().add_modifier(Modifier::DIM),
             )),
             TLine::from(format!(
@@ -182,74 +177,12 @@ impl App {
         ];
         if let Some(status) = &stats.last_status {
             lines.push(TLine::from(Span::styled(
-                clip(
-                    &format!("▸ {status}"),
-                    area.width.saturating_sub(4) as usize,
-                ),
+                clip(&format!("▸ {status}"), width),
                 Style::default().add_modifier(Modifier::DIM),
             )));
         }
         f.render_widget(
-            Paragraph::new(Text::from(lines)).block(self.panel("Local host")),
-            area,
-        );
-    }
-
-    /// The Overview tab's left panel: what this machine is running right now —
-    /// the live session, the worker harness driving it, and whether the run is
-    /// being traced.
-    pub(super) fn draw_this_device(&self, f: &mut Frame, area: Rect) {
-        let worker = self.loaded.config.opencode.clone().unwrap_or_default();
-        let lines = vec![
-            TLine::from(vec![
-                Span::styled(
-                    if self.snapshot.running {
-                        "● running"
-                    } else {
-                        "● idle"
-                    },
-                    Style::default().fg(if self.snapshot.running {
-                        Color::Yellow
-                    } else {
-                        Color::Green
-                    }),
-                ),
-                Span::styled(
-                    format!(
-                        " · {} turns · {}",
-                        self.snapshot.messages.len().div_ceil(2),
-                        clip(&self.snapshot.session_id, 16)
-                    ),
-                    Style::default().add_modifier(Modifier::DIM),
-                ),
-            ]),
-            TLine::from(vec![
-                Span::styled("harness ", Style::default().fg(Color::Magenta)),
-                Span::raw(worker_harness_label(&worker.command)),
-            ]),
-            TLine::from(if worker.model.is_empty() {
-                "model —".to_string()
-            } else {
-                format!("model {}", worker.model)
-            }),
-            TLine::from(format!(
-                "agent {} · concurrency {}",
-                worker.agent, worker.max_concurrency
-            )),
-            if self.snapshot.tracing {
-                TLine::from(Span::styled(
-                    "langfuse ● tracing",
-                    Style::default().fg(Color::Green),
-                ))
-            } else {
-                TLine::from(Span::styled(
-                    "langfuse ○ off",
-                    Style::default().add_modifier(Modifier::DIM),
-                ))
-            },
-        ];
-        f.render_widget(
-            Paragraph::new(Text::from(lines)).block(self.panel("This device")),
+            Paragraph::new(Text::from(lines)).block(self.panel("This Device")),
             area,
         );
     }
@@ -306,20 +239,4 @@ impl App {
         }
         lines
     }
-}
-
-/// The display name for the worker harness a `command` invokes.
-///
-/// Medulla drives several coding-agent CLIs, so the label is derived from the
-/// configured command rather than hard-coded. A recognized command basename maps
-/// to its product name ("claude" → "Claude Code"); anything else is shown
-/// verbatim, since a custom or wrapped binary is still worth naming.
-fn worker_harness_label(command: &str) -> String {
-    let basename = command.rsplit(['/', '\\']).next().unwrap_or(command).trim();
-    if basename.is_empty() {
-        return "—".to_string();
-    }
-    medulla::tinyplace::frames::HarnessProvider::from_wire(basename)
-        .map(|p| p.display_name().to_string())
-        .unwrap_or_else(|| basename.to_string())
 }

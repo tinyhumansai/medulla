@@ -18,14 +18,14 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(5),
+                Constraint::Length(4),
                 Constraint::Length(7),
                 Constraint::Min(0),
             ])
             .split(area);
-        // The band is one row taller than the art so the wordmark gets a blank
-        // line of breathing room under the header/tab strip instead of butting
-        // straight up against it.
+        // The band is exactly the art plus one blank row above it: enough that
+        // the wordmark does not butt up against the tab strip, and no more —
+        // the panels below open with a border, which is separation enough.
         let logo: Vec<TLine> = std::iter::once(TLine::from(""))
             .chain(crate::ui::LOGO.iter().map(|row| {
                 TLine::from(Span::styled(

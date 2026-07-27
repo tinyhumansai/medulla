@@ -330,3 +330,83 @@ fn subscription_strategy_navigation_persists_and_emits_its_own_operation() {
         "{saved}"
     );
 }
+
+// --- screen subscriptions follow the selection -----------------------------
+
+/// Put the cursor on the first task sublane in the rail, returning the command
+/// that produced.
+fn select_first_task(app: &mut App) -> Option<Cmd> {
+    app.tab_index = tab("Agents");
+    let rows = app.rail_rows();
+    let idx = rows.iter().position(|r| {
+        matches!(
+            r,
+            super::rail::RailRow::Agent(crate::ui::agents::AgentRow::Sub { .. })
+        )
+    })?;
+    app.agent_index = idx;
+    app.retarget_watch()
+}
+
+#[test]
+fn selecting_a_task_asks_to_watch_it() {
+    let mut app = app();
+    let cmd = select_first_task(&mut app).expect("the fixture has a selectable task");
+    let Cmd::WatchTask { stop, start } = cmd else {
+        panic!("selecting a task should retarget the watch");
+    };
+    assert!(stop.is_none(), "nothing was being watched before");
+    let (_, task_id) = start.expect("a task to start watching");
+    assert!(!task_id.is_empty());
+    assert!(app.watching.is_some(), "the target is remembered");
+}
+
+#[test]
+fn reselecting_the_same_task_does_not_resubscribe() {
+    // Every subscribe carries `resync: true`, so re-issuing one on each
+    // keystroke would make the worker resend a full frame each time — the
+    // expensive thing this protocol exists to avoid.
+    let mut app = app();
+    select_first_task(&mut app).expect("a task to select");
+    assert!(
+        app.retarget_watch().is_none(),
+        "an unchanged selection must not retarget"
+    );
+}
+
+#[test]
+fn leaving_the_agents_tab_releases_the_subscription() {
+    // A stream nobody is looking at still costs the worker a sample, a ratchet
+    // advance and a send every tick.
+    let mut app = app();
+    select_first_task(&mut app).expect("a task to select");
+    app.tab_index = tab("Overview");
+
+    let Some(Cmd::WatchTask { stop, start }) = app.retarget_watch() else {
+        panic!("leaving the tab should release the watch");
+    };
+    assert!(stop.is_some(), "the previous stream is stopped");
+    assert!(start.is_none(), "and nothing replaces it");
+    assert!(app.watching.is_none());
+}
+
+#[test]
+fn selecting_a_lane_rather_than_a_task_watches_nothing() {
+    // Streams are addressed by task. A lane names none, and guessing one of its
+    // tasks would watch work the operator did not point at.
+    let mut app = app();
+    app.tab_index = tab("Agents");
+    let rows = app.rail_rows();
+    let idx = rows
+        .iter()
+        .position(|r| {
+            matches!(
+                r,
+                super::rail::RailRow::Agent(crate::ui::agents::AgentRow::Lane { .. })
+            )
+        })
+        .expect("the fixture has a lane row");
+    app.agent_index = idx;
+    assert!(app.retarget_watch().is_none());
+    assert!(app.watching.is_none());
+}

@@ -42,5 +42,5 @@ mod types;
 mod tests;
 
 pub use entry::run_daemon;
-pub use status::status_detail;
+pub use status::{status_detail, work_detail};
 pub use types::{DaemonConfig, DaemonRuntime, LogFn, NowFn, SendFn};

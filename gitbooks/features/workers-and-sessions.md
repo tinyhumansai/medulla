@@ -162,6 +162,36 @@ Growing the fleet grows the number of addressable workers, not the parallelism
 ceiling. Concurrency is a separate, pool-wide cap, covered in
 [Token Efficiency and Budgets](token-efficiency.md).
 
+### Seeing what a worker is working on
+
+A worker is a full harness with its own screen, and that screen has always shown
+more than the transcript it streams back: a live todo list, a stated plan, the
+sub-agents it fanned work out to, the files it is rewriting. Medulla reads all of
+it, from every supported harness, and renders one surface rather than three.
+
+Each harness spells it differently. Claude Code writes `TodoWrite`, `Task`, and
+`ExitPlanMode` tool calls and announces its model, working directory, tools, and
+MCP servers on a startup record. Codex emits `todo_list` and `file_change` items
+and calls `update_plan`. OpenCode uses lowercase `todowrite` and `task`. All of
+them fold onto the same shape, so the panel reads the same whichever CLI is
+behind it, and a harness that reports none of it simply shows nothing rather than
+an empty frame.
+
+On the **Agents** tab this appears in three places. Each rail row carries a
+compact chip — `2/4 ⑂1`, meaning two of four tasks done and one sub-agent still
+running — so you can tell which machine to open without opening any of them. The
+transcript header carries a one-line headline naming the item the agent says it
+is on right now. And beside the transcript, when the terminal is wide enough, a
+**Work** panel shows the whole picture: the goal, the todo list with its
+checkboxes, each sub-agent and whether it finished, the files touched, the
+model and working directory the harness reported, and how the run ended with its
+turn count, duration, and cost.
+
+The snapshot travels with the worker's own status and reply frames, so a remote
+machine's todo list is as visible from here as a local one's. Workers that
+predate this surface, and harnesses that report nothing structured, are handled
+by absence rather than by guessing: no chip, no headline, no panel.
+
 ### Failure is a first-class outcome
 
 When a worker fails, Medulla notices and re-delegates. Cancelling one task aborts

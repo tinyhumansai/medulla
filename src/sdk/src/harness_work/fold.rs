@@ -45,6 +45,15 @@ impl WorkFold {
         WorkFold::default()
     }
 
+    /// Resume a fold from a snapshot taken earlier.
+    ///
+    /// For consumers that keep the snapshot rather than the fold — the
+    /// receiver-side session view does exactly this, so each arriving envelope
+    /// continues the same accumulation instead of starting over.
+    pub fn from_snapshot(snapshot: WorkSnapshot) -> Self {
+        WorkFold { snapshot }
+    }
+
     /// The snapshot as of every event applied so far.
     pub fn snapshot(&self) -> &WorkSnapshot {
         &self.snapshot

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::daemon::{status_detail, DaemonRuntime, NowFn};
+use crate::daemon::{status_detail, work_detail, DaemonRuntime, NowFn};
 use crate::tinyplace::{HarnessEvent, TaskFrameKind};
 
 use super::{
@@ -166,4 +166,40 @@ async fn status_detail_maps_event_kinds() {
         ..Default::default()
     };
     assert_eq!(status_detail(&lifecycle), None);
+}
+
+#[test]
+fn work_detail_describes_events_the_published_vocabulary_cannot() {
+    use crate::harness_work::{kinds, WorkFold};
+
+    // A todo write decodes to nothing in `status_detail` — the event union
+    // predates it — so without a work-derived line a harness could rewrite its
+    // whole plan and the peer would see no status change at all.
+    let mut fold = WorkFold::new();
+    fold.apply(
+        kinds::TODO_UPDATE,
+        &json!({ "todos": [
+            { "content": "a", "status": "completed" },
+            { "content": "b", "status": "in_progress", "activeForm": "Doing b" },
+        ]}),
+        1,
+    );
+    assert_eq!(
+        work_detail(fold.snapshot()).as_deref(),
+        Some("Doing b · todo 1/2")
+    );
+
+    // With nothing in progress, a running sub-agent is the next best answer.
+    let mut delegating = WorkFold::new();
+    delegating.apply(
+        kinds::SUBAGENT_START,
+        &json!({ "call_id": "s1", "description": "review" }),
+        1,
+    );
+    assert_eq!(
+        work_detail(delegating.snapshot()).as_deref(),
+        Some("1 sub-agent running")
+    );
+
+    assert_eq!(work_detail(&Default::default()), None);
 }

@@ -45,6 +45,7 @@ impl Default for SessionView {
             last_activity_ts: None,
             tools: Vec::new(),
             feed: Vec::new(),
+            work: Default::default(),
         }
     }
 }
@@ -107,6 +108,19 @@ pub fn fold_session_envelopes(
 }
 
 fn apply_event(view: &mut SessionView, env: &SessionEnvelopeV2, limits: SessionViewLimits) {
+    // The structured work kinds postdate the published event union, so they
+    // decode as `Unknown` below. Folding straight off the wire kind keeps them
+    // from being dropped on the one route that carries a whole wrapped session.
+    //
+    // A fresh fold per event is correct here because `view.work` is itself the
+    // accumulated state: the fold is seeded from it and folded back.
+    if crate::harness_work::kinds::is_work_kind(&env.event.kind) || env.event.kind == "tool_result"
+    {
+        let mut fold = crate::harness_work::WorkFold::from_snapshot(view.work.clone());
+        if fold.apply_event(&env.event, crate::clock::now_millis()) {
+            view.work = fold.into_snapshot();
+        }
+    }
     match env.event.decoded() {
         HarnessEventKind::ToolCall(payload) => {
             view.tools.push(ToolActivity {

@@ -99,6 +99,18 @@ impl MockRuntime {
                 content: "Reading auth module…".into(),
                 harness: Some("CODEX".into()),
             });
+            // The worker's own screen, as this one now reads it: what it plans
+            // to do, what it has ticked off, who it delegated to, and what it
+            // rewrote. Without these the demo shows a transcript and nothing
+            // about the work behind it.
+            for (kind, payload) in demo_work_events() {
+                s.emit(TuiEvent::TaskEvent {
+                    task_id: "task-1".into(),
+                    event_kind: kind.into(),
+                    content: payload.to_string(),
+                    harness: Some("CODEX".into()),
+                });
+            }
             s.emit(TuiEvent::TaskComplete {
                 digest: TaskDigest {
                     task_id: "task-1".into(),
@@ -229,4 +241,41 @@ fn demo_capacity() -> CapacitySnapshot {
             harnesses: Default::default(),
         }],
     }
+}
+
+/// The structured work a demo worker reports: a plan, a half-finished todo list,
+/// a sub-agent still running, and the files it has rewritten.
+fn demo_work_events() -> Vec<(&'static str, serde_json::Value)> {
+    use crate::harness_work::kinds;
+    vec![
+        (
+            kinds::SESSION_INFO,
+            json!({ "model": "gpt-5-codex", "cwd": "/srv/repos/auth", "tools": ["shell", "apply_patch", "web_search"] }),
+        ),
+        (
+            kinds::PLAN_UPDATE,
+            json!({ "goal": "Split auth into focused modules" }),
+        ),
+        (
+            kinds::TODO_UPDATE,
+            json!({ "todos": [
+                { "content": "map the auth surface", "status": "completed" },
+                { "content": "extract the token store", "status": "completed" },
+                { "content": "split the session guard", "status": "in_progress", "activeForm": "Splitting the session guard" },
+                { "content": "update the callers", "status": "pending" },
+            ]}),
+        ),
+        (
+            kinds::SUBAGENT_START,
+            json!({ "call_id": "sub-1", "agent_type": "code-reviewer", "description": "review the extracted token store" }),
+        ),
+        (
+            kinds::FILE_CHANGE,
+            json!({ "path": "src/auth/tokens.rs", "change": "added" }),
+        ),
+        (
+            kinds::FILE_CHANGE,
+            json!({ "path": "src/auth/mod.rs", "change": "modified" }),
+        ),
+    ]
 }

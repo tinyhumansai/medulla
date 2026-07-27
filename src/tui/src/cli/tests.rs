@@ -392,3 +392,153 @@ fn help_text_documents_the_run_command() {
     assert!(help.contains("medulla run"));
     assert!(help.contains("--core-socket"));
 }
+
+#[test]
+fn dispatches_the_workflow_subcommand_under_either_spelling() {
+    assert_eq!(parse_command(&argv(&["workflow"])), Command::Workflow);
+    assert_eq!(parse_command(&argv(&["workflows"])), Command::Workflow);
+    assert_eq!(
+        parse_command(&argv(&["workflow", "list"])),
+        Command::Workflow
+    );
+}
+
+#[test]
+fn parses_every_workflow_verb_with_its_operand() {
+    let cases: Vec<(Vec<&str>, WorkflowAction)> = vec![
+        (vec![], WorkflowAction::List),
+        (vec!["list"], WorkflowAction::List),
+        (vec!["get", "sweep"], WorkflowAction::Get("sweep".into())),
+        (
+            vec!["create", "sweep"],
+            WorkflowAction::Create("sweep".into()),
+        ),
+        (
+            vec!["delete", "sweep"],
+            WorkflowAction::Delete("sweep".into()),
+        ),
+        (
+            vec!["apply-ops", "sweep"],
+            WorkflowAction::ApplyOps("sweep".into()),
+        ),
+        (
+            vec!["preview-ops", "sweep"],
+            WorkflowAction::PreviewOps("sweep".into()),
+        ),
+        (
+            vec!["dry-run", "sweep"],
+            WorkflowAction::DryRun("sweep".into()),
+        ),
+        (vec!["run", "sweep"], WorkflowAction::Run("sweep".into())),
+        (vec!["resume", "r1"], WorkflowAction::Resume("r1".into())),
+        (vec!["cancel", "r1"], WorkflowAction::Cancel("r1".into())),
+        (
+            vec!["list-runs", "sweep"],
+            WorkflowAction::ListRuns("sweep".into()),
+        ),
+        (vec!["get-run", "r1"], WorkflowAction::GetRun("r1".into())),
+    ];
+
+    for (args, expected) in cases {
+        assert_eq!(
+            parse_workflow_args(&argv(&args)).action,
+            expected,
+            "for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn workflow_aliases_reach_the_same_actions() {
+    assert_eq!(
+        parse_workflow_args(&argv(&["show", "sweep"])).action,
+        WorkflowAction::Get("sweep".into())
+    );
+    assert_eq!(
+        parse_workflow_args(&argv(&["edit", "sweep"])).action,
+        WorkflowAction::ApplyOps("sweep".into())
+    );
+    assert_eq!(
+        parse_workflow_args(&argv(&["simulate", "sweep"])).action,
+        WorkflowAction::DryRun("sweep".into())
+    );
+    assert_eq!(
+        parse_workflow_args(&argv(&["kinds"])).action,
+        WorkflowAction::Catalog(None)
+    );
+}
+
+#[test]
+fn validate_and_catalog_take_an_optional_operand() {
+    // `validate` with no id reads a document from stdin; `catalog` with no kind
+    // returns every contract. Both are useful bare, unlike the other verbs.
+    assert_eq!(
+        parse_workflow_args(&argv(&["validate"])).action,
+        WorkflowAction::Validate(None)
+    );
+    assert_eq!(
+        parse_workflow_args(&argv(&["validate", "sweep"])).action,
+        WorkflowAction::Validate(Some("sweep".into()))
+    );
+    assert_eq!(
+        parse_workflow_args(&argv(&["catalog", "agent"])).action,
+        WorkflowAction::Catalog(Some("agent".into()))
+    );
+}
+
+#[test]
+fn a_verb_missing_its_required_operand_falls_back_to_listing() {
+    // Listing is the harmless read-only answer to a half-typed command, and
+    // matches how `workspace remove` already behaves.
+    for verb in ["get", "run", "delete", "apply-ops", "resume", "cancel"] {
+        assert_eq!(
+            parse_workflow_args(&argv(&[verb])).action,
+            WorkflowAction::List,
+            "for bare {verb}"
+        );
+    }
+}
+
+#[test]
+fn approve_and_reject_accumulate_so_one_resume_can_release_several_gates() {
+    let parsed = parse_workflow_args(&argv(&[
+        "resume",
+        "r1",
+        "--approve",
+        "review",
+        "--approve",
+        "deploy",
+        "--reject",
+        "risky",
+    ]));
+
+    assert_eq!(parsed.action, WorkflowAction::Resume("r1".into()));
+    assert_eq!(parsed.approve, vec!["review", "deploy"]);
+    assert_eq!(parsed.reject, vec!["risky"]);
+}
+
+#[test]
+fn workflow_flags_are_parsed_alongside_the_verb() {
+    let parsed = parse_workflow_args(&argv(&[
+        "run",
+        "sweep",
+        "--input",
+        "{\"n\":1}",
+        "--run-id",
+        "r9",
+        "--config",
+        "/tmp/c.toml",
+    ]));
+
+    assert_eq!(parsed.action, WorkflowAction::Run("sweep".into()));
+    assert_eq!(parsed.input.as_deref(), Some("{\"n\":1}"));
+    assert_eq!(parsed.run_id.as_deref(), Some("r9"));
+    assert_eq!(parsed.config.as_deref(), Some("/tmp/c.toml"));
+}
+
+#[test]
+fn help_text_documents_the_workflow_command() {
+    let help = help_text();
+    assert!(help.contains("medulla workflow"));
+    assert!(help.contains("--approve"));
+}

@@ -8,7 +8,7 @@ use medulla::tinyplace::HarnessProvider;
 
 use super::types::{
     Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs, UpdateArgs,
-    WorkspaceAction, WorkspaceArgs,
+    WorkflowAction, WorkflowArgs, WorkspaceAction, WorkspaceArgs,
 };
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -31,6 +31,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("init") => Command::Init,
         Some("workspace") | Some("workspaces") => Command::Workspace,
         Some("hub") => Command::Hub,
+        Some("workflow") | Some("workflows") => Command::Workflow,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),
@@ -208,6 +209,82 @@ pub fn parse_workspace_args(args: &[String]) -> WorkspaceArgs {
     out
 }
 
+/// Parse `medulla workflow` flags out of the args following `workflow`.
+///
+/// Unknown flags and stray operands are ignored rather than rejected, matching
+/// the other subcommand parsers: this is called from a shell and from a harness
+/// alike, and a hard failure on an extra token helps neither.
+pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
+    let mut out = WorkflowArgs::default();
+    let mut bare: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                if let Some(v) = it.next() {
+                    out.config = Some(v.clone());
+                }
+            }
+            "--input" => {
+                if let Some(v) = it.next() {
+                    out.input = Some(v.clone());
+                }
+            }
+            "--run-id" => {
+                if let Some(v) = it.next() {
+                    out.run_id = Some(v.clone());
+                }
+            }
+            // Repeatable: a paused run may be holding more than one gate, and
+            // releasing them one call at a time would restart the run each time.
+            "--approve" => {
+                if let Some(v) = it.next() {
+                    out.approve.push(v.clone());
+                }
+            }
+            "--reject" => {
+                if let Some(v) = it.next() {
+                    out.reject.push(v.clone());
+                }
+            }
+            other => {
+                if !other.starts_with('-') {
+                    bare.push(other.to_string());
+                }
+            }
+        }
+    }
+
+    let operand = bare.get(1).cloned();
+    out.action = match bare.first().map(String::as_str) {
+        Some("get") | Some("show") => operand.map_or(WorkflowAction::List, WorkflowAction::Get),
+        Some("create") | Some("save") => {
+            operand.map_or(WorkflowAction::List, WorkflowAction::Create)
+        }
+        Some("delete") | Some("rm") => operand.map_or(WorkflowAction::List, WorkflowAction::Delete),
+        Some("apply-ops") | Some("edit") => {
+            operand.map_or(WorkflowAction::List, WorkflowAction::ApplyOps)
+        }
+        Some("preview-ops") => operand.map_or(WorkflowAction::List, WorkflowAction::PreviewOps),
+        // The one verb whose operand is genuinely optional: with an id it
+        // checks a saved workflow, without one it reads a document from stdin.
+        Some("validate") | Some("check") => WorkflowAction::Validate(operand),
+        Some("dry-run") | Some("simulate") => {
+            operand.map_or(WorkflowAction::List, WorkflowAction::DryRun)
+        }
+        Some("run") => operand.map_or(WorkflowAction::List, WorkflowAction::Run),
+        Some("resume") => operand.map_or(WorkflowAction::List, WorkflowAction::Resume),
+        Some("cancel") => operand.map_or(WorkflowAction::List, WorkflowAction::Cancel),
+        Some("list-runs") | Some("runs") => {
+            operand.map_or(WorkflowAction::List, WorkflowAction::ListRuns)
+        }
+        Some("get-run") => operand.map_or(WorkflowAction::List, WorkflowAction::GetRun),
+        Some("catalog") | Some("kinds") => WorkflowAction::Catalog(operand),
+        _ => WorkflowAction::List,
+    };
+    out
+}
+
 /// Parse the TUI's own flags out of `argv[1..]`.
 pub fn parse_tui_args(args: &[String]) -> TuiArgs {
     let mut out = TuiArgs::default();
@@ -281,6 +358,7 @@ medulla logout          Clear stored credentials\n  \
 medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
 medulla workspace <cmd> Workspace registry: add [dir]|list|remove <dir|id>\n  \
+medulla workflow <cmd>  Workflows: list|get|create|apply-ops|validate|dry-run|run|resume|cancel|catalog\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\
@@ -298,6 +376,12 @@ Daemon flags:\n  \
 Wrapper flags:\n  \
 --no-bridge             Run the CLI as a plain passthrough (no tiny.place bridge)\n  \
 --                      Pass all following arguments to the CLI verbatim\n\n\
+Workflow flags:\n  \
+--input <json>          Trigger payload for run / dry-run\n  \
+--run-id <id>           Id to give the run (default: a fresh one)\n  \
+--approve <node-id>     Gate to release on resume (repeatable)\n  \
+--reject <node-id>      Gate to refuse on resume (repeatable)\n\n\
+Workflow documents and graph ops are read from stdin; every verb prints JSON.\n\n\
 Login flags:\n  \
 --provider <name>       OAuth provider: google (default), github, twitter\n  \
 --no-browser            Print the login URL without launching a browser\n  \

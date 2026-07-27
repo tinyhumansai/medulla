@@ -39,6 +39,8 @@ pub enum Command {
     /// Run the orchestrator hub: relay hosted-backend tasks to tiny.place
     /// workers over Signal DMs; carries the remaining args.
     Hub,
+    /// Author, inspect, and run workflows (`list`/`get`/`create`/`apply-ops`/…).
+    Workflow,
 }
 
 /// Parsed `medulla init` flags.
@@ -95,6 +97,74 @@ impl Default for WorkspaceArgs {
             offline: false,
             json: false,
             action: WorkspaceAction::List,
+        }
+    }
+}
+
+/// The `medulla workflow` action.
+///
+/// The verbs split into three groups: authoring (`create`, `apply-ops`,
+/// `validate`, `catalog`), inspection (`list`, `get`, `list-runs`, `get-run`),
+/// and execution (`dry-run`, `run`, `resume`, `cancel`). A harness building a
+/// workflow uses the first two; an operator uses all three.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkflowAction {
+    /// `list` — every installed workflow.
+    List,
+    /// `get <id>` — one workflow, whole.
+    Get(String),
+    /// `create <id>` — install a workflow from a document on stdin.
+    Create(String),
+    /// `delete <id>` — uninstall a workflow.
+    Delete(String),
+    /// `apply-ops <id>` — apply graph patches read from stdin.
+    ApplyOps(String),
+    /// `preview-ops <id>` — check graph patches from stdin without saving.
+    PreviewOps(String),
+    /// `validate [id]` — validate a saved workflow, or a document on stdin.
+    Validate(Option<String>),
+    /// `dry-run <id>` — simulate, dispatching nothing.
+    DryRun(String),
+    /// `run <id>` — run for real against the coding CLIs on this machine.
+    Run(String),
+    /// `resume <run-id>` — release approval gates and continue.
+    Resume(String),
+    /// `cancel <run-id>` — stop a run executing in this process.
+    Cancel(String),
+    /// `list-runs <id>` — a workflow's run history.
+    ListRuns(String),
+    /// `get-run <run-id>` — one run record.
+    GetRun(String),
+    /// `catalog [kind]` — the node kinds an author may use.
+    Catalog(Option<String>),
+}
+
+/// Parsed `medulla workflow` flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowArgs {
+    /// Explicit `--config` path. `None` selects the layered config discovery.
+    pub config: Option<String>,
+    /// `--input <json>`: the trigger payload for `run`/`dry-run`.
+    pub input: Option<String>,
+    /// `--approve <node-id>`, repeatable: gates to release on `resume`.
+    pub approve: Vec<String>,
+    /// `--reject <node-id>`, repeatable: gates to refuse on `resume`.
+    pub reject: Vec<String>,
+    /// `--run-id <id>`: the id to give a new run. Absent mints one.
+    pub run_id: Option<String>,
+    /// The selected action.
+    pub action: WorkflowAction,
+}
+
+impl Default for WorkflowArgs {
+    fn default() -> Self {
+        WorkflowArgs {
+            config: None,
+            input: None,
+            approve: Vec::new(),
+            reject: Vec::new(),
+            run_id: None,
+            action: WorkflowAction::List,
         }
     }
 }

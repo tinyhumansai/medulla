@@ -18,10 +18,9 @@ impl App {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                // The art's own top row is sparse — only the ascenders of "d",
-                // "l" and "ll" reach it — so the wordmark already reads as
-                // having space above it. The spare row goes underneath, where
-                // the glyphs sit hard on the baseline.
+                // Four rows for three rows of art, with the wordmark centred in
+                // the band rather than pinned to its top edge, so the spare row
+                // stays wherever the band's height puts it.
                 Constraint::Length(4),
                 Constraint::Length(7),
                 Constraint::Min(0),
@@ -38,7 +37,8 @@ impl App {
                 ))
             })
             .collect();
-        f.render_widget(Paragraph::new(Text::from(logo)), rows[0]);
+        let band = crate::ui::layout::centered_fixed(rows[0].width, logo.len() as u16, rows[0]);
+        f.render_widget(Paragraph::new(Text::from(logo)), band);
         let rows = &rows[1..];
         // Two panels: this device, and what the orchestration is doing with it.
         // The device panel is the host observer's, so it is only laid out while

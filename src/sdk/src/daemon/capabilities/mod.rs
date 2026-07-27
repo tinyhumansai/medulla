@@ -1,4 +1,4 @@
-//! Capability discovery, ported from the tinyplace CLI `daemon/capabilities.ts`.
+//! Capability discovery for supported local harnesses.
 //!
 //! An orchestrator picking a lane needs the repo, branch, accessible dirs, and
 //! the tools/MCP servers an agent can reach. Config heuristics get that wrong, so

@@ -1,5 +1,5 @@
 //! Provider detection + headless one-shot task execution, ported from the
-//! tinyplace CLI `daemon/providers.ts`.
+//! supported local harness providers.
 //!
 //! The daemon runs a delegated task by spawning the requested coding-agent CLI
 //! once, non-interactively, and folding its streaming JSONL output through the

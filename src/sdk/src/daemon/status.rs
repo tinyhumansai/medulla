@@ -1,6 +1,6 @@
 //! Status-line derivation: turn a semantic harness event into the short,
 //! human-facing detail string the daemon forwards as a `status` frame. Ported
-//! from the TypeScript `statusDetail`.
+//! from provider status details.
 
 use crate::tinyplace::{HarnessEvent, HarnessEventKind};
 

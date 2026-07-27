@@ -4,7 +4,7 @@
 //! [`SessionEnvelopeV2`] packets (the SDK wire type). This module is the pure,
 //! deterministic builder behind that stream: it stamps a monotonic `seq`, floors
 //! the bucket to the minute, and derives the idempotent `event.id`
-//! (`sha256(wrapperSessionId\0recordType\0seq\0kind)`) exactly as the TypeScript
+//! (`sha256(wrapperSessionId\0recordType\0seq\0kind)`) exactly as the public
 //! wrapper does. No I/O and no clock of its own beyond the timestamps it is
 //! handed, so every field is unit-testable.
 

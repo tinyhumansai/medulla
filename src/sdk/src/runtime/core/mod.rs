@@ -3,13 +3,13 @@
 //! flavor alongside [`backend`](crate::runtime::backend) (HTTP/SSE) and
 //! [`mock`](crate::runtime::mock) (scripted).
 //!
-//! serve wraps `createAgentHarness` (medulla-v1) and speaks the newline-delimited
+//! serve exposes an agent harness over the newline-delimited
 //! JSON `medulla-serve` protocol (plan §2.2): a `ready`→`hello` handshake with a
 //! protocol-version check, `req`/`res` request flow (`instruct`,
 //! `answer_question`, `cancel_task`, `stop`, `subscribe`), and an unsolicited
 //! `event` stream this runtime folds into a [`RuntimeSnapshot`](crate::runtime::RuntimeSnapshot).
 //! This milestone is **attach-only**: it connects to an existing socket and never
-//! spawns or supervises the Node child — process supervision arrives with the
+//! spawns or supervises the child process — process supervision arrives with the
 //! separately distributed serve artifact (plan §2.1.5). Reverse-RPC port hosting
 //! (serve→host `call` frames) is likewise a later milestone; inbound calls are
 //! refused `port_unavailable` so serve never hangs.

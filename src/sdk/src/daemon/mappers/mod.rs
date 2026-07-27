@@ -1,5 +1,5 @@
 //! JSONL line → semantic-event mappers, ported from the tinyplace CLI
-//! `harness-events.ts`.
+//! provider output into the public harness-event contract.
 //!
 //! Each provider's coding-agent CLI streams a different JSONL transcript shape;
 //! these three mappers fold a single raw line into zero or more

@@ -28,7 +28,7 @@
 //!
 //! **`Bounded`/`Unbound` here are the inverse of the JavaScript prior art's
 //! vocabulary.** The former `core-js` orchestrator (since removed from this
-//! repo) and the tiny.place TypeScript SDK daemon call the long-lived session
+//! repo) and tiny.place daemon call the long-lived session
 //! "bound" (bound to a thread) and the throwaway one "pool"/"unbound". Here the
 //! adjective describes the *lifetime*. When reading that prior art, translate:
 //! their `bound` is our [`SessionClass::Unbound`].

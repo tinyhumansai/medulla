@@ -1,7 +1,6 @@
-//! Round-trip serde tests against JSON literals written by hand from the
-//! medulla-v1 TypeScript definitions. Each test asserts the exact camelCase /
-//! lowercase field and tag names the TS wire shape emits, so a rename that
-//! diverges from the source of truth fails here.
+//! Round-trip serde tests against hand-written public-contract JSON literals.
+//! Each test asserts the exact camelCase / lowercase field and tag names, so a
+//! wire-incompatible rename fails here.
 
 use super::*;
 use serde_json::{json, Value};

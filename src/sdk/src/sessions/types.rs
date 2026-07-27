@@ -19,7 +19,7 @@ use crate::tinyplace::HarnessProvider;
 /// **This is the inverse of the JavaScript prior art's vocabulary, and the
 /// inversion is deliberate.** The implementations this was ported from — the
 /// former `core-js` orchestrator (since removed from this repo) and the
-/// tiny.place TypeScript SDK daemon — call the *long-lived* session "bound" (it
+/// tiny.place daemon — call the *long-lived* session "bound" (it
 /// is bound to a thread) and the throwaway one "unbound"/"pool". Here the
 /// adjective describes the session's **lifetime**, not its attachment: a
 /// [`SessionClass::Bounded`] session has a bounded life (one turn), a

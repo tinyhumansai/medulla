@@ -186,8 +186,7 @@ fn router_absent_by_default_and_omitted_from_output() {
 
 #[test]
 fn router_section_round_trips_camel_case() {
-    // The exact published contract shape (matches medulla-v1's routerConfig
-    // fixture and the backend's stored shape).
+    // The exact published router configuration contract.
     let cfg: TuiConfig = serde_json::from_str(
         r#"{"router":{
             "baseUrl":"https://gateway.internal/v1",

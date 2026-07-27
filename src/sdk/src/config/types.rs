@@ -380,8 +380,8 @@ impl Default for BackendConfig {
 /// Anthropic-passthrough URL, codex/opencode an OpenAI-compatible one), so the
 /// endpoint can be steered per provider while the API key stays shared.
 ///
-/// Mirrors medulla-v1's `RouterProviderConfig` and the backend's stored shape so
-/// one config document round-trips across all three modules.
+/// Matches the public router configuration contract so one config document
+/// round-trips across clients and the backend.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RouterProviderConfig {
@@ -395,8 +395,8 @@ pub struct RouterProviderConfig {
 /// metered, and re-routable without hand-editing each harness's on-disk config.
 ///
 /// camelCase on the wire (`baseUrl`, `apiKeyEnv`, `models`,
-/// `providers.<p>.baseUrl`), matching the published contract that medulla-v1
-/// resolves and the backend serves at `GET/PUT /medulla/v1/router`. Absent
+/// `providers.<p>.baseUrl`), matching the contract served at
+/// `GET/PUT /medulla/v1/router`. Absent
 /// entirely means the feature is off — zero behaviour change.
 ///
 /// The API key is referenced by env-var **name** (`apiKeyEnv`), never inlined:

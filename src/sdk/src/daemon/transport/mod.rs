@@ -57,7 +57,7 @@ pub(super) fn describe_error(err: &::tinyplace::Error) -> String {
 /// The directory rejects an envelope with an empty `id` (`400 message id, from,
 /// and to are required`) and the Rust SDK's `messages.send` only defaults the
 /// `timestamp`, so the id has to be supplied here. Matches the reference
-/// TypeScript SDK's `msg_<millis>_<counter>` shape; the counter disambiguates
+/// public `msg_<millis>_<counter>` shape; the counter disambiguates
 /// envelopes minted within the same millisecond.
 fn next_message_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -280,7 +280,7 @@ impl SignalTransport {
             timestamp: String::new(),
             // The directory rejects a zero device id (`400 deviceId must be
             // positive`). One wallet is one device here, so it is always 1 —
-            // the same value the reference TypeScript SDK and the spec use.
+            // the same value the public protocol specification uses.
             device_id: 1,
             envelope_type: encrypted.message_type,
             body: encrypted.body,

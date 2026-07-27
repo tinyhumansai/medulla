@@ -318,7 +318,7 @@ pub struct EncodeFrameInput {
 
 /// What an agent reports it can do, merged with facts its host establishes.
 ///
-/// Field names mirror the TypeScript SDK JSON (camelCase for the multi-word
+/// Field names match the public protocol JSON (camelCase for the multi-word
 /// keys), since this object rides inside a `capabilities_result` frame's `text`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AgentCapabilities {

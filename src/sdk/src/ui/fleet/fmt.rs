@@ -97,7 +97,7 @@ pub fn tightest(budgets: &[HarnessBudget]) -> Option<&HarnessBudget> {
 
 /// Whether an open-vocabulary availability string means "cannot take work".
 ///
-/// Only `offline` is a hard gate in medulla-v1; everything else — including
+/// Only `offline` is a hard gate in the public status contract; everything else — including
 /// values this client has never seen — is treated as usable, so an unfamiliar
 /// vocabulary degrades to "shown as available" rather than to "hidden".
 pub fn is_offline(availability: &str) -> bool {

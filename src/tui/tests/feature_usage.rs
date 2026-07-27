@@ -42,12 +42,12 @@ fn script_usage(rt: &Arc<MockRuntime>) {
     rt.script_event(TuiEvent::InferenceStart {
         tier: "orchestrator".into(),
         op: "decide".into(),
-        model: Some("medulla-v1".into()),
+        model: Some("orchestrator-model".into()),
     });
     rt.script_event(TuiEvent::InferenceEnd {
         tier: "orchestrator".into(),
         op: "decide".into(),
-        model: Some("medulla-v1".into()),
+        model: Some("orchestrator-model".into()),
         duration_ms: 10,
         usage: Some(Usage {
             input_tokens: 1200,

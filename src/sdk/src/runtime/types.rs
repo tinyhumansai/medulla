@@ -35,7 +35,7 @@ pub struct AgentDescriptor {
     /// Model-facing capability tags.
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Opaque harness-owned metadata, never interpreted by medulla-v1.
+    /// Opaque harness-owned metadata, never interpreted by this client.
     #[serde(default)]
     pub metadata: Map<String, Value>,
 }
@@ -267,8 +267,8 @@ pub struct RuntimeSnapshot {
     pub tinyplace: Option<TinyplaceIdentity>,
     pub threads: Vec<ThreadSummary>,
     pub active_thread_id: String,
-    /// Latest agent-harness status, when the backing runtime fronts a medulla-v1
-    /// agent harness. `None` until (and unless) the backend surfaces one; the
+    /// Latest agent-harness status, when the backing runtime exposes the public
+    /// harness contract. `None` until (and unless) the backend surfaces one; the
     /// Agents view renders the compact task board only while it is `Some`.
     pub harness: Option<crate::harness_contract::HarnessStatus>,
     /// Bumped each time the backing runtime rebaselines its folded event log —

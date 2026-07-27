@@ -4,7 +4,7 @@
 //! `GET /medulla/v1/roster` answers in the manager's own vocabulary: one flat
 //! [`RosterWorker`] row per connected worker, carrying the machine's resources,
 //! the harness serving it, and its budget windows all on the same record. The UI
-//! reads the medulla-v1 chain instead — `Host → Harness → Workspace → Agent` —
+//! reads the orchestrator chain instead — `Host → Harness → Workspace → Agent` —
 //! so this module splits each row back into the levels it flattened.
 //!
 //! The split is deliberately conservative. A worker names exactly one machine

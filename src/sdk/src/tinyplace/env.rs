@@ -4,8 +4,7 @@
 //! Every knob the wrapper/daemon read from the process environment resolves
 //! here, as a pure function over an injected `&HashMap<String, String>` so the
 //! precedence matrix is unit-testable and identical across both call sites. The
-//! contract mirrors the TypeScript reference wrapper
-//! (`vendor/tinyplace/sdk/typescript/src/cli/harness-wrapper.ts`): a
+//! contract follows the public tiny.place wrapper specification: a
 //! per-provider key always beats the generic (`HARNESS`) key, which beats the
 //! owner fallbacks / provider defaults.
 //!

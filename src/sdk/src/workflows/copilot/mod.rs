@@ -22,7 +22,7 @@ mod diff;
 mod prompt;
 
 pub use diff::describe as describe_changes;
-pub use prompt::build as build_prompt;
+pub use prompt::{build as build_prompt, build_new as build_new_prompt};
 
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ use crate::hub::TaskRequest;
 use crate::workflows::{require, WorkflowError, WorkflowStore};
 
 /// How one copilot turn ended.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CopilotOutcome {
     /// The agent's final reply.
     pub reply: String,
@@ -42,6 +42,16 @@ pub struct CopilotOutcome {
     /// when it changed nothing — which is the right outcome for a question, and
     /// a fact worth reporting for anything else.
     pub changes: Vec<String>,
+    /// The id of a workflow this turn brought into existence, for a [`create`]
+    /// turn that succeeded.
+    ///
+    /// Always `None` for [`CopilotSession::turn`], which edits a workflow that
+    /// already exists. Read from the store rather than from the reply: the
+    /// caller uses it to select the new workflow, and selecting one the agent
+    /// merely *said* it made would land on nothing.
+    ///
+    /// [`create`]: CopilotSession::create
+    pub created: Option<String>,
 }
 
 /// Everything a turn needs to reach a harness.
@@ -107,7 +117,82 @@ impl CopilotSession {
         Ok(CopilotOutcome {
             reply: outcome.reply.trim().to_string(),
             changes: diff::describe(&before, &after),
+            created: None,
         })
+    }
+
+    /// Run one instruction that is meant to *create* a workflow.
+    ///
+    /// The same dispatch as [`Self::turn`] with two differences: the prompt has
+    /// no workflow to name and tells the agent to call `workflow_create`, and
+    /// what changed is worked out by comparing the catalogue before and after
+    /// rather than one graph against itself.
+    ///
+    /// Reports the new workflow's id in [`CopilotOutcome::created`] so the
+    /// caller can select it. A turn where the agent talked but created nothing
+    /// is not an error — that is the right outcome for "what could I build?" —
+    /// and comes back with `created: None` and no changes.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the dispatch itself fails: a timeout, an abort, a harness
+    /// that errored. A refused or invalid `workflow_create` is not an error
+    /// here; the tool will have told the agent why and it says so in its reply.
+    pub async fn create(
+        &self,
+        instruction: &str,
+        status: Option<mpsc::UnboundedSender<String>>,
+    ) -> Result<CopilotOutcome, WorkflowError> {
+        let before = self.catalogue();
+
+        let task_id = format!("copilot-new-{}", uuid::Uuid::new_v4());
+        let request = TaskRequest {
+            task_id: task_id.clone(),
+            abort_id: task_id,
+            cycle_id: None,
+            instruction: prompt::build_new(instruction),
+            worker_address: self.worker_address.clone(),
+            provider: self.provider,
+            model: self.model.clone(),
+            // Never a workflow, for the same reason an edit is not: this is an
+            // authoring turn, not a run.
+            workflow: None,
+        };
+
+        let outcome = self
+            .dispatch
+            .dispatch_with_status(request, status)
+            .await
+            .map_err(|err| WorkflowError::Engine(err.to_string()))?;
+
+        // Whatever is in the catalogue now that was not before. A turn that
+        // somehow made several takes the first by id so the result is stable.
+        let mut created: Vec<String> = self
+            .catalogue()
+            .into_iter()
+            .filter(|id| !before.contains(id))
+            .collect();
+        created.sort();
+        Ok(CopilotOutcome {
+            reply: outcome.reply.trim().to_string(),
+            changes: created
+                .iter()
+                .map(|id| format!("+ workflow {id}"))
+                .collect(),
+            created: created.into_iter().next(),
+        })
+    }
+
+    /// Every workflow id the store currently holds.
+    ///
+    /// An unreadable store yields nothing rather than failing: the comparison it
+    /// feeds only has to answer "what is new", and a store that cannot be listed
+    /// after the turn reports no creation instead of losing the reply.
+    fn catalogue(&self) -> std::collections::BTreeSet<String> {
+        self.store
+            .list()
+            .map(|rows| rows.into_iter().map(|row| row.id).collect())
+            .unwrap_or_default()
     }
 
     /// The workflow's graph as the store now holds it.

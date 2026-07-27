@@ -52,6 +52,54 @@ change nothing.
 you did not. The operator sees the graph beside your reply, so do not restate \
 it or paste JSON.";
 
+/// The rules for a turn that has no workflow yet.
+///
+/// A separate preamble rather than a flag threaded through [`PREAMBLE`],
+/// because almost every rule differs: there is nothing to read first, nothing to
+/// patch, and the failure mode is the opposite one — an edit turn must not
+/// re-create a workflow, and this turn must not edit an existing one.
+const PREAMBLE_NEW: &str = "\
+You are the workflow copilot inside Medulla's terminal UI. The operator has \
+asked you to build a NEW workflow. Nothing exists yet.
+
+Use the `medulla-workflows` MCP tools for everything:
+
+- `workflow_catalog` FIRST, to see which node kinds exist and what config each \
+one takes — do not guess a kind or a field name.
+- `workflow_create` to save the graph once you have designed it.
+- `workflow_validate` and `workflow_dry_run` to confirm it works.
+
+Rules:
+
+- Create exactly ONE workflow, and only through the tools. Do not write \
+workflow files directly: the store is layered and a file you wrote is not \
+necessarily the record the operator would see.
+- Do not modify any workflow that already exists. This turn only adds.
+- Give it a short lowercase-hyphenated id and a human-readable name. If the \
+operator named it, use their name.
+- Start it with a trigger node and connect every node you add. A graph with \
+orphaned nodes is not a workflow.
+- Leave the graph valid. If you cannot build something valid from what you \
+were told, create nothing and say what you would need to know.
+- If the operator asked a question rather than for a workflow, answer it and \
+create nothing.
+- Reply in at most three sentences, in plain prose: what you built, or why you \
+did not. The operator sees the graph beside your reply, so do not restate it \
+or paste JSON.";
+
+/// Build the prompt for a turn that creates a workflow from nothing.
+///
+/// Like [`build`], the operator's own words go last and unaltered — a harness
+/// weights the end of a prompt most heavily.
+pub fn build_new(instruction: &str) -> String {
+    let mut prompt = String::with_capacity(2048);
+    prompt.push_str(PREAMBLE_NEW);
+    prompt.push_str("\n\n## The instruction\n\n");
+    prompt.push_str(instruction.trim());
+    prompt.push('\n');
+    prompt
+}
+
 /// Build the prompt for one copilot turn.
 ///
 /// `instruction` is the operator's own words, passed through unaltered and

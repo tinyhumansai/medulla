@@ -280,6 +280,14 @@ pub enum WorkflowView {
 pub struct WorkflowsState {
     /// Which pane has the keyboard.
     pub(super) focus: WorkflowFocus,
+    /// Whether the rail cursor is on the "New workflow" row.
+    ///
+    /// Its own flag rather than a sentinel value of the catalogue index,
+    /// because the New row is not a workflow: it has no graph to draw, no runs
+    /// to list, and nothing to run. Everything that reads the selection has to
+    /// answer "or is it the new one?" and a magic index would let that question
+    /// go unasked.
+    pub(super) creating: bool,
     /// The selected workflow's run, when the rail cursor is on one of the run
     /// rows nested under it rather than on the workflow itself.
     ///
@@ -390,6 +398,22 @@ pub enum Cmd {
         /// The workflow the turn is scoped to.
         workflow: String,
         /// The operator's instruction, verbatim.
+        instruction: String,
+    },
+    /// Ask the copilot to build a workflow that does not exist yet.
+    ///
+    /// Separate from [`Cmd::CopilotTurn`] because it has no workflow to name:
+    /// the agent is told to call `workflow_create`, and which workflow appeared
+    /// is worked out from the store afterwards.
+    #[cfg(feature = "workflows")]
+    CreateWorkflow {
+        /// Which copilot thread the turn's progress and result belong to.
+        ///
+        /// Carried rather than assumed: the thread for a workflow that does not
+        /// exist is keyed by a sentinel the app owns, and an event loop that
+        /// had to know that sentinel would be a second place it is spelled.
+        thread: String,
+        /// The operator's description of what they want, verbatim.
         instruction: String,
     },
     /// Simulate a workflow without dispatching anything, and report the result.

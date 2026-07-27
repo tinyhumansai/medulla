@@ -10,13 +10,25 @@ use medulla::ui::workflows::CopilotState;
 
 use super::super::types::{App, Cmd};
 
+/// The key the not-yet-a-workflow thread is filed under.
+///
+/// A workflow that does not exist has no id to key its conversation by, but the
+/// thread still has to survive the operator walking away from the New row and
+/// coming back. The leading control character cannot occur in an id: those come
+/// from file stems, and the store never yields one containing `\u{1}`.
+pub(in crate::ui::app) const NEW_THREAD: &str = "\u{1}new-workflow";
+
 impl App {
-    /// The copilot thread for the selected workflow, creating it on first use.
+    /// The copilot thread the rail cursor is on, creating it on first use.
     ///
-    /// Returns `None` when nothing is selected — an empty catalogue has no
-    /// conversation to have.
+    /// The New row has a thread of its own, filed under [`NEW_THREAD`] — the
+    /// conversation that will produce a workflow, held before there is one to
+    /// name it after.
+    ///
+    /// Returns `None` only when a workflow is selected and the catalogue cannot
+    /// produce it.
     pub(in crate::ui::app) fn copilot_mut(&mut self) -> Option<&mut CopilotState> {
-        let id = self.selected_workflow()?.id.clone();
+        let id = self.copilot_key()?;
         Some(
             self.wf
                 .copilots
@@ -25,10 +37,17 @@ impl App {
         )
     }
 
-    /// The selected workflow's copilot thread, if it has one yet.
+    /// The thread the rail cursor is on, if it has one yet.
     pub(in crate::ui::app) fn copilot(&self) -> Option<&CopilotState> {
-        let id = &self.selected_workflow()?.id;
-        self.wf.copilots.get(id)
+        self.wf.copilots.get(&self.copilot_key()?)
+    }
+
+    /// Which thread the rail cursor addresses.
+    fn copilot_key(&self) -> Option<String> {
+        if self.wf.creating {
+            return Some(NEW_THREAD.to_string());
+        }
+        Some(self.selected_workflow()?.id.clone())
     }
 
     /// Whether the selected workflow has a turn in flight.
@@ -69,10 +88,25 @@ impl App {
             self.set_status("The copilot is still working — wait for it to finish");
             return None;
         }
-        let workflow = self.selected_workflow()?.id.clone();
+        // The New row's turn creates rather than edits, so it is a different
+        // command — but the same draft, the same thread bookkeeping, and the
+        // same refusal while one is in flight.
+        let creating = self.wf.creating;
+        let workflow = if creating {
+            NEW_THREAD.to_string()
+        } else {
+            self.selected_workflow()?.id.clone()
+        };
         self.wf.draft = crate::ui::composer::Draft::new();
         self.wf.copilot_scroll = 0;
         self.copilot_mut()?.ask(&instruction);
+        if creating {
+            self.set_status("Copilot · building a new workflow…");
+            return Some(Cmd::CreateWorkflow {
+                thread: workflow,
+                instruction,
+            });
+        }
         self.set_status(format!("Copilot · {workflow}"));
         Some(Cmd::CopilotTurn {
             workflow,
@@ -95,20 +129,59 @@ impl App {
         }
     }
 
-    /// Record a finished copilot turn: its reply, and what it changed.
+    /// Record a finished copilot turn: its reply, what it changed, and any
+    /// workflow it brought into existence.
     ///
     /// Re-reads the catalogue and the graph when something changed, so the pane
     /// beside the transcript shows the edit the transcript just described.
-    pub fn copilot_finished(&mut self, workflow: &str, reply: String, changes: Vec<String>) {
+    pub fn copilot_finished(
+        &mut self,
+        workflow: &str,
+        reply: String,
+        changes: Vec<String>,
+        created: Option<String>,
+    ) {
         let changed = !changes.is_empty();
         if let Some(thread) = self.wf.copilots.get_mut(workflow) {
             thread.changed(changes);
             thread.reply(reply);
         }
-        if changed {
-            self.reload_workflows();
-            self.set_status(format!("{workflow} updated"));
+        if !changed {
+            return;
         }
+        self.reload_workflows();
+        match created {
+            Some(id) => self.adopt_new_workflow(&id),
+            None => self.set_status(format!("{workflow} updated")),
+        }
+    }
+
+    /// Select the workflow a create turn just made, and give it the thread that
+    /// made it.
+    ///
+    /// The conversation moves rather than being discarded: it is the record of
+    /// why this workflow looks the way it does, and the operator's next
+    /// instruction is almost always a follow-up to it. The New row is left with
+    /// a clean thread for the next workflow.
+    fn adopt_new_workflow(&mut self, id: &str) {
+        let Some(index) = self
+            .workflow_summaries()
+            .iter()
+            .position(|summary| summary.id == id)
+        else {
+            // The store says it is not there. Reported rather than silently
+            // ignored: the agent believed it created something.
+            self.set_status(format!("Created {id}, but it is not in the catalogue"));
+            return;
+        };
+        if let Some(mut thread) = self.wf.copilots.remove(NEW_THREAD) {
+            thread.workflow_id = id.to_string();
+            self.wf.copilots.insert(id.to_string(), thread);
+        }
+        // Clears `creating`, so the rail cursor lands on the new workflow and
+        // the content pane draws its graph.
+        self.select_workflow(index);
+        self.set_status(format!("Created {id}"));
     }
 
     /// Record a copilot turn that failed.

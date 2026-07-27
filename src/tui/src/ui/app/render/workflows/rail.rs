@@ -8,15 +8,12 @@
 //! specific: turning a workflow, and the runs nested under it, into rows.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line as TLine, Span, Text};
-use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::ui::multi_pane::{self, NavRow};
 
 use super::super::super::types::{App, WorkflowFocus};
-use super::super::super::workflows::WorkflowRailRow;
+use super::super::super::workflows::{WorkflowRailRow, NEW_LABEL};
 
 /// How far a run sits under the workflow it belongs to.
 const RUN_INDENT: usize = 2;
@@ -32,13 +29,6 @@ impl App {
         );
 
         let rows = self.workflow_rail_rows();
-        if rows.is_empty() {
-            let inner = block.inner(area);
-            f.render_widget(block, area);
-            f.render_widget(Paragraph::new(Text::from(empty_lines())), inner);
-            return;
-        }
-
         // Labels are formatted per row and live nowhere on `App`, so they are
         // built as owned strings first and the borrowing `NavRow`s point into
         // them.
@@ -55,7 +45,7 @@ impl App {
                         _ => None,
                     },
                     indent: match row {
-                        WorkflowRailRow::Workflow { .. } => 0,
+                        WorkflowRailRow::Workflow { .. } | WorkflowRailRow::New => 0,
                         _ => RUN_INDENT,
                     },
                     selected: self.workflow_rail_selected(row),
@@ -63,6 +53,10 @@ impl App {
                         WorkflowRailRow::Workflow { row, .. }
                         | WorkflowRailRow::Run { row, .. } => row.degraded,
                         WorkflowRailRow::Note(_) => true,
+                        // Never dim: it is the one row that is an offer rather
+                        // than a record, and on an empty machine it is the only
+                        // thing there is to do.
+                        WorkflowRailRow::New => false,
                     },
                     selectable: !matches!(row, WorkflowRailRow::Note(_)),
                 })
@@ -90,19 +84,6 @@ fn rail_label(row: &WorkflowRailRow) -> String {
             row.detail
         ),
         WorkflowRailRow::Note(note) => (*note).to_string(),
+        WorkflowRailRow::New => NEW_LABEL.to_string(),
     }
-}
-
-/// What the rail says when nothing is installed.
-fn empty_lines() -> Vec<TLine<'static>> {
-    let dim = Style::default().add_modifier(Modifier::DIM);
-    [
-        "No workflows installed.",
-        "",
-        "Write one to",
-        ".medulla/workflows/.",
-    ]
-    .into_iter()
-    .map(|line| TLine::from(Span::styled(line, dim)))
-    .collect()
 }

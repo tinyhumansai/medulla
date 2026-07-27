@@ -70,6 +70,8 @@ pub(super) enum AppMsg {
         reply: String,
         /// What the turn changed in the stored graph.
         changes: Vec<String>,
+        /// The workflow the turn created, for a create turn that made one.
+        created: Option<String>,
     },
     /// A copilot turn failed.
     #[cfg(feature = "workflows")]

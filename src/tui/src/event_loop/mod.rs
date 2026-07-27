@@ -131,7 +131,8 @@ pub(crate) async fn run(
                         workflow,
                         reply,
                         changes,
-                    } => app.copilot_finished(&workflow, reply, changes),
+                        created,
+                    } => app.copilot_finished(&workflow, reply, changes, created),
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotFailed { workflow, error } => {
                         app.copilot_failed(&workflow, error);

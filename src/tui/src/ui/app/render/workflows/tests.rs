@@ -310,7 +310,7 @@ fn a_copilot_thread_is_drawn_with_a_marker_per_kind_of_line() {
     app.wf.draft = crate::ui::composer::insert_at("", 0, "add a step");
     app.submit_copilot().expect("turn");
     app.copilot_status("nightly", "applying ops".into());
-    app.copilot_finished("nightly", "done".into(), vec!["+ node notify".into()]);
+    app.copilot_finished("nightly", "done".into(), vec!["+ node notify".into()], None);
 
     let screen = render(&mut app);
 

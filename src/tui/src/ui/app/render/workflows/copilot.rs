@@ -63,17 +63,28 @@ impl App {
                 // Unlike the orchestrator's, this composer has no caption row
                 // naming its target, so the placeholder is where it says what
                 // asking here does.
-                placeholder: Some("Ask for a change to this workflow"),
+                placeholder: Some(if self.wf.creating {
+                    "Describe the workflow you want"
+                } else {
+                    "Ask for a change to this workflow"
+                }),
             },
         );
     }
 
     /// The conversation so far, anchored to the bottom.
     fn draw_copilot_transcript(&mut self, f: &mut Frame, area: Rect, busy: bool) {
-        let title = if busy {
-            format!("Copilot {}", SPINNER[self.frame % SPINNER.len()])
+        // Named for what it is about, because the New row's thread is not about
+        // any workflow yet and a bare "Copilot" would not say so.
+        let subject = if self.wf.creating {
+            " · new workflow"
         } else {
-            "Copilot".to_string()
+            ""
+        };
+        let title = if busy {
+            format!("Copilot{subject} {}", SPINNER[self.frame % SPINNER.len()])
+        } else {
+            format!("Copilot{subject}")
         };
         let block = crate::ui::widgets::panel(&self.theme, title, true);
         let inner = block.inner(area);
@@ -103,11 +114,14 @@ impl App {
             // Nothing said yet: the pane explains itself instead. Top-anchored,
             // unlike a transcript — this is a standing invitation rather than a
             // conversation whose end matters.
-            let has_workflow = self.selected_workflow().is_some();
-            f.render_widget(
-                Paragraph::new(Text::from(intro_lines(has_workflow, width))),
-                body,
-            );
+            let intro = if self.wf.creating {
+                Intro::New
+            } else if self.selected_workflow().is_some() {
+                Intro::Edit
+            } else {
+                Intro::NothingSelected
+            };
+            f.render_widget(Paragraph::new(Text::from(intro_lines(intro, width))), body);
             self.wf.copilot_scroll = 0;
             0
         } else {
@@ -179,29 +193,53 @@ fn turn_lines(turn: &CopilotTurn, width: usize) -> Vec<TLine<'static>> {
         .collect()
 }
 
+/// Which invitation the pane shows before its first instruction.
+#[derive(Clone, Copy)]
+enum Intro {
+    /// The New row: nothing exists yet, and this conversation makes it.
+    New,
+    /// A workflow is selected and this conversation edits it.
+    Edit,
+    /// Neither — an empty catalogue with the cursor somewhere it cannot act.
+    NothingSelected,
+}
+
 /// What the pane says before the first instruction.
-fn intro_lines(has_workflow: bool, width: usize) -> Vec<TLine<'static>> {
+fn intro_lines(intro: Intro, width: usize) -> Vec<TLine<'static>> {
     let dim = Style::default().add_modifier(Modifier::DIM);
-    if !has_workflow {
-        return vec![TLine::from(Span::styled("Select a workflow first.", dim))];
-    }
+    let (blurb, samples) = match intro {
+        Intro::NothingSelected => {
+            return vec![TLine::from(Span::styled("Select a workflow first.", dim))]
+        }
+        Intro::New => (
+            "Describe what you want to happen and the copilot will build the \
+             workflow — choosing the steps, wiring them up, and saving it once \
+             it validates.",
+            [
+                "\"every morning, summarise new issues\"",
+                "\"run the tests, then post the result to Slack\"",
+                "\"when a PR opens, review it and comment\"",
+            ],
+        ),
+        Intro::Edit => (
+            "Ask for a change to this workflow and it will be made with the \
+             same tools a coding agent uses — then validated and saved.",
+            [
+                "\"add a Slack step at the end\"",
+                "\"why does the build step fail?\"",
+                "\"split the review into two\"",
+            ],
+        ),
+    };
     // Wrapped to the pane rather than hard-broken at the width it happened to
     // have when it was written, so a wider terminal does not show a ragged
     // column of short lines.
-    let mut lines: Vec<TLine> = wrap(
-        "Ask for a change to this workflow and it will be made with the same \
-         tools a coding agent uses — then validated and saved.",
-        width,
-    )
-    .into_iter()
-    .map(|row| TLine::from(Span::styled(row, dim)))
-    .collect();
+    let mut lines: Vec<TLine> = wrap(blurb, width)
+        .into_iter()
+        .map(|row| TLine::from(Span::styled(row, dim)))
+        .collect();
     lines.push(TLine::from(""));
-    for sample in [
-        "\"add a Slack step at the end\"",
-        "\"why does the build step fail?\"",
-        "\"split the review into two\"",
-    ] {
+    for sample in samples {
         lines.push(TLine::from(Span::styled(clip(sample, width), dim)));
     }
     lines

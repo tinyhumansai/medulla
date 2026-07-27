@@ -19,7 +19,7 @@ mod canvas;
 mod copilot;
 mod rail;
 
-pub(in crate::ui::app) use rail::WorkflowRailRow;
+pub(in crate::ui::app) use rail::{WorkflowRailRow, NEW_LABEL};
 
 #[cfg(test)]
 mod tests;

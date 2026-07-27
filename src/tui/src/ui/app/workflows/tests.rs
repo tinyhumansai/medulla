@@ -14,7 +14,9 @@ use medulla::ui::workflows::Move;
 use medulla::workflows::{WorkflowRecord, WorkflowStore};
 use serde_json::json;
 
-use super::super::types::App;
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+use super::super::types::{App, Cmd};
 
 /// A workflow whose graph is trigger → check, branching to two agents that both
 /// feed a merge: enough shape to test lanes, edges, and cursor movement.
@@ -84,6 +86,11 @@ fn an_empty_store_leaves_the_canvas_empty_rather_than_stale() {
     let (_home, app) = app_with(&[]);
 
     assert_eq!(app.workflow_row_count(), 0);
+    // The New row is still there: an empty machine is exactly when it matters.
+    assert!(matches!(
+        app.workflow_rail_rows().as_slice(),
+        [super::WorkflowRailRow::New]
+    ));
     assert!(app.workflow_layout().nodes.is_empty());
     assert!(app.selected_graph_node().is_none());
 }
@@ -94,13 +101,15 @@ fn the_rail_lists_the_selected_workflows_runs_and_no_others() {
 
     let rows = app.workflow_rail_rows();
 
-    // Two workflows, and a note under the selected one saying it has no runs.
-    assert_eq!(rows.len(), 3);
+    // Two workflows, a note under the selected one saying it has no runs, and
+    // the New row that closes every catalogue.
+    assert_eq!(rows.len(), 4);
     assert!(matches!(
         rows[1],
         super::WorkflowRailRow::Note("no runs yet")
     ));
     assert!(matches!(rows[2], super::WorkflowRailRow::Workflow { .. }));
+    assert!(matches!(rows[3], super::WorkflowRailRow::New));
 }
 
 #[test]
@@ -281,7 +290,12 @@ fn a_finished_turn_ends_the_thread_and_reports_what_changed() {
     app.submit_copilot().expect("turn");
 
     app.copilot_status("sweep", "reading the graph".into());
-    app.copilot_finished("sweep", "added it".into(), vec!["+ node notify".into()]);
+    app.copilot_finished(
+        "sweep",
+        "added it".into(),
+        vec!["+ node notify".into()],
+        None,
+    );
 
     let thread = app.copilot().expect("thread");
     assert!(!thread.busy);
@@ -303,7 +317,12 @@ fn a_turn_that_changed_the_graph_reloads_the_canvas_from_the_store() {
     record.graph.edges.clear();
     store.save(&record).unwrap();
 
-    app.copilot_finished("sweep", "trimmed it".into(), vec!["− node join".into()]);
+    app.copilot_finished(
+        "sweep",
+        "trimmed it".into(),
+        vec!["− node join".into()],
+        None,
+    );
 
     assert_eq!(app.workflow_layout().nodes.len(), 4);
 }
@@ -313,7 +332,7 @@ fn a_turn_that_changed_nothing_does_not_disturb_the_canvas() {
     let (_home, mut app) = app_with(&[diamond("sweep")]);
     app.wf.node_index = 3;
 
-    app.copilot_finished("sweep", "it branches on ok".into(), Vec::new());
+    app.copilot_finished("sweep", "it branches on ok".into(), Vec::new(), None);
 
     assert_eq!(
         app.wf.node_index, 3,
@@ -344,4 +363,129 @@ fn progress_for_a_workflow_with_no_thread_is_dropped_rather_than_creating_one() 
     app.copilot_status("someone-elses-workflow", "hello".into());
 
     assert!(app.copilot().is_none());
+}
+
+#[test]
+fn the_new_row_closes_the_catalogue_and_the_cursor_walks_onto_it() {
+    let (_home, mut app) = app_with(&[diamond("a")]);
+
+    // Down past the last workflow's last row lands on New rather than stopping.
+    app.move_workflow_rail(false);
+    assert!(app.wf.creating, "down from the bottom reaches New");
+    assert!(app
+        .workflow_rail_rows()
+        .iter()
+        .any(|row| app.workflow_rail_selected(row) && matches!(row, super::WorkflowRailRow::New)));
+
+    // And Up comes back into the catalogue.
+    app.move_workflow_rail(true);
+    assert!(!app.wf.creating);
+    assert_eq!(app.selected_workflow().unwrap().id, "a");
+}
+
+#[test]
+fn an_empty_machine_still_offers_to_make_one() {
+    let (_home, mut app) = app_with(&[]);
+
+    app.move_workflow_rail(false);
+
+    assert!(app.wf.creating, "the New row is the only thing to select");
+    // And it stays there rather than walking off the end of an empty list.
+    app.move_workflow_rail(false);
+    assert!(app.wf.creating);
+}
+
+#[test]
+fn the_new_row_has_a_thread_of_its_own() {
+    let (_home, mut app) = app_with(&[diamond("a")]);
+    // Something said to the existing workflow's copilot...
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "add a step");
+    app.submit_copilot().expect("turn");
+
+    app.wf.creating = true;
+
+    // ...is not in the New row's conversation.
+    assert!(
+        app.copilot().is_none_or(|thread| thread.turns.is_empty()),
+        "the New row starts empty"
+    );
+}
+
+#[test]
+fn describing_a_new_workflow_asks_for_a_create_rather_than_an_edit() {
+    let (_home, mut app) = app_with(&[diamond("a")]);
+    app.wf.creating = true;
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "summarise new issues daily");
+
+    let cmd = app.submit_copilot().expect("a command");
+
+    match cmd {
+        Cmd::CreateWorkflow { instruction, .. } => {
+            assert_eq!(instruction, "summarise new issues daily");
+        }
+        other => panic!("expected a create, got {other:?}"),
+    }
+    // The instruction is recorded in the New row's own thread, and it is busy.
+    let thread = app.copilot().expect("the new thread");
+    assert_eq!(thread.turns[0].text, "summarise new issues daily");
+    assert!(thread.busy);
+}
+
+#[test]
+fn a_created_workflow_is_selected_and_keeps_the_thread_that_made_it() {
+    let (_home, mut app) = app_with(&[diamond("a")]);
+    app.wf.creating = true;
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "build me one");
+    let cmd = app.submit_copilot().expect("a command");
+    let Cmd::CreateWorkflow { thread, .. } = cmd else {
+        panic!("expected a create");
+    };
+    // The turn ran and the agent really did write a workflow to the store.
+    app.workflow_store().save(&diamond("fresh")).expect("save");
+
+    app.copilot_finished(
+        &thread,
+        "built it".into(),
+        vec!["+ workflow fresh".into()],
+        Some("fresh".into()),
+    );
+
+    assert!(!app.wf.creating, "the cursor leaves the New row");
+    assert_eq!(app.selected_workflow().unwrap().id, "fresh");
+    // The conversation moved with it: it is why this workflow looks like this.
+    let thread = app.copilot().expect("the adopted thread");
+    assert_eq!(thread.workflow_id, "fresh");
+    assert!(thread.turns.iter().any(|turn| turn.text == "build me one"));
+}
+
+#[test]
+fn a_create_turn_that_built_nothing_leaves_the_cursor_where_it_was() {
+    let (_home, mut app) = app_with(&[diamond("a")]);
+    app.wf.creating = true;
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "what could I build?");
+    let cmd = app.submit_copilot().expect("a command");
+    let Cmd::CreateWorkflow { thread, .. } = cmd else {
+        panic!("expected a create");
+    };
+
+    // A question, answered. Nothing was created and nothing changed.
+    app.copilot_finished(&thread, "you could try…".into(), Vec::new(), None);
+
+    assert!(app.wf.creating, "still on the New row");
+    let turns = &app.copilot().expect("the new thread").turns;
+    assert_eq!(turns.last().unwrap().text, "you could try…");
+    assert!(!app.copilot_busy());
+}
+
+#[test]
+fn there_is_nothing_to_run_from_the_new_row() {
+    let (_home, mut app) = app_with(&[diamond("a")]);
+    app.wf.creating = true;
+
+    // `x` and `d` must not act on whichever workflow the index happens to hold.
+    for key in [KeyCode::Char('x'), KeyCode::Char('d')] {
+        let before = app.wf.creating;
+        app.on_event(Event::Key(KeyEvent::new(key, KeyModifiers::NONE)));
+        assert_eq!(app.wf.creating, before);
+    }
 }

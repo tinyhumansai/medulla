@@ -64,10 +64,17 @@ impl App {
                 WorkflowsKey::Handled(None)
             }
             // Enter and `→` both step into the content, which is what the rest
-            // of the app's sidebars do.
+            // of the app's sidebars do. On the New row the content *is* the
+            // copilot: there is no graph to open yet, and describing what you
+            // want is the whole of making one.
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-                self.wf.focus = WorkflowFocus::Canvas;
-                self.set_status("Graph · Esc to go back to the list");
+                if self.wf.creating {
+                    self.wf.focus = WorkflowFocus::Copilot;
+                    self.set_status("Describe the workflow you want · Esc to go back");
+                } else {
+                    self.wf.focus = WorkflowFocus::Canvas;
+                    self.set_status("Graph · Esc to go back to the list");
+                }
                 WorkflowsKey::Handled(None)
             }
             KeyCode::Char('c') => {
@@ -185,10 +192,14 @@ impl App {
             // and must stay one keypress from a half-typed instruction. With
             // nothing to clear it steps back to the graph it is about.
             KeyCode::Esc => {
-                if self.wf.draft.text.is_empty() {
-                    self.wf.focus = WorkflowFocus::Canvas;
-                } else {
+                if !self.wf.draft.text.is_empty() {
                     self.wf.draft = Draft::new();
+                } else if self.wf.creating {
+                    // A workflow that does not exist has no graph to step back
+                    // to, so the list is the level below.
+                    self.wf.focus = WorkflowFocus::Sidebar;
+                } else {
+                    self.wf.focus = WorkflowFocus::Canvas;
                 }
                 WorkflowsKey::Handled(None)
             }
@@ -203,6 +214,10 @@ impl App {
 
     /// Run the selected workflow, refusing a disabled one.
     fn run_selected_workflow(&mut self) -> Option<Cmd> {
+        if self.wf.creating {
+            self.set_status("Nothing to run yet — describe the workflow first");
+            return None;
+        }
         let workflow = self.selected_workflow()?;
         if !workflow.enabled {
             let name = workflow.name.clone();
@@ -220,6 +235,10 @@ impl App {
     /// a dry run resolves every expression and starts no harness session, which
     /// is what an operator wants after an edit and before a real run.
     fn dry_run_selected_workflow(&mut self) -> Option<Cmd> {
+        if self.wf.creating {
+            self.set_status("Nothing to simulate yet — describe the workflow first");
+            return None;
+        }
         let workflow = self.selected_workflow()?;
         let (id, name) = (workflow.id.clone(), workflow.name.clone());
         self.set_status(format!("Simulating {name}…"));

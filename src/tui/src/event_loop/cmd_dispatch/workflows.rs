@@ -92,6 +92,14 @@ async fn run(
     ))
 }
 
+/// What a copilot turn is being asked to do.
+enum Turn {
+    /// Change or explain the workflow with this id.
+    Edit(String),
+    /// Build a workflow that does not exist yet.
+    Create,
+}
+
 /// Spawn a copilot turn against `workflow`, streaming its progress.
 ///
 /// The turn runs on the same loopback host a workflow run uses, so the harness
@@ -104,6 +112,37 @@ pub(super) fn spawn_copilot(
     workflows_config: medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
+    spawn_turn(
+        Turn::Edit(workflow.clone()),
+        workflow,
+        instruction,
+        workflows_config,
+        msg_tx,
+    );
+}
+
+/// Spawn a copilot turn that builds a workflow from nothing.
+///
+/// The same session and the same tools as an edit; what differs is the prompt
+/// (see [`medulla::workflows::copilot`]) and that the workflow it reports back
+/// is discovered from the store rather than known in advance.
+pub(super) fn spawn_copilot_create(
+    thread: String,
+    instruction: String,
+    workflows_config: medulla::config::WorkflowsConfig,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
+    spawn_turn(Turn::Create, thread, instruction, workflows_config, msg_tx);
+}
+
+/// Run `turn` off-thread, forwarding its progress and reporting its result.
+fn spawn_turn(
+    turn: Turn,
+    thread: String,
+    instruction: String,
+    workflows_config: medulla::config::WorkflowsConfig,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
         // Progress lines are forwarded as they arrive rather than collected:
@@ -111,29 +150,29 @@ pub(super) fn spawn_copilot(
         let (status_tx, mut status_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let forward = tokio::spawn({
             let tx = tx.clone();
-            let workflow = workflow.clone();
+            let thread = thread.clone();
             async move {
                 while let Some(line) = status_rx.recv().await {
                     let _ = tx.send(AppMsg::CopilotStatus {
-                        workflow: workflow.clone(),
+                        workflow: thread.clone(),
                         line,
                     });
                 }
             }
         });
 
-        let message =
-            match copilot_turn(&workflow, &instruction, status_tx, &workflows_config).await {
-                Ok(outcome) => AppMsg::CopilotDone {
-                    workflow: workflow.clone(),
-                    reply: outcome.reply,
-                    changes: outcome.changes,
-                },
-                Err(err) => AppMsg::CopilotFailed {
-                    workflow: workflow.clone(),
-                    error: err.to_string(),
-                },
-            };
+        let message = match copilot_turn(&turn, &instruction, status_tx, &workflows_config).await {
+            Ok(outcome) => AppMsg::CopilotDone {
+                workflow: thread.clone(),
+                reply: outcome.reply,
+                changes: outcome.changes,
+                created: outcome.created,
+            },
+            Err(err) => AppMsg::CopilotFailed {
+                workflow: thread.clone(),
+                error: err.to_string(),
+            },
+        };
         // The forwarder ends when the session drops its sender, which it has by
         // now; awaiting it keeps a trailing status line from arriving after the
         // reply and reading as part of the next turn.
@@ -150,7 +189,7 @@ pub(super) fn spawn_copilot(
 /// [`spawn_copilot`]) rather than a fresh [`medulla::config::load_config`] call
 /// — reloading with no explicit path would silently drop a `--config` override.
 async fn copilot_turn(
-    workflow: &str,
+    turn: &Turn,
     instruction: &str,
     status: tokio::sync::mpsc::UnboundedSender<String>,
     workflows_config: &medulla::config::WorkflowsConfig,
@@ -190,7 +229,10 @@ async fn copilot_turn(
         model: (!workflows_config.default_model.is_empty())
             .then(|| workflows_config.default_model.clone()),
     };
-    Ok(session.turn(workflow, instruction, Some(status)).await?)
+    Ok(match turn {
+        Turn::Edit(workflow) => session.turn(workflow, instruction, Some(status)).await?,
+        Turn::Create => session.create(instruction, Some(status)).await?,
+    })
 }
 
 /// Spawn a dry run of the workflow `id`, reporting the outcome on the status

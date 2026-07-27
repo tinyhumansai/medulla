@@ -332,21 +332,18 @@ impl App {
         }
     }
 
-    /// Draw the bottom status line: the MEDULLA wordmark, the backend host, the
-    /// update badge, and the right-aligned stream-health + status text.
+    /// Draw the bottom status line: the backend host, the update badge, and the
+    /// right-aligned stream-health + status text.
+    ///
+    /// No product name — the wordmark is already on the Overview tab, and a
+    /// status bar that opens by telling you which program you are running spends
+    /// its first columns on the one thing you cannot be unsure of.
     pub(super) fn draw_status_line(&mut self, f: &mut Frame, area: Rect) {
         let halves = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(area);
         let mut spans = vec![
-            Span::styled(
-                "MEDULLA",
-                Style::default()
-                    .fg(self.theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
             // The backend the session is attached to. Host only — the scheme and
             // path are noise in a one-line status bar, and the host is what
             // distinguishes prod from staging from a local dev server.

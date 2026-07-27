@@ -37,7 +37,15 @@ impl App {
                 ))
             })
             .collect();
-        let band = crate::ui::layout::centered_fixed(rows[0].width, logo.len() as u16, rows[0]);
+        // Centre the art in the band. The leftover never divides evenly — three
+        // rows of art in four — and the odd row is given to the top, because the
+        // glyphs sit hard on their baseline and touching the panel border below
+        // reads as tighter than touching the tab strip above.
+        let band = Rect {
+            y: rows[0].y + rows[0].height.saturating_sub(logo.len() as u16).div_ceil(2),
+            height: logo.len() as u16,
+            ..rows[0]
+        };
         f.render_widget(Paragraph::new(Text::from(logo)), band);
         let rows = &rows[1..];
         // Two panels: this device, and what the orchestration is doing with it.

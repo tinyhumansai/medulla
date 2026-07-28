@@ -131,7 +131,8 @@ impl App {
         f.render_widget(Paragraph::new(Text::from(view)), inner);
     }
 
-    /// Format one rail row: a lane row, the fleet divider, or a fleet node.
+    /// Format one rail row. Every row is a lane row; the wrapper survives so
+    /// the rail can carry a second group again without reshaping its callers.
     pub(super) fn rail_row_line(
         &self,
         row: &RailRow,

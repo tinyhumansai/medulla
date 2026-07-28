@@ -40,9 +40,9 @@ impl Selection {
 pub(super) struct AgentsPanes {
     /// The threads strip above the rail; zero-height while only one is open.
     pub(super) threads: Rect,
-    /// The rail: lanes, the declared fleet, and the template catalog.
+    /// The rail: the agent lanes and their tasks.
     pub(super) rail: Rect,
-    /// The transcript or declaration pane.
+    /// The transcript, or the watched worker screen when one is streaming.
     pub(super) pane: Rect,
     /// The work panel beside the transcript; `None` when the selection has no
     /// work to show or the terminal is too narrow to spare the columns.

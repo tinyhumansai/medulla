@@ -95,10 +95,15 @@ pub(super) async fn route_frame(
     // empty read the same from here — and neither said whether the worker had
     // been talking at all.
     if let Some(log) = log {
+        // Named, because an anonymous frame cannot be attributed. A roster of
+        // several workers answering the same kind of probe produced a column of
+        // identical-looking lines, and telling which one had replied — or which
+        // had stayed silent — meant guessing from the payload's `cwd`.
         log(&format!(
-            "hub ← task {} {} · {} chars: {}",
+            "hub ← task {} {} from {} · {} chars: {}",
             frame.task_id,
             frame.kind.as_str(),
+            from,
             frame.text.chars().count(),
             crate::logging::preview(&frame.text),
         ));

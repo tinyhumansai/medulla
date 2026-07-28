@@ -81,6 +81,7 @@ fn frame(
 async fn the_first_frame_of_a_stream_is_announced_once() {
     let relay = Recorder::default();
     let screens = ScreenStore::new();
+    screens.arm("workerA", "w_1");
     let (log, lines) = recording_log();
     let log = Some(log);
     let first = grid("hello");
@@ -120,6 +121,7 @@ async fn the_first_frame_of_a_stream_is_announced_once() {
 async fn a_frame_the_hub_cannot_apply_asks_for_a_resync_and_says_so() {
     let relay = Recorder::default();
     let screens = ScreenStore::new();
+    screens.arm("workerA", "w_1");
     let (log, lines) = recording_log();
     let log = Some(log);
     let first = grid("hello");
@@ -179,5 +181,107 @@ async fn the_hub_ignores_screen_messages_only_a_viewer_would_send() {
 
     assert!(lines.lock().unwrap().is_empty());
     assert!(relay.sent.lock().unwrap().is_empty());
+    assert!(screens.get("workerA", "w_1").is_none());
+}
+
+#[tokio::test]
+async fn a_frame_for_a_task_nobody_watches_is_still_kept() {
+    let relay = Recorder::default();
+    let screens = ScreenStore::new();
+    let (log, _lines) = recording_log();
+    let screen = grid("hello");
+
+    // Never armed. The frame crossed the relay and was decrypted before this
+    // function saw it, so discarding it would save nothing and throw away the
+    // freshest screen this hub will ever hold for the task — which is exactly
+    // what the operator wants drawn the moment they look back at it.
+    route_screen(
+        &relay,
+        &screens,
+        "workerA",
+        ScreenMessage::Frame(frame(None, &screen, 1, 0)),
+        &Some(log),
+    )
+    .await;
+
+    assert_eq!(
+        screens.get("workerA", "w_1").expect("a screen").grid,
+        screen
+    );
+    // But nothing is asked of the worker: a resync request is a subscribe, and
+    // sending one here is what used to restart a stream nobody was watching.
+    assert!(relay.sent.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_frame_still_in_flight_when_a_watch_ends_does_not_restart_it() {
+    let relay = Recorder::default();
+    let screens = ScreenStore::new();
+    screens.arm("workerA", "w_1");
+    let (log, _lines) = recording_log();
+    let log = Some(log);
+    let first = grid("hello");
+    let second = grid("world");
+
+    route_screen(
+        &relay,
+        &screens,
+        "workerA",
+        ScreenMessage::Frame(frame(None, &first, 1, 0)),
+        &log,
+    )
+    .await;
+
+    // The operator looks away. The relay is not instant, so the worker has
+    // already sent the next frame by the time its unsubscribe lands.
+    screens.disarm("workerA", "w_1");
+    relay.sent.lock().unwrap().clear();
+
+    route_screen(
+        &relay,
+        &screens,
+        "workerA",
+        ScreenMessage::Frame(frame(Some(&first), &second, 2, 1)),
+        &log,
+    )
+    .await;
+
+    // The regression: that late frame was answered with `Subscribe { resync }`,
+    // which restarted the stream that had just been stopped, permanently.
+    assert!(
+        relay.sent.lock().unwrap().is_empty(),
+        "a late frame must never be answered with a subscribe: {:?}",
+        relay.sent.lock().unwrap()
+    );
+    // And because the screen was kept rather than dropped, the late frame still
+    // applies — so looking back shows the newer screen, not the older one.
+    assert_eq!(
+        screens.get("workerA", "w_1").expect("a screen").grid,
+        second
+    );
+}
+
+#[tokio::test]
+async fn an_unwatched_frame_that_cannot_be_applied_asks_for_nothing() {
+    let relay = Recorder::default();
+    let screens = ScreenStore::new();
+    let (log, lines) = recording_log();
+    let first = grid("hello");
+    let second = grid("world");
+
+    // A delta with no base held, for a task nobody is watching: the frame is
+    // unusable *and* unwanted. The first alone would justify a resync; the
+    // second is what must win.
+    route_screen(
+        &relay,
+        &screens,
+        "workerA",
+        ScreenMessage::Frame(frame(Some(&first), &second, 2, 1)),
+        &Some(log),
+    )
+    .await;
+
+    assert!(relay.sent.lock().unwrap().is_empty());
+    assert!(lines.lock().unwrap().is_empty());
     assert!(screens.get("workerA", "w_1").is_none());
 }

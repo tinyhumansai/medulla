@@ -212,14 +212,27 @@ async fn route_screen(
         return;
     };
     let task_id = frame.task_id.clone();
+    let watching = screens.is_watching(from, &task_id);
     // Whether this is the first frame for the task, read before the fold moves
     // it in. Worth one line: until it appears, "the worker is not sending" and
     // "the pane is showing something else" look identical from here.
     let first = screens.get(from, &task_id).is_none();
     let (cols, rows) = (frame.cols, frame.rows);
-    if screens.apply(from, &frame, crate::clock::now_millis())
-        == crate::tinyplace::ApplyOutcome::NeedsResync
-    {
+    // Applied whether or not anyone is watching. The frame crossed the relay
+    // and was decrypted before this function saw it, so dropping it now saves
+    // nothing and throws away the freshest screen we will ever hold for this
+    // task — which is exactly what the operator wants on screen the moment
+    // they look back at it.
+    let outcome = screens.apply(from, &frame, crate::clock::now_millis());
+
+    if outcome == crate::tinyplace::ApplyOutcome::NeedsResync {
+        // Only ever asked for while watching. A resync request is a *subscribe*,
+        // so sending one for a task nobody is watching restarts the stream that
+        // was just stopped — which is how an unwatched stream used to come back
+        // about a second after it ended and then run forever.
+        if !watching {
+            return;
+        }
         if let Some(log) = log {
             log(&format!(
                 "hub ← screen {task_id} from {from}: out of step at seq {} — resyncing",

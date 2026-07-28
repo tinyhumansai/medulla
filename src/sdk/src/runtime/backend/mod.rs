@@ -11,9 +11,14 @@
 //! - `fork` has no backend equivalent — the backend has no fork endpoint. We
 //!   open a *fresh* session and copy the parent thread's transcript locally, so
 //!   the fork diverges from its parent server-side from the first turn.
-//! - `set_async_mode` is a purely local flag; the `/medulla/v1` message endpoint
-//!   is always called async (`sync=0`) regardless. It changes nothing
-//!   server-side and is kept only so the UI toggle has somewhere to land.
+//! - async delegation mode is not surfaced at all. The `set_async_mode` toggle
+//!   this list used to describe was removed in #56 and nothing replaced it. The
+//!   backend *does* now accept a per-turn `?detached=` override on the message
+//!   endpoint (tinyhumansai/backend#1163) selecting whether a cycle may answer
+//!   before its delegated tasks drain, but this runtime never sends it, so every
+//!   cycle uses the session-level and server-side defaults. Unrelated to `sync`:
+//!   the endpoint is always called async (`sync=0`), which decides only who
+//!   waits for the HTTP response, not what the reply contains.
 //! - `inspect_context` returns an empty list — the backend does not expose the
 //!   context store over HTTP.
 //! - Presence / peer-session data is empty — that arrives over Socket.IO, which

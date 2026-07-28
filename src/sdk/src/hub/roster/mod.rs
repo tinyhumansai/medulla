@@ -16,13 +16,11 @@ use serde_json::{json, Value};
 
 /// The `AgentDescriptor` a single worker advertises.
 ///
-/// `availability` is `"online"`, not blank. The orchestrator only auto-assigns
-/// an untargeted task to an agent whose availability is exactly `"online"`, so a
-/// blank one is silently excluded from every fan-out — and it renders as an
-/// empty column in `agent_list`, which reads as a broken row rather than an
-/// idle worker. A roster entry exists because an operator put it there; genuine
-/// unreachability surfaces as a task error, which is honest, whereas advertising
-/// "offline" would refuse delegation outright.
+/// Only ever built for a worker that survived the liveness filter, so
+/// `availability` is always `"online"` here. It stays on the wire because the
+/// orchestrator only auto-assigns an untargeted task to an agent whose
+/// availability is exactly `"online"`, and a blank one would be silently
+/// excluded from every fan-out.
 fn to_agent(w: &HubWorker) -> Value {
     // `metadata.workspace` is what places the agent: the backend turns it into a
     // WorkspaceDescriptor and sets the agent's `workspaceId` from it. Omitted
@@ -52,9 +50,56 @@ fn to_agent(w: &HubWorker) -> Value {
     })
 }
 
-/// The `register_agents` payload for the current roster.
-pub(super) fn register_payload(workers: &[HubWorker]) -> Value {
-    json!({ "agents": workers.iter().map(to_agent).collect::<Vec<_>>() })
+/// The `register_agents` payload for the roster, minus anything known to be down.
+///
+/// `online` maps a worker address to its liveness, as
+/// [`Bridge::presence`](crate::bridge::Bridge::presence) reported it. An empty
+/// map is "no opinion" and advertises everything.
+///
+/// Withheld rather than advertised as offline. Marking one down only stops the
+/// *automatic* assignment of an untargeted task — a task that names a specific
+/// agent still resolves through [`address_of`] and dispatches into the void,
+/// which is the stall this is meant to prevent. `agent_list` is also what the
+/// orchestrator reads to decide who exists at all, and an agent it cannot reach
+/// is not a choice worth offering it.
+///
+/// An address the query had no answer for is kept. "The relay did not say" is
+/// not "the worker is down", and one dropped request must not empty a live
+/// roster.
+pub(super) fn register_payload(
+    workers: &[HubWorker],
+    online: &std::collections::HashMap<String, bool>,
+) -> Value {
+    let reachable = workers.iter().filter(|w| is_reachable(w, online));
+    json!({ "agents": reachable.map(to_agent).collect::<Vec<_>>() })
+}
+
+/// Whether `w` should be advertised, given what presence reported.
+///
+/// Only an explicit `false` withholds a worker; both "reported up" and "no
+/// answer" advertise it.
+pub(super) fn is_reachable(
+    w: &HubWorker,
+    online: &std::collections::HashMap<String, bool>,
+) -> bool {
+    online.get(&w.address) != Some(&false)
+}
+
+/// The addresses in `workers` the presence query reported down.
+pub(super) fn unreachable_addresses(
+    workers: &[HubWorker],
+    online: &std::collections::HashMap<String, bool>,
+) -> Vec<String> {
+    workers
+        .iter()
+        .filter(|w| !is_reachable(w, online))
+        .map(|w| w.address.clone())
+        .collect()
+}
+
+/// The addresses in `workers`, for a batched presence query.
+pub(super) fn addresses_of(workers: &[HubWorker]) -> Vec<String> {
+    workers.iter().map(|w| w.address.clone()).collect()
 }
 
 /// Resolve a targeted `agentId` to a tiny.place address.

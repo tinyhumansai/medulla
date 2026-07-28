@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::relay::Relay;
-use super::roster::{register_payload, remove_conflicting, HubWorker, SharedRoster};
+use super::roster::{addresses_of, register_payload, remove_conflicting, HubWorker, SharedRoster};
 use rust_socketio::asynchronous::Client;
 
 /// Whether `address` is a directory alias rather than a cryptoId.
@@ -391,8 +391,14 @@ impl HubHandle {
     }
 
     /// Re-emit `medulla:register_agents` for the current roster.
+    ///
+    /// Re-asks the relay who is up rather than reusing the last answer: this
+    /// runs on every roster mutation, and presence expires on a TTL, so a
+    /// worker that died since the last advertisement is caught here.
     async fn reregister(&self) -> anyhow::Result<()> {
-        let payload = register_payload(&self.list());
+        let workers = self.list();
+        let online = self.relay.presence(&addresses_of(&workers)).await;
+        let payload = register_payload(&workers, &online);
         self.socket
             .emit("medulla:register_agents", payload)
             .await

@@ -107,6 +107,29 @@ impl SignalTransport {
         &self.our_agent_id
     }
 
+    /// Which of `addresses` currently hold a live tiny.place heartbeat.
+    ///
+    /// One batched request rather than one per address: a roster is asked about
+    /// as a whole, and a hub with a dozen workers should not spend a dozen round
+    /// trips to redraw one column.
+    ///
+    /// A failed request returns an empty map — "no answer", not "everyone is
+    /// offline". Reporting a relay hiccup as a dead fleet would take the whole
+    /// roster out of rotation over one dropped request.
+    pub async fn presence(&self, addresses: &[String]) -> std::collections::HashMap<String, bool> {
+        if addresses.is_empty() {
+            return std::collections::HashMap::new();
+        }
+        match self.client.presence.query(addresses).await {
+            Ok(response) => response
+                .presence
+                .into_iter()
+                .map(|status| (status.crypto_id, status.online))
+                .collect(),
+            Err(_) => std::collections::HashMap::new(),
+        }
+    }
+
     /// Open the relay's push channel, so envelopes are delivered here instead
     /// of fetched on the poll interval.
     ///

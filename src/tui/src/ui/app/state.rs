@@ -10,7 +10,7 @@ use crate::ui::agents::{
 };
 use crate::ui::command::CommandSpec;
 use crate::ui::composer::Draft;
-use crate::ui::fleet::{fleet_rows, merge_capacity, registry_capacity, FleetNode};
+use crate::ui::fleet::{merge_capacity, registry_capacity};
 use crate::ui::theme::Theme;
 use medulla::config::LoadedConfig;
 use medulla::memory::{MemoryHit, MemoryStatus};
@@ -559,15 +559,6 @@ impl App {
         } else {
             target.saturating_sub(step)
         };
-    }
-
-    /// The flattened fleet tree for the Routing › Fleet page.
-    ///
-    /// Reads the same merged roster the Agents lanes do, so an agent the local
-    /// registry knows about but the backend has not advertised still appears —
-    /// in the `unplaced agents` group, since nothing declares where it runs.
-    pub(crate) fn fleet_rows(&self) -> Vec<FleetNode> {
-        fleet_rows(&self.fleet_capacity(), &self.fleet_roster())
     }
 
     /// The capacity the fleet surfaces render.

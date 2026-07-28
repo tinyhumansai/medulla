@@ -69,7 +69,6 @@ impl App {
         let rows = self.rail_rows();
         let active = self.agent_index.min(rows.len().saturating_sub(1));
         self.agent_index = active;
-        let node = self.selected_fleet_node();
         let lane_index = match rows.get(active) {
             Some(RailRow::Agent(row)) => row.lane_index().unwrap_or(0),
             _ => 0,
@@ -78,20 +77,16 @@ impl App {
             Some(RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
             _ => None,
         };
-        // A fleet row shows a declaration, so it is never "the conversation"
-        // even though it leaves the lane cursor where it was.
-        let on_orchestrator = node.is_none()
-            && lanes
-                .get(lane_index)
-                .map(|l| l.role == AgentRole::Orchestrator)
-                .unwrap_or(true);
+        let on_orchestrator = lanes
+            .get(lane_index)
+            .map(|l| l.role == AgentRole::Orchestrator)
+            .unwrap_or(true);
         Selection {
             rows,
             active,
             lanes,
             lane_index,
             task,
-            node,
             on_orchestrator,
         }
     }

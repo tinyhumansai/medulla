@@ -51,7 +51,7 @@ impl App {
             Some(task) => format!("answering {}", task.task_id),
             None => selection
                 .lane()
-                .filter(|l| l.role != AgentRole::Orchestrator && selection.node.is_none())
+                .filter(|l| l.role != AgentRole::Orchestrator)
                 .map(|l| format!("{} · Enter still instructs the orchestrator", l.label))
                 .unwrap_or_else(|| "orchestrator".into()),
         };

@@ -36,7 +36,7 @@ impl App {
     /// its tasks. Empty snapshots are treated as absent so the pane never opens
     /// on nothing.
     pub(super) fn selected_work<'a>(&self, selection: &'a Selection) -> Option<&'a WorkSnapshot> {
-        if selection.node.is_some() || selection.on_orchestrator {
+        if selection.on_orchestrator {
             return None;
         }
         selection

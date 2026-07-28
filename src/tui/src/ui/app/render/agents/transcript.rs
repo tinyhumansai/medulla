@@ -13,7 +13,6 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::ui::agents::{lane_lines, task_lines, Line as StyledLine};
-use crate::ui::fleet::fleet_detail;
 use crate::ui::harness::{budget_note, task_board_lines};
 use crate::ui::meters;
 use medulla::harness_contract::AgentBudgetMetadata;
@@ -37,14 +36,7 @@ impl App {
         let lane = selection.lane();
         let pane_width = ((area.width as usize).saturating_sub(4)).max(24);
         let on_orchestrator = selection.on_orchestrator;
-        let content_lines: Vec<StyledLine> = if let Some(node) = &selection.node {
-            fleet_detail(
-                &self.fleet_capacity(),
-                &self.fleet_roster(),
-                &node.key,
-                pane_width,
-            )
-        } else if let Some(t) = &selection.task {
+        let content_lines: Vec<StyledLine> = if let Some(t) = &selection.task {
             task_lines(t, pane_width)
         } else if on_orchestrator {
             // The orchestrator lane is the conversation: show what was said, not
@@ -53,9 +45,7 @@ impl App {
         } else {
             lane_lines(lane, pane_width)
         };
-        let title = if let Some(node) = &selection.node {
-            format!("{} · {}", node.kind.label(), node.label)
-        } else if let Some(t) = &selection.task {
+        let title = if let Some(t) = &selection.task {
             format!(
                 "{} › {} · {} turns",
                 lane.map(|l| l.label.as_str()).unwrap_or("task"),
@@ -121,7 +111,7 @@ impl App {
         // meters for the machine's memory and load and for the lane's own
         // context window. Every reading is omitted rather than zeroed when it
         // was not reported — a bar at 0% claims a measurement nobody took.
-        if selection.node.is_none() {
+        {
             let capacity = self.fleet_capacity();
             if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
                 let placement = capacity.placement(descriptor);

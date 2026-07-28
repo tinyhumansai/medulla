@@ -10,20 +10,19 @@
 //! from the declared capacity); this module only concatenates them, tracks which
 //! is selected, and answers what the detail pane should show.
 
-use crate::ui::agents::AgentRow;
-use crate::ui::fleet::FleetNode;
-
 use super::types::App;
+use crate::ui::agents::AgentRow;
 
 /// One row of the Agents rail.
 #[derive(Debug, Clone)]
 pub enum RailRow {
     /// A lane, task sublane, or lane-list divider.
+    ///
+    /// The only variant, now that the declared fleet no longer hangs below the
+    /// lanes. Kept as an enum rather than collapsed into `AgentRow` so the rail
+    /// kept its seam: the lane list's own `── functions ──` separator is an
+    /// `AgentRow::Separator`, and a future second group would land here.
     Agent(AgentRow),
-    /// A non-selectable heading between the two lists.
-    Divider(&'static str),
-    /// A host, harness, workspace, or agent from the declared fleet.
-    Fleet(FleetNode),
 }
 
 impl RailRow {
@@ -31,43 +30,22 @@ impl RailRow {
     pub fn selectable(&self) -> bool {
         match self {
             RailRow::Agent(row) => row.selectable(),
-            RailRow::Divider(_) => false,
-            RailRow::Fleet(node) => node.kind.selectable(),
         }
     }
 }
 
 impl App {
-    /// The rail's rows: the lanes, then the declared fleet.
+    /// The rail's rows: the agent lanes.
     ///
-    /// Each half is omitted entirely when it has nothing in it, so a session
-    /// with no capacity to show is byte-identical to the lane list alone. The
-    /// template catalog is deliberately absent: it is a declaration of what
-    /// *could* run rather than anything running, and the Routing tab's Agent
-    /// Templates page already owns it.
+    /// The declared fleet used to hang underneath these, and it was a third
+    /// rendering of things that already had two homes. Its agents were the very
+    /// lanes above the divider, so a worker that was both connected and declared
+    /// appeared twice; its hosts and harnesses are the Routing tab's Harnesses
+    /// page, which reads the same `fleet_capacity()`; and its templates were
+    /// already excluded here in favour of Routing's Agent Templates page. What
+    /// remained was duplication, so the rail now shows what is *running* and
+    /// nothing else.
     pub(super) fn rail_rows(&self) -> Vec<RailRow> {
-        let mut rows: Vec<RailRow> = self.agent_rows().into_iter().map(RailRow::Agent).collect();
-        let fleet = self.fleet_rows();
-        if !fleet.is_empty() {
-            rows.push(RailRow::Divider("── fleet ──"));
-            rows.extend(fleet.into_iter().map(RailRow::Fleet));
-        }
-        rows
-    }
-
-    /// The selection key of the fleet row under the cursor. Test/inspection seam.
-    pub fn selected_fleet_node_key(&self) -> Option<String> {
-        self.selected_fleet_node().map(|node| node.key)
-    }
-
-    /// The fleet node under the cursor, when the cursor is in the fleet half.
-    ///
-    /// `None` for a lane row, which is what tells the right-hand pane to render
-    /// a transcript rather than a declaration.
-    pub(super) fn selected_fleet_node(&self) -> Option<FleetNode> {
-        match self.rail_rows().get(self.agent_index) {
-            Some(RailRow::Fleet(node)) if node.kind.selectable() => Some(node.clone()),
-            _ => None,
-        }
+        self.agent_rows().into_iter().map(RailRow::Agent).collect()
     }
 }

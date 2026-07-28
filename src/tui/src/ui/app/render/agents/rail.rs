@@ -140,26 +140,6 @@ impl App {
     ) -> TLine<'static> {
         match row {
             RailRow::Agent(row) => self.agent_row_line(row, lanes, active),
-            RailRow::Divider(text) => TLine::from(Span::styled(
-                text.to_string(),
-                Style::default().add_modifier(Modifier::DIM),
-            )),
-            RailRow::Fleet(node) => {
-                let mut style = Style::default().fg(color(node.kind.color()));
-                if node.degraded {
-                    style = style.add_modifier(Modifier::DIM);
-                }
-                if active {
-                    style = self.theme.selection();
-                }
-                let indent = "  ".repeat(node.depth);
-                let text = if node.detail.is_empty() {
-                    format!("{indent}{}", node.label)
-                } else {
-                    format!("{indent}{} · {}", node.label, node.detail)
-                };
-                TLine::from(Span::styled(text, style))
-            }
         }
     }
 

@@ -4,7 +4,6 @@
 use ratatui::layout::Rect;
 
 use crate::ui::agents::{AgentLane, TaskState};
-use crate::ui::fleet::FleetNode;
 
 use super::super::super::rail::RailRow;
 
@@ -25,9 +24,6 @@ pub(super) struct Selection {
     pub(super) lane_index: usize,
     /// The task sublane under the cursor, if the cursor is on one.
     pub(super) task: Option<TaskState>,
-    /// The fleet node under the cursor, if the cursor is in the fleet half.
-    /// `Some` is what switches the pane from a transcript to a declaration.
-    pub(super) node: Option<FleetNode>,
     /// Whether the pane is showing the operator's own conversation, which
     /// scrolls separately and renders the chat log rather than model calls.
     pub(super) on_orchestrator: bool,

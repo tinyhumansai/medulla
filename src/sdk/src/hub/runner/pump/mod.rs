@@ -19,6 +19,9 @@ use super::super::types::{HubLog, TaskOutcome};
 use super::super::ActivityLog;
 use super::{CapabilitiesWaiters, SystemInfoWaiters, Waiters};
 
+#[cfg(test)]
+mod tests;
+
 /// How many inbound messages to drain per pump tick.
 const DRAIN_LIMIT: i64 = 50;
 
@@ -209,6 +212,11 @@ async fn route_screen(
         return;
     };
     let task_id = frame.task_id.clone();
+    // Whether this is the first frame for the task, read before the fold moves
+    // it in. Worth one line: until it appears, "the worker is not sending" and
+    // "the pane is showing something else" look identical from here.
+    let first = screens.get(from, &task_id).is_none();
+    let (cols, rows) = (frame.cols, frame.rows);
     if screens.apply(from, &frame, crate::clock::now_millis())
         == crate::tinyplace::ApplyOutcome::NeedsResync
     {
@@ -225,6 +233,16 @@ async fn route_screen(
                 resync: true,
             });
         let _ = relay.send(from, &body).await;
+        return;
+    }
+    // Once per stream, not once per frame: at a frame a second the latter would
+    // bury every other line in the log.
+    if first {
+        if let Some(log) = log {
+            log(&format!(
+                "hub ← screen {task_id} from {from}: streaming at {cols}x{rows}"
+            ));
+        }
     }
 }
 

@@ -415,7 +415,19 @@ impl Runtime for OpenHumanRuntime {
         let hub = self.hub();
         Box::pin(async move {
             let Some(hub) = hub else {
-                return Ok(());
+                // Reported rather than swallowed. A silent success here is the
+                // worst version of this failure: the pane stays empty, the
+                // worker is never asked for anything, and nothing anywhere says
+                // why. Stopping a watch is still a no-op — there is genuinely
+                // nothing to stop — so only the request to *start* one is an
+                // error worth surfacing.
+                return if watch {
+                    Err(anyhow::anyhow!(
+                        "no hub is connected, so this worker cannot be asked to stream its screen"
+                    ))
+                } else {
+                    Ok(())
+                };
             };
             let result = if watch {
                 hub.watch(&worker, &task_id).await

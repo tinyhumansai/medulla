@@ -316,7 +316,11 @@ impl Runtime for BackendRuntime {
                 s.push_local_user(&thread_id, &input, now_millis());
             }
             let _ = tx.send(());
-            match client.send_message(&session_id, &input, false).await {
+            // `None` (not `Some(false)`) so the backend falls through to the
+            // session-level and server-side defaults. There is no local async
+            // toggle to source this from since #56 removed `set_async_mode`;
+            // wire it here when the UI grows one back.
+            match client.send_message(&session_id, &input, false, None).await {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     {

@@ -300,13 +300,36 @@ async fn send_message_async_sets_sync_zero() {
     let data = json!({ "cycleId": "c1", "seq": 7 });
     let (base, req) = spawn_stub_capture(ok_envelope("HTTP/1.1 202 Accepted", data)).await;
     let client = MedullaClient::new(base, "jwt");
-    let out = client.send_message("s1", "hello", false).await.unwrap();
+    let out = client
+        .send_message("s1", "hello", false, None)
+        .await
+        .unwrap();
     assert_eq!(out.cycle_id, "c1");
     assert_eq!(out.seq, 7);
     assert!(out.reply.is_none());
     let sent = req.await.unwrap();
     assert!(sent.contains("sync=0"), "{sent}");
     assert!(sent.contains("\"body\":\"hello\""), "{sent}");
+    // `None` must omit the param entirely: the backend parses it as tri-state,
+    // and an explicit `detached=0` would pin the session/server tiers off.
+    assert!(!sent.contains("detached"), "{sent}");
+}
+
+#[tokio::test]
+async fn send_message_forwards_an_explicit_detached_override() {
+    for (detached, expected) in [(true, "detached=1"), (false, "detached=0")] {
+        let data = json!({ "cycleId": "c3", "seq": 11 });
+        let (base, req) = spawn_stub_capture(ok_envelope("HTTP/1.1 202 Accepted", data)).await;
+        let client = MedullaClient::new(base, "jwt");
+        client
+            .send_message("s1", "fan out", false, Some(detached))
+            .await
+            .unwrap();
+        let sent = req.await.unwrap();
+        assert!(sent.contains(expected), "{sent}");
+        // Orthogonal to `sync`, which stays transport-only.
+        assert!(sent.contains("sync=0"), "{sent}");
+    }
 }
 
 #[tokio::test]
@@ -314,7 +337,7 @@ async fn send_message_sync_carries_reply_and_flag() {
     let data = json!({ "cycleId": "c2", "seq": 9, "reply": "done" });
     let (base, req) = spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", data)).await;
     let client = MedullaClient::new(base, "jwt");
-    let out = client.send_message("s1", "hi", true).await.unwrap();
+    let out = client.send_message("s1", "hi", true, None).await.unwrap();
     assert_eq!(out.reply.as_deref(), Some("done"));
     let sent = req.await.unwrap();
     assert!(sent.contains("sync=1"), "{sent}");

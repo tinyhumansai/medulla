@@ -11,9 +11,14 @@
 //! - `fork` has no backend equivalent — the backend has no fork endpoint. We
 //!   open a *fresh* session and copy the parent thread's transcript locally, so
 //!   the fork diverges from its parent server-side from the first turn.
-//! - `set_async_mode` is a purely local flag; the `/medulla/v1` message endpoint
-//!   is always called async (`sync=0`) regardless. It changes nothing
-//!   server-side and is kept only so the UI toggle has somewhere to land.
+//! - async delegation mode is not surfaced. The backend now accepts a per-turn
+//!   `?detached=` override on the message endpoint (tri-state: omitted inherits
+//!   the session-level and server defaults), and [`MedullaClient::send_message`]
+//!   takes it, but nothing sources a value: the `set_async_mode` toggle was
+//!   removed in #56. This runtime therefore always passes `None`. The message
+//!   endpoint is still always called async (`sync=0`), which is unrelated —
+//!   `sync` is transport, `detached` is whether a cycle may answer before its
+//!   delegated tasks drain.
 //! - `inspect_context` returns an empty list — the backend does not expose the
 //!   context store over HTTP.
 //! - Presence / peer-session data is empty — that arrives over Socket.IO, which

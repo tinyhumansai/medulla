@@ -251,21 +251,31 @@ impl MedullaClient {
     ///
     /// With `sync = false` the backend returns 202 `{cycleId, seq}`; with
     /// `sync = true` it blocks and returns `{cycleId, seq, reply}`.
+    ///
+    /// `detached` is this turn's async-delegation override and is orthogonal to
+    /// `sync`: `sync` decides who waits for the HTTP response, `detached`
+    /// decides whether the cycle may answer before its delegated tasks drain.
+    /// It is `Option` rather than `bool` on purpose — the backend parses the
+    /// query param as tri-state, so `None` must omit it entirely and fall
+    /// through to the session-level and server defaults. Sending an explicit
+    /// `0` on every turn would pin the lowest tiers permanently.
     pub async fn send_message(
         &self,
         session_id: &str,
         body: &str,
         sync: bool,
+        detached: Option<bool>,
     ) -> Result<SendResult> {
         let sync_flag = if sync { "1" } else { "0" };
-        let req = self
-            .authed(
-                self.http
-                    .post(self.url(&format!("/medulla/v1/sessions/{session_id}/messages")))
-                    .query(&[("sync", sync_flag)]),
-            )
-            .json(&SendMessageBody { body });
-        self.send(req).await
+        let mut req = self
+            .http
+            .post(self.url(&format!("/medulla/v1/sessions/{session_id}/messages")))
+            .query(&[("sync", sync_flag)]);
+        if let Some(detached) = detached {
+            req = req.query(&[("detached", if detached { "1" } else { "0" })]);
+        }
+        self.send(self.authed(req).json(&SendMessageBody { body }))
+            .await
     }
 
     /// Replay messages after `after` (`GET .../messages?after=`).

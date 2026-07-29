@@ -561,3 +561,18 @@ fn a_blank_tool_mode_is_absent_rather_than_a_mode_named_nothing() {
 
     assert!(decoded.tool_mode.is_none());
 }
+
+#[test]
+fn an_unknown_tool_mode_rejects_the_frame() {
+    let body = serde_json::json!({
+        "proto": crate::tinyplace::TINYPLACE_PROTO,
+        "kind": "task",
+        "taskId": "t1",
+        "text": "do it",
+        "ts": "2026-01-01T00:00:00Z",
+        "tool_mode": "unrestricted"
+    })
+    .to_string();
+
+    assert!(decode_task_frame(&body).is_none());
+}

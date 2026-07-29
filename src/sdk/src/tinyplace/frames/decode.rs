@@ -70,15 +70,19 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .filter(|id| !id.is_empty())
         .map(Box::<str>::from);
 
-    // Blank is absent for the same reason. An unrecognised value is left alone
-    // rather than rejected: the reader turns anything it does not know into the
-    // full tool surface, which is the pre-existing behaviour.
-    let tool_mode = obj
+    // Blank is absent for compatibility with encoders that always write the
+    // key. Unknown non-empty modes fail closed: silently turning one into the
+    // full tool surface could grant a review turn authoring capabilities.
+    let tool_mode = match obj
         .get("tool_mode")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|mode| !mode.is_empty())
-        .map(str::to_string);
+    {
+        None => None,
+        Some(mode @ ("full" | "propose")) => Some(mode.to_string()),
+        Some(_) => return None,
+    };
 
     // Blank is absent, for the same reason a blank workflow id is: an encoder
     // that always writes the key must not put every task into a conversation

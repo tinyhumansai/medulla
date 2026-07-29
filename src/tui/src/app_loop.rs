@@ -375,7 +375,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // A bad `[host]` section is reported exactly like a failed start: this
     // machine does not host, and the operator is told why. `and_then` keeps the
     // two failure kinds — unparseable config, unstartable host — on one path.
-    let custom_harnesses = medulla::config::load_custom_harnesses(&active_config_path)
+    let custom_harnesses = medulla::config::load_layered_custom_harnesses(&loaded.sources)
         .unwrap_or_else(|error| {
             hub_logs.push(format!("custom harnesses: cannot load ({error})"));
             Vec::new()

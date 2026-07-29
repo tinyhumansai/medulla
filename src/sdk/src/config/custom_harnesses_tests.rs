@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 
 use super::{
-    load_custom_harnesses, CustomHarnessConfig, OPENROUTER_ANTHROPIC_URL, OPENROUTER_OPENAI_URL,
+    load_custom_harnesses, load_layered_custom_harnesses, CustomHarnessConfig,
+    OPENROUTER_ANTHROPIC_URL, OPENROUTER_OPENAI_URL,
 };
 use crate::tinyplace::HarnessProvider;
 
@@ -80,6 +81,35 @@ apiKeyEnv = "OPENROUTER_API_KEY"
     )
     .unwrap();
     let presets = load_custom_harnesses(&path).unwrap();
+    assert_eq!(presets.len(), 1);
+    assert_eq!(presets[0].id, "deepseek");
+}
+
+#[test]
+fn layered_loading_preserves_global_presets_across_unrelated_project_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.toml");
+    let project = dir.path().join("project.toml");
+    std::fs::write(
+        &global,
+        r#"
+[[customHarnesses]]
+id = "deepseek"
+name = "DeepSeek"
+baseHarness = "codex"
+model = "deepseek/model"
+hostId = "this-device"
+"#,
+    )
+    .unwrap();
+    std::fs::write(&project, "[backend]\nbaseUrl = \"https://example.test\"\n").unwrap();
+
+    let presets = load_layered_custom_harnesses(&[
+        global.to_string_lossy().into_owned(),
+        project.to_string_lossy().into_owned(),
+    ])
+    .unwrap();
+
     assert_eq!(presets.len(), 1);
     assert_eq!(presets[0].id, "deepseek");
 }

@@ -297,12 +297,10 @@ pub async fn run_daemon(
     let custom_harnesses = loaded_config
         .as_ref()
         .map(|loaded| {
-            crate::config::load_custom_harnesses(std::path::Path::new(&loaded.path)).unwrap_or_else(
-                |error| {
-                    log(&format!("custom harness config load failed ({error})"));
-                    Vec::new()
-                },
-            )
+            crate::config::load_layered_custom_harnesses(&loaded.sources).unwrap_or_else(|error| {
+                log(&format!("custom harness config load failed ({error})"));
+                Vec::new()
+            })
         })
         .unwrap_or_default();
     let config = DaemonConfig {

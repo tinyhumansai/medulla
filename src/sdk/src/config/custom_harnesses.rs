@@ -198,9 +198,32 @@ impl CustomHarnessConfig {
 /// presets return an error naming the source instead of silently dropping fleet
 /// capacity the operator expected to exist.
 pub fn load_custom_harnesses(path: &Path) -> anyhow::Result<Vec<CustomHarnessConfig>> {
+    Ok(load_custom_harness_section(path)?.unwrap_or_default())
+}
+
+/// Resolve `customHarnesses` across config sources ordered low to high.
+///
+/// A higher-precedence source replaces the array only when it declares the
+/// section. Unrelated project-local settings therefore do not hide presets
+/// inherited from the user-global config.
+pub fn load_layered_custom_harnesses(
+    sources: &[String],
+) -> anyhow::Result<Vec<CustomHarnessConfig>> {
+    let mut effective = Vec::new();
+    for source in sources {
+        if let Some(harnesses) = load_custom_harness_section(Path::new(source))? {
+            effective = harnesses;
+        }
+    }
+    Ok(effective)
+}
+
+/// Read and validate the section while preserving the distinction between a
+/// missing section and a deliberately empty array for layered resolution.
+fn load_custom_harness_section(path: &Path) -> anyhow::Result<Option<Vec<CustomHarnessConfig>>> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
     let value: serde_json::Value = if path
@@ -213,13 +236,13 @@ pub fn load_custom_harnesses(path: &Path) -> anyhow::Result<Vec<CustomHarnessCon
     } else {
         serde_json::from_str(&text)?
     };
-    let rows = value
-        .get("customHarnesses")
-        .cloned()
-        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let Some(rows) = value.get("customHarnesses").cloned() else {
+        return Ok(None);
+    };
     let presets: Vec<CustomHarnessConfig> = serde_json::from_value(rows)?;
-    presets
+    let presets = presets
         .into_iter()
         .map(|preset| preset.normalize().map_err(anyhow::Error::msg))
-        .collect()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(Some(presets))
 }

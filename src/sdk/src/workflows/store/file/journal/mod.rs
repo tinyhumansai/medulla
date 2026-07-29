@@ -135,10 +135,7 @@ fn with_write_lock<T>(
     })?;
     let result = write_operation();
     if let Err(source) = lock.unlock() {
-        return Err(WorkflowError::Io {
-            path: lock_path,
-            source,
-        });
+        tracing::warn!(path = %lock_path.display(), "failed to release journal lock: {source}");
     }
     result
 }

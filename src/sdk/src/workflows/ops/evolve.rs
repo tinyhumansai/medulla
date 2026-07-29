@@ -131,6 +131,7 @@ pub async fn propose(
         decision_reason: None,
     };
     proposal.verification = Some(verify(store, &proposal).await);
+    mark_stale_if_base_changed(store, &mut proposal)?;
 
     // A workflow with two undecided proposals asks an operator to hold both in
     // their head at once, and the older one was written from less evidence.
@@ -144,6 +145,26 @@ pub async fn propose(
         "ok": proposal.is_applicable(),
         "proposal": proposal,
     }))
+}
+
+/// Make a just-verified proposal stale when its captured base moved meanwhile.
+///
+/// Verification is asynchronous, so an ordinary author can save while its dry
+/// run is in flight. Persisting that result as applicable would advertise a
+/// proposal acceptance is guaranteed to reject.
+pub(super) fn mark_stale_if_base_changed(
+    store: &Arc<dyn WorkflowStore>,
+    proposal: &mut WorkflowProposal,
+) -> Result<(), WorkflowError> {
+    let current = require(store.as_ref(), &proposal.workflow_id)?;
+    if fingerprint(&current.graph) == proposal.base_fingerprint {
+        return Ok(());
+    }
+    proposal.status = ProposalStatus::Stale;
+    proposal.decided_at = Some(crate::clock::now_millis() as u64);
+    proposal.decision_reason =
+        Some("the workflow changed while this proposal was being verified".to_string());
+    Ok(())
 }
 
 /// Mark this workflow's other undecided proposals as stale.

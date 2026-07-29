@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::*;
 use crate::workflows::authoring::GraphHandle;
-use crate::workflows::FileWorkflowStore;
+use crate::workflows::{fingerprint, FileWorkflowStore, ProposalStatus, WorkflowProposal};
 
 fn document(id: &str) -> String {
     json!({
@@ -471,4 +471,39 @@ fn supersession_omits_the_current_note_and_duplicate_predecessors() {
         ),
         vec!["older".to_string()]
     );
+}
+
+#[test]
+fn a_proposal_is_made_stale_when_its_base_moves_during_verification() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    let base = store.get("sweep").unwrap().unwrap();
+    let mut proposal = WorkflowProposal {
+        id: "proposal".into(),
+        workflow_id: "sweep".into(),
+        created_at: 1,
+        rationale: "rename the worker".into(),
+        ops: json!([{ "op": "set_node_name", "id": "work", "name": "Proposed" }]),
+        evidence_runs: Vec::new(),
+        note_ids: Vec::new(),
+        base_fingerprint: fingerprint(&base.graph),
+        verification: None,
+        status: ProposalStatus::Pending,
+        decided_at: None,
+        decision_reason: None,
+    };
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Concurrent" }]),
+    )
+    .unwrap();
+
+    super::evolve::mark_stale_if_base_changed(&store, &mut proposal).unwrap();
+
+    assert_eq!(proposal.status, ProposalStatus::Stale);
+    assert!(proposal
+        .decision_reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("being verified")));
 }

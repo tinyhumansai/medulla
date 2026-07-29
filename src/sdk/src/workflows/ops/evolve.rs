@@ -67,15 +67,20 @@ pub fn add_note(
     // claims rather than an argument with itself: a hypothesis a later run
     // disproved stays visible to an operator but stops being briefed.
     let mut superseded = Vec::new();
-    for earlier in supersedes {
-        if earlier == note.id {
-            continue;
-        }
+    for earlier in normalize_supersedes(&note.id, supersedes) {
         store.supersede_note(id, &earlier, &note.id)?;
         superseded.push(earlier);
     }
 
     Ok(json!({ "recorded": note.id, "note": note, "superseded": superseded }))
+}
+
+/// Keep each predecessor once and never let a note supersede itself.
+pub(super) fn normalize_supersedes(current: &str, ids: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    ids.into_iter()
+        .filter(|id| id != current && seen.insert(id.clone()))
+        .collect()
 }
 
 /// Every proposal for a workflow, newest first.

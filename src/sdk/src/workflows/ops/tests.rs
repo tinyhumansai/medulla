@@ -457,3 +457,18 @@ async fn a_dry_run_cannot_tell_you_a_script_is_broken() {
     // copilot's sandbox table says so explicitly.
     assert_eq!(result["ok"], json!(true), "{result}");
 }
+
+#[test]
+fn supersession_omits_the_current_note_and_duplicate_predecessors() {
+    assert_eq!(
+        super::evolve::normalize_supersedes(
+            "current",
+            vec![
+                "older".to_string(),
+                "current".to_string(),
+                "older".to_string(),
+            ],
+        ),
+        vec!["older".to_string()]
+    );
+}

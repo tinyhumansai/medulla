@@ -41,7 +41,7 @@ async fn a_note_can_replace_an_earlier_one_it_disproves() {
 }
 
 #[tokio::test]
-async fn a_note_cannot_supersede_itself() {
+async fn duplicate_superseded_notes_are_reported_once() {
     let home = tempfile::tempdir().expect("a temp home");
     let store = store_in(home.path());
     install_failing(&store, "sweep");
@@ -53,7 +53,7 @@ async fn a_note_cannot_supersede_itself() {
         "something",
         Vec::new(),
         NoteSource::Operator,
-        vec!["self".into()],
+        Vec::new(),
     )
     .expect("the note records");
     let id = recorded["recorded"].as_str().expect("an id").to_string();
@@ -65,11 +65,12 @@ async fn a_note_cannot_supersede_itself() {
         "another",
         Vec::new(),
         NoteSource::Operator,
-        vec![id.clone(), id],
+        vec![id.clone(), id.clone()],
     )
     .expect("the note records");
     let echoed_id = echoed["recorded"].as_str().expect("an id");
 
+    assert_eq!(echoed["superseded"], json!([id]));
     let current = medulla::workflows::current_notes(store.as_ref(), "sweep").expect("readable");
     assert!(current.iter().any(|note| note.id == echoed_id));
 }

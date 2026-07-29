@@ -58,6 +58,12 @@ pub fn preview_workflow_ops(
 
 /// Create a workflow from a whole graph document, replacing any existing one of
 /// the same id.
+///
+/// Parses, then validates, then saves — the same order [`apply_workflow_ops`]
+/// uses, and for the same reason. A document that parses is not necessarily a
+/// graph the engine would compile, and a create path that skipped validation
+/// would be the one way to get an unrunnable workflow into a store whose
+/// listings are otherwise trustworthy.
 pub fn create_workflow(
     store: &Arc<dyn WorkflowStore>,
     document: &str,
@@ -65,6 +71,7 @@ pub fn create_workflow(
 ) -> Result<WorkflowRecord, WorkflowError> {
     let record = crate::workflows::store::parse_workflow(document, id_fallback)
         .map_err(WorkflowError::Malformed)?;
+    validate_graph(&record.id, &record.graph)?;
     store.save(&record)?;
     Ok(record)
 }

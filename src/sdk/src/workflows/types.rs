@@ -206,4 +206,42 @@ pub enum WorkflowError {
     /// The engine refused to compile or run the graph.
     #[error("{0}")]
     Engine(String),
+
+    /// A dispatch to a harness ran out of time before it replied.
+    ///
+    /// Kept apart from the three below because the operator's next step differs
+    /// for each: a timeout is worth retrying, an abort was deliberate, a harness
+    /// error wants reading, and an unreachable harness wants configuring.
+    #[error("the harness did not respond in time")]
+    DispatchTimeout,
+
+    /// A dispatch was aborted before it replied.
+    #[error("the turn was aborted")]
+    DispatchAborted,
+
+    /// The harness ran and reported a failure of its own.
+    #[error("harness: {0}")]
+    Harness(String),
+
+    /// The dispatch never reached a harness — no transport, no worker, or the
+    /// waiter went away.
+    #[error("could not reach a harness: {0}")]
+    Unreachable(String),
+}
+
+impl From<crate::hub::RunError> for WorkflowError {
+    /// Preserve the shape of a dispatch failure rather than flattening it.
+    ///
+    /// The hub already distinguishes these four; collapsing them into one
+    /// string made a missing harness and a deliberate abort read identically at
+    /// every call site above.
+    fn from(err: crate::hub::RunError) -> Self {
+        use crate::hub::RunError;
+        match err {
+            RunError::Timeout => Self::DispatchTimeout,
+            RunError::Aborted => Self::DispatchAborted,
+            RunError::Worker(message) => Self::Harness(message),
+            RunError::Transport(message) => Self::Unreachable(message),
+        }
+    }
 }

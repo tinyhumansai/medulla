@@ -26,7 +26,6 @@ pub use prompt::{build as build_prompt, build_new as build_new_prompt};
 
 use std::sync::Arc;
 
-use tinyflows::model::WorkflowGraph;
 use tokio::sync::mpsc;
 
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
@@ -87,9 +86,8 @@ impl CopilotSession {
         instruction: &str,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<CopilotOutcome, WorkflowError> {
-        let record = require(self.store.as_ref(), workflow_id)?;
-        let before = record.graph.clone();
-        let prompt = prompt::build(&record.id, &record.name, &before, instruction);
+        let before = require(self.store.as_ref(), workflow_id)?;
+        let prompt = prompt::build(&before.id, &before.name, &before.graph, instruction);
 
         let task_id = format!("copilot-{}", uuid::Uuid::new_v4());
         let request = TaskRequest {
@@ -105,18 +103,22 @@ impl CopilotSession {
             workflow: None,
         };
 
-        let outcome = self
-            .dispatch
-            .dispatch_with_status(request, status)
-            .await
-            .map_err(|err| WorkflowError::Engine(err.to_string()))?;
+        let outcome = self.dispatch.dispatch_with_status(request, status).await?;
 
         // Re-read rather than trusting the reply: the tools wrote to the store,
         // and the store is the only thing that knows what they wrote.
-        let after = self.graph_now(workflow_id, &before);
+        let changes = match self.store.get(workflow_id) {
+            Ok(Some(after)) => diff::describe(&before, &after),
+            // Gone. Reported explicitly rather than as "no changes": the caller
+            // only refreshes the catalogue when something changed, so a silent
+            // deletion would leave the workflow on screen after it stopped
+            // existing.
+            Ok(None) => vec![format!("− workflow {workflow_id}")],
+            Err(err) => return Err(err),
+        };
         Ok(CopilotOutcome {
             reply: outcome.reply.trim().to_string(),
-            changes: diff::describe(&before, &after),
+            changes,
             created: None,
         })
     }
@@ -143,7 +145,7 @@ impl CopilotSession {
         instruction: &str,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<CopilotOutcome, WorkflowError> {
-        let before = self.catalogue();
+        let before = self.catalogue()?;
 
         let task_id = format!("copilot-new-{}", uuid::Uuid::new_v4());
         let request = TaskRequest {
@@ -159,20 +161,18 @@ impl CopilotSession {
             workflow: None,
         };
 
-        let outcome = self
-            .dispatch
-            .dispatch_with_status(request, status)
-            .await
-            .map_err(|err| WorkflowError::Engine(err.to_string()))?;
+        let outcome = self.dispatch.dispatch_with_status(request, status).await?;
 
         // Whatever is in the catalogue now that was not before. A turn that
-        // somehow made several takes the first by id so the result is stable.
-        let mut created: Vec<String> = self
-            .catalogue()
+        // somehow made several reports all of them — hiding the extras would
+        // leave workflows an operator never asked for and cannot see they got —
+        // and offers the first by id as the one to select, so the result is
+        // stable.
+        let created: std::collections::BTreeSet<String> = self
+            .catalogue()?
             .into_iter()
             .filter(|id| !before.contains(id))
             .collect();
-        created.sort();
         Ok(CopilotOutcome {
             reply: outcome.reply.trim().to_string(),
             changes: created
@@ -185,27 +185,12 @@ impl CopilotSession {
 
     /// Every workflow id the store currently holds.
     ///
-    /// An unreadable store yields nothing rather than failing: the comparison it
-    /// feeds only has to answer "what is new", and a store that cannot be listed
-    /// after the turn reports no creation instead of losing the reply.
-    fn catalogue(&self) -> std::collections::BTreeSet<String> {
-        self.store
-            .list()
-            .map(|rows| rows.into_iter().map(|row| row.id).collect())
-            .unwrap_or_default()
-    }
-
-    /// The workflow's graph as the store now holds it.
-    ///
-    /// Falls back to the pre-turn graph when the record has gone — a workflow
-    /// the agent deleted, or a store that briefly cannot be read. Reporting "no
-    /// changes" there is wrong but harmless; the catalogue refresh that follows
-    /// the turn is what shows the deletion.
-    fn graph_now(&self, workflow_id: &str, fallback: &WorkflowGraph) -> WorkflowGraph {
-        match self.store.get(workflow_id) {
-            Ok(Some(record)) => record.graph,
-            _ => fallback.clone(),
-        }
+    /// Fails rather than yielding nothing on an unreadable store. A silent empty
+    /// set here is worse than an error: taken before the turn it makes every
+    /// existing workflow look newly created, and `created` then names one the
+    /// operator already had — which the caller selects.
+    fn catalogue(&self) -> Result<std::collections::BTreeSet<String>, WorkflowError> {
+        Ok(self.store.list()?.into_iter().map(|row| row.id).collect())
     }
 }
 

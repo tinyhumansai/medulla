@@ -105,6 +105,60 @@ impl HarnessDispatch for BrokenHarness {
     }
 }
 
+/// A dispatch that fails with one chosen [`RunError`], for asserting that the
+/// four kinds of failure stay distinguishable to the caller.
+struct FailingHarness(RunError);
+
+#[async_trait]
+impl HarnessDispatch for FailingHarness {
+    async fn dispatch(&self, _request: TaskRequest) -> Result<TaskOutcome, RunError> {
+        Err(self.0.clone())
+    }
+}
+
+/// A store whose listing always fails.
+///
+/// Stands in for a workflows directory that has gone unreadable mid-session —
+/// permissions changed, a mount dropped — which is the case where swallowing the
+/// error used to make every existing workflow look newly created.
+struct UnreadableStore;
+
+impl UnreadableStore {
+    fn failure() -> WorkflowError {
+        WorkflowError::Io {
+            path: "workflows".into(),
+            source: std::io::Error::other("unreadable"),
+        }
+    }
+}
+
+impl WorkflowStore for UnreadableStore {
+    fn list(&self) -> Result<Vec<crate::workflows::WorkflowSummary>, WorkflowError> {
+        Err(Self::failure())
+    }
+    fn get(&self, _id: &str) -> Result<Option<WorkflowRecord>, WorkflowError> {
+        Err(Self::failure())
+    }
+    fn save(&self, _record: &WorkflowRecord) -> Result<(), WorkflowError> {
+        Err(Self::failure())
+    }
+    fn delete(&self, _id: &str) -> Result<(), WorkflowError> {
+        Err(Self::failure())
+    }
+    fn record_run(&self, _run: &crate::workflows::RunRecord) -> Result<(), WorkflowError> {
+        Err(Self::failure())
+    }
+    fn get_run(&self, _run_id: &str) -> Result<Option<crate::workflows::RunRecord>, WorkflowError> {
+        Err(Self::failure())
+    }
+    fn list_runs(
+        &self,
+        _workflow_id: &str,
+    ) -> Result<Vec<crate::workflows::RunRecord>, WorkflowError> {
+        Err(Self::failure())
+    }
+}
+
 /// A store over a temporary directory, holding `sweep`.
 fn store() -> (tempfile::TempDir, Arc<dyn WorkflowStore>) {
     let root = tempfile::tempdir().expect("tempdir");
@@ -286,7 +340,7 @@ async fn a_failed_dispatch_surfaces_the_harness_error() {
 }
 
 #[tokio::test]
-async fn a_workflow_the_turn_deleted_reports_no_changes_rather_than_failing() {
+async fn a_workflow_the_turn_deleted_is_reported_as_a_removal() {
     let (_root, store) = store();
     let mut harness = StubHarness::new(store.clone(), "removed it");
     harness.edit = Some(Box::new(|store| {
@@ -300,7 +354,62 @@ async fn a_workflow_the_turn_deleted_reports_no_changes_rather_than_failing() {
         .expect("turn");
 
     assert_eq!(outcome.reply, "removed it");
-    assert!(outcome.changes.is_empty());
+    // Not empty: the caller only refreshes its catalogue when something
+    // changed, so a silent deletion leaves the workflow on screen.
+    assert_eq!(outcome.changes, vec!["− workflow sweep".to_string()]);
+}
+
+#[tokio::test]
+async fn a_turn_that_only_edited_the_description_still_reports_a_change() {
+    let (_root, store) = store();
+    let mut harness = StubHarness::new(store.clone(), "reworded it");
+    harness.edit = Some(Box::new(|store| {
+        let mut record = store.get("sweep").unwrap().unwrap();
+        record.description = "sweeps the repo every night".into();
+        store.save(&record).unwrap();
+    }));
+    let session = session(store, Arc::new(harness));
+
+    let outcome = session
+        .turn("sweep", "describe it better", None)
+        .await
+        .expect("turn");
+
+    assert_eq!(outcome.changes, vec!["~ description".to_string()]);
+}
+
+#[tokio::test]
+async fn a_turn_that_disabled_the_workflow_reports_it() {
+    let (_root, store) = store();
+    let mut harness = StubHarness::new(store.clone(), "turned it off");
+    harness.edit = Some(Box::new(|store| {
+        let mut record = store.get("sweep").unwrap().unwrap();
+        record.enabled = false;
+        store.save(&record).unwrap();
+    }));
+    let session = session(store, Arc::new(harness));
+
+    let outcome = session
+        .turn("sweep", "stop it running", None)
+        .await
+        .expect("turn");
+
+    assert_eq!(outcome.changes, vec!["~ disabled".to_string()]);
+}
+
+#[tokio::test]
+async fn dispatch_failures_keep_the_shape_the_hub_reported() {
+    let (_root, store) = store();
+
+    for (run_error, expected) in [
+        (RunError::Timeout, "did not respond in time"),
+        (RunError::Aborted, "aborted"),
+        (RunError::Transport("relay is down".into()), "relay is down"),
+    ] {
+        let session = session(store.clone(), Arc::new(FailingHarness(run_error)));
+        let err = session.turn("sweep", "go", None).await.expect_err("fails");
+        assert!(err.to_string().contains(expected), "{err}");
+    }
 }
 
 #[tokio::test]
@@ -389,6 +498,49 @@ async fn a_create_turn_ignores_a_workflow_that_was_already_there() {
     // id against the catalogue, not "did the store change at all".
     assert_eq!(outcome.created, None);
     assert!(outcome.changes.is_empty());
+}
+
+#[tokio::test]
+async fn a_create_turn_reports_every_workflow_it_made_not_only_the_first() {
+    let (_root, store) = store();
+    let mut harness = StubHarness::new(store.clone(), "built them");
+    harness.edit = Some(Box::new(|store| {
+        store.save(&document("alpha")).expect("save");
+        store.save(&document("beta")).expect("save");
+    }));
+    let session = session(store, Arc::new(harness));
+
+    let outcome = session.create("build two", None).await.expect("create");
+
+    // Both reported — an unmentioned second workflow is one the operator has
+    // and cannot see. The first by id is offered as the one to select.
+    assert_eq!(
+        outcome.changes,
+        vec![
+            "+ workflow alpha".to_string(),
+            "+ workflow beta".to_string()
+        ]
+    );
+    assert_eq!(outcome.created.as_deref(), Some("alpha"));
+}
+
+#[tokio::test]
+async fn a_create_turn_fails_rather_than_guessing_when_the_catalogue_cannot_be_read() {
+    let store: Arc<dyn WorkflowStore> = Arc::new(UnreadableStore);
+    let harness = Arc::new(StubHarness::new(store.clone(), "ok"));
+    let session = session(store, harness.clone());
+
+    let err = session
+        .create("build me one", None)
+        .await
+        .expect_err("fails");
+
+    assert!(matches!(err, WorkflowError::Io { .. }), "{err}");
+    assert!(
+        harness.seen.lock().unwrap().is_empty(),
+        "an unreadable catalogue must stop the turn before it dispatches: a \
+         silent empty set makes every existing workflow look newly created"
+    );
 }
 
 #[tokio::test]

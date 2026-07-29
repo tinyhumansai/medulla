@@ -141,6 +141,30 @@ fn a_custom_harness_is_attached_only_to_its_fleet_host() {
 }
 
 #[test]
+fn custom_harness_matching_uses_the_effective_host_address() {
+    let local = medulla::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek | codex | deepseek/deepseek-chat | | this-device",
+    )
+    .expect("valid custom harness");
+    let config = HostSection {
+        address: "  ".into(),
+        ..HostSection::default()
+    };
+
+    let options = options_from_config_with_custom(
+        &config,
+        &HashMap::new(),
+        None,
+        None,
+        None,
+        &[local.clone()],
+    )
+    .expect("valid host options");
+
+    assert_eq!(options.custom_harnesses, vec![local]);
+}
+
+#[test]
 fn a_zero_concurrency_config_still_runs_one_task_at_a_time() {
     let options = options_from_config(
         &HostSection {

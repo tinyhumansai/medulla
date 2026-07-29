@@ -101,6 +101,7 @@ pub(crate) fn options_from_config_with_custom(
     log: Option<medulla::hub::HubLog>,
     custom_harnesses: &[medulla::config::CustomHarnessConfig],
 ) -> Result<EmbeddedDaemonOptions, String> {
+    let address = host_address(config);
     let mut providers = config
         .providers
         .iter()
@@ -108,7 +109,7 @@ pub(crate) fn options_from_config_with_custom(
         .collect::<Result<Vec<_>, _>>()?;
     let custom_harnesses: Vec<_> = custom_harnesses
         .iter()
-        .filter(|harness| harness.host_id == config.address)
+        .filter(|harness| harness.host_id == address)
         .cloned()
         .collect();
     for provider in custom_harnesses.iter().map(|harness| harness.base_harness) {

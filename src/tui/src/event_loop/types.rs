@@ -20,8 +20,6 @@ pub(super) enum AppMsg {
     UsageLoaded(Option<serde_json::Value>),
     /// A newer release was detected by the background update checker.
     UpdateAvailable(String),
-    /// Current local task document.
-    TasksLoaded(medulla::tasks::TaskDocument),
     /// A progress line from a running copilot turn.
     ///
     /// Addressed by workflow rather than applied to whatever is selected: the
@@ -83,7 +81,7 @@ pub(crate) struct SessionWiring {
         Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
     /// Where appearance/config edits are persisted.
     pub config_path: std::path::PathBuf,
-    /// The Medulla home: where local task/appearance state is kept.
+    /// The Medulla home: where user-level application state is kept.
     pub medulla_home: std::path::PathBuf,
     /// The account the embedded core is signed in as, when it is.
     ///

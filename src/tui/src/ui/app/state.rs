@@ -17,7 +17,6 @@ use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
     App, Cmd, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT, SP_USAGE, TABS,
-    TASKS_SUBPAGES,
 };
 
 impl App {
@@ -88,13 +87,8 @@ impl App {
             subscription_strategy_index,
             subscription_strategy_focused: false,
             credential_status: super::credentials::detect_credential_status(),
-            tasks_index: 0,
-            tasks_focused: false,
-            task_source_index: 0,
-            tasks_detail_open: false,
             tokenmaxxing_index: 0,
             tokenmaxxing_focused: false,
-            tasks: medulla::tasks::TaskDocument::default(),
             decision_open: false,
             decision_index: 0,
             dismissed_decisions: Default::default(),
@@ -155,32 +149,6 @@ impl App {
     /// Configure Account logout with a testable home; without it, logout reports no writable location.
     pub fn set_medulla_home(&mut self, home: std::path::PathBuf) {
         self.medulla_home = Some(home);
-        if let Some(home) = &self.medulla_home {
-            if let Ok(repository) = medulla::tasks::TaskRepository::in_home(home) {
-                self.tasks = repository.document().clone();
-            }
-        }
-    }
-
-    /// Replace the task document returned by background persistence/sync work.
-    pub fn set_tasks(&mut self, document: medulla::tasks::TaskDocument) {
-        self.tasks = document;
-        self.selected = self.selected.min(self.tasks.tasks.len().saturating_sub(1));
-    }
-
-    /// The active Tasks subpage name. Test/inspection seam.
-    pub fn tasks_subpage(&self) -> &'static str {
-        TASKS_SUBPAGES[self.tasks_index.min(TASKS_SUBPAGES.len() - 1)]
-    }
-
-    /// Whether Tasks focus is inside the active content pane.
-    pub fn tasks_focused(&self) -> bool {
-        self.tasks_focused
-    }
-
-    /// Whether a selected task or source is open in the detail modal.
-    pub fn tasks_detail_open(&self) -> bool {
-        self.tasks_detail_open
     }
 
     /// The active Settings subpage name. Test/inspection seam.
@@ -386,7 +354,6 @@ impl App {
     /// active subpage.
     pub(super) fn tab_enter_cmd(&mut self) -> Option<Cmd> {
         match self.tab() {
-            "Tasks" => Some(Cmd::LoadTasks),
             // The workflow store is files on this machine, so entering the tab
             // reads them rather than asking the runtime for anything — which is
             // why this arm returns no command and does the work here.

@@ -26,7 +26,6 @@ mod prompt;
 mod routing;
 mod selection;
 mod settings;
-mod tasks;
 mod template_modal;
 #[cfg(feature = "workflows")]
 pub(super) mod workflows;
@@ -518,7 +517,6 @@ impl App {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
             "Agents" => self.draw_agents(f, area),
-            "Tasks" => self.draw_tasks(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),

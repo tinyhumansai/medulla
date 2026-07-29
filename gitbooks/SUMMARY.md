@@ -14,7 +14,6 @@
 
 * [Memory](features/memory.md)
 * [Workers and Sessions](features/workers-and-sessions.md)
-* [Tasks and Sources](features/tasks-and-sources.md)
 * [MEDULLA.md](features/workspace-profiles.md)
 * [Orchestrator Routing](features/routing.md)
 * [Token Efficiency and Budgets](features/token-efficiency.md)

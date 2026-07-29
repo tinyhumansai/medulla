@@ -235,7 +235,7 @@ fn tab_and_backtab_cycle_tabs() {
     let _ = app.on_event(key(KeyCode::Tab));
     assert_eq!(app.tab(), "Agents");
     let _ = app.on_event(key(KeyCode::Tab));
-    assert_eq!(app.tab(), "Tasks");
+    assert_eq!(app.tab(), "Workflows");
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
     assert_eq!(app.tab(), "Agents");
     // Wrap backwards from Overview to the last tab (Settings).

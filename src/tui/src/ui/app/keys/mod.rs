@@ -3,7 +3,7 @@
 //! leans on helpers defined in [`super::input`], [`super::commands`], and
 //! [`super::state`].
 //!
-//! Tasks, Routing, Memory, and Settings host subpages with bindings of their own,
+//! Routing and Settings host subpages with bindings of their own,
 //! so their handling lives in focused sibling modules rather than inline here.
 //!
 //! The Agents tab carries the composer, which settles every binding conflict on
@@ -24,7 +24,6 @@ mod agents;
 mod harness;
 mod routing;
 mod settings;
-mod tasks;
 mod tokenmaxxing;
 #[cfg(feature = "workflows")]
 mod workflows;
@@ -32,7 +31,6 @@ mod workflows;
 use agents::AgentsKey;
 use routing::RoutingKey;
 use settings::SettingsKey;
-use tasks::TasksKey;
 use tokenmaxxing::TokenMaxxxingKey;
 #[cfg(feature = "workflows")]
 use workflows::WorkflowsKey;
@@ -166,11 +164,6 @@ impl App {
         }
         if tab == "Routing" {
             if let RoutingKey::Handled(cmd) = self.on_routing_key(k.code) {
-                return cmd;
-            }
-        }
-        if tab == "Tasks" {
-            if let TasksKey::Handled(cmd) = self.on_tasks_key(k.code) {
                 return cmd;
             }
         }

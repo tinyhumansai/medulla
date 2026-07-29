@@ -12,7 +12,6 @@ use medulla_tui::ui::app::Cmd;
 
 use super::AppMsg;
 
-mod tasks;
 #[cfg(feature = "workflows")]
 mod workflows;
 
@@ -32,17 +31,8 @@ pub(super) fn run_cmd(
     _workflows_config: &medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
-    let cmd = match tasks::run_task_cmd(cmd, msg_tx) {
-        Some(cmd) => *cmd,
-        None => return,
-    };
     match cmd {
         Cmd::Quit => {}
-        Cmd::LoadTasks
-        | Cmd::SaveTask(_)
-        | Cmd::SaveTasks(_)
-        | Cmd::DeleteTask(_)
-        | Cmd::SyncTasks(_) => unreachable!("task commands return before main dispatch"),
         Cmd::Submit(input) => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

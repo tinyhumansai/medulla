@@ -22,6 +22,7 @@ use super::mappers::HarnessSemanticEvent;
 use super::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use super::*;
 
+mod admission_tests;
 mod capability_tests;
 mod provider_tests;
 mod system_info_tests;

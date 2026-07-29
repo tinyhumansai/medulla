@@ -1,6 +1,11 @@
 //! Task-lifecycle tests: acceptance limits, duplicate rejection, stdin/input
 //! forwarding (including buffering before the sink registers), and shutdown
 //! aborting an in-flight task.
+//!
+//! Sender attribution and its logging live in the sibling
+//! `task_attribution_tests`; conversation continuity (resume, isolation, and
+//! the turn-serialization race) lives in `task_continuity_tests` — both split
+//! out once their groups pushed this file over the 500-line ceiling.
 
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -11,9 +16,8 @@ use crate::daemon::DaemonRuntime;
 use crate::tinyplace::TaskFrameKind;
 
 use super::{
-    abort_frame, abortable_runner, base_config, blocking_runner, conversation_runner,
-    decoded_frames, input_frame, recording_send, resume_runner, stdin_runner, task_frame,
-    wait_ready,
+    abort_frame, abortable_runner, base_config, blocking_runner, decoded_frames, input_frame,
+    recording_send, stdin_runner, task_frame, wait_ready,
 };
 
 #[tokio::test]
@@ -379,246 +383,6 @@ async fn input_buffered_before_stdin_registration_is_drained() {
         received.lock().unwrap().as_slice(),
         &["buffered guidance".to_string()]
     );
-}
-
-#[tokio::test]
-async fn a_run_is_attributed_to_the_authenticated_sender() {
-    // The executor decides which session serves a task and whose context it may
-    // see, entirely from this field. If it ever silently defaults to empty, two
-    // peers collapse into one conversation — so it is pinned here rather than
-    // trusted to stay wired.
-    let seen = Arc::new(StdMutex::new(Vec::new()));
-    let (send, _recorded) = recording_send();
-    let runtime = DaemonRuntime::new(base_config(), conversation_runner(seen.clone()), send);
-
-    runtime.handle_message(
-        "peer-alice".to_string(),
-        String::new(),
-        Some(task_frame("t1", "do it", None)),
-    );
-    runtime.idle().await;
-
-    assert_eq!(seen.lock().unwrap().clone(), vec!["peer-alice".to_string()]);
-}
-
-#[tokio::test]
-async fn a_plain_text_dm_is_attributed_to_its_sender_too() {
-    // Plain text routes to a *conversation*, which is meaningless without
-    // knowing whose it is.
-    let seen = Arc::new(StdMutex::new(Vec::new()));
-    let (send, _recorded) = recording_send();
-    let runtime = DaemonRuntime::new(base_config(), conversation_runner(seen.clone()), send);
-
-    runtime.handle_message("peer-bob".to_string(), "hello there".to_string(), None);
-    runtime.idle().await;
-
-    assert_eq!(seen.lock().unwrap().clone(), vec!["peer-bob".to_string()]);
-}
-
-#[tokio::test]
-async fn two_peers_are_never_attributed_to_one_conversation() {
-    let seen = Arc::new(StdMutex::new(Vec::new()));
-    let (send, _recorded) = recording_send();
-    let runtime = DaemonRuntime::new(base_config(), conversation_runner(seen.clone()), send);
-
-    runtime.handle_message(
-        "peer-alice".to_string(),
-        String::new(),
-        Some(task_frame("t1", "a", None)),
-    );
-    runtime.handle_message(
-        "peer-bob".to_string(),
-        String::new(),
-        Some(task_frame("t2", "b", None)),
-    );
-    runtime.idle().await;
-
-    let mut got = seen.lock().unwrap().clone();
-    got.sort();
-    assert_eq!(got, vec!["peer-alice".to_string(), "peer-bob".to_string()]);
-}
-
-#[tokio::test]
-async fn the_captured_turn_and_the_sent_payload_are_both_logged() {
-    // These are two different facts and they used to share one line. A harness
-    // that answered with nothing and a send that never happened both showed up
-    // as "task ✓", so the operator could not tell which end had failed — the
-    // question that took several rounds to answer in the field.
-    let seen: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
-    let (send, _recorded) = recording_send();
-    let runtime = DaemonRuntime::new(
-        base_config(),
-        conversation_runner(Arc::new(StdMutex::new(Vec::new()))),
-        send,
-    )
-    .with_log({
-        let seen = seen.clone();
-        Arc::new(move |line: &str| seen.lock().unwrap().push(line.to_string()))
-    });
-
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(task_frame("t1", "do it", None)),
-    );
-    // The turn is spawned; wait for the terminal frame to have been narrated.
-    // Bounded, because a test that hangs when the line never comes is worse
-    // than one that fails: it reports nothing and blocks the suite.
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    let lines = loop {
-        let lines = seen.lock().unwrap().clone();
-        if lines.iter().any(|l| l.contains("bytes on the wire")) {
-            break lines;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the sent payload was never narrated; got {lines:?}"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    };
-    let captured = lines
-        .iter()
-        .find(|l| l.contains("captured"))
-        .unwrap_or_else(|| panic!("the harness's own output must be logged: {lines:?}"));
-    assert!(captured.contains("done"), "got {captured}");
-    assert!(captured.contains("4 chars"), "got {captured}");
-
-    let sent = lines
-        .iter()
-        .find(|l| l.contains("bytes on the wire"))
-        .unwrap_or_else(|| panic!("the payload sent to the peer must be logged: {lines:?}"));
-    assert!(sent.contains("peer"), "the recipient is named: {sent}");
-    assert!(sent.contains("done"), "got {sent}");
-}
-
-/// A task frame naming a continuity group.
-fn conversation_frame(
-    task_id: &str,
-    text: &str,
-    conversation: &str,
-) -> crate::tinyplace::TaskFrame {
-    crate::tinyplace::TaskFrame {
-        conversation: Some(conversation.to_string()),
-        ..task_frame(task_id, text, None)
-    }
-}
-
-#[tokio::test]
-async fn an_ordinary_task_resumes_nothing() {
-    // The default, and the invariant the whole feature is built around: a task
-    // frame is discrete work, so two tasks must never see each other's context.
-    let resumed = Arc::new(StdMutex::new(Vec::new()));
-    let (send, _recorded) = recording_send();
-    let runtime = DaemonRuntime::new(
-        base_config(),
-        resume_runner(resumed.clone(), "sess-1"),
-        send,
-    );
-
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(task_frame("t1", "a", None)),
-    );
-    runtime.idle().await;
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(task_frame("t2", "b", None)),
-    );
-    runtime.idle().await;
-
-    assert_eq!(resumed.lock().unwrap().clone(), vec![None, None]);
-}
-
-#[tokio::test]
-async fn a_second_task_in_one_conversation_resumes_the_first_ones_session() {
-    // What makes the copilot pane a chat rather than a series of unrelated
-    // requests: the second instruction reaches the session that ran the first.
-    let resumed = Arc::new(StdMutex::new(Vec::new()));
-    let (send, _recorded) = recording_send();
-    let runtime = DaemonRuntime::new(
-        base_config(),
-        resume_runner(resumed.clone(), "sess-1"),
-        send,
-    );
-
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(conversation_frame("t1", "add a step", "pane-1")),
-    );
-    runtime.idle().await;
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(conversation_frame("t2", "now the other one", "pane-1")),
-    );
-    runtime.idle().await;
-
-    assert_eq!(
-        resumed.lock().unwrap().clone(),
-        vec![None, Some("sess-1".to_string())],
-        "the first turn opens a session; the second continues it"
-    );
-}
-
-#[tokio::test]
-async fn two_conversations_from_one_peer_stay_separate() {
-    // Two workflows open side by side are two panes, and an operator does not
-    // expect an instruction about one to land in the other's context.
-    let resumed = Arc::new(StdMutex::new(Vec::new()));
-    let (send, _recorded) = recording_send();
-    let runtime = DaemonRuntime::new(
-        base_config(),
-        resume_runner(resumed.clone(), "sess-1"),
-        send,
-    );
-
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(conversation_frame("t1", "a", "pane-1")),
-    );
-    runtime.idle().await;
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(conversation_frame("t2", "b", "pane-2")),
-    );
-    runtime.idle().await;
-
-    assert_eq!(resumed.lock().unwrap().clone(), vec![None, None]);
-}
-
-#[tokio::test]
-async fn one_peer_cannot_resume_another_peers_conversation() {
-    // The frame body cannot be trusted to name its own author, so the
-    // conversation is scoped to the authenticated sender. Without that scoping
-    // any peer could name "pane-1" and resume into a session holding someone
-    // else's context.
-    let resumed = Arc::new(StdMutex::new(Vec::new()));
-    let (send, _recorded) = recording_send();
-    let runtime = DaemonRuntime::new(
-        base_config(),
-        resume_runner(resumed.clone(), "sess-1"),
-        send,
-    );
-
-    runtime.handle_message(
-        "peer-alice".into(),
-        String::new(),
-        Some(conversation_frame("t1", "a", "pane-1")),
-    );
-    runtime.idle().await;
-    runtime.handle_message(
-        "peer-mallory".into(),
-        String::new(),
-        Some(conversation_frame("t2", "b", "pane-1")),
-    );
-    runtime.idle().await;
-
-    assert_eq!(resumed.lock().unwrap().clone(), vec![None, None]);
 }
 
 #[tokio::test]

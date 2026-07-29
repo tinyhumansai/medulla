@@ -25,6 +25,8 @@ use super::*;
 mod capability_tests;
 mod provider_tests;
 mod system_info_tests;
+mod task_attribution_tests;
+mod task_continuity_tests;
 mod task_tests;
 
 /// A [`SendFn`] that records every `(to, body)` it is handed, paired with the

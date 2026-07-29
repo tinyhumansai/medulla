@@ -186,6 +186,26 @@ impl DaemonRuntime {
         let session_key = frame.conversation.as_deref().map(|conversation| {
             crate::sessions::SessionKey::new(format!("{from}/{conversation}"), provider)
         });
+        // Held for the rest of this turn, past the `plan()` below and through
+        // `run_task` — including the `on_session` callback that records the
+        // binding once the harness opens one. Without it, two frames naming
+        // the same conversation could both `plan()` before either recorded a
+        // session: the first pair would each open their own session and race
+        // to bind it (whichever `on_session` fires last silently wins, and the
+        // other harness session is orphaned); a later pair could both resume
+        // the *same* now-bound session concurrently, interleaving two turns on
+        // one harness. `acquire_turn` is a no-op (`None`) for anything but
+        // `Unbound`, so a task frame with no named conversation never
+        // serializes against unrelated work.
+        let turn_guard = match &session_key {
+            Some(key) => {
+                self.inner
+                    .sessions
+                    .acquire_turn(key, crate::sessions::SessionClass::Unbound)
+                    .await
+            }
+            None => None,
+        };
         // An `Unbound` class because these turns are a conversation, not
         // discrete work — that is the whole of what the sender opted into. The
         // registry still declines to resume a provider that cannot
@@ -280,6 +300,10 @@ impl DaemonRuntime {
         };
 
         let result = (self.inner.run_task)(options).await;
+        // Released only now: the guard must outlive the `on_session` callback
+        // above, which is the thing recording the binding the next queued turn
+        // will plan against.
+        drop(turn_guard);
         // The task future is dropped here, dropping its on_event (and its status
         // sender); the consumer then drains and ends.
         let _ = status_consumer.await;

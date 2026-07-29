@@ -57,3 +57,43 @@ fn duplicate_ids_are_rejected_without_overwriting_the_existing_preset() {
     assert_eq!(app.custom_harnesses.len(), 1);
     assert!(app.status().contains("already exists"));
 }
+
+#[test]
+fn editor_preserves_inherited_presets_when_writing_the_project_layer() {
+    let home = tempfile::tempdir().expect("home");
+    let project = tempfile::tempdir().expect("project");
+    let global = home.path().join("config.toml");
+    let project_config = project.path().join("medulla.toml");
+    std::fs::write(
+        &global,
+        r#"
+[[customHarnesses]]
+id = "global"
+name = "Global"
+baseHarness = "claude"
+model = "openrouter/global"
+hostId = "this-device"
+"#,
+    )
+    .unwrap();
+    std::fs::write(&project_config, "[theme]\naccent = \"blue\"\n").unwrap();
+    let env = std::collections::HashMap::from([(
+        "MEDULLA_HOME".to_string(),
+        home.path().to_string_lossy().into_owned(),
+    )]);
+    let loaded = medulla::config::load_config(None, &env, project.path()).unwrap();
+    let mut app = App::new(Arc::new(MockRuntime::demo()), loaded);
+    app.set_config_path(project_config.clone());
+
+    assert_eq!(app.custom_harnesses.len(), 1);
+    assert_eq!(app.custom_harnesses[0].id, "global");
+
+    app.save_custom_harness(
+        None,
+        "project | Project | codex | openrouter/project | | this-device",
+    );
+
+    let saved = medulla::config::load_custom_harnesses(&project_config).unwrap();
+    let ids: Vec<_> = saved.iter().map(|harness| harness.id.as_str()).collect();
+    assert_eq!(ids, vec!["global", "project"]);
+}

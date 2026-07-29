@@ -114,12 +114,18 @@ impl App {
         self.persist_custom_harnesses(&format!("Removed custom harness '{}'", removed.name));
     }
 
-    /// Re-read presets from the active config file.
+    /// Re-read effective presets from every config layer.
     pub(super) fn reload_custom_harnesses(&mut self) {
         let Some(path) = &self.config_path else {
             return;
         };
-        match medulla::config::load_custom_harnesses(path) {
+        let mut sources = self.loaded.sources.clone();
+        // `sources` contains only files that existed during initial discovery.
+        // Append the writable target so a newly-created highest-precedence file
+        // participates in reloads immediately. Re-reading an existing last
+        // source is harmless and preserves the same precedence.
+        sources.push(path.to_string_lossy().into_owned());
+        match medulla::config::load_layered_custom_harnesses(&sources) {
             Ok(harnesses) => {
                 self.custom_harnesses = harnesses;
                 self.custom_harness_index = crate::ui::selection::clamp(

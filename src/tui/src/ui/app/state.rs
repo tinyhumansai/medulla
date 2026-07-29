@@ -146,10 +146,8 @@ impl App {
     /// Point appearance persistence at the user-global `config.toml`; injectable
     /// so feature tests avoid the real home.
     pub fn set_config_path(&mut self, path: std::path::PathBuf) {
-        self.custom_harnesses = medulla::config::load_custom_harnesses(&path).unwrap_or_default();
-        self.custom_harness_index =
-            crate::ui::selection::clamp(self.custom_harness_index, self.custom_harnesses.len());
         self.config_path = Some(path);
+        self.reload_custom_harnesses();
     }
 
     /// Record who the core is signed in as, for the Account subpage.

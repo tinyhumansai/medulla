@@ -261,6 +261,7 @@ impl From<crate::hub::RunError> for WorkflowError {
             RunError::Timeout => Self::DispatchTimeout,
             RunError::Aborted => Self::DispatchAborted,
             RunError::Worker(message) => Self::Harness(message),
+            RunError::Busy(message) => Self::Unreachable(message),
             RunError::Transport(message) => Self::Unreachable(message),
         }
     }

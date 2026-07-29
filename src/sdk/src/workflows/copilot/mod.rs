@@ -268,5 +268,13 @@ impl CopilotSession {
     }
 }
 
+// Shared fixtures for `tests` and `create_tests`, so a stand-in harness or
+// store is defined once rather than duplicated across the split.
+#[cfg(test)]
+mod support;
 #[cfg(test)]
 mod tests;
+// Split out of `tests` once the create-turn cases pushed it over the
+// repository's 500-line file ceiling — see that module's doc comment.
+#[cfg(test)]
+mod create_tests;

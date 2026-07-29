@@ -184,10 +184,21 @@ pub async fn evolve_here(
         )));
     }
 
+    // Evolution depends on the restricted workflow MCP surface. The legacy
+    // provider transport cannot attach MCP servers, so an otherwise successful
+    // review would be unable to record a note or proposal.
+    let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    env.insert(
+        crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+        "acp".to_string(),
+    );
+    crate::workflows::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
+
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: config.default_provider,
         model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+        env,
         ..Default::default()
     })
     .map_err(crate::workflows::WorkflowError::Engine)?;

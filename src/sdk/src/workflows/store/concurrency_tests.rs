@@ -160,3 +160,32 @@ fn separate_store_instances_use_the_same_definition_lock() {
         .expect("save succeeds");
     writer.join().expect("writer thread");
 }
+
+#[test]
+fn separate_store_instances_serialize_proposal_decisions() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let first = store_in(root.path());
+    let second = store_in(root.path());
+    let first_claim = first
+        .lock_proposal_decision("race")
+        .expect("claim proposal decisions");
+
+    let (sent, received) = std::sync::mpsc::channel();
+    let contender = std::thread::spawn(move || {
+        let claim = second.lock_proposal_decision("race");
+        sent.send(claim.map(drop)).expect("report decision claim");
+    });
+    assert!(
+        received
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "another store must wait before deciding the same workflow"
+    );
+
+    drop(first_claim);
+    received
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("claim completes after unlock")
+        .expect("claim succeeds");
+    contender.join().expect("contender thread");
+}

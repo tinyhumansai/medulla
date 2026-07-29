@@ -48,7 +48,23 @@ use paths::{is_json, write_atomic};
 // guard is the one piece of this module worth asserting on from outside it.
 pub(crate) use paths::safe_component;
 
-use super::WorkflowStore;
+use super::{ProposalDecisionGuard, WorkflowStore};
+
+/// A file-backed proposal decision claim released when dropped.
+struct FileProposalDecisionGuard {
+    file: std::fs::File,
+    path: PathBuf,
+}
+
+impl ProposalDecisionGuard for FileProposalDecisionGuard {}
+
+impl Drop for FileProposalDecisionGuard {
+    fn drop(&mut self) {
+        if let Err(source) = FileExt::unlock(&self.file) {
+            tracing::warn!(path = %self.path.display(), "failed to release proposal decision lock: {source}");
+        }
+    }
+}
 
 /// What one read of the workflow directories found.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -467,6 +483,35 @@ impl WorkflowStore for FileWorkflowStore {
 
     fn list_proposals(&self, workflow_id: &str) -> Result<Vec<WorkflowProposal>, WorkflowError> {
         proposals::list_for(&self.proposals_dir, workflow_id)
+    }
+
+    fn lock_proposal_decision(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Box<dyn ProposalDecisionGuard>, WorkflowError> {
+        std::fs::create_dir_all(&self.proposals_dir).map_err(|source| WorkflowError::Io {
+            path: self.proposals_dir.clone(),
+            source,
+        })?;
+        let path = self.proposals_dir.join(format!(
+            ".workflow-{}.decision.lock",
+            safe_component(workflow_id)?
+        ));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|source| WorkflowError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        file.lock_exclusive().map_err(|source| WorkflowError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        Ok(Box::new(FileProposalDecisionGuard { file, path }))
     }
 }
 

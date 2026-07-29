@@ -43,6 +43,10 @@ pub fn accept(
     let _claim = DecisionGuard::claim(&format!("proposal:{proposal_id}")).ok_or_else(|| {
         WorkflowError::Engine(format!("proposal '{proposal_id}' is already being applied"))
     })?;
+    let proposal = require_proposal(store.as_ref(), proposal_id)?;
+    let _store_claim = store.lock_proposal_decision(&proposal.workflow_id)?;
+    // The proposal may have changed while this process waited for another
+    // process to finish deciding this workflow.
     let mut proposal = require_proposal(store.as_ref(), proposal_id)?;
     // Different proposals for one workflow are also positional edits against
     // the same base graph. Hold this claim from status/fingerprint validation
@@ -137,6 +141,10 @@ pub fn reject(
     let _claim = DecisionGuard::claim(&format!("proposal:{proposal_id}")).ok_or_else(|| {
         WorkflowError::Engine(format!("proposal '{proposal_id}' is already being decided"))
     })?;
+    let proposal = require_proposal(store.as_ref(), proposal_id)?;
+    let _store_claim = store.lock_proposal_decision(&proposal.workflow_id)?;
+    // Re-read under the store claim so a decision that completed while this
+    // process waited cannot be overwritten.
     let mut proposal = require_proposal(store.as_ref(), proposal_id)?;
     if !proposal.is_pending() {
         return Err(WorkflowError::Engine(format!(

@@ -30,6 +30,17 @@ use crate::workflows::types::{
 };
 use crate::workflows::WorkflowError;
 
+/// An exclusive claim over proposal decisions for one workflow.
+///
+/// The value has no operations: holding it is the operation, and dropping it
+/// releases the backing store's claim.
+pub trait ProposalDecisionGuard: Send {}
+
+/// Default guard for stores that need no external transaction primitive.
+struct NoopProposalDecisionGuard;
+
+impl ProposalDecisionGuard for NoopProposalDecisionGuard {}
+
 /// Persistence for workflow definitions and their run history.
 ///
 /// Implementations are shared across threads and may be called from async
@@ -158,6 +169,18 @@ pub trait WorkflowStore: Send + Sync {
     fn list_proposals(&self, workflow_id: &str) -> Result<Vec<WorkflowProposal>, WorkflowError> {
         let _ = workflow_id;
         Ok(Vec::new())
+    }
+
+    /// Claim exclusive decision access for every proposal on one workflow.
+    ///
+    /// File stores override this with a cross-process lock held across reading
+    /// the proposal, applying or rejecting it, and persisting the outcome.
+    fn lock_proposal_decision(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Box<dyn ProposalDecisionGuard>, WorkflowError> {
+        let _ = workflow_id;
+        Ok(Box::new(NoopProposalDecisionGuard))
     }
 }
 

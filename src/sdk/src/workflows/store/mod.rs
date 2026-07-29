@@ -20,12 +20,12 @@ mod concurrency_tests;
 mod tests;
 
 pub use file::{
-    new_run_record, parse_workflow, validate_graph, workflow_dirs, FileWorkflowStore, LoadReport,
-    MAX_REVISIONS,
+    mint_note_id, new_run_record, parse_workflow, validate_graph, workflow_dirs, FileWorkflowStore,
+    LoadReport, MAX_NOTES, MAX_REVISIONS,
 };
 
 use crate::workflows::types::{
-    RunId, RunRecord, WorkflowId, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    RunId, RunRecord, WorkflowId, WorkflowNote, WorkflowRecord, WorkflowRevision, WorkflowSummary,
 };
 use crate::workflows::WorkflowError;
 
@@ -79,6 +79,58 @@ pub trait WorkflowStore: Send + Sync {
         workflow_id: &str,
         revision_id: &str,
     ) -> Result<Option<WorkflowRevision>, WorkflowError>;
+
+    /// Every note recorded about a workflow, newest first, including notes a
+    /// later one superseded.
+    ///
+    /// Defaulted so a store that keeps no journal — a read-only catalogue, a
+    /// test stand-in — is not obliged to invent one. The asymmetry with
+    /// [`WorkflowStore::append_note`] is deliberate: reporting "nothing
+    /// learned" is honest, whereas silently discarding something the host
+    /// claims to have learned is not.
+    fn list_notes(&self, workflow_id: &str) -> Result<Vec<WorkflowNote>, WorkflowError> {
+        let _ = workflow_id;
+        Ok(Vec::new())
+    }
+
+    /// Record a note.
+    fn append_note(&self, note: &WorkflowNote) -> Result<(), WorkflowError> {
+        let _ = note;
+        Err(WorkflowError::Engine(
+            "this workflow store does not keep notes".to_string(),
+        ))
+    }
+
+    /// Mark a note as replaced by a later one.
+    ///
+    /// The superseded note stays listed; it simply stops being briefed.
+    fn supersede_note(
+        &self,
+        workflow_id: &str,
+        note_id: &str,
+        by: &str,
+    ) -> Result<(), WorkflowError> {
+        let _ = (workflow_id, note_id, by);
+        Err(WorkflowError::Engine(
+            "this workflow store does not keep notes".to_string(),
+        ))
+    }
+}
+
+/// A workflow's current notes — what a brief should be built from.
+///
+/// Superseded notes are deliberately excluded: they are history worth showing
+/// an operator, but asking a model to reason from a claim already known to be
+/// wrong is worse than telling it nothing.
+pub fn current_notes(
+    store: &dyn WorkflowStore,
+    workflow_id: &str,
+) -> Result<Vec<WorkflowNote>, WorkflowError> {
+    Ok(store
+        .list_notes(workflow_id)?
+        .into_iter()
+        .filter(WorkflowNote::is_current)
+        .collect())
 }
 
 /// Restore `workflow_id` to the state held by `revision_id`.

@@ -16,9 +16,11 @@
 //!
 //! - [`workflow`] — the versioned document an operator edits.
 //! - [`run`] — one execution's durable record, written once and never revised.
+//! - [`note`] — what the host has learned about a workflow across runs.
 //! - [`error`] — the failure vocabulary every surface reports through.
 
 mod error;
+mod note;
 mod run;
 mod workflow;
 
@@ -26,5 +28,6 @@ mod workflow;
 mod tests;
 
 pub use error::WorkflowError;
+pub use note::{NoteId, NoteKind, NoteSource, WorkflowNote};
 pub use run::{RunId, RunRecord, RunStatus, RunStep};
 pub use workflow::{WorkflowId, WorkflowRecord, WorkflowRevision, WorkflowSummary};

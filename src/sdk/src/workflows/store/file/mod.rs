@@ -19,11 +19,13 @@
 
 mod dirs;
 mod document;
+mod journal;
 mod paths;
 mod revisions;
 
 pub use dirs::workflow_dirs;
 pub use document::{new_run_record, parse_workflow, validate_graph};
+pub use journal::{mint_id as mint_note_id, MAX_NOTES};
 pub use revisions::MAX_REVISIONS;
 
 use std::collections::HashMap;
@@ -32,7 +34,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::home::medulla_home;
 use crate::workflows::types::{
-    RunRecord, WorkflowError, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    RunRecord, WorkflowError, WorkflowNote, WorkflowRecord, WorkflowRevision, WorkflowSummary,
 };
 
 use document::{read_workflow, to_document};
@@ -64,6 +66,12 @@ pub struct FileWorkflowStore {
     /// artifact, so they live under the state directory rather than beside the
     /// definitions an operator edits.
     runs_dir: PathBuf,
+    /// Where per-workflow notes are written.
+    ///
+    /// Beside the runs rather than beside the definitions for the same reason:
+    /// a journal is what this host observed while running the workflow, not
+    /// part of the document an operator edits and commits.
+    journal_dir: PathBuf,
     /// Serializes `save`/`delete` against each other on *this store instance*.
     ///
     /// Both are read-modify-write: read what a save would supersede or what a
@@ -88,9 +96,30 @@ impl FileWorkflowStore {
     /// A store over explicit directories. Mostly for tests; production callers
     /// want [`FileWorkflowStore::discover`].
     pub fn new(dirs: Vec<PathBuf>, runs_dir: PathBuf) -> Self {
+        // The journal is derived from the runs directory rather than taken as a
+        // parameter, so every existing caller of this constructor keeps working
+        // and still gets a working journal. `with_state` is the explicit form.
+        let journal_dir = runs_dir
+            .parent()
+            .map(|state| state.join("journal"))
+            .unwrap_or_else(|| PathBuf::from("journal"));
         Self {
             dirs,
             runs_dir,
+            journal_dir,
+            write_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// A store whose host state lives under one directory.
+    ///
+    /// The explicit form of [`FileWorkflowStore::new`], for callers that know
+    /// where state belongs rather than only where runs go.
+    pub fn with_state(dirs: Vec<PathBuf>, state_dir: &Path) -> Self {
+        Self {
+            dirs,
+            runs_dir: state_dir.join("runs"),
+            journal_dir: state_dir.join("journal"),
             write_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -98,11 +127,8 @@ impl FileWorkflowStore {
     /// A store over the conventional locations for this environment and working
     /// directory.
     pub fn discover(env: &HashMap<String, String>, cwd: &Path) -> Self {
-        let runs_dir = medulla_home(env)
-            .join("state")
-            .join("workflows")
-            .join("runs");
-        Self::new(workflow_dirs(env, cwd), runs_dir)
+        let state_dir = medulla_home(env).join("state").join("workflows");
+        Self::with_state(workflow_dirs(env, cwd), &state_dir)
     }
 
     /// The definition directories, lowest precedence first.
@@ -323,6 +349,28 @@ impl WorkflowStore for FileWorkflowStore {
         revision_id: &str,
     ) -> Result<Option<WorkflowRevision>, WorkflowError> {
         revisions::read(self.write_dir(), workflow_id, revision_id)
+    }
+
+    fn list_notes(&self, workflow_id: &str) -> Result<Vec<WorkflowNote>, WorkflowError> {
+        journal::list(&self.journal_dir, workflow_id)
+    }
+
+    fn append_note(&self, note: &WorkflowNote) -> Result<(), WorkflowError> {
+        // Under the same lock as `save`/`delete`: appending is a
+        // read-modify-write of one file, so two passes writing at once would
+        // otherwise lose whichever note lost the race.
+        let _guard = self.write_lock.lock().expect("workflow store write lock");
+        journal::append(&self.journal_dir, note)
+    }
+
+    fn supersede_note(
+        &self,
+        workflow_id: &str,
+        note_id: &str,
+        by: &str,
+    ) -> Result<(), WorkflowError> {
+        let _guard = self.write_lock.lock().expect("workflow store write lock");
+        journal::supersede(&self.journal_dir, workflow_id, note_id, by)
     }
 }
 

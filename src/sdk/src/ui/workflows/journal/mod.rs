@@ -147,5 +147,4 @@ fn source_label(source: &NoteSource) -> String {
 }
 
 #[cfg(test)]
-#[path = "journal_tests.rs"]
 mod tests;

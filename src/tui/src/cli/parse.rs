@@ -318,7 +318,7 @@ pub fn help_text() -> String {
         "medulla {version}\n\n\
 Usage:\n  \
 medulla                 Start the interactive chat TUI (default)\n  \
-medulla run <text>      Submit one instruction to a local medulla-serve socket and stream events (JSON lines)\n  \
+medulla run <text>      Submit one instruction to the embedded core and stream the cycle's events (JSON lines)\n  \
 medulla daemon [flags]  Run the daemon TUI (agents, master, workspaces, requests)\n  \
 medulla daemon --headless  Run without the operator screen (automatic when piped)\n  \
                         --workspace <dir>      where peer tasks run\n  \

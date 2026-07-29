@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use medulla::tinyplace::HarnessProvider;
 
-use crate::worker::pty::{LaunchSpec, PtyManager};
+use crate::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 
 use super::super::LocalHarnesses;
 
@@ -39,6 +39,8 @@ fn sh(script: &str) -> LaunchSpec {
         label: "test".to_string(),
         session_id: None,
         model: None,
+        control: HarnessControl::Orchestrator,
+        user_spawned: false,
     }
 }
 
@@ -64,6 +66,7 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         extra_args: Vec::new(),
         skip_permissions: false,
         router: None,
+        custom_harnesses: Vec::new(),
         budget: None,
     };
     let run_task: medulla::daemon::providers::RunTaskFn =
@@ -75,6 +78,10 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         sessions,
         runtime: medulla::daemon::DaemonRuntime::new(config, run_task, send),
         hub_address: "medulla-orchestrator".to_string(),
+        env: HashMap::new(),
+        workspace: "/".to_string(),
+        providers: vec![HarnessProvider::Codex],
+        router: None,
     }
 }
 

@@ -11,8 +11,8 @@ use medulla::tinyplace::HarnessProvider;
 pub enum Command {
     /// Run the interactive TUI (bare invocation, or with TUI flags).
     Tui,
-    /// Run the non-interactive core-runtime driver: submit one instruction over
-    /// a `medulla-serve` socket and stream the cycle's events as JSON lines.
+    /// Run the non-interactive core-runtime driver: submit one instruction to
+    /// the embedded core and stream the cycle's events as JSON lines.
     Run,
     /// Run the headless daemon; carries the remaining args.
     Daemon,

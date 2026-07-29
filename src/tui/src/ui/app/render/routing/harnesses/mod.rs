@@ -75,6 +75,55 @@ impl App {
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let mut lines: Vec<TLine> = Vec::new();
 
+        lines.push(TLine::from(Span::styled(
+            "Custom OpenRouter harnesses",
+            bold,
+        )));
+        if self.custom_harnesses.is_empty() {
+            lines.push(TLine::from(Span::styled(
+                "  No custom harnesses · press a to add one",
+                dim,
+            )));
+        } else {
+            let selected = self
+                .custom_harness_index
+                .min(self.custom_harnesses.len().saturating_sub(1));
+            for (index, harness) in self.custom_harnesses.iter().enumerate() {
+                let key_present = self.credential_status.key_for(&harness.api_key_env);
+                let availability = if key_present {
+                    "key connected"
+                } else {
+                    "key missing"
+                };
+                let marker = if index == selected { "▸" } else { " " };
+                let row = format!(
+                    "{marker} {} · {} · {} · host {} · {}",
+                    harness.name,
+                    harness.base_harness.display_name(),
+                    harness.model,
+                    harness.host_id,
+                    availability,
+                );
+                let style = if index == selected {
+                    self.theme.selection()
+                } else if key_present {
+                    Style::default().fg(Color::Green)
+                } else {
+                    dim
+                };
+                lines.push(TLine::from(Span::styled(row, style)));
+            }
+        }
+        lines.push(TLine::from(Span::styled(
+            "  ↑↓/jk select · a add · e edit · d delete · r refresh",
+            dim,
+        )));
+        lines.push(TLine::from(Span::styled(
+            "  Changes apply after the local host restarts.",
+            dim,
+        )));
+        lines.push(TLine::from(""));
+
         for entry in &HARNESS_CREDENTIALS {
             lines.push(TLine::from(Span::styled(entry.label, bold)));
             if let Some((label, hint)) = entry.subscription {

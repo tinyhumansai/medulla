@@ -91,6 +91,23 @@ fn the_probes_providers_win_over_the_configured_harness() {
 }
 
 #[test]
+fn custom_harnesses_reach_the_backend_capability_payload() {
+    let mut caps = probed();
+    caps.custom_harnesses = vec![crate::tinyplace::CustomHarnessAdvert {
+        id: "deepseek".into(),
+        name: "DeepSeek via Claude".into(),
+        base_harness: HarnessProvider::Claude,
+        model: "deepseek/deepseek-chat".into(),
+        default: false,
+    }];
+
+    let payload = capabilities_payload("claude", Some(&caps));
+
+    assert_eq!(payload["customHarnesses"][0]["id"], "deepseek");
+    assert!(payload["customHarnesses"][0].get("apiKeyEnv").is_none());
+}
+
+#[test]
 fn a_nameless_harness_advertises_no_providers_rather_than_one_called_nothing() {
     let payload = capabilities_payload("  ", None);
     assert_eq!(payload["providers"], serde_json::json!([]));

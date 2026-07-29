@@ -44,6 +44,8 @@ pub struct TaskRequest {
     pub worker_address: String,
     /// Optional harness hint (`claude`/`codex`/`opencode`).
     pub provider: Option<HarnessProvider>,
+    /// Optional named custom harness preset exposed by the worker.
+    pub custom_harness: Option<String>,
     /// Optional model hint (the worker maps it to `--model`/`-m`, else its
     /// configured default).
     pub model: Option<String>,
@@ -105,6 +107,16 @@ pub enum RunError {
     Aborted,
     /// The worker returned an `error` frame (carrying its message).
     Worker(String),
+    /// The worker shed load rather than failing: it was already holding its
+    /// maximum admitted-but-unfinished tasks and refused this one
+    /// (`daemon at capacity …; retry later`).
+    ///
+    /// Distinguished from [`Worker`](Self::Worker) because it says nothing about
+    /// the *task*: nothing was attempted, and the same dispatch a moment later
+    /// will very likely succeed. Retryable, so the orchestrator re-dispatches
+    /// under its own attempt ceiling and backoff instead of turning a "come back
+    /// later" into a permanently failed task.
+    Busy(String),
     /// The send itself failed, or the waiter was dropped (transport-shaped).
     Transport(String),
 }
@@ -115,6 +127,7 @@ impl std::fmt::Display for RunError {
             RunError::Timeout => write!(f, "bridge task timed out"),
             RunError::Aborted => write!(f, "task aborted by orchestrator"),
             RunError::Worker(m) => write!(f, "worker error: {m}"),
+            RunError::Busy(m) => write!(f, "worker busy: {m}"),
             RunError::Transport(m) => write!(f, "transport error: {m}"),
         }
     }

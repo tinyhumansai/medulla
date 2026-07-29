@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use medulla::daemon::{DaemonConfig, DaemonRuntime};
 use medulla::tinyplace::{HarnessProvider, TaskFrameKind};
 use medulla_tui::ui::harness_pane::LocalHarnesses;
-use medulla_tui::worker::pty::{LaunchSpec, PtyManager};
+use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 
 /// How long to allow for a child to paint and a record to appear.
 ///
@@ -55,6 +55,8 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
         label: label.to_string(),
         session_id: None,
         model: None,
+        control: HarnessControl::Orchestrator,
+        user_spawned: false,
     }
 }
 
@@ -81,6 +83,7 @@ fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
         skip_permissions: false,
         accessible_dirs: Vec::new(),
         router: None,
+        custom_harnesses: Vec::new(),
         budget: None,
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
@@ -112,6 +115,7 @@ fn dispatch(runtime: &DaemonRuntime, task_id: &str) {
         correlation_id: Some(format!("cyc/{task_id}/0")),
         harness: None,
         provider: Some(HarnessProvider::Codex),
+        custom_harness: None,
         model: None,
         tool_mode: None,
         workflow: None,
@@ -166,6 +170,10 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
         sessions: sessions.clone(),
         runtime: runtime.clone(),
         hub_address: HUB.to_string(),
+        env: HashMap::new(),
+        workspace: "/".to_string(),
+        providers: vec![HarnessProvider::Codex],
+        router: None,
     };
 
     // Before dispatch there is nothing to show — the pane must not invent a
@@ -209,6 +217,10 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
         sessions: sessions.clone(),
         runtime: runtime.clone(),
         hub_address: HUB.to_string(),
+        env: HashMap::new(),
+        workspace: "/".to_string(),
+        providers: vec![HarnessProvider::Codex],
+        router: None,
     };
 
     dispatch(&runtime, task_id);
@@ -240,6 +252,10 @@ async fn a_task_that_names_no_session_shows_no_screen_rather_than_someone_elses(
         sessions: sessions.clone(),
         runtime: runtime.clone(),
         hub_address: HUB.to_string(),
+        env: HashMap::new(),
+        workspace: "/".to_string(),
+        providers: vec![HarnessProvider::Codex],
+        router: None,
     };
 
     dispatch(&runtime, "mine#0");

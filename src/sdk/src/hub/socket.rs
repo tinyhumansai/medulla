@@ -242,6 +242,25 @@ pub async fn connect_harness(
 }
 
 /// Relay one `task_run` to its worker and emit the terminal `task_result`.
+/// Whether the orchestrator should re-dispatch a failed task.
+///
+/// Infra-shaped failures are retryable so medulla re-runs; a clean worker error
+/// is terminal — re-running work the harness actually attempted and rejected
+/// only burns the same tokens twice.
+///
+/// Backpressure counts as infra-shaped. A worker that refused the task because
+/// it was already holding its maximum pending tasks never attempted it, and
+/// reporting "permanently failed" for a message that literally says "retry
+/// later" is the one answer that is certainly wrong. medulla bounds the
+/// re-dispatch with its own attempt ceiling and exponential backoff, so this
+/// cannot become a hot loop against a saturated worker.
+pub(super) fn is_retryable(err: &RunError) -> bool {
+    matches!(
+        err,
+        RunError::Timeout | RunError::Transport(_) | RunError::Busy(_)
+    )
+}
+
 async fn handle_task_run(
     payload: Payload,
     socket: Client,
@@ -263,6 +282,7 @@ async fn handle_task_run(
     let requested_provider = str_field(&obj, "provider")
         .as_deref()
         .and_then(crate::tinyplace::HarnessProvider::from_wire);
+    let custom_harness = str_field(&obj, "customHarness").or_else(|| str_field(&obj, "harnessId"));
     let model = str_field(&obj, "model");
     // The frame's own `timeoutMs` is deliberately ignored: that is the BACKEND's
     // task deadline, and the backend now enforces it (aborting a running task via
@@ -378,6 +398,7 @@ async fn handle_task_run(
         instruction,
         worker_address,
         provider,
+        custom_harness,
         model,
         // Forwarded rather than dropped: a worker advertises the workflows it
         // has installed, so the orchestrator naming one here is the other half
@@ -417,9 +438,7 @@ async fn handle_task_run(
             },
         }),
         Err(err) => {
-            // Infra-shaped failures are retryable so medulla re-runs; a clean
-            // worker error is terminal.
-            let retryable = matches!(err, RunError::Timeout | RunError::Transport(_));
+            let retryable = is_retryable(&err);
             json!({
                 "taskId": task_id,
                 "ok": false,

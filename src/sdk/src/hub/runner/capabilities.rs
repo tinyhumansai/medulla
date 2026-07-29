@@ -46,6 +46,7 @@ impl TaskRunner {
                 correlation_id: Some(correlation_id.clone()),
                 harness: None,
                 provider: None,
+                custom_harness: None,
                 model: None,
                 tool_mode: None,
                 workflow: None,

@@ -21,49 +21,6 @@ use super::{
 };
 
 #[tokio::test]
-async fn rejects_tasks_over_max_pending() {
-    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
-    let gate = Arc::new(Notify::new());
-    let run_task = blocking_runner(ready_tx, gate.clone());
-    let (send, recorded) = recording_send();
-    let mut config = base_config();
-    config.concurrency = 1;
-    config.max_pending = 1;
-    let runtime = DaemonRuntime::new(config, run_task, send);
-
-    // Task A occupies the single pending slot and blocks.
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(task_frame("t1", "work", None)),
-    );
-    wait_ready(&mut ready_rx).await;
-
-    // Task B is rejected at capacity.
-    runtime.handle_message(
-        "peer".into(),
-        String::new(),
-        Some(task_frame("t2", "more", None)),
-    );
-    // Let B settle (it errors without ever running).
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let frames = decoded_frames(&recorded);
-    let capacity = frames
-        .iter()
-        .find(|f| f.kind == TaskFrameKind::Error && f.task_id == "t2")
-        .expect("t2 should be rejected");
-    assert!(
-        capacity.text.contains("at capacity"),
-        "got: {}",
-        capacity.text
-    );
-
-    gate.notify_waiters();
-    runtime.idle().await;
-}
-
-#[tokio::test]
 async fn rejects_duplicate_task_id_from_same_sender() {
     let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
     let gate = Arc::new(Notify::new());

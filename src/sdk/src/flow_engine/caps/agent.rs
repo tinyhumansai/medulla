@@ -154,6 +154,7 @@ impl HarnessAgentRunner {
             instruction,
             worker_address,
             provider: self.settings.default_provider,
+            custom_harness: None,
             model: self.settings.default_model.clone(),
             // No conversation, deliberately. Each node is its own unit of work,
             // and letting two share a harness session would make a graph's

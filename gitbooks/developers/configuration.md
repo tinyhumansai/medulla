@@ -1,6 +1,6 @@
 # Configuration
 
-Medulla reads a layered configuration, persists everything under a single home directory, and selects one of three runtimes at startup. This page covers all three.
+Medulla reads a layered configuration, persists everything under a single home directory, and selects a runtime at startup. This page covers all three.
 
 ## Medulla home
 
@@ -14,9 +14,13 @@ Under the home:
 
 * `openhuman/` — the embedded core's workspace, including the app session [`medulla login`](authentication.md) stores.
 * `config.toml` — the user-global config file.
-* `state/` — the default `stateDir`, holding chat history under `chats/` and the resolved `core.sock`.
+* `state/` — the default `stateDir`, holding chat history under `chats/`, and workflow run records and engine checkpoints under `state/workflows/runs/` and `state/workflows/checkpoints/`.
+* `workflows/*.json` — your [workflow](../features/workflows.md) definitions. A repository's own `<cwd>/.medulla/workflows/*.json` layers on top and shadows a personal one of the same id.
+* `tasks.json` — the [task ledger and its sources](../features/tasks-and-sources.md).
 * `tinyplace/` — the default [tiny.place](https://tiny.place) identity directory.
 * `worker.json` — the [worker profile](cli-reference.md#first-run-worker-registration).
+
+Point `MEDULLA_HOME` at a scratch directory to run against an isolated store — its own workflows, agent templates, tasks, and state rather than yours. That is what the test suites and container runs do.
 
 A `.env` file in the current directory is loaded at startup, before anything reads the environment: `KEY=VALUE` lines, `#` comments, an optional `export` prefix, and single/double quotes are stripped. It never overrides variables already set in the process environment — this is the usual way to opt into `MEDULLA_DEV=1` for local dev.
 
@@ -32,7 +36,9 @@ Config is merged from lowest to highest precedence (highest wins):
 
 Files are merged field-by-field (a recursive table merge), so a project-local file can override just `backend.baseUrl` without discarding the rest of a global file. [TOML](https://toml.io/) is the primary format; `--config <path>` still accepts either `.toml` or `.json` (parser chosen by extension) and bypasses file discovery, but env vars and CLI flags still override it. The Config tab shows the merged effective config and lists the source files that contributed.
 
-Every section is optional; with no file anywhere, all defaults apply. Sections: `backend`, `core`, `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `hub` (the persisted worker roster and selected default worker, so a fleet survives a restart), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display, model, agent, workspace, concurrency), `memory` (persona-memory switch, roots, identity, model, and the `maxCostUsd` ingest ceiling), `workflow` (the daemon's workspace allowlist), `onboarding` (welcome-flow completion state), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), `theme` (TUI colors — `primary`/`accent`/`selectionFg`/`dimBorder` as [ratatui](https://ratatui.rs/) color names or `#rrggbb`; the Settings › Appearance subpage edits and persists these), and `medulla.contextWindowTokens` (Context tab usage hint; the orchestration limits section also carries pass/step/depth/task/token bounds). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored.
+Every section is optional; with no file anywhere, all defaults apply. Sections: `backend`, `host` (whether this device also runs the work it orchestrates, and the workspace and roots it advertises), `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `hub` (the persisted worker roster and selected default worker, so a fleet survives a restart), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display, model, agent, workspace, concurrency), `workflow` (the daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint), `fleet` (the declared `Host → Harness → Workspace → Agent` capacity chain and the agent-template catalog), `router` (a custom OpenAI-compatible router the daemon spawns harnesses against; absent leaves every harness unrouted), `budget` (operator-declared per-provider budgets; absent leaves every harness advertising an estimate), `onboarding` (welcome-flow completion state), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), `theme` (TUI colors — `primary`/`accent`/`selectionFg`/`dimBorder` as [ratatui](https://ratatui.rs/) color names or `#rrggbb`; the Settings › Appearance subpage edits and persists these), and `medulla.contextWindowTokens` (Context tab usage hint; the orchestration limits section also carries pass/step/depth/task/token bounds). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored.
+
+There is no `memory` section: the persona-memory layer is out of this build, and its config schema went with it.
 
 See [`config.example.toml`](https://github.com/tinyhumansai/medulla/blob/main/config.example.toml) for a commented reference and [`src/sdk/src/config.rs`](../../src/sdk/src/config/) for the full schema — fields are camelCase.
 
@@ -60,49 +66,33 @@ An inline `"token"` field is also accepted, but keep secrets out of committed fi
 
 ## Runtimes
 
-On startup the TUI picks one of three runtimes, in this order. If a preferred runtime fails, it falls back down this chain and shows why in the status line.
+There are two, and the choice is simple:
 
-1. **Core socket** — if `--core-socket <path>` is passed or the config has a `core` section, and the socket is reachable.
-2. **Backend HTTP/SSE** — if a backend token is available (an inline `backend.token`, the `backend.tokenEnv` variable, or credentials saved by [`medulla login`](authentication.md)).
-3. **Mock** — otherwise.
+1. **The embedded OpenHuman core** — the product runtime. It boots inside the `medulla` process, so there is no server to start, no socket to resolve, no attach handshake to fail, and no unix-only restriction.
+2. **Mock** — a scripted offline runtime for demos and tests, reached with `--mock`.
 
-In the default (non-`--core-socket`) path, when no token resolves the TUI does not drop straight to the mock: it first opens the [login screen](authentication.md#logging-in-from-the-tui), and the mock runtime is entered only if you press `m` to continue offline. An explicit `--core-socket` run keeps the plain backend→mock fallback and is never redirected to the login screen.
+`--mock` is checked first and skips the token lookup and the login screen entirely, which makes it the only way to get a working runtime with no backend at all. Otherwise the core boots and the TUI runs on it.
+
+A core that boots but has no Medulla backend to talk to — no configured URL, or nobody signed in — takes the offline demo exactly as `--mock` does. That is not a misconfiguration to surface; it is the documented credential-free start, and every drive method would otherwise fail behind a UI that looks live. Before that point the TUI opens the [login screen](authentication.md#logging-in-from-the-tui); press `m` to continue offline.
 
 ### Mock (zero setup)
 
 ```sh
-cargo run
+medulla --mock
 ```
 
-With no token and no core socket, `medulla` opens a login screen; press `m` to continue offline against the mock runtime — a scripted demo, no credentials, no network, and the fastest way to explore the interface.
+A scripted demo: no credentials, no network, and the fastest way to explore the interface. This is what the test suites drive.
 
-### Backend HTTP/SSE
-
-Point the TUI at a running Medulla backend and give it a JWT:
+### Signing in
 
 ```sh
-MEDULLA_TOKEN=<jwt> medulla
+medulla login          # browser OAuth; stores a verified session
+medulla                # runs on the embedded core
 ```
 
-Or log in through the browser — see [Authentication](authentication.md).
+`MEDULLA_TOKEN=<jwt> medulla` supplies a bearer directly instead. See [Authentication](authentication.md).
 
-### Core socket
-
-For driving a locally running core orchestration server over its [NDJSON](https://ndjson.org/) Unix-socket protocol:
-
-```sh
-medulla --core-socket /path/to/serve.sock
-```
-
-The socket path resolves as, highest first: the explicit `--core-socket <path>` flag, then `MEDULLA_CORE_SOCKET`, then `core.socketPath` from the config, then `$XDG_RUNTIME_DIR/medulla/core.sock`, then `<stateDir>/core.sock` (the resolved `stateDir`, which defaults to `<home>/state` and honors `MEDULLA_STATE_DIR`). It is **attach-only** — the TUI connects to an already-running orchestration server and does not launch one. Config form:
-
-```json
-{
-  "core": { "socketPath": "/tmp/medulla-core.sock" }
-}
-```
-
-The core runtime unlocks the Routing tab (host and fleet management) and task steering (`X` cancel task, `A` answer a pending question). It is **unix-only** (it rides a Unix domain socket). On Windows a `--core-socket` flag or `[core]` config section resolves to a startup note ("core runtime requires unix sockets — unavailable on Windows") and falls through to the normal backend→mock chain.
+> **The core socket is gone.** Earlier versions attached to an external `medulla-serve` NDJSON Unix socket via `--core-socket`, `MEDULLA_CORE_SOCKET`, or a `[core]` config section. The core now runs in-process. The flag is rejected by `medulla run` with that explanation rather than being silently absorbed into the instruction text, and a `[core]` section left in a config file is inert.
 
 ## Hosting on this device
 

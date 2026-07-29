@@ -310,6 +310,10 @@ async fn dispatch_failures_keep_the_shape_the_hub_reported() {
     for (run_error, expected) in [
         (RunError::Timeout, "did not respond in time"),
         (RunError::Aborted, "aborted"),
+        (
+            RunError::Busy("worker at capacity".into()),
+            "worker at capacity",
+        ),
         (RunError::Transport("relay is down".into()), "relay is down"),
     ] {
         let session = session(store.clone(), Arc::new(FailingHarness(run_error)));

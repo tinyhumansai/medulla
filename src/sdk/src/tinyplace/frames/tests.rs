@@ -18,6 +18,7 @@ fn encodes_a_minimal_frame() {
         correlation_id: None,
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
         tool_mode: None,
         workflow: None,
@@ -46,6 +47,7 @@ fn encodes_optional_fields_when_present() {
         correlation_id: Some("corr-9".to_string()),
         harness: Some(HarnessProvider::Codex),
         provider: Some(HarnessProvider::Claude),
+        custom_harness: Some("deepseek-claude".into()),
         model: Some("anthropic/claude-opus-4.8".to_string()),
         tool_mode: None,
         workflow: Some("nightly-sweep".to_string()),
@@ -82,6 +84,7 @@ fn round_trips_every_kind() {
             correlation_id: None,
             harness: None,
             provider: None,
+            custom_harness: None,
             model: None,
             tool_mode: None,
             workflow: None,
@@ -124,6 +127,7 @@ fn carries_a_model_hint_through_encode_and_decode() {
         correlation_id: None,
         harness: None,
         provider: None,
+        custom_harness: None,
         model: Some("openrouter/some-model".to_string()),
         tool_mode: None,
         workflow: None,
@@ -386,6 +390,32 @@ fn new_capabilities_round_trip_budgets_and_readiness() {
 }
 
 #[test]
+fn custom_harness_adverts_round_trip_without_execution_or_credential_details() {
+    let caps = crate::tinyplace::AgentCapabilities {
+        custom_harnesses: vec![crate::tinyplace::CustomHarnessAdvert {
+            id: "deepseek".into(),
+            name: "DeepSeek via Claude".into(),
+            base_harness: HarnessProvider::Claude,
+            model: "deepseek/deepseek-chat".into(),
+            default: false,
+        }],
+        ..Default::default()
+    };
+
+    let value = serde_json::to_value(&caps).expect("serialize capabilities");
+    let advert = &value["customHarnesses"][0];
+    assert_eq!(advert["id"], "deepseek");
+    assert_eq!(advert["baseHarness"], "claude");
+    assert!(advert.get("apiKeyEnv").is_none());
+    assert!(advert.get("baseUrl").is_none());
+    assert_eq!(
+        serde_json::from_value::<crate::tinyplace::AgentCapabilities>(value)
+            .expect("parse capabilities"),
+        caps
+    );
+}
+
+#[test]
 fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
     use crate::harness_work::{kinds, WorkFold};
 
@@ -414,6 +444,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
             correlation_id: None,
             harness: Some(HarnessProvider::Claude),
             provider: None,
+            custom_harness: None,
             model: None,
             tool_mode: None,
             workflow: None,
@@ -437,6 +468,7 @@ fn an_empty_work_snapshot_is_left_off_the_wire() {
             correlation_id: None,
             harness: None,
             provider: None,
+            custom_harness: None,
             model: None,
             tool_mode: None,
             workflow: None,

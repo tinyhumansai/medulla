@@ -275,6 +275,16 @@ pub struct TaskFrame {
     /// Inbound-only hint naming the agent the orchestrator wants to run this task.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only named custom harness preset to run on the selected host.
+    ///
+    /// Additive to `provider`: older peers ignore it, while a current worker
+    /// resolves it to its configured base CLI, model, and OpenRouter route.
+    #[serde(
+        rename = "customHarness",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub custom_harness: Option<Box<str>>,
     /// Inbound-only advisory hint naming the model the orchestrator wants this
     /// task run on (parallels `provider`). The worker daemon may honor it as the
     /// harness `--model`/`-m` or fall back to its configured model; never echoed
@@ -372,6 +382,8 @@ pub struct EncodeFrameInput {
     pub harness: Option<HarnessProvider>,
     /// Inbound-only hint naming the agent the orchestrator wants to run this task.
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only named custom harness preset.
+    pub custom_harness: Option<String>,
     /// Inbound-only advisory model hint (parallels `provider`); `None` on the
     /// responses a worker daemon emits.
     pub model: Option<String>,
@@ -411,6 +423,16 @@ pub struct AgentCapabilities {
     /// Harness providers the agent can run.
     #[serde(default, deserialize_with = "de_providers")]
     pub providers: Vec<HarnessProvider>,
+    /// Named OpenRouter-backed harness presets this host accepts in task frames.
+    ///
+    /// These descriptors intentionally omit endpoint and credential details.
+    /// They are selection metadata, not execution configuration.
+    #[serde(
+        rename = "customHarnesses",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub custom_harnesses: Vec<CustomHarnessAdvert>,
     /// Tool names the agent exposes.
     #[serde(default, deserialize_with = "de_string_array")]
     pub tools: Vec<String>,
@@ -442,6 +464,23 @@ pub struct AgentCapabilities {
     /// field. Same backward-compatibility contract as the two vectors above.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflows: Vec<WorkflowAdvert>,
+}
+
+/// Fleet-safe description of one named custom harness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomHarnessAdvert {
+    /// Stable id an orchestrator may send as `customHarness`.
+    pub id: String,
+    /// Operator-facing label.
+    pub name: String,
+    /// Coding CLI that executes the task.
+    pub base_harness: HarnessProvider,
+    /// OpenRouter model id.
+    pub model: String,
+    /// Whether this preset handles tasks that name no custom harness.
+    #[serde(default)]
+    pub default: bool,
 }
 
 /// One workflow a worker advertises as runnable.

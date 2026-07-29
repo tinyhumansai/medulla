@@ -36,7 +36,7 @@ use medulla::tinyplace::{
     encode_task_frame, load_or_create_identity, parse_screen_message, resolve_endpoint,
     EncodeFrameInput, HarnessProvider, TaskFrameKind,
 };
-use medulla_tui::worker::pty::{LaunchSpec, PtyManager};
+use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 use medulla_tui::worker::stream::{send_fn, ScreenRouter};
 // The SDK re-exports the tiny.place crate, so the app crate reaches it here
 // rather than taking a direct dependency it does not otherwise need.
@@ -86,6 +86,8 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
         label: label.to_string(),
         session_id: None,
         model: None,
+        control: HarnessControl::Orchestrator,
+        user_spawned: false,
     }
 }
 
@@ -108,6 +110,7 @@ fn worker_runtime(session_id: String) -> DaemonRuntime {
         skip_permissions: false,
         accessible_dirs: Vec::new(),
         router: None,
+        custom_harnesses: Vec::new(),
         budget: None,
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
@@ -253,6 +256,7 @@ async fn a_hub_watches_a_real_workers_screen_over_the_relay() {
         correlation_id: Some(format!("live/{task_id}/0")),
         harness: None,
         provider: Some(HarnessProvider::Codex),
+        custom_harness: None,
         model: None,
         tool_mode: None,
         workflow: None,

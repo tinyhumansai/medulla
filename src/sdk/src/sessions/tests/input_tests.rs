@@ -20,6 +20,7 @@ fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
         correlation_id: Some("cyc/t1/abcd".to_string()),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
         usage: None,
         work: None,

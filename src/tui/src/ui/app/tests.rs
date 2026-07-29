@@ -4,6 +4,7 @@
 use super::*;
 use std::sync::Arc;
 
+use super::types::RP_HARNESSES;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
@@ -48,6 +49,28 @@ fn every_tab_renders() {
             "tab {name} missing shortcut line"
         );
     }
+}
+
+#[test]
+fn harnesses_page_renders_custom_openrouter_presets_and_editor_controls() {
+    let mut a = app();
+    a.tab_index = tab("Routing");
+    a.routing_index = RP_HARNESSES;
+    a.routing_focused = true;
+    a.credential_status.openrouter_api_key = true;
+    a.custom_harnesses = vec![medulla::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek via Claude | claude | deepseek/deepseek-chat | | this-device",
+    )
+    .expect("valid custom harness")];
+
+    let out = render(&mut a);
+
+    assert!(out.contains("Custom OpenRouter harnesses"));
+    assert!(out.contains("DeepSeek via Claude"));
+    assert!(out.contains("key connected"));
+    assert!(out.contains("a add"));
+    assert!(out.contains("e edit"));
+    assert!(!out.contains("sk-or-"));
 }
 
 #[test]

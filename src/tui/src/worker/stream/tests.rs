@@ -378,6 +378,7 @@ fn empty_router() -> ScreenRouter {
             skip_permissions: false,
             accessible_dirs: Vec::new(),
             router: None,
+            custom_harnesses: Vec::new(),
             budget: None,
         },
         std::sync::Arc::new(|_| Box::pin(async { Err("unused".to_string()) })),

@@ -87,6 +87,12 @@ pub(super) fn capabilities_payload(harness: &str, caps: Option<&AgentCapabilitie
                 obj.insert(key.to_string(), json!(values));
             }
         }
+        if !caps.custom_harnesses.is_empty() {
+            obj.insert(
+                "customHarnesses".to_string(),
+                serde_json::to_value(&caps.custom_harnesses).unwrap_or_default(),
+            );
+        }
     }
 
     let mut payload = Value::Object(obj);

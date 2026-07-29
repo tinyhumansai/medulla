@@ -185,6 +185,24 @@ impl App {
                 self.add_workspace(&text);
                 None
             }
+            PromptKind::CustomHarnessAdd => {
+                self.save_custom_harness(None, &text);
+                None
+            }
+            PromptKind::CustomHarnessEdit(id) => {
+                self.save_custom_harness(Some(&id), &text);
+                None
+            }
+            // Back to the picker with the new directory, rather than spawning
+            // straight from here: the operator has still not said *which*
+            // harness, and the picker is where that choice lives.
+            PromptKind::HarnessCwd => {
+                if let Some(picker) = &mut self.harness_picker {
+                    picker.cwd = text;
+                }
+                self.set_status("Pick a harness · Enter start · Esc cancel");
+                None
+            }
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text));
@@ -333,6 +351,11 @@ impl App {
                 self.new_thread();
             }
             SlashCommand::Resume => return Some(Cmd::ListChats),
+            SlashCommand::NewHarness { provider, path } => {
+                self.start_harness_command(provider.as_deref(), path.as_deref());
+            }
+            SlashCommand::TakeControl => self.take_harness_control(),
+            SlashCommand::HandOff => self.hand_harness_back(),
             SlashCommand::Abort => {
                 self.runtime.abort();
                 self.set_status("Abort requested");

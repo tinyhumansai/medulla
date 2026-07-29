@@ -159,6 +159,7 @@ impl CopilotSession {
             instruction: prompt,
             worker_address: self.worker_address.clone(),
             provider: self.provider,
+            custom_harness: None,
             model: self.model.clone(),
             // Never a workflow: this dispatch is an *authoring* turn, and
             // setting this would run the graph the operator is trying to edit.
@@ -230,6 +231,7 @@ impl CopilotSession {
             .render(),
             worker_address: self.worker_address.clone(),
             provider: self.provider,
+            custom_harness: None,
             model: self.model.clone(),
             // Never a workflow, for the same reason an edit is not: this is an
             // authoring turn, not a run.

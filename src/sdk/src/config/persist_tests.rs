@@ -336,6 +336,25 @@ fn daemon_workspace_allowlist_replaces_only_workflow_workspaces() {
 }
 
 #[test]
+fn custom_harnesses_persist_without_secret_values_or_unrelated_loss() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[backend]\nbaseUrl = \"https://example.test\"\n").unwrap();
+    let preset = crate::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek via Claude | claude | deepseek/model | deepseek/fast | this-device",
+    )
+    .unwrap();
+
+    super::persist_custom_harnesses(&path, &[preset]).unwrap();
+
+    let text = std::fs::read_to_string(path).unwrap();
+    assert!(text.contains("https://example.test"));
+    assert!(text.contains("deepseek/model"));
+    assert!(text.contains("OPENROUTER_API_KEY"));
+    assert!(!text.contains("sk-or-"));
+}
+
+#[test]
 fn daemon_master_roster_persists_public_peer_data_without_identity_secrets() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");

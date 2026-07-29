@@ -119,6 +119,22 @@ pub async fn run_script(
 ) -> Result<ScriptOutput> {
     use tokio::io::AsyncWriteExt;
 
+    // Refused rather than emulated. `argv[1]` and `MEDULLA_INPUT` are real
+    // filesystem paths this host wrote (`C:\...` on Windows), and Git Bash — the
+    // only `bash` a Windows host is likely to have — cannot open a Windows path
+    // without translating it, which is exactly the kind of per-platform
+    // reinterpretation that would make a workflow look portable while quietly
+    // behaving differently by host. `javascript` and `python` need no such
+    // translation and stay available everywhere their interpreter is.
+    #[cfg(windows)]
+    if language == ScriptLanguage::Shell {
+        return Err(EngineError::Capability(
+            "script: shell scripts are not supported on Windows (no portable POSIX shell to \
+             run them in); use language: \"javascript\" or \"python\" instead"
+                .to_string(),
+        ));
+    }
+
     let (program, extension) = language.program();
     let dir =
         tempfile::tempdir().map_err(|err| EngineError::Capability(format!("script: {err}")))?;
@@ -156,19 +172,28 @@ pub async fn run_script(
         ))
     })?;
 
-    // Written and closed before waiting: a script that reads to EOF would
-    // otherwise block forever on a pipe nobody closed. The write is inside the
-    // same timeout as the wait, not before it: an input bigger than the OS pipe
-    // buffer blocks on `write_all` until the child drains it, and a script that
-    // never reads stdin could otherwise hang here for the much longer outer run
-    // deadline instead of this function's own `timeout`.
-    let stdin = child.stdin.take();
-    let output = tokio::time::timeout(timeout, async {
-        if let Some(mut stdin) = stdin {
+    // Writing stdin and draining stdout/stderr happen concurrently, not one
+    // after the other: a script that prints before it finishes reading stdin
+    // fills its stdout pipe while this side is still blocked in `write_all` on
+    // stdin, and neither side would ever unblock the other — a real deadlock,
+    // not just a slow path, for any input near the OS pipe buffer size. The
+    // writer runs on its own task so `wait_with_output` starts reading
+    // immediately; if the child exits without reading all of stdin, the pipe
+    // simply closes underneath the writer, which surfaces as a write error we
+    // ignore (the exit status and stderr are the story in that case, not this).
+    let mut stdin = child.stdin.take();
+    let writer = tokio::spawn(async move {
+        if let Some(mut stdin) = stdin.take() {
             let _ = stdin.write_all(&body).await;
             let _ = stdin.shutdown().await;
         }
-        child.wait_with_output().await
+    });
+    let output = tokio::time::timeout(timeout, async {
+        let output = child.wait_with_output().await;
+        // Joined so a slow writer is still bounded by `timeout` above, not left
+        // running past the point this function returns.
+        let _ = writer.await;
+        output
     })
     .await
     .map_err(|_| {

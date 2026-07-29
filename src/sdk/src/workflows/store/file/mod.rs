@@ -28,6 +28,7 @@ pub use revisions::MAX_REVISIONS;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use crate::home::medulla_home;
 use crate::workflows::types::{
@@ -63,13 +64,35 @@ pub struct FileWorkflowStore {
     /// artifact, so they live under the state directory rather than beside the
     /// definitions an operator edits.
     runs_dir: PathBuf,
+    /// Serializes `save`/`delete` against each other on *this store instance*.
+    ///
+    /// Both are read-modify-write: read what a save would supersede or what a
+    /// delete would remove, capture that as a revision, then write. Two
+    /// concurrent writers for the same id — a copilot autosave racing a manual
+    /// TUI edit, both holding a `clone()` of this store — could otherwise
+    /// interleave those steps and either lose one edit's revision snapshot or
+    /// have one silently overwrite the other's write with a stale read. `Arc`
+    /// so every clone of this store shares the one lock rather than each
+    /// getting its own and serializing nothing.
+    ///
+    /// Scoped to a process, not a filesystem: two *separate* store instances
+    /// (a `medulla workflow` CLI invocation racing a running daemon) are not
+    /// covered by this, the same limitation `write_atomic`'s rename already
+    /// has. Closing that would need real cross-process file locking, which is
+    /// a larger change than this store's current single-writer-per-process
+    /// deployment shape calls for.
+    write_lock: Arc<Mutex<()>>,
 }
 
 impl FileWorkflowStore {
     /// A store over explicit directories. Mostly for tests; production callers
     /// want [`FileWorkflowStore::discover`].
     pub fn new(dirs: Vec<PathBuf>, runs_dir: PathBuf) -> Self {
-        Self { dirs, runs_dir }
+        Self {
+            dirs,
+            runs_dir,
+            write_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     /// A store over the conventional locations for this environment and working
@@ -191,6 +214,17 @@ impl WorkflowStore for FileWorkflowStore {
     }
 
     fn save(&self, record: &WorkflowRecord) -> Result<(), WorkflowError> {
+        // Held across the whole read-modify-write below — see `write_lock`'s
+        // doc comment for what a concurrent `save`/`delete` on this store
+        // would otherwise interleave.
+        let _guard = self.write_lock.lock().unwrap_or_else(|poison| {
+            // A prior panic mid-write is exactly the case a lock exists to
+            // survive: the on-disk state is whatever it was left in, but that
+            // is what a torn write already risks and `write_atomic`'s rename
+            // makes recoverable — poisoning must not turn one bad write into
+            // every future save failing too.
+            poison.into_inner()
+        });
         // The id decides a filename, so it is checked before anything else:
         // a document's own `id` overrides what the caller asked for, and a
         // document may have been written by an agent.
@@ -208,6 +242,12 @@ impl WorkflowStore for FileWorkflowStore {
     }
 
     fn delete(&self, id: &str) -> Result<(), WorkflowError> {
+        // See `save`'s matching guard and `write_lock`'s doc comment: this is
+        // the same read (`load`/`get`), snapshot, write shape.
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         // Delete wherever it was found, not only in the write directory: an
         // operator asking to remove a workflow they can see means the one they
         // can see.

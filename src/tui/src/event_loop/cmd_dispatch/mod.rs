@@ -34,6 +34,21 @@ pub(super) fn close_copilot_host(thread: &str) {
     copilot_hosts::forget(thread);
 }
 
+/// Drop every cached copilot host and stop its daemon.
+///
+/// The cache is process-global and keyed by workflow id, not by account — see
+/// [`copilot_hosts::clear_all`] for why that makes a relogin the one place
+/// this must be called.
+#[cfg(feature = "workflows")]
+pub(crate) fn clear_copilot_hosts() {
+    copilot_hosts::clear_all();
+}
+
+/// No-op build without the `workflows` feature: there is no host cache to
+/// clear, but the relogin call site is unconditional.
+#[cfg(not(feature = "workflows"))]
+pub(crate) fn clear_copilot_hosts() {}
+
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so
 /// they run on `spawn_blocking` off the UI thread.

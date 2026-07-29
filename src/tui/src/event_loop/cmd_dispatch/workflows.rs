@@ -146,6 +146,12 @@ pub(super) fn spawn_copilot_create(
 /// the error and the failing nodes. Reading it costs one directory read against
 /// making the agent spend a tool call rediscovering what this process already
 /// had on screen.
+///
+/// The read itself happens on a blocking task, not inline: this function runs
+/// synchronously on the render thread (called straight from `run_cmd`, itself
+/// inline in the TUI's `tokio::select!` loop), and `discover_store`/`get_run`
+/// are synchronous filesystem I/O — the same reason `spawn_undo` off-loads to
+/// `spawn_blocking` rather than reading straight from the caller.
 pub(super) fn spawn_repair(
     workflow: String,
     instruction: String,
@@ -153,35 +159,43 @@ pub(super) fn spawn_repair(
     workflows_config: medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
-    let env: HashMap<String, String> = std::env::vars().collect();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let store = medulla::workflows::discover_store(&env, &cwd);
+    let tx = msg_tx.clone();
+    tokio::spawn(async move {
+        let run = tokio::task::spawn_blocking(move || {
+            let env: HashMap<String, String> = std::env::vars().collect();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let store = medulla::workflows::discover_store(&env, &cwd);
 
-    // A run that cannot be read still gets a repair turn: the id alone lets the
-    // agent fetch it with `workflow_run_get`, and refusing the turn over a
-    // missing detail would be worse than starting it with less.
-    let record = store.get_run(&run_id).ok().flatten();
-    let run = medulla::workflows::FailedRun {
-        id: run_id,
-        error: record.as_ref().and_then(|r| r.error.clone()),
-        failing_nodes: record
-            .map(|r| {
-                r.steps
-                    .into_iter()
-                    .filter(|step| step.status == "error")
-                    .map(|step| step.node_id)
-                    .collect()
-            })
-            .unwrap_or_default(),
-    };
+            // A run that cannot be read still gets a repair turn: the id alone
+            // lets the agent fetch it with `workflow_run_get`, and refusing the
+            // turn over a missing detail would be worse than starting it with
+            // less.
+            let record = store.get_run(&run_id).ok().flatten();
+            medulla::workflows::FailedRun {
+                id: run_id,
+                error: record.as_ref().and_then(|r| r.error.clone()),
+                failing_nodes: record
+                    .map(|r| {
+                        r.steps
+                            .into_iter()
+                            .filter(|step| step.status == "error")
+                            .map(|step| step.node_id)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
+        })
+        .await
+        .expect("spawn_blocking join");
 
-    spawn_turn(
-        Turn::Repair(workflow.clone(), run),
-        workflow,
-        instruction,
-        workflows_config,
-        msg_tx,
-    );
+        spawn_turn(
+            Turn::Repair(workflow.clone(), run),
+            workflow,
+            instruction,
+            workflows_config,
+            &tx,
+        );
+    });
 }
 
 /// Run `turn` off-thread, forwarding its progress and reporting its result.

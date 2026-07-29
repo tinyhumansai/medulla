@@ -475,6 +475,14 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
 
         match exit {
             Ok(SessionExit::Relogin) => {
+                // The copilot host cache is process-global and keyed by
+                // workflow id, not by account (see
+                // `event_loop::clear_copilot_hosts`'s doc). Left alive across
+                // this boundary, a second account opening a workflow that
+                // happens to share an id with one the first account had a
+                // live conversation on would silently inherit that daemon's
+                // harness session and context.
+                crate::event_loop::clear_copilot_hosts();
                 // Only the embedded core can be signed back in; every other
                 // runtime reports that it holds no session, so its logout never
                 // succeeds and this arm is unreachable for it.

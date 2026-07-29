@@ -569,6 +569,46 @@ fn a_created_workflow_is_selected_and_keeps_the_thread_that_made_it() {
 }
 
 #[test]
+fn a_follow_up_queued_during_a_create_turn_drains_under_the_adopted_id() {
+    // Regression: `adopt_new_workflow` moves the thread — queue and all — from
+    // `NEW_THREAD` to the created workflow's real id. Draining under the
+    // original (pre-move) key would look up a thread that no longer lives
+    // there and silently drop the operator's queued follow-up.
+    let (_home, mut app) = app_with(&[diamond("a")]);
+    app.wf.creating = true;
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "build me one");
+    let cmd = app.submit_copilot().expect("a command");
+    let Cmd::CreateWorkflow { thread, .. } = cmd else {
+        panic!("expected a create");
+    };
+
+    // Queued while the create turn is still in flight.
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "now add a step");
+    assert!(
+        app.submit_copilot().is_none(),
+        "busy — this must queue, not dispatch"
+    );
+
+    app.workflow_store().save(&diamond("fresh")).expect("save");
+    let drained = app.copilot_finished(
+        &thread,
+        "built it".into(),
+        vec!["+ workflow fresh".into()],
+        Some("fresh".into()),
+    );
+
+    let Some(Cmd::CopilotTurn {
+        workflow,
+        instruction,
+    }) = drained
+    else {
+        panic!("the queued follow-up must be drained, not dropped");
+    };
+    assert_eq!(workflow, "fresh", "drained under the adopted id");
+    assert_eq!(instruction, "now add a step");
+}
+
+#[test]
 fn a_create_turn_that_built_nothing_leaves_the_cursor_where_it_was() {
     let (_home, mut app) = app_with(&[diamond("a")]);
     app.wf.creating = true;

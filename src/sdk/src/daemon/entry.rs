@@ -47,6 +47,16 @@ pub async fn run_daemon(
     onboarding_ui: Option<OnboardingUi>,
 ) -> anyhow::Result<()> {
     let flags = Flags::parse(args).map_err(|e| anyhow::anyhow!(e))?;
+    // Recorded before anything spawns a subprocess: a task this daemon runs
+    // over ACP hands the harness an MCP server served by another invocation of
+    // this same binary (`medulla workflow mcp`, see `daemon::providers::acp`),
+    // and that subprocess only sees environment, not this process's parsed
+    // flags. Without this, `medulla daemon --config foo.toml` would still have
+    // its harness sessions' workflow tools re-discover a different config from
+    // their own `cwd`. See `crate::config::CONFIG_PATH_ENV`.
+    if let Some(path) = flags.string("config") {
+        std::env::set_var(crate::config::CONFIG_PATH_ENV, path);
+    }
     let env: HashMap<String, String> = std::env::vars().collect();
     let log = |line: &str| eprintln!("medulla daemon: {line}");
 

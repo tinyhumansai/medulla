@@ -5,6 +5,13 @@
 //! Everything here exercises [`super::caps::tools::MedullaToolInvoker`]
 //! dispatching to `medulla:shell`, which is the tool surface a `code` node and
 //! an authored workflow step both go through.
+//!
+//! `medulla:shell` defaults to `ScriptLanguage::Shell` when a case gives no
+//! `language`, so any case that actually runs a script under that default is
+//! `#[cfg(unix)]` — Windows refuses that language rather than emulating a
+//! POSIX shell for it (see `flow_engine::caps::script::run_script`). Cases
+//! that fail before dispatching a script (the `allowCode` gate, an unknown
+//! language name) are platform-independent and stay ungated.
 
 use std::sync::Arc;
 
@@ -37,6 +44,10 @@ async fn the_shell_tool_is_refused_until_an_operator_turns_scripting_on() {
     assert!(err.to_string().contains("allowCode"), "got {err}");
 }
 
+// Unix-only: `medulla:shell` defaults to `ScriptLanguage::Shell`, which
+// `run_script` refuses on Windows rather than emulating a POSIX shell
+// there (see the `#[cfg(windows)]` guard in `flow_engine::caps::script`).
+#[cfg(unix)]
 #[tokio::test]
 async fn the_shell_tool_runs_in_the_workspace_so_a_step_can_touch_the_project() {
     let root = tempfile::tempdir().unwrap();
@@ -52,6 +63,10 @@ async fn the_shell_tool_runs_in_the_workspace_so_a_step_can_touch_the_project() 
     assert_eq!(result["output"], json!("1.2.3"));
 }
 
+// Unix-only: `medulla:shell` defaults to `ScriptLanguage::Shell`, which
+// `run_script` refuses on Windows rather than emulating a POSIX shell
+// there (see the `#[cfg(windows)]` guard in `flow_engine::caps::script`).
+#[cfg(unix)]
 #[tokio::test]
 async fn the_shell_tool_hands_its_input_to_the_script_and_returns_structured_output() {
     let root = tempfile::tempdir().unwrap();
@@ -68,6 +83,10 @@ async fn the_shell_tool_hands_its_input_to_the_script_and_returns_structured_out
     assert_eq!(result["output"], json!({ "issues": 3 }));
 }
 
+// Unix-only: `medulla:shell` defaults to `ScriptLanguage::Shell`, which
+// `run_script` refuses on Windows rather than emulating a POSIX shell
+// there (see the `#[cfg(windows)]` guard in `flow_engine::caps::script`).
+#[cfg(unix)]
 #[tokio::test]
 async fn the_shell_tool_keeps_stderr_from_a_script_that_succeeded() {
     let root = tempfile::tempdir().unwrap();
@@ -133,6 +152,10 @@ async fn the_shell_tool_says_what_is_missing_rather_than_running_an_empty_script
     assert!(unknown.to_string().contains("javascript"), "{unknown}");
 }
 
+// Unix-only: `medulla:shell` defaults to `ScriptLanguage::Shell`, which
+// `run_script` refuses on Windows rather than emulating a POSIX shell
+// there (see the `#[cfg(windows)]` guard in `flow_engine::caps::script`).
+#[cfg(unix)]
 #[tokio::test]
 async fn a_failing_shell_step_fails_the_node_with_the_scripts_own_error() {
     let root = tempfile::tempdir().unwrap();

@@ -85,10 +85,16 @@ impl CapabilitySettings {
     /// A fraction of the run's own bound, so a wedged script fails as a *script*
     /// — naming itself in the error — rather than by silently consuming the
     /// whole run's budget and failing as a timeout with nothing to point at.
+    /// The floor exists to keep a short quarter-share from being unreasonably
+    /// tiny, but it is capped at the run's own timeout: for any
+    /// `run_timeout_secs` under `4 × FLOOR_SECS` the uncapped floor would have
+    /// exceeded the run's whole budget, which is exactly the failure mode this
+    /// method exists to prevent.
     pub fn script_timeout(&self) -> std::time::Duration {
         const SHARE: u64 = 4;
         const FLOOR_SECS: u64 = 30;
-        std::time::Duration::from_secs((self.run_timeout_secs / SHARE).max(FLOOR_SECS))
+        let share = (self.run_timeout_secs / SHARE).max(FLOOR_SECS);
+        std::time::Duration::from_secs(share.min(self.run_timeout_secs.max(1)))
     }
 
     /// Whether `host` is permitted for outbound HTTP.

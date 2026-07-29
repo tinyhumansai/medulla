@@ -124,6 +124,14 @@ fn local_context(
     env: &HashMap<String, String>,
     cwd: &std::path::Path,
 ) -> anyhow::Result<(RunContext, String)> {
+    // Recorded before `LocalWorkflowHost::start` below, which spawns an
+    // embedded daemon that may in turn spawn ACP harness subprocesses — those
+    // read this env var (see `medulla::config::CONFIG_PATH_ENV`) to resolve
+    // the same `--config` this command was given, rather than rediscovering a
+    // possibly different one from their own `cwd`.
+    if let Some(path) = parsed.config.as_deref() {
+        std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+    }
     let loaded = medulla::config::load_config(parsed.config.as_deref(), env, cwd)?;
     let home = medulla::home::medulla_home(env);
     let mut settings = CapabilitySettings::from_config(&loaded.config.workflows, &home);

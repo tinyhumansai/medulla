@@ -51,6 +51,12 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
              the script's stdout parsed as JSON when it is JSON. Gated on \
              `workflows.allowCode` for the same reason `code` nodes are — check `workflow_host`."
                 .to_string(),
+            "`language: shell` requires a unix host: there is no portable POSIX shell on \
+             Windows, and this host refuses rather than emulating one, so a `shell` step run \
+             there fails outright. `javascript` and `python` need no such shell and work on any \
+             host — prefer them when the workflow may run on Windows. `workflow_host` reports \
+             whether the current host can run shell scripts."
+                .to_string(),
             "Reach for `medulla:shell` before an `agent` node whenever the work is a \
              deterministic command. An `agent` node is a whole coding-harness session — minutes \
              of wall clock and a model deciding what to run — which is the right shape for work \

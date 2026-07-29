@@ -15,6 +15,8 @@
 mod file;
 
 #[cfg(test)]
+mod concurrency_tests;
+#[cfg(test)]
 mod tests;
 
 pub use file::{

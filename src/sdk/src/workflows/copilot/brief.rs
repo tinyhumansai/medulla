@@ -150,7 +150,11 @@ impl CopilotRequest<'_> {
         if let Some(run) = &self.run {
             prompt.push_str("\n\n## The failed run\n\n");
             prompt.push_str(&format!(
-                "id: {}\nCall `workflow_runs` for the full record.\n",
+                // `workflow_runs` takes a *workflow* id and answers with that
+                // workflow's run history — the wrong tool for one run's own
+                // steps and diagnostics. `workflow_run_get` takes this run's
+                // own id and returns its full record.
+                "id: {}\nCall `workflow_run_get` for the full record.\n",
                 run.id
             ));
             if let Some(error) = run

@@ -162,7 +162,13 @@ impl App {
     /// whichever ran second would arrive out of order and its completion could
     /// clear `busy` while the other turn was still in flight.
     pub(in crate::ui::app) fn repair_selected_run(&mut self) -> Option<Cmd> {
-        let run = self.selected_run()?.clone();
+        let Some(run) = self.selected_run().cloned() else {
+            // Reported rather than silently swallowed: without this, `f` with
+            // no run selected is indistinguishable on screen from a stray
+            // keypress the menu absorbed on purpose.
+            self.set_status("No run selected — nothing to repair");
+            return None;
+        };
         if run.status != medulla::workflows::RunStatus::Failed {
             self.set_status("That run did not fail — nothing to repair");
             return None;
@@ -216,17 +222,29 @@ impl App {
             thread.changed(changes);
             thread.reply(reply);
         }
+        // `adopt_new_workflow` can move this thread — queued instruction and
+        // all — from `NEW_THREAD` to the workflow's real id, so the queue must
+        // be drained under whatever key the thread lives at *after* that move.
+        // Draining under the original `workflow` (still `NEW_THREAD`) would
+        // silently drop a follow-up an operator queued during a create turn:
+        // `self.wf.copilots.get_mut(NEW_THREAD)` finds nothing once the thread
+        // has relocated.
+        let mut drain_key = workflow.to_string();
         if changed {
             self.reload_workflows();
             match created {
-                Some(id) => self.adopt_new_workflow(&id),
+                Some(id) => {
+                    if self.adopt_new_workflow(&id) {
+                        drain_key = id;
+                    }
+                }
                 None => self.set_status(format!("{workflow} updated")),
             }
         }
         // Drained after the catalogue refresh, so the queued turn is dispatched
         // against the graph this one actually left behind rather than the one
         // on screen when it was typed.
-        self.drain_copilot_queue(workflow)
+        self.drain_copilot_queue(&drain_key)
     }
 
     /// Send whatever was queued on `workflow`'s thread while it was busy.
@@ -254,7 +272,12 @@ impl App {
     /// why this workflow looks the way it does, and the operator's next
     /// instruction is almost always a follow-up to it. The New row is left with
     /// a clean thread for the next workflow.
-    fn adopt_new_workflow(&mut self, id: &str) {
+    ///
+    /// Returns whether the thread actually moved to `id` — `false` when the
+    /// catalogue lookup failed and the thread is still filed under
+    /// [`NEW_THREAD`], which the caller needs to know to drain the right
+    /// thread's queue afterwards.
+    fn adopt_new_workflow(&mut self, id: &str) -> bool {
         let Some(index) = self
             .workflow_summaries()
             .iter()
@@ -263,7 +286,7 @@ impl App {
             // The store says it is not there. Reported rather than silently
             // ignored: the agent believed it created something.
             self.set_status(format!("Created {id}, but it is not in the catalogue"));
-            return;
+            return false;
         };
         if let Some(mut thread) = self.wf.copilots.remove(NEW_THREAD) {
             thread.workflow_id = id.to_string();
@@ -273,6 +296,7 @@ impl App {
         // the content pane draws its graph.
         self.select_workflow(index);
         self.set_status(format!("Created {id}"));
+        true
     }
 
     /// Record a copilot turn that failed.

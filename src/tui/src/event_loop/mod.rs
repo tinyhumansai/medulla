@@ -30,6 +30,7 @@ use types::AppMsg;
 pub(crate) use types::{SessionExit, SessionWiring};
 use update_checker::spawn_update_checker;
 
+pub(crate) use cmd_dispatch::clear_copilot_hosts;
 use cmd_dispatch::run_cmd;
 
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over

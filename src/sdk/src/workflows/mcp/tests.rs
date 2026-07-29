@@ -421,6 +421,35 @@ async fn the_host_tool_reports_what_this_machine_permits() {
 }
 
 #[tokio::test]
+async fn the_host_tool_states_whether_shell_scripts_are_available() {
+    // An author needs this before writing a `medulla:shell` step, not after it
+    // fails on whichever host actually runs the workflow: `run_script` refuses
+    // `language: shell` on Windows rather than emulating a POSIX shell there.
+    let (_root, store) = store();
+
+    let (facts, _) = call(&store, "workflow_host", json!({})).await;
+
+    assert_eq!(facts["shellScriptsAvailable"], json!(!cfg!(windows)));
+    let notes: Vec<&str> = facts["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|note| note.as_str().unwrap())
+        .collect();
+    if cfg!(windows) {
+        assert!(
+            notes.iter().any(|note| note.contains("javascript")),
+            "{notes:?}"
+        );
+    } else {
+        assert!(
+            notes.iter().any(|note| note.contains("language: shell")),
+            "{notes:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn the_host_tool_says_plainly_when_there_is_no_default_worker() {
     let (_root, store) = store();
 
@@ -484,6 +513,13 @@ async fn running_a_workflow_is_on_the_belt_but_cancelling_one_is_not() {
 
 #[tokio::test]
 async fn running_a_workflow_that_is_disabled_is_refused_rather_than_silently_skipped() {
+    // Hermetic despite `workflow_run` building its `env`/`cwd` from the real
+    // process (`tools::call`'s `workflow_run` arm) rather than injected temp
+    // values: `local::run_here` checks `workflow.enabled` *before* it ever
+    // reads `env` (via `medulla_home`) or starts a `LocalWorkflowHost` — see
+    // that ordering's own comment. A workflow saved disabled here is refused
+    // on that first check, so this test never touches the developer's real
+    // Medulla home or spawns a daemon, whatever the process environment holds.
     let (_root, store) = store();
     let disabled = json!({
         "id": "paused", "name": "Paused", "enabled": false,

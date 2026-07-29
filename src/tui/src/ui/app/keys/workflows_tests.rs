@@ -514,11 +514,31 @@ fn r_in_the_copilot_retries_only_when_nothing_is_typed() {
 }
 
 #[test]
-fn f_on_a_run_that_did_not_fail_says_there_is_nothing_to_repair() {
+fn f_with_no_run_selected_says_so_rather_than_falling_through_silently() {
     let (_home, mut app) = app_with(&[solo("sweep")]);
 
     // No runs at all, so the cursor is on the workflow rather than a run.
     let pressed = key(&mut app, KeyCode::Char('f'));
 
+    // `Handled(None)` alone would also be what a stray letter absorbed by the
+    // sidebar's generic handler looks like; the status is what proves `f` was
+    // actually recognised and refused for a stated reason.
     assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+    assert!(app.status().contains("No run selected"), "{}", app.status());
+}
+
+#[test]
+fn f_on_a_run_that_did_not_fail_says_there_is_nothing_to_repair() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+    let mut run = medulla::workflows::new_run_record("run-1", "sweep", 0);
+    run.status = medulla::workflows::RunStatus::Succeeded;
+    app.workflow_store().record_run(&run).expect("record");
+    app.reload_workflows();
+
+    // Down from the workflow row lands on its first (and only) run.
+    key(&mut app, KeyCode::Down);
+    let pressed = key(&mut app, KeyCode::Char('f'));
+
+    assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+    assert!(app.status().contains("did not fail"), "{}", app.status());
 }

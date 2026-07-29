@@ -4,9 +4,14 @@
 //! written to fix was a calling convention that was documented one way and
 //! implemented another, and only actually running something catches that.
 //!
-//! `bash` is assumed present — this crate already assumes a unix host in its
-//! bridge and daemon tests. `node` and `python3` are not, so those cases skip
-//! rather than fail on a machine without them.
+//! `bash` is assumed present on unix — this crate already assumes a unix host
+//! in its bridge and daemon tests — and the `ScriptLanguage::Shell` cases are
+//! `#[cfg(unix)]` because `run_script` itself refuses that language on
+//! Windows (see its doc comment): there is no portable POSIX shell there to
+//! run them in, and emulating one is exactly the per-platform behavior this
+//! module exists to avoid. `node` and `python3` are cross-platform but not
+//! guaranteed installed, so those cases skip rather than fail on a machine
+//! without them.
 
 use super::*;
 use serde_json::json;
@@ -23,6 +28,10 @@ fn available(program: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_shell_script_reads_its_input_on_stdin_and_returns_stdout() {
     let output = run_script(
@@ -40,6 +49,10 @@ async fn a_shell_script_reads_its_input_on_stdin_and_returns_stdout() {
     assert_eq!(output.value, json!({ "name": "sweep" }));
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_shell_script_can_read_its_input_from_the_path_instead() {
     // Shell reads a path more naturally than a pipe, so both are offered.
@@ -56,6 +69,10 @@ async fn a_shell_script_can_read_its_input_from_the_path_instead() {
     assert_eq!(output.value, json!({ "n": 1 }));
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_input_path_is_also_the_first_argument() {
     let output = run_script(
@@ -71,6 +88,10 @@ async fn the_input_path_is_also_the_first_argument() {
     assert_eq!(output.value, json!(42));
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn output_that_is_not_json_comes_back_as_a_string() {
     let output = run_script(
@@ -87,6 +108,10 @@ async fn output_that_is_not_json_comes_back_as_a_string() {
     assert_eq!(output.value, json!("hello there"));
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn stderr_survives_a_script_that_succeeded() {
     let output = run_script(
@@ -104,6 +129,10 @@ async fn stderr_survives_a_script_that_succeeded() {
     assert_eq!(output.stderr, "warning: skipped one");
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_failing_script_reports_its_stderr_rather_than_only_its_code() {
     let err = run_script(
@@ -123,6 +152,10 @@ async fn a_failing_script_reports_its_stderr_rather_than_only_its_code() {
     );
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_script_that_never_ends_is_stopped_and_says_so() {
     let err = run_script(
@@ -158,6 +191,10 @@ async fn a_missing_interpreter_says_what_is_missing_rather_than_failing_opaquely
     }
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_script_runs_where_it_was_told_to() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -178,6 +215,10 @@ async fn a_script_runs_where_it_was_told_to() {
     assert_eq!(output.value, json!("found me"));
 }
 
+// Unix-only: these run `ScriptLanguage::Shell`, which `run_script` refuses
+// on Windows because there is no portable POSIX shell to run it in (see
+// the `#[cfg(windows)]` guard in `run_script`) rather than emulating one.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_script_with_no_directory_given_runs_somewhere_disposable() {
     let output = run_script(ScriptLanguage::Shell, "pwd", &json!(null), TIMEOUT, None)
@@ -260,4 +301,28 @@ fn a_language_name_is_read_the_way_an_author_would_write_it() {
     // Refused rather than guessed: running the wrong interpreter on someone's
     // script is worse than telling them the name was not recognised.
     assert_eq!(ScriptLanguage::parse("ruby"), None);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn shell_is_refused_on_windows_rather_than_emulated() {
+    // The one Windows-specific behavior this module has: refuse plainly,
+    // pointing at the languages that do work everywhere, instead of
+    // path-translating into Git Bash or swapping in `cmd`/PowerShell — either
+    // of which would make a workflow look portable while quietly behaving
+    // differently by host.
+    let err = run_script(
+        ScriptLanguage::Shell,
+        "echo hi",
+        &json!(null),
+        TIMEOUT,
+        None,
+    )
+    .await
+    .expect_err("shell must be refused on Windows");
+
+    let message = err.to_string();
+    assert!(message.contains("Windows"), "{message}");
+    assert!(message.contains("javascript"), "{message}");
+    assert!(message.contains("python"), "{message}");
 }

@@ -52,18 +52,32 @@ fn hosts() -> &'static Mutex<Hosts> {
 /// Fails when no coding-agent CLI is installed or the loopback endpoints cannot
 /// be bound — both are situations the operator has to see rather than a pane
 /// that accepts instructions and answers none of them.
+///
+/// The cache lock is released before `LocalWorkflowHost::start` — starting a
+/// daemon spawns a process and binds loopback sockets, real blocking I/O that
+/// must not hold a lock every other pane's (already-cached, otherwise-fast)
+/// lookup shares. This does reopen a small window where two threads can both
+/// miss the cache and both start a daemon for the same key before either
+/// inserts; `insert` still enforces the recency/cap invariant either way, and
+/// a duplicate start is wasteful but harmless, unlike blocking every other
+/// pane on one cold start.
 pub(super) fn host_for(
     thread: &str,
     options: impl FnOnce() -> EmbeddedDaemonOptions,
 ) -> Result<Arc<LocalWorkflowHost>, String> {
-    let mut hosts = hosts().lock().expect("copilot host cache lock");
-
-    if let Some(host) = touch(&mut hosts, thread) {
+    if let Some(host) = touch(
+        &mut hosts().lock().expect("copilot host cache lock"),
+        thread,
+    ) {
         return Ok(host);
     }
 
     let host = Arc::new(LocalWorkflowHost::start(options())?);
-    insert(&mut hosts, thread, host.clone());
+    insert(
+        &mut hosts().lock().expect("copilot host cache lock"),
+        thread,
+        host.clone(),
+    );
     Ok(host)
 }
 
@@ -115,6 +129,21 @@ pub(super) fn forget(thread: &str) {
     );
 }
 
+/// Drop every cached host, stopping every daemon it holds.
+///
+/// This cache is keyed by *workflow id*, a name chosen by whoever authored the
+/// workflow — not by account. Left alive across a relogin, a second account
+/// opening a workflow that happens to share an id with one the first account
+/// had a live conversation on would silently reuse that daemon: its harness
+/// session, and whatever the first account's turns put in its context, both
+/// carry over to an operator who has no way to know they are there. Called at
+/// the one place that boundary is crossed — the login screen returning after
+/// `SessionExit::Relogin` — so a fresh account always starts every copilot
+/// thread from nothing.
+pub(super) fn clear_all() {
+    clear_in(&mut hosts().lock().expect("copilot host cache lock"));
+}
+
 // The bookkeeping below is generic over the stored value because none of it
 // depends on what a host *is* — and a test that had to start a real daemon to
 // check a rename would need a coding CLI on `PATH`, which this suite does not
@@ -151,6 +180,11 @@ fn rename_in<T>(entries: &mut Vec<(String, T)>, from: &str, to: &str) {
 /// Drop `thread`'s entry, if it has one.
 fn forget_in<T>(entries: &mut Vec<(String, T)>, thread: &str) {
     entries.retain(|(key, _)| key != thread);
+}
+
+/// Drop every entry.
+fn clear_in<T>(entries: &mut Vec<(String, T)>) {
+    entries.clear();
 }
 
 #[cfg(test)]

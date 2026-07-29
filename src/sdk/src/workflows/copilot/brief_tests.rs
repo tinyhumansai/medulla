@@ -194,7 +194,12 @@ fn a_repair_turn_with_no_recorded_error_still_names_the_run() {
     .render();
 
     assert!(prompt.contains("run-7"), "{prompt}");
-    assert!(prompt.contains("workflow_runs"), "the record is fetchable");
+    // `workflow_run_get`, not `workflow_runs`: the latter takes a workflow id
+    // and answers with its run *history*, not one run's own full record.
+    assert!(
+        prompt.contains("workflow_run_get"),
+        "the record is fetchable"
+    );
     // No empty "It failed with:" block for an error that was never recorded.
     assert!(!prompt.contains("It failed with"), "{prompt}");
 }

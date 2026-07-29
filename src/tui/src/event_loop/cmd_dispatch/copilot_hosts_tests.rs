@@ -101,3 +101,16 @@ fn forgetting_ends_only_the_named_conversation() {
 
     assert_eq!(keys(&cache), vec!["b"]);
 }
+
+#[test]
+fn clearing_ends_every_conversation() {
+    // What a relogin needs: the cache is keyed by workflow id, not by account,
+    // so every entry — not just the one the operator happens to be on — must
+    // go, or a second account could inherit a live daemon (and its harness
+    // session) from the first.
+    let mut cache = entries(&["a", "b", "c"]);
+
+    clear_in(&mut cache);
+
+    assert!(cache.is_empty());
+}

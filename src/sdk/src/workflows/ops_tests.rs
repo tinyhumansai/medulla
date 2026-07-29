@@ -244,6 +244,36 @@ fn history_for_a_workflow_that_does_not_exist_is_an_error_not_an_empty_list() {
 }
 
 #[test]
+fn history_stays_reachable_after_the_workflow_itself_is_deleted() {
+    // Regression: `delete` snapshots a revision of what it removed
+    // specifically so that edit is recoverable, but `list_history` used to
+    // gate on the *live* record and would report `NotFound` the moment that
+    // record was gone — the one moment an operator most needs to see what a
+    // deletion can still be undone from.
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Renamed" }]),
+    )
+    .unwrap();
+    store.delete("sweep").unwrap();
+
+    let history = list_history(&store, "sweep").expect("history must still be reachable");
+
+    // Both revisions delete captured: the edit before it, and the deletion
+    // itself.
+    let revisions = history["revisions"].as_array().expect("array");
+    assert_eq!(revisions.len(), 2, "{revisions:?}");
+
+    // Undo (which restores from a revision, not the live record) must also
+    // still work through the ops surface after the delete.
+    let undone = undo(&store, "sweep").expect("undo must still work");
+    assert_eq!(undone["undone"], json!(true));
+}
+
+#[test]
 fn undo_puts_the_previous_graph_back_and_says_what_it_restored() {
     let (_root, store) = store();
     create(&store, &document("sweep"), "sweep").unwrap();

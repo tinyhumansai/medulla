@@ -183,6 +183,7 @@ pub async fn run_workflow(
     let mut record = record;
     record.steps = observer.steps();
     record.finished_at = Some(crate::clock::now_millis() as u64);
+    let terminal_engine_error = matches!(&settled, Err(Settle::Failed(_)));
     match settled {
         Ok(outcome) => {
             record.pending_approvals = outcome.pending_approvals.clone();
@@ -204,7 +205,12 @@ pub async fn run_workflow(
             record.error = Some(message);
         }
     }
-    record_evidence(&mut record, &observer, &workflow.graph);
+    record_evidence(
+        &mut record,
+        &observer,
+        &workflow.graph,
+        terminal_engine_error,
+    );
 
     finalizer.disarm();
     context.store.record_run(&record)?;
@@ -395,16 +401,13 @@ fn record_evidence(
     record: &mut RunRecord,
     observer: &WorkflowRunObserver,
     graph: &tinyflows::model::WorkflowGraph,
+    terminal_engine_error: bool,
 ) {
     // The observer's own sentence when it has one: it saw the engine settle and
     // can count what actually ran. The fallback only knows the record.
     record.summary = final_summary(record, observer);
     let steps = observer.execution_steps();
-    record.diagnosis = Some(diagnose_record(
-        graph,
-        &steps,
-        record.status == RunStatus::Failed,
-    ));
+    record.diagnosis = Some(diagnose_record(graph, &steps, terminal_engine_error));
 }
 
 /// Diagnose a settled run without calling its terminal error "swallowed".

@@ -121,6 +121,31 @@ pub fn proposal_detail(proposal: &WorkflowProposal) -> Vec<DetailRow> {
                     ),
                 });
             }
+            for node_id in check
+                .diagnosis
+                .iter()
+                .flat_map(|diagnosis| diagnosis.empty_prompts.iter())
+            {
+                rows.push(DetailRow {
+                    label: String::new(),
+                    value: format!("{node_id} would run with an empty prompt"),
+                });
+            }
+            for error in check
+                .diagnosis
+                .iter()
+                .flat_map(|diagnosis| diagnosis.hidden_errors.iter())
+            {
+                let detail = error
+                    .message
+                    .as_deref()
+                    .map(|message| format!(": {message}"))
+                    .unwrap_or_default();
+                rows.push(DetailRow {
+                    label: String::new(),
+                    value: format!("{} hides an error{}", error.node_id, detail),
+                });
+            }
         }
     }
     if let Some(reason) = proposal.decision_reason.as_deref() {

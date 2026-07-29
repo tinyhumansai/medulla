@@ -5,6 +5,7 @@
 //! both are the kind of thing a later refactor quietly filters out.
 
 use super::*;
+use crate::workflows::run::{Diagnosis, HiddenError};
 use crate::workflows::{NoteKind, ProposalVerification};
 use serde_json::json;
 
@@ -201,6 +202,31 @@ fn a_failed_check_spells_out_what_went_wrong() {
     assert!(rows
         .iter()
         .any(|row| row.value.contains("node 'build' does not exist")));
+}
+
+#[test]
+fn a_failed_check_renders_every_blocking_diagnosis_category() {
+    let mut diagnosis = Diagnosis::default();
+    diagnosis.empty_prompts.push("summarize".into());
+    diagnosis.hidden_errors.push(HiddenError {
+        node_id: "notify".into(),
+        message: Some("connection refused".into()),
+    });
+    let verification = ProposalVerification {
+        ok: false,
+        verified_at: 2,
+        messages: Vec::new(),
+        diagnosis: Some(diagnosis),
+    };
+
+    let rows = proposal_detail(&proposal(ProposalStatus::Pending, Some(verification)));
+
+    assert!(rows
+        .iter()
+        .any(|row| row.value.contains("summarize") && row.value.contains("empty prompt")));
+    assert!(rows
+        .iter()
+        .any(|row| row.value.contains("notify") && row.value.contains("connection refused")));
 }
 
 #[test]

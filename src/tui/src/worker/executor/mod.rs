@@ -311,7 +311,7 @@ impl PtySessionExecutor {
     }
 
     /// The environment and extra argv a fresh launch spawns with: this
-    /// executor's base environment, layered with the `[router]` injection the
+    /// task-scoped environment, layered with the `[router]` injection the
     /// headless executor already applies at its own spawn seam.
     ///
     /// Without this, switching the local host to `PtySessionExecutor` silently
@@ -329,7 +329,7 @@ impl PtySessionExecutor {
         &self,
         options: &RunTaskOptions,
     ) -> Result<(HashMap<String, String>, Vec<String>), String> {
-        let mut env = self.env.clone();
+        let mut env = options.env.clone();
         let mut extra_args = options.extra_args.clone();
         if let Some(router) = &options.router {
             let injection = medulla::tinyplace::env::router_env(options.provider, router);
@@ -337,7 +337,7 @@ impl PtySessionExecutor {
                 env.insert(key, value);
             }
             for (child_var, source_name) in injection.secret_env {
-                match self.env.get(&source_name).filter(|v| !v.is_empty()) {
+                match options.env.get(&source_name).filter(|v| !v.is_empty()) {
                     Some(secret) => {
                         env.insert(child_var, secret.clone());
                     }

@@ -409,7 +409,21 @@ pub async fn dry_run(
     input: Value,
 ) -> Result<DryRun, WorkflowError> {
     let workflow = require(store.as_ref(), workflow_id)?;
-    let compiled = execute::compile(&workflow.graph).map_err(WorkflowError::Engine)?;
+    dry_run_graph(&workflow.graph, resolver, input).await
+}
+
+/// Simulate a graph that is not necessarily saved anywhere.
+///
+/// The same check as [`dry_run`], against a candidate rather than a record.
+/// What a proposal needs: the whole question is whether a patched graph *would*
+/// work, and answering it by saving the patch first would be the silent
+/// mutation the proposal exists to avoid.
+pub async fn dry_run_graph(
+    graph: &tinyflows::model::WorkflowGraph,
+    resolver: Arc<dyn tinyflows::caps::WorkflowResolver>,
+    input: Value,
+) -> Result<DryRun, WorkflowError> {
+    let compiled = execute::compile(graph).map_err(WorkflowError::Engine)?;
     let capabilities = crate::flow_engine::build_dry_run_capabilities(resolver);
 
     // Observed, because the steps are what a dry run is *for* at authoring
@@ -422,6 +436,6 @@ pub async fn dry_run(
 
     Ok(DryRun {
         output: outcome.output,
-        diagnosis: diagnose::diagnose(&workflow.graph, &capture.steps()),
+        diagnosis: diagnose::diagnose(graph, &capture.steps()),
     })
 }

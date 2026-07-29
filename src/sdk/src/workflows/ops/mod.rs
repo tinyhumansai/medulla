@@ -54,7 +54,7 @@ fn record_value(record: &WorkflowRecord) -> Value {
 /// Both spellings turn up in practice — a model told "pass the ops" sends the
 /// array, one told "call with an ops argument" sends the object — and rejecting
 /// either costs a round-trip to learn nothing.
-fn parse_ops(value: &Value) -> Result<Vec<GraphOp>, WorkflowError> {
+pub(crate) fn parse_ops(value: &Value) -> Result<Vec<GraphOp>, WorkflowError> {
     let array = match value {
         Value::Array(_) => value.clone(),
         Value::Object(object) => object

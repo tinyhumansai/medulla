@@ -132,6 +132,9 @@ pub async fn propose(
     };
     proposal.verification = Some(verify(store, &proposal).await);
     mark_stale_if_base_changed(store, &mut proposal)?;
+    let _decision = store.lock_proposal_decision(id)?;
+    // The lock may have waited behind an acceptance or another publication.
+    mark_stale_if_base_changed(store, &mut proposal)?;
 
     // A workflow with two undecided proposals asks an operator to hold both in
     // their head at once, and the older one was written from less evidence.

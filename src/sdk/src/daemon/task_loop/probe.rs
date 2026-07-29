@@ -23,6 +23,7 @@ impl DaemonRuntime {
             .config
             .custom_harnesses
             .iter()
+            .filter(|harness| harness.key_present(&self.inner.config.env))
             .map(|harness| CustomHarnessAdvert {
                 id: harness.id.clone(),
                 name: harness.name.clone(),

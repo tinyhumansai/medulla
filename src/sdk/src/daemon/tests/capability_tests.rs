@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::daemon::{status_detail, work_detail, DaemonRuntime, NowFn};
-use crate::tinyplace::{HarnessEvent, TaskFrameKind};
+use crate::tinyplace::{AgentCapabilities, HarnessEvent, TaskFrameKind};
 
 use super::{
     base_config, capabilities_frame, counting_capability_runner, decoded_frames, recording_send,
@@ -83,6 +83,47 @@ async fn capabilities_probe_is_cached_across_askers() {
         1,
         "probe cached after first run"
     );
+}
+
+#[tokio::test]
+async fn capabilities_advertise_only_custom_harnesses_with_available_keys() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let run_task = counting_capability_runner(count);
+    let (send, recorded) = recording_send();
+    let mut config = base_config();
+    let ready = crate::config::CustomHarnessConfig::from_editor_line(
+        "ready | Ready | claude | openrouter/ready | | this-device",
+    )
+    .unwrap();
+    let mut unavailable = crate::config::CustomHarnessConfig::from_editor_line(
+        "missing | Missing | claude | openrouter/missing | | this-device",
+    )
+    .unwrap();
+    unavailable.api_key_env = "MISSING_OPENROUTER_KEY".into();
+    config
+        .env
+        .insert(ready.api_key_env.clone(), "configured".into());
+    config.custom_harnesses = vec![ready, unavailable];
+    let runtime = DaemonRuntime::new(config, run_task, send);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(capabilities_frame("custom-capabilities", None)),
+    );
+    runtime.idle().await;
+
+    let result = decoded_frames(&recorded)
+        .into_iter()
+        .find(|frame| frame.kind == TaskFrameKind::CapabilitiesResult)
+        .expect("capabilities result");
+    let capabilities: AgentCapabilities = serde_json::from_str(&result.text).unwrap();
+    let advertised: Vec<_> = capabilities
+        .custom_harnesses
+        .iter()
+        .map(|harness| harness.id.as_str())
+        .collect();
+    assert_eq!(advertised, vec!["ready"]);
 }
 
 #[tokio::test]

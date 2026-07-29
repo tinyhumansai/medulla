@@ -23,6 +23,7 @@ use super::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use super::*;
 
 mod capability_tests;
+mod custom_harness_tests;
 mod provider_tests;
 mod system_info_tests;
 mod task_attribution_tests;

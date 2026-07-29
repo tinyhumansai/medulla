@@ -44,7 +44,7 @@ impl DaemonRuntime {
                 .config
                 .custom_harnesses
                 .iter()
-                .find(|harness| harness.default)
+                .find(|harness| harness.default && harness.key_present(&self.inner.config.env))
                 .cloned(),
             None => None,
         };

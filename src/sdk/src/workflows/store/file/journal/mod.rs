@@ -59,9 +59,11 @@ fn path_for(journal_dir: &Path, workflow_id: &str) -> Result<PathBuf, WorkflowEr
 /// unreadable everywhere its notes are shown, which is a worse failure than
 /// forgetting what it learned — and run history already behaves this way.
 pub fn list(journal_dir: &Path, workflow_id: &str) -> Result<Vec<WorkflowNote>, WorkflowError> {
-    let mut notes = read_all(journal_dir, workflow_id)?;
-    notes.sort_by(|a, b| b.id.cmp(&a.id));
-    Ok(notes)
+    with_write_lock(journal_dir, workflow_id, || {
+        let mut notes = read_all(journal_dir, workflow_id)?;
+        notes.sort_by(|a, b| b.id.cmp(&a.id));
+        Ok(notes)
+    })
 }
 
 /// Append `note`, then prune to [`MAX_NOTES`].
@@ -108,7 +110,11 @@ pub fn supersede(
     })
 }
 
-/// Serialize a journal read-modify-write across stores and processes.
+/// Serialize journal reads and writes across stores and processes.
+///
+/// Reads participate because recovering a corrupt file renames it. Without the
+/// same lock a reader could quarantine the valid replacement a writer had just
+/// installed after the reader captured the old corrupt bytes.
 fn with_write_lock<T>(
     journal_dir: &Path,
     workflow_id: &str,

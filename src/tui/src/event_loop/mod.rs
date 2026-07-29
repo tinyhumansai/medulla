@@ -138,7 +138,23 @@ pub(crate) async fn run(
                         reply,
                         changes,
                         created,
-                    } => app.copilot_finished(&workflow, reply, changes, created),
+                        removed,
+                    } => {
+                        // The conversation follows the workflow. A create turn
+                        // ran on a sentinel thread because there was no id yet;
+                        // now there is one, so the harness session moves onto it
+                        // and the operator's follow-up is turn two of the same
+                        // conversation rather than turn one of a new one.
+                        if let Some(created) = &created {
+                            cmd_dispatch::adopt_copilot_host(&workflow, created);
+                        }
+                        // Nothing left to continue, and no reason to keep a
+                        // daemon and its harness processes alive for it.
+                        if removed {
+                            cmd_dispatch::close_copilot_host(&workflow);
+                        }
+                        app.copilot_finished(&workflow, reply, changes, created)
+                    }
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotFailed { workflow, error } => {
                         app.copilot_failed(&workflow, error);

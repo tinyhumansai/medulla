@@ -51,7 +51,7 @@ pub fn fold(
     policy: SessionPolicy,
 ) -> Folded {
     match input {
-        SessionInput::Frame { from, frame } => fold_frame(&from, frame, default_provider, policy),
+        SessionInput::Frame { from, frame } => fold_frame(&from, *frame, default_provider, policy),
         SessionInput::PlainText { from, text } => {
             if text.trim().is_empty() {
                 return Folded::Ignore;

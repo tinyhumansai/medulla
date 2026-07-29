@@ -161,18 +161,20 @@ fn spawn_turn(
             }
         });
 
-        let message = match copilot_turn(&turn, &instruction, status_tx, &workflows_config).await {
-            Ok(outcome) => AppMsg::CopilotDone {
-                workflow: thread.clone(),
-                reply: outcome.reply,
-                changes: outcome.changes,
-                created: outcome.created,
-            },
-            Err(err) => AppMsg::CopilotFailed {
-                workflow: thread.clone(),
-                error: err.to_string(),
-            },
-        };
+        let message =
+            match copilot_turn(&turn, &thread, &instruction, status_tx, &workflows_config).await {
+                Ok(outcome) => AppMsg::CopilotDone {
+                    workflow: thread.clone(),
+                    reply: outcome.reply,
+                    changes: outcome.changes,
+                    created: outcome.created,
+                    removed: outcome.removed,
+                },
+                Err(err) => AppMsg::CopilotFailed {
+                    workflow: thread.clone(),
+                    error: err.to_string(),
+                },
+            };
         // The forwarder ends when the session drops its sender, which it has by
         // now; awaiting it keeps a trailing status line from arriving after the
         // reply and reading as part of the next turn.
@@ -183,13 +185,15 @@ fn spawn_turn(
 
 /// Run one copilot turn to completion.
 ///
-/// The host is started per turn and dropped with it, which unbinds the loopback
-/// endpoints so the next turn — or a workflow run — can bind them again.
+/// The host is kept per thread rather than per turn (see [`copilot_hosts`]),
+/// because the harness session a turn opens is remembered by the daemon — a
+/// daemon that died with the turn would take the conversation with it.
 /// `workflows_config` is the already-loaded `[workflows]` section (see
 /// [`spawn_copilot`]) rather than a fresh [`medulla::config::load_config`] call
 /// — reloading with no explicit path would silently drop a `--config` override.
 async fn copilot_turn(
     turn: &Turn,
+    thread: &str,
     instruction: &str,
     status: tokio::sync::mpsc::UnboundedSender<String>,
     workflows_config: &medulla::config::WorkflowsConfig,
@@ -211,7 +215,7 @@ async fn copilot_turn(
         "acp".to_string(),
     );
 
-    let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
+    let host = super::copilot_hosts::host_for(thread, || EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: workflows_config.default_provider,
         model: (!workflows_config.default_model.is_empty())
@@ -228,6 +232,10 @@ async fn copilot_turn(
         provider: workflows_config.default_provider,
         model: (!workflows_config.default_model.is_empty())
             .then(|| workflows_config.default_model.clone()),
+        // The pane's thread is the conversation. Two workflows open side by side
+        // are two threads and therefore two conversations, which is what the
+        // operator means by having them open separately.
+        conversation: thread.to_string(),
     };
     Ok(match turn {
         Turn::Edit(workflow) => session.turn(workflow, instruction, Some(status)).await?,

@@ -191,6 +191,7 @@ fn session(store: Arc<dyn WorkflowStore>, harness: Arc<dyn HarnessDispatch>) -> 
         worker_address: "worker".into(),
         provider: None,
         model: None,
+        conversation: "pane-1".into(),
     }
 }
 
@@ -230,6 +231,45 @@ async fn each_turn_gets_its_own_task_id_so_two_are_never_deduped() {
     assert_eq!(
         seen[0].abort_id, seen[0].task_id,
         "the turn is abortable by the id it was dispatched under"
+    );
+}
+
+#[tokio::test]
+async fn every_turn_in_one_pane_names_the_same_conversation() {
+    let (_root, store) = store();
+    let harness = Arc::new(StubHarness::new(store.clone(), "ok"));
+    let session = session(store, harness.clone());
+
+    session
+        .turn("sweep", "add a step", None)
+        .await
+        .expect("one");
+    session
+        .turn("sweep", "now do the same to the other node", None)
+        .await
+        .expect("two");
+
+    let seen = harness.seen.lock().unwrap();
+    // Both turns are one conversation, which is what makes the second
+    // instruction intelligible — it names no node, and only the first turn's
+    // context says which one "the other" is.
+    assert_eq!(seen[0].conversation.as_deref(), Some("pane-1"));
+    assert_eq!(seen[1].conversation.as_deref(), Some("pane-1"));
+}
+
+#[tokio::test]
+async fn a_create_turn_shares_the_panes_conversation_too() {
+    let (_root, store) = store();
+    let harness = Arc::new(StubHarness::new(store.clone(), "ok"));
+    let session = session(store, harness.clone());
+
+    session.create("build me one", None).await.expect("create");
+
+    // The follow-up to "build me one" is almost always "now change it", and
+    // that has to reach the session that built it.
+    assert_eq!(
+        harness.seen.lock().unwrap()[0].conversation.as_deref(),
+        Some("pane-1")
     );
 }
 

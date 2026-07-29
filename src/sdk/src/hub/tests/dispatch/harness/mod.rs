@@ -74,6 +74,7 @@ impl Relay for FakeWorker {
                         provider: None,
                         model: None,
                         workflow: None,
+                        conversation: None,
                     },
                     None,
                 ),
@@ -95,6 +96,7 @@ impl Relay for FakeWorker {
                             provider: None,
                             model: None,
                             workflow: None,
+                            conversation: None,
                         },
                         None,
                     ),
@@ -130,6 +132,7 @@ impl Relay for FakeWorker {
                     provider: None,
                     model: None,
                     workflow: None,
+                    conversation: None,
                 },
                 usage,
             ),
@@ -163,6 +166,7 @@ impl Relay for FakeWorker {
                             provider: None,
                             model: None,
                             workflow: None,
+                            conversation: None,
                         },
                         None,
                     ),
@@ -250,6 +254,7 @@ pub(super) fn req(instruction: &str) -> TaskRequest {
         provider: None,
         model: None,
         workflow: None,
+        conversation: None,
     }
 }
 

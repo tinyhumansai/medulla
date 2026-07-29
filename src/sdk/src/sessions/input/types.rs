@@ -11,7 +11,12 @@ pub enum SessionInput {
         /// body — a frame cannot name its own author.
         from: String,
         /// The decoded frame.
-        frame: TaskFrame,
+        ///
+        /// Boxed for the same reason [`Envelope`](Self::Envelope) is: a
+        /// [`TaskFrame`] carries a dozen optional wire fields and dwarfs the
+        /// other variants, so inlining it would make every `SessionInput` —
+        /// including the two-string plain-text one — pay its size.
+        frame: Box<TaskFrame>,
     },
     /// A plain-text DM that carried no frame at all.
     PlainText {

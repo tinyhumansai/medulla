@@ -61,6 +61,9 @@ pub(super) enum AppMsg {
         changes: Vec<String>,
         /// The workflow the turn created, for a create turn that made one.
         created: Option<String>,
+        /// Whether the workflow the turn was scoped to no longer exists, so its
+        /// conversation can be closed down with it.
+        removed: bool,
     },
     /// A copilot turn failed.
     #[cfg(feature = "workflows")]

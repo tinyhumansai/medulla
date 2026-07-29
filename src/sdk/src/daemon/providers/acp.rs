@@ -120,10 +120,17 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
 
             let session_id = match resume {
                 Some(id) => {
-                    connection
-                        .send_request(LoadSessionRequest::new(id.clone(), cwd.clone()))
-                        .block_task()
-                        .await?;
+                    let mut request = LoadSessionRequest::new(id.clone(), cwd.clone());
+                    // The same servers a new session gets, and for the same
+                    // reason. A loaded session restores the *transcript*, not
+                    // the client's tool offer — so omitting this hands the
+                    // harness a conversation it remembers and no way to act on
+                    // it. For the copilot that is the difference between an
+                    // agent that edits the graph and one that can only discuss
+                    // it, and it would fail silently: the model would explain
+                    // what it would have done.
+                    request.mcp_servers = workflow_mcp_servers();
+                    connection.send_request(request).block_task().await?;
                     id.into()
                 }
                 None => {

@@ -12,7 +12,8 @@ use crate::tinyplace::TaskFrameKind;
 
 use super::{
     abort_frame, abortable_runner, base_config, blocking_runner, conversation_runner,
-    decoded_frames, input_frame, recording_send, stdin_runner, task_frame, wait_ready,
+    decoded_frames, input_frame, recording_send, resume_runner, stdin_runner, task_frame,
+    wait_ready,
 };
 
 #[tokio::test]
@@ -488,4 +489,134 @@ async fn the_captured_turn_and_the_sent_payload_are_both_logged() {
         .unwrap_or_else(|| panic!("the payload sent to the peer must be logged: {lines:?}"));
     assert!(sent.contains("peer"), "the recipient is named: {sent}");
     assert!(sent.contains("done"), "got {sent}");
+}
+
+/// A task frame naming a continuity group.
+fn conversation_frame(
+    task_id: &str,
+    text: &str,
+    conversation: &str,
+) -> crate::tinyplace::TaskFrame {
+    crate::tinyplace::TaskFrame {
+        conversation: Some(conversation.to_string()),
+        ..task_frame(task_id, text, None)
+    }
+}
+
+#[tokio::test]
+async fn an_ordinary_task_resumes_nothing() {
+    // The default, and the invariant the whole feature is built around: a task
+    // frame is discrete work, so two tasks must never see each other's context.
+    let resumed = Arc::new(StdMutex::new(Vec::new()));
+    let (send, _recorded) = recording_send();
+    let runtime = DaemonRuntime::new(
+        base_config(),
+        resume_runner(resumed.clone(), "sess-1"),
+        send,
+    );
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "a", None)),
+    );
+    runtime.idle().await;
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t2", "b", None)),
+    );
+    runtime.idle().await;
+
+    assert_eq!(resumed.lock().unwrap().clone(), vec![None, None]);
+}
+
+#[tokio::test]
+async fn a_second_task_in_one_conversation_resumes_the_first_ones_session() {
+    // What makes the copilot pane a chat rather than a series of unrelated
+    // requests: the second instruction reaches the session that ran the first.
+    let resumed = Arc::new(StdMutex::new(Vec::new()));
+    let (send, _recorded) = recording_send();
+    let runtime = DaemonRuntime::new(
+        base_config(),
+        resume_runner(resumed.clone(), "sess-1"),
+        send,
+    );
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(conversation_frame("t1", "add a step", "pane-1")),
+    );
+    runtime.idle().await;
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(conversation_frame("t2", "now the other one", "pane-1")),
+    );
+    runtime.idle().await;
+
+    assert_eq!(
+        resumed.lock().unwrap().clone(),
+        vec![None, Some("sess-1".to_string())],
+        "the first turn opens a session; the second continues it"
+    );
+}
+
+#[tokio::test]
+async fn two_conversations_from_one_peer_stay_separate() {
+    // Two workflows open side by side are two panes, and an operator does not
+    // expect an instruction about one to land in the other's context.
+    let resumed = Arc::new(StdMutex::new(Vec::new()));
+    let (send, _recorded) = recording_send();
+    let runtime = DaemonRuntime::new(
+        base_config(),
+        resume_runner(resumed.clone(), "sess-1"),
+        send,
+    );
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(conversation_frame("t1", "a", "pane-1")),
+    );
+    runtime.idle().await;
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(conversation_frame("t2", "b", "pane-2")),
+    );
+    runtime.idle().await;
+
+    assert_eq!(resumed.lock().unwrap().clone(), vec![None, None]);
+}
+
+#[tokio::test]
+async fn one_peer_cannot_resume_another_peers_conversation() {
+    // The frame body cannot be trusted to name its own author, so the
+    // conversation is scoped to the authenticated sender. Without that scoping
+    // any peer could name "pane-1" and resume into a session holding someone
+    // else's context.
+    let resumed = Arc::new(StdMutex::new(Vec::new()));
+    let (send, _recorded) = recording_send();
+    let runtime = DaemonRuntime::new(
+        base_config(),
+        resume_runner(resumed.clone(), "sess-1"),
+        send,
+    );
+
+    runtime.handle_message(
+        "peer-alice".into(),
+        String::new(),
+        Some(conversation_frame("t1", "a", "pane-1")),
+    );
+    runtime.idle().await;
+    runtime.handle_message(
+        "peer-mallory".into(),
+        String::new(),
+        Some(conversation_frame("t2", "b", "pane-1")),
+    );
+    runtime.idle().await;
+
+    assert_eq!(resumed.lock().unwrap().clone(), vec![None, None]);
 }

@@ -133,6 +133,13 @@ pub(super) struct Inner {
     /// Kept outside the immutable config so the daemon TUI can change the
     /// allowlist without restarting the worker.
     pub(super) accessible_dirs: StdMutex<Vec<String>>,
+    /// Harness sessions bound to the conversations tasks have named.
+    ///
+    /// Empty for the whole life of a daemon serving only ordinary tasks: a task
+    /// frame names no conversation, so nothing is ever recorded and every task
+    /// runs context-free. It fills only for senders that opt in — today, the
+    /// workflow copilot, whose pane is one conversation.
+    pub(super) sessions: crate::sessions::SessionRegistry,
 }
 
 /// The provider-agnostic daemon task state machine. Cheap to clone (an `Arc`),

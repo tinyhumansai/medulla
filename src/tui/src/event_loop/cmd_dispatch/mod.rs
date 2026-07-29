@@ -12,9 +12,27 @@ use medulla_tui::ui::app::Cmd;
 
 use super::AppMsg;
 
+#[cfg(feature = "workflows")]
+mod copilot_hosts;
 mod tasks;
 #[cfg(feature = "workflows")]
 mod workflows;
+
+/// Move a copilot conversation onto the id of the workflow it just created.
+///
+/// Exposed here rather than reached into directly so the event loop has one
+/// door into the host cache, matching how it reaches every other spawned
+/// concern in this module.
+#[cfg(feature = "workflows")]
+pub(super) fn adopt_copilot_host(thread: &str, created: &str) {
+    copilot_hosts::rename(thread, created);
+}
+
+/// End a copilot conversation whose workflow no longer exists.
+#[cfg(feature = "workflows")]
+pub(super) fn close_copilot_host(thread: &str) {
+    copilot_hosts::forget(thread);
+}
 
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so

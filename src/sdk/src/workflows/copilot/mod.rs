@@ -51,6 +51,13 @@ pub struct CopilotOutcome {
     ///
     /// [`create`]: CopilotSession::create
     pub created: Option<String>,
+    /// Whether the workflow this turn was scoped to no longer exists.
+    ///
+    /// Reported as a flag rather than left for the caller to spot in
+    /// [`changes`](Self::changes): a caller that has to sniff a rendered
+    /// transcript line to learn a fact is one refactor away from missing it,
+    /// and what hangs on this is releasing the resources the workflow held.
+    pub removed: bool,
 }
 
 /// Everything a turn needs to reach a harness.
@@ -65,6 +72,18 @@ pub struct CopilotSession {
     pub provider: Option<crate::tinyplace::HarnessProvider>,
     /// Optional model hint.
     pub model: Option<String>,
+    /// The continuity group this pane's turns share.
+    ///
+    /// The whole reason the copilot reads as a chat rather than a series of
+    /// unrelated requests. Without it "now do the same to the other node" could
+    /// not work: every turn would be a fresh harness session that had never seen
+    /// the last instruction, and the operator would have to restate the context
+    /// every time.
+    ///
+    /// One key per pane, so two workflows being edited side by side keep
+    /// separate conversations — which is what the operator means by having two
+    /// panes.
+    pub conversation: String,
 }
 
 impl CopilotSession {
@@ -101,25 +120,27 @@ impl CopilotSession {
             // Never a workflow: this dispatch is an *authoring* turn, and
             // setting this would run the graph the operator is trying to edit.
             workflow: None,
+            conversation: Some(self.conversation.clone()),
         };
 
         let outcome = self.dispatch.dispatch_with_status(request, status).await?;
 
         // Re-read rather than trusting the reply: the tools wrote to the store,
         // and the store is the only thing that knows what they wrote.
-        let changes = match self.store.get(workflow_id) {
-            Ok(Some(after)) => diff::describe(&before, &after),
+        let (changes, removed) = match self.store.get(workflow_id) {
+            Ok(Some(after)) => (diff::describe(&before, &after), false),
             // Gone. Reported explicitly rather than as "no changes": the caller
             // only refreshes the catalogue when something changed, so a silent
             // deletion would leave the workflow on screen after it stopped
             // existing.
-            Ok(None) => vec![format!("− workflow {workflow_id}")],
+            Ok(None) => (vec![format!("− workflow {workflow_id}")], true),
             Err(err) => return Err(err),
         };
         Ok(CopilotOutcome {
             reply: outcome.reply.trim().to_string(),
             changes,
             created: None,
+            removed,
         })
     }
 
@@ -159,6 +180,7 @@ impl CopilotSession {
             // Never a workflow, for the same reason an edit is not: this is an
             // authoring turn, not a run.
             workflow: None,
+            conversation: Some(self.conversation.clone()),
         };
 
         let outcome = self.dispatch.dispatch_with_status(request, status).await?;
@@ -180,6 +202,9 @@ impl CopilotSession {
                 .map(|id| format!("+ workflow {id}"))
                 .collect(),
             created: created.into_iter().next(),
+            // A create turn is scoped to no existing workflow, so there is
+            // nothing it could have removed.
+            removed: false,
         })
     }
 

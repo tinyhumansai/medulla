@@ -64,6 +64,16 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .filter(|id| !id.is_empty())
         .map(str::to_string);
 
+    // Blank is absent, for the same reason a blank workflow id is: an encoder
+    // that always writes the key must not put every task into a conversation
+    // named "" — which would be one shared context for every unrelated sender.
+    let conversation = obj
+        .get("conversation")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
         kind,
@@ -75,6 +85,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         provider,
         model,
         workflow,
+        conversation,
         usage,
         work,
     })

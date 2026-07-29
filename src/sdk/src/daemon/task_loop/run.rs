@@ -178,12 +178,41 @@ impl DaemonRuntime {
             }) as Box<dyn FnOnce(mpsc::UnboundedSender<String>) + Send>
         };
 
+        // The conversation this task belongs to, if it named one. Scoped to the
+        // *authenticated* sender rather than taken bare from the frame: the
+        // frame body cannot be trusted to name its own author, so without this
+        // one peer could name another's conversation and resume into a session
+        // holding someone else's context.
+        let session_key = frame.conversation.as_deref().map(|conversation| {
+            crate::sessions::SessionKey::new(format!("{from}/{conversation}"), provider)
+        });
+        // An `Unbound` class because these turns are a conversation, not
+        // discrete work — that is the whole of what the sender opted into. The
+        // registry still declines to resume a provider that cannot
+        // (`opencode`), which costs continuity but never correctness.
+        let plan = session_key.as_ref().map(|key| {
+            self.inner
+                .sessions
+                .plan(key, crate::sessions::SessionClass::Unbound)
+        });
+        let resume_session_id = plan
+            .as_ref()
+            .and_then(|plan| plan.resume_session_id.clone());
+
         // Reported as soon as the executor opens a session, not with the
         // result: the point of knowing it is to watch the task while it runs.
         let on_session = {
             let this = self.clone();
             let key = key.clone();
+            let session_key = session_key.clone();
             Box::new(move |session_id: String| {
+                // Bind before the turn finishes. A turn that opens a session and
+                // then times out has still moved the conversation on, and the
+                // next instruction has to resume *that* session rather than
+                // starting a third one the operator never sees.
+                if let Some(session_key) = &session_key {
+                    this.inner.sessions.record(session_key, session_id.clone());
+                }
                 this.record_task_session(&key, session_id);
             }) as Box<dyn FnOnce(String) + Send>
         };
@@ -193,7 +222,7 @@ impl DaemonRuntime {
             // frame cannot be trusted to name its own author, and this value
             // decides which session serves the task and whose context it may see.
             conversation: from.clone(),
-            resume_session_id: None,
+            resume_session_id,
             provider,
             prompt: frame.text.clone(),
             cwd: self.inner.config.workspace.clone(),

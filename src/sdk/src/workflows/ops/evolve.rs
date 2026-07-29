@@ -128,8 +128,8 @@ pub async fn propose(
 
     // A workflow with two undecided proposals asks an operator to hold both in
     // their head at once, and the older one was written from less evidence.
-    supersede_earlier(store, &proposal)?;
     store.save_proposal(&proposal)?;
+    supersede_earlier(store, &proposal)?;
 
     Ok(json!({
         "proposed": proposal.id,

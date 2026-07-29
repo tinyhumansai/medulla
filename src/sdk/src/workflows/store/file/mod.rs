@@ -96,6 +96,12 @@ pub struct FileWorkflowStore {
     journal_dir: PathBuf,
     /// Where proposed graph changes are written, awaiting an operator.
     proposals_dir: PathBuf,
+    /// Stable identity for in-process decisions and evolution claims.
+    ///
+    /// Derived from the persistent proposal directory rather than this
+    /// object's address because daemon tasks construct independent store
+    /// instances over the same on-disk state.
+    decision_scope: String,
     /// Serializes `save`/`delete` against each other on *this store instance*.
     ///
     /// Both are read-modify-write: read what a save would supersede or what a
@@ -127,11 +133,13 @@ impl FileWorkflowStore {
             .parent()
             .map(|state| state.join("proposals"))
             .unwrap_or_else(|| PathBuf::from("proposals"));
+        let decision_scope = file_store_scope(&proposals_dir);
         Self {
             dirs,
             runs_dir,
             journal_dir,
             proposals_dir,
+            decision_scope,
             write_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -141,11 +149,13 @@ impl FileWorkflowStore {
     /// The explicit form of [`FileWorkflowStore::new`], for callers that know
     /// where state belongs rather than only where runs go.
     pub fn with_state(dirs: Vec<PathBuf>, state_dir: &Path) -> Self {
+        let proposals_dir = state_dir.join("proposals");
         Self {
             dirs,
             runs_dir: state_dir.join("runs"),
             journal_dir: state_dir.join("journal"),
-            proposals_dir: state_dir.join("proposals"),
+            decision_scope: file_store_scope(&proposals_dir),
+            proposals_dir,
             write_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -306,7 +316,16 @@ fn absolute_path(path: &Path) -> PathBuf {
         .join(path)
 }
 
+/// A stable process-local key for every store instance over `proposals_dir`.
+fn file_store_scope(proposals_dir: &Path) -> String {
+    format!("file:{}", absolute_path(proposals_dir).to_string_lossy())
+}
+
 impl WorkflowStore for FileWorkflowStore {
+    fn proposal_decision_scope(&self) -> String {
+        self.decision_scope.clone()
+    }
+
     fn list(&self) -> Result<Vec<WorkflowSummary>, WorkflowError> {
         Ok(self
             .load()

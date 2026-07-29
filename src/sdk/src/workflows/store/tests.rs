@@ -13,6 +13,7 @@ use serde_json::json;
 
 use super::file::{new_run_record, parse_workflow, validate_graph, workflow_dirs};
 use super::{require, require_run, rollback, undo_last, FileWorkflowStore, WorkflowStore};
+use crate::workflows::evolve::EvolveGuard;
 use crate::workflows::types::{RunStatus, WorkflowError, WorkflowRecord};
 use crate::workflows::NoteSource;
 
@@ -74,6 +75,25 @@ fn discovered_stores_isolate_evolution_state_by_workspace() {
 
     assert_eq!(store_a.list_notes("deploy").unwrap().len(), 1);
     assert!(store_b.list_notes("deploy").unwrap().is_empty());
+}
+
+#[test]
+fn independent_instances_over_the_same_state_share_evolution_claims() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let dirs = vec![root.path().join("workflows")];
+    let first = FileWorkflowStore::with_state(dirs.clone(), &state);
+    let second = FileWorkflowStore::with_state(dirs, &state);
+    let first_scope = first.proposal_decision_scope();
+    let second_scope = second.proposal_decision_scope();
+
+    assert_eq!(first_scope, second_scope);
+    let _guard =
+        EvolveGuard::claim(&first_scope, "deploy").expect("the first store instance claims it");
+    assert!(
+        EvolveGuard::claim(&second_scope, "deploy").is_none(),
+        "another instance over the same state must not start a duplicate review"
+    );
 }
 
 #[test]

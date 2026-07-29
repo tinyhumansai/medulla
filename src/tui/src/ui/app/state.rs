@@ -130,6 +130,7 @@ impl App {
             host_obs: None,
             harnesses: None,
             harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
+            harness_pane_session: None,
             copy_capture: None,
         }
     }

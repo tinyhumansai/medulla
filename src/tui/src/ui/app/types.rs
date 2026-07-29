@@ -663,4 +663,9 @@ pub struct App {
     // `Chrome` whenever the attached session stops being the selected one, so
     // the operator's keys can never land in a harness they are not looking at.
     pub(super) harness_focus: crate::ui::harness_pane::HarnessFocus,
+    // The harness session the Agents pane resolved on the last draw, and the
+    // only one the attach chord can act on. Recorded during render because that
+    // is where the rail cursor is turned into a selection; cleared at the top of
+    // every draw so it can never name a pane that is no longer on screen.
+    pub(super) harness_pane_session: Option<String>,
 }

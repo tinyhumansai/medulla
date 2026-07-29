@@ -24,11 +24,31 @@ use super::types::Selection;
 impl App {
     /// Draw the transcript or declaration for whatever the cursor is on.
     pub(super) fn draw_agents_pane(&mut self, f: &mut Frame, area: Rect, selection: &Selection) {
-        // A watched screen supersedes the transcript. The transcript says what a
-        // worker reported; the screen shows what it is actually doing —
-        // including the states it never reports at all, like a harness stopped
-        // on a permission dialog, which writes no transcript records and so
-        // reads as "thinking" until the task times out.
+        // A screen supersedes the transcript. The transcript says what a worker
+        // reported; the screen shows what it is actually doing — including the
+        // states it never reports at all, like a harness stopped on a permission
+        // dialog, which writes no transcript records and so reads as "thinking"
+        // until the task times out.
+        //
+        // Local first: a harness running on this device is *here*, read straight
+        // out of its emulator every frame and typeable. A remote worker's screen
+        // is the same picture arrived over the wire, sampled and diffed, and
+        // read-only. When both somehow name the selection, the live one wins.
+        let local = self.local_harness_session(selection);
+        // Focus follows the pane, not the other way round. If the cursor moved
+        // off the attached session — or that session ended — the keyboard comes
+        // back to the chrome, because keys landing in a harness the operator is
+        // no longer looking at is the worst failure this feature can have.
+        if let Some(attached) = self.harness_focus.attached_to() {
+            if local.as_deref() != Some(attached) {
+                self.release_harness();
+            }
+        }
+        self.harness_pane_session = local.clone();
+        if let Some(session_id) = local {
+            self.draw_local_harness(f, area, &session_id);
+            return;
+        }
         if let Some(screen) = self.selected_screen(selection) {
             self.draw_worker_screen(f, area, &screen);
             return;

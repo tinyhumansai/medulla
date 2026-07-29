@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use medulla::bridge::LocalBridgeNetwork;
 use medulla::config::HostSection;
 use medulla::tinyplace::HarnessProvider;
+use medulla_tui::worker::pty::PtyManager;
 
 use super::{host_address, host_enabled, options_from_config, start};
 
@@ -133,7 +134,14 @@ async fn hosting_switched_off_is_a_choice_not_an_error() {
     let options = options_from_config(&config, &env_with_only_claude(), None, None, None)
         .expect("valid config");
 
-    let host = start(&config, &HashMap::new(), &network, options).unwrap();
+    let host = start(
+        &config,
+        &HashMap::new(),
+        &network,
+        options,
+        PtyManager::new(),
+    )
+    .unwrap();
 
     assert!(host.is_none());
     // Nothing was bound, so the address is still free for a later run.
@@ -147,9 +155,15 @@ async fn a_started_host_advertises_this_machine_to_the_hub() {
     let env = env_with_only_claude();
     let options = options_from_config(&config, &env, None, None, None).expect("valid config");
 
-    let host = start(&config, &HashMap::new(), &network, options)
-        .unwrap()
-        .expect("hosting is on by default");
+    let host = start(
+        &config,
+        &HashMap::new(),
+        &network,
+        options,
+        PtyManager::new(),
+    )
+    .unwrap()
+    .expect("hosting is on by default");
 
     assert_eq!(host.address(), "this-device");
     assert_eq!(host.providers(), [HarnessProvider::Claude]);
@@ -181,6 +195,7 @@ async fn a_second_host_on_one_address_is_refused_rather_than_splitting_the_inbox
         &HashMap::new(),
         &network,
         options_from_config(&config, &env, None, None, None).expect("valid config"),
+        PtyManager::new(),
     )
     .unwrap()
     .expect("the first host starts");
@@ -190,6 +205,7 @@ async fn a_second_host_on_one_address_is_refused_rather_than_splitting_the_inbox
         &HashMap::new(),
         &network,
         options_from_config(&config, &env, None, None, None).expect("valid config"),
+        PtyManager::new(),
     )
     .unwrap_err();
 

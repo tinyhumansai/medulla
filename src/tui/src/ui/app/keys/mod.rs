@@ -21,6 +21,7 @@ use crate::ui::composer::{
 };
 
 mod agents;
+mod harness;
 mod routing;
 mod settings;
 mod tasks;
@@ -43,6 +44,15 @@ impl App {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
+
+        // An attached harness owns the keyboard outright — ahead of the
+        // overlays and the quit chord both. Anything less is not a terminal:
+        // the operator would be typing into Claude Code with a handful of keys
+        // mysteriously reserved, and `Ctrl-C` (interrupt the harness) would quit
+        // the orchestrator instead.
+        if self.handle_harness_key(k) {
+            return None;
+        }
 
         // Resume picker owns navigation while open.
         if self.resume_picker.is_some() {

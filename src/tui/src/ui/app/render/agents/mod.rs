@@ -24,6 +24,7 @@ use super::super::rail::RailRow;
 use super::super::types::App;
 
 mod composer;
+mod harness;
 mod rail;
 mod transcript;
 mod types;

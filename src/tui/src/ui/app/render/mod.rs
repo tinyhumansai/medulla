@@ -284,6 +284,12 @@ impl App {
     /// "which backend am I on, and what is it doing" is a glance-down check.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
+        // The harness pane is resolved during the draw and read by the *next*
+        // key press, so it has to be cleared here rather than left over: a
+        // `Ctrl-]` on the Settings tab must not attach to whatever the Agents
+        // tab was showing several frames ago. `draw_agents_pane` fills it back
+        // in when it resolves a session.
+        self.harness_pane_session = None;
         // The composer now lives inside the Agents pane, so the only things that
         // still claim a row of their own below the content are the inline prompt
         // and the resume picker.
@@ -453,6 +459,23 @@ impl App {
         let workflows = self.tab() == "Workflows";
         #[cfg(not(feature = "workflows"))]
         let workflows = false;
+        // An attached harness has swallowed every other binding, so advertising
+        // them would be a lie. One key is live, and it is the one that gets the
+        // keyboard back.
+        if self.harness_focus.attached_to().is_some() {
+            f.render_widget(
+                Paragraph::new(TLine::from(Span::styled(
+                    format!(
+                        "Typing into the harness — every key goes to it · {} releases the keyboard",
+                        crate::ui::harness_pane::FOCUS_CHORD_LABEL
+                    ),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )))
+                .wrap(Wrap { trim: true }),
+                area,
+            );
+            return;
+        }
         let text = if self.tab() == "TokenMaxxxing" && self.tokenmaxxxing_is_production() {
             "Tab views · TokenMaxxxing coming soon"
         } else if self.tab() == "TokenMaxxxing" {
@@ -460,7 +483,7 @@ impl App {
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
         } else {
-            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
+            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^] harness"
         };
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(

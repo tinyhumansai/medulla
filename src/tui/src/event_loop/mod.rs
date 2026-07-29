@@ -50,6 +50,7 @@ pub(crate) async fn run(
         mut sharing,
         onboarding_path,
         host,
+        harnesses,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
@@ -60,6 +61,9 @@ pub(crate) async fn run(
     }
     if let Some(host) = host {
         app.set_host_observation(host);
+    }
+    if let Some(harnesses) = harnesses {
+        app.set_local_harnesses(harnesses);
     }
     if let Some(status) = startup_status {
         app.set_status(status);

@@ -12,12 +12,21 @@
 //! for this device is delivered in-process and everything else still goes to
 //! remote workers over tiny.place. Configuration is the `[host]` section, with
 //! `MEDULLA_HOST=0` as the single-run kill switch.
+//!
+//! Tasks run in **watchable** harness sessions
+//! ([`PtySessionExecutor`](medulla_tui::worker::executor::PtySessionExecutor)),
+//! the same executor the worker daemon's `--tui` mode uses. The headless
+//! `-p --output-format stream-json` executor is no longer selected here: it
+//! suppresses the very interface the Agents tab now renders, so choosing it
+//! would leave that pane with nothing to show.
 
 use medulla::bridge::{Bridge, LocalBridgeNetwork};
 use medulla::config::HostSection;
-use medulla::daemon::embedded::{EmbeddedDaemon, EmbeddedDaemonOptions};
+use medulla::daemon::embedded::{resolve_workspace, EmbeddedDaemon, EmbeddedDaemonOptions};
 use medulla::hub::WorkerSpec;
 use medulla::tinyplace::HarnessProvider;
+use medulla_tui::worker::executor::PtySessionExecutor;
+use medulla_tui::worker::pty::PtyManager;
 use std::collections::HashMap;
 
 mod types;
@@ -144,11 +153,20 @@ fn spec_for(daemon: &EmbeddedDaemon) -> WorkerSpec {
 /// than a failure. An `Err` means hosting was wanted and could not happen — no
 /// agent CLI installed, or the address already bound — and the caller surfaces
 /// it, because an orchestrator with no host silently does nothing at all.
+///
+/// Tasks run in **live harness sessions** on `sessions`, not in headless
+/// one-shots. That is the whole difference between this and the old embedded
+/// host: `claude`/`codex` are started the way a human starts them — no `-p`, no
+/// `--output-format` — so they paint their own interface, and the Agents tab
+/// renders that interface instead of a transcript reconstructed from JSON. The
+/// manager is passed in rather than built here because the UI needs the same
+/// one to read screens from and type into.
 pub(crate) fn start(
     config: &HostSection,
     env: &HashMap<String, String>,
     network: &LocalBridgeNetwork,
     options: EmbeddedDaemonOptions,
+    sessions: PtyManager,
 ) -> Result<Option<LocalHost>, String> {
     if !host_enabled(config, env) {
         return Ok(None);
@@ -157,10 +175,18 @@ pub(crate) fn start(
     let bridge = network
         .bind(&address)
         .map_err(|e| format!("could not host on this device ({e})"))?;
-    let daemon = EmbeddedDaemon::start(
+    // The executor is built before the host, so it cannot ask the host where
+    // tasks will run; it resolves the same configured workspace the host is
+    // about to resolve. The two must agree — this is the directory the session
+    // tailer searches for the harness's transcript.
+    let executor =
+        PtySessionExecutor::new(sessions, env.clone(), resolve_workspace(&options.workspace))
+            .into_run_task();
+    let daemon = EmbeddedDaemon::start_with_executor(
         std::sync::Arc::new(bridge) as std::sync::Arc<dyn Bridge>,
         &address,
         options,
+        executor,
     )?;
     let spec = spec_for(&daemon);
     Ok(Some(LocalHost { daemon, spec }))

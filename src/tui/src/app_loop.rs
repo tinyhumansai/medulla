@@ -356,6 +356,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // registers with the backend has to name this host from the first moment, or
     // the orchestrator's opening move has nowhere to send work.
     let local_network = medulla::bridge::LocalBridgeNetwork::new();
+    // Every harness this device runs lives here, on a real pseudo-terminal with
+    // its screen parsed by an emulator. Built out here rather than inside the
+    // host because both halves need it: the host's executor opens sessions in
+    // it, and the Agents tab reads their screens out of it and types into them.
+    // It outlives each session (a relogin rebuilds those), so a harness the
+    // operator is watching is not torn down by an unrelated re-auth.
+    let harness_sessions = medulla_tui::worker::pty::PtyManager::new();
     // A bad `[host]` section is reported exactly like a failed start: this
     // machine does not host, and the operator is told why. `and_then` keeps the
     // two failure kinds — unparseable config, unstartable host — on one path.
@@ -367,7 +374,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         Some(hub_logs.sink()),
     )
     .and_then(|options| {
-        crate::local_host::start(&loaded.config.host, &env, &local_network, options)
+        crate::local_host::start(
+            &loaded.config.host,
+            &env,
+            &local_network,
+            options,
+            harness_sessions.clone(),
+        )
     }) {
         Ok(host) => host,
         Err(e) => {
@@ -391,6 +404,17 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             host.workspace()
         ));
     }
+    // Only meaningful with a host: with hosting off nothing runs here, so there
+    // is no local screen to resolve and the Agents tab keeps its remote/
+    // transcript behaviour unchanged.
+    let local_harnesses =
+        local_host
+            .as_ref()
+            .map(|host| medulla_tui::ui::harness_pane::LocalHarnesses {
+                sessions: harness_sessions.clone(),
+                runtime: host.runtime(),
+                hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
+            });
     let local_dispatch = crate::hub_relay::LocalDispatch {
         network: local_network,
         hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
@@ -435,6 +459,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 sharing: sharing.take(),
                 onboarding_path: active_config_path.clone(),
                 host: local_host.as_ref().map(|host| host.observation()),
+                harnesses: local_harnesses.clone(),
             },
         )
         .await;

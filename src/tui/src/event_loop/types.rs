@@ -98,4 +98,12 @@ pub(crate) struct SessionWiring {
     /// A read-only view of the host running on this device, when one is. `None`
     /// means this machine orchestrates but does not run the work itself.
     pub host: Option<medulla::daemon::embedded::HostObservation>,
+    /// The live harness sessions this device is running, and the state machine
+    /// that says which task each one serves.
+    ///
+    /// `None` when this machine does not host: there are no local harnesses to
+    /// show, and the Agents tab falls back to a remote worker's streamed screen
+    /// or to the transcript. Shared with the host's executor — the sessions it
+    /// opens are the ones rendered here.
+    pub harnesses: Option<medulla_tui::ui::harness_pane::LocalHarnesses>,
 }

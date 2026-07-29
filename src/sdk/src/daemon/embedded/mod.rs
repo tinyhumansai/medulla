@@ -215,7 +215,14 @@ impl EmbeddedDaemon {
 /// An unresolvable path is kept verbatim rather than rejected: the daemon
 /// reports a bad working directory per task, which names the failing task, and
 /// that is more useful than refusing to start the host at all.
-fn resolve_workspace(configured: &str) -> String {
+///
+/// Public because a caller supplying its own executor via
+/// [`EmbeddedDaemon::start_with_executor`] has a chicken-and-egg problem: the
+/// executor is built *before* the host, but a session-backed one needs the same
+/// resolved workspace the host will run tasks in. Exposing the resolution is
+/// what keeps the two from disagreeing — the alternative is every embedder
+/// reimplementing this and canonicalizing slightly differently.
+pub fn resolve_workspace(configured: &str) -> String {
     let path = match configured.trim() {
         "" => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         value => std::path::PathBuf::from(value),

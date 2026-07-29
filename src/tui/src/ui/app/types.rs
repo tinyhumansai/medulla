@@ -655,4 +655,12 @@ pub struct App {
     // move on the host's own schedule, and the snapshot is the *runtime's*
     // picture of the world — the host is a peer to it, not part of it.
     pub(super) host_obs: Option<medulla::daemon::embedded::HostObservation>,
+    // The live harness sessions this device is running. `None` when this machine
+    // does not host, in which case the Agents tab has no local screen to show
+    // and falls back to a remote worker's streamed one, or to the transcript.
+    pub(super) harnesses: Option<crate::ui::harness_pane::LocalHarnesses>,
+    // Which of the TUI and the selected harness owns the keyboard. Reset to
+    // `Chrome` whenever the attached session stops being the selected one, so
+    // the operator's keys can never land in a harness they are not looking at.
+    pub(super) harness_focus: crate::ui::harness_pane::HarnessFocus,
 }

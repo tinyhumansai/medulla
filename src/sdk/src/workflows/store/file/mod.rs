@@ -90,12 +90,8 @@ pub struct FileWorkflowStore {
     /// so every clone of this store shares the one lock rather than each
     /// getting its own and serializing nothing.
     ///
-    /// Scoped to a process, not a filesystem: two *separate* store instances
-    /// (a `medulla workflow` CLI invocation racing a running daemon) are not
-    /// covered by this, the same limitation `write_atomic`'s rename already
-    /// has. Closing that would need real cross-process file locking, which is
-    /// a larger change than this store's current single-writer-per-process
-    /// deployment shape calls for.
+    /// Separate store instances and processes additionally synchronize through
+    /// the per-workflow file lock acquired by every definition writer.
     write_lock: Arc<Mutex<()>>,
 }
 
@@ -236,6 +232,42 @@ impl FileWorkflowStore {
             .runs_dir
             .join(format!("{}.json", safe_component(run_id)?)))
     }
+
+    /// Run one workflow definition mutation while holding its filesystem lock.
+    fn with_definition_lock<T>(
+        &self,
+        workflow_id: &str,
+        operation: impl FnOnce() -> Result<T, WorkflowError>,
+    ) -> Result<T, WorkflowError> {
+        std::fs::create_dir_all(self.write_dir()).map_err(|source| WorkflowError::Io {
+            path: self.write_dir().to_path_buf(),
+            source,
+        })?;
+        let lock_path = self
+            .write_dir()
+            .join(format!(".{}.lock", safe_component(workflow_id)?));
+        let file_lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|source| WorkflowError::Io {
+                path: lock_path.clone(),
+                source,
+            })?;
+        file_lock
+            .lock_exclusive()
+            .map_err(|source| WorkflowError::Io {
+                path: lock_path.clone(),
+                source,
+            })?;
+        let result = operation();
+        if let Err(source) = FileExt::unlock(&file_lock) {
+            tracing::warn!(path = %lock_path.display(), "failed to release workflow lock: {source}");
+        }
+        result
+    }
 }
 
 impl WorkflowStore for FileWorkflowStore {
@@ -264,20 +296,22 @@ impl WorkflowStore for FileWorkflowStore {
             // every future save failing too.
             poison.into_inner()
         });
-        // The id decides a filename, so it is checked before anything else:
-        // a document's own `id` overrides what the caller asked for, and a
-        // document may have been written by an agent.
-        let path = self.definition_path(&record.id)?;
-        // Validate before writing so a listing can be trusted to be runnable.
-        validate_graph(&record.id, &record.graph)?;
-        let document = to_document(record)?;
-        // Snapshot what is about to be replaced, before replacing it. Doing it
-        // here rather than at each call site is what makes every authoring
-        // surface undoable without any of them having to opt in.
-        if let Some(superseded) = self.superseded_by(&path, &record.id)? {
-            revisions::capture(self.write_dir(), &superseded)?;
-        }
-        write_atomic(&path, &document)
+        self.with_definition_lock(&record.id, || {
+            // The id decides a filename, so it is checked before anything else:
+            // a document's own `id` overrides what the caller asked for, and a
+            // document may have been written by an agent.
+            let path = self.definition_path(&record.id)?;
+            // Validate before writing so a listing can be trusted to be runnable.
+            validate_graph(&record.id, &record.graph)?;
+            let document = to_document(record)?;
+            // Snapshot what is about to be replaced, before replacing it. Doing it
+            // here rather than at each call site is what makes every authoring
+            // surface undoable without any of them having to opt in.
+            if let Some(superseded) = self.superseded_by(&path, &record.id)? {
+                revisions::capture(self.write_dir(), &superseded)?;
+            }
+            write_atomic(&path, &document)
+        })
     }
 
     fn save_if_fingerprint(
@@ -289,45 +323,20 @@ impl WorkflowStore for FileWorkflowStore {
             .write_lock
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        std::fs::create_dir_all(self.write_dir()).map_err(|source| WorkflowError::Io {
-            path: self.write_dir().to_path_buf(),
-            source,
-        })?;
-        let lock_path = self
-            .write_dir()
-            .join(format!(".{}.lock", paths::safe_component(&record.id)?));
-        let file_lock = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-            .map_err(|source| WorkflowError::Io {
-                path: lock_path.clone(),
-                source,
-            })?;
-        file_lock
-            .lock_exclusive()
-            .map_err(|source| WorkflowError::Io {
-                path: lock_path.clone(),
-                source,
-            })?;
-        let Some(current) = self.get(&record.id)? else {
-            return Ok(false);
-        };
-        if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
-            return Ok(false);
-        }
-        let path = self.definition_path(&record.id)?;
-        validate_graph(&record.id, &record.graph)?;
-        let document = to_document(record)?;
-        revisions::capture(self.write_dir(), &current)?;
-        write_atomic(&path, &document)?;
-        FileExt::unlock(&file_lock).map_err(|source| WorkflowError::Io {
-            path: lock_path,
-            source,
-        })?;
-        Ok(true)
+        self.with_definition_lock(&record.id, || {
+            let Some(current) = self.get(&record.id)? else {
+                return Ok(false);
+            };
+            if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
+                return Ok(false);
+            }
+            let path = self.definition_path(&record.id)?;
+            validate_graph(&record.id, &record.graph)?;
+            let document = to_document(record)?;
+            revisions::capture(self.write_dir(), &current)?;
+            write_atomic(&path, &document)?;
+            Ok(true)
+        })
     }
 
     fn delete(&self, id: &str) -> Result<(), WorkflowError> {
@@ -337,24 +346,26 @@ impl WorkflowStore for FileWorkflowStore {
             .write_lock
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        // Delete wherever it was found, not only in the write directory: an
-        // operator asking to remove a workflow they can see means the one they
-        // can see.
-        let existing = self
-            .load()
-            .workflows
-            .into_iter()
-            .find(|w| w.id == id)
-            .ok_or_else(|| WorkflowError::NotFound(id.to_string()))?;
-        let path = match existing.source_path.clone() {
-            Some(path) => path,
-            None => self.definition_path(id)?,
-        };
-        // Snapshot before removing. A delete is the one edit that leaves
-        // nothing to diff against afterwards, so without this it is the one
-        // edit that cannot be undone.
-        revisions::capture(self.write_dir(), &existing)?;
-        std::fs::remove_file(&path).map_err(|source| WorkflowError::Io { path, source })
+        self.with_definition_lock(id, || {
+            // Delete wherever it was found, not only in the write directory: an
+            // operator asking to remove a workflow they can see means the one they
+            // can see.
+            let existing = self
+                .load()
+                .workflows
+                .into_iter()
+                .find(|w| w.id == id)
+                .ok_or_else(|| WorkflowError::NotFound(id.to_string()))?;
+            let path = match existing.source_path.clone() {
+                Some(path) => path,
+                None => self.definition_path(id)?,
+            };
+            // Snapshot before removing. A delete is the one edit that leaves
+            // nothing to diff against afterwards, so without this it is the one
+            // edit that cannot be undone.
+            revisions::capture(self.write_dir(), &existing)?;
+            std::fs::remove_file(&path).map_err(|source| WorkflowError::Io { path, source })
+        })
     }
 
     fn record_run(&self, run: &RunRecord) -> Result<(), WorkflowError> {

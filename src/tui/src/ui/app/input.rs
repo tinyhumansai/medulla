@@ -43,6 +43,26 @@ impl App {
             // fires here rather than on release so navigation stays immediate;
             // a drag that follows selects text without undoing it.
             MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(session) =
+                    self.harness_focus.attached_to().map(str::to_string)
+                {
+                    let inside_attached_pane = self
+                        .hit_harness
+                        .as_ref()
+                        .is_some_and(|(rect, id)| {
+                            id == &session && rect.contains((m.column, m.row).into())
+                        });
+                    if !inside_attached_pane {
+                        // A click that navigates away releases the same keyboard
+                        // focus as Ctrl-]. Settle the configured hand-back policy
+                        // before changing the selected tab or rail row; otherwise
+                        // an Ask prompt would refer to a pane already hidden.
+                        if !self.begin_harness_release(&session) {
+                            return None;
+                        }
+                        self.release_harness();
+                    }
+                }
                 self.drag_anchor = Some((m.column, m.row));
                 self.selection = None;
                 return self.handle_click(m.column, m.row);

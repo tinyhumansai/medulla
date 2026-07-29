@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -88,6 +90,15 @@ fn ctrl(c: char) -> Event {
 /// The focus chord, as a terminal actually delivers it.
 fn focus_chord() -> Event {
     Event::Key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL))
+}
+
+fn click(column: u16, row: u16) -> Event {
+    Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
 }
 
 fn type_str(app: &mut App, text: &str) {
@@ -348,6 +359,39 @@ fn escape_from_the_question_stays_attached() {
     assert_eq!(sessions.row(&id).unwrap().control, HarnessControl::User);
     let out = render(&mut app, 140, 44);
     assert!(!out.contains("You still have this harness"), "{out}");
+
+    sessions.shutdown();
+}
+
+#[test]
+fn clicking_away_from_an_attached_harness_honors_handback_policy() {
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = user_session(&sessions);
+    sessions.set_control(&id, HarnessControl::Orchestrator);
+
+    let _ = render(&mut app, 140, 44);
+    select_harness_row(&mut app);
+    let _ = render(&mut app, 140, 44);
+    let _ = app.on_event(focus_chord());
+    assert_eq!(sessions.row(&id).unwrap().control, HarnessControl::User);
+
+    // The Overview tab begins at column zero on the second screen row.
+    let _ = app.on_event(click(1, 1));
+    let out = render(&mut app, 140, 44);
+    assert!(
+        out.contains("You still have this harness"),
+        "pointer navigation must ask before hiding the held pane: {out}"
+    );
+    assert_eq!(app.attached_harness(), Some(id.as_str()));
+    assert_eq!(app.tab(), "Agents", "the pending release blocks navigation");
+
+    let _ = app.on_event(key(KeyCode::Char('y')));
+    assert_eq!(app.attached_harness(), None);
+    assert_eq!(
+        sessions.row(&id).unwrap().control,
+        HarnessControl::Orchestrator
+    );
 
     sessions.shutdown();
 }

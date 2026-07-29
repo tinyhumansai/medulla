@@ -497,6 +497,22 @@ fn workflow_flags_are_parsed_alongside_the_verb() {
     assert_eq!(parsed.input.as_deref(), Some("{\"n\":1}"));
     assert_eq!(parsed.run_id.as_deref(), Some("r9"));
     assert_eq!(parsed.config.as_deref(), Some("/tmp/c.toml"));
+
+    let missing = parse_workflow_args(&argv(&[
+        "note",
+        "sweep",
+        "--kind",
+        "--text",
+        "--reason",
+        "--supersedes",
+        "--run-id",
+        "r10",
+    ]));
+    assert_eq!(missing.kind, None);
+    assert_eq!(missing.text, None);
+    assert_eq!(missing.reason, None);
+    assert!(missing.supersedes.is_empty());
+    assert_eq!(missing.run_id.as_deref(), Some("r10"));
 }
 
 #[test]

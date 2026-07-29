@@ -162,7 +162,7 @@ pub fn parse_workspace_args(args: &[String]) -> WorkspaceArgs {
 pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
     let mut out = WorkflowArgs::default();
     let mut bare: Vec<String> = Vec::new();
-    let mut it = args.iter();
+    let mut it = args.iter().peekable();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--config" => {
@@ -181,24 +181,25 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
                 }
             }
             "--kind" => {
-                if let Some(v) = it.next() {
-                    out.kind = Some(v.clone());
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.kind = it.next().cloned();
                 }
             }
             "--text" => {
-                if let Some(v) = it.next() {
-                    out.text = Some(v.clone());
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.text = it.next().cloned();
                 }
             }
             "--reason" => {
-                if let Some(v) = it.next() {
-                    out.reason = Some(v.clone());
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.reason = it.next().cloned();
                 }
             }
             // Repeatable: one conclusion can replace several earlier guesses.
             "--supersedes" => {
-                if let Some(v) = it.next() {
-                    out.supersedes.push(v.clone());
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.supersedes
+                        .push(it.next().expect("peeked value exists").clone());
                 }
             }
             // Repeatable: a paused run may be holding more than one gate, and

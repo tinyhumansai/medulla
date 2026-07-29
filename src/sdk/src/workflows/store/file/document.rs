@@ -133,5 +133,9 @@ pub fn new_run_record(id: &str, workflow_id: &str, started_at: u64) -> RunRecord
         steps: Vec::new(),
         pending_approvals: Vec::new(),
         error: None,
+        // Both are evidence about a run that has ended, so a run that has only
+        // just started has neither. They are filled in when it settles.
+        summary: None,
+        diagnosis: None,
     }
 }

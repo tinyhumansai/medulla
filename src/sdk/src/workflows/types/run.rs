@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::workflow::WorkflowId;
+use crate::workflows::run::diagnose::Diagnosis;
 
 /// One run's identifier. Doubles as the engine checkpointer's `thread_id`, which
 /// is what makes a paused run resumable across process restarts.
@@ -80,4 +81,24 @@ pub struct RunRecord {
     /// Failure message, when the run failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// One line saying what this run did, written when it settled.
+    ///
+    /// The observer builds this to narrate the run live; keeping it means a
+    /// reader after the fact — an operator scanning history, an agent reviewing
+    /// what a workflow has been doing — gets the same sentence rather than
+    /// re-deriving a worse one from the steps.
+    ///
+    /// Absent on records written before this field existed, and on runs that
+    /// never settled through the engine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// What was wrong with the run beyond whether it failed.
+    ///
+    /// Null bindings, errors an `on_error` policy swallowed, and nodes that
+    /// never executed. Previously produced only for *dry* runs, which meant the
+    /// runs that actually mattered were the ones with no diagnosis at all.
+    ///
+    /// Absent on records written before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnosis: Option<Diagnosis>,
 }

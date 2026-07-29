@@ -305,20 +305,13 @@ fn trigger_input(text: &str) -> Value {
 }
 
 /// A one-line account of how a run ended, for the reply frame's text.
+///
+/// Delegates rather than phrasing its own: a run that is described one way in
+/// the reply frame and another way in its own record is a run an operator has
+/// to reconcile by hand.
 fn summarize(record: &crate::workflows::RunRecord) -> String {
-    let steps = record.steps.len();
-    match record.status {
-        RunStatus::Succeeded => format!("workflow completed {steps} steps"),
-        RunStatus::PendingApproval => format!(
-            "workflow paused after {steps} steps, awaiting approval: {}",
-            record.pending_approvals.join(", ")
-        ),
-        RunStatus::Cancelled => format!("workflow cancelled after {steps} steps"),
-        RunStatus::Interrupted => format!("workflow interrupted after {steps} steps"),
-        RunStatus::Failed => match &record.error {
-            Some(error) => format!("workflow failed after {steps} steps: {error}"),
-            None => format!("workflow failed after {steps} steps"),
-        },
-        RunStatus::Running => format!("workflow still running after {steps} steps"),
-    }
+    record
+        .summary
+        .clone()
+        .unwrap_or_else(|| crate::workflows::run::summarize(record))
 }

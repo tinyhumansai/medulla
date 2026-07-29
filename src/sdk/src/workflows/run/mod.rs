@@ -27,12 +27,14 @@
 
 pub mod diagnose;
 mod registry;
+mod summary;
 
 #[cfg(test)]
 mod tests;
 
 pub use diagnose::{diagnose, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding};
 pub use registry::{cancel, is_running, RunGuard};
+pub use summary::summarize;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,7 +45,7 @@ use crate::flow_engine::execute;
 use crate::flow_engine::observability::{WorkEventSink, WorkflowRunObserver};
 use crate::flow_engine::{build_capabilities, open_checkpointer, CapabilitySettings, HostServices};
 use crate::workflows::store::{new_run_record, require, require_run};
-use crate::workflows::{RunRecord, RunStatus, WorkflowError, WorkflowStore};
+use crate::workflows::{RunRecord, RunStatus, RunStep, WorkflowError, WorkflowStore};
 
 /// Everything one run needs beyond the workflow itself.
 pub struct RunContext {
@@ -202,6 +204,7 @@ pub async fn run_workflow(
             record.error = Some(message);
         }
     }
+    record_evidence(&mut record, &observer, &workflow.graph);
 
     finalizer.disarm();
     context.store.record_run(&record)?;
@@ -309,6 +312,7 @@ pub async fn resume_workflow(
 
     // Steps from this leg are appended: the record is the whole run's history,
     // not just its latest attempt.
+    let earlier_steps = record.steps.len();
     record.steps.extend(observer.steps());
     record.finished_at = Some(crate::clock::now_millis() as u64);
     match settled {
@@ -332,10 +336,65 @@ pub async fn resume_workflow(
             record.error = Some(message);
         }
     }
+    // A resumed leg only observed the nodes that ran *after* the gate, so its
+    // diagnosis would report every earlier node as one that never ran. Merged
+    // rather than replaced, for the same reason the steps are appended.
+    let resumed = diagnose::diagnose(&workflow.graph, &observer.execution_steps());
+    record.diagnosis = Some(match record.diagnosis.take() {
+        Some(earlier) => merge_diagnoses(earlier, resumed, &record.steps[..earlier_steps]),
+        None => resumed,
+    });
+    record.summary = observer
+        .summary()
+        .or_else(|| Some(summary::summarize(&record)));
 
     finalizer.disarm();
     context.store.record_run(&record)?;
     Ok(record)
+}
+
+/// Attach what the run *taught*, as distinct from whether it succeeded.
+///
+/// Called once the status is final, because the fallback summary reads the
+/// status to phrase itself. Both fields are additive and neither can fail, so
+/// this never has a say in whether a run is recorded.
+fn record_evidence(
+    record: &mut RunRecord,
+    observer: &WorkflowRunObserver,
+    graph: &tinyflows::model::WorkflowGraph,
+) {
+    // The observer's own sentence when it has one: it saw the engine settle and
+    // can count what actually ran. The fallback only knows the record.
+    record.summary = observer
+        .summary()
+        .or_else(|| Some(summary::summarize(record)));
+    record.diagnosis = Some(diagnose::diagnose(graph, &observer.execution_steps()));
+}
+
+/// Fold a resumed leg's diagnosis into the one from before the gate.
+///
+/// Findings accumulate, but `never_ran` is intersected with what the resumed
+/// leg still believes never ran, minus the nodes the earlier leg did run — a
+/// node that executed before the pause did execute, however blind this leg was
+/// to it.
+fn merge_diagnoses(
+    mut earlier: diagnose::Diagnosis,
+    resumed: diagnose::Diagnosis,
+    earlier_steps: &[RunStep],
+) -> diagnose::Diagnosis {
+    earlier.null_bindings.extend(resumed.null_bindings);
+    earlier.empty_prompts.extend(resumed.empty_prompts);
+    earlier.hidden_errors.extend(resumed.hidden_errors);
+    earlier.never_ran = resumed
+        .never_ran
+        .into_iter()
+        .filter(|missing| {
+            !earlier_steps
+                .iter()
+                .any(|step| step.node_id == missing.node_id)
+        })
+        .collect();
+    earlier
 }
 
 /// Validate a workflow by simulating it: every expression resolved, every

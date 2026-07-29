@@ -86,6 +86,8 @@ fn run_records_use_camel_case_on_the_wire() {
         }],
         pending_approvals: Vec::new(),
         error: None,
+        summary: None,
+        diagnosis: None,
     })
     .expect("a run record should serialize");
 
@@ -97,4 +99,49 @@ fn run_records_use_camel_case_on_the_wire() {
         "an absent error should not be written"
     );
     assert!(wire["steps"][0].get("nodeId").is_some());
+}
+
+#[test]
+fn a_run_file_written_before_evidence_existed_still_parses() {
+    // A literal, not a round trip: run records are read back by builds other
+    // than the one that wrote them, and every one of these files is already on
+    // operators' disks. If `summary` or `diagnosis` ever stops defaulting, this
+    // is the test that says so rather than a support ticket.
+    let parsed: RunRecord = serde_json::from_value(json!({
+        "id": "run-old",
+        "workflowId": "demo",
+        "status": "failed",
+        "startedAt": 1,
+        "finishedAt": 2,
+        "steps": [{ "nodeId": "start", "status": "error", "durationMs": 3 }],
+        "pendingApprovals": [],
+        "error": "boom"
+    }))
+    .expect("a run record from before the evidence fields must still load");
+
+    assert_eq!(parsed.status, RunStatus::Failed);
+    assert!(parsed.summary.is_none());
+    assert!(parsed.diagnosis.is_none());
+}
+
+#[test]
+fn run_evidence_is_omitted_from_the_wire_when_absent() {
+    // The other half of the compatibility bargain: a record with no evidence
+    // must not start writing null keys into files an older build reads.
+    let wire = serde_json::to_value(RunRecord {
+        id: "run-1".into(),
+        workflow_id: "demo".into(),
+        status: RunStatus::Running,
+        started_at: 1,
+        finished_at: None,
+        steps: Vec::new(),
+        pending_approvals: Vec::new(),
+        error: None,
+        summary: None,
+        diagnosis: None,
+    })
+    .expect("a run record should serialize");
+
+    assert!(wire.get("summary").is_none());
+    assert!(wire.get("diagnosis").is_none());
 }

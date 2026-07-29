@@ -367,21 +367,22 @@ impl App {
     /// Decline the proposed change waiting on this workflow.
     ///
     /// The reason is recorded as a note, which is what stops the next review
-    /// proposing the same thing again. A key press cannot carry one, so this
-    /// records that a person declined it — an operator with more to say can use
-    /// `medulla workflow reject --reason`.
+    /// proposing the same thing again. Open the shared inline prompt so the
+    /// keyboard shortcut still captures that required context.
     pub(in crate::ui::app) fn reject_selected_proposal(&mut self) -> Option<Cmd> {
         let Some(proposal) = self.actionable_proposal() else {
             self.set_status("Nothing is proposed for this workflow");
             return None;
         };
-        let proposal_id = proposal.id.clone();
-        let workflow = proposal.workflow_id.clone();
-        self.set_status("Declined the proposed change");
-        Some(Cmd::RejectProposal {
-            workflow,
-            proposal_id,
-            reason: "declined by the operator".to_string(),
-        })
+        self.prompt = Some(super::super::types::Prompt {
+            kind: super::super::types::PromptKind::RejectProposal {
+                workflow: proposal.workflow_id.clone(),
+                proposal_id: proposal.id.clone(),
+            },
+            title: "Why reject this proposal?".to_string(),
+            draft: crate::ui::composer::Draft::new(),
+        });
+        self.set_status("Explain the rejection · Enter submit · Esc cancel");
+        None
     }
 }

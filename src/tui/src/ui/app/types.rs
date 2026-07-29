@@ -525,6 +525,13 @@ pub(super) enum PromptKind {
     CustomHarnessEdit(String),
     /// Set the directory the harness picker will start its harness in.
     HarnessCwd,
+    /// Reject a workflow proposal with the operator's explanation.
+    RejectProposal {
+        /// The workflow the proposal belongs to.
+        workflow: String,
+        /// The proposal awaiting the decision.
+        proposal_id: String,
+    },
     /// Answer a pending sub-agent question.
     AnswerQuestion {
         /// The cycle the question belongs to.

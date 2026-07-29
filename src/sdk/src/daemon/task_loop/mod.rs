@@ -86,11 +86,14 @@ pub(super) fn with_tool_mode(
     mode: Option<&str>,
 ) -> std::collections::HashMap<String, String> {
     #[cfg(feature = "workflows")]
-    if let Some(mode) = mode {
-        env.insert(
-            crate::workflows::mcp::TOOL_MODE_ENV.to_string(),
-            mode.to_string(),
-        );
+    {
+        env.remove(crate::workflows::mcp::TOOL_MODE_ENV);
+        if let Some(mode) = mode {
+            env.insert(
+                crate::workflows::mcp::TOOL_MODE_ENV.to_string(),
+                mode.to_string(),
+            );
+        }
     }
     // Without the feature there is no MCP server to restrict, so the mode has
     // nowhere to go and nothing to protect.

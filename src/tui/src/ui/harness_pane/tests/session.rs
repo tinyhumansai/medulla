@@ -16,7 +16,7 @@ use medulla::tinyplace::HarnessProvider;
 
 use crate::worker::pty::{LaunchSpec, PtyManager};
 
-use super::LocalHarnesses;
+use super::super::LocalHarnesses;
 
 /// A spec that runs `sh -c <script>` on a pty.
 ///

@@ -1,4 +1,7 @@
-//! Unit tests for the embedded harness pane: key encoding and focus.
+//! Unit tests for the embedded harness pane, split so no file exceeds the
+//! repo's 500-line ceiling: this module covers key encoding, mouse-wheel
+//! encoding, and focus; [`session`] drives a real child on a real
+//! pseudo-terminal to cover the session-facing half of [`super::LocalHarnesses`].
 //!
 //! The encoder is where a mistake is invisible until an operator is sitting in
 //! front of a harness that ignores their arrow keys, so every family it emits is
@@ -7,6 +10,12 @@
 //! wrong together.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+// Unix-only: drives a real child on a real pseudo-terminal via `/bin/sh`,
+// which Windows has no equivalent of. The pane layer itself is portable; this
+// half of its tests is not.
+#[cfg(unix)]
+mod session;
 
 use super::keys::{encode, is_focus_chord};
 use super::mouse;

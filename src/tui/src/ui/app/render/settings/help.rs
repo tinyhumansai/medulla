@@ -83,12 +83,16 @@ impl App {
         // scroll depends on the terminal it is being drawn into, which the key
         // handler does not know.
         let block = self.panel("Keyboard & REPL help");
-        let visible = block.inner(area).height as usize;
-        let max_scroll = lines.len().saturating_sub(visible) as u16;
+        let inner = block.inner(area);
+        let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true });
+        // Logical lines are not screen rows once wrapping is enabled. Ask the
+        // widget's own line breaker for its rendered height so narrow terminals
+        // can scroll through every wrapped description to the final command.
+        let rendered = paragraph.line_count(inner.width);
+        let max_scroll = rendered.saturating_sub(inner.height as usize) as u16;
         self.help_scroll = self.help_scroll.min(max_scroll);
         f.render_widget(
-            Paragraph::new(Text::from(lines))
-                .wrap(Wrap { trim: true })
+            paragraph
                 .scroll((self.help_scroll, 0))
                 .block(block),
             area,

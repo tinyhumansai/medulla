@@ -196,6 +196,26 @@ fn help_scrolls_so_a_short_terminal_can_reach_the_commands() {
 }
 
 #[test]
+fn help_scroll_bound_includes_rows_wrapped_by_a_narrow_terminal() {
+    let mut app = agents_app();
+    type_str(&mut app, "/help");
+    let _ = app.on_event(key(KeyCode::Enter));
+
+    let top = render(&mut app, 72, 40);
+    assert!(!top.contains("/handoff"), "the tail starts off-screen: {top}");
+
+    let _ = app.on_event(key(KeyCode::Enter));
+    for _ in 0..100 {
+        let _ = app.on_event(key(KeyCode::Down));
+    }
+    let bottom = render(&mut app, 72, 40);
+    assert!(
+        bottom.contains("/handoff"),
+        "wrapped rows must contribute to the scroll bound: {bottom}"
+    );
+}
+
+#[test]
 fn an_ordinary_message_is_never_treated_as_a_command() {
     let mut app = agents_app();
     type_str(&mut app, "and/or maybe");

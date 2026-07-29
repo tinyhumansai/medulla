@@ -164,7 +164,7 @@ fn pinned_notes_survive_the_cap() {
 }
 
 #[test]
-fn a_replacement_survives_the_cap_with_its_superseded_predecessor() {
+fn an_old_supersession_chain_is_evicted_together_at_the_cap() {
     let home = dir();
     let first = note("sweep", 0, "obsolete");
     let replacement = note("sweep", 1, "current");
@@ -176,6 +176,30 @@ fn a_replacement_survives_the_cap_with_its_superseded_predecessor() {
     }
 
     let listed = list(home.path(), "sweep").expect("list");
+    assert_eq!(listed.len(), MAX_NOTES);
+    assert!(!listed.iter().any(|note| note.id == first.id));
+    assert!(!listed.iter().any(|note| note.id == replacement.id));
+    assert!(listed.iter().all(|note| {
+        note.superseded_by
+            .as_ref()
+            .is_none_or(|id| listed.iter().any(|replacement| &replacement.id == id))
+    }));
+}
+
+#[test]
+fn a_recent_replacement_survives_with_its_superseded_predecessor() {
+    let home = dir();
+    for at in 0..MAX_NOTES as u64 {
+        append(home.path(), &note("sweep", at, &format!("note {at}"))).expect("append");
+    }
+    let first = note("sweep", MAX_NOTES as u64, "obsolete");
+    let replacement = note("sweep", MAX_NOTES as u64 + 1, "current");
+    append(home.path(), &first).expect("append predecessor");
+    append(home.path(), &replacement).expect("append replacement");
+    supersede(home.path(), "sweep", &first.id, &replacement.id).expect("supersede");
+
+    let listed = list(home.path(), "sweep").expect("list");
+    assert_eq!(listed.len(), MAX_NOTES);
     assert!(listed.iter().any(|note| note.id == first.id));
     assert!(listed.iter().any(|note| note.id == replacement.id));
 }

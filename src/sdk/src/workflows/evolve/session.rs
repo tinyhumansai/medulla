@@ -74,7 +74,8 @@ impl EvolveSession {
 
         // Claimed before the note is written, so a burst of failures produces
         // one pass rather than ten harnesses reaching the same conclusion.
-        let Some(_guard) = EvolveGuard::claim(workflow_id) else {
+        let store_scope = self.store.proposal_decision_scope();
+        let Some(_guard) = EvolveGuard::claim(&store_scope, workflow_id) else {
             return Ok(EvolveOutcome {
                 skipped: true,
                 ..Default::default()

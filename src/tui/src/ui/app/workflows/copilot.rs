@@ -387,7 +387,7 @@ impl App {
     /// proposing the same thing again. Open the shared inline prompt so the
     /// keyboard shortcut still captures that required context.
     pub(in crate::ui::app) fn reject_selected_proposal(&mut self) -> Option<Cmd> {
-        let Some(proposal) = self.actionable_proposal() else {
+        let Some(proposal) = self.visible_proposal() else {
             self.set_status("Nothing is proposed for this workflow");
             return None;
         };

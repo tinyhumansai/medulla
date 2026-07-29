@@ -13,12 +13,15 @@
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
-use crate::workflows::WorkflowId;
-
 /// Workflows with a pass in flight.
-fn claimed() -> &'static Mutex<HashSet<WorkflowId>> {
-    static CLAIMED: OnceLock<Mutex<HashSet<WorkflowId>>> = OnceLock::new();
+fn claimed() -> &'static Mutex<HashSet<String>> {
+    static CLAIMED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     CLAIMED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// A claim key unique to one workflow store and workflow.
+fn claim_key(store_scope: &str, workflow_id: &str) -> String {
+    format!("{store_scope}:workflow:{workflow_id}")
 }
 
 /// Held for the duration of a pass; releases the workflow on drop.
@@ -26,19 +29,18 @@ fn claimed() -> &'static Mutex<HashSet<WorkflowId>> {
 /// A guard rather than an explicit release so a pass that panics or is dropped
 /// mid-await does not leave a workflow permanently unable to evolve.
 pub struct EvolveGuard {
-    workflow_id: WorkflowId,
+    key: String,
 }
 
 impl EvolveGuard {
-    /// Claim `workflow_id`, or `None` when a pass is already running for it.
-    pub fn claim(workflow_id: &str) -> Option<Self> {
+    /// Claim `workflow_id` within `store_scope`, or `None` when it is busy.
+    pub fn claim(store_scope: &str, workflow_id: &str) -> Option<Self> {
+        let key = claim_key(store_scope, workflow_id);
         let mut claimed = claimed().lock().expect("evolve registry lock");
-        if !claimed.insert(workflow_id.to_string()) {
+        if !claimed.insert(key.clone()) {
             return None;
         }
-        Some(Self {
-            workflow_id: workflow_id.to_string(),
-        })
+        Some(Self { key })
     }
 }
 
@@ -47,14 +49,14 @@ impl Drop for EvolveGuard {
         claimed()
             .lock()
             .expect("evolve registry lock")
-            .remove(&self.workflow_id);
+            .remove(&self.key);
     }
 }
 
-/// Whether a pass is running for `workflow_id` in this process.
-pub fn is_evolving(workflow_id: &str) -> bool {
+/// Whether a pass is running for `workflow_id` in `store_scope`.
+pub fn is_evolving(store_scope: &str, workflow_id: &str) -> bool {
     claimed()
         .lock()
         .expect("evolve registry lock")
-        .contains(workflow_id)
+        .contains(&claim_key(store_scope, workflow_id))
 }

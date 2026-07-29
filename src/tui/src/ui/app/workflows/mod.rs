@@ -24,6 +24,8 @@ pub(in crate::ui::app) use rail::{WorkflowRailRow, NEW_LABEL};
 #[cfg(test)]
 mod copilot_overlap_tests;
 #[cfg(test)]
+mod proposal_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;

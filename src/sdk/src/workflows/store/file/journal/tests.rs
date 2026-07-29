@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use super::*;
-use crate::workflows::types::{NoteKind, NoteSource};
+use crate::workflows::types::{NoteKind, NoteSource, WorkflowNote};
 
 fn note(workflow_id: &str, recorded_at: u64, text: &str) -> WorkflowNote {
     WorkflowNote {

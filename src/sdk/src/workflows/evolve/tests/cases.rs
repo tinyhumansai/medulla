@@ -344,7 +344,8 @@ async fn a_proposal_from_a_review_is_returned_verified_and_changes_nothing() {
 #[tokio::test]
 async fn a_second_pass_is_refused_while_one_is_running() {
     let (_home, store, _run) = fixture("a-second-pass-is-refused-while-one-is-ru");
-    let _guard = EvolveGuard::claim("a-second-pass-is-refused-while-one-is-ru")
+    let scope = store.proposal_decision_scope();
+    let _guard = EvolveGuard::claim(&scope, "a-second-pass-is-refused-while-one-is-ru")
         .expect("the first claim wins");
 
     let outcome = session(store.clone(), silent(&store, "ok"))
@@ -359,7 +360,26 @@ async fn a_second_pass_is_refused_while_one_is_running() {
     // A workflow failing ten times in a minute must not start ten harnesses.
     assert!(outcome.skipped);
     assert!(outcome.notes.is_empty());
-    assert!(is_evolving("a-second-pass-is-refused-while-one-is-ru"));
+    assert!(is_evolving(
+        &scope,
+        "a-second-pass-is-refused-while-one-is-ru"
+    ));
+}
+
+#[tokio::test]
+async fn the_same_workflow_id_in_another_store_can_evolve_concurrently() {
+    let id = "the-same-workflow-id-in-another-store-can-evolve";
+    let (_first_home, first_store, _first_run) = fixture(id);
+    let (_second_home, second_store, _second_run) = fixture(id);
+    let first_scope = first_store.proposal_decision_scope();
+    let _guard = EvolveGuard::claim(&first_scope, id).expect("first store claims its workflow");
+
+    let outcome = session(second_store.clone(), silent(&second_store, "ok"))
+        .evolve(id, EvolveTrigger::Manual, None)
+        .await
+        .expect("the other store can review its own workflow");
+
+    assert!(!outcome.skipped);
 }
 
 #[tokio::test]
@@ -376,7 +396,10 @@ async fn the_claim_is_released_when_the_pass_ends() {
     // anything if a claim was actually taken — hence the `expect` above rather
     // than swallowing an error, and hence running against the workflow the
     // fixture installed rather than one that does not exist.
-    assert!(!is_evolving(id), "a finished pass releases its claim");
+    assert!(
+        !is_evolving(&store.proposal_decision_scope(), id),
+        "a finished pass releases its claim"
+    );
 
     // And a second pass can now run, which is the thing the release is for.
     let again = session(store.clone(), silent(&store, "ok"))
@@ -395,7 +418,10 @@ async fn a_review_of_an_unknown_workflow_fails_rather_than_inventing_one() {
         .await;
 
     assert!(failed.is_err());
-    assert!(!is_evolving("no-such-workflow"), "and claims nothing");
+    assert!(
+        !is_evolving(&store.proposal_decision_scope(), "no-such-workflow"),
+        "and claims nothing"
+    );
 }
 
 #[tokio::test]

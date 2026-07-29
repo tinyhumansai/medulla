@@ -6,7 +6,9 @@
 
 use super::*;
 use crate::workflows::run::{Diagnosis, HiddenError};
-use crate::workflows::{NoteKind, ProposalVerification};
+use crate::workflows::{
+    NoteKind, NoteSource, ProposalStatus, ProposalVerification, WorkflowNote, WorkflowProposal,
+};
 use serde_json::json;
 
 fn note(id: &str, kind: NoteKind, source: NoteSource, text: &str) -> WorkflowNote {

@@ -390,6 +390,11 @@ impl WorkflowStore for FileWorkflowStore {
     }
 
     fn save_proposal(&self, proposal: &WorkflowProposal) -> Result<(), WorkflowError> {
+        // Every proposal transition (verification, rejection, acceptance, and
+        // supersession) funnels through this method. Serialize those writes on
+        // the shared store lock so clones cannot concurrently replace the same
+        // proposal document.
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         proposals::save(&self.proposals_dir, proposal)
     }
 

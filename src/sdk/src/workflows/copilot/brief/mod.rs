@@ -22,9 +22,9 @@ mod context;
 #[cfg(test)]
 mod tests;
 
-use crate::workflows::WorkflowRecord;
+use crate::workflows::{RunRecord, WorkflowNote, WorkflowRecord};
 
-use context::{graph_section, MAX_INLINE_GRAPH_BYTES};
+use context::{graph_section, notes_section, runs_section, MAX_INLINE_GRAPH_BYTES};
 
 /// Which kind of authoring turn this is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +40,14 @@ pub enum Mode {
     /// only the graph — not the run, not the error, not which node stopped —
     /// and the agent had to go looking for all three before it could start.
     Repair,
+    /// Review a workflow's own history and write down what it teaches.
+    ///
+    /// The one mode that may not edit. It reads the journal and the recent
+    /// runs, records what it learns, and — if a change would help — describes
+    /// one as a proposal for an operator to accept. The restriction is enforced
+    /// by the tools it is served, not by this directive; the directive is here
+    /// so the agent is not surprised by a refusal.
+    Evolve,
 }
 
 // There is deliberately no `Explain` mode. A question is answered by a
@@ -72,6 +80,17 @@ impl Mode {
                  that was not installed, a host that refused the connection), say so \
                  and change nothing."
             }
+            Mode::Evolve => {
+                "Review the workflow named below against its own history, and write down \
+                 what you learn. Record at least one note with `workflow_note_add` even if \
+                 you conclude nothing should change — a pass that learns nothing still \
+                 rules something out, and saying so stops the next pass re-deriving it. \
+                 If a change to the graph would help, describe it with `workflow_propose`; \
+                 you cannot edit the graph in this turn, and a proposal is reviewed by an \
+                 operator before anything is applied. Prefer one well-argued proposal to \
+                 several speculative ones. Read the notes below first: a change already \
+                 rejected should not be proposed again unless you have new evidence."
+            }
         }
     }
 }
@@ -88,6 +107,14 @@ pub struct CopilotRequest<'a> {
     pub record: Option<&'a WorkflowRecord>,
     /// The failed run this turn is about, for [`Mode::Repair`].
     pub run: Option<FailedRun>,
+    /// What the host has already learned about this workflow.
+    ///
+    /// Empty for every mode but [`Mode::Evolve`]. A revise turn is told what to
+    /// do; an evolve turn has to work it out, and the journal is most of what
+    /// it works from.
+    pub notes: &'a [WorkflowNote],
+    /// Recent runs, newest first.
+    pub runs: &'a [RunRecord],
 }
 
 /// What is known about the run a [`Mode::Repair`] turn is fixing.
@@ -172,6 +199,16 @@ impl CopilotRequest<'_> {
                     run.failing_nodes.join(", ")
                 ));
             }
+        }
+
+        if !self.notes.is_empty() || self.mode == Mode::Evolve {
+            prompt.push_str("\n\n## What this workflow has learned\n\n");
+            prompt.push_str(&notes_section(self.notes));
+        }
+
+        if !self.runs.is_empty() {
+            prompt.push_str("\n\n## Recent runs\n\n");
+            prompt.push_str(&runs_section(self.runs));
         }
 
         prompt.push_str("\n\n## The instruction\n\n");

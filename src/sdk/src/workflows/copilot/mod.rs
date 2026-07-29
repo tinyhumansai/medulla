@@ -146,6 +146,8 @@ impl CopilotSession {
             instruction,
             record: Some(&before),
             run,
+            notes: &[],
+            runs: &[],
         }
         .render();
 
@@ -221,6 +223,8 @@ impl CopilotSession {
                 // an existing one is how an agent talks itself into editing it.
                 record: None,
                 run: None,
+                notes: &[],
+                runs: &[],
             }
             .render(),
             worker_address: self.worker_address.clone(),

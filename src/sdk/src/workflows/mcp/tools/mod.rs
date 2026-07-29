@@ -9,6 +9,7 @@
 //! the routing was getting lost among them.
 
 mod definitions;
+pub mod evolve;
 
 use std::sync::Arc;
 
@@ -20,6 +21,7 @@ use crate::workflows::{ops, WorkflowStore};
 use super::RpcError;
 
 pub use definitions::tool_definitions;
+pub use evolve::{ToolMode, TOOL_MODE_ENV};
 
 /// Every tool this server exposes, in the order a model meets them.
 ///
@@ -32,7 +34,7 @@ pub use definitions::tool_definitions;
 ///
 /// There is still no tool to *cancel* a run. A copilot that started one is
 /// awaiting it; the operator cancels from the pane, where they can see it.
-pub const TOOL_NAMES: [&str; 14] = [
+pub const TOOL_NAMES: [&str; 18] = [
     "workflow_list",
     "workflow_get",
     "workflow_host",
@@ -47,6 +49,10 @@ pub const TOOL_NAMES: [&str; 14] = [
     "workflow_run_get",
     "workflow_history",
     "workflow_delete",
+    "workflow_notes",
+    "workflow_note_add",
+    "workflow_proposals",
+    "workflow_propose",
 ];
 
 /// A JSON Schema object with the given properties and required keys.
@@ -71,6 +77,7 @@ fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
 pub(super) async fn call(
     store: &Arc<dyn WorkflowStore>,
     config: &crate::config::WorkflowsConfig,
+    mode: ToolMode,
     params: &Value,
 ) -> Result<Value, RpcError> {
     let name = params
@@ -78,6 +85,13 @@ pub(super) async fn call(
         .and_then(Value::as_str)
         .ok_or_else(|| RpcError::invalid_params("missing tool name"))?;
     let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+
+    // Checked before the match rather than inside each arm: a withheld tool is
+    // withheld whatever its arguments are, and a guard per arm is a guard that
+    // will eventually be forgotten on a new one.
+    if !mode.allows(name) {
+        return Ok(content(&json!({ "error": mode.refusal(name) }), true));
+    }
 
     let outcome = match name {
         "workflow_list" => ops::list(store).map_err(to_rpc),
@@ -139,10 +153,41 @@ pub(super) async fn call(
         "workflow_host" => Ok(ops::host_facts(config)),
         "workflow_history" => ops::list_history(store, arg(&arguments, "id")?).map_err(to_rpc),
         "workflow_delete" => ops::delete(store, arg(&arguments, "id")?).map_err(to_rpc),
+        "workflow_notes" => ops::notes(store, arg(&arguments, "id")?).map_err(to_rpc),
+        "workflow_note_add" => ops::add_note(
+            store,
+            arg(&arguments, "id")?,
+            arg(&arguments, "kind")?,
+            arg(&arguments, "text")?,
+            string_list(&arguments, "runIds"),
+            // Anything reaching this server over a tool call is a model. An
+            // operator's own note comes in through the CLI or the TUI, and the
+            // two are weighted differently in a brief.
+            crate::workflows::NoteSource::Agent { model: None },
+        )
+        .map_err(to_rpc),
+        "workflow_proposals" => ops::proposals(store, arg(&arguments, "id")?).map_err(to_rpc),
+        "workflow_propose" => {
+            let id = arg(&arguments, "id")?;
+            let rationale = arg(&arguments, "rationale")?;
+            let ops_value = arguments
+                .get("ops")
+                .ok_or_else(|| RpcError::invalid_params("missing required argument 'ops'"))?;
+            ops::propose(
+                store,
+                id,
+                rationale,
+                ops_value,
+                string_list(&arguments, "runIds"),
+                string_list(&arguments, "noteIds"),
+            )
+            .await
+            .map_err(to_rpc)
+        }
         other => {
             return Err(RpcError::invalid_params(format!(
                 "unknown tool '{other}'; available: {}",
-                TOOL_NAMES.join(", ")
+                served(mode).join(", ")
             )))
         }
     };
@@ -154,6 +199,30 @@ pub(super) async fn call(
         Ok(value) => content(&value, false),
         Err(err) => content(&json!({ "error": err.message }), true),
     })
+}
+
+/// The tool names this mode serves.
+pub fn served(mode: ToolMode) -> Vec<&'static str> {
+    TOOL_NAMES
+        .into_iter()
+        .filter(|name| mode.allows(name))
+        .collect()
+}
+
+/// An optional array-of-strings argument, absent or malformed alike as empty.
+///
+/// Forgiving on purpose: a model that sends a bare string instead of an array
+/// has still told us something, and failing the whole call over the shape of an
+/// optional provenance field costs a round trip to learn nothing.
+fn string_list(arguments: &Value, name: &str) -> Vec<String> {
+    match arguments.get(name) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect(),
+        Some(Value::String(single)) => vec![single.clone()],
+        _ => Vec::new(),
+    }
 }
 
 /// Wrap a value as an MCP tool result.

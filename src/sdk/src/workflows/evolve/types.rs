@@ -60,6 +60,20 @@ pub struct EvolveConfig {
     pub max_notes: usize,
 }
 
+impl EvolveConfig {
+    /// Read this host's settings.
+    pub fn from_config(config: &crate::config::WorkflowsConfig) -> Self {
+        Self {
+            // A host with workflows switched off has no runs to review, so the
+            // outer switch subsumes the inner one.
+            enabled: config.enabled && config.evolve.enabled,
+            auto_on_failure: config.evolve.auto_on_failure,
+            max_runs: config.evolve.max_runs,
+            max_notes: config.evolve.max_notes,
+        }
+    }
+}
+
 impl Default for EvolveConfig {
     fn default() -> Self {
         Self {

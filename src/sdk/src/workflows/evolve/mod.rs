@@ -24,6 +24,7 @@
 mod context;
 pub mod decide;
 mod registry;
+mod session;
 mod types;
 mod verify;
 
@@ -33,5 +34,6 @@ mod tests;
 pub use context::{failing_nodes, record_failure_note};
 pub use decide::{accept, reject};
 pub use registry::{is_evolving, EvolveGuard};
+pub use session::EvolveSession;
 pub use types::{EvolveConfig, EvolveOutcome, EvolveTrigger};
 pub use verify::verify;

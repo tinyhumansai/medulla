@@ -9,12 +9,29 @@
 
 use serde_json::{json, Value};
 
+use super::evolve::ToolMode;
 use super::schema;
 use crate::workflows::node_contracts::render_node_kinds_line;
 
-/// The tool definitions, as `tools/list` returns them.
-pub fn tool_definitions() -> Vec<Value> {
-    vec![
+/// The tool definitions a session in `mode` is served.
+///
+/// Filtered rather than merely documented: a turn that must not edit is not
+/// shown the editing verbs at all, so the restriction holds without depending
+/// on the model having read and believed a standing instruction.
+pub fn tool_definitions(mode: ToolMode) -> Vec<Value> {
+    all_definitions()
+        .into_iter()
+        .filter(|tool| {
+            tool.get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| mode.allows(name))
+        })
+        .collect()
+}
+
+/// Every tool, before any mode filtering.
+fn all_definitions() -> Vec<Value> {
+    let mut tools = vec![
         json!({
             "name": "workflow_list",
             "description":
@@ -205,5 +222,7 @@ pub fn tool_definitions() -> Vec<Value> {
                 &["id"],
             ),
         }),
-    ]
+    ];
+    tools.extend(super::evolve::definitions(schema));
+    tools
 }

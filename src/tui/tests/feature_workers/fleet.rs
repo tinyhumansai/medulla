@@ -189,9 +189,15 @@ fn the_context_meter_splits_input_output_and_cache() {
     // The orchestrator lane carries the scripted cycle's usage.
     let out = render(&mut app, 160, 44);
     assert!(out.contains("ctx"), "context meter: {out}");
-    assert!(out.contains("in 1k / 32k"), "{out}");
-    assert!(out.contains("out "), "{out}");
-    assert!(out.contains("cache 70%"), "the reported cache share: {out}");
+    // The window is named — a bar at 0% means nothing without knowing 0% of
+    // what — and the breakdown is one bracket. `1M`, not `1000k`.
+    assert!(out.contains("1M window"), "the window is named: {out}");
+    assert!(
+        out.contains("(in 1k / out 90 / cached 70%)"),
+        "in/out/cached breakdown: {out}"
+    );
+    // The rail row agrees with the meter about the window's size.
+    assert!(out.contains("ctx 1.2k/1M"), "rail row: {out}");
 }
 
 #[test]

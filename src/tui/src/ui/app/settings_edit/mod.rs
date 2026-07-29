@@ -91,7 +91,15 @@ impl App {
                 label: "Context window",
                 section: "medulla",
                 key: "contextWindowTokens",
-                kind: count(4096, 1_000_000, 4096, 32_000),
+                // The editor's default and fallback must be the config's own, or
+                // opening this row would silently rewrite an unset window to a
+                // different number than the one the meter has been showing.
+                kind: count(
+                    4096,
+                    medulla::config::DEFAULT_CONTEXT_WINDOW_TOKENS,
+                    4096,
+                    medulla::config::DEFAULT_CONTEXT_WINDOW_TOKENS,
+                ),
                 help: "Window size used when deciding to compress context.",
             },
             SettingRow {

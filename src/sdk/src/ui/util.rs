@@ -113,6 +113,18 @@ pub fn fmt_tokens(n: i64) -> String {
     if n < 1_000 {
         return n.to_string();
     }
+    // Millions get their own unit, or a 1M context window renders as `1000k` —
+    // technically correct, and the reason the rail read `ctx 1.2k/1000k` where
+    // it should say `1M`. A round million drops the `.0`, matching
+    // [`crate::ui::meters::tokens`] so the rail and the meter agree.
+    if n >= 1_000_000 {
+        let m = n as f64 / 1_000_000.0;
+        return if (m - m.round()).abs() < f64::EPSILON {
+            format!("{}M", m.round() as i64)
+        } else {
+            format!("{m:.1}M")
+        };
+    }
     let k = n as f64 / 1_000.0;
     if k >= 10.0 {
         format!("{}k", k.round() as i64)

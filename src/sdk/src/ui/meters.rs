@@ -73,7 +73,11 @@ pub fn bytes(value: u64) -> String {
     }
 }
 
-/// A token magnitude: `980`, `12k`, `1.2M`.
+/// A token magnitude: `980`, `12k`, `1M`, `1.2M`.
+///
+/// A round million prints as `1M`, not `1.0M`. The context window is the number
+/// this is most often asked to render, it is almost always exactly round, and a
+/// decimal point on a figure with nothing after it reads as spurious precision.
 pub fn tokens(value: i64) -> String {
     let value = value.max(0);
     if value < 1_000 {
@@ -82,7 +86,12 @@ pub fn tokens(value: i64) -> String {
     if value < 1_000_000 {
         return format!("{}k", (value as f64 / 1_000.0).round() as i64);
     }
-    format!("{:.1}M", value as f64 / 1_000_000.0)
+    let millions = value as f64 / 1_000_000.0;
+    if (millions - millions.round()).abs() < f64::EPSILON {
+        format!("{}M", millions.round() as i64)
+    } else {
+        format!("{millions:.1}M")
+    }
 }
 
 /// The host's memory meter, or `None` when the host declared no memory numbers.
@@ -136,28 +145,35 @@ pub fn disk_line(resources: &crate::runtime::HostResources) -> Option<Line> {
     })
 }
 
-/// The context meter for one lane: the prompt against the window, with the
-/// output and cache figures beside it.
+/// The context meter for one lane: the prompt against the window, the window's
+/// size, and the `(in / out / cached)` breakdown.
 ///
 /// The bar is input-against-window because that is the ceiling that actually
-/// stops a turn. Output is reported next to it as a total rather than folded
-/// into the bar — it does not consume the same budget — and the cache share is
-/// shown only when the provider reported one.
+/// stops a turn. The window is named rather than left implicit — a bar at 4%
+/// means nothing without knowing 4% of what, and the difference between a 32k
+/// and a 1M window is the difference between "nearly out of room" and "barely
+/// started". Output sits in the breakdown rather than the bar because it does
+/// not consume the same budget.
+///
+/// `cached` is a dash when the provider reported no cache figure. Omitting the
+/// field entirely would make the row change shape between providers; inventing a
+/// zero would claim a cache miss we never observed.
 pub fn context_meter(usage: &LaneUsage, window: i64) -> Option<Line> {
     if usage.input == 0 && usage.output == 0 {
         return None;
     }
     let window = window.max(1);
     let fraction = usage.input as f64 / window as f64;
-    let mut detail = format!(
-        "in {} / {} · out {}",
-        tokens(usage.input),
+    let cached = match usage.cache_hit_rate() {
+        Some(rate) => format!("{}%", (rate * 100.0).round() as i64),
+        None => "—".to_string(),
+    };
+    let detail = format!(
+        "{} window · (in {} / out {} / cached {cached})",
         tokens(window),
-        tokens(usage.output)
+        tokens(usage.input),
+        tokens(usage.output),
     );
-    if let Some(rate) = usage.cache_hit_rate() {
-        detail.push_str(&format!(" · cache {}%", (rate * 100.0).round() as i64));
-    }
     Some(meter("ctx", fraction, detail))
 }
 

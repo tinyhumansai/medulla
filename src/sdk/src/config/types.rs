@@ -87,10 +87,24 @@ pub struct MedullaConfig {
     pub context_window_tokens: Option<u32>,
 }
 
+/// The context window assumed when the operator has not set one.
+///
+/// One million tokens: the window of the models this actually runs against.
+/// The old 32k default predates them, and understating the window is the
+/// damaging direction — the meter reads near-full on a prompt using three
+/// percent of the real budget, which is an alarm that fires constantly and so
+/// gets ignored when it finally matters.
+///
+/// Still only a default. `contextWindowTokens` overrides it for a deployment
+/// pointed at a smaller model.
+pub const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 1_000_000;
+
 impl MedullaConfig {
-    /// The effective context window in tokens (default 32k).
+    /// The effective context window in tokens, defaulting to
+    /// [`DEFAULT_CONTEXT_WINDOW_TOKENS`].
     pub fn context_window(&self) -> u32 {
-        self.context_window_tokens.unwrap_or(32_000)
+        self.context_window_tokens
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)
     }
 }
 

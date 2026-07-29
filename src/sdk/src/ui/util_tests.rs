@@ -19,6 +19,10 @@ fn fmt_tokens_scales() {
     assert_eq!(fmt_tokens(980), "980");
     assert_eq!(fmt_tokens(1_200), "1.2k");
     assert_eq!(fmt_tokens(34_000), "34k");
+    // A 1M context window must not render as `1000k`.
+    assert_eq!(fmt_tokens(1_000_000), "1M");
+    assert_eq!(fmt_tokens(999_999), "1000k");
+    assert_eq!(fmt_tokens(1_500_000), "1.5M");
 }
 
 #[test]

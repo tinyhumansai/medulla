@@ -43,13 +43,9 @@ impl App {
             // fires here rather than on release so navigation stays immediate;
             // a drag that follows selects text without undoing it.
             MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(session) =
-                    self.harness_focus.attached_to().map(str::to_string)
-                {
-                    let inside_attached_pane = self
-                        .hit_harness
-                        .as_ref()
-                        .is_some_and(|(rect, id)| {
+                if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
+                    let inside_attached_pane =
+                        self.hit_harness.as_ref().is_some_and(|(rect, id)| {
                             id == &session && rect.contains((m.column, m.row).into())
                         });
                     if !inside_attached_pane {

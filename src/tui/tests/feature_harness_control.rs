@@ -223,8 +223,14 @@ fn the_picker_directory_can_be_edited_before_starting() {
     let _ = app.on_event(key(KeyCode::Enter));
 
     let out = render(&mut app, 140, 44);
-    assert!(out.contains("/tmp"), "the picker must show the edited path: {out}");
-    assert!(sessions.rows().is_empty(), "editing must not start the harness");
+    assert!(
+        out.contains("/tmp"),
+        "the picker must show the edited path: {out}"
+    );
+    assert!(
+        sessions.rows().is_empty(),
+        "editing must not start the harness"
+    );
 
     let _ = app.on_event(key(KeyCode::Enter));
     wait_for("the harness to open", || sessions.rows().len() == 1);

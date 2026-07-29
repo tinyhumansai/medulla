@@ -91,11 +91,6 @@ impl App {
         let rendered = paragraph.line_count(inner.width);
         let max_scroll = rendered.saturating_sub(inner.height as usize) as u16;
         self.help_scroll = self.help_scroll.min(max_scroll);
-        f.render_widget(
-            paragraph
-                .scroll((self.help_scroll, 0))
-                .block(block),
-            area,
-        );
+        f.render_widget(paragraph.scroll((self.help_scroll, 0)).block(block), area);
     }
 }

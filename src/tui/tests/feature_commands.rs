@@ -202,7 +202,10 @@ fn help_scroll_bound_includes_rows_wrapped_by_a_narrow_terminal() {
     let _ = app.on_event(key(KeyCode::Enter));
 
     let top = render(&mut app, 72, 40);
-    assert!(!top.contains("/handoff"), "the tail starts off-screen: {top}");
+    assert!(
+        !top.contains("/handoff"),
+        "the tail starts off-screen: {top}"
+    );
 
     let _ = app.on_event(key(KeyCode::Enter));
     for _ in 0..100 {

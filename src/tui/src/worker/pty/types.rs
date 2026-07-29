@@ -76,6 +76,13 @@ pub struct LaunchSpec {
     pub skip_permissions: bool,
     /// A label for the session list — the peer's id.
     pub label: String,
+    /// An operator- or peer-configured model override, when set.
+    ///
+    /// Threaded onto the interactive argv the same way the headless path adds
+    /// it to its one-shot invocation: without this, a `[host].model` or a
+    /// task's own model hint silently reached the harness's own default
+    /// instead, changing which model actually ran.
+    pub model: Option<String>,
     /// A session id to hand the harness, when it accepts one.
     ///
     /// Claude does (`--session-id`), and the transcript is then written under

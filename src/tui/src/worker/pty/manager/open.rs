@@ -55,6 +55,7 @@ impl PtyManager {
             spec.provider,
             session_id.as_deref(),
             spec.skip_permissions,
+            spec.model.as_deref(),
             &spec.extra_args,
         ) {
             command.arg(arg);

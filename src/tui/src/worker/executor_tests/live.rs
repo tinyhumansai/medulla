@@ -215,6 +215,7 @@ async fn experiment_codex_dialog_dismissal() {
             skip_permissions: true,
             label: "exp".to_string(),
             session_id: None,
+            model: None,
         })
         .expect("open");
 
@@ -294,6 +295,7 @@ async fn experiment_codex_startup_dialog_dismissal() {
             skip_permissions: true,
             label: "trust".to_string(),
             session_id: None,
+            model: None,
         })
         .expect("open");
 
@@ -364,6 +366,7 @@ async fn diagnose_codex_paste_rendering() {
             skip_permissions: true,
             label: "diag".to_string(),
             session_id: None,
+            model: None,
         })
         .expect("open codex session");
 

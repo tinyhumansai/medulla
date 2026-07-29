@@ -38,6 +38,7 @@ fn sh(script: &str) -> LaunchSpec {
         skip_permissions: false,
         label: "test".to_string(),
         session_id: None,
+        model: None,
     }
 }
 

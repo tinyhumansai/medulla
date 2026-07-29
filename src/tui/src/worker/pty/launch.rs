@@ -22,6 +22,7 @@ pub fn interactive_args(
     provider: HarnessProvider,
     session_id: Option<&str>,
     skip_permissions: bool,
+    model: Option<&str>,
     extra: &[String],
 ) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
@@ -40,6 +41,21 @@ pub fn interactive_args(
     if let (HarnessProvider::Claude, Some(id)) = (provider, session_id) {
         args.push("--session-id".to_string());
         args.push(id.to_string());
+    }
+    // Same flag spellings as the headless argv builder
+    // (`build_resumed_run_args`): claude takes the long form, codex/opencode the
+    // short one. An unset model leaves the harness's own default alone.
+    if let Some(model) = model {
+        match provider {
+            HarnessProvider::Claude => {
+                args.push("--model".to_string());
+                args.push(model.to_string());
+            }
+            HarnessProvider::Codex | HarnessProvider::Opencode => {
+                args.push("-m".to_string());
+                args.push(model.to_string());
+            }
+        }
     }
     args.extend(extra.iter().cloned());
     args

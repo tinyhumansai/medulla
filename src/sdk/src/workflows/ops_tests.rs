@@ -304,3 +304,95 @@ fn rolling_back_names_the_revision_it_used() {
         json!("Work")
     );
 }
+
+#[tokio::test]
+async fn a_dry_run_reports_a_failure_the_error_policy_swallowed() {
+    let (_root, store) = store();
+    // The blind spot these diagnostics exist for. `medulla:echo` refuses a null
+    // argument, so this node fails — but `on_error: continue` means the *run*
+    // succeeds, the outcome is a JSON object, and the failed step carries no
+    // diagnostics of its own. Everything downstream reads it as a clean run.
+    create(
+        &store,
+        &json!({
+            "id": "quiet",
+            "name": "Quiet",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "say", "kind": "tool_call", "name": "Say",
+                  "config": { "slug": "medulla:echo", "on_error": "continue",
+                              "args": { "text": "=run.trigger.absent" } } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "say" }]
+        })
+        .to_string(),
+        "quiet",
+    )
+    .unwrap();
+
+    let result = dry_run(&store, "quiet", json!({})).await.unwrap();
+
+    // The single most misleading thing this surface could say is `ok: true` for
+    // a graph whose work did not happen.
+    assert_eq!(result["ok"], json!(false), "{result}");
+    let hidden = result["diagnostics"]["hiddenErrors"]
+        .as_array()
+        .expect("array");
+    assert_eq!(hidden.len(), 1, "{result}");
+    assert_eq!(hidden[0]["nodeId"], json!("say"));
+}
+
+#[tokio::test]
+async fn a_dry_run_of_a_soundly_wired_graph_reports_ok() {
+    let (_root, store) = store();
+    create(
+        &store,
+        &json!({
+            "id": "loud",
+            "name": "Loud",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "say", "kind": "tool_call", "name": "Say",
+                  "config": { "slug": "medulla:echo", "args": { "text": "hello" } } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "say" }]
+        })
+        .to_string(),
+        "loud",
+    )
+    .unwrap();
+
+    let result = dry_run(&store, "loud", json!({})).await.unwrap();
+
+    assert_eq!(result["ok"], json!(true), "{result}");
+}
+
+#[test]
+fn an_edit_whose_binding_would_resolve_null_is_refused_before_it_is_saved() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+
+    // `work` is an agent node, so its output is wrapped as {json, text, raw} —
+    // reading `.item.title` off it resolves null at run time.
+    let err = apply_ops(
+        &store,
+        "sweep",
+        &json!([
+            { "op": "add_node", "node": { "id": "say", "kind": "tool_call", "name": "Say",
+              "config": { "slug": "medulla:echo",
+                          "args": { "text": "=nodes.work.item.title" } } } },
+            { "op": "add_edge", "edge": { "from_node": "work", "to_node": "say" } }
+        ]),
+    )
+    .expect_err("must refuse");
+
+    let WorkflowError::Invalid { messages, .. } = err else {
+        panic!("expected Invalid, got {err:?}");
+    };
+    assert!(messages[0].contains("json"), "{messages:?}");
+    // Refused whole: the workflow is left exactly as it was.
+    let after = get(&store, "sweep").unwrap();
+    assert_eq!(after["graph"]["nodes"].as_array().unwrap().len(), 2);
+}

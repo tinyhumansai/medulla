@@ -21,6 +21,7 @@
 
 pub mod authoring;
 pub mod copilot;
+pub mod gates;
 pub mod local;
 pub mod mcp;
 pub mod node_contracts;

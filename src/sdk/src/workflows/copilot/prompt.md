@@ -143,18 +143,30 @@ behaviour, and do not treat a failure as "just the sandbox".
 | kind | what a dry run proves | what it does not |
 |---|---|---|
 | `trigger` | the payload shape reaches the first node | nothing about scheduling |
-| `agent` | the prompt expression resolves to non-empty text | what a harness would actually reply |
-| `tool_call` | the slug is permitted and its args resolve | the integration's real output shape |
+| `agent` | the instruction resolves to non-empty text | what a harness would actually reply |
+| `tool_call` | the slug is permitted and every arg resolves | the integration's real output shape |
 | `http_request` | the URL and headers resolve, host is allowlisted | that the endpoint exists or answers |
-| `transform` | every expression evaluates | nothing else — this one is exact |
+| `transform` | every expression evaluates without erroring | **whether one resolved to null** — see below |
 | `condition` | the predicate evaluates and routes | which branch real data would take |
 | `sub_workflow` | the id resolves to an installed workflow | that workflow's own runtime behaviour |
 
-**Stop condition.** You are done when the dry run reports no null resolutions
-and no node errors, or when the only remaining diagnostics are ones this table
-says a dry run cannot settle. If a diagnostic is in the "does not" column, say
-so to the operator rather than re-wiring against it — thrashing on a binding the
-sandbox structurally cannot check is worse than naming the uncertainty.
+Two gaps in that table are worth knowing rather than discovering:
+
+- **Null bindings are only traced on `agent`, `tool_call`, and `http_request`.**
+  A `transform` that sets a field from an expression resolving to null reports
+  nothing at all. If a transform is doing the wiring, read its output in the dry
+  run's `output` yourself rather than trusting a clean diagnostic list.
+- **A node that never ran reports nothing either**, because it produced no step.
+  The dry run flags these separately as `neverRan`, naming the condition that
+  routed past them. That is a warning, not a failure — one sample taking one
+  branch is what a condition is for.
+
+**Stop condition.** You are done when the dry run reports `ok: true`, or when
+the only remaining entries are marked `unverifiable`. An `unverifiable` binding
+reads from something the sandbox structurally cannot stand in for — an `agent`
+node's real reply, most often. Do **not** thrash re-wiring against it: check it
+against what you asked that node to produce, and if it still looks right, say so
+to the operator and move on.
 
 # Your reply
 

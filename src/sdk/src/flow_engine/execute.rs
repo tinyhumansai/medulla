@@ -112,14 +112,31 @@ pub async fn resume(
 
 /// Run `compiled` against capabilities that touch nothing.
 ///
-/// Neither checkpointed nor observed: a simulation has no state worth keeping
-/// and no progress worth reporting.
+/// Not checkpointed: a simulation has no state worth keeping.
 pub async fn simulate(
     compiled: &Compiled,
     input: Value,
     capabilities: &tinyflows::caps::Capabilities,
 ) -> Result<Outcome, String> {
     tinyflows::engine::run(&compiled.0, input, capabilities)
+        .await
+        .map(Outcome::from)
+        .map_err(|err| err.to_string())
+}
+
+/// Simulate `compiled`, reporting every step to `observer`.
+///
+/// The observed variant exists because a simulation's *steps* are the whole
+/// point of running one at authoring time. The outcome says the graph completed;
+/// only the per-step record says which expressions resolved to null on the way,
+/// and a binding that silently resolved null is the failure a dry run is for.
+pub async fn simulate_observed(
+    compiled: &Compiled,
+    input: Value,
+    capabilities: &tinyflows::caps::Capabilities,
+    observer: &Arc<dyn RunObserver>,
+) -> Result<Outcome, String> {
+    tinyflows::engine::run_with_observer(&compiled.0, input, capabilities, observer)
         .await
         .map(Outcome::from)
         .map_err(|err| err.to_string())

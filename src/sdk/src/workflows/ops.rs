@@ -112,8 +112,17 @@ pub async fn dry_run(
     input: Value,
 ) -> Result<Value, WorkflowError> {
     let resolver = Arc::new(StoreWorkflowResolver::new(store.clone()));
-    let output = crate::workflows::run::dry_run(store.clone(), resolver, id, input).await?;
-    Ok(json!({ "ok": true, "output": output }))
+    let result = crate::workflows::run::dry_run(store.clone(), resolver, id, input).await?;
+
+    // `ok` is about the *diagnosis*, not about whether the engine returned. A
+    // graph whose only binding resolved to null completes perfectly and does
+    // nothing, so reporting that as `ok: true` is the single most misleading
+    // thing this surface could say.
+    Ok(json!({
+        "ok": result.diagnosis.is_clean(),
+        "output": result.output,
+        "diagnostics": result.diagnosis,
+    }))
 }
 
 /// A workflow's run history, newest first.

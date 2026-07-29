@@ -36,6 +36,10 @@ pub fn apply_workflow_ops(
         WorkflowError::Engine(format!("workflow '{id}': {err}"))
     })?;
     validate_graph(id, &record.graph)?;
+    // The engine's validation answers "would this compile". The gates answer
+    // "would this do anything" — a binding that resolves null at run time
+    // compiles fine and quietly does nothing.
+    crate::workflows::gates::check(id, &record.graph)?;
     store.save(&record)?;
     Ok(record)
 }
@@ -53,6 +57,7 @@ pub fn preview_workflow_ops(
     let graph = apply_ops(&record.graph, ops)
         .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
     validate_graph(id, &graph)?;
+    crate::workflows::gates::check(id, &graph)?;
     Ok(graph)
 }
 
@@ -72,6 +77,7 @@ pub fn create_workflow(
     let record = crate::workflows::store::parse_workflow(document, id_fallback)
         .map_err(WorkflowError::Malformed)?;
     validate_graph(&record.id, &record.graph)?;
+    crate::workflows::gates::check(&record.id, &record.graph)?;
     store.save(&record)?;
     Ok(record)
 }
@@ -111,6 +117,7 @@ pub fn validate_handle(
 ) -> Result<WorkflowRecord, WorkflowError> {
     let record = handle.resolve(store)?;
     validate_graph(&record.id, &record.graph)?;
+    crate::workflows::gates::check(&record.id, &record.graph)?;
     Ok(record)
 }
 

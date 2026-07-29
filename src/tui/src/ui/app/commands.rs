@@ -185,6 +185,14 @@ impl App {
                 self.add_workspace(&text);
                 None
             }
+            PromptKind::CustomHarnessAdd => {
+                self.save_custom_harness(None, &text);
+                None
+            }
+            PromptKind::CustomHarnessEdit(id) => {
+                self.save_custom_harness(Some(&id), &text);
+                None
+            }
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text));

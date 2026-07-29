@@ -94,7 +94,7 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
             if let Some(path) = parsed.config.as_deref() {
                 std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
             }
-            let config = load_workflows_config(&parsed, &env, &cwd);
+            let config = load_workflows_config(&parsed, &env, &cwd)?;
             ops::evolve(&store, &config, &cwd, id, parsed.run_id.as_deref()).await?
         }
         WorkflowAction::Mcp => unreachable!("handled above, before stdout is claimed"),
@@ -234,18 +234,19 @@ fn read_stdin_json(what: &str) -> anyhow::Result<Value> {
     serde_json::from_str(&body).map_err(|err| anyhow::anyhow!("{what}: invalid JSON: {err}"))
 }
 
-/// This machine's workflow settings, defaulting safely when config is
-/// unreadable.
+/// This machine's workflow settings.
 ///
-/// Defaults rather than failing, matching how the MCP server handles the same
-/// case: a review that cannot start because a config file has a typo in an
-/// unrelated section is a worse outcome than one that runs conservatively.
+/// An explicitly selected config is part of the command contract, so a read or
+/// parse failure is returned instead of silently launching a review under
+/// defaults the operator did not request.
 fn load_workflows_config(
     parsed: &WorkflowArgs,
     env: &HashMap<String, String>,
     cwd: &std::path::Path,
-) -> medulla::config::WorkflowsConfig {
-    medulla::config::load_config(parsed.config.as_deref(), env, cwd)
-        .map(|loaded| loaded.config.workflows)
-        .unwrap_or_default()
+) -> anyhow::Result<medulla::config::WorkflowsConfig> {
+    Ok(
+        medulla::config::load_config(parsed.config.as_deref(), env, cwd)?
+            .config
+            .workflows,
+    )
 }

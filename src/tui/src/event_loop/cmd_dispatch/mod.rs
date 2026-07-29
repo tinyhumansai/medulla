@@ -169,7 +169,7 @@ pub(super) fn run_cmd(
                 }
             });
         }
-        Cmd::StartLocalHost(host) => {
+        Cmd::StartLocalHost { host, index } => {
             let Some(spawner) = local_hosts.cloned() else {
                 let _ = msg_tx.send(AppMsg::Status(
                     "This device is not hosting, so a local host cannot start here".to_string(),
@@ -183,7 +183,7 @@ pub(super) fn run_cmd(
                 // address nothing answers on is the failure this whole feature
                 // exists to avoid — the orchestrator would dispatch to it and
                 // the task would vanish.
-                let spec = match spawner.spawn(&host) {
+                let spec = match spawner.spawn(&host, index) {
                     Ok(spec) => spec,
                     Err(error) => {
                         let _ =

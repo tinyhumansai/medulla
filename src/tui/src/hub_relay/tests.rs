@@ -102,7 +102,7 @@ fn a_saved_roster_comes_back_on_the_next_launch() {
         "nothing remembered before anything is saved"
     );
 
-    let sink = super::roster_sink(home, medulla::hub::stderr_log(), Vec::new());
+    let sink = super::roster_sink(home, medulla::hub::stderr_log(), shared(Vec::new()));
     sink(&[
         worker("alpha", "3Hob1Fxu", true),
         worker("beta", "@peer", false),
@@ -122,7 +122,7 @@ fn an_explicit_environment_roster_is_not_merged_with_the_saved_one() {
     // quietly re-add a worker the operator had removed.
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
-    super::roster_sink(home, medulla::hub::stderr_log(), Vec::new())(&[worker(
+    super::roster_sink(home, medulla::hub::stderr_log(), shared(Vec::new()))(&[worker(
         "saved",
         "addr-saved",
         false,
@@ -145,7 +145,7 @@ fn saving_over_a_config_leaves_its_other_sections_alone() {
     )
     .expect("seed");
 
-    super::roster_sink(home, medulla::hub::stderr_log(), Vec::new())(&[worker(
+    super::roster_sink(home, medulla::hub::stderr_log(), shared(Vec::new()))(&[worker(
         "alpha", "addr", false,
     )]);
 
@@ -154,13 +154,18 @@ fn saving_over_a_config_leaves_its_other_sections_alone() {
     assert!(text.contains("addr"), "got: {text}");
 }
 
+/// The shared device-local address list the sink reads at save time.
+fn shared(addresses: Vec<String>) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+    std::sync::Arc::new(std::sync::Mutex::new(addresses))
+}
+
 #[test]
 fn an_unwritable_roster_path_does_not_take_the_hub_down() {
     // Losing the roster is a nuisance; failing to start is an outage.
     let sink = super::roster_sink(
         std::path::Path::new("/proc/nonexistent/nope"),
         medulla::hub::stderr_log(),
-        Vec::new(),
+        shared(Vec::new()),
     );
     sink(&[worker("alpha", "addr", false)]);
 }
@@ -175,7 +180,7 @@ fn the_device_local_host_is_never_written_into_the_saved_roster() {
     super::roster_sink(
         home,
         medulla::hub::stderr_log(),
-        vec!["this-device".to_string()],
+        shared(vec!["this-device".to_string()]),
     )(&[
         worker("this-device", "this-device", false),
         worker("beta", "3Hob1Fxu", false),
@@ -195,7 +200,7 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
     // Write it the way a build without the filter would have.
-    super::roster_sink(home, medulla::hub::stderr_log(), Vec::new())(&[
+    super::roster_sink(home, medulla::hub::stderr_log(), shared(Vec::new()))(&[
         worker("this-device", "this-device", false),
         worker("beta", "3Hob1Fxu", false),
     ]);
@@ -213,7 +218,7 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
         Some(super::LocalDispatch {
             network: medulla::bridge::LocalBridgeNetwork::new(),
             hub_address: "medulla-orchestrator".to_string(),
-            host_addresses: vec!["this-device".to_string()],
+            host_addresses: shared(vec!["this-device".to_string()]),
             // Hosting is off: nothing is bound at `this-device` this run.
             hosts: Vec::new(),
         }),
@@ -233,4 +238,37 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
     );
     assert_eq!(config.workers.len(), 1);
     assert_eq!(config.workers[0].address, "3Hob1Fxu");
+}
+
+#[test]
+fn a_host_added_after_launch_is_not_remembered_as_a_remote_peer() {
+    // The sink filters at *save* time, so a launch-time snapshot of the local
+    // addresses did not know about a host started mid-session through
+    // `LocalHostSpawner`. Its device-local entry was written into the saved
+    // roster and would be advertised on a later run at an address nothing binds.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+
+    let addresses = shared(vec!["this-device".to_string()]);
+    let sink = super::roster_sink(home, medulla::hub::stderr_log(), addresses.clone());
+
+    // The spawner binds a second host and appends its address.
+    addresses
+        .lock()
+        .expect("host addresses")
+        .push("local-backend".to_string());
+
+    sink(&[
+        worker("this-device", "this-device", false),
+        worker("local-backend", "local-backend", false),
+        worker("beta", "3Hob1Fxu", false),
+    ]);
+
+    let saved = super::workers_from_config(home);
+    let addresses: Vec<&str> = saved.iter().map(|w| w.address.as_str()).collect();
+    assert_eq!(
+        addresses,
+        vec!["3Hob1Fxu"],
+        "only the genuinely remote peer is remembered"
+    );
 }

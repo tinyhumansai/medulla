@@ -68,6 +68,7 @@ impl App {
             agent_scroll: 0,
             chat_scroll: 0,
             command_index: 0,
+            add_host_provider_cache: std::cell::OnceCell::new(),
             host_index: 0,
             host_roles_focus: false,
             host_role_index: 0,

@@ -38,8 +38,12 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
     // The role ids, not just their text. The description and tags are what the
     // model reads; the ids are what anything downstream joins on — asking for a
     // role by name, or applying its tools and instructions at delegate time.
-    if !w.roles.is_empty() {
-        metadata["roles"] = json!(w.roles);
+    //
+    // The *resolved* ids, for that reason. Advertising an id the catalog does
+    // not have hands a joiner a key with nothing behind it, which is the same
+    // unactionable hint the description and tags already drop.
+    if !roles.is_empty() {
+        metadata["roles"] = json!(roles.iter().map(|t| t.id.as_str()).collect::<Vec<_>>());
     }
     if let Some(workspace) = w
         .workspace

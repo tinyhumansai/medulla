@@ -223,6 +223,38 @@ pub(crate) fn options_from_config_with_custom(
     })
 }
 
+/// The primary's options with the fields an extra host may redefine applied.
+///
+/// An extra overrides only what makes it distinct and inherits the rest, so
+/// declaring one stays a directory and nothing else. But *which* harness runs
+/// there is a per-host choice — the Add Host wizard asks for it and writes it to
+/// `providers`/`default_provider` — and inheriting those unconditionally meant
+/// the answer was persisted and then never read, at startup or at spawn. A host
+/// added as `codex` ran `claude` because the primary did.
+///
+/// Absent fields still inherit: an entry that names no provider is a directory
+/// declaration, exactly as before.
+fn extra_options(
+    primary: &EmbeddedDaemonOptions,
+    extra: &HostSection,
+) -> Result<EmbeddedDaemonOptions, String> {
+    let mut options = primary.clone();
+    options.workspace = extra.workspace.clone();
+    if !extra.providers.is_empty() {
+        options.providers = Some(
+            extra
+                .providers
+                .iter()
+                .map(|name| parse_provider(name))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    if !extra.default_provider.trim().is_empty() {
+        options.default_provider = Some(parse_provider(&extra.default_provider)?);
+    }
+    Ok(options)
+}
+
 /// Parse one configured provider name, naming the valid spellings on failure.
 fn parse_provider(name: &str) -> Result<HarnessProvider, String> {
     HarnessProvider::from_wire(name.trim()).ok_or_else(|| {
@@ -335,6 +367,10 @@ pub(crate) struct LocalHostSpawner {
     /// stops it, so a spawner that did not hold them would start a host and
     /// immediately kill it.
     started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
+    /// Every device-local address, shared with the hub's roster filter. A host
+    /// bound here must be appended or the roster sink will persist it as a
+    /// remote entry.
+    addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl LocalHostSpawner {
@@ -346,6 +382,7 @@ impl LocalHostSpawner {
         env: HashMap<String, String>,
         runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
         started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
+        addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     ) -> Self {
         Self {
             network,
@@ -354,27 +391,35 @@ impl LocalHostSpawner {
             env,
             runtimes,
             started,
+            addresses,
         }
     }
 
     /// Start `config` now and return the roster entry describing it.
     ///
-    /// The address is derived from the count of hosts already started, so a
-    /// second unnamed host does not collide with the first.
-    pub(crate) fn spawn(&self, config: &HostSection) -> Result<WorkerSpec, String> {
-        let index = self.started.lock().expect("started hosts").len();
-        let mut options = self.options.clone();
-        options.workspace = config.workspace.clone();
+    /// `index` is the entry's position within `[[hosts]]`, which is the basis
+    /// [`all_host_addresses`] and [`start_all`] derive an unnamed host's address
+    /// from. It is passed in rather than counted here for exactly that reason:
+    /// counting *started* hosts includes the primary, so a first unnamed extra
+    /// bound `local-host-2` this run and `local-host-1` on the next launch —
+    /// an address the roster remembered that nothing would ever bind again.
+    pub(crate) fn spawn(&self, config: &HostSection, index: usize) -> Result<WorkerSpec, String> {
         let host = start_at(
             config,
             &self.env,
             &self.network,
-            options,
+            extra_options(&self.options, config)?,
             self.sessions.clone(),
             extra_host_address(config, index),
             false,
         )?;
         let spec = host.spec().clone();
+        // Before the roster entry exists, so the hub's save filter already knows
+        // this address is device-local by the time registration triggers one.
+        self.addresses
+            .lock()
+            .expect("host addresses")
+            .push(spec.address.clone());
         self.runtimes
             .lock()
             .expect("local harness runtimes")
@@ -417,17 +462,19 @@ pub(crate) fn start_all(
         if !host_enabled(extra, env) {
             continue;
         }
-        // Each extra overrides only what makes it distinct — where it works —
-        // and inherits the rest of the primary's options, so declaring one is a
-        // directory and nothing else.
-        let mut extra_options = options.clone();
-        extra_options.workspace = extra.workspace.clone();
+        let options = match extra_options(&options, extra) {
+            Ok(options) => options,
+            Err(error) => {
+                problems.push(error);
+                continue;
+            }
+        };
         let address = extra_host_address(extra, index);
         match start_at(
             extra,
             env,
             network,
-            extra_options,
+            options,
             sessions.clone(),
             address,
             false,

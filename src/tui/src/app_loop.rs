@@ -476,6 +476,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             router: loaded.config.router.clone(),
         }
     });
+    // Shared with the hub's roster filter and appended to by the spawner, so a
+    // host added mid-session is recognised as device-local the next time the
+    // roster is saved rather than being remembered as a remote peer.
+    let local_addresses = std::sync::Arc::new(std::sync::Mutex::new(
+        crate::local_host::all_host_addresses(&loaded.config.host, &loaded.config.hosts),
+    ));
     // Only meaningful while this device hosts: with hosting off there is no bus
     // binding or session manager to hand a new host.
     let local_host_spawner = hosting
@@ -497,6 +503,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     env.clone(),
                     host_runtimes.clone(),
                     started_hosts.clone(),
+                    local_addresses.clone(),
                 )
             })
         })
@@ -506,10 +513,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
         // Always known, even with hosting off — it is what identifies a
         // remembered local roster entry that must not be inherited.
-        host_addresses: crate::local_host::all_host_addresses(
-            &loaded.config.host,
-            &loaded.config.hosts,
-        ),
+        host_addresses: local_addresses,
         hosts: started_hosts
             .lock()
             .expect("started hosts")

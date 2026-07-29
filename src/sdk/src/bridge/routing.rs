@@ -131,9 +131,9 @@ impl Bridge for RoutingBridge {
         self.remote.as_ref()?.resolve_handle(name).await
     }
 
-    /// Asked of the remote only. A device-local address is served in-process,
-    /// so it has no heartbeat to read and needs none — it is up exactly when
-    /// this process is.
+    /// Split by where the address lives. A device-local one is answered here as
+    /// live — it names something bound in this process, so it has no heartbeat
+    /// to read and needs none. Only the rest are forwarded to the remote.
     async fn presence(&self, addresses: &[String]) -> std::collections::HashMap<String, bool> {
         // A device-local address is answered here, not asked of the relay. It
         // names something bound in this process, so its liveness is knowable

@@ -385,12 +385,17 @@ impl HubHandle {
     /// Unlike a label this is not display-only: roles ride the descriptor the
     /// hub advertises, so the re-register is what actually makes the
     /// orchestrator start routing role-matched subtasks here.
+    /// Errors when no worker holds `id` — a host can be removed between the
+    /// render the operator toggled against and this call, and reporting that as
+    /// a successful role change would leave the UI claiming a roster state that
+    /// never existed.
     pub async fn set_roles(&self, id: &str, roles: Vec<String>) -> anyhow::Result<()> {
         {
             let mut r = self.roster.lock().expect("roster lock");
-            if let Some(w) = r.iter_mut().find(|w| w.id == id) {
-                w.roles = roles;
-            }
+            let Some(w) = r.iter_mut().find(|w| w.id == id) else {
+                anyhow::bail!("no host {id} to set roles on");
+            };
+            w.roles = roles;
         }
         self.save();
         self.reregister().await

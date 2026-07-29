@@ -582,4 +582,23 @@ fn a_role_the_catalog_does_not_have_is_dropped_rather_than_advertised() {
     w.roles = vec!["deleted-role".to_string()];
     let payload = register_payload(&[w], &no_presence(), &crate::agents::default_templates());
     assert_eq!(payload["agents"][0]["description"], "claude daemon");
+    // Including from `metadata.roles`, which is the join key: an id with no
+    // template behind it hands a downstream lookup a key that resolves to
+    // nothing, which is the same unactionable hint the description drops.
+    assert!(
+        payload["agents"][0]["metadata"]["roles"].is_null(),
+        "unresolved ids must not survive in metadata: {}",
+        payload["agents"][0]["metadata"]
+    );
+}
+
+#[test]
+fn metadata_roles_carries_only_the_ids_the_catalog_resolves() {
+    let mut w = worker("w1", "GRVaddr");
+    w.roles = vec!["code-reviewer".to_string(), "deleted-role".to_string()];
+    let payload = register_payload(&[w], &no_presence(), &crate::agents::default_templates());
+    assert_eq!(
+        payload["agents"][0]["metadata"]["roles"],
+        serde_json::json!(["code-reviewer"])
+    );
 }

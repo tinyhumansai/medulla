@@ -5,14 +5,15 @@ use std::collections::HashMap;
 
 use medulla::bridge::LocalBridgeNetwork;
 use medulla::config::HostSection;
+use medulla::daemon::embedded::EmbeddedDaemonOptions;
 use medulla::daemon::providers::{Abort, RunTaskOptions};
 use medulla::tinyplace::HarnessProvider;
 use medulla_tui::worker::executor::PtySessionExecutor;
 use medulla_tui::worker::pty::PtyManager;
 
 use super::{
-    all_host_addresses, display_name, extra_host_address, host_address, host_enabled,
-    options_from_config, options_from_config_with_custom, run_task, start, start_all,
+    all_host_addresses, display_name, extra_host_address, extra_options, host_address,
+    host_enabled, options_from_config, options_from_config_with_custom, run_task, start, start_all,
 };
 
 /// A path that is guaranteed to exist and be executable on every platform.
@@ -506,5 +507,81 @@ async fn a_failing_extra_does_not_take_the_other_hosts_down() {
         problems.len(),
         1,
         "and the collision is reported, not fatal"
+    );
+}
+
+#[test]
+fn an_extra_runs_the_harness_it_declared_rather_than_the_primarys() {
+    // The Add Host wizard asks which harness a local host runs and writes the
+    // answer to `providers`/`defaultProvider`. Inheriting the primary's meant
+    // the answer was persisted and then never read — a host added as codex ran
+    // claude because the primary did.
+    let primary = EmbeddedDaemonOptions {
+        providers: Some(vec![HarnessProvider::Claude]),
+        default_provider: Some(HarnessProvider::Claude),
+        workspace: "/primary".to_string(),
+        ..Default::default()
+    };
+    let extra = HostSection {
+        workspace: "/extra".to_string(),
+        providers: vec!["codex".to_string()],
+        default_provider: "codex".to_string(),
+        ..HostSection::default()
+    };
+
+    let options = extra_options(&primary, &extra).expect("valid providers");
+    assert_eq!(options.default_provider, Some(HarnessProvider::Codex));
+    assert_eq!(options.providers, Some(vec![HarnessProvider::Codex]));
+    assert_eq!(options.workspace, "/extra");
+}
+
+#[test]
+fn an_extra_that_names_no_harness_still_inherits_the_primarys() {
+    // A `[[hosts]]` entry that is only a directory keeps behaving as one.
+    let primary = EmbeddedDaemonOptions {
+        providers: Some(vec![HarnessProvider::Claude]),
+        default_provider: Some(HarnessProvider::Claude),
+        ..Default::default()
+    };
+    let extra = HostSection {
+        workspace: "/extra".to_string(),
+        ..HostSection::default()
+    };
+
+    let options = extra_options(&primary, &extra).expect("no providers is fine");
+    assert_eq!(options.default_provider, Some(HarnessProvider::Claude));
+    assert_eq!(options.providers, Some(vec![HarnessProvider::Claude]));
+}
+
+#[test]
+fn an_extras_unknown_harness_is_rejected_rather_than_silently_widening() {
+    // Same rule the primary follows: an empty provider list means "detect
+    // everything installed", so dropping a typo would widen what this machine
+    // runs when the operator meant to narrow it.
+    let extra = HostSection {
+        workspace: "/extra".to_string(),
+        providers: vec!["claudde".to_string()],
+        ..HostSection::default()
+    };
+    assert!(extra_options(&EmbeddedDaemonOptions::default(), &extra).is_err());
+}
+
+#[test]
+fn an_unnamed_extras_address_is_derived_from_its_config_index() {
+    // `spawn` used to count *started* hosts, which includes the primary, so a
+    // first unnamed extra bound `local-host-2` this run and `local-host-1` on
+    // the next launch — leaving the roster remembering an address nothing binds.
+    // Every site now derives from the entry's position within `[[hosts]]`.
+    let unnamed = HostSection {
+        workspace: "/extra".to_string(),
+        address: String::new(),
+        ..HostSection::default()
+    };
+    let primary = HostSection::default();
+
+    assert_eq!(extra_host_address(&unnamed, 0), "local-host-1");
+    assert_eq!(
+        all_host_addresses(&primary, std::slice::from_ref(&unnamed)),
+        vec![host_address(&primary), "local-host-1".to_string()],
     );
 }

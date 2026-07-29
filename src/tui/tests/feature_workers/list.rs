@@ -284,10 +284,35 @@ fn space_on_a_role_offers_the_selected_host_for_it_and_takes_it_back() {
     assert!(out.contains("[ ]"), "the toggle list is drawn: {out}");
 
     let cmd = app.on_event(key(KeyCode::Char(' ')));
-    match cmd {
+    let assigned = match cmd {
         Some(Cmd::WorkerOp(WorkerOp::SetRoles { id, roles })) => {
             assert_eq!(id, "w1");
             assert_eq!(roles.len(), 1, "exactly the toggled role");
+            roles
+        }
+        other => panic!("expected a SetRoles op, got {other:?}"),
+    };
+
+    // And back off again. The op is a whole-list replacement, so removing the
+    // only role must send an *empty* list — not omit the field, which would
+    // read as "leave the roles alone" and make the toggle one-way.
+    let mut held = app_with_roster(
+        vec![{
+            let mut w = worker("w1", true);
+            w.roles = assigned;
+            w
+        }],
+        None,
+    );
+    held.focus_routing_subpage("Hosts");
+    let _ = held.on_event(key(KeyCode::Right));
+    match held.on_event(key(KeyCode::Char(' '))) {
+        Some(Cmd::WorkerOp(WorkerOp::SetRoles { id, roles })) => {
+            assert_eq!(id, "w1");
+            assert!(
+                roles.is_empty(),
+                "removal sends an empty list, got {roles:?}"
+            );
         }
         other => panic!("expected a SetRoles op, got {other:?}"),
     }
@@ -446,5 +471,43 @@ fn a_role_below_the_fold_stays_visible_when_selected() {
     assert!(
         out.contains(&format!("▸ [ ] {last}")),
         "the window follows the cursor to the last role: {out}"
+    );
+}
+
+#[test]
+fn a_local_host_that_could_not_be_saved_can_be_retried() {
+    // The entry used to be pushed into the in-process config before the write,
+    // so a failed save left a host that was never written and never started —
+    // and the duplicate check then refused every retry for that directory,
+    // which the operator could not clear without restarting.
+    let mut app = app_with_roster(Vec::new(), None);
+    let workspace = std::env::temp_dir().to_string_lossy().into_owned();
+
+    // Drive the wizard: Local is first, one Enter settles the harness step, the
+    // next opens the directory prompt. No config path is set on this app, so
+    // the save cannot succeed.
+    let add = |app: &mut App, workspace: &str| {
+        app.focus_routing_subpage("Add Host");
+        let _ = app.on_event(key(KeyCode::Enter));
+        let _ = app.on_event(key(KeyCode::Enter));
+        assert!(app.prompt_state().is_some(), "the directory prompt opened");
+        for ch in workspace.chars() {
+            let _ = app.on_event(key(KeyCode::Char(ch)));
+        }
+        app.on_event(key(KeyCode::Enter))
+    };
+
+    assert!(
+        add(&mut app, &workspace).is_none(),
+        "nothing starts when nothing was saved"
+    );
+    assert!(app.status().contains("No config file"), "{}", app.status());
+
+    // The second attempt must reach the same failure, not "Already hosted".
+    assert!(add(&mut app, &workspace).is_none());
+    assert!(
+        !app.status().contains("Already hosted"),
+        "a failed save must not block the retry: {}",
+        app.status()
     );
 }

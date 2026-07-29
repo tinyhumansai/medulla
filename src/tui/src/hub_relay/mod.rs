@@ -86,10 +86,11 @@ fn subscription_strategy_from_config(home: &Path) -> medulla::runtime::Subscript
 fn roster_sink(
     home: &Path,
     log: medulla::hub::HubLog,
-    local_addresses: Vec<String>,
+    local_addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 ) -> medulla::hub::RosterSink {
     let path = roster_path(home);
     Arc::new(move |workers: &[medulla::hub::HubWorker]| {
+        let local_addresses = local_addresses.lock().expect("host addresses").clone();
         let rows: Vec<medulla::config::HubWorkerConfig> = workers
             .iter()
             .filter(|w| !local_addresses.contains(&w.address))
@@ -214,7 +215,10 @@ pub(crate) fn build_hub_config_with_host(
     // heard the name.
     let (local_network, local_address) = match &local {
         Some(dispatch) => {
-            workers.retain(|worker| !dispatch.host_addresses.contains(&worker.address));
+            {
+                let local_addresses = dispatch.host_addresses.lock().expect("host addresses");
+                workers.retain(|worker| !local_addresses.contains(&worker.address));
+            }
             // Inserted in declaration order, so the primary leads and the
             // extras follow it the way they read in the config.
             for host in dispatch.hosts.iter().rev() {
@@ -237,6 +241,8 @@ pub(crate) fn build_hub_config_with_host(
         .get("MEDULLA_HUB_POLL_MS")
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_MS);
+    // The handle, not a copy of its contents: the sink reads it at save time,
+    // which is the only moment that knows which hosts this device is binding.
     let persisted_local = local
         .as_ref()
         .map(|dispatch| dispatch.host_addresses.clone())

@@ -192,3 +192,47 @@ fn assigned_roles_travel_with_the_capabilities() {
     let payload = capabilities_payload("claude", Some(&probed()), None, &[]);
     assert!(payload.get("roles").is_none(), "{payload}");
 }
+
+#[test]
+fn a_worker_that_resolves_none_of_its_roles_advertises_no_tools() {
+    // Fail-closed. `filter_map` used to drop unknown ids and leave the worker
+    // unconstrained, so a typo in a role id — the one case where the operator
+    // meant to *narrow* what a machine does — silently advertised every tool the
+    // harness has instead.
+    let catalog = crate::agents::default_templates();
+    let allowed = super::role_tool_allowlist(&["typoed-role".to_string()], &catalog);
+    assert_eq!(
+        allowed,
+        Some(Vec::new()),
+        "an unresolvable role must deny, not open"
+    );
+}
+
+#[test]
+fn an_empty_catalog_leaves_a_worker_unconstrained() {
+    // The other half of the rule: no catalog means the templates have not been
+    // read, not that every id is bad. Failing closed here would take a whole
+    // fleet offline on a transient read.
+    let allowed = super::role_tool_allowlist(&["code-reviewer".to_string()], &[]);
+    assert_eq!(allowed, None);
+}
+
+#[test]
+fn a_worker_naming_no_roles_stays_unconstrained() {
+    let catalog = crate::agents::default_templates();
+    assert_eq!(super::role_tool_allowlist(&[], &catalog), None);
+}
+
+#[test]
+fn resolved_roles_union_their_allowlists() {
+    let catalog = crate::agents::default_templates();
+    let allowed = super::role_tool_allowlist(
+        &["code-reviewer".to_string(), "typoed-role".to_string()],
+        &catalog,
+    )
+    .expect("a resolved role constrains");
+    // The unresolvable id contributes nothing, but it no longer opens the gate:
+    // one role resolved, so the constraint is that role's allowlist.
+    assert!(allowed.contains(&"read".to_string()), "{allowed:?}");
+    assert!(!allowed.contains(&"edit".to_string()), "{allowed:?}");
+}

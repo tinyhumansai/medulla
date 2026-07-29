@@ -387,9 +387,16 @@ pub enum Cmd {
     WorkerOp(WorkerOp),
     /// Start a host on this device now, and register it with the hub.
     ///
-    /// Carries the declaration rather than an index into config: the config is
-    /// the app's, and the loop that can actually start a host is not.
-    StartLocalHost(Box<medulla::config::HostSection>),
+    /// Carries the declaration rather than only an index into config: the
+    /// config is the app's, and the loop that can actually start a host is not.
+    /// `index` is the entry's position within `[[hosts]]`, which is the basis an
+    /// unnamed host's address is derived from at every other site.
+    StartLocalHost {
+        /// The host declaration to bind.
+        host: Box<medulla::config::HostSection>,
+        /// Its position within `[[hosts]]`.
+        index: usize,
+    },
     /// Retarget the live screen subscription: stop watching one task, start
     /// watching another. Both halves ride one command so the change is atomic
     /// from the loop's point of view — a stop that landed without its start
@@ -706,6 +713,14 @@ pub struct App {
     pub(super) chat_scroll: usize,
     /// Selected row in the command peek, while it is open.
     pub(super) command_index: usize,
+    /// Installed harnesses offered by the Add Host wizard, detected once.
+    ///
+    /// Detection reads the environment and stat-checks every provider binary on
+    /// `PATH`. The wizard asked on every render frame *and* every keypress, so a
+    /// page that is drawn at the frame rate was doing filesystem work to answer
+    /// a question whose answer cannot change while the process runs.
+    pub(super) add_host_provider_cache:
+        std::cell::OnceCell<Vec<medulla::tinyplace::HarnessProvider>>,
     /// Selected row on the Routing Hosts page.
     pub(super) host_index: usize,
     /// Whether ↑↓ on the Hosts page drives the role toggles in the preview

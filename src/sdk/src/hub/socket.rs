@@ -499,28 +499,7 @@ async fn handle_capabilities(
         Some(w) => (w.harness.clone(), Some(w.address.clone()), w.roles.clone()),
         None => (String::new(), None, Vec::new()),
     };
-    // The union of the toggled roles' tool allowlists. `None` when the worker
-    // names no roles, or names only roles with no allowlist of their own —
-    // both mean "unconstrained", which must stay distinct from "allowed
-    // nothing" or an unspecified worker would advertise no tools at all.
-    let allowed_tools: Option<Vec<String>> = {
-        let mut allowed: Vec<String> = Vec::new();
-        let mut constrained = false;
-        for role in roles
-            .iter()
-            .filter_map(|id| catalog.iter().find(|t| &t.id == id))
-        {
-            if let Some(tools) = &role.tools {
-                constrained = true;
-                for tool in tools {
-                    if !allowed.iter().any(|held| held == tool) {
-                        allowed.push(tool.clone());
-                    }
-                }
-            }
-        }
-        constrained.then_some(allowed)
-    };
+    let allowed_tools = super::probe::role_tool_allowlist(&roles, &catalog);
     // Ask the worker what it can actually do, and answer with that. Fails open:
     // a transport error, timeout, or malformed reply leaves only the static
     // facts the roster already knows. See [`super::probe`].

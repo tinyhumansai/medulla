@@ -21,6 +21,52 @@ use serde_json::{json, Map, Value};
 
 use crate::tinyplace::AgentCapabilities;
 
+/// The union of the toggled roles' tool allowlists.
+///
+/// `None` means unconstrained, and must stay distinct from `Some(vec![])` —
+/// "allowed nothing" — or an unspecified worker would advertise no tools at all.
+/// A worker names no roles, or names only roles that declare no allowlist of
+/// their own, and both mean unconstrained.
+///
+/// # Fail-closed on unresolvable roles
+///
+/// A worker that names roles and resolves *none* of them is misconfigured, and
+/// the permissive reading of that is the worst one available: a typo in a role
+/// id would silently advertise every tool the harness has, which is exactly the
+/// over-claim the allowlist exists to prevent. It denies instead — an agent
+/// advertising no tools is visibly broken and gets fixed, whereas one
+/// advertising too many looks fine and routes wrong.
+///
+/// Only when there is a catalog to judge against. An empty one means the
+/// templates have not been read, not that every id is bad, and failing closed
+/// there would disable a whole fleet on a transient.
+pub(super) fn role_tool_allowlist(
+    roles: &[String],
+    catalog: &[crate::runtime::AgentTemplate],
+) -> Option<Vec<String>> {
+    let mut allowed: Vec<String> = Vec::new();
+    let mut constrained = false;
+    let mut resolved = 0usize;
+    for role in roles
+        .iter()
+        .filter_map(|id| catalog.iter().find(|t| &t.id == id))
+    {
+        resolved += 1;
+        if let Some(tools) = &role.tools {
+            constrained = true;
+            for tool in tools {
+                if !allowed.iter().any(|held| held == tool) {
+                    allowed.push(tool.clone());
+                }
+            }
+        }
+    }
+    if !roles.is_empty() && resolved == 0 && !catalog.is_empty() {
+        constrained = true;
+    }
+    constrained.then_some(allowed)
+}
+
 /// The backend-shaped `capabilities` bag for one worker.
 ///
 /// `harness` is the roster's configured harness name, used when the probe

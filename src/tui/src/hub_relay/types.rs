@@ -29,7 +29,12 @@ pub(crate) struct LocalDispatch {
     /// and the `[[hosts]]` entries rather than from a started host — and it is
     /// needed in exactly that case, to recognise a remembered local entry and
     /// drop it.
-    pub(crate) host_addresses: Vec<String>,
+    ///
+    /// Shared and appended to rather than a launch-time snapshot: the roster
+    /// sink filters against it at *save* time, so a host added mid-session was
+    /// absent from a captured list and got written into the remembered roster —
+    /// a device-local entry that survives to a run where nothing binds it.
+    pub(crate) host_addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     /// The hosts running on this device, as roster entries. Empty when hosting
     /// is switched off — the bus is still shared, so hosts can appear later.
     pub(crate) hosts: Vec<WorkerSpec>,

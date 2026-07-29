@@ -27,13 +27,20 @@ impl App {
     pub(in crate::ui::app) fn add_host_providers(
         &self,
     ) -> Vec<medulla::tinyplace::HarnessProvider> {
-        let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-        let detected = medulla::daemon::providers::detect_providers(&env, None, None);
-        if detected.is_empty() {
-            vec![medulla::tinyplace::HarnessProvider::Claude]
-        } else {
-            detected
-        }
+        // Computed once per process. Detection stat-checks provider binaries on
+        // `PATH`, and both the draw and the key handler call this — so without
+        // the cache the page did that work every frame and every keystroke.
+        self.add_host_provider_cache
+            .get_or_init(|| {
+                let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+                let detected = medulla::daemon::providers::detect_providers(&env, None, None);
+                if detected.is_empty() {
+                    vec![medulla::tinyplace::HarnessProvider::Claude]
+                } else {
+                    detected
+                }
+            })
+            .clone()
     }
 
     /// The kind currently under the cursor.
@@ -220,10 +227,16 @@ impl App {
 
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
-            if on_kind {
-                "↑↓ choose a kind · Enter continue · Esc back to the menu"
-            } else {
-                "↑↓ choose · Enter continue · Esc start over · c copy the install line"
+            // The install line exists only in the Remote branch, so offering `c`
+            // on a local host advertises a key that copies nothing.
+            match (on_kind, kind) {
+                (true, _) => "↑↓ choose a kind · Enter continue · Esc back to the menu",
+                (false, AddHostKind::Remote) => {
+                    "Enter continue · Esc start over · c copy the install line"
+                }
+                (false, AddHostKind::Local) => {
+                    "↑↓ choose a harness · Enter continue · Esc start over"
+                }
             },
             dim,
         )));

@@ -82,6 +82,9 @@ pub(crate) async fn call(
     if !mode.allows(name) {
         return Ok(content(&json!({ "error": mode.refusal(name) }), true));
     }
+    if let Some(error) = scope_error(mode, name, &arguments) {
+        return Ok(content(&json!({ "error": error }), true));
+    }
 
     let outcome = match name {
         "workflow_list" => ops::list(store).map_err(to_rpc),
@@ -189,6 +192,21 @@ pub(crate) async fn call(
     Ok(match outcome {
         Ok(value) => content(&value, false),
         Err(err) => content(&json!({ "error": err.message }), true),
+    })
+}
+
+/// Refuse evolution writes that target a workflow other than the reviewed one.
+fn scope_error(mode: ToolMode, name: &str, arguments: &Value) -> Option<String> {
+    if mode != ToolMode::Propose || !matches!(name, "workflow_note_add" | "workflow_propose") {
+        return None;
+    }
+    let scope = std::env::var(super::evolve::TOOL_SCOPE_ENV).ok()?;
+    let requested = arguments.get("id").and_then(Value::as_str).unwrap_or("");
+    (requested != scope).then(|| {
+        format!(
+            "'{name}' is scoped to workflow '{scope}' for this review; \
+             writing workflow '{requested}' is not allowed"
+        )
     })
 }
 

@@ -52,7 +52,7 @@ pub struct TaskRequest {
     /// Which slice of the workflow tools this dispatch's harness is served.
     ///
     /// `None` — every ordinary dispatch — means the full authoring surface.
-    /// `Some("propose")` withholds every verb that writes or runs a graph,
+    /// `Some("propose:<workflow-id>")` withholds graph writes and scopes review writes,
     /// which is what an evolution pass gets.
     ///
     /// Carried on the request rather than read from the ambient environment

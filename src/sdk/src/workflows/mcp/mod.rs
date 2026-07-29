@@ -20,7 +20,7 @@ mod tools;
 #[cfg(test)]
 mod tests;
 
-pub use tools::{tool_definitions, ToolMode, TOOL_MODE_ENV, TOOL_NAMES};
+pub use tools::{tool_definitions, ToolMode, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV};
 
 use std::collections::HashMap;
 use std::path::Path;

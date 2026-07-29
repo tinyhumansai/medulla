@@ -72,12 +72,23 @@ fn workflow_mcp_servers(
         let mut server = McpServerStdio::new(crate::workflows::mcp::SERVER_NAME, binary)
             .args(vec!["workflow".to_string(), "mcp".to_string()]);
         if let Some(mode) = tool_mode {
+            let (mode, scope) = mode
+                .split_once(':')
+                .map_or((mode, None), |(mode, scope)| (mode, Some(scope)));
             server
                 .env
                 .push(agent_client_protocol::schema::v1::EnvVariable::new(
                     crate::workflows::mcp::TOOL_MODE_ENV,
                     mode,
                 ));
+            if let Some(scope) = scope {
+                server
+                    .env
+                    .push(agent_client_protocol::schema::v1::EnvVariable::new(
+                        crate::workflows::mcp::TOOL_SCOPE_ENV,
+                        scope,
+                    ));
+            }
         }
         vec![McpServer::Stdio(server)]
     }

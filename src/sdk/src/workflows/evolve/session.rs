@@ -138,7 +138,7 @@ impl EvolveSession {
             // The autonomy boundary, carried to the harness rather than
             // assumed. Without this the review turn is served the full
             // authoring surface and the "it cannot edit" claim is only prose.
-            tool_mode: Some(ToolMode::Propose.as_wire().to_string()),
+            tool_mode: Some(format!("{}:{workflow_id}", ToolMode::Propose.as_wire())),
             // Never a workflow: this is a review turn. Setting it would run the
             // graph the pass is reviewing, which for a failure-triggered pass
             // would be the run that triggered it, again.

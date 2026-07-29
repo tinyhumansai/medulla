@@ -33,6 +33,9 @@ pub enum ToolMode {
 /// kind of turn this is does not get to write its argv.
 pub const TOOL_MODE_ENV: &str = "MEDULLA_WORKFLOW_TOOLS";
 
+/// Restricts evolution writes to the workflow being reviewed.
+pub const TOOL_SCOPE_ENV: &str = "MEDULLA_WORKFLOW_SCOPE";
+
 /// The tools a [`ToolMode::Propose`] session does not get.
 const WITHHELD_IN_PROPOSE: [&str; 4] = [
     "workflow_create",

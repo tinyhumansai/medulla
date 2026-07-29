@@ -76,10 +76,17 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
     let tool_mode = match obj.get("tool_mode") {
         None => None,
         Some(serde_json::Value::String(mode)) if mode.trim().is_empty() => None,
-        Some(serde_json::Value::String(mode)) => match mode.trim() {
-            mode @ ("full" | "propose") => Some(mode.to_string()),
-            _ => return None,
-        },
+        Some(serde_json::Value::String(mode)) => {
+            let mode = mode.trim();
+            let valid_scoped_propose = mode
+                .strip_prefix("propose:")
+                .is_some_and(|scope| !scope.trim().is_empty());
+            if matches!(mode, "full" | "propose") || valid_scoped_propose {
+                Some(mode.to_string())
+            } else {
+                return None;
+            }
+        }
         Some(_) => return None,
     };
 

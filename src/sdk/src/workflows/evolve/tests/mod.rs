@@ -521,7 +521,10 @@ async fn a_review_turn_asks_for_the_restricted_tool_set() {
     // being *correct* and the mode being *sent* are different claims and only
     // the second one protects the graph.
     let seen = stub.seen.lock().unwrap();
-    assert_eq!(seen[0].tool_mode.as_deref(), Some("propose"));
+    assert_eq!(
+        seen[0].tool_mode.as_deref(),
+        Some("propose:a-review-turn-asks-for-restricted-tools")
+    );
 }
 
 #[test]

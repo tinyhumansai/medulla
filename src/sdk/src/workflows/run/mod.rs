@@ -448,6 +448,10 @@ pub async fn dry_run(
 /// What a proposal needs: the whole question is whether a patched graph *would*
 /// work, and answering it by saving the patch first would be the silent
 /// mutation the proposal exists to avoid.
+///
+/// # Errors
+///
+/// Returns [`WorkflowError`] if the graph cannot be compiled or simulated.
 pub async fn dry_run_graph(
     graph: &tinyflows::model::WorkflowGraph,
     resolver: Arc<dyn tinyflows::caps::WorkflowResolver>,

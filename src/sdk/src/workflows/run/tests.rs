@@ -212,6 +212,14 @@ async fn an_approval_gate_pauses_the_run_and_names_what_it_is_waiting_on() {
 
     assert_eq!(record.status, RunStatus::PendingApproval);
     assert_eq!(record.pending_approvals, vec!["review".to_string()]);
+    assert!(
+        record
+            .summary
+            .as_deref()
+            .is_some_and(|summary| summary.contains("awaiting approval: review")),
+        "the persisted summary must describe the resumable state: {:?}",
+        record.summary
+    );
     assert!(!record.status.is_settled(), "a gate is resumable");
 }
 

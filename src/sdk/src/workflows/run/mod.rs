@@ -373,9 +373,7 @@ pub async fn resume_workflow(
         Some(earlier) => merge_diagnoses(earlier, resumed, &record.steps[..earlier_steps]),
         None => resumed,
     });
-    record.summary = observer
-        .summary()
-        .or_else(|| Some(summary::summarize(&record)));
+    record.summary = final_summary(&record, &observer);
 
     finalizer.disarm();
     context.store.record_run(&record)?;
@@ -395,10 +393,21 @@ fn record_evidence(
 ) {
     // The observer's own sentence when it has one: it saw the engine settle and
     // can count what actually ran. The fallback only knows the record.
-    record.summary = observer
-        .summary()
-        .or_else(|| Some(summary::summarize(record)));
+    record.summary = final_summary(record, observer);
     record.diagnosis = Some(diagnose::diagnose(graph, &observer.execution_steps()));
+}
+
+/// Prefer the observer's richer summary except when a run paused for approval.
+///
+/// The observer only knows whether engine execution returned successfully; it
+/// cannot describe the host-level `PendingApproval` state or name its gates.
+fn final_summary(record: &RunRecord, observer: &WorkflowRunObserver) -> Option<String> {
+    if record.status == RunStatus::PendingApproval {
+        return Some(summary::summarize(record));
+    }
+    observer
+        .summary()
+        .or_else(|| Some(summary::summarize(record)))
 }
 
 /// Fold a resumed leg's diagnosis into the one from before the gate.

@@ -113,6 +113,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let loaded = load_config(args.config.as_deref(), &env, &cwd)?;
+    prompt_for_update(&loaded.config.update, &env).await;
     let home = medulla::home::medulla_home(&env);
 
     // Bind the embedded core's state directory to this process's Medulla home
@@ -445,7 +446,6 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // would contradict both the message it shows and the no-session startup path
     // they would then have to trigger by relaunching.
     let mut status = startup_status.or(tinyplace_status).or(log_note);
-    let mut restart_requested = false;
     let result = loop {
         let exit = run(
             &mut terminal,
@@ -486,10 +486,6 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 break Ok(());
             }
             Ok(SessionExit::Quit) => break Ok(()),
-            Ok(SessionExit::Restart) => {
-                restart_requested = true;
-                break Ok(());
-            }
             Err(e) => break Err(e),
         }
     };
@@ -498,29 +494,33 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Explicit teardown (the guard also runs on drop / panic).
     drop(guard);
     drop(tinyplace_service); // aborts the background loops.
-    if restart_requested && result.is_ok() {
-        // The update checker has already replaced the executable. Relaunch with
-        // the same command-line arguments so the new version takes effect.
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            let error = std::process::Command::new(std::env::current_exe()?)
-                .args(raw)
-                .exec();
-            Err(anyhow::anyhow!("failed to restart after update: {error}"))
+    result
+}
+
+/// Offer an available release before the interactive session starts, so an
+/// accepted update never interrupts an active turn or terminal session.
+async fn prompt_for_update(
+    config: &medulla::config::UpdateConfig,
+    env: &std::collections::HashMap<String, String>,
+) {
+    if !config.enabled(env) {
+        return;
+    }
+    let current = env!("CARGO_PKG_VERSION");
+    let Ok(Some(info)) =
+        medulla::update::check_for_update(&medulla::update::update_url(), current).await
+    else {
+        return;
+    };
+    println!(
+        "medulla {} is available (current {}). Install now? [y/N]",
+        info.version, current
+    );
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_ok() && answer.trim().eq_ignore_ascii_case("y") {
+        match medulla::update::install_update(&info).await {
+            Ok(()) => println!("updated successfully; starting medulla {}.", info.version),
+            Err(error) => eprintln!("update failed; continuing with medulla {current}: {error}"),
         }
-        #[cfg(windows)]
-        {
-            std::process::Command::new(std::env::current_exe()?)
-                .args(raw)
-                .spawn()?;
-            Ok(())
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            result
-        }
-    } else {
-        result
     }
 }

@@ -73,7 +73,6 @@ pub(crate) async fn run(
     let mut tick = tokio::time::interval(Duration::from_millis(90));
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
     let mut mouse_on = true;
-    let mut restart_requested = false;
 
     // Background release-update checker ("automated cron"): first probe ~10s
     // after startup, then every 6h. A newer version surfaces as a persistent
@@ -143,11 +142,6 @@ pub(crate) async fn run(
                         app.set_status(notice);
                         app.refresh_snapshot();
                     }
-                    AppMsg::UpdateInstalled(status) => {
-                        app.set_status(status);
-                        restart_requested = true;
-                        app.should_quit = true;
-                    }
                 }
             }
             // A history share the welcome flow handed over. Reported on the
@@ -174,9 +168,7 @@ pub(crate) async fn run(
             }
         }
     }
-    Ok(if restart_requested {
-        SessionExit::Restart
-    } else if app.relogin_requested() {
+    Ok(if app.relogin_requested() {
         SessionExit::Relogin
     } else {
         SessionExit::Quit

@@ -20,8 +20,6 @@ pub(super) enum AppMsg {
     UsageLoaded(Option<serde_json::Value>),
     /// A newer release was detected by the background update checker.
     UpdateAvailable(String),
-    /// A background update was installed and the process should restart.
-    UpdateInstalled(String),
     /// Current local task document.
     TasksLoaded(medulla::tasks::TaskDocument),
     /// A progress line from a running copilot turn.
@@ -66,8 +64,6 @@ pub(super) enum AppMsg {
 pub(crate) enum SessionExit {
     /// The user quit; the process should exit.
     Quit,
-    /// The binary was replaced and must be relaunched.
-    Restart,
     /// The user logged out; re-authenticate and start a fresh session.
     Relogin,
 }

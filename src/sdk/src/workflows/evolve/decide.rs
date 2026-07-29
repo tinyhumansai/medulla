@@ -118,7 +118,17 @@ pub fn accept(
     let decided_at = crate::clock::now_millis() as u64;
     proposal.status = ProposalStatus::Accepted;
     proposal.decided_at = Some(decided_at);
-    store.save_proposal(&proposal)?;
+    if let Err(err) = store.save_proposal(&proposal) {
+        // The definition write above already landed and cannot be honestly
+        // reported as a failed acceptance. Return the applied graph and the
+        // intended terminal proposal state while making the reconciliation
+        // failure visible to operators.
+        tracing::error!(
+            proposal = %proposal.id,
+            workflow = %proposal.workflow_id,
+            "workflow change landed but accepted proposal state could not be persisted: {err}"
+        );
+    }
 
     // Best effort: the graph has already changed, and failing here would leave
     // the caller unable to tell whether the edit landed.

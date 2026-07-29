@@ -25,11 +25,28 @@ fn edge(from: &str, to: &str) -> Edge {
     }
 }
 
-fn graph(nodes: Vec<Node>, edges: Vec<Edge>) -> WorkflowGraph {
-    WorkflowGraph {
+/// A record around a bare graph.
+///
+/// The diff reads whole records, so even the purely structural cases go through
+/// one. Everything outside the graph is held constant here so those cases keep
+/// asserting only the structure.
+fn graph(nodes: Vec<Node>, edges: Vec<Edge>) -> WorkflowRecord {
+    record(WorkflowGraph {
         nodes,
         edges,
         ..Default::default()
+    })
+}
+
+/// A record wrapping `graph`, named after it as the store's parser would.
+fn record(graph: WorkflowGraph) -> WorkflowRecord {
+    WorkflowRecord {
+        id: "wf".into(),
+        name: graph.name.clone(),
+        description: String::new(),
+        enabled: true,
+        graph,
+        source_path: None,
     }
 }
 
@@ -167,10 +184,35 @@ fn an_edge_off_a_named_port_says_which_port() {
 #[test]
 fn a_renamed_workflow_is_reported() {
     let before = graph(vec![], vec![]);
-    let after = WorkflowGraph {
+    let after = record(WorkflowGraph {
         name: "Nightly sweep".into(),
-        ..graph(vec![], vec![])
-    };
+        ..Default::default()
+    });
 
     assert_eq!(describe(&before, &after), vec!["~ name  → Nightly sweep"]);
+}
+
+#[test]
+fn an_edited_description_is_reported_even_though_the_graph_is_untouched() {
+    let before = graph(vec![node("a", NodeKind::Trigger)], vec![]);
+    let after = WorkflowRecord {
+        description: "sweeps the repo every night".into(),
+        ..before.clone()
+    };
+
+    // The description is not in the graph, so a graph-only diff saw nothing and
+    // the caller skipped its catalogue refresh — leaving a stale rail.
+    assert_eq!(describe(&before, &after), vec!["~ description"]);
+}
+
+#[test]
+fn enabling_and_disabling_each_say_which_way_it_went() {
+    let enabled = graph(vec![node("a", NodeKind::Trigger)], vec![]);
+    let disabled = WorkflowRecord {
+        enabled: false,
+        ..enabled.clone()
+    };
+
+    assert_eq!(describe(&enabled, &disabled), vec!["~ disabled"]);
+    assert_eq!(describe(&disabled, &enabled), vec!["~ enabled"]);
 }

@@ -131,6 +131,7 @@ fn frame(task_id: &str, text: &str, workflow: Option<&str>) -> String {
         provider: None,
         model: None,
         workflow: workflow.map(str::to_string),
+        conversation: None,
     })
 }
 
@@ -257,6 +258,7 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
             provider: None,
             model: None,
             workflow: None,
+            conversation: None,
         }),
     )
     .await

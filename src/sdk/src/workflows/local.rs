@@ -65,4 +65,87 @@ impl LocalWorkflowHost {
     pub fn dispatch(&self) -> Arc<dyn HarnessDispatch> {
         self.dispatch.clone()
     }
+
+    /// Stop whatever this host currently has in flight.
+    ///
+    /// Scoped to this host, which is what makes it safe: a copilot pane holds
+    /// one of these per conversation, so stopping "everything here" is stopping
+    /// the turn the operator is watching and nothing else.
+    pub fn abort(&self) {
+        self.dispatch.abort_in_flight();
+    }
+}
+
+/// Run the workflow `id` on this machine, start to finish.
+///
+/// Everything a caller needs assembled in one place: settings from config, a
+/// loopback host for `agent` nodes to dispatch to, and the run itself. The
+/// `medulla workflow run` command builds its own because it has more to say
+/// about run ids and progress; this is for callers that want the plain thing —
+/// today the copilot's `workflow_run` tool.
+///
+/// The host is held for the whole run and dropped with it, which unbinds the
+/// loopback endpoints so a later run can bind them again.
+///
+/// # Errors
+///
+/// Fails when no coding-agent CLI is installed, when the workflow or the host
+/// is disabled, or when the run itself does.
+pub async fn run_here(
+    store: Arc<dyn crate::workflows::WorkflowStore>,
+    config: &crate::config::WorkflowsConfig,
+    env: &std::collections::HashMap<String, String>,
+    cwd: &std::path::Path,
+    id: &str,
+    input: serde_json::Value,
+) -> Result<crate::workflows::RunRecord, crate::workflows::WorkflowError> {
+    use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
+    use crate::workflows::{RunContext, StoreWorkflowResolver};
+
+    // Checked before the host, not after: starting a host requires a
+    // coding-agent CLI on `PATH`, a cost a disabled workflow (or a host with
+    // workflows turned off) should never pay just to be told no. Every path
+    // here still runs `run_workflow`'s own checks too — this is an early exit
+    // for the common refusal, not a replacement for the authoritative one.
+    if !config.enabled {
+        return Err(crate::workflows::WorkflowError::Engine(
+            "workflows are disabled on this host (workflows.enabled = false)".to_string(),
+        ));
+    }
+    let workflow = crate::workflows::store::require(store.as_ref(), id)?;
+    if !workflow.enabled {
+        return Err(crate::workflows::WorkflowError::Engine(format!(
+            "workflow '{id}' is disabled"
+        )));
+    }
+
+    let home = crate::home::medulla_home(env);
+    let mut settings = CapabilitySettings::from_config(config, &home);
+    settings.workspace = cwd.to_string_lossy().to_string();
+    if settings.default_worker_address.trim().is_empty() {
+        settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
+    }
+
+    let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
+        workspace: cwd.to_string_lossy().to_string(),
+        default_provider: config.default_provider,
+        model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+        ..Default::default()
+    })
+    .map_err(crate::workflows::WorkflowError::Engine)?;
+
+    let (sink, _fold) = folding_sink();
+    let context = RunContext {
+        store: store.clone(),
+        settings: Arc::new(settings),
+        services: HostServices {
+            dispatch: host.dispatch(),
+            resolver: Arc::new(StoreWorkflowResolver::new(store)),
+            http_credentials: std::collections::HashMap::new(),
+        },
+        sink,
+    };
+
+    let run_id = format!("run-{}", uuid::Uuid::new_v4());
+    crate::workflows::run_workflow(context, id, &run_id, input).await
 }

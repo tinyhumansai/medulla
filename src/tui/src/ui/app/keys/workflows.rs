@@ -87,6 +87,10 @@ impl App {
             }
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
             KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
+            KeyCode::Char('u') => WorkflowsKey::Handled(self.undo_selected_workflow()),
+            // `f` for "fix". Only meaningful with the cursor on a run, which is
+            // where the operator is when they can see one failed.
+            KeyCode::Char('f') => WorkflowsKey::Handled(self.repair_selected_run()),
             // Every other character is swallowed so a stray letter cannot fire a
             // content-pane action from the menu — the settlement Settings makes.
             KeyCode::Char(_) => WorkflowsKey::Handled(None),
@@ -151,6 +155,7 @@ impl App {
             }
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
             KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
+            KeyCode::Char('u') => WorkflowsKey::Handled(self.undo_selected_workflow()),
             _ => WorkflowsKey::Unhandled,
         }
     }
@@ -203,6 +208,12 @@ impl App {
                 }
                 WorkflowsKey::Handled(None)
             }
+            // Retry, but only with nothing typed: every printable key in this
+            // pane types, and an `r` that sometimes did something else instead
+            // would be worse than no retry at all.
+            KeyCode::Char('r') if self.wf.draft.text.is_empty() => {
+                WorkflowsKey::Handled(self.retry_copilot())
+            }
             KeyCode::Char(c) if !alt => {
                 self.wf.draft =
                     insert_at(&self.wf.draft.text, self.wf.draft.cursor, &c.to_string());
@@ -210,6 +221,22 @@ impl App {
             }
             _ => WorkflowsKey::Unhandled,
         }
+    }
+
+    /// Take back the last edit to the selected workflow.
+    ///
+    /// Deliberately not confirmed. Undo is the *recovery* gesture — the one an
+    /// operator reaches for after the copilot did something they did not want —
+    /// and a confirmation prompt in front of it would put a decision between
+    /// them and the fix. It is also itself undoable: the restore is snapshotted
+    /// like any other write, so pressing `u` twice returns to where you were.
+    fn undo_selected_workflow(&mut self) -> Option<Cmd> {
+        if self.wf.creating {
+            self.set_status("Nothing to undo — this workflow has not been created yet");
+            return None;
+        }
+        let id = self.selected_workflow()?.id.clone();
+        Some(Cmd::UndoWorkflow { id })
     }
 
     /// Run the selected workflow, refusing a disabled one.

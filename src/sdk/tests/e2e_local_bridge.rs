@@ -38,6 +38,7 @@ async fn task_runner_round_trips_entirely_over_the_local_bridge() {
                                 provider: None,
                                 model: None,
                                 workflow: None,
+                                conversation: None,
                             }),
                         )
                         .await
@@ -61,6 +62,7 @@ async fn task_runner_round_trips_entirely_over_the_local_bridge() {
                 provider: None,
                 model: None,
                 workflow: None,
+                conversation: None,
             },
             None,
         )

@@ -110,6 +110,7 @@ pub fn frame(
         provider: None,
         model: None,
         workflow: None,
+        conversation: None,
     }
 }
 

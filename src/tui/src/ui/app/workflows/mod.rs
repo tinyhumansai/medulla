@@ -156,6 +156,12 @@ impl App {
         self.workflows.get(self.workflow_index)
     }
 
+    /// The run under the cursor, when the cursor is on one of a workflow's runs
+    /// rather than on the workflow itself.
+    pub(in crate::ui::app) fn selected_run(&self) -> Option<&medulla::workflows::RunRecord> {
+        self.workflow_runs().get(self.wf.run_index?)
+    }
+
     /// Which of the tab's three panes has the keyboard. Test seam.
     #[cfg(test)]
     pub(in crate::ui::app) fn wf_focus(&self) -> super::types::WorkflowFocus {

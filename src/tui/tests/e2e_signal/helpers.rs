@@ -158,6 +158,7 @@ pub fn task_frame(
         provider: None,
         model: None,
         workflow: None,
+        conversation: None,
     })
 }
 

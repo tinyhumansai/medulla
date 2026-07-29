@@ -25,11 +25,13 @@
 //! the caller to name at least one node the persisted record actually lists as
 //! pending, so a stale or invented resume cannot walk a run past its gate.
 
+pub mod diagnose;
 mod registry;
 
 #[cfg(test)]
 mod tests;
 
+pub use diagnose::{diagnose, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding};
 pub use registry::{cancel, is_running, RunGuard};
 
 use std::sync::Arc;
@@ -346,13 +348,21 @@ pub async fn dry_run(
     resolver: Arc<dyn tinyflows::caps::WorkflowResolver>,
     workflow_id: &str,
     input: Value,
-) -> Result<Value, WorkflowError> {
+) -> Result<DryRun, WorkflowError> {
     let workflow = require(store.as_ref(), workflow_id)?;
     let compiled = execute::compile(&workflow.graph).map_err(WorkflowError::Engine)?;
     let capabilities = crate::flow_engine::build_dry_run_capabilities(resolver);
 
-    execute::simulate(&compiled, input, &capabilities)
+    // Observed, because the steps are what a dry run is *for* at authoring
+    // time. The outcome only says the graph completed; a binding that resolved
+    // to null on the way completes too.
+    let (capture, observer) = diagnose::capturing();
+    let outcome = execute::simulate_observed(&compiled, input, &capabilities, &observer)
         .await
-        .map(|outcome| outcome.output)
-        .map_err(WorkflowError::Engine)
+        .map_err(WorkflowError::Engine)?;
+
+    Ok(DryRun {
+        output: outcome.output,
+        diagnosis: diagnose::diagnose(&workflow.graph, &capture.steps()),
+    })
 }

@@ -114,6 +114,7 @@ async fn start_task(runtime: &DaemonRuntime, from: &str, task_id: &str) {
         provider: Some(HarnessProvider::Codex),
         model: None,
         workflow: None,
+        conversation: None,
     });
     let frame = medulla::tinyplace::decode_task_frame(&body);
     runtime.handle_message(from.to_string(), body, frame);

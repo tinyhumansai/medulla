@@ -210,6 +210,27 @@ impl TaskRunner {
         }
     }
 
+    /// Cancel every dispatch this runner has in flight.
+    ///
+    /// For a caller that owns a runner serving one piece of work and wants to
+    /// stop it without having kept the task id — the copilot pane, whose runner
+    /// serves one conversation. On a runner shared by unrelated work this would
+    /// be far too broad, which is why nothing shared calls it.
+    ///
+    /// Best-effort in the same way [`abort_task`](Self::abort_task) is: a
+    /// poisoned lock leaves each dispatch to its own liveness bound.
+    pub fn abort_all(&self) {
+        let signals: Vec<_> = self
+            .aborts
+            .lock()
+            .ok()
+            .map(|map| map.values().cloned().collect())
+            .unwrap_or_default();
+        for signal in signals {
+            signal.notify_one();
+        }
+    }
+
     /// Dispatch `req` to its worker and await the terminal `reply`/`error`, with
     /// automatic recovery from a desynced session.
     ///
@@ -307,6 +328,7 @@ impl TaskRunner {
                 provider: req.provider,
                 model: req.model.clone(),
                 workflow: req.workflow.clone(),
+                conversation: req.conversation.clone(),
             });
 
             if let Err(e) = self.relay.send(&req.worker_address, &body).await {
@@ -405,6 +427,7 @@ async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) 
         provider: None,
         model: None,
         workflow: None,
+        conversation: None,
     });
     let _ = relay.send(address, &body).await;
 }

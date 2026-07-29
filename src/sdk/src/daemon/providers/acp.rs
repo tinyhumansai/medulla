@@ -41,9 +41,15 @@ fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
         // tools that would be refused.
         let env: std::collections::HashMap<String, String> = std::env::vars().collect();
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let enabled = crate::config::load_config(None, &env, &cwd)
-            .map(|loaded| loaded.config.workflows.enabled)
-            .unwrap_or(true);
+        // Respects the parent's `--config`, if one was recorded — see
+        // `crate::config::CONFIG_PATH_ENV`. Rediscovering here regardless of
+        // that would let a policy the operator explicitly chose (say,
+        // `allowCode = false`) be silently overridden by whatever config this
+        // subprocess's own `cwd` happens to discover.
+        let enabled =
+            crate::config::load_config(crate::config::explicit_config_from_env(&env), &env, &cwd)
+                .map(|loaded| loaded.config.workflows.enabled)
+                .unwrap_or(true);
         if !enabled {
             return Vec::new();
         }
@@ -120,10 +126,17 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
 
             let session_id = match resume {
                 Some(id) => {
-                    connection
-                        .send_request(LoadSessionRequest::new(id.clone(), cwd.clone()))
-                        .block_task()
-                        .await?;
+                    let mut request = LoadSessionRequest::new(id.clone(), cwd.clone());
+                    // The same servers a new session gets, and for the same
+                    // reason. A loaded session restores the *transcript*, not
+                    // the client's tool offer — so omitting this hands the
+                    // harness a conversation it remembers and no way to act on
+                    // it. For the copilot that is the difference between an
+                    // agent that edits the graph and one that can only discuss
+                    // it, and it would fail silently: the model would explain
+                    // what it would have done.
+                    request.mcp_servers = workflow_mcp_servers();
+                    connection.send_request(request).block_task().await?;
                     id.into()
                 }
                 None => {

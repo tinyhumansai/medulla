@@ -92,6 +92,7 @@ async fn a_task_round_trips_from_the_orchestrator_to_this_device_and_back() {
                 provider: None,
                 model: None,
                 workflow: None,
+                conversation: None,
             },
             None,
         )
@@ -156,6 +157,7 @@ async fn concurrent_tasks_are_correlated_back_to_the_right_caller() {
                             provider: None,
                             model: None,
                             workflow: None,
+                            conversation: None,
                         },
                         None,
                     )

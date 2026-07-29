@@ -53,6 +53,17 @@ pub struct TaskRequest {
     /// This is what lets one dispatch be a whole plan. The instruction becomes
     /// the workflow's trigger payload.
     pub workflow: Option<String>,
+    /// Opt into session continuity: successive dispatches naming the same
+    /// conversation resume one harness session.
+    ///
+    /// `None` — the default, and what every dispatch but the copilot's uses —
+    /// keeps a task context-free, which is the invariant that lets two tasks
+    /// run concurrently without seeing each other's work.
+    ///
+    /// Continuity is best-effort by design. A provider with no resume flag
+    /// (`opencode`) runs every turn fresh, which loses context but never
+    /// correctness, so a caller may always ask.
+    pub conversation: Option<String>,
 }
 
 /// The terminal result of a dispatched task.

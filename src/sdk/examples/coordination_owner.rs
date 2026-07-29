@@ -229,6 +229,7 @@ async fn run() -> Result<(), String> {
         provider: args.provider,
         model: args.model.clone(),
         workflow: None,
+        conversation: None,
     });
     transport
         .send(&to, &frame)

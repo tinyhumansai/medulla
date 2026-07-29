@@ -168,6 +168,45 @@ fn d_simulates_and_x_runs_the_selected_workflow_from_the_sidebar() {
 }
 
 #[test]
+fn u_undoes_the_selected_workflow_from_either_pane() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+
+    let from_sidebar = key(&mut app, KeyCode::Char('u'));
+    assert!(matches!(
+        from_sidebar,
+        WorkflowsKey::Handled(Some(Cmd::UndoWorkflow { ref id })) if id == "sweep"
+    ));
+
+    // Also on the canvas: undo answers an edit the operator is *looking at*,
+    // and stepping back out to the list to reach it would be a step away from
+    // the thing they want changed.
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.wf_focus(), WorkflowFocus::Canvas);
+    let from_canvas = key(&mut app, KeyCode::Char('u'));
+    assert!(matches!(
+        from_canvas,
+        WorkflowsKey::Handled(Some(Cmd::UndoWorkflow { ref id })) if id == "sweep"
+    ));
+}
+
+#[test]
+fn u_on_the_new_row_says_there_is_nothing_to_undo_yet() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+    // The New row sits below the whole catalogue, so Down from the last row of
+    // the only workflow lands on it.
+    key(&mut app, KeyCode::Down);
+
+    let pressed = key(&mut app, KeyCode::Char('u'));
+
+    assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+    assert!(
+        app.status().contains("not been created"),
+        "{}",
+        app.status()
+    );
+}
+
+#[test]
 fn x_refuses_a_disabled_workflow_from_the_sidebar_but_d_still_simulates_it() {
     let (_home, mut app) = app_with(&[disabled("paused")]);
 
@@ -446,4 +485,60 @@ fn alt_held_characters_are_not_typed_into_the_draft() {
 
     assert!(matches!(result, WorkflowsKey::Unhandled));
     assert!(app.wf.draft.text.is_empty());
+}
+
+#[test]
+fn r_in_the_copilot_retries_only_when_nothing_is_typed() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+    key(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.wf_focus(), WorkflowFocus::Copilot);
+
+    // With a draft in progress `r` is a letter, because every printable key in
+    // this pane types — an `r` that sometimes did something else would be
+    // worse than no retry at all.
+    key(&mut app, KeyCode::Char('g'));
+    key(&mut app, KeyCode::Char('r'));
+    assert_eq!(app.wf.draft.text, "gr");
+
+    // Emptied, so `r` is the retry again.
+    for _ in 0..2 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    let pressed = key(&mut app, KeyCode::Char('r'));
+    assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+    assert!(
+        app.status().contains("Nothing to retry"),
+        "{}",
+        app.status()
+    );
+}
+
+#[test]
+fn f_with_no_run_selected_says_so_rather_than_falling_through_silently() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+
+    // No runs at all, so the cursor is on the workflow rather than a run.
+    let pressed = key(&mut app, KeyCode::Char('f'));
+
+    // `Handled(None)` alone would also be what a stray letter absorbed by the
+    // sidebar's generic handler looks like; the status is what proves `f` was
+    // actually recognised and refused for a stated reason.
+    assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+    assert!(app.status().contains("No run selected"), "{}", app.status());
+}
+
+#[test]
+fn f_on_a_run_that_did_not_fail_says_there_is_nothing_to_repair() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+    let mut run = medulla::workflows::new_run_record("run-1", "sweep", 0);
+    run.status = medulla::workflows::RunStatus::Succeeded;
+    app.workflow_store().record_run(&run).expect("record");
+    app.reload_workflows();
+
+    // Down from the workflow row lands on its first (and only) run.
+    key(&mut app, KeyCode::Down);
+    let pressed = key(&mut app, KeyCode::Char('f'));
+
+    assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+    assert!(app.status().contains("did not fail"), "{}", app.status());
 }

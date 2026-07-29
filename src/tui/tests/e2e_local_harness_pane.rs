@@ -114,6 +114,7 @@ fn dispatch(runtime: &DaemonRuntime, task_id: &str) {
         provider: Some(HarnessProvider::Codex),
         model: None,
         workflow: None,
+        conversation: None,
     });
     let frame = medulla::tinyplace::decode_task_frame(&body);
     runtime.handle_message(HUB.to_string(), body, frame);

@@ -25,6 +25,11 @@ pub mod settings;
 #[cfg(test)]
 mod tests;
 
+// Split out of `tests` once the `medulla:shell` cases pushed it over the
+// repository's 500-line file ceiling — see that file's module doc.
+#[cfg(test)]
+mod shell_tests;
+
 pub use caps::{build_capabilities, build_dry_run_capabilities, open_checkpointer, HostServices};
 pub use execute::{Compiled, Outcome};
 pub use observability::{folding_sink, null_sink, WorkEventSink, WorkflowRunObserver};

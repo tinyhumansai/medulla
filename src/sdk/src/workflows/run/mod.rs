@@ -368,7 +368,12 @@ pub async fn resume_workflow(
     // A resumed leg only observed the nodes that ran *after* the gate, so its
     // diagnosis would report every earlier node as one that never ran. Merged
     // rather than replaced, for the same reason the steps are appended.
-    let resumed = diagnose::diagnose(&workflow.graph, &observer.execution_steps());
+    let resumed_steps = observer.execution_steps();
+    let resumed = diagnose_record(
+        &workflow.graph,
+        &resumed_steps,
+        record.status == RunStatus::Failed,
+    );
     record.diagnosis = Some(match record.diagnosis.take() {
         Some(earlier) => merge_diagnoses(earlier, resumed, &record.steps[..earlier_steps]),
         None => resumed,
@@ -394,7 +399,36 @@ fn record_evidence(
     // The observer's own sentence when it has one: it saw the engine settle and
     // can count what actually ran. The fallback only knows the record.
     record.summary = final_summary(record, observer);
-    record.diagnosis = Some(diagnose::diagnose(graph, &observer.execution_steps()));
+    let steps = observer.execution_steps();
+    record.diagnosis = Some(diagnose_record(
+        graph,
+        &steps,
+        record.status == RunStatus::Failed,
+    ));
+}
+
+/// Diagnose a settled run without calling its terminal error "swallowed".
+fn diagnose_record(
+    graph: &tinyflows::model::WorkflowGraph,
+    steps: &[tinyflows::observability::ExecutionStep],
+    failed: bool,
+) -> diagnose::Diagnosis {
+    let mut diagnosis = diagnose::diagnose(graph, steps);
+    if failed {
+        let terminal = steps
+            .iter()
+            .rev()
+            .find(|step| matches!(step.status, tinyflows::observability::StepStatus::Error));
+        if let Some(position) = terminal.and_then(|step| {
+            diagnosis
+                .hidden_errors
+                .iter()
+                .rposition(|error| error.node_id == step.node_id)
+        }) {
+            diagnosis.hidden_errors.remove(position);
+        }
+    }
+    diagnosis
 }
 
 /// Prefer the observer's richer summary except when a run paused for approval.

@@ -57,6 +57,54 @@ pub fn check(id: &str, graph: &WorkflowGraph) -> Result<(), WorkflowError> {
 pub fn failures(graph: &WorkflowGraph) -> Vec<String> {
     let mut failures = agent_prompt_failures(graph);
     failures.extend(binding_failures(graph));
+    failures.extend(code_language_failures(graph));
+    failures
+}
+
+/// `code` nodes whose language the engine will not read the way it was written.
+///
+/// The engine matches the literal string `"python"` and treats *everything else*
+/// as JavaScript — silently. So `"language": "python3"` runs a Python program
+/// through node, and `"language": "shell"` runs a shell script through node.
+/// Both fail with a syntax error from an interpreter the author never named,
+/// which is among the least helpful failures this host can produce.
+///
+/// Refused here rather than documented, because documentation does not stop a
+/// plausible spelling.
+fn code_language_failures(graph: &WorkflowGraph) -> Vec<String> {
+    // The two the engine actually distinguishes. Not `ScriptLanguage::NAMES`:
+    // that includes `shell`, which this node kind cannot reach.
+    const ACCEPTED: [&str; 2] = ["javascript", "python"];
+
+    let mut failures = Vec::new();
+    for node in &graph.nodes {
+        if node.kind != NodeKind::Code {
+            continue;
+        }
+        let Some(language) = node.config.get("language").and_then(|v| v.as_str()) else {
+            // Absent is legal and means JavaScript, which the engine's own
+            // default already says.
+            continue;
+        };
+        if ACCEPTED.contains(&language) {
+            continue;
+        }
+        let hint = if crate::flow_engine::caps::script::ScriptLanguage::parse(language)
+            == Some(crate::flow_engine::caps::script::ScriptLanguage::Shell)
+        {
+            " A `code` node cannot run shell: use a `tool_call` with the `medulla:shell` slug, \
+             which runs in the operator's project directory."
+        } else {
+            ""
+        };
+        failures.push(format!(
+            "node '{}': `language` is `{language}`, which this engine does not recognise — it \
+             matches only the exact strings `javascript` and `python`, and silently treats \
+             anything else as JavaScript. Your program would be run through node and fail with a \
+             syntax error naming an interpreter you did not choose.{hint}",
+            node.id
+        ));
+    }
     failures
 }
 

@@ -202,3 +202,65 @@ fn a_clean_graph_passes() {
 
     assert!(check("sweep", &graph).is_ok());
 }
+
+// ---- code node languages ----
+
+#[test]
+fn a_code_node_asking_for_shell_is_refused_and_pointed_at_the_shell_tool() {
+    let graph = graph(json!([
+        { "id": "compute", "kind": "code", "name": "Compute",
+          "config": { "language": "shell", "source": "echo hi" } },
+    ]));
+
+    let failures = failures(&graph);
+
+    // The engine treats anything but the literal "python" as JavaScript, so
+    // this would run a shell script through node and fail with a syntax error
+    // naming an interpreter the author never chose.
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("medulla:shell"), "{failures:?}");
+}
+
+#[test]
+fn a_near_miss_language_spelling_is_refused_rather_than_silently_becoming_javascript() {
+    for spelling in ["python3", "py", "js", "node"] {
+        let graph = graph(json!([
+            { "id": "compute", "kind": "code", "name": "Compute",
+              "config": { "language": spelling, "source": "print(1)" } },
+        ]));
+
+        assert_eq!(
+            failures(&graph).len(),
+            1,
+            "{spelling} must not silently become javascript"
+        );
+    }
+}
+
+#[test]
+fn the_two_spellings_the_engine_actually_reads_are_accepted() {
+    for spelling in ["javascript", "python"] {
+        let graph = graph(json!([
+            { "id": "compute", "kind": "code", "name": "Compute",
+              "config": { "language": spelling, "source": "x" } },
+        ]));
+
+        assert!(
+            failures(&graph).is_empty(),
+            "{spelling} is exactly what the engine matches: {:?}",
+            failures(&graph)
+        );
+    }
+}
+
+#[test]
+fn a_code_node_that_names_no_language_is_left_alone() {
+    let graph = graph(json!([
+        { "id": "compute", "kind": "code", "name": "Compute",
+          "config": { "source": "console.log(1)" } },
+    ]));
+
+    // Absent is legal and means JavaScript, which the engine's own default
+    // already says — refusing it would be a false positive.
+    assert!(failures(&graph).is_empty(), "{:?}", failures(&graph));
+}

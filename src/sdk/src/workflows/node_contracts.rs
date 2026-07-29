@@ -88,14 +88,32 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
              to **stdout**, parsed as JSON when it is JSON and taken as a string otherwise. \
              `return` at the top level is a syntax error — print instead."
                 .to_string(),
-            "Working javascript: `const i = JSON.parse(require('fs').readFileSync(0, 'utf8')); \
-             console.log(JSON.stringify({ total: i.a + i.b }));`. Working python: `import json, \
-             sys; print(json.dumps({'total': sum(json.load(sys.stdin))}))`."
+            "`language` must be exactly `javascript` or `python`. The engine matches those two \
+             literal strings and silently treats everything else — `python3`, `js`, `shell` — as \
+             JavaScript, so a near-miss spelling runs your program through node and fails with a \
+             syntax error naming an interpreter you did not choose. Authoring one is refused \
+             rather than saved. A `code` node cannot run shell at all: that is `medulla:shell`."
+                .to_string(),
+            "THE INPUT IS AN ARRAY OF ITEMS, not the upstream value directly: \
+             `[{\"json\": <value>, \"paired_item\": 0}, …]`. Reach the first item's value with \
+             `items[0].json`. When the upstream node is an `agent`, `tool_call`, or \
+             `http_request`, that value is itself the `{json, text, raw}` envelope — so a field \
+             from a `medulla:shell` step upstream is `items[0].json.json.output.<field>`. \
+             Getting this wrong is the most likely way a working script still fails."
+                .to_string(),
+            "Working javascript: `const items = JSON.parse(require('fs').readFileSync(0, \
+             'utf8')); console.log(JSON.stringify({ total: items[0].json.a + items[0].json.b \
+             }));`. Working python: `import json, sys; items = json.load(sys.stdin); \
+             print(json.dumps({'total': items[0]['json']['a']}))`."
                 .to_string(),
             "A `code` node runs in a scratch directory, not the operator's project — it is a \
              computation over its input. A step that means to touch the repository is a \
              `tool_call` with the `medulla:shell` slug, which runs in the workspace and says so \
              in the graph."
+                .to_string(),
+            "A dry run does NOT execute a code node: the simulation mocks the runner, so a \
+             script with a syntax error or the wrong output shape passes one cleanly. \
+             `workflow_run` is the only thing that proves a script works."
                 .to_string(),
         ],
         "sub_workflow" => vec![

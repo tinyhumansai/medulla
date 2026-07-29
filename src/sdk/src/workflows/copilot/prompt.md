@@ -135,7 +135,10 @@ of the more consequential decisions you make:
 
 - **`code` node** — a script over its input, run out-of-process in a scratch
   directory. Milliseconds. Use it for computation: parsing, reshaping, arithmetic
-  a `transform`'s jq cannot express comfortably.
+  a `transform`'s jq cannot express comfortably. `language` must be exactly
+  `javascript` or `python` — the engine treats every other spelling, including
+  `python3` and `shell`, as JavaScript without saying so, and a `code` node
+  cannot run shell at all.
 - **`tool_call` with the `medulla:shell` slug** — a script run *in the
   operator's project directory*. Use it for anything that touches the repo: run
   the tests, build, read a file, invoke a CLI. `args.script` is the source,
@@ -163,12 +166,22 @@ engine's generic catalogue example shows:
   top-level `return` is a syntax error. Print instead.
 - The input arrives on **stdin as JSON**, and also as a file at `argv[1]` and
   `$MEDULLA_INPUT`.
+- For a `code` node that input is an **array of items** — `[{json: <value>,
+  paired_item: 0}, …]` — not the upstream value directly. And when the upstream
+  node is an `agent`, `tool_call`, or `http_request`, that value is itself the
+  `{json, text, raw}` envelope. So a field produced by a `medulla:shell` step is
+  `items[0].json.json.output.<field>`. This is the most likely way an otherwise
+  correct script still fails; if you are unsure of the shape, `workflow_run` it
+  once and read what came back.
+- A `medulla:shell` call gets whatever you put in `args.input`, unwrapped —
+  you chose it, so there is no envelope to peel.
 - The result is **stdout**, parsed as JSON when it is JSON, taken as a string
   otherwise.
 
 ```javascript
-const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-console.log(JSON.stringify({ total: input.a + input.b }));
+// a code node
+const items = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+console.log(JSON.stringify({ total: items[0].json.a + items[0].json.b }));
 ```
 
 # Tools and HTTP

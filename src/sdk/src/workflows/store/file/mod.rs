@@ -34,6 +34,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use fs2::FileExt;
+
 use crate::home::medulla_home;
 use crate::workflows::types::{
     RunRecord, WorkflowError, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision,
@@ -287,6 +289,28 @@ impl WorkflowStore for FileWorkflowStore {
             .write_lock
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        std::fs::create_dir_all(self.write_dir()).map_err(|source| WorkflowError::Io {
+            path: self.write_dir().to_path_buf(),
+            source,
+        })?;
+        let lock_path = self
+            .write_dir()
+            .join(format!(".{}.lock", paths::safe_component(&record.id)?));
+        let file_lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|source| WorkflowError::Io {
+                path: lock_path.clone(),
+                source,
+            })?;
+        file_lock
+            .lock_exclusive()
+            .map_err(|source| WorkflowError::Io {
+                path: lock_path.clone(),
+                source,
+            })?;
         let Some(current) = self.get(&record.id)? else {
             return Ok(false);
         };
@@ -298,6 +322,10 @@ impl WorkflowStore for FileWorkflowStore {
         let document = to_document(record)?;
         revisions::capture(self.write_dir(), &current)?;
         write_atomic(&path, &document)?;
+        FileExt::unlock(&file_lock).map_err(|source| WorkflowError::Io {
+            path: lock_path,
+            source,
+        })?;
         Ok(true)
     }
 

@@ -69,6 +69,28 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
         WorkflowAction::Catalog(kind) => ops::catalog(kind.as_deref())?,
         WorkflowAction::Run(id) => execute(&parsed, &store, &env, &cwd, id).await?,
         WorkflowAction::Resume(run_id) => resume(&parsed, &store, &env, &cwd, run_id).await?,
+        WorkflowAction::Notes(id) => ops::notes(&store, id)?,
+        WorkflowAction::AddNote(id) => ops::add_note(
+            &store,
+            id,
+            parsed.kind.as_deref().unwrap_or("observation"),
+            parsed.text.as_deref().unwrap_or_default(),
+            parsed.run_id.clone().into_iter().collect(),
+            // Typed by a person at a terminal. Pinned as a result, so
+            // automation writing observations cannot evict it.
+            medulla::workflows::NoteSource::Operator,
+        )?,
+        WorkflowAction::Proposals(id) => ops::proposals(&store, id)?,
+        WorkflowAction::Accept(proposal_id) => ops::accept_proposal(&store, proposal_id)?,
+        WorkflowAction::Reject(proposal_id) => ops::reject_proposal(
+            &store,
+            proposal_id,
+            parsed.reason.as_deref().unwrap_or_default(),
+        )?,
+        WorkflowAction::Evolve(id) => {
+            let config = load_workflows_config(&parsed, &env, &cwd);
+            ops::evolve(&store, &config, &cwd, id, parsed.run_id.as_deref()).await?
+        }
         WorkflowAction::Mcp => unreachable!("handled above, before stdout is claimed"),
     };
 
@@ -204,4 +226,20 @@ fn read_stdin(what: &str) -> anyhow::Result<String> {
 fn read_stdin_json(what: &str) -> anyhow::Result<Value> {
     let body = read_stdin(what)?;
     serde_json::from_str(&body).map_err(|err| anyhow::anyhow!("{what}: invalid JSON: {err}"))
+}
+
+/// This machine's workflow settings, defaulting safely when config is
+/// unreadable.
+///
+/// Defaults rather than failing, matching how the MCP server handles the same
+/// case: a review that cannot start because a config file has a typo in an
+/// unrelated section is a worse outcome than one that runs conservatively.
+fn load_workflows_config(
+    parsed: &WorkflowArgs,
+    env: &HashMap<String, String>,
+    cwd: &std::path::Path,
+) -> medulla::config::WorkflowsConfig {
+    medulla::config::load_config(parsed.config.as_deref(), env, cwd)
+        .map(|loaded| loaded.config.workflows)
+        .unwrap_or_default()
 }

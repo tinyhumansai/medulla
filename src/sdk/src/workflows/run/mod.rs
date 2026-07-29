@@ -208,7 +208,31 @@ pub async fn run_workflow(
 
     finalizer.disarm();
     context.store.record_run(&record)?;
+    remember_failure(&context.store, &record);
     Ok(record)
+}
+
+/// Write the observation a failed run earns, before anyone asks for one.
+///
+/// The sync half of the evolution trigger, and deliberately the only half that
+/// lives here. This body is shared by the CLI, the daemon, and the TUI; it
+/// holds no dispatch and no worker address, so starting a harness from it would
+/// make `medulla workflow run` silently spawn a second agent. What it *can* do
+/// everywhere is turn a run record into a note.
+///
+/// Best effort by design: a note that could not be written must not turn a run
+/// that already happened into a failure to record it.
+fn remember_failure(store: &Arc<dyn WorkflowStore>, record: &RunRecord) {
+    if record.status != RunStatus::Failed {
+        return;
+    }
+    if let Err(err) = crate::workflows::evolve::record_failure_note(store, record) {
+        tracing::warn!(
+            run = %record.id,
+            workflow = %record.workflow_id,
+            "could not record what this failure taught: {err}"
+        );
+    }
 }
 
 /// How a run stopped, when it did not produce an outcome.
@@ -350,6 +374,7 @@ pub async fn resume_workflow(
 
     finalizer.disarm();
     context.store.record_run(&record)?;
+    remember_failure(&context.store, &record);
     Ok(record)
 }
 

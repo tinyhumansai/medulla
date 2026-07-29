@@ -47,6 +47,8 @@ fn revise<'a>(record: &'a WorkflowRecord, instruction: &'a str) -> String {
         instruction,
         record: Some(record),
         run: None,
+        notes: &[],
+        runs: &[],
     }
     .render()
 }
@@ -131,6 +133,8 @@ fn a_create_turn_names_no_existing_workflow() {
         instruction: "summarise new issues daily",
         record: None,
         run: None,
+        notes: &[],
+        runs: &[],
     }
     .render();
 
@@ -151,6 +155,8 @@ fn a_repair_turn_carries_the_run_the_error_and_the_failing_nodes() {
             error: Some("worker refused the task".into()),
             failing_nodes: vec!["notify".into(), "publish".into()],
         }),
+        notes: &[],
+        runs: &[],
     }
     .render();
 
@@ -171,6 +177,8 @@ fn a_repair_turn_says_a_cause_the_graph_cannot_fix_is_not_a_graph_edit() {
             id: "run-1".into(),
             ..Default::default()
         }),
+        notes: &[],
+        runs: &[],
     }
     .render();
 
@@ -190,6 +198,8 @@ fn a_repair_turn_with_no_recorded_error_still_names_the_run() {
             error: None,
             failing_nodes: Vec::new(),
         }),
+        notes: &[],
+        runs: &[],
     }
     .render();
 

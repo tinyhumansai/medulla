@@ -32,7 +32,7 @@ use tinyflows::graph_ops::GraphOp;
 use crate::workflows::{FileWorkflowStore, WorkflowError, WorkflowRecord, WorkflowStore};
 
 pub use evolve::{
-    accept_proposal, add_note, notes, proposals, propose, reject_proposal, verify_proposal,
+    accept_proposal, add_note, evolve, notes, proposals, propose, reject_proposal, verify_proposal,
 };
 pub use graph::{apply_ops, catalog, create, delete, get, host_facts, list, preview_ops, validate};
 pub use runs::{cancel_run, dry_run, get_run, list_history, list_runs, rollback, run, undo};

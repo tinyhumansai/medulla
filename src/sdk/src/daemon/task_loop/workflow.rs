@@ -21,6 +21,7 @@ use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
 use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert};
+use crate::workflows::evolve::{EvolveConfig, EvolveSession, EvolveTrigger};
 use crate::workflows::{
     run_workflow, FileWorkflowStore, RunContext, RunStatus, StoreWorkflowResolver, WorkflowStore,
 };
@@ -214,6 +215,9 @@ impl DaemonRuntime {
         self.log(&format!("workflow {} → {id}", frame.task_id));
 
         let (sink, fold) = folding_sink();
+        // Kept past the move into the resolver: a failed run gets a review, and
+        // the review reads the same store the run wrote to.
+        let evolve_store = store.clone();
         let context = RunContext {
             store: store.clone(),
             settings,
@@ -238,6 +242,7 @@ impl DaemonRuntime {
 
         match outcome {
             Ok(record) => {
+                let failed = record.status == RunStatus::Failed;
                 let text = summarize(&record);
                 let kind = match record.status {
                     RunStatus::Succeeded | RunStatus::PendingApproval => TaskFrameKind::Reply,
@@ -253,6 +258,9 @@ impl DaemonRuntime {
                     attachments,
                 )
                 .await;
+                if failed {
+                    self.spawn_review(evolve_store, &id, &frame.task_id, &from);
+                }
             }
             Err(err) => {
                 self.reply_with(
@@ -267,6 +275,72 @@ impl DaemonRuntime {
                 .await;
             }
         }
+    }
+
+    /// Start a review of a workflow whose run just failed.
+    ///
+    /// Spawned rather than awaited, and only after the reply has gone out: a
+    /// review is a whole harness turn, and the orchestrator waiting on this
+    /// task should not be held for one. Nothing depends on its result here —
+    /// what it produces is a note and possibly a proposal, both of which live
+    /// in the store for an operator to find.
+    ///
+    /// The run's own failure note is *not* written here. `run_workflow` already
+    /// wrote it, synchronously, so it exists whether or not this review ever
+    /// starts.
+    fn spawn_review(
+        &self,
+        store: Arc<dyn WorkflowStore>,
+        workflow_id: &str,
+        run_id: &str,
+        from: &str,
+    ) {
+        let settings = self.evolve_settings();
+        if !settings.enabled || !settings.auto_on_failure {
+            return;
+        }
+        let session = EvolveSession {
+            store,
+            dispatch: Arc::new(RuntimeDispatch {
+                runtime: self.clone(),
+                conversation: from.to_string(),
+            }),
+            worker_address: self.inner.config.default_provider.as_str().to_string(),
+            provider: Some(self.inner.config.default_provider),
+            model: self.inner.config.model.clone(),
+            // Per workflow, not per run: successive reviews of the same
+            // workflow are the same conversation, which is what lets one build
+            // on what the last concluded.
+            conversation: format!("evolve:{workflow_id}"),
+            config: settings,
+        };
+        let workflow_id = workflow_id.to_string();
+        let trigger = EvolveTrigger::Failure(run_id.to_string());
+        tokio::spawn(async move {
+            match session.evolve(&workflow_id, trigger, None).await {
+                Ok(outcome) if outcome.skipped => {
+                    tracing::debug!(workflow = %workflow_id, "a review is already in flight");
+                }
+                Ok(outcome) => tracing::info!(
+                    workflow = %workflow_id,
+                    notes = outcome.notes.len(),
+                    proposals = outcome.proposals.len(),
+                    "reviewed a failed run",
+                ),
+                Err(err) => {
+                    tracing::warn!(workflow = %workflow_id, "review failed: {err}")
+                }
+            }
+        });
+    }
+
+    /// This worker's review settings, defaulting safely when config is
+    /// unreadable.
+    fn evolve_settings(&self) -> EvolveConfig {
+        let cwd = std::path::Path::new(&self.inner.config.workspace);
+        crate::config::load_config(None, &self.inner.config.env, cwd)
+            .map(|loaded| EvolveConfig::from_config(&loaded.config.workflows))
+            .unwrap_or_default()
     }
 
     /// Capability settings for workflows run on this worker.

@@ -68,6 +68,7 @@ fn config_becomes_settings_with_every_field_carried_across() {
         tool_allowlist: vec!["github.create_issue".into()],
         http_allowlist: vec!["api.github.com".into()],
         run_timeout_secs: 30,
+        evolve: Default::default(),
     };
 
     let settings = CapabilitySettings::from_config(&config, "/home/.medulla");
@@ -94,6 +95,7 @@ fn an_empty_default_model_becomes_no_hint_rather_than_an_empty_one() {
 fn a_zero_timeout_falls_back_to_the_default_rather_than_abandoning_every_run() {
     let config = WorkflowsConfig {
         run_timeout_secs: 0,
+        evolve: Default::default(),
         ..Default::default()
     };
 

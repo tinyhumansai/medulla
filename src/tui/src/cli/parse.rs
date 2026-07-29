@@ -180,6 +180,21 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
                     out.run_id = Some(v.clone());
                 }
             }
+            "--kind" => {
+                if let Some(v) = it.next() {
+                    out.kind = Some(v.clone());
+                }
+            }
+            "--text" => {
+                if let Some(v) = it.next() {
+                    out.text = Some(v.clone());
+                }
+            }
+            "--reason" => {
+                if let Some(v) = it.next() {
+                    out.reason = Some(v.clone());
+                }
+            }
             // Repeatable: a paused run may be holding more than one gate, and
             // releasing them one call at a time would restart the run each time.
             "--approve" => {
@@ -225,6 +240,14 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
         }
         Some("get-run") => operand.map_or(WorkflowAction::List, WorkflowAction::GetRun),
         Some("catalog") | Some("kinds") => WorkflowAction::Catalog(operand),
+        Some("notes") => operand.map_or(WorkflowAction::List, WorkflowAction::Notes),
+        Some("note") => operand.map_or(WorkflowAction::List, WorkflowAction::AddNote),
+        Some("evolve") | Some("review") => {
+            operand.map_or(WorkflowAction::List, WorkflowAction::Evolve)
+        }
+        Some("proposals") => operand.map_or(WorkflowAction::List, WorkflowAction::Proposals),
+        Some("accept") => operand.map_or(WorkflowAction::List, WorkflowAction::Accept),
+        Some("reject") => operand.map_or(WorkflowAction::List, WorkflowAction::Reject),
         Some("mcp") => WorkflowAction::Mcp,
         _ => WorkflowAction::List,
     };

@@ -101,10 +101,11 @@ impl Default for WorkspaceArgs {
 
 /// The `medulla workflow` action.
 ///
-/// The verbs split into three groups: authoring (`create`, `apply-ops`,
+/// The verbs split into four groups: authoring (`create`, `apply-ops`,
 /// `validate`, `catalog`), inspection (`list`, `get`, `list-runs`, `get-run`),
-/// and execution (`dry-run`, `run`, `resume`, `cancel`). A harness building a
-/// workflow uses the first two; an operator uses all three.
+/// execution (`dry-run`, `run`, `resume`, `cancel`), and review (`notes`,
+/// `note`, `evolve`, `proposals`, `accept`, `reject`). A harness building a
+/// workflow uses the first two; an operator uses all four.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkflowAction {
     /// `list` — every installed workflow.
@@ -135,6 +136,18 @@ pub enum WorkflowAction {
     GetRun(String),
     /// `catalog [kind]` — the node kinds an author may use.
     Catalog(Option<String>),
+    /// `notes <id>` — everything recorded about a workflow.
+    Notes(String),
+    /// `note <id>` — record a note; `--kind` and `--text` say what.
+    AddNote(String),
+    /// `evolve <id>` — review a workflow against its own history.
+    Evolve(String),
+    /// `proposals <id>` — changes proposed for a workflow.
+    Proposals(String),
+    /// `accept <proposal-id>` — apply a proposal to the saved graph.
+    Accept(String),
+    /// `reject <proposal-id>` — turn one down; `--reason` says why.
+    Reject(String),
     /// `mcp` — serve the workflow tools over MCP on stdin/stdout.
     ///
     /// Not for a human to run: this is the command Medulla attaches to an ACP
@@ -153,8 +166,16 @@ pub struct WorkflowArgs {
     pub approve: Vec<String>,
     /// `--reject <node-id>`, repeatable: gates to refuse on `resume`.
     pub reject: Vec<String>,
-    /// `--run-id <id>`: the id to give a new run. Absent mints one.
+    /// `--run-id <id>`: the id to give a new run, or the failed run an
+    /// `evolve` should lead with. Absent mints one, or reviews the whole
+    /// history.
     pub run_id: Option<String>,
+    /// `--kind <kind>`: which kind of note `note` records.
+    pub kind: Option<String>,
+    /// `--text <text>`: the note itself, for `note`.
+    pub text: Option<String>,
+    /// `--reason <reason>`: why a proposal was rejected.
+    pub reason: Option<String>,
     /// The selected action.
     pub action: WorkflowAction,
 }
@@ -167,6 +188,9 @@ impl Default for WorkflowArgs {
             approve: Vec::new(),
             reject: Vec::new(),
             run_id: None,
+            kind: None,
+            text: None,
+            reason: None,
             action: WorkflowAction::List,
         }
     }

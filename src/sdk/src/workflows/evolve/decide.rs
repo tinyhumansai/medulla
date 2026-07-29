@@ -48,8 +48,8 @@ pub fn accept(
     // the same base graph. Hold this claim from status/fingerprint validation
     // through persistence so neither can validate against a graph the other
     // changes before applying its ops.
-    let _workflow_claim =
-        AcceptGuard::claim(&format!("workflow:{}", proposal.workflow_id)).ok_or_else(|| {
+    let _workflow_claim = AcceptGuard::claim(&format!("workflow:{}", proposal.workflow_id))
+        .ok_or_else(|| {
             WorkflowError::Engine(format!(
                 "another proposal for workflow '{}' is already being applied",
                 proposal.workflow_id

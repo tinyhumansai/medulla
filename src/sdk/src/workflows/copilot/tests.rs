@@ -274,6 +274,35 @@ async fn a_create_turn_shares_the_panes_conversation_too() {
 }
 
 #[tokio::test]
+async fn a_repair_turn_hands_the_agent_the_failure_rather_than_making_it_hunt() {
+    let (_root, store) = store();
+    let harness = Arc::new(StubHarness::new(store.clone(), "the worker was offline"));
+    let session = session(store, harness.clone());
+
+    session
+        .repair(
+            "sweep",
+            "why did this fail last night?",
+            crate::workflows::FailedRun {
+                id: "run-42".into(),
+                error: Some("worker refused the task".into()),
+                failing_nodes: vec!["work".into()],
+            },
+            None,
+        )
+        .await
+        .expect("repair");
+
+    let seen = harness.seen.lock().unwrap();
+    let prompt = &seen[0].instruction;
+    assert!(prompt.contains("run-42"), "{prompt}");
+    assert!(prompt.contains("worker refused the task"), "{prompt}");
+    assert!(prompt.contains("work"), "{prompt}");
+    // Still an authoring turn: diagnosing a failed run must not re-run it.
+    assert!(seen[0].workflow.is_none());
+}
+
+#[tokio::test]
 async fn a_turn_that_changes_nothing_reports_no_changes() {
     let (_root, store) = store();
     let harness = Arc::new(StubHarness::new(store.clone(), "it sweeps the repo"));

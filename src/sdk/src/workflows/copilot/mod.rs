@@ -10,19 +10,20 @@
 //! What this module adds on top of a bare dispatch is the three things that make
 //! it a copilot rather than a prompt box:
 //!
-//! - **Scope.** [`prompt`] states which workflow the turn may touch and that
-//!   edits go through the tools.
+//! - **Scope.** [`brief`] states which kind of turn this is, which workflow it
+//!   may touch, and — in `prompt.md` beside it — the rules every turn runs
+//!   under.
 //! - **Progress.** The harness's status frames are forwarded as they arrive, so
 //!   a turn that takes a minute is not a frozen pane.
 //! - **Accountability.** The graph is snapshotted before and after and the
 //!   [`diff`] between them is reported — what the store actually holds, not what
 //!   the agent said it did.
 
+mod brief;
 mod diff;
-mod prompt;
 
+pub use brief::{CopilotRequest, FailedRun, Mode};
 pub use diff::describe as describe_changes;
-pub use prompt::{build as build_prompt, build_new as build_new_prompt};
 
 use std::sync::Arc;
 
@@ -105,8 +106,48 @@ impl CopilotSession {
         instruction: &str,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<CopilotOutcome, WorkflowError> {
+        self.edit(Mode::Revise, workflow_id, instruction, None, status)
+            .await
+    }
+
+    /// Run a turn that diagnoses `run` and fixes what caused it.
+    ///
+    /// The same dispatch as [`Self::turn`], told what it is looking at. The run
+    /// is carried in rather than left for the agent to find, because the caller
+    /// already has it — the operator pressed a key beside a failure on screen —
+    /// and a turn that has to rediscover that starts a step behind.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::turn`].
+    pub async fn repair(
+        &self,
+        workflow_id: &str,
+        instruction: &str,
+        run: FailedRun,
+        status: Option<mpsc::UnboundedSender<String>>,
+    ) -> Result<CopilotOutcome, WorkflowError> {
+        self.edit(Mode::Repair, workflow_id, instruction, Some(run), status)
+            .await
+    }
+
+    /// The shared body of every turn scoped to a workflow that already exists.
+    async fn edit(
+        &self,
+        mode: Mode,
+        workflow_id: &str,
+        instruction: &str,
+        run: Option<FailedRun>,
+        status: Option<mpsc::UnboundedSender<String>>,
+    ) -> Result<CopilotOutcome, WorkflowError> {
         let before = require(self.store.as_ref(), workflow_id)?;
-        let prompt = prompt::build(&before.id, &before.name, &before.graph, instruction);
+        let prompt = CopilotRequest {
+            mode,
+            instruction,
+            record: Some(&before),
+            run,
+        }
+        .render();
 
         let task_id = format!("copilot-{}", uuid::Uuid::new_v4());
         let request = TaskRequest {
@@ -173,7 +214,15 @@ impl CopilotSession {
             task_id: task_id.clone(),
             abort_id: task_id,
             cycle_id: None,
-            instruction: prompt::build_new(instruction),
+            instruction: CopilotRequest {
+                mode: Mode::Create,
+                instruction,
+                // Nothing to show: the workflow does not exist yet, and naming
+                // an existing one is how an agent talks itself into editing it.
+                record: None,
+                run: None,
+            }
+            .render(),
             worker_address: self.worker_address.clone(),
             provider: self.provider,
             model: self.model.clone(),

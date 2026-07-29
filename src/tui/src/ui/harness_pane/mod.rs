@@ -24,6 +24,7 @@
 use crate::worker::pty::{PtyManager, ScreenSnapshot};
 
 pub mod keys;
+pub mod mouse;
 mod types;
 
 #[cfg(test)]
@@ -86,6 +87,43 @@ impl LocalHarnesses {
     /// harness died should say so rather than swallow the operator's typing.
     pub fn write(&self, session_id: &str, bytes: &[u8]) -> Result<(), String> {
         self.sessions.write(session_id, bytes)
+    }
+
+    /// Scroll `session_id` by one wheel notch at pane-relative `(col, row)`.
+    ///
+    /// Two paths, chosen by what the child asked for rather than by what we
+    /// would prefer:
+    ///
+    /// - the harness enabled mouse reporting (Claude Code and Codex both do), so
+    ///   the notch is forwarded and *its* scrollback moves — which is the one
+    ///   the operator means, because it holds the whole conversation rather than
+    ///   the last screenful the emulator happened to retain;
+    /// - it did not, so our emulator's own retained lines move instead. Not as
+    ///   good, but a wheel that does something beats one that does nothing, and
+    ///   forwarding to a child that never opted in would type escape bytes into
+    ///   its composer.
+    ///
+    /// `rows` is how far to move our own history when that is the path taken;
+    /// the forwarded path sends one notch and lets the harness decide what a
+    /// notch means.
+    pub fn scroll(&self, session_id: &str, col: u16, row: u16, up: bool, rows: usize) {
+        if let Some((mode, encoding)) = self.sessions.mouse_protocol(session_id) {
+            if let Some(bytes) = mouse::wheel(mode, encoding, col, row, up) {
+                // A failed write means the child died; the pane notices on its
+                // next frame, and a lost wheel notch is not worth a message.
+                let _ = self.sessions.write(session_id, &bytes);
+                return;
+            }
+        }
+        self.sessions.scroll_history(session_id, rows, up);
+    }
+
+    /// Snap the pane back to the live screen.
+    ///
+    /// Only meaningful for a session being scrolled through our own emulator; a
+    /// harness that owns its scrollback handles this itself.
+    pub fn scroll_to_live(&self, session_id: &str) {
+        self.sessions.scroll_to_live(session_id);
     }
 
     /// Whether `session_id` names a session that is still running.

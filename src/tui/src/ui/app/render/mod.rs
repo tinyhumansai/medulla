@@ -290,6 +290,9 @@ impl App {
         // tab was showing several frames ago. `draw_agents_pane` fills it back
         // in when it resolves a session.
         self.harness_pane_session = None;
+        // Same reasoning as above: a stale rect would route the wheel into a
+        // terminal that is no longer on screen.
+        self.hit_harness = None;
         // The composer now lives inside the Agents pane, so the only things that
         // still claim a row of their own below the content are the inline prompt
         // and the resume picker.

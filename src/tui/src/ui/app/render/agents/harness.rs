@@ -75,6 +75,9 @@ impl App {
             return;
         }
 
+        // Recorded before the paint so a wheel event landing between frames
+        // still has somewhere to go.
+        self.hit_harness = Some((inner, session_id.to_string()));
         harnesses.fit(session_id, inner.width, inner.height);
         let Some(snapshot) = harnesses.screen(session_id) else {
             return;

@@ -9,6 +9,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::keys::{encode, is_focus_chord};
+use super::mouse;
 use super::HarnessFocus;
 
 /// Decode a raw input byte the way crossterm does, so chord tests assert against
@@ -195,4 +196,112 @@ fn attached_focus_names_exactly_one_session() {
     assert!(focus.is_attached_to("w_1"));
     // Not a prefix match: `w_1` must not capture keys meant for `w_10`.
     assert!(!focus.is_attached_to("w_10"));
+}
+
+#[test]
+fn a_child_that_never_asked_for_the_mouse_gets_no_report() {
+    // The important half of this feature. Forwarding to a harness that did not
+    // enable reporting delivers `ESC [ < 6 4 ; 1 ; 1 M` as literal keystrokes
+    // into whatever it has focused — usually its composer.
+    assert!(mouse::wheel(
+        vt100::MouseProtocolMode::None,
+        vt100::MouseProtocolEncoding::Sgr,
+        0,
+        0,
+        true
+    )
+    .is_none());
+    assert!(mouse::wheel(
+        vt100::MouseProtocolMode::None,
+        vt100::MouseProtocolEncoding::Default,
+        4,
+        9,
+        false
+    )
+    .is_none());
+}
+
+#[test]
+fn sgr_wheel_reports_are_one_based_and_name_the_wheel_buttons() {
+    // Pane-relative (0, 0) is the child's own top-left, reported as 1;1.
+    assert_eq!(
+        mouse::wheel(
+            vt100::MouseProtocolMode::PressRelease,
+            vt100::MouseProtocolEncoding::Sgr,
+            0,
+            0,
+            true
+        )
+        .unwrap(),
+        b"\x1b[<64;1;1M"
+    );
+    // 64 is wheel-up, 65 is wheel-down.
+    assert_eq!(
+        mouse::wheel(
+            vt100::MouseProtocolMode::PressRelease,
+            vt100::MouseProtocolEncoding::Sgr,
+            11,
+            4,
+            false
+        )
+        .unwrap(),
+        b"\x1b[<65;12;5M"
+    );
+}
+
+#[test]
+fn normal_wheel_reports_offset_every_field_by_32() {
+    let bytes = mouse::wheel(
+        vt100::MouseProtocolMode::Press,
+        vt100::MouseProtocolEncoding::Default,
+        0,
+        0,
+        true,
+    )
+    .unwrap();
+    // ESC [ M, then button+32, then each coordinate as (value + 1 + 32).
+    assert_eq!(bytes, vec![0x1b, b'[', b'M', 32 + 64, 33, 33]);
+
+    let down = mouse::wheel(
+        vt100::MouseProtocolMode::Press,
+        vt100::MouseProtocolEncoding::Default,
+        9,
+        2,
+        false,
+    )
+    .unwrap();
+    assert_eq!(down, vec![0x1b, b'[', b'M', 32 + 65, 42, 35]);
+}
+
+#[test]
+fn normal_wheel_reports_clamp_rather_than_wrapping_past_a_byte() {
+    // The normal encoding cannot express a coordinate past 223. Wrapping would
+    // report a wheel notch at the opposite corner of the child's screen.
+    let bytes = mouse::wheel(
+        vt100::MouseProtocolMode::Press,
+        vt100::MouseProtocolEncoding::Default,
+        5_000,
+        5_000,
+        true,
+    )
+    .unwrap();
+    assert_eq!(bytes[4], 255);
+    assert_eq!(bytes[5], 255);
+}
+
+#[test]
+fn every_reporting_mode_takes_wheel_notches() {
+    // A wheel notch is a button press, and there is no mode that reports motion
+    // but not buttons — so anything other than `None` gets a report.
+    for mode in [
+        vt100::MouseProtocolMode::Press,
+        vt100::MouseProtocolMode::PressRelease,
+        vt100::MouseProtocolMode::ButtonMotion,
+        vt100::MouseProtocolMode::AnyMotion,
+    ] {
+        assert!(
+            mouse::wheel(mode, vt100::MouseProtocolEncoding::Sgr, 1, 1, true).is_some(),
+            "{mode:?} should report a wheel notch"
+        );
+    }
 }

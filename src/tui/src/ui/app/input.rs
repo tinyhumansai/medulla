@@ -13,6 +13,11 @@ use super::types::{
     App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TASKS_SUBPAGES, TOKENMAXXING_SUBPAGES,
 };
 
+/// Rows one wheel notch moves, matching the transcript's own step so the two
+/// panes feel like one surface. Only used for a harness we scroll ourselves —
+/// one that takes mouse reports decides what a notch means itself.
+const SCROLL_ROWS: usize = 3;
+
 impl App {
     /// Route a terminal event to the key or mouse handler, producing any command
     /// the event loop must run.
@@ -62,6 +67,22 @@ impl App {
     /// thing that makes a mouse feel bolted on. Focus is left alone: the wheel
     /// looks around, it does not move where typing goes.
     pub(super) fn scroll_at(&mut self, x: u16, y: u16, up: bool) {
+        // An embedded harness is a terminal, so the wheel over it belongs to it
+        // — before the subpage menu, before the tab. Deliberately *not* gated on
+        // being attached: reading back through a harness's output is the most
+        // common thing to want from one, and making it cost a chord first would
+        // be the wrapper getting in the way.
+        if let Some((rect, session)) = self.hit_harness.clone() {
+            if rect.contains((x, y).into()) {
+                if let Some(harnesses) = self.harnesses.clone() {
+                    // Pane-relative: the child believes its screen starts at its
+                    // own origin, and reporting our absolute position would put
+                    // the event somewhere else entirely on it.
+                    harnesses.scroll(&session, x - rect.x, y - rect.y, up, SCROLL_ROWS);
+                }
+                return;
+            }
+        }
         // The subpage menu scrolls through its pages, whichever tab drew it.
         if self.hit_nav.area.contains((x, y).into()) {
             self.scroll_subpage(up);

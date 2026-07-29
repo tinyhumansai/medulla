@@ -102,6 +102,11 @@ impl App {
         if let Err(err) = harnesses.write(session, &bytes) {
             self.release_harness();
             self.set_status(format!("Harness stopped listening ({err})"));
+            return;
         }
+        // Typing means "I am here now". A pane left scrolled back would keep
+        // showing history while the harness answered below it, unseen. No-op
+        // for a harness that owns its own scrollback.
+        harnesses.scroll_to_live(session);
     }
 }

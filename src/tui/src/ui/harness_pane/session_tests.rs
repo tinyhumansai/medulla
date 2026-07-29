@@ -206,3 +206,86 @@ fn an_unknown_session_resolves_to_nothing_rather_than_panicking() {
     // render pass fits every frame and the child can exit between frames.
     harnesses.fit("w_nope", 80, 24);
 }
+
+#[test]
+fn a_child_that_asks_for_the_mouse_has_wheel_notches_forwarded_to_it() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // Turn on SGR mouse reporting (1000 = report presses, 1006 = SGR encoding)
+    // the way a real harness does, then echo whatever arrives on stdin.
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?1000h\\033[?1006h'; sleep 0.3; cat -v; sleep 30",
+        ))
+        .unwrap();
+
+    wait_for("the child to enable mouse reporting", || {
+        matches!(
+            harnesses.sessions.mouse_protocol(&id),
+            Some((mode, _)) if mode != vt100::MouseProtocolMode::None
+        )
+    });
+
+    harnesses.scroll(&id, 3, 4, true, 3);
+
+    // `cat -v` prints control bytes visibly, so the report the child received is
+    // readable straight off its own screen. 1-based: pane (3,4) is 4;5.
+    wait_for("the child to receive the wheel report", || {
+        text(&harnesses, &id).contains("[<64;4;5M")
+    });
+    sessions.close(&id);
+}
+
+#[test]
+fn a_child_that_never_asked_for_the_mouse_gets_our_scrollback_instead() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // Enough lines to push history off a 30-row screen, and no mouse reporting.
+    let id = sessions
+        .open(sh(
+            "i=1; while [ $i -le 200 ]; do echo line-$i; i=$((i+1)); done; sleep 30",
+        ))
+        .unwrap();
+
+    wait_for("the child to scroll its output off the screen", || {
+        text(&harnesses, &id).contains("line-200")
+    });
+    assert!(
+        matches!(
+            harnesses.sessions.mouse_protocol(&id),
+            Some((vt100::MouseProtocolMode::None, _))
+        ),
+        "a plain shell asks for no mouse reporting"
+    );
+
+    // Nothing is written to the child — the wheel moves our own emulator. The
+    // 40 exceeds both the screen height and what vt100 can safely offset by; it
+    // must clamp rather than panic inside the crate's `visible_rows`.
+    harnesses.scroll(&id, 0, 0, true, 40);
+    let scrolled = text(&harnesses, &id);
+    assert!(
+        !scrolled.contains("line-200"),
+        "the view should have moved back into history:\n{scrolled}"
+    );
+
+    // And typing snaps it back, so a harness answering below is not missed.
+    harnesses.scroll_to_live(&id);
+    assert!(text(&harnesses, &id).contains("line-200"));
+    sessions.close(&id);
+}
+
+#[test]
+fn scrolling_down_at_the_live_edge_stays_put_rather_than_underflowing() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    let id = sessions.open(sh("echo hello; sleep 30")).unwrap();
+
+    wait_for("the child to paint", || {
+        text(&harnesses, &id).contains("hello")
+    });
+    // Already at the bottom; scrolling further down must not wrap into a huge
+    // offset and blank the pane.
+    harnesses.scroll(&id, 0, 0, false, 500);
+    assert!(text(&harnesses, &id).contains("hello"));
+    sessions.close(&id);
+}

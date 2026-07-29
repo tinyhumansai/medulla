@@ -118,6 +118,7 @@ impl App {
             hit_tabs: Vec::new(),
             hit_tabs_row: 0,
             hit_agents: None,
+            hit_harness: None,
             hit_threads: None,
             hit_context: None,
             hit_nav: Default::default(),

@@ -618,6 +618,10 @@ pub struct App {
     pub(super) hit_tabs: Vec<(u16, u16)>,
     pub(super) hit_tabs_row: u16,
     pub(super) hit_agents: Option<(Rect, usize)>,
+    // Where the embedded harness screen landed, and whose it is. Recorded so a
+    // wheel event can be routed to the terminal under the pointer and given
+    // coordinates relative to *its* origin rather than the screen's.
+    pub(super) hit_harness: Option<(Rect, String)>,
     /// The threads strip's hit box and its first visible row, for click-to-switch.
     pub(super) hit_threads: Option<(Rect, usize)>,
     pub(super) hit_context: Option<Rect>,

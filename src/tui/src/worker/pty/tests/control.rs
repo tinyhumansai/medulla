@@ -56,6 +56,37 @@ fn handing_a_session_back_makes_it_claimable() {
 }
 
 #[test]
+fn handed_back_operator_session_adopts_the_first_real_conversation() {
+    let manager = PtyManager::new();
+    let mut spec = user_sh("sleep 30");
+    spec.label = "you:codex".to_string();
+    let id = manager.open(spec).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+
+    assert!(manager.set_control(&id, HarnessControl::Orchestrator));
+    let claimed = manager
+        .claim_idle("peer@example", HarnessProvider::Codex)
+        .expect("a handed-back session must be eligible for real dispatch");
+    assert_eq!(claimed.id, id);
+    assert_eq!(claimed.label, "peer@example");
+
+    manager.release(&id);
+    assert!(
+        manager
+            .claim_idle("another-peer", HarnessProvider::Codex)
+            .is_none(),
+        "adoption must not turn the session into a cross-conversation pool"
+    );
+    assert!(manager
+        .claim_idle("peer@example", HarnessProvider::Codex)
+        .is_some());
+
+    manager.close(&id);
+}
+
+#[test]
 fn taking_over_a_running_session_stops_further_dispatch() {
     let manager = PtyManager::new();
     // Opened the way a task frame opens one: orchestrator-held.

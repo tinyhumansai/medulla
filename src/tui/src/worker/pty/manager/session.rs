@@ -59,16 +59,24 @@ impl PtyManager {
     /// collision the `busy` flag above exists to prevent, reachable by an
     /// operator simply focusing a harness.
     ///
+    /// A handed-back operator session still has its synthetic `you:<provider>`
+    /// label. The first real conversation to claim it adopts that conversation
+    /// label, making subsequent reuse obey the same exact-label rule as every
+    /// task-spawned session.
+    ///
     /// `None` when there is no idle session, and the caller opens a fresh one.
     pub fn claim_idle(&self, label: &str, provider: HarnessProvider) -> Option<SessionRow> {
         let mut sessions = self.inner.sessions.lock().unwrap();
         let session = sessions.iter_mut().find(|s| {
-            s.row.label == label
+            (s.row.label == label || is_unassigned_operator_session(&s.row))
                 && s.row.provider == provider
                 && s.row.state.is_running()
                 && !s.row.busy
                 && s.row.control.is_orchestrator()
         })?;
+        if is_unassigned_operator_session(&session.row) {
+            session.row.label = label.to_string();
+        }
         session.row.busy = true;
         Some(session.row.clone())
     }
@@ -196,4 +204,9 @@ impl PtyManager {
             }
         }
     }
+}
+
+/// Whether an operator-spawned session has not yet served a real conversation.
+fn is_unassigned_operator_session(row: &SessionRow) -> bool {
+    row.user_spawned && row.label.starts_with("you:")
 }

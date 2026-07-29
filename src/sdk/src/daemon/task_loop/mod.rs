@@ -13,7 +13,7 @@ mod probe;
 mod run;
 mod system_info;
 #[cfg(feature = "workflows")]
-mod workflow;
+pub(in crate::daemon) mod workflow;
 
 use crate::tinyplace::{HarnessProvider, TaskFrame, TaskFrameKind};
 

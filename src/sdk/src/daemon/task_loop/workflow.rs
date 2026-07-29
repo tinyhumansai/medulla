@@ -34,11 +34,21 @@ use super::super::types::{DaemonRuntime, FrameAttachments, CAPACITY_REJECTION_PR
 /// instruction goes straight to the executor rather than back out over a bridge
 /// to itself. The node's `agent_ref` names a provider hint when it matches one
 /// this worker offers; otherwise the worker's default runs it.
-struct RuntimeDispatch {
+pub(in crate::daemon) struct RuntimeDispatch {
     runtime: DaemonRuntime,
     /// The authenticated sender the workflow is being run for, so nodes inherit
     /// the same conversation attribution an ordinary task would get.
     conversation: String,
+}
+
+impl RuntimeDispatch {
+    /// Build a dispatch attributed to one authenticated sender.
+    pub(in crate::daemon) fn new(runtime: DaemonRuntime, conversation: String) -> Self {
+        Self {
+            runtime,
+            conversation,
+        }
+    }
 }
 
 #[async_trait]
@@ -79,6 +89,15 @@ impl HarnessDispatch for RuntimeDispatch {
             on_session: None,
         };
 
+        // Workflow nodes and detached evolution reviews run outside the inbound
+        // task handler, but they are still harness sessions on this host. Share
+        // its semaphore so a burst of failed workflows cannot exceed the
+        // operator's configured concurrency.
+        let _permit = inner
+            .slots
+            .acquire()
+            .await
+            .expect("semaphore is never closed");
         let result = (inner.run_task)(options).await.map_err(RunError::Worker)?;
         Ok(TaskOutcome {
             reply: result.reply,
@@ -223,10 +242,7 @@ impl DaemonRuntime {
             store: store.clone(),
             settings,
             services: HostServices {
-                dispatch: Arc::new(RuntimeDispatch {
-                    runtime: self.clone(),
-                    conversation: from.clone(),
-                }),
+                dispatch: Arc::new(RuntimeDispatch::new(self.clone(), from.clone())),
                 resolver: Arc::new(StoreWorkflowResolver::new(store)),
                 http_credentials: Default::default(),
             },
@@ -305,10 +321,7 @@ impl DaemonRuntime {
         }
         let session = EvolveSession {
             store,
-            dispatch: Arc::new(RuntimeDispatch {
-                runtime: self.clone(),
-                conversation: from.to_string(),
-            }),
+            dispatch: Arc::new(RuntimeDispatch::new(self.clone(), from.to_string())),
             worker_address: self.inner.config.default_provider.as_str().to_string(),
             provider: Some(self.inner.config.default_provider),
             model: self.inner.config.model.clone(),

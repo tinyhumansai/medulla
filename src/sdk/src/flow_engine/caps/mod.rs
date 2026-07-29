@@ -86,6 +86,11 @@ pub fn build_capabilities(
         code,
         state: Arc::new(FileStateStore::new(&settings.state_dir, state_namespace)),
         resolver: services.resolver,
+        // `None` until the host exposes a memory store: the engine then fails a
+        // `memory` node with a capability error, which is the honest answer.
+        // Standing one up on the state store would answer `recall` with an empty
+        // set — indistinguishable from "the user never said that".
+        memory: None,
     }
 }
 

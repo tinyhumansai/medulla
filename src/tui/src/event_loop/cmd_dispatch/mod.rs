@@ -47,7 +47,6 @@ pub(super) fn close_copilot_host(thread: &str) {
 pub(super) fn run_cmd(
     cmd: Cmd,
     runtime: &Arc<dyn Runtime>,
-    memory: Option<Arc<medulla::memory::MemoryService>>,
     _workflows_config: &medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
@@ -230,105 +229,5 @@ pub(super) fn run_cmd(
                 }
             });
         }
-        // Memory queries are synchronous but touch SQLite, so run them off the UI
-        // thread via `spawn_blocking` and report back over `AppMsg`.
-        Cmd::LoadMemory => {
-            let rt = runtime.clone();
-            let tx = msg_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let (status, directives) = read_memory(&rt, memory.as_deref());
-                let _ = tx.send(AppMsg::MemoryLoaded { status, directives });
-            });
-        }
-        Cmd::SearchMemory(query) => {
-            let rt = runtime.clone();
-            let tx = msg_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let (status, directives) = read_memory(&rt, memory.as_deref());
-                let hits = match memory.as_deref() {
-                    Some(svc) => svc.search(&query, None, 20),
-                    None => rt.memory_search(query.clone(), None, 20),
-                };
-                let _ = tx.send(AppMsg::MemoryLoaded { status, directives });
-                let _ = tx.send(AppMsg::MemoryResults { hits, query });
-            });
-        }
-        // Ingest is genuinely long-running (it walks transcripts and calls a
-        // paid summarizer), so it runs as a normal async task and reports a
-        // single terminal status rather than streaming progress.
-        Cmd::IngestMemory { backfill } => {
-            let tx = msg_tx.clone();
-            let Some(svc) = memory else {
-                let _ = tx.send(AppMsg::MemoryIngestDone(
-                    "Memory · no memory service is attached; nothing to ingest".into(),
-                ));
-                return;
-            };
-            let rt = runtime.clone();
-            // `ingest` returns a non-`Send` future, so it cannot ride
-            // `tokio::spawn`. Give it a dedicated blocking thread with its own
-            // current-thread runtime — that also keeps a long walk off the
-            // shared worker pool, where it would starve UI-facing tasks.
-            tokio::task::spawn_blocking(move || {
-                let mode = if backfill {
-                    medulla::memory::IngestMode::Backfill
-                } else {
-                    medulla::memory::IngestMode::Incremental
-                };
-                let local = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        let _ = tx.send(AppMsg::MemoryIngestDone(format!(
-                            "Memory · ingest failed to start: {e}"
-                        )));
-                        return;
-                    }
-                };
-                let status = match local.block_on(svc.ingest(mode)) {
-                    // Mirrors `medulla memory`'s summary line. The budget note
-                    // matters: a truncated run looks identical otherwise, and
-                    // the user needs to know more work remains.
-                    Ok(report) => format!(
-                        "Memory · {} complete — {} files, {} sessions, {} observations{}",
-                        report.mode,
-                        report.files_seen,
-                        report.sessions_processed,
-                        report.observations,
-                        if report.budget_hit {
-                            " (budget hit — rerun to continue)"
-                        } else {
-                            ""
-                        },
-                    ),
-                    Err(e) => format!("Memory · ingest failed: {e}"),
-                };
-                // Re-read so the tab reflects the store the ingest just grew.
-                let (st, directives) = read_memory(&rt, Some(svc.as_ref()));
-                let _ = tx.send(AppMsg::MemoryLoaded {
-                    status: st,
-                    directives,
-                });
-                let _ = tx.send(AppMsg::MemoryIngestDone(status));
-            });
-        }
-    }
-}
-
-/// Read memory status + directives, preferring the directly-attached service
-/// over the runtime seam.
-///
-/// The runtime seam only carries memory on the core runtime, so without this the
-/// Memory tab would be empty on the backend and mock paths. The seam remains the
-/// fallback because the mock scripts memory through it in tests.
-pub(super) fn read_memory(
-    runtime: &Arc<dyn Runtime>,
-    memory: Option<&medulla::memory::MemoryService>,
-) -> (Option<medulla::memory::MemoryStatus>, Vec<String>) {
-    match memory {
-        Some(svc) => (Some(svc.status()), svc.directives()),
-        None => (runtime.memory_status(), runtime.memory_directives()),
     }
 }

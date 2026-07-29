@@ -10,9 +10,13 @@ use crate::ui::agents::{agent_row_model, AgentRole, AgentRow};
 use crate::ui::composer::Draft;
 
 use super::types::{
-    App, Cmd, MEMORY_SUBPAGES, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TASKS_SUBPAGES,
-    TOKENMAXXING_SUBPAGES,
+    App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TASKS_SUBPAGES, TOKENMAXXING_SUBPAGES,
 };
+
+/// Rows one wheel notch moves, matching the transcript's own step so the two
+/// panes feel like one surface. Only used for a harness we scroll ourselves —
+/// one that takes mouse reports decides what a notch means itself.
+const SCROLL_ROWS: usize = 3;
 
 impl App {
     /// Route a terminal event to the key or mouse handler, producing any command
@@ -63,25 +67,34 @@ impl App {
     /// thing that makes a mouse feel bolted on. Focus is left alone: the wheel
     /// looks around, it does not move where typing goes.
     pub(super) fn scroll_at(&mut self, x: u16, y: u16, up: bool) {
+        // An embedded harness is a terminal, so the wheel over it belongs to it
+        // — before the subpage menu, before the tab. Deliberately *not* gated on
+        // being attached: reading back through a harness's output is the most
+        // common thing to want from one, and making it cost a chord first would
+        // be the wrapper getting in the way.
+        if let Some((rect, session)) = self.hit_harness.clone() {
+            if rect.contains((x, y).into()) {
+                if let Some(harnesses) = self.harnesses.clone() {
+                    // Pane-relative: the child believes its screen starts at its
+                    // own origin, and reporting our absolute position would put
+                    // the event somewhere else entirely on it.
+                    harnesses.scroll(&session, x - rect.x, y - rect.y, up, SCROLL_ROWS);
+                }
+                return;
+            }
+        }
         // The subpage menu scrolls through its pages, whichever tab drew it.
         if self.hit_nav.area.contains((x, y).into()) {
             self.scroll_subpage(up);
             return;
         }
         match self.tab() {
-            // Over the rail, the wheel walks the cursor over lanes and fleet
-            // rows; anywhere else on the tab it scrolls the transcript.
+            // Over the rail, the wheel walks the cursor over the lanes and
+            // their tasks; anywhere else on the tab it scrolls the transcript.
             "Agents" => match self.hit_agents {
                 Some((rail, _)) if rail.contains((x, y).into()) => self.move_agent_index(up),
                 _ => self.scroll_transcript(up, 3),
             },
-            "Memory" if self.memory_focused => {
-                self.memory_index = if up {
-                    self.memory_index.saturating_sub(1)
-                } else {
-                    (self.memory_index + 1).min(self.memory_page_entries().len().saturating_sub(1))
-                };
-            }
             // Trace and Context are Settings subpages, not tabs, so they are
             // matched on the subpage rather than on the tab — which is always
             // "Settings" for both.
@@ -122,9 +135,6 @@ impl App {
                     step(self.tokenmaxxing_index, TOKENMAXXING_SUBPAGES.len());
             }
             "Routing" => self.routing_index = step(self.routing_index, ROUTING_SUBPAGES.len()),
-            "Memory" => {
-                self.memory_subpage_index = step(self.memory_subpage_index, MEMORY_SUBPAGES.len());
-            }
             "Settings" => self.settings_index = step(self.settings_index, SETTINGS_SUBPAGES.len()),
             _ => {}
         }
@@ -173,7 +183,6 @@ impl App {
                     (self.tokenmaxxing_index, self.tokenmaxxing_focused) = (page, true);
                 }
                 "Routing" => (self.routing_index, self.routing_focused) = (page, true),
-                "Memory" => (self.memory_subpage_index, self.memory_focused) = (page, true),
                 "Settings" => (self.settings_index, self.settings_focused) = (page, true),
                 _ => {}
             }
@@ -198,11 +207,11 @@ impl App {
             if let Some((rect, window_start)) = self.hit_agents {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
-                    // The *rail's* rows, not the lane rows: the rail also holds
-                    // the dividers, the declared fleet, and the template
-                    // catalog, and `agent_index` indexes all of it. Reading the
-                    // shorter list here meant every click below the lanes fell
-                    // off the end and silently did nothing.
+                    // The *rail's* rows, which include the unselectable ones —
+                    // the `── functions ──` separator and the `+N more` counter
+                    // — because `agent_index` indexes all of them. Reading a
+                    // list that skipped those would shift every row below one
+                    // out of alignment, so a click would select its neighbour.
                     let rows = self.rail_rows();
                     let idx = window_start + rel;
                     if let Some(row) = rows.get(idx) {
@@ -249,8 +258,10 @@ impl App {
 
     /// Move the Agents-rail cursor to the next/previous selectable row.
     ///
-    /// The rail spans the lanes and the declared fleet, so this walks straight
-    /// from the last agent into the first host rather than stopping short.
+    /// Not every row can hold the cursor: the `── functions ──` separator and
+    /// the `+N more` counter are labels, not destinations. So this steps over
+    /// them to the next lane or task rather than stopping on one, and a cursor
+    /// that would leave the list stays where it was.
     pub(super) fn move_agent_index(&mut self, up: bool) {
         let rows = self.rail_rows();
         if rows.is_empty() {

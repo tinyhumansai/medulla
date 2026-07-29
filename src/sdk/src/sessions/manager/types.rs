@@ -1,4 +1,4 @@
-//! Data model for [`SessionManager`](super::SessionManager): its configuration,
+//! Data model for [`SessionManager`]: its configuration,
 //! the request to open a session, the per-session entry it stores, and the
 //! transcript line the UI renders.
 

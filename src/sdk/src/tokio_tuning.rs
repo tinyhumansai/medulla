@@ -6,9 +6,8 @@
 //! values from it. Keeping the seam here is the same rule that puts every other
 //! vendored-crate coupling in the SDK.
 //!
-//! Both values are re-exported from OpenHuman when the `openhuman-core` feature
-//! is on, so the two hosts cannot drift apart, and fall back to the same
-//! literals otherwise. OpenHuman's own runtime docs direct downstream call
+//! Both values are re-exported from OpenHuman rather than restated, so the two
+//! hosts cannot drift apart. OpenHuman's own runtime docs direct downstream call
 //! sites to set both on every multi-thread runtime that can host an agent turn.
 
 /// Worker-thread stack size for a runtime that may host an agent turn.
@@ -22,27 +21,14 @@
 /// only under real nesting, so it surfaces in front of a user rather than in a
 /// unit test. The same depth already overflows `cargo test`'s 2 MiB test
 /// threads, which is why the suite needs `RUST_MIN_STACK=16777216`.
-#[cfg(feature = "openhuman-core")]
 pub const WORKER_STACK_BYTES: usize = openhuman_core::core::runtime::AGENT_WORKER_STACK_BYTES;
-/// Worker-thread stack size for a runtime that may host an agent turn.
-///
-/// Standalone fallback matching OpenHuman's `AGENT_WORKER_STACK_BYTES`; see the
-/// `openhuman-core` variant above for why 2 MiB is not enough.
-#[cfg(not(feature = "openhuman-core"))]
-pub const WORKER_STACK_BYTES: usize = 16 * 1024 * 1024;
 
 /// Upper bound on tokio's blocking-thread pool.
 ///
 /// tokio defaults to 512. Blocking work in this process is bursty and bounded
 /// (filesystem, sqlite, process spawn), so the default mostly buys idle
 /// footprint. Threads still retire on tokio's idle timeout.
-#[cfg(feature = "openhuman-core")]
 pub const MAX_BLOCKING_THREADS: usize = openhuman_core::core::runtime::MAX_BLOCKING_THREADS;
-/// Upper bound on tokio's blocking-thread pool.
-///
-/// Standalone fallback matching OpenHuman's `MAX_BLOCKING_THREADS`.
-#[cfg(not(feature = "openhuman-core"))]
-pub const MAX_BLOCKING_THREADS: usize = 64;
 
 /// Build a multi-thread runtime tuned for hosting agent turns.
 ///

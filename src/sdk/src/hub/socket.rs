@@ -15,7 +15,10 @@ use rust_socketio::{Event, Payload, TransportType};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::roster::{address_of, register_payload, SharedRoster, SharedSubscriptionStrategy};
+use super::roster::{
+    address_of, addresses_of, register_payload, unreachable_addresses, SharedRoster,
+    SharedSubscriptionStrategy,
+};
 use super::runner::TaskRunner;
 use super::types::{RunError, TaskRequest};
 
@@ -75,6 +78,8 @@ pub async fn connect_harness(
     activity: Option<super::ActivityLog>,
 ) -> anyhow::Result<Client> {
     let connect_roster = roster.clone();
+    let connect_relay = runner.relay();
+    let connect_log = log.clone();
     let run_log = log.clone();
     let run_activity = activity.clone();
     let run_roster = roster.clone();
@@ -106,8 +111,47 @@ pub async fn connect_harness(
         // (Re)advertise the current roster on connect.
         .on(Event::Connect, move |_payload, socket| {
             let roster = connect_roster.clone();
+            let relay = connect_relay.clone();
+            let connect_log = connect_log.clone();
             async move {
-                let payload = register_payload(&roster.lock().expect("roster lock"));
+                // Liveness first, so the opening advertisement is already
+                // truthful. Registering optimistically and correcting later
+                // leaves a window in which the orchestrator can pick a worker
+                // that is not there — which is the whole failure being fixed.
+                let addresses = { addresses_of(&roster.lock().expect("roster lock")) };
+                let online = relay.presence(&addresses).await;
+                // Said out loud, because a roster that quietly shrinks is
+                // indistinguishable from one that was never configured — and an
+                // agent advertised without this line has two causes that look
+                // identical: the relay reported it up, or the relay said nothing
+                // and the optimistic default applied.
+                let withheld = {
+                    let r = roster.lock().expect("roster lock");
+                    unreachable_addresses(&r, &online)
+                };
+                (connect_log)(&format!(
+                    "hub: presence for {} worker(s) — {}{}",
+                    addresses.len(),
+                    if online.is_empty() {
+                        "no answer, advertising all".to_string()
+                    } else {
+                        addresses
+                            .iter()
+                            .map(|a| match online.get(a) {
+                                Some(true) => format!("{a} online"),
+                                Some(false) => format!("{a} OFFLINE"),
+                                None => format!("{a} unknown"),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    },
+                    if withheld.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — withholding {} from agent_list", withheld.len())
+                    }
+                ));
+                let payload = { register_payload(&roster.lock().expect("roster lock"), &online) };
                 let _ = socket.emit("medulla:register_agents", payload).await;
             }
             .boxed()

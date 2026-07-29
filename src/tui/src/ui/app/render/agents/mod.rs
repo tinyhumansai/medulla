@@ -24,6 +24,7 @@ use super::super::rail::RailRow;
 use super::super::types::App;
 
 mod composer;
+mod harness;
 mod rail;
 mod transcript;
 mod types;
@@ -59,8 +60,13 @@ impl App {
         {
             self.draw_agents_work(f, area, &snapshot);
         }
-        // What the composer submits depends on the cursor, so it says so.
-        self.draw_agent_composer(f, panes.composer, &selection);
+        // What the composer submits depends on the cursor, so it says so. Not
+        // drawn at all when a harness has the pane: the layout gave it no rows,
+        // and a zero-height composer would still paint its border into the
+        // terminal's bottom line.
+        if panes.composer.height > 0 {
+            self.draw_agent_composer(f, panes.composer, &selection);
+        }
     }
 
     /// Resolve what the rail cursor is on, clamping it to the rows that exist.
@@ -81,14 +87,27 @@ impl App {
             .get(lane_index)
             .map(|l| l.role == AgentRole::Orchestrator)
             .unwrap_or(true);
-        Selection {
+        let mut selection = Selection {
             rows,
             active,
             lanes,
             lane_index,
             task,
             on_orchestrator,
+            harness: None,
+        };
+        selection.harness = self.local_harness_session(&selection);
+        // Focus follows the pane, not the other way round. If the cursor moved
+        // off the attached session — or that session ended — the keyboard comes
+        // back to the chrome, because keys landing in a harness the operator is
+        // no longer looking at is the worst failure this feature can have.
+        if let Some(attached) = self.harness_focus.attached_to() {
+            if selection.harness.as_deref() != Some(attached) {
+                self.release_harness();
+            }
         }
+        self.harness_pane_session = selection.harness.clone();
+        selection
     }
 
     /// Divide `area` between the rail, the pane, and the composer.
@@ -124,20 +143,33 @@ impl App {
                 Constraint::Min(0),
             ])
             .split(columns[0]);
-        // The composer lives inside the right column, under the transcript it
-        // belongs to, and grows with the draft.
+        // A harness owns the whole right column. It paints its own composer —
+        // showing ours under it would be two input boxes, only one of which the
+        // keyboard reaches, and the operator cannot tell which by looking. The
+        // work panel goes for the same reason: the harness's own screen already
+        // shows its todos and edits, and the columns are better spent on the
+        // terminal than on our second-hand copy of it.
+        let embedded = selection.harness.is_some();
+        // The composer belongs to the orchestrator lane and nowhere else. That
+        // lane *is* the conversation — typing into it is how work starts. Every
+        // other row is something already running somewhere: an agent, a task, a
+        // harness. Offering a text box under those rows implies they can be
+        // talked to the same way, which is a promise the rail cannot keep.
+        let show_composer = selection.on_orchestrator && !embedded;
         let right = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(3),
-                Constraint::Length(self.composer_height()),
+                Constraint::Length(if show_composer {
+                    self.composer_height(columns[1].width)
+                } else {
+                    0
+                }),
             ])
             .split(columns[1]);
-        // The work panel splits the transcript row, not the whole column: the
-        // composer still spans the width it submits to, and a narrow terminal
-        // keeps the transcript whole rather than showing two cramped halves.
-        let show_work =
-            self.selected_work(selection).is_some() && area.width >= work::MIN_WIDTH_FOR_WORK_PANE;
+        let show_work = !embedded
+            && self.selected_work(selection).is_some()
+            && area.width >= work::MIN_WIDTH_FOR_WORK_PANE;
         let (pane, work_area) = if show_work {
             let split = Layout::default()
                 .direction(Direction::Horizontal)

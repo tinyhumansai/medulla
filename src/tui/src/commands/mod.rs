@@ -1,7 +1,7 @@
 //! Non-TUI subcommand runners and the pre-app login screen driver.
 //!
 //! Holds the CLI verbs that do not enter the ratatui app — `medulla login`,
-//! `logout`, `memory`, `init`, and `workspace` — plus the credential persistence
+//! `logout`, `init`, and `workspace` — plus the credential persistence
 //! helper and the interactive login-screen loop the TUI runs before selecting a
 //! runtime. Each runner parses its own args, loads config, performs its work,
 //! and returns an `anyhow::Result`.
@@ -22,9 +22,7 @@ pub(crate) use workspace::run_workspace;
 use medulla::auth::{open_browser, run_login_flow, Credentials, LoopbackConfig};
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
-use medulla_tui::cli::{
-    parse_init_args, parse_login_args, parse_memory_args, LoginArgs, MemoryAction,
-};
+use medulla_tui::cli::{parse_init_args, parse_login_args, LoginArgs};
 
 /// `medulla login`: obtain a JWT (loopback OAuth or a one-time token), verify it
 /// with `/auth/me`, and hand it to the embedded core as its app session.
@@ -101,6 +99,9 @@ async fn auth_core(
     // another.
     let loaded = load_config(None, env, &home)?;
     medulla::core_host::bind_medulla_base_url(env, &loaded.config.backend.base_url);
+    // And the core's own backend client with it: storing a session validates it
+    // against `/auth/me` there, not on the Medulla base above.
+    medulla::core_host::bind_backend_api_url(env, &loaded.config.backend.base_url);
     medulla::core_host::boot_for_auth()
         .await
         .map_err(|e| anyhow::anyhow!("failed to start the embedded OpenHuman core: {e}"))
@@ -175,137 +176,28 @@ pub(crate) async fn run_hub(_args: &[String]) -> anyhow::Result<()> {
     }
 }
 
-/// `medulla memory <status|ingest|backfill|compile|search <query>>`: manage the
-/// persona-memory layer from the command line.
-pub(crate) async fn run_memory(args: &[String]) -> anyhow::Result<()> {
-    let parsed = match parse_memory_args(args) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("medulla memory: {msg}");
-            std::process::exit(2);
-        }
-    };
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
-    // Summarization syncs through the backend when a token is available (an
-    // explicit OPENROUTER_API_KEY still wins inside the service).
-    let session = session_credentials(&env, &loaded.config.backend.base_url).await;
-    let settings = medulla::memory::env::resolve_with_backend(
-        loaded.config.memory.as_ref(),
-        &loaded.config.backend,
-        &env,
-        &medulla::home::medulla_home(&env),
-        session.as_ref().map(|c| c.jwt.as_str()),
-    );
-    let service = medulla::memory::MemoryService::open(settings)?;
-
-    match parsed.action {
-        MemoryAction::Status => {
-            let status = service.status();
-            if parsed.json {
-                println!("{}", serde_json::to_string_pretty(&status)?);
-            } else {
-                print!("{}", service.overview());
-            }
-        }
-        MemoryAction::Search(query) => {
-            let hits = service.search(&query, parsed.facet.as_deref(), parsed.k);
-            if parsed.json {
-                println!("{}", serde_json::to_string_pretty(&hits)?);
-            } else if hits.is_empty() {
-                println!("(no matches)");
-            } else {
-                for hit in &hits {
-                    println!("[{}] ({:.3}) {}", hit.facet, hit.score, hit.text);
-                }
-            }
-        }
-        MemoryAction::Compile => {
-            let report = service.compile()?;
-            print_ingest_report(&report, parsed.json)?;
-        }
-        MemoryAction::Ingest | MemoryAction::Backfill => {
-            let mode = if matches!(parsed.action, MemoryAction::Backfill) {
-                medulla::memory::IngestMode::Backfill
-            } else {
-                medulla::memory::IngestMode::Incremental
-            };
-            let report = service.ingest(mode).await?;
-            print_ingest_report(&report, parsed.json)?;
-        }
-    }
-    Ok(())
-}
-
 /// `medulla init [dir]` — author a `MEDULLA.md` workspace profile.
 ///
 /// Reads the directory's `AGENTS.md` / `CLAUDE.md` / `README.md`, scans its file
-/// layout, and asks the configured model to distil them into a short,
-/// routing-oriented profile, then writes it for the operator to review. Falls
-/// back to an editable stub when `--offline` is set or no model is reachable, so
-/// `init` always leaves a valid file behind.
+/// layout, and writes an editable stub profile for the operator to fill in. The
+/// model-drafted body went out with the memory layer that owned the provider
+/// seam, so `--offline` is now the only behaviour there is.
 ///
 /// This authors the file and stops there. `medulla workspace add` does the same
 /// *and* enrols the directory in the registry, which is what the orchestrator
 /// reads — see [`run_workspace`].
 pub(crate) async fn run_init(args: &[String]) -> anyhow::Result<()> {
     let parsed = parse_init_args(args);
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let dir = parsed
         .dir
         .as_ref()
         .map_or_else(|| cwd.clone(), |d| cwd.join(d));
 
-    // Resolve the same backend/model settings memory ingest uses, so one login
-    // (or one OPENROUTER_API_KEY) serves both surfaces.
-    let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
-    let session = session_credentials(&env, &loaded.config.backend.base_url).await;
-    let settings = medulla::memory::env::resolve_with_backend(
-        loaded.config.memory.as_ref(),
-        &loaded.config.backend,
-        &env,
-        &medulla::home::medulla_home(&env),
-        session.as_ref().map(|c| c.jwt.as_str()),
-    );
-
-    if !parsed.offline && !medulla::init::model_available(&settings) {
-        eprintln!(
-            "medulla init: no model available (run `medulla login` or set OPENROUTER_API_KEY) — writing an editable stub"
-        );
-    }
-
-    let outcome =
-        medulla::init::init_workspace_with_settings(&dir, &settings, parsed.offline, parsed.force)
-            .await?;
+    let outcome = medulla::init::init_workspace(&dir, parsed.force).await?;
     workspace::report_profile(&outcome);
     println!(
         "Not registered — run `medulla workspace add` to let the orchestrator place work here."
     );
-    Ok(())
-}
-
-/// Print an ingest/compile report as JSON or a short human summary.
-fn print_ingest_report(report: &medulla::memory::IngestReport, json: bool) -> anyhow::Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
-    } else {
-        println!(
-            "{}: {} files, {} sessions, {} observations{}",
-            report.mode,
-            report.files_seen,
-            report.sessions_processed,
-            report.observations,
-            if report.budget_hit {
-                " (budget hit)"
-            } else {
-                ""
-            },
-        );
-        if let Some(path) = &report.pack_path {
-            println!("pack: {path}");
-        }
-    }
     Ok(())
 }

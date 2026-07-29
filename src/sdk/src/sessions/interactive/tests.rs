@@ -404,11 +404,26 @@ done
         .await
         .expect("spawn");
     let abort = Abort::new();
+    let (streamed_tx, streamed_rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn({
         let (session, abort) = (session.clone(), abort.clone());
-        async move { session.submit("work", &abort, |_| {}).await }
+        async move {
+            let mut streamed_tx = Some(streamed_tx);
+            session
+                .submit("work", &abort, move |event| {
+                    if matches!(event, StreamEvent::AssistantDelta { text } if text == "partial") {
+                        if let Some(streamed_tx) = streamed_tx.take() {
+                            let _ = streamed_tx.send(());
+                        }
+                    }
+                })
+                .await
+        }
     });
-    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    tokio::time::timeout(std::time::Duration::from_secs(30), streamed_rx)
+        .await
+        .expect("the fake harness must stream before it is interrupted")
+        .expect("the turn must stay alive until its streamed text is observed");
     abort.abort();
 
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), handle)

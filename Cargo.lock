@@ -468,6 +468,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -486,6 +487,7 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -995,18 +997,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
-]
-
-[[package]]
-name = "console"
-version = "0.16.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fe5f465a4f6fee88fad41b85d990f84c835335e85b5d9e6e63e0d06d28cba7c"
-dependencies = [
- "encode_unicode",
- "libc",
- "unicode-width 0.2.0",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1648,12 +1638,6 @@ name = "email_address"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449"
-
-[[package]]
-name = "encode_unicode"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "encoding_rs"
@@ -2699,8 +2683,6 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
- "zune-core",
- "zune-jpeg",
 ]
 
 [[package]]
@@ -3220,7 +3202,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "medulla"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3238,8 +3220,8 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
- "tinycortex",
  "tinyflows",
+ "tinyhumans-sdk",
  "tinyplace",
  "tokio",
  "toml 0.8.23",
@@ -3249,7 +3231,7 @@ dependencies = [
 
 [[package]]
 name = "medulla-tui"
-version = "0.5.0"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3259,6 +3241,7 @@ dependencies = [
  "medulla",
  "portable-pty",
  "ratatui",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
@@ -3747,7 +3730,6 @@ dependencies = [
  "chrono-tz",
  "clap",
  "coins-bip39",
- "console",
  "cron",
  "directories",
  "dirs 5.0.1",
@@ -3768,7 +3750,6 @@ dependencies = [
  "hmac",
  "hostname",
  "iana-time-zone",
- "image",
  "keyring",
  "libc",
  "log",
@@ -3786,15 +3767,12 @@ dependencies = [
  "ring",
  "rusqlite",
  "rustls",
- "rustls-pki-types",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "serde_repr",
  "serde_yaml",
- "sha1",
  "sha2 0.10.9",
- "similar",
  "starship-battery",
  "sysinfo",
  "tar",
@@ -3807,7 +3785,6 @@ dependencies = [
  "tinyjuice",
  "tinyplace",
  "tokio",
- "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite 0.24.0",
  "tokio-util",
@@ -3821,7 +3798,6 @@ dependencies = [
  "uuid 1.24.0",
  "wait-timeout",
  "walkdir",
- "webpki-roots 1.0.8",
  "windows-sys 0.61.2",
  "x25519-dalek",
  "xz2",
@@ -5306,12 +5282,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
-name = "similar"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
-
-[[package]]
 name = "siphasher"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5774,28 +5744,34 @@ name = "tinyflows"
 version = "0.5.1"
 dependencies = [
  "async-trait",
+ "axum",
  "futures-timer",
+ "futures-util",
+ "getrandom 0.3.4",
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tinyagents",
+ "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "tinyhumans-sdk"
 version = "0.1.0"
-source = "git+https://github.com/tinyhumansai/sdk.git?rev=3ee4123ba3b7a76c5f167d7bc2c72fca86671292#3ee4123ba3b7a76c5f167d7bc2c72fca86671292"
 dependencies = [
  "base64 0.22.1",
+ "futures",
  "percent-encoding",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "url",
 ]
 
@@ -6097,6 +6073,7 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -6135,6 +6112,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",

@@ -200,11 +200,6 @@ async fn program_resource_ids_are_encoded_as_single_path_segments() {
         .await
         .unwrap()
         .starts_with("DELETE /medulla/v1/tasks/task%2Fwith%3F%23 "),);
-
-    assert_eq!(
-        super::super::urlencode("source/with?#"),
-        "source%2Fwith%3F%23"
-    );
 }
 
 #[tokio::test]
@@ -446,7 +441,9 @@ async fn http_error_without_envelope_becomes_api_error() {
 async fn success_status_with_non_json_body_is_decode_error() {
     let (base, _req) = spawn_stub_capture(http_json("HTTP/1.1 200 OK", "not json at all")).await;
     let client = MedullaClient::new(base, "jwt");
-    let err = client.me().await.unwrap_err();
+    // A typed endpoint: the SDK preserves an unparseable 2xx body as a JSON
+    // string, and decoding it into the endpoint's shape is what fails.
+    let err = client.get_session("s1").await.unwrap_err();
     assert!(matches!(err, ClientError::Decode(_)), "got {err:?}");
 }
 

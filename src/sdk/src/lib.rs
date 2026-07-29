@@ -4,6 +4,7 @@
 //! app that consumes this crate is the sibling `medulla-tui` crate.
 
 pub mod agents;
+pub mod attribution;
 pub mod auth;
 pub mod bridge;
 pub mod client;
@@ -11,7 +12,6 @@ pub mod clipboard;
 pub mod clock;
 pub mod config;
 pub mod contacts;
-#[cfg(feature = "openhuman-core")]
 pub mod core_host;
 pub mod daemon;
 #[cfg(feature = "workflows")]
@@ -23,7 +23,6 @@ pub mod home;
 pub mod hub;
 pub mod init;
 pub mod logging;
-pub mod memory;
 pub mod onboarding;
 pub(crate) mod persistence;
 pub mod runtime;

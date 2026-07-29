@@ -284,6 +284,25 @@ impl App {
     /// "which backend am I on, and what is it doing" is a glance-down check.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
+        // The harness pane is resolved during the draw and read by the *next*
+        // key press, so it has to be cleared here rather than left over: a
+        // `Ctrl-]` on the Settings tab must not attach to whatever the Agents
+        // tab was showing several frames ago. `draw_agents_pane` fills it back
+        // in when it resolves a session.
+        self.harness_pane_session = None;
+        // Same reasoning as above: a stale rect would route the wheel into a
+        // terminal that is no longer on screen.
+        self.hit_harness = None;
+        // Focus follows the pane, not the other way round. `agents_selection`
+        // (called only while drawing the Agents tab) is what notices the cursor
+        // moving off the attached session; it has nothing to say once the
+        // operator has left the tab entirely. Without this, `harness_focus`
+        // stayed `Attached` after a click elsewhere, and the next keystroke —
+        // meant for whatever tab was now on screen — was typed into a harness
+        // pane the operator could no longer see.
+        if self.harness_focus.attached_to().is_some() && self.tab() != "Agents" {
+            self.release_harness();
+        }
         // The composer now lives inside the Agents pane, so the only things that
         // still claim a row of their own below the content are the inline prompt
         // and the resume picker.
@@ -453,6 +472,23 @@ impl App {
         let workflows = self.tab() == "Workflows";
         #[cfg(not(feature = "workflows"))]
         let workflows = false;
+        // An attached harness has swallowed every other binding, so advertising
+        // them would be a lie. One key is live, and it is the one that gets the
+        // keyboard back.
+        if self.harness_focus.attached_to().is_some() {
+            f.render_widget(
+                Paragraph::new(TLine::from(Span::styled(
+                    format!(
+                        "Typing into the harness — every key goes to it · {} releases the keyboard",
+                        crate::ui::harness_pane::FOCUS_CHORD_LABEL
+                    ),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )))
+                .wrap(Wrap { trim: true }),
+                area,
+            );
+            return;
+        }
         let text = if self.tab() == "TokenMaxxxing" && self.tokenmaxxxing_is_production() {
             "Tab views · TokenMaxxxing coming soon"
         } else if self.tab() == "TokenMaxxxing" {
@@ -460,7 +496,7 @@ impl App {
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
         } else {
-            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
+            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort · ^] harness"
         };
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(

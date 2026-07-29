@@ -21,7 +21,7 @@ use crate::ui::composer::{
 };
 
 mod agents;
-mod memory;
+mod harness;
 mod routing;
 mod settings;
 mod tasks;
@@ -30,7 +30,6 @@ mod tokenmaxxing;
 mod workflows;
 
 use agents::AgentsKey;
-use memory::MemoryKey;
 use routing::RoutingKey;
 use settings::SettingsKey;
 use tasks::TasksKey;
@@ -45,6 +44,15 @@ impl App {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
+
+        // An attached harness owns the keyboard outright — ahead of the
+        // overlays and the quit chord both. Anything less is not a terminal:
+        // the operator would be typing into Claude Code with a handful of keys
+        // mysteriously reserved, and `Ctrl-C` (interrupt the harness) would quit
+        // the orchestrator instead.
+        if self.handle_harness_key(k) {
+            return None;
+        }
 
         // Resume picker owns navigation while open.
         if self.resume_picker.is_some() {
@@ -176,11 +184,6 @@ impl App {
         }
         if tab == "TokenMaxxxing" {
             if let TokenMaxxxingKey::Handled(cmd) = self.on_tokenmaxxing_key(k.code) {
-                return cmd;
-            }
-        }
-        if tab == "Memory" {
-            if let MemoryKey::Handled(cmd) = self.on_memory_key(k.code) {
                 return cmd;
             }
         }

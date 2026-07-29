@@ -75,6 +75,20 @@ pub trait Bridge: Send + Sync {
     /// Reset transport-specific session state for `peer`.
     async fn reset_session(&self, peer: &str);
 
+    /// Which of `addresses` are reachable right now.
+    ///
+    /// Returns one entry per address that could be resolved; an address absent
+    /// from the map has no answer, which is not the same as being offline and
+    /// callers must not treat it as such.
+    ///
+    /// Defaulted to "no opinion" — an empty map — so a bridge with no liveness
+    /// signal is never mistaken for one reporting everybody offline. Only the
+    /// tiny.place bridge overrides it, because only tiny.place keeps the
+    /// TTL-backed heartbeat records this reads.
+    async fn presence(&self, _addresses: &[String]) -> std::collections::HashMap<String, bool> {
+        std::collections::HashMap::new()
+    }
+
     /// Wait until there may be inbound mail, or `poll` elapses.
     ///
     /// Defaulted to a plain sleep, which is exactly what every pump did before
@@ -127,6 +141,13 @@ impl Bridge for BridgeTransport {
         match self {
             Self::Local(bridge) => bridge.drain_inbox(limit).await,
             Self::Tinyplace(bridge) => bridge.drain_inbox(limit).await,
+        }
+    }
+
+    async fn presence(&self, addresses: &[String]) -> std::collections::HashMap<String, bool> {
+        match self {
+            Self::Local(bridge) => bridge.presence(addresses).await,
+            Self::Tinyplace(bridge) => bridge.presence(addresses).await,
         }
     }
 

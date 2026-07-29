@@ -100,7 +100,7 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let mut child_args = tp_env::provider_args(config.provider, &config.env);
     // Attribute commits made through this session to Medulla. Injected per-spawn,
     // so the operator's own `settings.json` is never touched.
-    child_args.extend(crate::tinyplace::attribution::attribution_args(
+    child_args.extend(crate::attribution::attribution_args(
         config.provider,
         &config.env,
     ));
@@ -177,7 +177,7 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     }
 
     // Clean up any git hook temp directory created by attribution_env.
-    crate::tinyplace::attribution::cleanup_hook_tmpdir();
+    crate::attribution::cleanup_hook_tmpdir();
 
     Ok(code)
 }
@@ -185,12 +185,10 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
 /// Merge the git-hook attribution env vars (for Codex / Opencode) into
 /// `config.env`. Claude Code gets no additional env vars.
 fn merge_attribution_env_into_config(config: &mut WrapperConfig) {
-    config
-        .env
-        .extend(crate::tinyplace::attribution::attribution_env(
-            config.provider,
-            &config.env,
-        ));
+    config.env.extend(crate::attribution::attribution_env(
+        config.provider,
+        &config.env,
+    ));
 }
 
 /// A future that resolves on SIGINT/SIGTERM (Unix) or Ctrl-C (elsewhere).

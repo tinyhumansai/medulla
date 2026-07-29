@@ -1,6 +1,6 @@
 //! Contract tests for narrow runtime capability adapters.
 
-use super::{FleetCapability, MemoryCapability, SteeringCapability, UsageCapability};
+use super::{FleetCapability, SteeringCapability, UsageCapability};
 use crate::runtime::mock::MockRuntime;
 use crate::runtime::WorkerOp;
 
@@ -18,9 +18,6 @@ fn blanket_adapter_exposes_narrow_capabilities() {
     assert_eq!(worker_count(&runtime), 0);
     assert!(FleetCapability::worker_activity(&runtime).is_empty());
     assert!(FleetCapability::stream_state(&runtime).is_none());
-    assert!(MemoryCapability::memory_status(&runtime).is_none());
-    assert!(MemoryCapability::memory_search(&runtime, "query".into(), None, 5).is_empty());
-    assert!(MemoryCapability::memory_directives(&runtime).is_empty());
 
     futures::executor::block_on(async {
         assert!(UsageCapability::team_usage(&runtime)

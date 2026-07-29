@@ -45,7 +45,8 @@ impl App {
         debug_assert_eq!(self.wf.focus, WorkflowFocus::Copilot);
         let busy = self.copilot_busy();
 
-        let composer = chat::composer_height(&self.wf.draft.text).min(MAX_COMPOSER_ROWS);
+        let composer =
+            chat::composer_height(&self.wf.draft.text, area.width).min(MAX_COMPOSER_ROWS);
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(composer)])

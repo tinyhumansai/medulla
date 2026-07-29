@@ -138,13 +138,13 @@ fn persist_setting_creates_and_merges_sections() {
     let path = dir.path().join("nested").join("config.toml");
 
     // Writing into a file that does not exist yet creates it and its parent.
-    super::persist_setting(&path, "memory", "enabled", toml::Value::Boolean(true)).expect("write");
+    super::persist_setting(&path, "update", "check", toml::Value::Boolean(false)).expect("write");
     // A second key in the same section merges rather than replacing.
     super::persist_setting(&path, "medulla", "maxPasses", toml::Value::Integer(7)).expect("write");
 
     let parsed: TuiConfig =
         toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
-    assert_eq!(parsed.memory.and_then(|m| m.enabled), Some(true));
+    assert!(!parsed.update.check);
     assert_eq!(parsed.medulla.max_passes, Some(7));
 }
 
@@ -154,20 +154,26 @@ fn persist_setting_preserves_unrelated_sections() {
     let path = dir.path().join("config.toml");
     std::fs::write(
         &path,
-        "[theme]\nprimary = \"cyan\"\n\n[memory]\nworkspace = \"/w\"\n",
+        "[theme]\nprimary = \"cyan\"\n\n[tinyplace]\nhandle = \"me\"\n",
     )
     .expect("seed");
 
-    super::persist_setting(&path, "memory", "enabled", toml::Value::Boolean(false)).expect("write");
+    super::persist_setting(
+        &path,
+        "tinyplace",
+        "autoDiscoverPeers",
+        toml::Value::Boolean(false),
+    )
+    .expect("write");
 
     let parsed: TuiConfig =
         toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
     assert_eq!(parsed.theme.primary.as_deref(), Some("cyan"));
-    let memory = parsed.memory.expect("memory section");
-    assert_eq!(memory.enabled, Some(false));
+    let tinyplace = parsed.tinyplace.expect("tinyplace section");
+    assert!(!tinyplace.auto_discover_peers);
     assert_eq!(
-        memory.workspace.as_deref(),
-        Some("/w"),
+        tinyplace.handle.as_deref(),
+        Some("me"),
         "sibling key survives"
     );
 }

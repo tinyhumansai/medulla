@@ -8,9 +8,7 @@
 
 mod types;
 
-pub use types::{
-    FleetCapability, MemoryCapability, RuntimeCapabilities, SteeringCapability, UsageCapability,
-};
+pub use types::{FleetCapability, RuntimeCapabilities, SteeringCapability, UsageCapability};
 
 #[cfg(test)]
 mod tests;

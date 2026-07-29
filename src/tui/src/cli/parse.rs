@@ -1,5 +1,5 @@
 //! Argument parsing for `main`: subcommand dispatch ([`parse_command`]) and the
-//! per-subcommand flag parsers ([`parse_login_args`], [`parse_memory_args`],
+//! per-subcommand flag parsers ([`parse_login_args`],
 //! [`parse_update_args`], [`parse_tui_args`]), plus the [`help_text`] shown by
 //! `medulla help`/`--help`. Every function is pure over its input args.
 
@@ -7,8 +7,8 @@ use medulla::auth::Provider;
 use medulla::tinyplace::HarnessProvider;
 
 use super::types::{
-    Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs, UpdateArgs,
-    WorkflowAction, WorkflowArgs, WorkspaceAction, WorkspaceArgs,
+    Command, InitArgs, LoginArgs, RunArgs, TuiArgs, UpdateArgs, WorkflowAction, WorkflowArgs,
+    WorkspaceAction, WorkspaceArgs,
 };
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -26,7 +26,6 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("sessions") => Command::Sessions,
         Some("login") => Command::Login,
         Some("logout") => Command::Logout,
-        Some("memory") => Command::Memory,
         Some("update") => Command::Update,
         Some("init") => Command::Init,
         Some("workspace") | Some("workspaces") => Command::Workspace,
@@ -67,60 +66,6 @@ pub fn parse_login_args(args: &[String]) -> Result<LoginArgs, String> {
         }
     }
     Ok(out)
-}
-
-/// Parse `medulla memory <action> [flags]`. Returns a usage error on a missing
-/// or unknown action, or a `search` with no query.
-pub fn parse_memory_args(args: &[String]) -> Result<MemoryArgs, String> {
-    let action_word = args.first().map(String::as_str).ok_or_else(|| {
-        "expected a subcommand: status|ingest|backfill|compile|search".to_string()
-    })?;
-
-    let mut config: Option<String> = None;
-    let mut json = false;
-    let mut facet: Option<String> = None;
-    let mut k: usize = 5;
-    let mut query_parts: Vec<String> = Vec::new();
-
-    let mut it = args.iter().skip(1);
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--config" => config = it.next().cloned(),
-            "--json" => json = true,
-            "--facet" => facet = it.next().cloned(),
-            "--k" => {
-                if let Some(v) = it.next() {
-                    k = v
-                        .parse::<usize>()
-                        .map_err(|_| format!("invalid --k value '{v}'"))?;
-                }
-            }
-            other => query_parts.push(other.to_string()),
-        }
-    }
-
-    let action = match action_word {
-        "status" => MemoryAction::Status,
-        "ingest" => MemoryAction::Ingest,
-        "backfill" => MemoryAction::Backfill,
-        "compile" => MemoryAction::Compile,
-        "search" => {
-            let query = query_parts.join(" ");
-            if query.trim().is_empty() {
-                return Err("memory search: expected a query".to_string());
-            }
-            MemoryAction::Search(query)
-        }
-        other => return Err(format!("unknown memory subcommand '{other}'")),
-    };
-
-    Ok(MemoryArgs {
-        config,
-        json,
-        facet,
-        k,
-        action,
-    })
 }
 
 /// Parse the flags following `medulla update`.
@@ -355,7 +300,6 @@ medulla claude [args]   Run Claude Code in your terminal, bridged to tiny.place\
 medulla opencode [args] Run OpenCode in your terminal, bridged to tiny.place\n  \
 medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
-medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
 medulla workspace <cmd> Workspace registry: add [dir]|list|remove <dir|id>\n  \
 medulla workflow <cmd>  Workflows: list|get|create|apply-ops|validate|dry-run|run|resume|cancel|catalog\n  \
@@ -388,11 +332,6 @@ Login flags:\n  \
 --no-browser            Print the login URL without launching a browser\n  \
 --token <64-hex>        Redeem a one-time login token instead (headless)\n  \
 --config <path>         Config file to read backend.baseUrl from (.toml or .json)\n\n\
-Memory flags:\n  \
---json                  Emit JSON instead of human-readable output\n  \
---facet <name>          Restrict a search to one facet\n  \
---k <n>                 Max search results (default 5)\n  \
---config <path>         Explicit config file (.toml or .json) for the memory section\n\n\
 Init flags:\n  \
 --force, -f             Overwrite an existing MEDULLA.md\n  \
 --offline               Skip the model call and write an editable stub\n  \

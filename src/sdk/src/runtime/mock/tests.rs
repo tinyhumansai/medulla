@@ -1,5 +1,5 @@
 //! Unit tests for the scripted mock runtime: demo population, thread forking,
-//! the submit/abort/session lifecycle, the memory surface, and change
+//! the submit/abort/session lifecycle, and change
 //! notifications.
 
 use super::*;
@@ -129,40 +129,6 @@ fn thread_summaries_count_running_tasks_and_attention() {
     let main = &snap.threads[0];
     assert_eq!(main.running_tasks, 1, "one open task");
     assert_eq!(main.attention, 2, "attention + error both count");
-}
-
-#[test]
-fn memory_surface_defaults_empty_and_is_scriptable() {
-    use crate::memory::{MemoryHit, MemoryStatus};
-    let rt = MockRuntime::empty();
-    // No scripted memory → the seam is inert.
-    assert!(rt.memory_status().is_none());
-    assert!(rt.memory_search("q".into(), None, 5).is_empty());
-    assert!(rt.memory_directives().is_empty());
-
-    rt.set_memory_status(MemoryStatus {
-        enabled: true,
-        workspace: "/ws".into(),
-        pack_exists: false,
-        pack_path: "/ws/persona/PERSONA.md".into(),
-        entry_count: 2,
-        directives_count: 1,
-        facet_counts: Default::default(),
-    });
-    rt.set_memory_directives(vec!["Always branch first".into()]);
-    rt.set_memory_hits(vec![MemoryHit {
-        facet: "workflow".into(),
-        tier: "t0".into(),
-        text: "Commit small and often".into(),
-        quote: None,
-        timestamp: "2020-01-01T00:00:00+00:00".into(),
-        score: 1.0,
-    }]);
-    assert!(rt.memory_status().unwrap().enabled);
-    assert_eq!(rt.memory_directives(), vec!["Always branch first"]);
-    // `k` caps the scripted hits.
-    assert_eq!(rt.memory_search("q".into(), None, 0).len(), 0);
-    assert_eq!(rt.memory_search("q".into(), None, 5).len(), 1);
 }
 
 #[test]

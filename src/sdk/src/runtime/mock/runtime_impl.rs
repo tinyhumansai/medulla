@@ -1,7 +1,7 @@
 //! The [`Runtime`] trait implementation for [`MockRuntime`]: snapshotting,
-//! subscription, the scripted submit/abort/session lifecycle, forking, and the
-//! memory-surface reads. This is the behaviour half of the mock; the data model
-//! it drives lives in [`super::types`].
+//! subscription, the scripted submit/abort/session lifecycle, and forking.
+//! This is the behaviour half of the mock; the data model it drives lives in
+//! [`super::types`].
 
 use std::collections::HashMap;
 
@@ -239,36 +239,5 @@ impl Runtime for MockRuntime {
 
     fn shutdown(&self) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async move { Ok(()) })
-    }
-
-    fn memory_status(&self) -> Option<crate::memory::MemoryStatus> {
-        self.memory
-            .lock()
-            .unwrap()
-            .as_ref()
-            .and_then(|m| m.status.clone())
-    }
-
-    fn memory_search(
-        &self,
-        _query: String,
-        _facet: Option<String>,
-        k: usize,
-    ) -> Vec<crate::memory::MemoryHit> {
-        self.memory
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|m| m.hits.iter().take(k).cloned().collect())
-            .unwrap_or_default()
-    }
-
-    fn memory_directives(&self) -> Vec<String> {
-        self.memory
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|m| m.directives.clone())
-            .unwrap_or_default()
     }
 }

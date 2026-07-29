@@ -67,24 +67,44 @@ fn d_task_protocol() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct MedullaConfig {
+    /// Maximum cognitive passes allowed in one orchestration run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_passes: Option<u32>,
+    /// Maximum execution steps allowed in one orchestration run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_steps: Option<u32>,
+    /// Maximum nested delegation depth.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_depth: Option<u32>,
+    /// Maximum tasks one delegate may create.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tasks_per_delegate: Option<u32>,
+    /// Maximum aggregate token budget for a run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Model context window used when calculating prompt budgets.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window_tokens: Option<u32>,
 }
 
+/// The context window assumed when the operator has not set one.
+///
+/// One million tokens: the window of the models this actually runs against.
+/// The old 32k default predates them, and understating the window is the
+/// damaging direction — the meter reads near-full on a prompt using three
+/// percent of the real budget, which is an alarm that fires constantly and so
+/// gets ignored when it finally matters.
+///
+/// Still only a default. `contextWindowTokens` overrides it for a deployment
+/// pointed at a smaller model.
+pub const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 1_000_000;
+
 impl MedullaConfig {
-    /// The effective context window in tokens (default 32k).
+    /// The effective context window in tokens, defaulting to
+    /// [`DEFAULT_CONTEXT_WINDOW_TOKENS`].
     pub fn context_window(&self) -> u32 {
-        self.context_window_tokens.unwrap_or(32_000)
+        self.context_window_tokens
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)
     }
 }
 
@@ -92,17 +112,24 @@ impl MedullaConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Peer {
+    /// Stable peer identifier.
     pub id: String,
+    /// Optional human-facing name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Optional tiny.place handle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
+    /// Address used to contact the peer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
+    /// Operator-defined labels used for discovery or routing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// Optional description shown beside the peer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Wire protocol used when sending tasks to this peer.
     #[serde(default = "d_task_protocol")]
     pub protocol: String,
 }
@@ -146,20 +173,28 @@ pub struct HubSection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TinyplaceConfig {
+    /// Base URL of the tiny.place service.
     #[serde(default = "d_tp_base")]
     pub base_url: String,
+    /// Directory containing this installation's tiny.place identity.
     #[serde(default = "d_tp_identity")]
     pub identity_dir: String,
+    /// Optional public handle registered for the identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
+    /// Optional public display name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// Optional public profile biography.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bio: Option<String>,
+    /// Whether startup discovers peers from the service.
     #[serde(default = "d_true")]
     pub auto_discover_peers: bool,
+    /// Contact acceptance policy (`peers`, for example).
     #[serde(default = "d_accept")]
     pub accept_contacts: String,
+    /// Peers declared directly in configuration.
     pub peers: Vec<Peer>,
 }
 
@@ -182,14 +217,19 @@ impl Default for TinyplaceConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct OpencodeConfig {
+    /// OpenCode executable or command name.
     #[serde(default = "d_opencode_cmd")]
     pub command: String,
+    /// Default model passed to OpenCode, or empty to use its default.
     #[serde(default)]
     pub model: String,
+    /// Default OpenCode agent profile.
     #[serde(default = "d_agent")]
     pub agent: String,
+    /// Default workspace for local OpenCode runs.
     #[serde(default = "d_workspace")]
     pub workspace: String,
+    /// Maximum concurrent OpenCode tasks.
     #[serde(default = "d_concurrency")]
     pub max_concurrency: u32,
 }
@@ -379,38 +419,6 @@ impl UpdateConfig {
     }
 }
 
-/// The optional `memory` section: tinycortex persona memory integration. All
-/// fields are optional overrides; the effective settings are resolved against
-/// the environment in [`crate::memory::env`].
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-pub struct MemoryConfigSection {
-    /// On/off switch (also settable via `MEDULLA_MEMORY`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// Workspace root for the chunk store / facet trees / `persona/` outputs.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
-    /// Identity line for the compiled pack header.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub identity: Option<String>,
-    /// Claude Code transcript root override.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub claude_root: Option<String>,
-    /// Codex rollout root override.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub codex_root: Option<String>,
-    /// Project roots walked for instruction files + git history.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub project_roots: Vec<String>,
-    /// Chat/digest model id override.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// Per-run provider spend ceiling, USD.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_cost_usd: Option<f64>,
-}
-
 /// The optional `core` section: the NDJSON `medulla-serve` orchestration socket.
 ///
 /// When configured, the core runtime attaches to a long-lived `medulla-serve`
@@ -432,10 +440,13 @@ pub struct CoreConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct BackendConfig {
+    /// Base URL of the Medulla backend HTTP API.
     #[serde(default = "d_backend_base")]
     pub base_url: String,
+    /// Environment-variable name from which to resolve a bearer token.
     #[serde(default = "d_token_env")]
     pub token_env: String,
+    /// Optional inline bearer token; environment-based credentials are preferred.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 }
@@ -587,12 +598,16 @@ impl BudgetConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ThemeConfig {
+    /// Primary highlight color.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<String>,
+    /// Secondary accent color.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accent: Option<String>,
+    /// Foreground color for selected rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection_fg: Option<String>,
+    /// Color used for inactive or secondary borders.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dim_border: Option<String>,
 }
@@ -691,22 +706,29 @@ impl FleetConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TuiConfig {
+    /// Optional local OpenCode harness configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opencode: Option<OpencodeConfig>,
+    /// Optional tiny.place identity and discovery configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tinyplace: Option<TinyplaceConfig>,
+    /// Orchestration limits.
     pub medulla: MedullaConfig,
+    /// Directory for runtime state and caches.
     #[serde(default = "d_state_dir")]
     pub state_dir: String,
+    /// Backend HTTP API and authentication configuration.
     pub backend: BackendConfig,
+    /// Optional embedded-core socket configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub core: Option<CoreConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory: Option<MemoryConfigSection>,
+    /// Release update-check configuration.
     #[serde(default)]
     pub update: UpdateConfig,
+    /// TUI color overrides.
     #[serde(default)]
     pub theme: ThemeConfig,
+    /// Persisted welcome-flow state.
     #[serde(default)]
     pub onboarding: OnboardingConfig,
     /// Workspace roots managed by the daemon worker TUI.
@@ -716,6 +738,7 @@ pub struct TuiConfig {
     /// above, which despite the name is only a list of workspace roots.
     #[serde(default)]
     pub workflows: WorkflowsConfig,
+    /// Persisted orchestrator worker roster.
     #[serde(default)]
     pub hub: HubSection,
     /// Whether this device also hosts the tasks the orchestrator hands out.
@@ -751,7 +774,6 @@ impl Default for TuiConfig {
             state_dir: d_state_dir(),
             backend: BackendConfig::default(),
             core: None,
-            memory: None,
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),
             onboarding: OnboardingConfig::default(),
@@ -773,8 +795,11 @@ impl Default for TuiConfig {
 /// precedence). `sources` is empty when only built-in defaults applied.
 #[derive(Debug, Clone)]
 pub struct LoadedConfig {
+    /// Effective configuration after merging defaults and source files.
     pub config: TuiConfig,
+    /// Primary path used to identify or persist the configuration.
     pub path: String,
+    /// Contributing configuration files in ascending precedence order.
     pub sources: Vec<String>,
 }
 

@@ -370,6 +370,7 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::Transform => "transform",
         NodeKind::OutputParser => "output_parser",
         NodeKind::SubWorkflow => "sub_workflow",
+        NodeKind::Memory => "memory",
     }
 }
 
@@ -392,6 +393,9 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         NodeKind::Transform => "ƒ",
         NodeKind::OutputParser => "⌗",
         NodeKind::SubWorkflow => "⧉",
+        // A store read or written, not a step that transforms what passes
+        // through it — the shape says "shelf" rather than "arrow".
+        NodeKind::Memory => "▤",
     }
 }
 
@@ -405,7 +409,9 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::Trigger => "green",
         NodeKind::Agent | NodeKind::SubWorkflow => "magenta",
-        NodeKind::ToolCall | NodeKind::HttpRequest | NodeKind::Code => "cyan",
+        // Grouped with the reaching-outside kinds: a memory node's result comes
+        // from the host's store, not from anything the graph carries.
+        NodeKind::ToolCall | NodeKind::HttpRequest | NodeKind::Code | NodeKind::Memory => "cyan",
         NodeKind::Condition | NodeKind::Switch | NodeKind::Merge | NodeKind::SplitOut => "yellow",
         NodeKind::Transform | NodeKind::OutputParser => "blue",
     }
@@ -461,6 +467,13 @@ pub fn node_summary(node: &Node) -> String {
         NodeKind::Transform => text("expression").unwrap_or_default(),
         NodeKind::OutputParser => text("schema_ref").unwrap_or_default(),
         NodeKind::SubWorkflow => text("workflow_id").unwrap_or_default(),
+        // The operation is what the node does; the scope is what it does it to,
+        // and reading `remember` without knowing where is the ambiguous half.
+        NodeKind::Memory => match (text("operation"), text("scope")) {
+            (Some(operation), Some(scope)) => format!("{operation} · {scope}"),
+            (Some(operation), None) => operation,
+            (None, _) => String::new(),
+        },
         NodeKind::Merge => node
             .config
             .get("inputs")

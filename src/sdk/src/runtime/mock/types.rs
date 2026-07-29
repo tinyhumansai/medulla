@@ -2,9 +2,9 @@
 //! runtime.
 //!
 //! Holds the in-memory [`State`] (threads, roster, presence, sessions) and its
-//! per-thread [`Thread`] records, the [`MockRuntime`] handle plus its scripted
-//! [`ScriptedMemory`] surface, and the small helpers (id generation, event
-//! emission, thread summarisation) shared by the behaviour submodules. The
+//! per-thread [`Thread`] records, the [`MockRuntime`] handle, and the small
+//! helpers (id generation, event emission, thread summarisation) shared by the
+//! behaviour submodules. The
 //! `Runtime` trait impl lives in [`super::runtime_impl`] and the populated demo
 //! scenario in [`super::scenario`]; both reach the internals here through
 //! `pub(super)` items.
@@ -152,20 +152,6 @@ pub struct MockRuntime {
     pub(super) tx: broadcast::Sender<()>,
     /// Ordered log of runtime methods invoked (test seam).
     calls: Arc<Mutex<Vec<String>>>,
-    /// Scripted persona-memory surface (test seam). `None` = no memory service.
-    pub(super) memory: Arc<Mutex<Option<ScriptedMemory>>>,
-}
-
-/// A scripted stand-in for a `MemoryService`, driven by tests via the
-/// `set_memory_*` seams.
-#[derive(Default, Clone)]
-pub(super) struct ScriptedMemory {
-    /// Scripted memory status, if attached.
-    pub(super) status: Option<crate::memory::MemoryStatus>,
-    /// Scripted search hits, returned (capped by `k`) from `memory_search`.
-    pub(super) hits: Vec<crate::memory::MemoryHit>,
-    /// Scripted persona directives.
-    pub(super) directives: Vec<String>,
 }
 
 impl MockRuntime {
@@ -176,26 +162,7 @@ impl MockRuntime {
             state: Arc::new(Mutex::new(state)),
             tx,
             calls: Arc::new(Mutex::new(Vec::new())),
-            memory: Arc::new(Mutex::new(None)),
         }
-    }
-
-    /// Attach a scripted memory status. Enables the mock's memory surface.
-    pub fn set_memory_status(&self, status: crate::memory::MemoryStatus) {
-        let mut guard = self.memory.lock().unwrap();
-        guard.get_or_insert_with(ScriptedMemory::default).status = Some(status);
-    }
-
-    /// Script the hits returned by [`Runtime::memory_search`].
-    pub fn set_memory_hits(&self, hits: Vec<crate::memory::MemoryHit>) {
-        let mut guard = self.memory.lock().unwrap();
-        guard.get_or_insert_with(ScriptedMemory::default).hits = hits;
-    }
-
-    /// Script the directives returned by [`Runtime::memory_directives`].
-    pub fn set_memory_directives(&self, directives: Vec<String>) {
-        let mut guard = self.memory.lock().unwrap();
-        guard.get_or_insert_with(ScriptedMemory::default).directives = directives;
     }
 
     /// Record a runtime method invocation in the call log.

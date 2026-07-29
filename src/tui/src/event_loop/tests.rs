@@ -8,7 +8,7 @@ use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{Runtime, WorkerOp};
 use medulla_tui::ui::app::{App, Cmd};
 
-use super::cmd_dispatch::{read_memory, run_cmd};
+use super::cmd_dispatch::run_cmd;
 use super::should_refresh_context;
 use super::types::AppMsg;
 use super::update_checker::spawn_update_checker;
@@ -29,19 +29,19 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let cfg = medulla::config::WorkflowsConfig::default();
 
-    run_cmd(Cmd::Quit, &runtime, None, &cfg, &tx);
+    run_cmd(Cmd::Quit, &runtime, &cfg, &tx);
     assert!(rx.try_recv().is_err());
 
-    run_cmd(Cmd::Submit("hello".into()), &runtime, None, &cfg, &tx);
+    run_cmd(Cmd::Submit("hello".into()), &runtime, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s == "Cycle complete"));
 
-    run_cmd(Cmd::Resume("tui-demo-1".into()), &runtime, None, &cfg, &tx);
+    run_cmd(Cmd::Resume("tui-demo-1".into()), &runtime, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::Resumed(s) if s == "Resumed chat"));
 
-    run_cmd(Cmd::ListChats, &runtime, None, &cfg, &tx);
+    run_cmd(Cmd::ListChats, &runtime, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::OpenResume(chats) if chats.len() == 2));
 
-    run_cmd(Cmd::InspectContext, &runtime, None, &cfg, &tx);
+    run_cmd(Cmd::InspectContext, &runtime, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::Contexts(items) if items.len() == 2));
 
     run_cmd(
@@ -52,13 +52,12 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
             harness: None,
         }),
         &runtime,
-        None,
         &cfg,
         &tx,
     );
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s == "Worker registry updated"));
 
-    run_cmd(Cmd::LoadUsage, &runtime, None, &cfg, &tx);
+    run_cmd(Cmd::LoadUsage, &runtime, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::UsageLoaded(None)));
 }
 
@@ -82,53 +81,9 @@ async fn dispatcher_surfaces_resume_errors() {
     let cfg = medulla::config::WorkflowsConfig::default();
 
     concrete.set_running(true);
-    run_cmd(Cmd::Resume("any".into()), &runtime, None, &cfg, &tx);
+    run_cmd(Cmd::Resume("any".into()), &runtime, &cfg, &tx);
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s.contains("cannot resume")));
     concrete.set_running(false);
-}
-
-#[tokio::test]
-async fn dispatches_runtime_memory_reads_searches_and_missing_ingest() {
-    let concrete = Arc::new(MockRuntime::empty());
-    concrete.set_memory_directives(vec!["Keep tests offline".into()]);
-    let runtime: Arc<dyn Runtime> = concrete;
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let cfg = medulla::config::WorkflowsConfig::default();
-
-    let (status, directives) = read_memory(&runtime, None);
-    assert!(status.is_none());
-    assert_eq!(directives, ["Keep tests offline"]);
-
-    run_cmd(Cmd::LoadMemory, &runtime, None, &cfg, &tx);
-    assert!(matches!(
-        next(&mut rx).await,
-        AppMsg::MemoryLoaded { status: None, directives } if directives == ["Keep tests offline"]
-    ));
-
-    run_cmd(
-        Cmd::SearchMemory("needle".into()),
-        &runtime,
-        None,
-        &cfg,
-        &tx,
-    );
-    assert!(matches!(next(&mut rx).await, AppMsg::MemoryLoaded { .. }));
-    assert!(matches!(
-        next(&mut rx).await,
-        AppMsg::MemoryResults { hits, query } if hits.is_empty() && query == "needle"
-    ));
-
-    run_cmd(
-        Cmd::IngestMemory { backfill: false },
-        &runtime,
-        None,
-        &cfg,
-        &tx,
-    );
-    assert!(matches!(
-        next(&mut rx).await,
-        AppMsg::MemoryIngestDone(s) if s.contains("no memory service")
-    ));
 }
 
 #[test]
@@ -206,7 +161,7 @@ async fn a_non_blocking_submit_reports_acceptance_not_completion() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let cfg = medulla::config::WorkflowsConfig::default();
 
-    run_cmd(Cmd::Submit("hello".into()), &runtime, None, &cfg, &tx);
+    run_cmd(Cmd::Submit("hello".into()), &runtime, &cfg, &tx);
     assert!(matches!(
         next(&mut rx).await,
         AppMsg::Status(s) if s.starts_with("Sent")

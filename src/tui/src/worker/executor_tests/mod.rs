@@ -21,6 +21,7 @@ use super::pty::PtyManager;
 
 mod basic;
 mod live;
+mod plumbing;
 mod sessions;
 
 /// A fake harness on the default session id, for tests that run only one.
@@ -54,6 +55,21 @@ fn harness(
     sessions_dir: &std::path::Path,
     workspace: &str,
 ) -> (PtySessionExecutor, HashMap<String, String>) {
+    harness_with_env(sessions_dir, workspace, &[])
+}
+
+/// As [`harness`], with `extra` layered into the environment the executor is
+/// *constructed* with — not merely into the map a test happens to hold
+/// afterward. `PtySessionExecutor::new` clones its base environment once, at
+/// construction, so mutating the map a caller was handed back has no effect on
+/// what the executor actually spawns with; overrides that matter (a fake
+/// harness binary path, a router's resolved secret) must go in before that
+/// clone happens.
+fn harness_with_env(
+    sessions_dir: &std::path::Path,
+    workspace: &str,
+    extra: &[(&str, &str)],
+) -> (PtySessionExecutor, HashMap<String, String>) {
     let mut env = HashMap::new();
     env.insert(
         "PATH".to_string(),
@@ -66,6 +82,9 @@ fn harness(
         sessions_dir.to_string_lossy().into_owned(),
     );
     env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
+    for (key, value) in extra {
+        env.insert(key.to_string(), value.to_string());
+    }
     let executor = PtySessionExecutor::new(PtyManager::new(), env.clone(), workspace.to_string());
     (executor, env)
 }

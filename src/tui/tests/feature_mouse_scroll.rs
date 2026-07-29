@@ -29,10 +29,6 @@ fn wheel(kind: MouseEventKind) -> Event {
     })
 }
 
-fn key(code: KeyCode) -> Event {
-    Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
-}
-
 fn render(app: &mut App) -> String {
     let mut terminal = Terminal::new(TestBackend::new(120, 16)).unwrap();
     terminal.draw(|f| app.draw(f)).unwrap();
@@ -99,17 +95,6 @@ fn the_wheel_scrolls_the_trace_and_context_subpages() {
             "{subpage}: scrolling back returns to the start"
         );
     }
-}
-
-#[test]
-fn the_wheel_scrolls_the_memory_tab() {
-    let mut app = seeded_app();
-    app.tab_index = TABS.iter().position(|t| *t == "Memory").unwrap();
-    app.on_event(key(KeyCode::Enter));
-    // Scrolling up at the top is a no-op rather than an underflow.
-    app.on_event(wheel(MouseEventKind::ScrollUp));
-    assert_eq!(app.memory_index(), 0, "clamped at the top");
-    app.on_event(wheel(MouseEventKind::ScrollDown));
 }
 
 #[test]

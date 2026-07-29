@@ -75,6 +75,12 @@ impl Drop for TaskRunner {
 }
 
 impl TaskRunner {
+    /// The relay this runner dispatches over, for callers that need to ask it
+    /// something — currently roster liveness.
+    pub fn relay(&self) -> Arc<dyn Relay> {
+        self.relay.clone()
+    }
+
     /// Start a runner over `relay`, spawning the inbox pump that polls every
     /// `poll` interval, with the default [`ACK_WINDOW`].
     pub fn start(relay: Arc<dyn Relay>, poll: Duration) -> Self {
@@ -235,8 +241,8 @@ impl TaskRunner {
     /// and returning [`RunError::Aborted`], even while the task is actively
     /// reporting progress (the one path that cancels a healthy, chatty worker).
     /// Beyond that the runner enforces only two *liveness* bounds, so a dead
-    /// dispatch can never pin its correlation entry: the [`ACK_WINDOW`] on a
-    /// never-answering peer, and — once alive — the [`IDLE_WINDOW`] no-progress
+    /// dispatch can never pin its correlation entry: the `ACK_WINDOW` on a
+    /// never-answering peer, and — once alive — the `IDLE_WINDOW` no-progress
     /// watchdog, which reaps a worker that acks then stops emitting frames
     /// (crashed / vanished). Neither is a wall-clock cap on a working peer.
     pub async fn run(

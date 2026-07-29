@@ -52,12 +52,7 @@ fn the_editor_lists_settings_over_the_effective_config() {
     let mut app = config_app(dir.path());
     let out = render(&mut app, 200, 60);
 
-    for label in [
-        "Persona memory",
-        "Update check",
-        "Max passes",
-        "Worker concurrency",
-    ] {
+    for label in ["Update check", "Max passes", "Worker concurrency"] {
         assert!(out.contains(label), "editor missing {label}: {out}");
     }
     assert!(
@@ -71,16 +66,12 @@ fn enter_toggles_the_selected_switch_and_writes_it() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut app = config_app(dir.path());
 
-    // Persona memory is the first row and is off by default.
+    // Update check is the first row and is on by default.
     key(&mut app, KeyCode::Enter);
 
-    assert_eq!(
-        written(dir.path()).memory.and_then(|m| m.enabled),
-        Some(true),
-        "the toggle reached disk"
-    );
+    assert!(!written(dir.path()).update.check, "the toggle reached disk");
     let out = render(&mut app, 200, 60);
-    assert!(out.contains("on"), "the new value renders: {out}");
+    assert!(out.contains("off"), "the new value renders: {out}");
 }
 
 #[test]
@@ -91,7 +82,9 @@ fn jk_moves_between_settings_without_leaving_the_subpage() {
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.settings_subpage(), "Config", "j stays in the pane");
 
-    // The second row is Update check, on by default; Enter turns it off.
+    // j landed on Max passes; k comes back to the Update check switch, which is
+    // on by default, so Enter turns it off.
+    key(&mut app, KeyCode::Char('k'));
     key(&mut app, KeyCode::Enter);
     assert!(!written(dir.path()).update.check, "the switch turned off");
 }
@@ -101,9 +94,8 @@ fn arrows_step_a_number_and_persist_it() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut app = config_app(dir.path());
 
-    // Rows are: Persona memory, Update check, then the medulla limits — so two
-    // presses of j land on Max passes. (No tiny.place row: it is unconfigured.)
-    key(&mut app, KeyCode::Char('j'));
+    // Rows are: Update check, then the medulla limits — so one press of j lands
+    // on Max passes. (No tiny.place row: it is unconfigured.)
     key(&mut app, KeyCode::Char('j'));
 
     key(&mut app, KeyCode::Right);

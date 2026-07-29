@@ -15,18 +15,42 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::ui::composer::{caret_row_col, Draft};
+use crate::ui::composer::{caret_visual, wrap_rows, Draft};
 use crate::ui::theme::Theme;
 
 use super::types::ComposerChrome;
 
-/// Rows a composer needs to show `text` in full, borders included.
+/// Columns the prompt gutter (`❯ ` and its continuation indent) claims on every
+/// row, and so cannot be spent on text.
+const GUTTER: u16 = 2;
+
+/// Columns the border claims, one either side.
+const BORDERS: u16 = 2;
+
+/// Text columns a composer drawn into `width` actually has.
+fn text_width(width: u16) -> u16 {
+    width.saturating_sub(BORDERS + GUTTER)
+}
+
+/// Rows a composer `width` columns wide needs to show `text` in full, borders
+/// included.
+///
+/// Counts *rendered* rows, not hard newlines: a paragraph with no `\n` in it
+/// still occupies several rows once it passes the pane's right edge, and a
+/// height that ignored that would clip the part being typed.
 ///
 /// Grows with the draft rather than capping it: a composer that stops growing
 /// hides the end of what is being typed, which is the part being worked on.
-pub(crate) fn composer_height(text: &str) -> u16 {
-    const BORDERS: u16 = 2;
-    (text.split('\n').count() as u16)
+/// Callers with a pane to protect clamp it themselves — [`draw_composer`]
+/// scrolls to the caret when they do.
+pub(crate) fn composer_height(text: &str, width: u16) -> u16 {
+    let columns = text_width(width);
+    if columns == 0 {
+        // Too narrow to lay text out at all. Reporting a wrapped height here
+        // would ask for one row per char of a draft that cannot be drawn.
+        return 1 + BORDERS;
+    }
+    (wrap_rows(text, columns as usize).len() as u16)
         .max(1)
         .saturating_add(BORDERS)
 }
@@ -82,30 +106,58 @@ pub(crate) fn draw_composer(
     }
 
     f.render_widget(
-        Paragraph::new(Text::from(draft_lines(draft, theme, chrome.focused))),
+        Paragraph::new(Text::from(draft_lines(
+            draft,
+            theme,
+            chrome.focused,
+            text_width(area.width),
+            inner.height,
+        ))),
         inner,
     );
 }
 
-/// The draft as one styled line per row, with the caret marked on its own row.
-fn draft_lines(draft: &Draft, theme: &Theme, focused: bool) -> Vec<TLine<'static>> {
-    let caret = caret_row_col(&draft.text, draft.cursor);
+/// The draft as one styled line per rendered row, with the caret marked on its
+/// own row, clipped to the `height` rows the pane granted.
+///
+/// When the draft is taller than that — a caller capping the composer so it
+/// cannot eat the transcript above it — the window follows the caret rather than
+/// staying at the top, because the row being typed on is the one that has to be
+/// on screen.
+fn draft_lines(
+    draft: &Draft,
+    theme: &Theme,
+    focused: bool,
+    width: u16,
+    height: u16,
+) -> Vec<TLine<'static>> {
+    let rows = wrap_rows(&draft.text, width.max(1) as usize);
+    let (caret_row, caret_col) = caret_visual(&rows, draft.cursor);
+    let visible = (height as usize).max(1);
+    let start = if rows.len() <= visible {
+        0
+    } else {
+        caret_row
+            .saturating_sub(visible - 1)
+            .min(rows.len() - visible)
+    };
+
     let mut lines: Vec<TLine> = Vec::new();
-    for (index, row) in draft.text.split('\n').enumerate() {
-        // Only the first row is prompted. A continuation carrying `❯ ` too would
-        // read as a second message rather than the same one wrapped.
+    for (index, row) in rows.iter().enumerate().skip(start).take(visible) {
+        // Only the very first row is prompted. A continuation carrying `❯ ` too
+        // would read as a second message rather than the same one wrapped.
         let prefix = if index == 0 { "❯ " } else { "  " };
         let mut spans = vec![Span::styled(prefix, Style::default().fg(theme.primary))];
-        if index == caret.row {
-            let chars: Vec<char> = row.chars().collect();
-            let before: String = chars.iter().take(caret.col).collect();
+        if index == caret_row {
+            let chars: Vec<char> = row.text.chars().collect();
+            let before: String = chars.iter().take(caret_col).collect();
             // Past the end of the row there is no character to reverse, so the
             // caret is drawn over a space — which is where the next one lands.
             let at: String = chars
-                .get(caret.col)
+                .get(caret_col)
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| " ".into());
-            let after: String = chars.iter().skip(caret.col + 1).collect();
+            let after: String = chars.iter().skip(caret_col + 1).collect();
             spans.push(Span::raw(before));
             spans.push(Span::styled(
                 at,
@@ -117,7 +169,7 @@ fn draft_lines(draft: &Draft, theme: &Theme, focused: bool) -> Vec<TLine<'static
             ));
             spans.push(Span::raw(after));
         } else {
-            spans.push(Span::raw(row.to_string()));
+            spans.push(Span::raw(row.text.clone()));
         }
         lines.push(TLine::from(spans));
     }

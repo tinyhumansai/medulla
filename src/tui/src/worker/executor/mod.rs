@@ -186,13 +186,41 @@ impl PtySessionExecutor {
             return Err(err);
         }
 
+        // Register the peer's stdin channel now that the session exists: a
+        // `TaskFrameKind::Input` for this task reaches nothing until this runs,
+        // because nobody ever calls the registration callback. The background
+        // task outlives this function (it is spawned, not awaited) and drains
+        // itself once the sender side drops — when the dispatcher forgets this
+        // task's `on_stdin` registration at turn end.
+        if let Some(register) = options.on_stdin {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            register(tx);
+            let sessions = self.sessions.clone();
+            let stdin_id = id.clone();
+            tokio::spawn(async move {
+                while let Some(text) = rx.recv().await {
+                    // The same path a human's keystrokes take: bracket, wait for
+                    // it to land, then submit. A steering message arriving mid-turn
+                    // is exactly the case `inject_prompt` exists for — it already
+                    // waits out a busy composer rather than assuming one is ready.
+                    if super::pty::inject_prompt(&sessions, &stdin_id, &text)
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+        }
+
         // Only the plain data and the (owned) callback cross into the polling
         // loop: `RunTaskOptions` is `Send` but not `Sync`, so holding a borrow
         // of it across an await would make this future un-spawnable.
         let abort = options.abort.clone();
         let on_event = options.on_event;
+        let timeout_ms = options.timeout_ms;
         let outcome = self
-            .await_turn(&id, provider, tailer, abort, on_event)
+            .await_turn(&id, provider, tailer, abort, on_event, timeout_ms)
             .await;
         if class == SessionClass::Bounded {
             // Bounded means bounded: the session dies with its reply.
@@ -235,14 +263,22 @@ impl PtySessionExecutor {
         } else {
             options.conversation.clone()
         };
+        // Only a *fresh* launch applies the router and model: a reused session
+        // (the `claim_idle` branch above) is a process already running with
+        // whatever it was opened with, and there is no flag that reconfigures a
+        // live harness mid-conversation. Router/model drift across turns of the
+        // same conversation is the same trade the headless executor's own resume
+        // path accepts.
+        let (env, extra_args) = self.spawn_env(options)?;
         let id = self.sessions.open(LaunchSpec {
             provider: options.provider,
             bin: medulla::tinyplace::env::provider_bin(options.provider, &self.env),
             cwd: options.cwd.clone(),
-            env: self.env.clone(),
-            extra_args: options.extra_args.clone(),
+            env,
+            extra_args,
             skip_permissions: options.skip_permissions,
             label,
+            model: options.model.clone(),
             session_id: None,
         })?;
         let harness_session_id = self.sessions.row(&id).and_then(|row| row.session_id);
@@ -253,7 +289,61 @@ impl PtySessionExecutor {
         })
     }
 
+    /// The environment and extra argv a fresh launch spawns with: this
+    /// executor's base environment, layered with the `[router]` injection the
+    /// headless executor already applies at its own spawn seam.
+    ///
+    /// Without this, switching the local host to `PtySessionExecutor` silently
+    /// dropped a configured router — the child spawned against its own default
+    /// endpoint instead of the one the operator pointed it at, with no error to
+    /// say so.
+    ///
+    /// # Errors
+    ///
+    /// A configured `apiKeyEnv` whose named variable is unset in this
+    /// executor's environment is a hard error, matching the headless path: a
+    /// silently-empty key would spawn the harness unauthenticated against the
+    /// routed endpoint.
+    fn spawn_env(
+        &self,
+        options: &RunTaskOptions,
+    ) -> Result<(HashMap<String, String>, Vec<String>), String> {
+        let mut env = self.env.clone();
+        let mut extra_args = options.extra_args.clone();
+        if let Some(router) = &options.router {
+            let injection = medulla::tinyplace::env::router_env(options.provider, router);
+            for (key, value) in injection.env {
+                env.insert(key, value);
+            }
+            for (child_var, source_name) in injection.secret_env {
+                match self.env.get(&source_name).filter(|v| !v.is_empty()) {
+                    Some(secret) => {
+                        env.insert(child_var, secret.clone());
+                    }
+                    None => {
+                        return Err(format!(
+                            "router API key env var `{source_name}` is not set; \
+                             export it or remove apiKeyEnv from [router]"
+                        ));
+                    }
+                }
+            }
+            extra_args.extend(injection.args);
+        }
+        Ok((env, extra_args))
+    }
+
     /// Poll the transcript until the harness says the turn is over.
+    ///
+    /// `timeout_ms` is the caller's configured idle watchdog (`[host]
+    /// .taskTimeoutMs`, mirroring the headless executor's own `timeout_ms`) —
+    /// the hard ceiling on how long a turn may go without producing a single
+    /// transcript line. It is distinct from, and can override, the two fixed
+    /// budgets below: [`LOCATE_BUDGET`] covers a harness that never starts a
+    /// turn at all, and [`STALL_BUDGET_MS`] is a soft "probably finished"
+    /// signal for a transcript that stops without a stated reason. A caller
+    /// configuring a shorter ceiling than either means it, and is honored
+    /// ahead of them.
     async fn await_turn(
         &self,
         id: &str,
@@ -261,6 +351,7 @@ impl PtySessionExecutor {
         mut tailer: SessionTailer,
         abort: medulla::daemon::providers::Abort,
         mut on_event: Option<medulla::daemon::providers::OnEvent>,
+        timeout_ms: u64,
     ) -> Result<RunTaskResult, String> {
         let mut stream = TurnStream::new(provider);
         let started = tokio::time::Instant::now();
@@ -328,6 +419,17 @@ impl PtySessionExecutor {
                 ));
             }
             let idle_ms = medulla::clock::now_millis().saturating_sub(last_line_at);
+            // The configured idle ceiling, checked first so a caller-set budget
+            // shorter than the fixed ones below actually takes effect instead of
+            // being silently outlived by them. `timeout_ms == 0` means no
+            // configured ceiling (never observed from `[host]`, whose default is
+            // nonzero, but a defensive floor all the same).
+            if timeout_ms > 0 && idle_ms as u64 >= timeout_ms {
+                return Err(format!(
+                    "{} task idle for {timeout_ms}ms (no events)",
+                    provider.as_str()
+                ));
+            }
             // The turn ended, but its message is written one record per content
             // block and the reply usually lives in the last one. Normally the
             // records that follow close it immediately; this covers a transcript

@@ -2,7 +2,7 @@
 //!
 //! The copilot reaches a harness through [`crate::flow_engine::caps::dispatch`],
 //! whose status channel carries the strings
-//! [`crate::daemon::status::status_detail`] derives — one flat `String` per
+//! [`crate::daemon::status_detail`] derives — one flat `String` per
 //! frame, because that channel is shared with every other dispatch and none of
 //! the others want structure.
 //!

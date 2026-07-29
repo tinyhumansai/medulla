@@ -7,9 +7,9 @@
 //! module represents those public shapes as serde types so the SDK and TUI
 //! decode them consistently.
 //!
-//! The [`types`] submodule holds the shapes; this file owns the module docs, the
+//! The `types` submodule holds the shapes; this file owns the module docs, the
 //! reserved tool-name vocabulary, and the public re-exports. Round-trip tests
-//! against hand-written JSON literals live in the sibling [`tests`] module.
+//! against hand-written JSON literals live in the sibling `tests` module.
 //!
 //! Field names match the documented JSON contract.
 

@@ -105,42 +105,6 @@ fn init_offline_writes_then_protects_a_workspace_profile() {
 }
 
 #[test]
-fn memory_status_search_and_compile_run_fully_offline() {
-    let dir = TempDir::new().unwrap();
-
-    let status = run(&["memory", "status", "--json"], dir.path(), dir.path());
-    assert!(
-        status.status.success(),
-        "{}",
-        String::from_utf8_lossy(&status.stderr)
-    );
-    assert!(String::from_utf8_lossy(&status.stdout).contains("entry_count"));
-
-    let overview = run(&["memory", "status"], dir.path(), dir.path());
-    assert!(overview.status.success());
-
-    let search = run(
-        &["memory", "search", "not-present", "--json"],
-        dir.path(),
-        dir.path(),
-    );
-    assert!(search.status.success());
-    assert_eq!(String::from_utf8_lossy(&search.stdout).trim(), "[]");
-
-    let empty_search = run(&["memory", "search", "not-present"], dir.path(), dir.path());
-    assert!(empty_search.status.success());
-    assert!(String::from_utf8_lossy(&empty_search.stdout).contains("no matches"));
-
-    let compile = run(&["memory", "compile"], dir.path(), dir.path());
-    assert!(
-        compile.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compile.stderr)
-    );
-    assert!(String::from_utf8_lossy(&compile.stdout).contains("files"));
-}
-
-#[test]
 fn invalid_cli_inputs_and_non_tty_tui_exit_cleanly() {
     let dir = TempDir::new().unwrap();
 
@@ -151,10 +115,6 @@ fn invalid_cli_inputs_and_non_tty_tui_exit_cleanly() {
     );
     assert_eq!(bad_login.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&bad_login.stderr).contains("unknown provider"));
-
-    let bad_memory = run(&["memory", "unknown"], dir.path(), dir.path());
-    assert_eq!(bad_memory.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&bad_memory.stderr).contains("unknown memory subcommand"));
 
     let tui = run(&[], dir.path(), dir.path());
     assert_eq!(tui.status.code(), Some(1));

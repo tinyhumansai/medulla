@@ -41,7 +41,8 @@ git -C vendor/openhuman submodule update --init --depth 1 \
   vendor/tinychannels \
   vendor/tinycortex \
   vendor/tinyflows \
+  vendor/tinyhumans-sdk \
   vendor/tinyjuice \
   vendor/tinyplace
 
-echo "Submodules initialized (OpenHuman core + its six vendored crates)."
+echo "Submodules initialized (OpenHuman core + its seven vendored crates)."

@@ -27,4 +27,7 @@ mod tests;
 
 pub use convert::{wire_color, wire_grid, wire_style};
 pub use router::ScreenRouter;
-pub use sampler::{sample_interval, send_fn, spawn_session_stream, SessionStream, StreamRegistry};
+pub use sampler::{
+    sample_interval, send_fn, spawn_session_stream, LiveCheck, SessionStream, StreamRegistry,
+    StreamSpec,
+};

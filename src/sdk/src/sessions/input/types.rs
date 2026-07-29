@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::*;
 /// One inbound stimulus, before normalization. The two variants are the two
-/// drivers named in [`SessionDriver`](super::types::SessionDriver).
+/// drivers named in [`SessionDriver`](crate::sessions::SessionDriver).
 #[derive(Debug, Clone)]
 pub enum SessionInput {
     /// A decoded `medulla-tinyplace/1` frame from an authenticated sender.

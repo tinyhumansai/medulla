@@ -3,11 +3,11 @@
 //!
 //! It owns the live sessions (processes for the interactive transport, records
 //! for everything else), delegates continuity decisions to
-//! [`SessionRegistry`](super::registry::SessionRegistry), and publishes a change
+//! [`SessionRegistry`], and publishes a change
 //! ping so the UI can redraw without polling.
 //!
 //! - [`types`] — configuration, the open request, and the transcript model.
-//! - [`turns`] — turn execution: the bounded/unbound split and the interactive
+//! - `turns` — turn execution: the bounded/unbound split and the interactive
 //!   and one-shot transports.
 
 use std::sync::atomic::{AtomicU64, Ordering};

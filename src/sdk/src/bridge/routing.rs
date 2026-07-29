@@ -131,6 +131,16 @@ impl Bridge for RoutingBridge {
         self.remote.as_ref()?.resolve_handle(name).await
     }
 
+    /// Asked of the remote only. A device-local address is served in-process,
+    /// so it has no heartbeat to read and needs none — it is up exactly when
+    /// this process is.
+    async fn presence(&self, addresses: &[String]) -> std::collections::HashMap<String, bool> {
+        match &self.remote {
+            Some(remote) => remote.presence(addresses).await,
+            None => std::collections::HashMap::new(),
+        }
+    }
+
     async fn is_device_local(&self, address: &str) -> bool {
         self.is_local(address).await
     }

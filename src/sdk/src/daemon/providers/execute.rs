@@ -129,14 +129,14 @@ async fn run_provider_attempt(
     // Medulla-launched harnesses attribute their commits to Medulla via a
     // `Co-authored-by` trailer. Nothing is persisted — the flags live only on
     // this child's argv. Empty for providers with no such knob.
-    extra_args.extend(crate::tinyplace::attribution::attribution_args(
+    extra_args.extend(crate::attribution::attribution_args(
         spec.provider,
         &spec.env,
     ));
     // For providers that use the git-hook path (Codex, Opencode), merge the
     // prepare-commit-msg hook env vars into the child's environment.
     let mut merged_env = spec.env.clone();
-    merged_env.extend(crate::tinyplace::attribution::attribution_env(
+    merged_env.extend(crate::attribution::attribution_env(
         spec.provider,
         &merged_env,
     ));
@@ -343,7 +343,7 @@ async fn run_provider_attempt(
     // transient-lock marker the retry loop keys on.
     let _ = tokio::time::timeout(Duration::from_millis(500), stderr_task).await;
     // Clean up any git hook temp directory created by attribution_env.
-    crate::tinyplace::attribution::cleanup_hook_tmpdir();
+    crate::attribution::cleanup_hook_tmpdir();
     if spec.abort.is_aborted() {
         return Err(format!("{} task aborted", provider_name(spec.provider)));
     }

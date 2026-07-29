@@ -49,6 +49,12 @@ impl Bridge for RecordingRemote {
         inbox.drain(..count).collect()
     }
 
+    /// Answers every address as down, so a caller that reaches this at all is
+    /// distinguishable from one that silently took the trait's default.
+    async fn presence(&self, addresses: &[String]) -> std::collections::HashMap<String, bool> {
+        addresses.iter().map(|a| (a.clone(), false)).collect()
+    }
+
     async fn request_contact(&self, peer: &str) -> Result<(), String> {
         self.contacts.lock().unwrap().push(peer.to_string());
         Ok(())
@@ -214,4 +220,35 @@ async fn without_a_remote_a_non_local_address_fails_loudly() {
     assert!(router.drain_inbox(10).await.is_empty());
     assert_eq!(router.local_address(), "hub");
     assert!(router.remote().is_none());
+}
+
+#[tokio::test]
+async fn presence_is_asked_of_the_remote() {
+    // The bug this exists to catch: `RoutingBridge` implements `Bridge`, so a
+    // method it forgets to forward silently takes the trait's default instead of
+    // reaching the transport that can actually answer. That default is "no
+    // opinion", which reads as a healthy fleet — so the hub advertised a worker
+    // that tiny.place knew was down, and nothing anywhere said otherwise.
+    let network = LocalBridgeNetwork::new();
+    let hub = network.bind("presence-hub").unwrap();
+    let remote = Arc::new(RecordingRemote::default());
+    let bridge = RoutingBridge::new(hub, remote as Arc<dyn Bridge>);
+
+    let answered = bridge.presence(&["GRVaddr".to_string()]).await;
+
+    assert_eq!(
+        answered.get("GRVaddr"),
+        Some(&false),
+        "the remote's answer must come through, not the trait default"
+    );
+}
+
+#[tokio::test]
+async fn a_local_only_bridge_has_nobody_to_ask_about_presence() {
+    // No remote, so no liveness signal — and "no signal" must stay "no opinion"
+    // rather than becoming "everyone is offline", which would empty the roster.
+    let network = LocalBridgeNetwork::new();
+    let hub = network.bind("lonely-hub").unwrap();
+    let bridge = RoutingBridge::local_only(hub);
+    assert!(bridge.presence(&["GRVaddr".to_string()]).await.is_empty());
 }

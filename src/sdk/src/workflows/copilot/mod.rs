@@ -16,7 +16,7 @@
 //! - **Progress.** The harness's status frames are forwarded as they arrive, so
 //!   a turn that takes a minute is not a frozen pane.
 //! - **Accountability.** The graph is snapshotted before and after and the
-//!   [`diff`] between them is reported — what the store actually holds, not what
+//!   `diff` between them is reported — what the store actually holds, not what
 //!   the agent said it did.
 
 mod brief;

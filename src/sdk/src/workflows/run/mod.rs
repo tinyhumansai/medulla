@@ -17,7 +17,7 @@
 //!
 //! **The run record is reconciled on drop.** A run that is cancelled, panics, or
 //! dies with the process would otherwise leave a record claiming to be
-//! `running` forever. [`RunFinalizer`] writes a terminal status on drop unless a
+//! `running` forever. `RunFinalizer` writes a terminal status on drop unless a
 //! settled path already did.
 //!
 //! **Resume checks the host's record, not just the engine's.** The engine treats

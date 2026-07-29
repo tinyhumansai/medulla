@@ -15,10 +15,10 @@
 //! login` could succeed while the core, whose session actually drives the
 //! runtime, stayed signed out.
 //!
-//! Split by responsibility: [`types`] holds the plain data model, [`migrate`]
-//! the sweep of the retired credential files, [`url`] the
-//! pure URL/query helpers, [`token`] backend bearer-token resolution, and
-//! [`loopback`] the socket-bound OAuth flow and browser opener. All public items
+//! Split by responsibility: `types` holds the plain data model, `migrate`
+//! the sweep of the retired credential files, `url` the
+//! pure URL/query helpers, `token` backend bearer-token resolution, and
+//! `loopback` the socket-bound OAuth flow and browser opener. All public items
 //! are re-exported here so callers use `medulla::auth::*`.
 
 mod loopback;

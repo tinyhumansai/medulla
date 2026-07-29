@@ -19,7 +19,7 @@
 //! [`input::fold`] — the single place that knows the difference. Everything
 //! downstream sees only a normalized [`TurnRequest`].
 //!
-//! A third, *derived* choice — [`Transport`](routing::Transport) — follows from
+//! A third, *derived* choice — [`Transport`] — follows from
 //! the class and the provider: an unbound `claude` session gets a live
 //! [`interactive`] process, everything else runs one-shot and rebuilds context
 //! from a captured session id.

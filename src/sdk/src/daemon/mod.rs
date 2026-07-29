@@ -8,12 +8,12 @@
 //! - [`providers`] — provider detection + one-shot headless task execution.
 //! - [`capabilities`] — the on-demand capability probe.
 //! - [`transport`] — encrypted Signal DM send/receive + pre-key publishing.
-//! - [`types`] — the daemon data model ([`DaemonConfig`], [`DaemonRuntime`], and
+//! - `types` — the daemon data model ([`DaemonConfig`], [`DaemonRuntime`], and
 //!   the callback aliases).
-//! - [`runtime`] + [`task_loop`] — [`DaemonRuntime`], the provider-agnostic task
+//! - `runtime` + `task_loop` — [`DaemonRuntime`], the provider-agnostic task
 //!   state machine, split into lifecycle/dispatch and frame/task orchestration.
-//! - [`status`] — semantic-event → status-line derivation ([`status_detail`]).
-//! - [`flags`] + [`entry`] — CLI flag parsing and the entry ([`run_daemon`]) that
+//! - `status` — semantic-event → status-line derivation ([`status_detail`]).
+//! - `flags` + `entry` — CLI flag parsing and the entry ([`run_daemon`]) that
 //!   wires the SDK transport in.
 //! - [`embedded`] — the same runtime driven over any
 //!   [`Bridge`](crate::bridge::Bridge) inside another process, so the

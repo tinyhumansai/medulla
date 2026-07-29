@@ -36,7 +36,14 @@ fn defaults_are_applied() {
     assert_eq!(cfg.state_dir, "state");
     assert_eq!(cfg.backend.base_url, "https://api.tinyhumans.ai");
     assert_eq!(cfg.backend.token_env, "MEDULLA_TOKEN");
-    assert_eq!(cfg.medulla.context_window(), 32_000);
+    // One million, matching the models this runs against. Understating the
+    // window makes the context meter read near-full on a prompt using a few
+    // percent of the real budget.
+    assert_eq!(
+        cfg.medulla.context_window(),
+        super::types::DEFAULT_CONTEXT_WINDOW_TOKENS
+    );
+    assert_eq!(cfg.medulla.context_window(), 1_000_000);
     assert!(cfg.workflow.workspaces.is_empty());
 }
 
@@ -145,24 +152,6 @@ fn unknown_fields_are_ignored() {
     )
     .unwrap();
     assert_eq!(cfg.medulla.max_passes, Some(3));
-}
-
-#[test]
-fn memory_section_parses_camel_case() {
-    let cfg: TuiConfig = serde_json::from_str(
-        r#"{"memory":{"enabled":true,"workspace":"/ws","identity":"a@b","projectRoots":["/x","/y"],"model":"m","maxCostUsd":3.0}}"#,
-    )
-    .unwrap();
-    let mem = cfg.memory.unwrap();
-    assert_eq!(mem.enabled, Some(true));
-    assert_eq!(mem.workspace.as_deref(), Some("/ws"));
-    assert_eq!(mem.identity.as_deref(), Some("a@b"));
-    assert_eq!(mem.project_roots, vec!["/x".to_string(), "/y".to_string()]);
-    assert_eq!(mem.model.as_deref(), Some("m"));
-    assert_eq!(mem.max_cost_usd, Some(3.0));
-    // Absent by default.
-    let bare: TuiConfig = serde_json::from_str("{}").unwrap();
-    assert!(bare.memory.is_none());
 }
 
 #[test]

@@ -1,5 +1,5 @@
 //! CLI data model: the top-level [`Command`], the per-subcommand parsed-flag
-//! structs ([`LoginArgs`], [`MemoryArgs`]/[`MemoryAction`], [`UpdateArgs`],
+//! structs ([`LoginArgs`], [`UpdateArgs`],
 //! [`TuiArgs`]). The parsers that build these live in the sibling `parse`
 //! module.
 
@@ -25,8 +25,6 @@ pub enum Command {
     Login,
     /// Clear stored credentials.
     Logout,
-    /// Persona-memory management (`status`/`ingest`/`backfill`/`compile`/`search`).
-    Memory,
     /// Launch a coding-agent CLI as a transparent tiny.place-bridged wrapper.
     Wrapper(HarnessProvider),
     /// Check for / install a newer release (`update [--check]`).
@@ -184,36 +182,6 @@ pub struct LoginArgs {
     pub no_browser: bool,
     /// A 64-hex one-time login token (headless fallback); skips the listener.
     pub token: Option<String>,
-}
-
-/// The `medulla memory` action.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MemoryAction {
-    /// Print the memory-layer status.
-    Status,
-    /// Incremental ingest pass (LLM-backed; needs an API key).
-    Ingest,
-    /// Full backfill ingest pass (LLM-backed; needs an API key).
-    Backfill,
-    /// Recompile the pack from the persisted trees (offline).
-    Compile,
-    /// BM25 search over the persona corpus (offline).
-    Search(String),
-}
-
-/// Parsed `medulla memory` flags.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemoryArgs {
-    /// Explicit `--config` path. `None` selects the layered config discovery.
-    pub config: Option<String>,
-    /// Emit JSON instead of human-readable output.
-    pub json: bool,
-    /// Optional `--facet <name>` filter (search only).
-    pub facet: Option<String>,
-    /// Optional `--k <n>` result cap (search only).
-    pub k: usize,
-    /// The selected action.
-    pub action: MemoryAction,
 }
 
 /// Parsed `medulla update` flags.

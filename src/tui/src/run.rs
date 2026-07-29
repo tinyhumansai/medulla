@@ -47,6 +47,11 @@ pub(crate) async fn run_core(args: &[String]) -> anyhow::Result<()> {
         .first()
         .map(std::path::PathBuf::from);
     medulla::core_host::bind_action_dir(&env, first_workspace.as_deref());
+    // And the endpoints, for the same reason: a scripted run on staging that let
+    // the core resolve its own backend would use the session stored by
+    // `medulla login` against a deployment that never issued it.
+    medulla::core_host::bind_medulla_base_url(&env, &loaded.config.backend.base_url);
+    medulla::core_host::bind_backend_api_url(&env, &loaded.config.backend.base_url);
 
     let core = medulla::core_host::boot()
         .await

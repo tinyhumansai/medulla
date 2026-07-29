@@ -11,8 +11,8 @@ use crate::ui::theme::{color_to_string, THEME_ROLES};
 use medulla::runtime::{WorkerInfo, WorkerOp};
 
 use super::types::{
-    tab_pos, App, Cmd, Prompt, PromptKind, MP_OVERVIEW, MP_SEARCH, SETTINGS_SUBPAGES,
-    SP_APPEARANCE, SP_CONFIG, SP_HELP, SP_USAGE,
+    tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_HELP,
+    SP_USAGE,
 };
 
 impl App {
@@ -170,16 +170,6 @@ impl App {
                 let mut document = self.tasks.clone();
                 document.sources.push(source);
                 Some(Cmd::SaveTasks(Box::new(document)))
-            }
-            PromptKind::MemorySearch => {
-                if text.is_empty() {
-                    self.set_status("Memory · search query is required");
-                    return None;
-                }
-                self.memory_subpage_index = MP_SEARCH;
-                self.memory_focused = true;
-                self.set_status(format!("Memory · searching “{text}”…"));
-                Some(Cmd::SearchMemory(text))
             }
             PromptKind::HostAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
@@ -361,22 +351,11 @@ impl App {
                 self.enter_settings_subpage(SP_APPEARANCE);
             }
             SlashCommand::Usage => return self.set_settings_subpage(SP_USAGE),
-            SlashCommand::Memory(query) => {
+            // The persona-memory layer is out of the build; the tab it lands
+            // on says so rather than the command silently doing nothing.
+            SlashCommand::Memory(_) => {
                 self.tab_index = tab_pos("Memory");
-                match query {
-                    None => {
-                        self.memory_subpage_index = MP_OVERVIEW;
-                        self.memory_focused = false;
-                        self.set_status("Memory · loading persona…");
-                        return Some(Cmd::LoadMemory);
-                    }
-                    Some(query) => {
-                        self.memory_subpage_index = MP_SEARCH;
-                        self.memory_focused = true;
-                        self.set_status(format!("Memory · searching “{query}”…"));
-                        return Some(Cmd::SearchMemory(query));
-                    }
-                }
+                self.set_status("Memory · coming soon");
             }
             SlashCommand::ToggleMouse => self.toggle_mouse(),
             SlashCommand::Copy(scope) => self.copy_chat(scope),

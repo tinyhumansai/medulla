@@ -7,9 +7,9 @@
 //! `claude --resume <id>` / `codex resume <id>` in the session's original cwd.
 //! Exposed to the CLI via `medulla sessions` (JSON); a TUI picker lands later.
 //!
-//! The module is split by responsibility: [`types`] holds the data model,
-//! [`scan`] locates and enumerates session files (and the wrapper's discovery
-//! helpers), [`summary`] reads a file's head into an id/cwd/label, and [`list`]
+//! The module is split by responsibility: `types` holds the data model,
+//! `scan` locates and enumerates session files (and the wrapper's discovery
+//! helpers), `summary` reads a file's head into an id/cwd/label, and `list`
 //! ranks them into the public [`RecentSession`] read model. Public items are
 //! re-exported here so callers use `medulla::session_history::*`.
 

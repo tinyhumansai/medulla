@@ -199,7 +199,7 @@ fn attribution_env_is_merged_for_codex_and_opencode() {
 
         // Clean up the temp dir so it doesn't race with the attribution
         // module's own cleanup test that shares the global HOOK_DIR.
-        crate::tinyplace::attribution::cleanup_hook_tmpdir();
+        crate::attribution::cleanup_hook_tmpdir();
     }
 }
 

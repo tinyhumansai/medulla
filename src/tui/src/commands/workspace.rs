@@ -36,7 +36,7 @@ pub(crate) async fn run_workspace(args: &[String]) -> anyhow::Result<()> {
     match &parsed.action {
         WorkspaceAction::Add(dir) => {
             let target = dir.as_ref().map_or_else(|| cwd.clone(), |d| cwd.join(d));
-            add(&parsed, &loaded, &config_path, &target, &env).await
+            add(&parsed, &loaded, &config_path, &target).await
         }
         WorkspaceAction::List => {
             list(&loaded, &config_path, parsed.json);
@@ -63,31 +63,12 @@ async fn add(
     loaded: &LoadedConfig,
     config_path: &Path,
     dir: &Path,
-    env: &HashMap<String, String>,
 ) -> anyhow::Result<()> {
-    // The same backend/model settings memory ingest uses, so one login (or one
-    // OPENROUTER_API_KEY) serves both surfaces.
-    let session = super::session_credentials(env, &loaded.config.backend.base_url).await;
-    let settings = medulla::memory::env::resolve_with_backend(
-        loaded.config.memory.as_ref(),
-        &loaded.config.backend,
-        env,
-        &medulla::home::medulla_home(env),
-        session.as_ref().map(|c| c.jwt.as_str()),
-    );
-    if !parsed.offline && !medulla::init::model_available(&settings) {
-        eprintln!(
-            "medulla workspace add: no model available (run `medulla login` or set OPENROUTER_API_KEY) — writing an editable stub"
-        );
-    }
-
     let outcome = medulla::init::init_and_register_workspace(
         dir,
-        &settings,
         config_path,
         &loaded.config,
         parsed.harness.as_deref(),
-        parsed.offline,
         parsed.force,
     )
     .await?;

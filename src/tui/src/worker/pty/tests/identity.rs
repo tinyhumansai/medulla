@@ -12,14 +12,14 @@ fn claude_is_handed_a_minted_session_id_and_codex_is_not() {
     // attribution from a guess into a fact.
     assert!(accepts_preset_session_id(HarnessProvider::Claude));
     let minted = mint_session_id(HarnessProvider::Claude).expect("claude accepts one");
-    let args = interactive_args(HarnessProvider::Claude, Some(&minted), false, &[]);
+    let args = interactive_args(HarnessProvider::Claude, Some(&minted), false, None, &[]);
     assert_eq!(args, vec!["--session-id".to_string(), minted.clone()]);
 
     // Codex has no flag to choose an id for a fresh session; handing it one
     // would be an unknown option, so it must not be offered.
     assert!(!accepts_preset_session_id(HarnessProvider::Codex));
     assert_eq!(mint_session_id(HarnessProvider::Codex), None);
-    assert!(interactive_args(HarnessProvider::Codex, Some("ignored"), false, &[]).is_empty());
+    assert!(interactive_args(HarnessProvider::Codex, Some("ignored"), false, None, &[]).is_empty());
 }
 
 #[test]

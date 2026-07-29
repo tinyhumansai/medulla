@@ -1,6 +1,6 @@
 //! Boot the embedded OpenHuman core in this process.
 //!
-//! One place builds the [`CoreRuntime`], so there is exactly one answer to
+//! One place builds the [`EmbeddedCore`], so there is exactly one answer to
 //! "which workspace does the core write to" and one place to change the domain
 //! and service composition.
 //!
@@ -46,7 +46,7 @@ mod auth_tests;
 mod tests;
 
 /// The embed facade, re-exported so a host can name what [`boot`] returns
-/// without depending on `openhuman-core` directly.
+/// without depending on the `openhuman` crate directly.
 pub use openhuman_core::embed::Core as EmbeddedCore;
 
 /// Environment variable OpenHuman reads for its state directory.
@@ -57,6 +57,14 @@ pub const OPENHUMAN_ACTION_DIR_ENV: &str = "OPENHUMAN_ACTION_DIR";
 
 /// Environment variable OpenHuman reads for the Medulla backend it dials.
 pub const OPENHUMAN_MEDULLA_BASE_URL_ENV: &str = "OPENHUMAN_MEDULLA_BASE_URL";
+
+/// Environment variable OpenHuman reads for its **own** backend API base — the
+/// one `/auth/me` is resolved against.
+pub const OPENHUMAN_BACKEND_URL_ENV: &str = "BACKEND_URL";
+
+/// The alternate spelling OpenHuman's config chain also honours, checked so an
+/// operator who exported that one is not overridden.
+pub const OPENHUMAN_BACKEND_URL_ALT_ENV: &str = "VITE_BACKEND_URL";
 
 /// The core's state directory for a given Medulla home.
 ///
@@ -155,6 +163,42 @@ pub fn bind_medulla_base_url(env: &HashMap<String, String>, base_url: &str) -> S
     }
     std::env::set_var(OPENHUMAN_MEDULLA_BASE_URL_ENV, base_url);
     tracing::debug!("[core_host] medulla base url bound from the Medulla config");
+    base_url.to_string()
+}
+
+/// Point the core's *own* backend client at the same deployment.
+///
+/// [`bind_medulla_base_url`] covers the core's Medulla client only. Auth is a
+/// different client: `openhuman.auth_store_session` validates a token against
+/// `/auth/me` on the base OpenHuman's own config chain resolves, which consults
+/// `BACKEND_URL` / `VITE_BACKEND_URL` and otherwise falls back to *production*
+/// — it has never heard of `MEDULLA_STAGING`.
+///
+/// So on staging the login flow verified a staging JWT, handed it to the core,
+/// and the core asked production whether it was valid. It is not, and the
+/// failure surfaces as `auth_store_session: Session validation failed (GET
+/// /auth/me): backend rejected session token` — which names the symptom and not
+/// the two endpoints that disagreed. The same mismatch hits any self-hosted
+/// install, staging just makes it certain.
+///
+/// Non-overriding, like the bindings above, and either spelling counts as the
+/// operator having aimed the core somewhere on purpose. Returns the URL in
+/// effect either way.
+///
+/// Call before [`boot`]; the core reads the variable when it resolves a client.
+pub fn bind_backend_api_url(env: &HashMap<String, String>, base_url: &str) -> String {
+    for key in [OPENHUMAN_BACKEND_URL_ENV, OPENHUMAN_BACKEND_URL_ALT_ENV] {
+        if let Some(explicit) = env.get(key).map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            tracing::debug!("[core_host] backend api url from the operator's {key} override");
+            return explicit.to_string();
+        }
+    }
+    let base_url = base_url.trim().trim_end_matches('/');
+    if base_url.is_empty() {
+        return String::new();
+    }
+    std::env::set_var(OPENHUMAN_BACKEND_URL_ENV, base_url);
+    tracing::debug!("[core_host] backend api url bound from the Medulla config");
     base_url.to_string()
 }
 

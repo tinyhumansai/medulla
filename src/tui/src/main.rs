@@ -11,7 +11,7 @@ use medulla_tui::cli::{parse_command, sessions_json, Command};
 use crate::app_loop::run_tui;
 #[cfg(feature = "workflows")]
 use crate::commands::run_workflow_cmd;
-use crate::commands::{run_hub, run_init, run_login, run_logout, run_memory, run_workspace};
+use crate::commands::{run_hub, run_init, run_login, run_logout, run_workspace};
 use crate::run::run_core;
 
 mod app_loop;
@@ -30,7 +30,23 @@ mod worker_loop;
 /// core is a dependency of the SDK, not of this crate — so that is the only
 /// place able to source the values from it rather than restating them.
 fn main() -> anyhow::Result<()> {
+    install_crypto_provider();
     medulla::tokio_tuning::build_runtime()?.block_on(async_main())
+}
+
+/// Pick the TLS backend before anything opens a connection.
+///
+/// rustls 0.23 refuses to guess when more than one provider is compiled in, and
+/// this binary has two: `ring` arrives with reqwest's `rustls-tls`, `aws-lc-rs`
+/// with the vendored OpenHuman core. Neither wins by default, so the first TLS
+/// handshake panicked — on a tokio worker thread, which meant the process
+/// survived and the TUI kept drawing while every relay call died silently.
+///
+/// Done here rather than at each call site because the choice is process-wide
+/// and must be made before the first handshake, whichever subcommand runs.
+/// A failure means a provider is already installed, which is equally fine.
+fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 async fn async_main() -> anyhow::Result<()> {
@@ -67,7 +83,6 @@ async fn async_main() -> anyhow::Result<()> {
         }
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout().await,
-        Command::Memory => run_memory(&raw[1..]).await,
         Command::Init => run_init(&raw[1..]).await,
         Command::Workspace => run_workspace(&raw[1..]).await,
         Command::Hub => run_hub(&raw[1..]).await,

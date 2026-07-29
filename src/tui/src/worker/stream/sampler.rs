@@ -107,25 +107,63 @@ impl SessionStream {
     }
 }
 
+/// Answers "is the task this stream was opened for still running?".
+///
+/// The stream needs this because a session outlives the task that ran in it —
+/// that is what makes an interactive worker interactive — so "the session is
+/// still there" is not the same question.
+pub type LiveCheck = Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// Everything one subscription needs to know about what it is streaming.
+///
+/// Grouped rather than passed loose because the parts are meaningless apart: a
+/// task, the session it is running in, who asked for it, how fast, and how to
+/// tell when it is over.
+pub struct StreamSpec {
+    /// The task the frames are addressed by.
+    pub task_id: String,
+    /// The session the frames are sampled from.
+    pub session_id: String,
+    /// The peer the frames are sent to.
+    pub subscriber: String,
+    /// Frames per second asked for, before clamping.
+    pub max_fps: u8,
+    /// Answers whether the task is still running.
+    pub is_live: LiveCheck,
+}
+
 /// Drive one subscription: sample the session on a timer and send what changes.
 ///
-/// Ends when the session disappears — the harness exited, or the manager forgot
-/// it — so a subscription cannot outlive the thing it is watching. Dropping the
-/// returned handle aborts it, which is how `unsubscribe` is served.
+/// Ends when its task ends, or when the session disappears. Both matter, and
+/// the first is the one that is easy to miss: a session is handed on to the
+/// next task once its current one settles, so a stream that only watched the
+/// session would carry on sampling — and keep labelling another task's screen,
+/// possibly another peer's, with the task id this stream was opened for.
+///
+/// Dropping the returned handle aborts it, which is how `unsubscribe` is served.
 pub fn spawn_session_stream(
     sessions: PtyManager,
-    task_id: String,
-    session_id: String,
-    subscriber: String,
-    max_fps: u8,
+    spec: StreamSpec,
     send: SendFn,
 ) -> tokio::task::JoinHandle<()> {
+    let StreamSpec {
+        task_id,
+        session_id,
+        subscriber,
+        max_fps,
+        is_live,
+    } = spec;
     let interval = sample_interval(max_fps);
     tokio::spawn(async move {
         // Frames are addressed by task — what the subscriber named and holds —
         // while sampling reads the session the task is running in.
         let mut stream = SessionStream::new(task_id);
         loop {
+            // Checked before the session, because a settled task is the common
+            // ending and the session it ran in is usually still very much alive.
+            if !is_live() {
+                return; // the task is over; the screen is no longer its screen
+            }
             // Read the emulator, never the pty: `screen_rows` hands back an
             // owned copy so the sampler never holds the parser lock across the
             // send, which would stall the reader thread feeding it.
@@ -148,7 +186,12 @@ pub fn spawn_session_stream(
 /// information.
 #[derive(Default)]
 pub struct StreamRegistry {
-    streams: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
+    /// Keyed by task, holding the subscriber it was opened for alongside the
+    /// running sampler. The subscriber is kept so a stop can be authorized
+    /// against *who asked for the stream* rather than against whether the task
+    /// is still running — the latter refuses the one legitimate case that
+    /// matters, a viewer letting go of a task that has just finished.
+    streams: std::collections::HashMap<String, (String, tokio::task::JoinHandle<()>)>,
 }
 
 impl StreamRegistry {
@@ -161,32 +204,36 @@ impl StreamRegistry {
     ///
     /// Restarting is how a resync is served: the replacement stream begins
     /// owing a full frame, which is exactly what the viewer asked for.
-    pub fn subscribe(
-        &mut self,
-        sessions: &PtyManager,
-        task_id: &str,
-        session_id: &str,
-        subscriber: &str,
-        max_fps: u8,
-        send: SendFn,
-    ) {
-        self.unsubscribe(task_id);
-        let handle = spawn_session_stream(
-            sessions.clone(),
-            task_id.to_string(),
-            session_id.to_string(),
-            subscriber.to_string(),
-            max_fps,
-            send,
-        );
-        self.streams.insert(task_id.to_string(), handle);
+    pub fn subscribe(&mut self, sessions: &PtyManager, spec: StreamSpec, send: SendFn) {
+        let (task_id, subscriber) = (spec.task_id.clone(), spec.subscriber.clone());
+        self.unsubscribe(&task_id);
+        let handle = spawn_session_stream(sessions.clone(), spec, send);
+        self.streams.insert(task_id, (subscriber, handle));
     }
 
     /// Stop streaming `task_id`, if it was being streamed.
     pub fn unsubscribe(&mut self, task_id: &str) {
-        if let Some(handle) = self.streams.remove(task_id) {
+        if let Some((_, handle)) = self.streams.remove(task_id) {
             handle.abort();
         }
+    }
+
+    /// Stop streaming `task_id`, but only for the peer it is being streamed to.
+    ///
+    /// Returns whether a stream was stopped. This is the authorization the
+    /// protocol actually needs: without it any peer could cancel another's
+    /// stream by naming its task id, and checking the task is still running
+    /// instead — as this once did — leaves a finished task's stream impossible
+    /// to stop by anyone.
+    pub fn unsubscribe_for(&mut self, subscriber: &str, task_id: &str) -> bool {
+        let matches = self
+            .streams
+            .get(task_id)
+            .is_some_and(|(owner, _)| owner == subscriber);
+        if matches {
+            self.unsubscribe(task_id);
+        }
+        matches
     }
 
     /// How many sessions are being streamed.
@@ -198,7 +245,7 @@ impl StreamRegistry {
     pub fn contains(&self, task_id: &str) -> bool {
         self.streams
             .get(task_id)
-            .is_some_and(|handle| !handle.is_finished())
+            .is_some_and(|(_, handle)| !handle.is_finished())
     }
 
     /// Whether nothing is being streamed.
@@ -208,7 +255,7 @@ impl StreamRegistry {
 
     /// Drop every subscription — used on shutdown.
     pub fn clear(&mut self) {
-        for (_, handle) in self.streams.drain() {
+        for (_, (_, handle)) in self.streams.drain() {
             handle.abort();
         }
     }
@@ -219,7 +266,7 @@ impl StreamRegistry {
 impl StreamRegistry {
     /// Forget every stream whose task has finished.
     pub fn prune(&mut self) {
-        self.streams.retain(|_, handle| !handle.is_finished());
+        self.streams.retain(|_, (_, handle)| !handle.is_finished());
     }
 }
 

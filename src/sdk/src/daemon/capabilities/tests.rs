@@ -107,13 +107,42 @@ async fn probe_merges_agent_report_over_facts() {
 
 #[tokio::test]
 async fn probe_degrades_to_facts_when_provider_fails() {
+    // Probed in an empty directory rather than the crate's own: a workspace with
+    // a README/AGENTS.md has a deterministic digest, and asserting on the crate
+    // directory made this test a claim about which docs happen to sit beside it.
+    let empty = tempfile::tempdir().unwrap();
     let run_task: RunTaskFn =
         Arc::new(|_opts| Box::pin(async move { Err("provider wedged".to_string()) }));
-    let caps = probe_capabilities(probe_options(run_task)).await;
+    let caps = probe_capabilities(probe_options_in(
+        run_task,
+        empty.path().to_str().expect("utf-8"),
+    ))
+    .await;
     assert!(caps.tools.is_empty(), "no tools without a working probe");
     assert!(caps.mcp_servers.is_empty());
-    assert!(caps.summary.is_none());
+    assert!(caps.summary.is_none(), "nothing to digest in an empty dir");
     assert!(caps.cwd.is_some(), "cheap facts survive a failed probe");
+}
+
+#[tokio::test]
+async fn the_directory_digest_survives_a_failed_probe() {
+    // The digest is a cheap fact, not a probe result: a wedged provider is
+    // exactly when an orchestrator still needs to know what this project is.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("README.md"),
+        "# Widgets\n\nA widget shop.\n",
+    )
+    .unwrap();
+    let run_task: RunTaskFn =
+        Arc::new(|_opts| Box::pin(async move { Err("provider wedged".to_string()) }));
+    let caps = probe_capabilities(probe_options_in(
+        run_task,
+        dir.path().to_str().expect("utf-8"),
+    ))
+    .await;
+    assert!(caps.summary.is_some(), "the cwd digest is a fact");
+    assert!(caps.tools.is_empty(), "still no tools from a failed probe");
 }
 
 #[tokio::test]

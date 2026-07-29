@@ -17,6 +17,49 @@ fn guard() -> std::sync::MutexGuard<'static, ()> {
 fn clear() {
     std::env::remove_var(OPENHUMAN_WORKSPACE_ENV);
     std::env::remove_var(OPENHUMAN_ACTION_DIR_ENV);
+    std::env::remove_var(OPENHUMAN_BACKEND_URL_ENV);
+}
+
+#[test]
+fn the_backend_api_url_is_bound_so_auth_me_hits_the_configured_deployment() {
+    // The staging failure this exists for: OpenHuman resolves `/auth/me` from
+    // `BACKEND_URL` and falls back to production, so a staging token verified by
+    // the login flow was then handed to production to validate — and rejected.
+    let _g = guard();
+    clear();
+    let bound = bind_backend_api_url(&HashMap::new(), "https://staging-api.tinyhumans.ai/");
+    assert_eq!(bound, "https://staging-api.tinyhumans.ai");
+    assert_eq!(
+        std::env::var(OPENHUMAN_BACKEND_URL_ENV).unwrap(),
+        "https://staging-api.tinyhumans.ai"
+    );
+    clear();
+}
+
+#[test]
+fn an_operator_who_aimed_the_core_themselves_keeps_their_backend_url() {
+    // Either spelling counts: OpenHuman's own config chain reads both, so
+    // binding over `VITE_BACKEND_URL` would override an override.
+    let _g = guard();
+    for key in [OPENHUMAN_BACKEND_URL_ENV, OPENHUMAN_BACKEND_URL_ALT_ENV] {
+        clear();
+        let env = HashMap::from([(key.to_string(), "https://self.hosted".to_string())]);
+        assert_eq!(
+            bind_backend_api_url(&env, "https://api.tinyhumans.ai"),
+            "https://self.hosted"
+        );
+        assert!(std::env::var(OPENHUMAN_BACKEND_URL_ENV).is_err());
+    }
+    clear();
+}
+
+#[test]
+fn a_blank_backend_url_binds_nothing_rather_than_an_empty_endpoint() {
+    let _g = guard();
+    clear();
+    assert_eq!(bind_backend_api_url(&HashMap::new(), "   "), "");
+    assert!(std::env::var(OPENHUMAN_BACKEND_URL_ENV).is_err());
+    clear();
 }
 
 #[test]

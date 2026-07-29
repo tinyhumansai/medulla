@@ -156,11 +156,11 @@ jobs:
 
       - uses: ./.github/actions/native-deps
 
-      # The core is default-ON now, so this check duplicates what every other
-      # lane compiles. It stays because the guards below are what this lane is
-      # really for, and they need a resolved graph to inspect.
+      # The core is unconditional now, so this check duplicates what every
+      # other lane compiles. It stays because the guards below are what this
+      # lane is really for, and they need a resolved graph to inspect.
       - name: Check with the embedded core enabled
-        run: cargo check --locked --features openhuman-core
+        run: cargo check --locked
 
       # Guards the failure modes that do not announce themselves: two copies of
       # a vendored crate (an E0308 where the types look identical), a tinyagents
@@ -169,13 +169,13 @@ jobs:
       - name: Guard against duplicate and misresolved vendored crates
         run: |
           set -euo pipefail
-          dupes=$(cargo tree -d --features openhuman-core | grep -E '^(tiny[a-z]+|ratatui|crossterm|rustls|ring|aws-lc-rs) v' || true)
+          dupes=$(cargo tree -d | grep -E '^(tiny[a-z]+|ratatui|crossterm|rustls|ring|aws-lc-rs) v' || true)
           if [ -n "$dupes" ]; then
             echo "Duplicate packages that must be unified:"; echo "$dupes"; exit 1
           fi
-          if ! cargo tree -i tinyagents --features openhuman-core | head -1 | grep -q 'vendor/openhuman/vendor/tinyagents'; then
+          if ! cargo tree -i tinyagents | head -1 | grep -q 'vendor/openhuman/vendor/tinyagents'; then
             echo "tinyagents did not resolve to the vendored tree:"
-            cargo tree -i tinyagents --features openhuman-core | head -1
+            cargo tree -i tinyagents | head -1
             exit 1
           fi
           echo "OK: one copy of each vendored crate, resolved from vendor/openhuman."

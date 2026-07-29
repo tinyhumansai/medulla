@@ -35,7 +35,6 @@ fn dispatches_subcommands() {
         parse_command(&argv(&["opencode", "--foo"])),
         Command::Wrapper(HarnessProvider::Opencode)
     );
-    assert_eq!(parse_command(&argv(&["memory", "status"])), Command::Memory);
     assert_eq!(parse_command(&argv(&["update"])), Command::Update);
     assert_eq!(parse_command(&argv(&["init"])), Command::Init);
     assert_eq!(parse_command(&argv(&["init", "some/dir"])), Command::Init);
@@ -59,35 +58,6 @@ fn update_args_parse() {
         parse_update_args(&argv(&["--check", "--force"])),
         UpdateArgs { check: true }
     );
-}
-
-#[test]
-fn memory_args_parse() {
-    // Simple actions.
-    assert_eq!(
-        parse_memory_args(&argv(&["status"])).unwrap().action,
-        MemoryAction::Status
-    );
-    assert_eq!(
-        parse_memory_args(&argv(&["backfill"])).unwrap().action,
-        MemoryAction::Backfill
-    );
-    // Search joins the query words and honors flags.
-    let a = parse_memory_args(&argv(&[
-        "search", "how", "to", "test", "--facet", "stack", "--k", "3", "--json", "--config",
-        "c.toml",
-    ]))
-    .unwrap();
-    assert_eq!(a.action, MemoryAction::Search("how to test".into()));
-    assert_eq!(a.facet.as_deref(), Some("stack"));
-    assert_eq!(a.k, 3);
-    assert!(a.json);
-    assert_eq!(a.config.as_deref(), Some("c.toml"));
-    // Errors: no action, empty search, unknown action, bad --k.
-    assert!(parse_memory_args(&argv(&[])).is_err());
-    assert!(parse_memory_args(&argv(&["search"])).is_err());
-    assert!(parse_memory_args(&argv(&["frobnicate"])).is_err());
-    assert!(parse_memory_args(&argv(&["search", "q", "--k", "nan"])).is_err());
 }
 
 #[test]

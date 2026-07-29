@@ -324,3 +324,36 @@ fn a_huge_argument_payload_is_clipped_not_dumped() {
         "the payload must be summarised, never dumped: {call}"
     );
 }
+
+#[test]
+fn leaving_the_agents_tab_takes_the_keyboard_back_from_an_attached_harness() {
+    // The bug this pins: `release_harness` was only reached from
+    // `agents_selection`, which runs only while the Agents tab is being drawn.
+    // It notices the *cursor* moving off the attached session and has nothing to
+    // say once the operator has left the tab altogether — so focus stayed
+    // `Attached`, and every keystroke meant for the tab now on screen was typed
+    // into a harness pane the operator could no longer see, with `Ctrl-]` the
+    // only way out of a mode with no visible cause.
+    //
+    // Only the leaving case is asserted here. "Stays attached while the pane is
+    // on screen" needs a live pty session for the selection to resolve to, which
+    // is covered against a real child in `ui::harness_pane`; this fixture has no
+    // harnesses, so the Agents tab would release focus for the ordinary reason
+    // (nothing under the cursor) and prove nothing about the tab switch.
+    let mut app = app();
+    app.harness_focus = crate::ui::harness_pane::HarnessFocus::Attached("w_1".to_string());
+    app.tab_index = crate::ui::app::types::TABS
+        .iter()
+        .position(|t| *t != "Agents")
+        .expect("some other tab");
+
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
+    terminal.draw(|f| app.draw(f)).expect("draw");
+
+    assert_eq!(
+        app.attached_harness(),
+        None,
+        "keys must not reach a harness the operator has navigated away from"
+    );
+}

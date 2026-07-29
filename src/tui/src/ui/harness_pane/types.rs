@@ -1,0 +1,64 @@
+//! Data types for the `harness_pane` module: the handle onto this device's
+//! live harnesses, and where the operator's keyboard is pointed.
+
+#[allow(unused_imports)]
+use super::*;
+
+/// The local harness sessions the Agents tab reads and types into.
+///
+/// Two halves that are only useful together: [`sessions`](Self::sessions) holds
+/// the screens and the write side, and [`runtime`](Self::runtime) answers which
+/// session is serving a given task. Selecting a task in the Agents tab resolves
+/// through the runtime and then renders through the manager.
+///
+/// Cheap to clone — both fields are `Arc`-backed — and a clone does *not* keep
+/// the host alive. When the host goes away the sessions simply stop being
+/// resolvable, which is the truth the pane should be showing.
+#[derive(Clone)]
+pub struct LocalHarnesses {
+    /// Every PTY-backed harness running on this device.
+    pub sessions: PtyManager,
+    /// The host's task state machine, for
+    /// [`session_for_task`](medulla::daemon::DaemonRuntime::session_for_task).
+    pub runtime: medulla::daemon::DaemonRuntime,
+    /// The address local work is dispatched *from* — the `from` half of the
+    /// `(sender, task id)` key `session_for_task` is keyed on.
+    ///
+    /// Locally dispatched work carries the hub's own bus address, not the
+    /// operator's identity, because the hub is what put the frame on the bus.
+    pub hub_address: String,
+}
+
+/// Where the operator's keystrokes are going.
+///
+/// The orchestrator TUI is a chrome *around* a real terminal, so at any moment
+/// exactly one of the two owns the keyboard. Leaving that implicit is what makes
+/// embedded terminals infuriating: the operator types `q` meaning "quit the
+/// harness" and quits the wrapper instead, or presses Escape expecting to get
+/// out and cancels the harness's turn. So it is explicit, modal, and shown.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum HarnessFocus {
+    /// The TUI owns the keyboard. Harness screens still paint live; they just
+    /// do not receive input.
+    #[default]
+    Chrome,
+    /// The named session owns the keyboard. Every key is encoded and written to
+    /// its PTY except the detach chord, which is the one key the chrome keeps
+    /// for itself — without a reserved key there is no way back out.
+    Attached(String),
+}
+
+impl HarnessFocus {
+    /// The session currently receiving keystrokes, if any.
+    pub fn attached_to(&self) -> Option<&str> {
+        match self {
+            HarnessFocus::Chrome => None,
+            HarnessFocus::Attached(id) => Some(id.as_str()),
+        }
+    }
+
+    /// Whether `id` is the session the keyboard is pointed at.
+    pub fn is_attached_to(&self, id: &str) -> bool {
+        self.attached_to() == Some(id)
+    }
+}

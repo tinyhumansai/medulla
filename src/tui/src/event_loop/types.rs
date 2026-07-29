@@ -16,26 +16,10 @@ pub(super) enum AppMsg {
     Resumed(String),
     /// The session was cleared; quit back to the login screen.
     LoggedOut,
-    /// Memory overview data loaded off the UI thread.
-    MemoryLoaded {
-        /// Current memory status, when a service is attached.
-        status: Option<medulla::memory::MemoryStatus>,
-        /// Current persona directives.
-        directives: Vec<String>,
-    },
     /// Account usage returned by the runtime.
     UsageLoaded(Option<serde_json::Value>),
-    /// Ranked memory-search results and their query.
-    MemoryResults {
-        /// Ranked hits.
-        hits: Vec<medulla::memory::MemoryHit>,
-        /// The submitted query.
-        query: String,
-    },
     /// A newer release was detected by the background update checker.
     UpdateAvailable(String),
-    /// A memory ingest finished; clear the in-flight flag and report the outcome.
-    MemoryIngestDone(String),
     /// Current local task document.
     TasksLoaded(medulla::tasks::TaskDocument),
     /// A progress line from a running copilot turn.
@@ -116,8 +100,6 @@ pub(crate) struct SessionWiring {
     /// Resolved once at startup rather than polled: the session cannot change
     /// under a running app — logging out quits it.
     pub account: Option<medulla::core_host::auth::AuthState>,
-    /// The persona-memory service backing the Memory tab.
-    pub memory_service: Option<Arc<medulla::memory::MemoryService>>,
     /// Live events from a history share the welcome flow left running.
     pub sharing:
         Option<tokio::sync::mpsc::UnboundedReceiver<medulla_tui::ui::welcome::WelcomeEvent>>,
@@ -126,4 +108,12 @@ pub(crate) struct SessionWiring {
     /// A read-only view of the host running on this device, when one is. `None`
     /// means this machine orchestrates but does not run the work itself.
     pub host: Option<medulla::daemon::embedded::HostObservation>,
+    /// The live harness sessions this device is running, and the state machine
+    /// that says which task each one serves.
+    ///
+    /// `None` when this machine does not host: there are no local harnesses to
+    /// show, and the Agents tab falls back to a remote worker's streamed screen
+    /// or to the transcript. Shared with the host's executor — the sessions it
+    /// opens are the ones rendered here.
+    pub harnesses: Option<medulla_tui::ui::harness_pane::LocalHarnesses>,
 }

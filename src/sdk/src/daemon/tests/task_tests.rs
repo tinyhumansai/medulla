@@ -620,3 +620,40 @@ async fn one_peer_cannot_resume_another_peers_conversation() {
 
     assert_eq!(resumed.lock().unwrap().clone(), vec![None, None]);
 }
+
+#[tokio::test]
+async fn a_screen_message_is_never_typed_into_a_harness() {
+    // The plain-text path runs whatever it is handed as a prompt. A daemon with
+    // no watchable sessions cannot serve `medulla.screen.v1`, but "cannot serve"
+    // must mean ignored, not executed — otherwise watching a task on a
+    // device-local or headless daemon dispatches the subscribe JSON to claude,
+    // which is what it did.
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+    let gate = Arc::new(Notify::new());
+    let run_task = blocking_runner(ready_tx, gate.clone());
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+
+    for body in [
+        crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Subscribe {
+            task_id: "t1".into(),
+            max_fps: 1,
+            resync: true,
+        }),
+        crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Unsubscribe {
+            task_id: "t1".into(),
+        }),
+    ] {
+        runtime.handle_message("peer".into(), body, None);
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    // Nothing reached a harness...
+    assert!(
+        ready_rx.try_recv().is_err(),
+        "a screen message must not start a run"
+    );
+    // ...and nothing was sent back, since the hub is owed no answer to a message
+    // this daemon has no way to serve.
+    assert!(recorded.lock().unwrap().is_empty());
+}

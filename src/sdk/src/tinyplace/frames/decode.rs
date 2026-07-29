@@ -73,14 +73,13 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
     // Blank is absent for compatibility with encoders that always write the
     // key. Unknown non-empty modes fail closed: silently turning one into the
     // full tool surface could grant a review turn authoring capabilities.
-    let tool_mode = match obj
-        .get("tool_mode")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|mode| !mode.is_empty())
-    {
+    let tool_mode = match obj.get("tool_mode") {
         None => None,
-        Some(mode @ ("full" | "propose")) => Some(mode.to_string()),
+        Some(serde_json::Value::String(mode)) if mode.trim().is_empty() => None,
+        Some(serde_json::Value::String(mode)) => match mode.trim() {
+            mode @ ("full" | "propose") => Some(mode.to_string()),
+            _ => return None,
+        },
         Some(_) => return None,
     };
 

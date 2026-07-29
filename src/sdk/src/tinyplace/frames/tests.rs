@@ -576,3 +576,20 @@ fn an_unknown_tool_mode_rejects_the_frame() {
 
     assert!(decode_task_frame(&body).is_none());
 }
+
+#[test]
+fn a_non_string_tool_mode_rejects_the_frame() {
+    for malformed in [serde_json::json!(true), serde_json::json!(7)] {
+        let body = serde_json::json!({
+            "proto": crate::tinyplace::TINYPLACE_PROTO,
+            "kind": "task",
+            "taskId": "t1",
+            "text": "do it",
+            "ts": "2026-01-01T00:00:00Z",
+            "tool_mode": malformed
+        })
+        .to_string();
+
+        assert!(decode_task_frame(&body).is_none());
+    }
+}

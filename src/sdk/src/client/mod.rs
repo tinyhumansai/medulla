@@ -1,11 +1,24 @@
-//! HTTP/SSE client for the Medulla orchestration backend.
+//! Typed Medulla surface over the shared `tinyhumans-sdk` transport.
 //!
 //! Surfaces: auth (`/auth`), durable sessions (`/medulla/v1`), SSE event
 //! streaming, and one-shot orchestration (`/orchestration/v1`).
 //!
-//! Every response is wrapped in a `{ "success": true, "data": ... }` envelope;
-//! errors arrive as `{ "success": false, "error": ..., "errorCode": ... }` and
-//! are surfaced as [`ClientError::Api`], preserving the `errorCode`.
+//! Every HTTP request is issued by [`tinyhumans_sdk::TinyHumansClient`], which
+//! owns credential headers, the `{ "success": true, "data": ... }` envelope,
+//! percent-encoding of path segments, and the not-exposed-route gate. Backend
+//! failures arrive as [`ClientError::Api`] with the `errorCode` preserved — see
+//! the conversion in [`error`].
+//!
+//! What remains here is the part the shared SDK does not model. The SDK returns
+//! open `DynamicResponse` JSON for these routes, so this module decodes into the
+//! typed DTOs in [`types`] and [`program`]; and it adds the reconnecting [`sse`]
+//! event stream, which the SDK has no equivalent for.
+//!
+//! A few routes go through [`tinyhumans_sdk::TinyHumansClient::raw`], the SDK's
+//! own escape hatch, because this crate models their contract more precisely
+//! than the SDK's request types can express — a tri-state recurrence patch, the
+//! `sync=1`/`sync=0` message flag, the NDJSON transcript upload. Each such call
+//! says why inline. They still share the one transport.
 
 pub mod error;
 pub mod program;
@@ -17,8 +30,14 @@ pub use program::*;
 pub use types::*;
 
 use futures::stream::Stream;
+use reqwest::Method;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::Value;
+use tinyhumans_sdk::api::medulla::{CreateSessionRequest, WorkspaceProfile};
+use tinyhumans_sdk::api::orchestration::RunRequest;
+use tinyhumans_sdk::api::types::{ContinueRunRequest, LoginTokenRequest};
+use tinyhumans_sdk::{enc, QueryParam, TinyHumansClient};
 
 /// Default backend base URL.
 pub const DEFAULT_BASE_URL: &str = "http://localhost:5000";
@@ -37,6 +56,9 @@ impl MedullaClientBuilder {
     }
 
     /// Supply a preconfigured `reqwest::Client`.
+    ///
+    /// It is handed to the SDK as well, so ordinary requests and the SSE stream
+    /// share one connection pool, TLS backend, and proxy policy.
     pub fn http_client(mut self, http: reqwest::Client) -> Self {
         self.http = Some(http);
         self
@@ -49,12 +71,38 @@ impl MedullaClientBuilder {
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
             .trim_end_matches('/')
             .to_string();
+        let jwt = self.jwt.unwrap_or_default();
+        let http = self.http.unwrap_or_default();
         MedullaClient {
+            sdk: build_sdk(&base_url, &jwt, http.clone()),
             base_url,
-            jwt: self.jwt.unwrap_or_default(),
-            http: self.http.unwrap_or_default(),
+            jwt,
+            http,
         }
     }
+}
+
+/// Construct the SDK client that backs a [`MedullaClient`].
+///
+/// The host's `reqwest::Client` is passed in rather than letting the SDK build
+/// its own, so both halves of this client share one transport policy.
+fn build_sdk(base_url: &str, jwt: &str, http: reqwest::Client) -> TinyHumansClient {
+    TinyHumansClient::new(base_url)
+        .with_http_client(http)
+        .with_token(Some(jwt.to_string()))
+}
+
+/// Decode an SDK response body into one of this crate's typed DTOs.
+fn decode<T: DeserializeOwned>(value: Value) -> Result<T> {
+    serde_json::from_value(value).map_err(|e| ClientError::Decode(e.to_string()))
+}
+
+/// Serialize a request DTO whose wire shape this crate owns.
+///
+/// These types are plain data with infallible `Serialize` impls; the error arm
+/// exists only because `serde_json` cannot say so in the type.
+fn to_body<T: Serialize>(value: &T) -> Result<Value> {
+    serde_json::to_value(value).map_err(|e| ClientError::Decode(e.to_string()))
 }
 
 impl MedullaClient {
@@ -79,27 +127,26 @@ impl MedullaClient {
     }
 
     /// Replace the JWT (e.g. after a token refresh).
+    ///
+    /// Rebuilds the SDK client, which captures the credential at construction.
     pub fn set_jwt(&mut self, jwt: impl Into<String>) {
         self.jwt = jwt.into();
+        self.sdk = build_sdk(&self.base_url, &self.jwt, self.http.clone());
     }
 
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.base_url, path)
-    }
-
-    fn authed(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        req.header(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", self.jwt),
-        )
-    }
-
-    /// Send a request and unwrap the `{success, data}` envelope into `T`.
-    async fn send<T: DeserializeOwned>(&self, req: reqwest::RequestBuilder) -> Result<T> {
-        let resp = req.send().await?;
-        let status = resp.status();
-        let bytes = resp.bytes().await?;
-        unwrap_envelope(status.as_u16(), &bytes)
+    /// Issue a request through the SDK's raw transport and decode the unwrapped
+    /// payload.
+    ///
+    /// Used only where this crate's request or response contract is finer than
+    /// the SDK's typed namespace method; every caller documents which.
+    async fn raw<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[QueryParam],
+        body: Option<&Value>,
+    ) -> Result<T> {
+        decode(self.sdk.raw().send(method, path, query, body, true).await?)
     }
 
     // --- Auth ------------------------------------------------------------
@@ -107,20 +154,20 @@ impl MedullaClient {
     /// Exchange a one-time login token for a JWT
     /// (`POST /auth/login-token/consume`).
     pub async fn consume_login_token(&self, token: impl Into<String>) -> Result<String> {
-        let req =
-            self.http
-                .post(self.url("/auth/login-token/consume"))
-                .json(&ConsumeLoginTokenBody {
-                    token: token.into(),
-                });
-        let out: LoginTokenResult = self.send(req).await?;
+        let response = self
+            .sdk
+            .auth()
+            .consume_login_token(&LoginTokenRequest {
+                token: token.into(),
+            })
+            .await?;
+        let out: LoginTokenResult = decode(response.0)?;
         Ok(out.jwt)
     }
 
     /// Fetch the authenticated principal (`GET /auth/me`).
     pub async fn me(&self) -> Result<Value> {
-        let req = self.authed(self.http.get(self.url("/auth/me")));
-        self.send(req).await
+        Ok(self.sdk.auth().me().await?.0)
     }
 
     /// Account-level token usage for the active team/user
@@ -128,8 +175,7 @@ impl MedullaClient {
     /// remaining budget, plan. Returned as raw JSON — the shape is rendered
     /// defensively by the UI.
     pub async fn team_usage(&self) -> Result<Value> {
-        let req = self.authed(self.http.get(self.url("/teams/me/usage")));
-        self.send(req).await
+        Ok(self.sdk.teams().get_my_usage().await?.0)
     }
 
     // --- History rewards -------------------------------------------------
@@ -148,6 +194,9 @@ impl MedullaClient {
         agent: &str,
         content: String,
     ) -> Result<HistoryUploadResult> {
+        // Raw multipart rather than `agent_integrations().upload_history`: that
+        // helper sends the file part without a content type, and this upload
+        // declares NDJSON.
         let part = reqwest::multipart::Part::text(content)
             .file_name("session.jsonl")
             .mime_str("application/x-ndjson")?;
@@ -155,12 +204,12 @@ impl MedullaClient {
             .text("agent", agent.to_string())
             .part("file", part);
 
-        let req = self.authed(
-            self.http
-                .post(self.url("/agent-integrations/history-rewards/uploads"))
-                .multipart(form),
-        );
-        self.send(req).await
+        decode(
+            self.sdk
+                .raw()
+                .post_multipart("/agent-integrations/history-rewards/uploads", form)
+                .await?,
+        )
     }
 
     /// Score the uploaded history and grant the welcome credit
@@ -169,11 +218,16 @@ impl MedullaClient {
     /// Idempotent: a repeat call returns the same award with
     /// `already_claimed` set rather than granting again.
     pub async fn claim_history_reward(&self) -> Result<HistoryRewardClaim> {
-        let req = self.authed(
-            self.http
-                .post(self.url("/agent-integrations/history-rewards/claim")),
-        );
-        self.send(req).await
+        // Raw rather than `agent_integrations().claim_history_reward`: the SDK's
+        // response type is a three-field projection, while the reveal screen
+        // needs the settled status and the per-metric breakdown.
+        self.raw(
+            Method::POST,
+            "/agent-integrations/history-rewards/claim",
+            &[],
+            None,
+        )
+        .await
     }
 
     /// Whether the caller has already earned the history reward
@@ -182,11 +236,15 @@ impl MedullaClient {
     /// A user who has never uploaded gets a zeroed, unclaimed status rather
     /// than an error.
     pub async fn history_reward_status(&self) -> Result<HistoryRewardStatus> {
-        let req = self.authed(
-            self.http
-                .get(self.url("/agent-integrations/history-rewards/status")),
-        );
-        self.send(req).await
+        // Raw for the same reason as `claim_history_reward`: the SDK's
+        // `HistoryRewardsStatus` omits the tier, totals, and award this renders.
+        self.raw(
+            Method::GET,
+            "/agent-integrations/history-rewards/status",
+            &[],
+            None,
+        )
+        .await
     }
 
     // --- Sessions --------------------------------------------------------
@@ -208,37 +266,33 @@ impl MedullaClient {
         title: Option<&str>,
         workspace_profiles: &[WorkspaceProfileInput],
     ) -> Result<SessionCreated> {
-        let req = self
-            .authed(self.http.post(self.url("/medulla/v1/sessions")))
-            .json(&CreateSessionBody {
-                title,
-                workspace_profiles,
-            });
-        self.send(req).await
+        let request = CreateSessionRequest {
+            title: title.map(str::to_owned),
+            workspace_profiles: workspace_profiles
+                .iter()
+                .map(|profile| WorkspaceProfile {
+                    workspace: profile.workspace.clone(),
+                    medulla_md: profile.medulla_md.clone(),
+                })
+                .collect(),
+            ..CreateSessionRequest::default()
+        };
+        decode(self.sdk.medulla().create_session(&request).await?.0)
     }
 
     /// List sessions (`GET /medulla/v1/sessions`).
     pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
-        let req = self.authed(self.http.get(self.url("/medulla/v1/sessions")));
-        self.send(req).await
+        decode(self.sdk.medulla().list_sessions(&[]).await?.0)
     }
 
     /// Fetch a session's state (`GET /medulla/v1/sessions/:id`).
     pub async fn get_session(&self, session_id: &str) -> Result<SessionDetail> {
-        let req = self.authed(
-            self.http
-                .get(self.url(&format!("/medulla/v1/sessions/{session_id}"))),
-        );
-        self.send(req).await
+        decode(self.sdk.medulla().get_session(session_id).await?.0)
     }
 
     /// Archive a session (`DELETE /medulla/v1/sessions/:id`).
     pub async fn archive_session(&self, session_id: &str) -> Result<SessionArchived> {
-        let req = self.authed(
-            self.http
-                .delete(self.url(&format!("/medulla/v1/sessions/{session_id}"))),
-        );
-        self.send(req).await
+        decode(self.sdk.medulla().delete_session(session_id).await?.0)
     }
 
     /// Send a message (`POST /medulla/v1/sessions/:id/messages`).
@@ -251,15 +305,16 @@ impl MedullaClient {
         body: &str,
         sync: bool,
     ) -> Result<SendResult> {
+        // Raw rather than `medulla().send_session_message`: that helper spells
+        // the flag `sync=true`/`sync=false`, and this contract is `1`/`0`.
         let sync_flag = if sync { "1" } else { "0" };
-        let req = self
-            .authed(
-                self.http
-                    .post(self.url(&format!("/medulla/v1/sessions/{session_id}/messages")))
-                    .query(&[("sync", sync_flag)]),
-            )
-            .json(&SendMessageBody { body });
-        self.send(req).await
+        self.raw(
+            Method::POST,
+            &format!("/medulla/v1/sessions/{}/messages", enc(session_id)),
+            &[("sync", Some(sync_flag.to_string()))],
+            Some(&serde_json::json!({ "body": body })),
+        )
+        .await
     }
 
     /// Replay messages after `after` (`GET .../messages?after=`).
@@ -268,13 +323,14 @@ impl MedullaClient {
         session_id: &str,
         after: Option<i64>,
     ) -> Result<Vec<Message>> {
-        let mut req = self
-            .http
-            .get(self.url(&format!("/medulla/v1/sessions/{session_id}/messages")));
-        if let Some(after) = after {
-            req = req.query(&[("after", after)]);
-        }
-        self.send(self.authed(req)).await
+        let query: [QueryParam; 1] = [("after", after.map(|a| a.to_string()))];
+        decode(
+            self.sdk
+                .medulla()
+                .session_messages(session_id, &query)
+                .await?
+                .0,
+        )
     }
 
     /// Replay events after `after` (`GET .../events?after=`).
@@ -283,22 +339,19 @@ impl MedullaClient {
         session_id: &str,
         after: Option<i64>,
     ) -> Result<Vec<EventEnvelope>> {
-        let mut req = self
-            .http
-            .get(self.url(&format!("/medulla/v1/sessions/{session_id}/events")));
-        if let Some(after) = after {
-            req = req.query(&[("after", after)]);
-        }
-        self.send(self.authed(req)).await
+        let query: [QueryParam; 1] = [("after", after.map(|a| a.to_string()))];
+        decode(
+            self.sdk
+                .medulla()
+                .session_events(session_id, &query)
+                .await?
+                .0,
+        )
     }
 
     /// Abort the running cycle (`POST /medulla/v1/sessions/:id/abort`).
     pub async fn abort(&self, session_id: &str) -> Result<AbortResult> {
-        let req = self.authed(
-            self.http
-                .post(self.url(&format!("/medulla/v1/sessions/{session_id}/abort"))),
-        );
-        self.send(req).await
+        decode(self.sdk.medulla().abort_session(session_id).await?.0)
     }
 
     /// Read the backend's configured worker routing strategy
@@ -308,8 +361,7 @@ impl MedullaClient {
     /// unrecognized, so an absent/garbled strategy degrades to "no backend
     /// preference" rather than an error — the operator's local config still wins.
     pub async fn get_routing_strategy(&self) -> Result<Option<crate::runtime::RoutingStrategy>> {
-        let req = self.authed(self.http.get(self.url("/medulla/v1/routing/strategy")));
-        let value: Value = self.send(req).await?;
+        let value = self.sdk.medulla().routing_strategy().await?;
         Ok(value
             .get("strategy")
             .and_then(|v| v.as_str())
@@ -322,33 +374,37 @@ impl MedullaClient {
         &self,
         strategy: crate::runtime::RoutingStrategy,
     ) -> Result<()> {
-        let req = self
-            .authed(self.http.put(self.url("/medulla/v1/routing/strategy")))
-            .json(&serde_json::json!({ "strategy": strategy.as_wire() }));
-        let _: Value = self.send(req).await?;
+        self.sdk
+            .medulla()
+            .set_routing_strategy(strategy.as_wire())
+            .await?;
         Ok(())
     }
 
     /// Read the connected worker roster (`GET /medulla/v1/roster`).
     pub async fn roster(&self) -> Result<Vec<RosterWorker>> {
-        let req = self.authed(self.http.get(self.url("/medulla/v1/roster")));
-        let payload: Roster = self.send(req).await?;
+        let payload: Roster = decode(self.sdk.medulla().roster().await?.0)?;
         Ok(payload.workers)
     }
 
     /// List the operator-owned program task ledger (`GET /medulla/v1/tasks`).
     pub async fn list_program_tasks(&self) -> Result<Vec<ProgramTask>> {
-        let req = self.authed(self.http.get(self.url("/medulla/v1/tasks")));
-        let payload: TasksPayload = self.send(req).await?;
+        let payload: TasksPayload = decode(self.sdk.medulla().list_tasks(&[]).await?.0)?;
         Ok(payload.tasks)
     }
 
     /// Create an operator-owned program task (`POST /medulla/v1/tasks`).
     pub async fn create_program_task(&self, input: CreateProgramTask) -> Result<ProgramTask> {
-        let req = self
-            .authed(self.http.post(self.url("/medulla/v1/tasks")))
-            .json(&input);
-        let payload: TaskPayload = self.send(req).await?;
+        // Raw rather than `medulla().create_task`: the SDK types `recurrence` as
+        // open JSON, while [`TaskRecurrence`] models the rule.
+        let payload: TaskPayload = self
+            .raw(
+                Method::POST,
+                "/medulla/v1/tasks",
+                &[],
+                Some(&to_body(&input)?),
+            )
+            .await?;
         Ok(payload.task)
     }
 
@@ -358,32 +414,30 @@ impl MedullaClient {
         task_id: &str,
         patch: UpdateProgramTask,
     ) -> Result<ProgramTask> {
-        let task_id = urlencode(task_id);
-        let req = self
-            .authed(
-                self.http
-                    .patch(self.url(&format!("/medulla/v1/tasks/{task_id}"))),
+        // Raw rather than `medulla().update_task`: [`UpdateProgramTask`]
+        // distinguishes an omitted `recurrence` from an explicit `null` that
+        // clears it, which the SDK's `Option<Value>` field cannot express — it
+        // would silently drop the clear.
+        let payload: TaskPayload = self
+            .raw(
+                Method::PATCH,
+                &format!("/medulla/v1/tasks/{}", enc(task_id)),
+                &[],
+                Some(&to_body(&patch)?),
             )
-            .json(&patch);
-        let payload: TaskPayload = self.send(req).await?;
+            .await?;
         Ok(payload.task)
     }
 
     /// Delete an operator-owned program task (`DELETE /medulla/v1/tasks/:id`).
     pub async fn delete_program_task(&self, task_id: &str) -> Result<bool> {
-        let task_id = urlencode(task_id);
-        let req = self.authed(
-            self.http
-                .delete(self.url(&format!("/medulla/v1/tasks/{task_id}"))),
-        );
-        let payload: DeleteProgramItem = self.send(req).await?;
+        let payload: DeleteProgramItem = decode(self.sdk.medulla().delete_task(task_id).await?.0)?;
         Ok(payload.deleted)
     }
 
     /// List configured GitHub task sources (`GET /medulla/v1/tasks/sources`).
     pub async fn list_program_task_sources(&self) -> Result<Vec<ProgramTaskSource>> {
-        let req = self.authed(self.http.get(self.url("/medulla/v1/tasks/sources")));
-        let payload: TaskSourcesPayload = self.send(req).await?;
+        let payload: TaskSourcesPayload = decode(self.sdk.medulla().list_task_sources().await?.0)?;
         Ok(payload.sources)
     }
 
@@ -395,32 +449,31 @@ impl MedullaClient {
         &self,
         input: CreateProgramTaskSource,
     ) -> Result<ProgramTaskSource> {
-        let req = self
-            .authed(self.http.post(self.url("/medulla/v1/tasks/sources")))
-            .json(&input);
-        let payload: TaskSourcePayload = self.send(req).await?;
+        // Raw rather than `medulla().create_task_source`: this request types
+        // `state` as [`GithubIssueState`] and omits `labels` only when unset,
+        // where the SDK takes an open string and drops an explicitly empty list.
+        let payload: TaskSourcePayload = self
+            .raw(
+                Method::POST,
+                "/medulla/v1/tasks/sources",
+                &[],
+                Some(&to_body(&input)?),
+            )
+            .await?;
         Ok(payload.source)
     }
 
     /// Synchronize one GitHub source into the task ledger.
     pub async fn sync_program_task_source(&self, source_id: &str) -> Result<TaskSourceSyncResult> {
-        let source_id = urlencode(source_id);
-        let req = self.authed(
-            self.http
-                .post(self.url(&format!("/medulla/v1/tasks/sources/{source_id}/sync"))),
-        );
-        let payload: TaskSourceSyncPayload = self.send(req).await?;
+        let payload: TaskSourceSyncPayload =
+            decode(self.sdk.medulla().sync_task_source(source_id).await?.0)?;
         Ok(payload.result)
     }
 
     /// Remove a configured GitHub task source.
     pub async fn delete_program_task_source(&self, source_id: &str) -> Result<bool> {
-        let source_id = urlencode(source_id);
-        let req = self.authed(
-            self.http
-                .delete(self.url(&format!("/medulla/v1/tasks/sources/{source_id}"))),
-        );
-        let payload: DeleteProgramItem = self.send(req).await?;
+        let payload: DeleteProgramItem =
+            decode(self.sdk.medulla().delete_task_source(source_id).await?.0)?;
         Ok(payload.deleted)
     }
 
@@ -431,6 +484,11 @@ impl MedullaClient {
     ///
     /// The returned stream auto-reconnects with `Last-Event-ID` and
     /// de-duplicates replayed frames by seq. Drop it to stop.
+    ///
+    /// Built by hand rather than through the SDK: the SDK's transport buffers a
+    /// whole response body before returning, which a stream that never ends
+    /// cannot use. The `reqwest::Client` is the one the SDK was given, so the
+    /// two still share a connection pool.
     pub fn stream_events(
         &self,
         session_id: &str,
@@ -439,8 +497,8 @@ impl MedullaClient {
         let url = format!(
             "{}/medulla/v1/sessions/{}/stream?token={}",
             self.base_url,
-            session_id,
-            urlencode(&self.jwt),
+            enc(session_id),
+            enc(&self.jwt),
         );
         sse::event_stream(self.http.clone(), url, last_event_id)
     }
@@ -452,14 +510,18 @@ impl MedullaClient {
     /// Without tools the backend returns a final reply; with tools it returns
     /// the first [`LoopEvent`].
     pub async fn run(&self, input: &str, options: RunOptions) -> Result<RunResult> {
-        let req = self
-            .authed(self.http.post(self.url("/orchestration/v1/run")))
-            .json(&RunBody {
-                input,
-                options: &options,
-            });
-        let value: Value = self.send(req).await?;
-        parse_run_result(value)
+        let request = RunRequest {
+            input: input.to_string(),
+            session_id: options.session_id.clone(),
+            // Selected by the hosted flavours, not by this client.
+            flavor: None,
+            tools: match &options.tools {
+                Some(tools) => tools.iter().map(to_body).collect::<Result<Vec<_>>>()?,
+                None => Vec::new(),
+            },
+            options: options.options.as_ref().map(to_body).transpose()?,
+        };
+        parse_run_result(self.sdk.orchestration().run(&request).await?.0)
     }
 
     /// Continue a tool-loop run (`POST /orchestration/v1/run/continue`).
@@ -470,80 +532,25 @@ impl MedullaClient {
         cycle_id: &str,
         tool_results: Vec<ToolResult>,
     ) -> Result<LoopEvent> {
-        let req = self
-            .authed(self.http.post(self.url("/orchestration/v1/run/continue")))
-            .json(&ContinueRunBody {
-                cycle_id,
-                tool_results,
-            });
-        self.send(req).await
+        let request = ContinueRunRequest {
+            cycle_id: cycle_id.to_string(),
+            tool_results: tool_results
+                .iter()
+                .map(to_body)
+                .collect::<Result<Vec<_>>>()?,
+        };
+        decode(self.sdk.orchestration().continue_run(&request).await?.0)
     }
 }
 
 /// Decide whether a run response is a tool-less reply or a tool-loop event.
 fn parse_run_result(value: Value) -> Result<RunResult> {
     if value.get("stop").is_some() {
-        let ev: LoopEvent =
-            serde_json::from_value(value).map_err(|e| ClientError::Decode(e.to_string()))?;
-        Ok(RunResult::Loop(ev))
+        Ok(RunResult::Loop(decode(value)?))
     } else {
-        let reply: RunReply =
-            serde_json::from_value(value).map_err(|e| ClientError::Decode(e.to_string()))?;
-        Ok(RunResult::Reply(reply))
+        Ok(RunResult::Reply(decode(value)?))
     }
-}
-
-/// Unwrap a `{success, data}` envelope into `T`, mapping failures and non-2xx
-/// responses into [`ClientError::Api`].
-pub(crate) fn unwrap_envelope<T: DeserializeOwned>(status: u16, body: &[u8]) -> Result<T> {
-    let env: RawEnvelope = match serde_json::from_slice(body) {
-        Ok(env) => env,
-        Err(e) => {
-            // Body was not a recognizable envelope. If the HTTP status already
-            // signals failure, report that; otherwise it's a decode error.
-            if !(200..300).contains(&status) {
-                return Err(ClientError::Api {
-                    status: Some(status),
-                    message: String::from_utf8_lossy(body).trim().to_string(),
-                    error_code: None,
-                    details: None,
-                });
-            }
-            return Err(ClientError::Decode(e.to_string()));
-        }
-    };
-
-    if env.success && (200..300).contains(&status) {
-        let data = env.data.unwrap_or(Value::Null);
-        serde_json::from_value(data).map_err(|e| ClientError::Decode(e.to_string()))
-    } else {
-        Err(ClientError::Api {
-            status: Some(status),
-            message: env
-                .error
-                .unwrap_or_else(|| format!("request failed with status {status}")),
-            error_code: env.error_code,
-            details: env.details,
-        })
-    }
-}
-
-/// Minimal percent-encoding for the JWT query parameter and for untrusted path
-/// segments (ids interpolated into a URL). Encodes everything outside the
-/// unreserved set, so a `/` in an id cannot escape its segment.
-pub(crate) fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests;
-use types::RawEnvelope;

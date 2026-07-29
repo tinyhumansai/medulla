@@ -19,6 +19,10 @@ workflows = ["dep:tinyflows"]
 
 [dependencies]
 tinyplace = { workspace = true }
+# The backend transport. `client` is a typed surface over this, not a second
+# HTTP client: credential headers, the `{success,data}` envelope, path
+# percent-encoding, and the not-exposed-route gate all live in the SDK.
+tinyhumans-sdk = { workspace = true }
 tinyflows = { workspace = true, optional = true }
 # default-features = false is LOAD-BEARING, not tidiness: OpenHuman's defaults
 # include its own `tui` gate on ratatui 0.30 / crossterm 0.29 against this

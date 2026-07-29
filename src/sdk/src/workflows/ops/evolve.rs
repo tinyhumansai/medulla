@@ -228,7 +228,23 @@ pub async fn verify_proposal(
     store: &Arc<dyn WorkflowStore>,
     proposal_id: &str,
 ) -> Result<Value, WorkflowError> {
+    let proposal = crate::workflows::require_proposal(store.as_ref(), proposal_id)?;
+    let verification = verify(store, &proposal).await;
+    let lock_store = store.clone();
+    let workflow_id = proposal.workflow_id.clone();
+    let _decision =
+        tokio::task::spawn_blocking(move || lock_store.lock_proposal_decision(&workflow_id))
+            .await
+            .map_err(|err| {
+                WorkflowError::Engine(format!("proposal decision lock task failed: {err}"))
+            })??;
+    // A decision may have landed while the asynchronous dry run was in
+    // flight. Re-read under the workflow lock and never turn a durable
+    // accepted/rejected proposal back into a pending one.
     let mut proposal = crate::workflows::require_proposal(store.as_ref(), proposal_id)?;
+    if !proposal.is_pending() {
+        return Ok(json!({ "ok": proposal.is_applicable(), "proposal": proposal }));
+    }
     let current = require(store.as_ref(), &proposal.workflow_id)?;
     if fingerprint(&current.graph) != proposal.base_fingerprint {
         proposal.status = ProposalStatus::Stale;
@@ -238,7 +254,7 @@ pub async fn verify_proposal(
         store.save_proposal(&proposal)?;
         return Ok(json!({ "ok": false, "proposal": proposal }));
     }
-    proposal.verification = Some(verify(store, &proposal).await);
+    proposal.verification = Some(verification);
     store.save_proposal(&proposal)?;
     Ok(json!({ "ok": proposal.is_applicable(), "proposal": proposal }))
 }

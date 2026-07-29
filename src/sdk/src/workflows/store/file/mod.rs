@@ -21,11 +21,13 @@ mod dirs;
 mod document;
 mod journal;
 mod paths;
+mod proposals;
 mod revisions;
 
 pub use dirs::workflow_dirs;
 pub use document::{new_run_record, parse_workflow, validate_graph};
 pub use journal::{mint_id as mint_note_id, MAX_NOTES};
+pub use proposals::mint_id as mint_proposal_id;
 pub use revisions::MAX_REVISIONS;
 
 use std::collections::HashMap;
@@ -34,7 +36,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::home::medulla_home;
 use crate::workflows::types::{
-    RunRecord, WorkflowError, WorkflowNote, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    RunRecord, WorkflowError, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision,
+    WorkflowSummary,
 };
 
 use document::{read_workflow, to_document};
@@ -72,6 +75,8 @@ pub struct FileWorkflowStore {
     /// a journal is what this host observed while running the workflow, not
     /// part of the document an operator edits and commits.
     journal_dir: PathBuf,
+    /// Where proposed graph changes are written, awaiting an operator.
+    proposals_dir: PathBuf,
     /// Serializes `save`/`delete` against each other on *this store instance*.
     ///
     /// Both are read-modify-write: read what a save would supersede or what a
@@ -103,10 +108,15 @@ impl FileWorkflowStore {
             .parent()
             .map(|state| state.join("journal"))
             .unwrap_or_else(|| PathBuf::from("journal"));
+        let proposals_dir = runs_dir
+            .parent()
+            .map(|state| state.join("proposals"))
+            .unwrap_or_else(|| PathBuf::from("proposals"));
         Self {
             dirs,
             runs_dir,
             journal_dir,
+            proposals_dir,
             write_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -120,6 +130,7 @@ impl FileWorkflowStore {
             dirs,
             runs_dir: state_dir.join("runs"),
             journal_dir: state_dir.join("journal"),
+            proposals_dir: state_dir.join("proposals"),
             write_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -371,6 +382,18 @@ impl WorkflowStore for FileWorkflowStore {
     ) -> Result<(), WorkflowError> {
         let _guard = self.write_lock.lock().expect("workflow store write lock");
         journal::supersede(&self.journal_dir, workflow_id, note_id, by)
+    }
+
+    fn save_proposal(&self, proposal: &WorkflowProposal) -> Result<(), WorkflowError> {
+        proposals::save(&self.proposals_dir, proposal)
+    }
+
+    fn get_proposal(&self, id: &str) -> Result<Option<WorkflowProposal>, WorkflowError> {
+        proposals::read(&self.proposals_dir, id)
+    }
+
+    fn list_proposals(&self, workflow_id: &str) -> Result<Vec<WorkflowProposal>, WorkflowError> {
+        proposals::list_for(&self.proposals_dir, workflow_id)
     }
 }
 

@@ -20,12 +20,13 @@ mod concurrency_tests;
 mod tests;
 
 pub use file::{
-    mint_note_id, new_run_record, parse_workflow, validate_graph, workflow_dirs, FileWorkflowStore,
-    LoadReport, MAX_NOTES, MAX_REVISIONS,
+    mint_note_id, mint_proposal_id, new_run_record, parse_workflow, validate_graph, workflow_dirs,
+    FileWorkflowStore, LoadReport, MAX_NOTES, MAX_REVISIONS,
 };
 
 use crate::workflows::types::{
-    RunId, RunRecord, WorkflowId, WorkflowNote, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    RunId, RunRecord, WorkflowId, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision,
+    WorkflowSummary,
 };
 use crate::workflows::WorkflowError;
 
@@ -115,6 +116,40 @@ pub trait WorkflowStore: Send + Sync {
             "this workflow store does not keep notes".to_string(),
         ))
     }
+
+    /// Write a proposal, replacing any earlier state for the same id.
+    ///
+    /// Every transition goes through here — verified, accepted, rejected, made
+    /// stale — so a proposal's stored form is its current state rather than a
+    /// log to replay.
+    fn save_proposal(&self, proposal: &WorkflowProposal) -> Result<(), WorkflowError> {
+        let _ = proposal;
+        Err(WorkflowError::Engine(
+            "this workflow store does not keep proposals".to_string(),
+        ))
+    }
+
+    /// One proposal by id.
+    fn get_proposal(&self, id: &str) -> Result<Option<WorkflowProposal>, WorkflowError> {
+        let _ = id;
+        Ok(None)
+    }
+
+    /// Every proposal for a workflow, newest first, decided ones included.
+    fn list_proposals(&self, workflow_id: &str) -> Result<Vec<WorkflowProposal>, WorkflowError> {
+        let _ = workflow_id;
+        Ok(Vec::new())
+    }
+}
+
+/// Fetch a proposal by id, turning absence into an error.
+pub fn require_proposal(
+    store: &dyn WorkflowStore,
+    id: &str,
+) -> Result<WorkflowProposal, WorkflowError> {
+    store
+        .get_proposal(id)?
+        .ok_or_else(|| WorkflowError::Malformed(format!("no proposal with id '{id}'")))
 }
 
 /// A workflow's current notes — what a brief should be built from.

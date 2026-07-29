@@ -44,9 +44,9 @@ pub use ops::discover_store;
 pub use registry::StoreWorkflowResolver;
 pub use run::{dry_run, resume_workflow, run_workflow, RunContext};
 pub use store::{
-    current_notes, mint_note_id, new_run_record, parse_workflow, require, require_run, rollback,
-    undo_last, validate_graph, FileWorkflowStore, LoadReport, WorkflowStore, MAX_NOTES,
-    MAX_REVISIONS,
+    current_notes, mint_note_id, mint_proposal_id, new_run_record, parse_workflow, require,
+    require_proposal, require_run, rollback, undo_last, validate_graph, FileWorkflowStore,
+    LoadReport, WorkflowStore, MAX_NOTES, MAX_REVISIONS,
 };
 // The engine's own graph model, re-exported so hosts above this crate (the TUI)
 // can name a workflow's graph without taking a direct dependency on the engine.
@@ -54,6 +54,7 @@ pub use store::{
 // alternative to a parallel copy that would drift.
 pub use tinyflows::model::WorkflowGraph;
 pub use types::{
-    NoteId, NoteKind, NoteSource, RunId, RunRecord, RunStatus, RunStep, WorkflowError, WorkflowId,
-    WorkflowNote, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    fingerprint, NoteId, NoteKind, NoteSource, ProposalId, ProposalStatus, ProposalVerification,
+    RunId, RunRecord, RunStatus, RunStep, WorkflowError, WorkflowId, WorkflowNote,
+    WorkflowProposal, WorkflowRecord, WorkflowRevision, WorkflowSummary,
 };

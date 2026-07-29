@@ -369,8 +369,7 @@ impl DaemonRuntime {
         });
     }
 
-    /// This worker's review settings, defaulting safely when config is
-    /// unreadable.
+    /// This worker's review settings, failing closed when config is unreadable.
     fn evolve_settings(&self) -> EvolveConfig {
         let cwd = std::path::Path::new(&self.inner.config.workspace);
         crate::config::load_config(
@@ -379,7 +378,14 @@ impl DaemonRuntime {
             cwd,
         )
         .map(|loaded| EvolveConfig::from_config(&loaded.config.workflows))
-        .unwrap_or_default()
+        .unwrap_or_else(|err| {
+            tracing::warn!("could not reload evolution policy; reviews disabled: {err}");
+            EvolveConfig {
+                enabled: false,
+                auto_on_failure: false,
+                ..EvolveConfig::default()
+            }
+        })
     }
 
     /// Capability settings for workflows run on this worker.

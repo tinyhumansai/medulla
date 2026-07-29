@@ -79,19 +79,31 @@ pub const TABS: [&str; 6] = [
 /// beside the lanes running on it. These pages are the *management* surfaces —
 /// what you register, authenticate, and choose — not the picture. Workflows is
 /// not here either: it is a tab of its own (see [`TABS`]).
-/// Harnesses, Workspaces, Agent Templates and Strategies are commented out
-/// rather than deleted: their draw arms, key handlers and state all still
-/// build, so restoring one is putting its name back in this list and renumbering.
-pub const ROUTING_SUBPAGES: [&str; 2] = ["Hosts", "Add Host"];
+/// Ordered by the containment chain, as before: the machine, what runs on it,
+/// what may be stood up there, how to add another, and how work is routed
+/// between them.
+///
+/// Only Workspaces is commented out, and only because Add Host › Local
+/// supersedes it: an entry there was advisory routing context, whereas a local
+/// host actually runs work in its directory. Its draw arm, keys and
+/// `[host].workspaces` persistence all still build, so restoring it is putting
+/// its name back here and renumbering.
+pub const ROUTING_SUBPAGES: [&str; 5] = [
+    "Hosts",
+    "Harnesses",
+    "Agent Templates",
+    "Add Host",
+    "Strategies",
+];
 
 pub(super) const RP_HOSTS: usize = 0;
-pub(super) const RP_ADD_HOST: usize = 1;
-// Past the end of `ROUTING_SUBPAGES`, so the nav clamp cannot reach them and
-// their arms are unreachable — the pages are off without their code rotting.
-pub(super) const RP_HARNESSES: usize = 2;
-pub(super) const RP_WORKSPACES: usize = 3;
-pub(super) const RP_TEMPLATES: usize = 4;
-pub(super) const RP_STRATEGIES: usize = 5;
+pub(super) const RP_HARNESSES: usize = 1;
+pub(super) const RP_TEMPLATES: usize = 2;
+pub(super) const RP_ADD_HOST: usize = 3;
+pub(super) const RP_STRATEGIES: usize = 4;
+// Past the end of `ROUTING_SUBPAGES`, so the nav clamp cannot reach it and its
+// arm is unreachable — the page is off without its code rotting.
+pub(super) const RP_WORKSPACES: usize = 5;
 
 /// The TokenMaxxxing tab's sidebar pages.
 pub(super) const TOKENMAXXING_SUBPAGES: [&str; 3] = ["Overview", "Bounties", "Leaderboard"];
@@ -169,12 +181,11 @@ pub(super) const SUBSCRIPTION_STRATEGIES: [SubscriptionStrategyOption; 3] = [
 ///
 /// This is the flat, selectable list [`App::settings_index`] indexes into.
 /// [`SETTINGS_GROUPS`] overlays the display-only headings.
-pub const SETTINGS_SUBPAGES: [&str; 9] = [
+pub const SETTINGS_SUBPAGES: [&str; 8] = [
     "Usage",
     "Appearance",
     "Config",
     "Feedback",
-    "Memory",
     "Trace",
     "Context",
     "Account",
@@ -197,14 +208,10 @@ pub(super) const SP_USAGE: usize = 0;
 pub(super) const SP_APPEARANCE: usize = 1;
 pub(super) const SP_CONFIG: usize = 2;
 pub(super) const SP_FEEDBACK: usize = 3;
-/// Persona memory. A settings page rather than a tab: the layer is out of the
-/// build, so it describes something the operator may switch on later rather
-/// than a surface they work in — which is what the rest of GENERAL is.
-pub(super) const SP_MEMORY: usize = 4;
-pub(super) const SP_TRACE: usize = 5;
-pub(super) const SP_CONTEXT: usize = 6;
-pub(super) const SP_ACCOUNT: usize = 7;
-pub(super) const SP_HELP: usize = 8;
+pub(super) const SP_TRACE: usize = 4;
+pub(super) const SP_CONTEXT: usize = 5;
+pub(super) const SP_ACCOUNT: usize = 6;
+pub(super) const SP_HELP: usize = 7;
 
 /// Which kind of host the Add Host page is collecting.
 ///

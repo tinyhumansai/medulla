@@ -15,6 +15,15 @@ use super::super::types::{
 impl App {
     /// Handle Routing navigation and the active pane's actions.
     pub(super) fn on_routing_key(&mut self, code: KeyCode) -> RoutingKey {
+        // Claimed before the pane navigation, which treats Esc as "leave the
+        // content pane". Mid-wizard that is the wrong answer: a mis-picked kind
+        // should cost one step, not the whole page. Esc leaves the page as
+        // usual once the wizard is back at its first step.
+        if code == KeyCode::Esc && self.routing_index == RP_ADD_HOST && self.add_host_kind_chosen {
+            self.add_host_kind_chosen = false;
+            self.set_status("Choose a kind of host");
+            return RoutingKey::Handled(None);
+        }
         match multi_pane::navigate(
             code,
             ROUTING_SUBPAGES.len(),
@@ -230,9 +239,69 @@ impl App {
     /// Open the existing host-address prompt from the dedicated Add Host pane,
     /// or copy the line the operator has to run on the machine being added.
     fn add_host_key(&mut self, code: KeyCode) -> RoutingKey {
+        use super::super::types::AddHostKind;
         match code {
+            // The arrows move whichever list the page is currently showing:
+            // the kind picker until one is chosen, the harness list after. One
+            // pair of keys for a page that is read top to bottom.
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
+                let up = matches!(code, KeyCode::Up | KeyCode::Char('k'));
+                if self.add_host_selected_kind() == AddHostKind::Local && self.add_host_kind_chosen
+                {
+                    let len = self.add_host_providers().len();
+                    self.add_host_harness = crate::ui::selection::moved(
+                        self.add_host_harness.min(len.saturating_sub(1)),
+                        len,
+                        up,
+                    );
+                } else {
+                    self.add_host_kind = crate::ui::selection::moved(
+                        self.add_host_kind.min(AddHostKind::ALL.len() - 1),
+                        AddHostKind::ALL.len(),
+                        up,
+                    );
+                }
+                RoutingKey::Handled(None)
+            }
             KeyCode::Enter | KeyCode::Char('a') => {
-                self.open_add_host_prompt();
+                match self.add_host_selected_kind() {
+                    // Both kinds settle the choice first, so the page always
+                    // reads the same way: pick a kind, then the steps it needs
+                    // light up. Remote's are instructions rather than a list,
+                    // but jumping straight to the prompt made the same key mean
+                    // two different things depending on which row was under it.
+                    AddHostKind::Remote if !self.add_host_kind_chosen => {
+                        self.add_host_kind_chosen = true;
+                        self.set_status(
+                            "Run the line on that machine · Enter to paste its address",
+                        );
+                    }
+                    AddHostKind::Remote => {
+                        self.add_host_kind_chosen = false;
+                        self.open_add_host_prompt();
+                    }
+                    // Two Enters for a local host: the first settles the
+                    // harness, the second asks where it works. Collapsing them
+                    // would mean the arrows never reached the harness list.
+                    AddHostKind::Local if !self.add_host_kind_chosen => {
+                        self.add_host_kind_chosen = true;
+                        self.set_status("Choose a harness · Enter to set the directory");
+                    }
+                    AddHostKind::Local => {
+                        let providers = self.add_host_providers();
+                        let harness = providers[self.add_host_harness.min(providers.len() - 1)];
+                        self.prompt = Some(Prompt {
+                            kind: PromptKind::LocalHostWorkspace(harness),
+                            title: format!(
+                                "Directory for the {} host — blank uses this one",
+                                harness.as_str()
+                            ),
+                            draft: Draft::new(),
+                        });
+                        self.add_host_kind_chosen = false;
+                        self.set_status("Add local host · Enter save · Esc cancel");
+                    }
+                }
                 RoutingKey::Handled(None)
             }
             // Copying it here rather than retyping it there is the whole point:

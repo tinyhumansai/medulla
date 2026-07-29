@@ -7,7 +7,7 @@ use crate::helpers::*;
 #[test]
 fn hosts_tab_lists_registered_machines() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
     let out = render(&mut app, 120, 40);
     assert!(out.contains("Hosts · 3"), "host count in title");
@@ -130,7 +130,7 @@ fn host_row_sanitizes_probe_text_and_keeps_fractional_budget() {
 #[test]
 fn hosts_r_refreshes_selected_machine_details() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
     let _ = app.on_event(key(KeyCode::Down));
     let cmd = app.on_event(key(KeyCode::Char('r')));
@@ -148,9 +148,12 @@ fn hosts_r_refreshes_selected_machine_details() {
 fn add_host_page_renders_guidance_and_opens_the_prompt() {
     let mut app = app_with_workers(None);
     app.focus_routing_subpage("Add Host");
+    // Local leads the picker; choosing Remote lights up the pairing guidance.
+    let _ = app.on_event(key(KeyCode::Down));
+    let _ = app.on_event(key(KeyCode::Enter));
 
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Connect another machine to this orchestrator."));
+    assert!(out.contains("Add a host for the orchestrator to delegate to."));
     // The handle shortcut, which is the way to add a host without copying
     // anything at all.
     assert!(out.contains("@build-box"));
@@ -258,7 +261,7 @@ fn harnesses_page_names_credentials_per_runtime_without_values() {
 #[test]
 fn hosts_up_down_moves_selection() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
     assert_eq!(app.host_index(), 0);
     let _ = app.on_event(key(KeyCode::Down));
@@ -275,7 +278,7 @@ fn hosts_up_down_moves_selection() {
 #[test]
 fn hosts_enter_selects_and_d_removes() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
     let _ = app.on_event(key(KeyCode::Down)); // select w2
     let cmd = app.on_event(key(KeyCode::Enter));
@@ -293,7 +296,7 @@ fn hosts_enter_selects_and_d_removes() {
 #[test]
 fn hosts_s_and_x_are_select_and_remove_aliases() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
     let cmd = app.on_event(key(KeyCode::Char('s')));
     assert!(matches!(cmd, Some(Cmd::WorkerOp(_))));
@@ -304,7 +307,7 @@ fn hosts_s_and_x_are_select_and_remove_aliases() {
 #[test]
 fn hosts_e_opens_edit_label_prompt_prefilled() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
     let _ = app.on_event(key(KeyCode::Char('e')));
     let (title, draft) = app.prompt_state().expect("edit prompt open");

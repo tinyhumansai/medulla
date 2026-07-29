@@ -14,6 +14,15 @@ use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 use medulla_tui::ui::app::App;
 
+// Harnesses is commented out of `ROUTING_SUBPAGES`, so the page this renders is
+// currently unreachable and `focus_routing_subpage` cannot land on it. Kept and
+// ignored rather than deleted: the demo-fleet code it covers is untouched, and
+// restoring the page restores the test with it.
+//
+// Worth knowing what hiding that page costs: PR #86 removed the fleet from the
+// Agents rail on the grounds that Routing › Harnesses showed the same hosts,
+// budgets and readiness. With Harnesses hidden too, that information now has
+// nowhere to appear.
 #[test]
 fn the_stand_in_fleet_renders_when_the_runtime_declares_nothing() {
     // An empty runtime: no capacity, no roster, no registered peers — the state

@@ -54,7 +54,7 @@ fn every_tab_renders() {
 #[test]
 fn harnesses_page_renders_custom_openrouter_presets_and_editor_controls() {
     let mut a = app();
-    a.tab_index = tab("Routing");
+    a.tab_index = tab("Hosts");
     a.routing_index = RP_HARNESSES;
     a.routing_focused = true;
     a.credential_status.openrouter_api_key = true;
@@ -151,7 +151,7 @@ fn clicking_a_context_chunk_selects_it() {
 #[test]
 fn routing_strategies_render_host_and_subscription_groups() {
     let mut a = app();
-    a.tab_index = tab("Routing");
+    a.tab_index = tab("Hosts");
     a.routing_index = types::RP_STRATEGIES;
     a.routing_focused = true;
 
@@ -167,7 +167,7 @@ fn subscription_strategy_navigation_persists_and_emits_its_own_operation() {
     let dir = tempfile::tempdir().unwrap();
     let mut a = app();
     a.set_config_path(dir.path().join("config.toml"));
-    a.tab_index = tab("Routing");
+    a.tab_index = tab("Hosts");
     a.routing_index = types::RP_STRATEGIES;
     a.routing_focused = true;
 

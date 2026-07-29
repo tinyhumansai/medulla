@@ -12,7 +12,7 @@ use medulla::runtime::{WorkerInfo, WorkerOp};
 
 use super::types::{
     tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_HELP,
-    SP_MEMORY, SP_USAGE,
+    SP_USAGE,
 };
 
 impl App {

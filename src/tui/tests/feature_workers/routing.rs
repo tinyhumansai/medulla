@@ -7,8 +7,10 @@ use crate::helpers::*;
 #[test]
 fn routing_nav_exposes_every_subpage() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     let out = render(&mut app, 120, 40);
+    // Only Workspaces is commented out of `ROUTING_SUBPAGES`; the nav shows
+    // what it can reach.
     for page in [
         "Hosts",
         "Harnesses",
@@ -23,7 +25,7 @@ fn routing_nav_exposes_every_subpage() {
 #[test]
 fn routing_nav_has_no_redundant_fleet_heading() {
     let mut app = app_with_roster(Vec::new(), None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     let out = render(&mut app, 120, 40);
     assert!(
         !out.contains("FLEET"),
@@ -34,7 +36,7 @@ fn routing_nav_has_no_redundant_fleet_heading() {
 #[test]
 fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     assert!(!app.routing_focused());
 
     assert!(app.on_event(key(KeyCode::Down)).is_none());
@@ -50,7 +52,7 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
 
     // Number keys jump positionally, so this index moves whenever a page is
     // added. Strategies is last, which is what this is really asserting.
-    assert!(app.on_event(key(KeyCode::Char('6'))).is_none());
+    assert!(app.on_event(key(KeyCode::Char('5'))).is_none());
     assert_eq!(app.routing_subpage(), "Strategies");
     assert!(app.routing_focused());
 }
@@ -58,7 +60,7 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
 #[test]
 fn routing_pages_leave_unbound_keys_for_global_handling() {
     let mut app = app_with_workers(None);
-    for page in ["Add Host", "Strategies"] {
+    for page in ["Hosts", "Add Host"] {
         app.focus_routing_subpage(page);
         assert!(app.on_event(key(KeyCode::Char('z'))).is_none());
     }
@@ -132,6 +134,10 @@ fn strategy_selection_persists_to_config_and_reloads_highlighted() {
 fn add_host_shows_the_line_to_run_on_the_machine_being_added() {
     let mut app = app_with_workers(None);
     app.focus_routing_subpage("Add Host");
+    // The page asks which kind first; the pairing procedure belongs to Remote,
+    // and only becomes the live step once that kind is confirmed.
+    let _ = app.on_event(key(KeyCode::Down));
+    let _ = app.on_event(key(KeyCode::Enter));
     let out = render(&mut app, 160, 44);
     // The page is a procedure, not a definition: both halves of the pairing and
     // the two keys that drive them.

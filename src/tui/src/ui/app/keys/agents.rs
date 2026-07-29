@@ -77,17 +77,28 @@ impl App {
                 self.focus_agents_composer();
                 AgentsKey::Handled(None)
             }
-            // Typing is never swallowed: the character lands in the composer and
-            // focus follows it. Without this, a user who stepped out to look at
-            // a lane would type a whole message into nothing.
-            KeyCode::Char(c) if !ctrl && !alt => {
+            // Typing lands in the composer and focus follows it — but only
+            // where there *is* a composer. It is drawn for the orchestrator
+            // lane and nowhere else, so doing this on an agent row moved the
+            // keyboard into an invisible input: the character vanished, and
+            // every arrow after it drove a caret nobody could see instead of
+            // the rail. That reads exactly like navigation having died.
+            KeyCode::Char(c) if !ctrl && !alt && self.on_orchestrator_lane() => {
                 self.focus_agents_composer();
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, &c.to_string());
                 self.command_index = 0;
                 AgentsKey::Handled(None)
             }
-            // Backspace is typing too — it edits the draft it belongs to.
-            KeyCode::Backspace => {
+            // On any other row the rail keeps the keyboard and says why, rather
+            // than swallowing the key or stealing focus for a hidden box.
+            KeyCode::Char(c) if !ctrl && !alt => {
+                let _ = c;
+                self.set_status("Select the orchestrator lane to type an instruction");
+                AgentsKey::Handled(None)
+            }
+            // Backspace is typing too — it edits the draft it belongs to, and
+            // only where that draft is on screen.
+            KeyCode::Backspace if self.on_orchestrator_lane() => {
                 self.focus_agents_composer();
                 AgentsKey::Unhandled
             }

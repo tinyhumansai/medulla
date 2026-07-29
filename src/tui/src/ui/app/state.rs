@@ -267,7 +267,7 @@ impl App {
 
     /// Focus Routing on a named subpage and enter its content pane.
     pub fn focus_routing_subpage(&mut self, name: &str) {
-        self.tab_index = super::types::tab_pos("Routing");
+        self.tab_index = super::types::tab_pos("Hosts");
         self.routing_index = ROUTING_SUBPAGES
             .iter()
             .position(|page| *page == name)
@@ -379,6 +379,20 @@ impl App {
     /// Settings subpages rather than tabs, the Settings arm dispatches on the
     /// active subpage.
     pub(super) fn tab_enter_cmd(&mut self) -> Option<Cmd> {
+        // Arriving at a tab should put the keyboard on the thing the tab is
+        // *about*. Both of these used to land it somewhere else — Hosts on its
+        // two-item menu, Agents on the composer — so the first arrow press did
+        // nothing visible and the list had to be clicked before it would move.
+        match self.tab() {
+            // The list is the page; the menu is two rows and reachable with `1`
+            // and `2`, or with Esc.
+            "Hosts" => self.routing_focused = true,
+            // Safe because the rail forwards typing: a printable key moves focus
+            // to the composer and lands the character there, so nothing is lost
+            // by not starting in it.
+            "Agents" => self.focus_agents_rail(),
+            _ => {}
+        }
         match self.tab() {
             "Feedback" => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
             // The workflow store is files on this machine, so entering the tab

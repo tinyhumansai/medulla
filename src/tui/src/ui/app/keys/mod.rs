@@ -213,7 +213,7 @@ impl App {
                 return *cmd;
             }
         }
-        if tab == "Routing" {
+        if tab == "Hosts" {
             if let RoutingKey::Handled(cmd) = self.on_routing_key(k.code) {
                 return cmd;
             }

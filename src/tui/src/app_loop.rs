@@ -458,9 +458,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // *manually started* harness inherits, and the primary is the right default
     // for that. Only task resolution needs every host, which is `runtimes`.
     // Read before the list moves into the shared handle below.
-    let primary_defaults = local_hosts
-        .first()
-        .map(|primary| (primary.workspace().to_string(), primary.providers().to_vec()));
+    let primary_defaults = local_hosts.first().map(|primary| {
+        (
+            primary.workspace().to_string(),
+            primary.providers().to_vec(),
+        )
+    });
     let started_hosts = std::sync::Arc::new(std::sync::Mutex::new(local_hosts));
     let local_harnesses = primary_defaults.map(|(workspace, providers)| {
         medulla_tui::ui::harness_pane::LocalHarnesses {

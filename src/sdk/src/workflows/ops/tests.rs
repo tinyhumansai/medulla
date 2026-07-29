@@ -9,6 +9,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use super::*;
+use crate::workflows::authoring::GraphHandle;
 use crate::workflows::FileWorkflowStore;
 
 fn document(id: &str) -> String {

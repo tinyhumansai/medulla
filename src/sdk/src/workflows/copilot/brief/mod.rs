@@ -12,18 +12,19 @@
 //! because its copilot hands back a proposal card; Medulla's edits land in the
 //! store and are taken back with undo instead, so the modes here differ in what
 //! they *tell the agent to do* rather than in when they persist.
+//!
+//! Rendering the *situation* — the graph, and anything else the turn is
+//! grounded in — lives in [`context`], because those sections grow with what
+//! the host learns about a workflow while the turn structure here does not.
 
-use tinyflows::model::WorkflowGraph;
+mod context;
+
+#[cfg(test)]
+mod tests;
 
 use crate::workflows::WorkflowRecord;
 
-/// How much of the current graph is pasted into the brief.
-///
-/// A large graph would crowd out the instruction and cost a round trip's worth
-/// of tokens on something the agent can fetch itself. Past this it gets the
-/// summary and is told to call `workflow_get` — which it needs to do anyway
-/// before patching, so nothing is lost.
-const MAX_INLINE_GRAPH_BYTES: usize = 6000;
+use context::{graph_section, MAX_INLINE_GRAPH_BYTES};
 
 /// Which kind of authoring turn this is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,38 +187,4 @@ impl CopilotRequest<'_> {
 /// it is edited far more often than the code around it, and a change to it
 /// should read as a change to a document in review rather than as a diff
 /// through escaped quotes.
-const STANDING: &str = include_str!("prompt.md");
-
-/// The graph itself, inline when it is small enough to be worth pasting.
-fn graph_section(graph: &WorkflowGraph) -> String {
-    let json = serde_json::to_string_pretty(graph).unwrap_or_else(|_| "{}".to_string());
-    if json.len() <= MAX_INLINE_GRAPH_BYTES {
-        return format!("Current graph:\n\n```json\n{json}\n```");
-    }
-    // Too big to paste: the outline is enough to plan against, and the agent
-    // fetches the detail for the nodes it actually touches.
-    let outline: Vec<String> = graph
-        .nodes
-        .iter()
-        .map(|node| {
-            format!(
-                "- {} ({}){}",
-                node.id,
-                crate::ui::workflows::graph::kind_wire(&node.kind),
-                if node.name.trim().is_empty() {
-                    String::new()
-                } else {
-                    format!(" — {}", node.name.trim())
-                }
-            )
-        })
-        .collect();
-    format!(
-        "The graph is too large to paste. Call `workflow_get` for it. Its nodes:\n\n{}",
-        outline.join("\n")
-    )
-}
-
-#[cfg(test)]
-#[path = "brief_tests.rs"]
-mod tests;
+const STANDING: &str = include_str!("../prompt.md");

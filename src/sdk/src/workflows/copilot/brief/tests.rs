@@ -8,7 +8,7 @@
 
 use super::*;
 use serde_json::json;
-use tinyflows::model::{Node, NodeKind};
+use tinyflows::model::{Node, NodeKind, WorkflowGraph};
 
 fn node(id: &str) -> Node {
     Node {

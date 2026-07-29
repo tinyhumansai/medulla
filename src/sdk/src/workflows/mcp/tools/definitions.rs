@@ -9,8 +9,8 @@
 
 use serde_json::{json, Value};
 
+use super::dispatch::schema;
 use super::evolve::ToolMode;
-use super::schema;
 use crate::workflows::node_contracts::render_node_kinds_line;
 
 /// The tool definitions a session in `mode` is served.

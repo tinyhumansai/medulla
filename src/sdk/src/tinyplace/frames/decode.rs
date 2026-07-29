@@ -68,7 +68,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .and_then(|value| value.as_str())
         .map(str::trim)
         .filter(|id| !id.is_empty())
-        .map(str::to_string);
+        .map(Box::<str>::from);
 
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),

@@ -45,7 +45,7 @@ fn encodes_optional_fields_when_present() {
         correlation_id: Some("corr-9".to_string()),
         harness: Some(HarnessProvider::Codex),
         provider: Some(HarnessProvider::Claude),
-        custom_harness: Some("deepseek-claude".to_string()),
+        custom_harness: Some("deepseek-claude".into()),
         model: Some("anthropic/claude-opus-4.8".to_string()),
         workflow: Some("nightly-sweep".to_string()),
     });

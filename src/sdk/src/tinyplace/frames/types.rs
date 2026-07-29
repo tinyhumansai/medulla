@@ -284,7 +284,7 @@ pub struct TaskFrame {
         skip_serializing_if = "Option::is_none",
         default
     )]
-    pub custom_harness: Option<String>,
+    pub custom_harness: Option<Box<str>>,
     /// Inbound-only advisory hint naming the model the orchestrator wants this
     /// task run on (parallels `provider`). The worker daemon may honor it as the
     /// harness `--model`/`-m` or fall back to its configured model; never echoed

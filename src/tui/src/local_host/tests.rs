@@ -157,7 +157,7 @@ fn custom_harness_matching_uses_the_effective_host_address() {
         None,
         None,
         None,
-        &[local.clone()],
+        std::slice::from_ref(&local),
     )
     .expect("valid host options");
 

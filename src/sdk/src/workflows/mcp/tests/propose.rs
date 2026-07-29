@@ -48,6 +48,19 @@ fn a_review_turn_is_not_shown_the_tools_it_may_not_call() {
     assert_eq!(listed.len(), TOOL_NAMES.len() - 4);
 }
 
+#[test]
+fn proposal_schema_advertises_note_evidence() {
+    let proposal = tool_definitions(ToolMode::Propose)
+        .into_iter()
+        .find(|tool| tool["name"] == "workflow_propose")
+        .expect("workflow_propose definition");
+
+    assert_eq!(
+        proposal["inputSchema"]["properties"]["noteIds"]["items"]["type"],
+        "string"
+    );
+}
+
 #[tokio::test]
 async fn a_review_turn_calling_a_withheld_tool_is_refused_and_told_what_to_use() {
     let (_root, store) = store();

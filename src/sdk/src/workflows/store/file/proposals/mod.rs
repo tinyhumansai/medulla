@@ -100,5 +100,4 @@ pub fn list_for(
 }
 
 #[cfg(test)]
-#[path = "proposals_tests.rs"]
 mod tests;

@@ -161,7 +161,7 @@ fn read_all(journal_dir: &Path, workflow_id: &str) -> Result<Vec<WorkflowNote>, 
             // deliberate kindness; appending on top of it would destroy
             // whatever an operator might still have recovered by hand, which
             // is a different and much less forgivable thing to do.
-            let quarantine = path.with_extension("json.corrupt");
+            let quarantine = path.with_extension(format!("json.corrupt.{}", uuid::Uuid::new_v4()));
             let _ = std::fs::rename(&path, &quarantine);
             tracing::warn!(
                 workflow = %workflow_id,

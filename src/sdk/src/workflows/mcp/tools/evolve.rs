@@ -178,6 +178,13 @@ pub fn definitions(schema: impl Fn(Value, &[&str]) -> Value) -> Vec<Value> {
                         "type": "array",
                         "items": { "type": "string" },
                         "description": "The runs that motivated this.",
+                    },
+                    "noteIds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description":
+                            "The journal notes that motivated this. Populate this when the \
+                             rationale relies on evidence or constraints from workflow_notes.",
                     }
                 }),
                 &["id", "rationale", "ops"],

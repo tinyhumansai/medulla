@@ -128,6 +128,29 @@ fn an_unreadable_journal_reads_as_empty_rather_than_failing() {
 }
 
 #[test]
+fn repeated_corruption_preserves_each_quarantined_journal() {
+    let home = dir();
+    for body in [b"{ first corruption".as_slice(), b"{ second corruption"] {
+        std::fs::write(home.path().join("sweep.json"), body).expect("corrupt it");
+        assert!(list(home.path(), "sweep")
+            .expect("a corrupt journal is not an error")
+            .is_empty());
+    }
+
+    let quarantined: Vec<_> = std::fs::read_dir(home.path())
+        .expect("journal directory")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("sweep.json.corrupt.")
+        })
+        .collect();
+    assert_eq!(quarantined.len(), 2);
+}
+
+#[test]
 fn the_journal_is_capped_and_drops_the_oldest_first() {
     let home = dir();
     for at in 0..(MAX_NOTES as u64 + 5) {

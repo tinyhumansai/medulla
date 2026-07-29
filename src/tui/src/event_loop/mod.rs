@@ -122,7 +122,6 @@ pub(crate) async fn run(
                         app.refresh_snapshot();
                         app.set_status(s);
                     }
-                    AppMsg::TasksLoaded(document) => app.set_tasks(document),
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotStatus { workflow, line } => {
                         app.copilot_status(&workflow, line);

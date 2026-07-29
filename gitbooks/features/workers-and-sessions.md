@@ -252,17 +252,16 @@ a mode — it is how delegation works.
 
 ## What you see
 
-The terminal app organizes this into eight tabs: Overview, Agents, Tasks,
-Workflows, TokenMaxxxing, Routing, Memory, and Settings — the last of which holds
-Usage, Appearance, Config, Trace, Context, Account, and Help, grouped under
-General, Debug, and About headings. Overview is the at-a-glance panel: runtime
-identity and health, the active cycle, recent events, the last cycle's results,
-the task ledger, any pending decision, and a **This device** panel for what this
-machine is hosting. The Tasks tab is the planning surface, covered in
-[Tasks and Sources](tasks-and-sources.md); [Workflows](workflows.md) is the
-authored multi-step surface; Routing holds the fleet's management pages described
-above. Memory is a placeholder — the persona-memory layer is out of this build,
-and the tab says so rather than disappearing.
+The terminal app organizes this into Overview, Agents, Workflows,
+TokenMaxxxing, Routing, Memory, and Settings — the last of which holds Usage,
+Appearance, Config, Trace, Context, Account, and Help, grouped under General,
+Debug, and About headings. Overview is the at-a-glance panel: runtime identity
+and health, the active cycle, recent events, the last cycle's results, the task
+ledger, any pending decision, and a **This device** panel for what this machine
+is hosting. [Workflows](workflows.md) is the authored planning and execution
+surface; Routing holds the fleet's management pages described above. Memory is a
+placeholder — the persona-memory layer is out of this build, and the tab says so
+rather than disappearing.
 
 The Agents tab is where an operation becomes legible, and where you drive it:
 this is the conversation surface too. There is one lane for the orchestrator and

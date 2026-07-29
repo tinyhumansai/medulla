@@ -58,7 +58,6 @@ name only; restart the local host after saving one. See
 Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
 * [Workers and Sessions](https://tinyhumans.gitbook.io/medulla/features/workers-and-sessions) — capacity, threads, and what survives.
-* [Tasks and Sources](https://tinyhumans.gitbook.io/medulla/features/tasks-and-sources) — where a task comes from and what context it carries.
 * [Workflows](https://tinyhumans.gitbook.io/medulla/features/workflows) — authored multi-step plans and their runs.
 * [MEDULLA.md Workspace Profiles](https://tinyhumans.gitbook.io/medulla/features/workspace-profiles) — telling the orchestrator what a repo is.
 * [Orchestrator Routing](https://tinyhumans.gitbook.io/medulla/features/routing) — cognitive tiers, harness selection, strategies.

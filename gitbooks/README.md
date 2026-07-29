@@ -49,7 +49,7 @@ Medulla is built around one principle: get the right answer. When a worker fails
 * [Context Scaling Without Collapse](rlm-context-scaling.md) — how the reasoning surface stays small while the fleet grows.
 * [Pricing and Availability](pricing-and-availability.md) — pricing, early alpha, and how to request access.
 
-The Features section covers what Medulla does day to day: [workers and sessions](features/workers-and-sessions.md), [tasks and sources](features/tasks-and-sources.md), [workflows](features/workflows.md), [`MEDULLA.md` workspace profiles](features/workspace-profiles.md), [routing](features/routing.md), and [token efficiency and budgets](features/token-efficiency.md).
+The Features section covers what Medulla does day to day: [workers and sessions](features/workers-and-sessions.md), [workflows](features/workflows.md), [`MEDULLA.md` workspace profiles](features/workspace-profiles.md), [routing](features/routing.md), and [token efficiency and budgets](features/token-efficiency.md).
 
 Building on Medulla? The [Developers](developers/) section covers installing the [TUI](developers/getting-started.md), embedding the [SDK](developers/architecture.md), and wiring your own fleet to the orchestrator.
 

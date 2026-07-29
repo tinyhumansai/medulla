@@ -9,9 +9,7 @@ use super::rail::RailRow;
 use crate::ui::agents::{agent_row_model, AgentRole, AgentRow};
 use crate::ui::composer::Draft;
 
-use super::types::{
-    App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TASKS_SUBPAGES, TOKENMAXXING_SUBPAGES,
-};
+use super::types::{App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_SUBPAGES};
 
 /// Rows one wheel notch moves, matching the transcript's own step so the two
 /// panes feel like one surface. Only used for a harness we scroll ourselves —
@@ -145,7 +143,6 @@ impl App {
             }
         };
         match self.tab() {
-            "Tasks" => self.tasks_index = step(self.tasks_index, TASKS_SUBPAGES.len()),
             "TokenMaxxxing" => {
                 self.tokenmaxxing_index =
                     step(self.tokenmaxxing_index, TOKENMAXXING_SUBPAGES.len());
@@ -194,7 +191,6 @@ impl App {
         // left.
         if let Some(page) = self.hit_nav.page_at(x, y) {
             match tab {
-                "Tasks" => (self.tasks_index, self.tasks_focused) = (page, true),
                 "TokenMaxxxing" => {
                     (self.tokenmaxxing_index, self.tokenmaxxing_focused) = (page, true);
                 }

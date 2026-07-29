@@ -10,7 +10,6 @@
 ## Features
 
 * [Workers and Sessions](features/workers-and-sessions.md)
-* [Tasks and Sources](features/tasks-and-sources.md)
 * [Workflows](features/workflows.md)
 * [MEDULLA.md](features/workspace-profiles.md)
 * [Orchestrator Routing](features/routing.md)

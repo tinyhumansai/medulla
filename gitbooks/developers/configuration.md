@@ -16,11 +16,10 @@ Under the home:
 * `config.toml` — the user-global config file.
 * `state/` — the default `stateDir`, holding chat history under `chats/`, and workflow run records and engine checkpoints under `state/workflows/runs/` and `state/workflows/checkpoints/`.
 * `workflows/*.json` — your [workflow](../features/workflows.md) definitions. A repository's own `<cwd>/.medulla/workflows/*.json` layers on top and shadows a personal one of the same id.
-* `tasks.json` — the [task ledger and its sources](../features/tasks-and-sources.md).
 * `tinyplace/` — the default [tiny.place](https://tiny.place) identity directory.
 * `worker.json` — the [worker profile](cli-reference.md#first-run-worker-registration).
 
-Point `MEDULLA_HOME` at a scratch directory to run against an isolated store — its own workflows, agent templates, tasks, and state rather than yours. That is what the test suites and container runs do.
+Point `MEDULLA_HOME` at a scratch directory to run against an isolated store — its own workflows, agent templates, and state rather than yours. That is what the test suites and container runs do.
 
 A `.env` file in the current directory is loaded at startup, before anything reads the environment: `KEY=VALUE` lines, `#` comments, an optional `export` prefix, and single/double quotes are stripped. It never overrides variables already set in the process environment — this is the usual way to opt into `MEDULLA_DEV=1` for local dev.
 

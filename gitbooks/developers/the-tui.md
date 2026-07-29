@@ -11,7 +11,6 @@ login screen; `medulla --mock` skips straight to the offline demo runtime.
 | --- | --- |
 | **Overview** | The live event feed, the active cycle and its results, the task ledger, any pending decision, and a **This device** panel for what this machine is hosting. |
 | **Agents** | Agent lanes and the chat composer together, with an attachable live harness pane. |
-| **Tasks** | Every task and where it came from — **All Tasks**, **Sources**. See [Tasks and Sources](../features/tasks-and-sources.md). |
 | **Workflows** | Authored multi-step plans: a sidebar, a graph canvas, and a copilot that edits it. See [Workflows](../features/workflows.md). |
 | **TokenMaxxxing** | Token spend and headroom — **Overview**, **Bounties**, **Leaderboard**. |
 | **Routing** | What capacity exists — **Hosts**, **Harnesses**, **Workspaces**, **Agent Templates**, **Add Host**, **Strategies**. |

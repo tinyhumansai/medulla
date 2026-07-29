@@ -102,7 +102,7 @@ pub trait WorkflowStore: Send + Sync {
         ))
     }
 
-    /// Mark a note as replaced by a later one.
+    /// Mark a note as replaced by a later one, returning whether it changed.
     ///
     /// The superseded note stays listed; it simply stops being briefed.
     fn supersede_note(
@@ -110,7 +110,7 @@ pub trait WorkflowStore: Send + Sync {
         workflow_id: &str,
         note_id: &str,
         by: &str,
-    ) -> Result<(), WorkflowError> {
+    ) -> Result<bool, WorkflowError> {
         let _ = (workflow_id, note_id, by);
         Err(WorkflowError::Engine(
             "this workflow store does not keep notes".to_string(),

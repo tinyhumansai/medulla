@@ -68,8 +68,9 @@ pub fn add_note(
     // disproved stays visible to an operator but stops being briefed.
     let mut superseded = Vec::new();
     for earlier in normalize_supersedes(&note.id, supersedes) {
-        store.supersede_note(id, &earlier, &note.id)?;
-        superseded.push(earlier);
+        if store.supersede_note(id, &earlier, &note.id)? {
+            superseded.push(earlier);
+        }
     }
 
     Ok(json!({ "recorded": note.id, "note": note, "superseded": superseded }))
@@ -134,7 +135,9 @@ pub async fn propose(
     // A workflow with two undecided proposals asks an operator to hold both in
     // their head at once, and the older one was written from less evidence.
     store.save_proposal(&proposal)?;
-    supersede_earlier(store, &proposal)?;
+    if proposal.is_applicable() {
+        supersede_earlier(store, &proposal)?;
+    }
 
     Ok(json!({
         "proposed": proposal.id,
@@ -195,6 +198,15 @@ pub async fn verify_proposal(
     proposal_id: &str,
 ) -> Result<Value, WorkflowError> {
     let mut proposal = crate::workflows::require_proposal(store.as_ref(), proposal_id)?;
+    let current = require(store.as_ref(), &proposal.workflow_id)?;
+    if fingerprint(&current.graph) != proposal.base_fingerprint {
+        proposal.status = ProposalStatus::Stale;
+        proposal.decided_at = Some(crate::clock::now_millis() as u64);
+        proposal.decision_reason =
+            Some("the workflow changed after this proposal was written".to_string());
+        store.save_proposal(&proposal)?;
+        return Ok(json!({ "ok": false, "proposal": proposal }));
+    }
     proposal.verification = Some(verify(store, &proposal).await);
     store.save_proposal(&proposal)?;
     Ok(json!({ "ok": proposal.is_applicable(), "proposal": proposal }))

@@ -384,7 +384,7 @@ impl WorkflowStore for FileWorkflowStore {
         workflow_id: &str,
         note_id: &str,
         by: &str,
-    ) -> Result<(), WorkflowError> {
+    ) -> Result<bool, WorkflowError> {
         let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         journal::supersede(&self.journal_dir, workflow_id, note_id, by)
     }

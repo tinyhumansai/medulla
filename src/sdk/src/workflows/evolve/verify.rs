@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use crate::workflows::authoring::preview_workflow_ops;
 use crate::workflows::{
-    ProposalVerification, StoreWorkflowResolver, WorkflowError, WorkflowProposal, WorkflowStore,
+    require, ProposalVerification, StoreWorkflowResolver, WorkflowError, WorkflowProposal,
+    WorkflowStore,
 };
 
 /// Check `proposal` against the store's current graph.
@@ -62,10 +63,31 @@ pub async fn verify(
         }
     };
 
+    let current = match require(store.as_ref(), &proposal.workflow_id) {
+        Ok(record) => record,
+        Err(err) => {
+            return ProposalVerification {
+                ok: false,
+                verified_at,
+                messages: messages_of(err),
+                diagnosis: None,
+            }
+        }
+    };
     let resolver = Arc::new(StoreWorkflowResolver::new(store.clone()));
-    match crate::workflows::run::dry_run_graph(&candidate, resolver, serde_json::json!({})).await {
+    let input = serde_json::json!({});
+    let baseline =
+        crate::workflows::run::dry_run_graph(&current.graph, resolver.clone(), input.clone()).await;
+    match crate::workflows::run::dry_run_graph(&candidate, resolver, input).await {
         Ok(result) => ProposalVerification {
-            ok: result.diagnosis.is_clean(),
+            // Empty input is not representative for every workflow. Accept a
+            // candidate that retains only findings already present in the
+            // unmodified graph under the identical sample; verification is
+            // about whether the proposal introduced a new problem.
+            ok: result.diagnosis.is_clean()
+                || baseline
+                    .as_ref()
+                    .is_ok_and(|base| has_no_new_blockers(&base.diagnosis, &result.diagnosis)),
             verified_at,
             // A clean diagnosis has nothing to say; an unclean one is already
             // spelled out in the structured findings below, so the messages
@@ -80,6 +102,26 @@ pub async fn verify(
             diagnosis: None,
         },
     }
+}
+
+/// Whether every blocking candidate finding already existed in the baseline.
+fn has_no_new_blockers(
+    baseline: &crate::workflows::run::diagnose::Diagnosis,
+    candidate: &crate::workflows::run::diagnose::Diagnosis,
+) -> bool {
+    candidate
+        .null_bindings
+        .iter()
+        .filter(|binding| !binding.unverifiable)
+        .all(|binding| baseline.null_bindings.contains(binding))
+        && candidate
+            .empty_prompts
+            .iter()
+            .all(|node| baseline.empty_prompts.contains(node))
+        && candidate
+            .hidden_errors
+            .iter()
+            .all(|error| baseline.hidden_errors.contains(error))
 }
 
 /// Flatten an error into the messages an operator reads.

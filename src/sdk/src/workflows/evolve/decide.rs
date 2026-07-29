@@ -40,7 +40,7 @@ pub fn accept(
     // a double key press, each spawned on its own blocking task — could
     // otherwise both read it as pending, both pass the fingerprint check, and
     // both apply the ops.
-    let _claim = AcceptGuard::claim(&format!("proposal:{proposal_id}")).ok_or_else(|| {
+    let _claim = DecisionGuard::claim(&format!("proposal:{proposal_id}")).ok_or_else(|| {
         WorkflowError::Engine(format!("proposal '{proposal_id}' is already being applied"))
     })?;
     let mut proposal = require_proposal(store.as_ref(), proposal_id)?;
@@ -48,7 +48,7 @@ pub fn accept(
     // the same base graph. Hold this claim from status/fingerprint validation
     // through persistence so neither can validate against a graph the other
     // changes before applying its ops.
-    let _workflow_claim = AcceptGuard::claim(&format!("workflow:{}", proposal.workflow_id))
+    let _workflow_claim = DecisionGuard::claim(&format!("workflow:{}", proposal.workflow_id))
         .ok_or_else(|| {
             WorkflowError::Engine(format!(
                 "another proposal for workflow '{}' is already being applied",
@@ -119,6 +119,9 @@ pub fn reject(
     proposal_id: &str,
     reason: &str,
 ) -> Result<WorkflowProposal, WorkflowError> {
+    let _claim = DecisionGuard::claim(&format!("proposal:{proposal_id}")).ok_or_else(|| {
+        WorkflowError::Engine(format!("proposal '{proposal_id}' is already being decided"))
+    })?;
     let mut proposal = require_proposal(store.as_ref(), proposal_id)?;
     if !proposal.is_pending() {
         return Err(WorkflowError::Engine(format!(
@@ -179,14 +182,14 @@ fn note(
     }
 }
 
-/// Serializes accepts of one proposal or workflow within this process.
+/// Serializes decisions on one proposal or workflow within this process.
 ///
 /// A guard rather than a flag on the record: the window that matters is between
 /// reading the proposal and writing the graph, and only something that releases
 /// on drop closes it against a task that panics halfway.
-struct AcceptGuard(String);
+struct DecisionGuard(String);
 
-impl AcceptGuard {
+impl DecisionGuard {
     /// The one set every guard shares.
     ///
     /// A single accessor rather than a `static` in each method: two `OnceLock`s
@@ -209,7 +212,7 @@ impl AcceptGuard {
     }
 }
 
-impl Drop for AcceptGuard {
+impl Drop for DecisionGuard {
     fn drop(&mut self) {
         Self::in_flight()
             .lock()

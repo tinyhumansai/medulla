@@ -95,7 +95,11 @@ fn superseding_a_note_that_is_not_there_is_not_a_failure() {
 
     // A caller naming a note that has already been pruned has nothing left to
     // fix, and failing here would turn tidying into an error path.
-    supersede(home.path(), "sweep", "no-such-note", "whatever").expect("supersede is forgiving");
+    assert!(
+        !supersede(home.path(), "sweep", "no-such-note", "whatever")
+            .expect("supersede is forgiving"),
+        "a missing predecessor was not superseded"
+    );
 }
 
 #[test]
@@ -157,6 +161,45 @@ fn pinned_notes_survive_the_cap() {
         listed.iter().any(|n| n.id == pinned.id),
         "automation writing a hundred observations must not evict a person's note"
     );
+}
+
+#[test]
+fn a_replacement_survives_the_cap_with_its_superseded_predecessor() {
+    let home = dir();
+    let first = note("sweep", 0, "obsolete");
+    let replacement = note("sweep", 1, "current");
+    append(home.path(), &first).expect("append predecessor");
+    append(home.path(), &replacement).expect("append replacement");
+    supersede(home.path(), "sweep", &first.id, &replacement.id).expect("supersede");
+    for at in 2..(MAX_NOTES as u64 + 20) {
+        append(home.path(), &note("sweep", at, &format!("note {at}"))).expect("append");
+    }
+
+    let listed = list(home.path(), "sweep").expect("list");
+    assert!(listed.iter().any(|note| note.id == first.id));
+    assert!(listed.iter().any(|note| note.id == replacement.id));
+}
+
+#[test]
+fn concurrent_appenders_do_not_overwrite_each_other() {
+    let home = dir();
+    let journal_dir = std::sync::Arc::new(home.path().to_path_buf());
+    let gate = std::sync::Arc::new(std::sync::Barrier::new(16));
+    let writers: Vec<_> = (0..16)
+        .map(|at| {
+            let journal_dir = journal_dir.clone();
+            let gate = gate.clone();
+            std::thread::spawn(move || {
+                gate.wait();
+                append(&journal_dir, &note("sweep", at, &format!("note {at}"))).expect("append");
+            })
+        })
+        .collect();
+    for writer in writers {
+        writer.join().expect("writer completed");
+    }
+
+    assert_eq!(list(&journal_dir, "sweep").expect("list").len(), 16);
 }
 
 #[test]

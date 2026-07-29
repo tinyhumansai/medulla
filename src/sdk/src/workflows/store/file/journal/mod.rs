@@ -13,6 +13,8 @@
 
 use std::path::{Path, PathBuf};
 
+use fs2::FileExt;
+
 use crate::workflows::types::{NoteId, WorkflowError, WorkflowNote};
 
 use super::paths::{safe_component, write_atomic};
@@ -70,13 +72,15 @@ pub fn list(journal_dir: &Path, workflow_id: &str) -> Result<Vec<WorkflowNote>, 
 /// be written. A note that could not be recorded is a real failure: the callers
 /// that append are the ones claiming the host now knows something.
 pub fn append(journal_dir: &Path, note: &WorkflowNote) -> Result<(), WorkflowError> {
-    let mut notes = read_all(journal_dir, &note.workflow_id)?;
-    notes.push(note.clone());
-    prune(&mut notes);
-    write(journal_dir, &note.workflow_id, &notes)
+    with_write_lock(journal_dir, &note.workflow_id, || {
+        let mut notes = read_all(journal_dir, &note.workflow_id)?;
+        notes.push(note.clone());
+        prune(&mut notes);
+        write(journal_dir, &note.workflow_id, &notes)
+    })
 }
 
-/// Mark `id` as replaced by `by`.
+/// Mark `id` as replaced by `by`, returning whether a current note changed.
 ///
 /// Silently does nothing when the note is not there. Supersession is a tidying
 /// action taken after the fact, and a caller naming a note that has already
@@ -86,19 +90,56 @@ pub fn supersede(
     workflow_id: &str,
     id: &str,
     by: &str,
-) -> Result<(), WorkflowError> {
-    let mut notes = read_all(journal_dir, workflow_id)?;
-    let mut changed = false;
-    for note in notes.iter_mut() {
-        if note.id == id && note.superseded_by.is_none() {
-            note.superseded_by = Some(by.to_string());
-            changed = true;
+) -> Result<bool, WorkflowError> {
+    with_write_lock(journal_dir, workflow_id, || {
+        let mut notes = read_all(journal_dir, workflow_id)?;
+        let mut changed = false;
+        for note in notes.iter_mut() {
+            if note.id == id && note.superseded_by.is_none() {
+                note.superseded_by = Some(by.to_string());
+                changed = true;
+            }
         }
+        if !changed {
+            return Ok(false);
+        }
+        write(journal_dir, workflow_id, &notes)?;
+        Ok(true)
+    })
+}
+
+/// Serialize a journal read-modify-write across stores and processes.
+fn with_write_lock<T>(
+    journal_dir: &Path,
+    workflow_id: &str,
+    write_operation: impl FnOnce() -> Result<T, WorkflowError>,
+) -> Result<T, WorkflowError> {
+    std::fs::create_dir_all(journal_dir).map_err(|source| WorkflowError::Io {
+        path: journal_dir.to_path_buf(),
+        source,
+    })?;
+    let lock_path = journal_dir.join(format!("{}.lock", safe_component(workflow_id)?));
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|source| WorkflowError::Io {
+            path: lock_path.clone(),
+            source,
+        })?;
+    lock.lock_exclusive().map_err(|source| WorkflowError::Io {
+        path: lock_path.clone(),
+        source,
+    })?;
+    let result = write_operation();
+    if let Err(source) = lock.unlock() {
+        return Err(WorkflowError::Io {
+            path: lock_path,
+            source,
+        });
     }
-    if !changed {
-        return Ok(());
-    }
-    write(journal_dir, workflow_id, &notes)
+    result
 }
 
 /// Read the file, treating absence and corruption alike as "nothing learned".
@@ -142,18 +183,23 @@ fn write(
 
 /// Drop the oldest notes past [`MAX_NOTES`].
 ///
-/// Pinned notes and superseded ones are protected for opposite reasons: a
-/// pinned note is what an operator said, and a superseded one is already the
-/// cheap half of a pair whose replacement would otherwise dangle. Everything
-/// else goes oldest-first.
+/// Pinned notes and both halves of a supersession chain are protected. Dropping
+/// a replacement while retaining its predecessor would hide both from current
+/// briefs and leave a dangling `superseded_by` reference.
 fn prune(notes: &mut Vec<WorkflowNote>) {
     if notes.len() <= MAX_NOTES {
         return;
     }
+    let replacements: std::collections::HashSet<&str> = notes
+        .iter()
+        .filter_map(|note| note.superseded_by.as_deref())
+        .collect();
     let mut droppable: Vec<usize> = notes
         .iter()
         .enumerate()
-        .filter(|(_, note)| !note.pinned && note.superseded_by.is_none())
+        .filter(|(_, note)| {
+            !note.pinned && note.superseded_by.is_none() && !replacements.contains(note.id.as_str())
+        })
         .map(|(index, _)| index)
         .collect();
     // Oldest first: ids sort chronologically, and so does insertion order.
@@ -169,5 +215,4 @@ fn prune(notes: &mut Vec<WorkflowNote>) {
 }
 
 #[cfg(test)]
-#[path = "journal_tests.rs"]
 mod tests;

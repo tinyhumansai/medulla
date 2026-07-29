@@ -361,9 +361,9 @@ async fn run_returns_reply_when_toolless() {
     let client = MedullaClient::new(base, "jwt");
     let out = client.run("go", RunOptions::default()).await.unwrap();
     match out {
-        RunResult::Reply(r) => {
-            assert_eq!(r.reply, "hello");
-            assert_eq!(r.pass_count, Some(1));
+        RunResult::Reply(reply) => {
+            assert_eq!(reply.reply, "hello");
+            assert_eq!(reply.pass_count, Some(1));
         }
         other => panic!("expected reply, got {other:?}"),
     }
@@ -392,9 +392,11 @@ async fn run_returns_loop_when_tools_present() {
     };
     let out = client.run("go", opts).await.unwrap();
     match out {
-        RunResult::Loop(LoopEvent::ToolUse { tool_calls, .. }) => {
-            assert_eq!(tool_calls[0].name, "search");
-        }
+        // `RunResult` boxes its payloads, so match through the box.
+        RunResult::Loop(event) => match *event {
+            LoopEvent::ToolUse { tool_calls, .. } => assert_eq!(tool_calls[0].name, "search"),
+            other => panic!("expected tool_use loop, got {other:?}"),
+        },
         other => panic!("expected tool_use loop, got {other:?}"),
     }
 }

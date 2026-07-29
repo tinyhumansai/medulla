@@ -1,24 +1,23 @@
-//! Typed Medulla surface over the shared `tinyhumans-sdk` transport.
+//! Thin Medulla surface over the shared `tinyhumans-sdk`.
 //!
 //! Surfaces: auth (`/auth`), durable sessions (`/medulla/v1`), SSE event
 //! streaming, and one-shot orchestration (`/orchestration/v1`).
 //!
-//! Every HTTP request is issued by [`tinyhumans_sdk::TinyHumansClient`], which
-//! owns credential headers, the `{ "success": true, "data": ... }` envelope,
-//! percent-encoding of path segments, and the not-exposed-route gate. Backend
-//! failures arrive as [`ClientError::Api`] with the `errorCode` preserved — see
-//! the conversion in [`error`].
+//! The SDK owns essentially all of it now — transport, credential headers, the
+//! `{ "success": true, "data": ... }` envelope, path percent-encoding, the
+//! not-exposed-route gate, the typed request and response models, and the SSE
+//! stream. [`types`] and [`program`] re-export those models under this crate's
+//! established names; most methods below are one-line delegations.
 //!
-//! What remains here is the part the shared SDK does not model. The SDK returns
-//! open `DynamicResponse` JSON for these routes, so this module decodes into the
-//! typed DTOs in [`types`] and [`program`]; and it adds the reconnecting [`sse`]
-//! event stream, which the SDK has no equivalent for.
+//! What genuinely remains here:
 //!
-//! A few routes go through [`tinyhumans_sdk::TinyHumansClient::raw`], the SDK's
-//! own escape hatch, because this crate models their contract more precisely
-//! than the SDK's request types can express — a tri-state recurrence patch, the
-//! `sync=1`/`sync=0` message flag, the NDJSON transcript upload. Each such call
-//! says why inline. They still share the one transport.
+//! - [`ClientError`], the taxonomy front ends branch on, converted from
+//!   [`tinyhumans_sdk::Error`] in [`error`] so an `errorCode` survives on a
+//!   non-2xx response and reaches the login screen.
+//! - The history-reward calls, where this crate needs the full settled status
+//!   and per-metric breakdown that the SDK exposes only a projection of.
+//! - [`RunOptions`], which wraps the SDK's own `RunOptions` to keep
+//!   [`MedullaClient::run`]'s signature stable.
 
 pub mod error;
 pub mod program;
@@ -29,15 +28,14 @@ pub use error::{ClientError, Result};
 pub use program::*;
 pub use types::*;
 
-use futures::stream::Stream;
+use futures::stream::{Stream, StreamExt};
 use reqwest::Method;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 use serde_json::Value;
-use tinyhumans_sdk::api::medulla::{CreateSessionRequest, WorkspaceProfile};
+use tinyhumans_sdk::api::medulla::CreateSessionRequest;
 use tinyhumans_sdk::api::orchestration::RunRequest;
 use tinyhumans_sdk::api::types::{ContinueRunRequest, LoginTokenRequest};
-use tinyhumans_sdk::{enc, QueryParam, TinyHumansClient};
+use tinyhumans_sdk::{QueryParam, TinyHumansClient};
 
 /// Default backend base URL.
 pub const DEFAULT_BASE_URL: &str = "http://localhost:5000";
@@ -97,14 +95,6 @@ fn decode<T: DeserializeOwned>(value: Value) -> Result<T> {
     serde_json::from_value(value).map_err(|e| ClientError::Decode(e.to_string()))
 }
 
-/// Serialize a request DTO whose wire shape this crate owns.
-///
-/// These types are plain data with infallible `Serialize` impls; the error arm
-/// exists only because `serde_json` cannot say so in the type.
-fn to_body<T: Serialize>(value: &T) -> Result<Value> {
-    serde_json::to_value(value).map_err(|e| ClientError::Decode(e.to_string()))
-}
-
 impl MedullaClient {
     /// Start building a client.
     pub fn builder() -> MedullaClientBuilder {
@@ -137,8 +127,8 @@ impl MedullaClient {
     /// Issue a request through the SDK's raw transport and decode the unwrapped
     /// payload.
     ///
-    /// Used only where this crate's request or response contract is finer than
-    /// the SDK's typed namespace method; every caller documents which.
+    /// Used only by the history-reward calls, whose responses this crate models
+    /// more fully than the SDK's projection of them.
     async fn raw<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -268,31 +258,25 @@ impl MedullaClient {
     ) -> Result<SessionCreated> {
         let request = CreateSessionRequest {
             title: title.map(str::to_owned),
-            workspace_profiles: workspace_profiles
-                .iter()
-                .map(|profile| WorkspaceProfile {
-                    workspace: profile.workspace.clone(),
-                    medulla_md: profile.medulla_md.clone(),
-                })
-                .collect(),
+            workspace_profiles: workspace_profiles.to_vec(),
             ..CreateSessionRequest::default()
         };
-        decode(self.sdk.medulla().create_session(&request).await?.0)
+        Ok(self.sdk.medulla().create_session(&request).await?)
     }
 
     /// List sessions (`GET /medulla/v1/sessions`).
     pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
-        decode(self.sdk.medulla().list_sessions(&[]).await?.0)
+        Ok(self.sdk.medulla().list_sessions(&[]).await?)
     }
 
     /// Fetch a session's state (`GET /medulla/v1/sessions/:id`).
     pub async fn get_session(&self, session_id: &str) -> Result<SessionDetail> {
-        decode(self.sdk.medulla().get_session(session_id).await?.0)
+        Ok(self.sdk.medulla().get_session(session_id).await?)
     }
 
     /// Archive a session (`DELETE /medulla/v1/sessions/:id`).
     pub async fn archive_session(&self, session_id: &str) -> Result<SessionArchived> {
-        decode(self.sdk.medulla().delete_session(session_id).await?.0)
+        Ok(self.sdk.medulla().delete_session(session_id).await?)
     }
 
     /// Send a message (`POST /medulla/v1/sessions/:id/messages`).
@@ -305,16 +289,11 @@ impl MedullaClient {
         body: &str,
         sync: bool,
     ) -> Result<SendResult> {
-        // Raw rather than `medulla().send_session_message`: that helper spells
-        // the flag `sync=true`/`sync=false`, and this contract is `1`/`0`.
-        let sync_flag = if sync { "1" } else { "0" };
-        self.raw(
-            Method::POST,
-            &format!("/medulla/v1/sessions/{}/messages", enc(session_id)),
-            &[("sync", Some(sync_flag.to_string()))],
-            Some(&serde_json::json!({ "body": body })),
-        )
-        .await
+        Ok(self
+            .sdk
+            .medulla()
+            .send_session_message(session_id, body, Some(sync))
+            .await?)
     }
 
     /// Replay messages after `after` (`GET .../messages?after=`).
@@ -323,14 +302,12 @@ impl MedullaClient {
         session_id: &str,
         after: Option<i64>,
     ) -> Result<Vec<Message>> {
-        let query: [QueryParam; 1] = [("after", after.map(|a| a.to_string()))];
-        decode(
-            self.sdk
-                .medulla()
-                .session_messages(session_id, &query)
-                .await?
-                .0,
-        )
+        let query = [("after", after.map(|a| a.to_string()))];
+        Ok(self
+            .sdk
+            .medulla()
+            .session_messages(session_id, &query)
+            .await?)
     }
 
     /// Replay events after `after` (`GET .../events?after=`).
@@ -339,19 +316,17 @@ impl MedullaClient {
         session_id: &str,
         after: Option<i64>,
     ) -> Result<Vec<EventEnvelope>> {
-        let query: [QueryParam; 1] = [("after", after.map(|a| a.to_string()))];
-        decode(
-            self.sdk
-                .medulla()
-                .session_events(session_id, &query)
-                .await?
-                .0,
-        )
+        let query = [("after", after.map(|a| a.to_string()))];
+        Ok(self
+            .sdk
+            .medulla()
+            .session_events(session_id, &query)
+            .await?)
     }
 
     /// Abort the running cycle (`POST /medulla/v1/sessions/:id/abort`).
     pub async fn abort(&self, session_id: &str) -> Result<AbortResult> {
-        decode(self.sdk.medulla().abort_session(session_id).await?.0)
+        Ok(self.sdk.medulla().abort_session(session_id).await?)
     }
 
     /// Read the backend's configured worker routing strategy
@@ -361,10 +336,10 @@ impl MedullaClient {
     /// unrecognized, so an absent/garbled strategy degrades to "no backend
     /// preference" rather than an error — the operator's local config still wins.
     pub async fn get_routing_strategy(&self) -> Result<Option<crate::runtime::RoutingStrategy>> {
-        let value = self.sdk.medulla().routing_strategy().await?;
-        Ok(value
-            .get("strategy")
-            .and_then(|v| v.as_str())
+        let strategy = self.sdk.medulla().routing_strategy().await?;
+        Ok(strategy
+            .strategy
+            .as_deref()
             .and_then(crate::runtime::RoutingStrategy::from_wire))
     }
 
@@ -383,29 +358,17 @@ impl MedullaClient {
 
     /// Read the connected worker roster (`GET /medulla/v1/roster`).
     pub async fn roster(&self) -> Result<Vec<RosterWorker>> {
-        let payload: Roster = decode(self.sdk.medulla().roster().await?.0)?;
-        Ok(payload.workers)
+        Ok(self.sdk.medulla().roster().await?)
     }
 
     /// List the operator-owned program task ledger (`GET /medulla/v1/tasks`).
     pub async fn list_program_tasks(&self) -> Result<Vec<ProgramTask>> {
-        let payload: TasksPayload = decode(self.sdk.medulla().list_tasks(&[]).await?.0)?;
-        Ok(payload.tasks)
+        Ok(self.sdk.medulla().list_tasks(&[]).await?)
     }
 
     /// Create an operator-owned program task (`POST /medulla/v1/tasks`).
     pub async fn create_program_task(&self, input: CreateProgramTask) -> Result<ProgramTask> {
-        // Raw rather than `medulla().create_task`: the SDK types `recurrence` as
-        // open JSON, while [`TaskRecurrence`] models the rule.
-        let payload: TaskPayload = self
-            .raw(
-                Method::POST,
-                "/medulla/v1/tasks",
-                &[],
-                Some(&to_body(&input)?),
-            )
-            .await?;
-        Ok(payload.task)
+        Ok(self.sdk.medulla().create_task(&input).await?)
     }
 
     /// Update an operator-owned program task (`PATCH /medulla/v1/tasks/:id`).
@@ -414,31 +377,17 @@ impl MedullaClient {
         task_id: &str,
         patch: UpdateProgramTask,
     ) -> Result<ProgramTask> {
-        // Raw rather than `medulla().update_task`: [`UpdateProgramTask`]
-        // distinguishes an omitted `recurrence` from an explicit `null` that
-        // clears it, which the SDK's `Option<Value>` field cannot express — it
-        // would silently drop the clear.
-        let payload: TaskPayload = self
-            .raw(
-                Method::PATCH,
-                &format!("/medulla/v1/tasks/{}", enc(task_id)),
-                &[],
-                Some(&to_body(&patch)?),
-            )
-            .await?;
-        Ok(payload.task)
+        Ok(self.sdk.medulla().update_task(task_id, &patch).await?)
     }
 
     /// Delete an operator-owned program task (`DELETE /medulla/v1/tasks/:id`).
     pub async fn delete_program_task(&self, task_id: &str) -> Result<bool> {
-        let payload: DeleteProgramItem = decode(self.sdk.medulla().delete_task(task_id).await?.0)?;
-        Ok(payload.deleted)
+        Ok(self.sdk.medulla().delete_task(task_id).await?)
     }
 
     /// List configured GitHub task sources (`GET /medulla/v1/tasks/sources`).
     pub async fn list_program_task_sources(&self) -> Result<Vec<ProgramTaskSource>> {
-        let payload: TaskSourcesPayload = decode(self.sdk.medulla().list_task_sources().await?.0)?;
-        Ok(payload.sources)
+        Ok(self.sdk.medulla().list_task_sources().await?)
     }
 
     /// Configure a GitHub task source (`POST /medulla/v1/tasks/sources`).
@@ -449,32 +398,17 @@ impl MedullaClient {
         &self,
         input: CreateProgramTaskSource,
     ) -> Result<ProgramTaskSource> {
-        // Raw rather than `medulla().create_task_source`: this request types
-        // `state` as [`GithubIssueState`] and omits `labels` only when unset,
-        // where the SDK takes an open string and drops an explicitly empty list.
-        let payload: TaskSourcePayload = self
-            .raw(
-                Method::POST,
-                "/medulla/v1/tasks/sources",
-                &[],
-                Some(&to_body(&input)?),
-            )
-            .await?;
-        Ok(payload.source)
+        Ok(self.sdk.medulla().create_task_source(&input).await?)
     }
 
     /// Synchronize one GitHub source into the task ledger.
     pub async fn sync_program_task_source(&self, source_id: &str) -> Result<TaskSourceSyncResult> {
-        let payload: TaskSourceSyncPayload =
-            decode(self.sdk.medulla().sync_task_source(source_id).await?.0)?;
-        Ok(payload.result)
+        Ok(self.sdk.medulla().sync_task_source(source_id).await?)
     }
 
     /// Remove a configured GitHub task source.
     pub async fn delete_program_task_source(&self, source_id: &str) -> Result<bool> {
-        let payload: DeleteProgramItem =
-            decode(self.sdk.medulla().delete_task_source(source_id).await?.0)?;
-        Ok(payload.deleted)
+        Ok(self.sdk.medulla().delete_task_source(source_id).await?)
     }
 
     // --- SSE -------------------------------------------------------------
@@ -484,23 +418,15 @@ impl MedullaClient {
     ///
     /// The returned stream auto-reconnects with `Last-Event-ID` and
     /// de-duplicates replayed frames by seq. Drop it to stop.
-    ///
-    /// Built by hand rather than through the SDK: the SDK's transport buffers a
-    /// whole response body before returning, which a stream that never ends
-    /// cannot use. The `reqwest::Client` is the one the SDK was given, so the
-    /// two still share a connection pool.
     pub fn stream_events(
         &self,
         session_id: &str,
         last_event_id: Option<u64>,
     ) -> impl Stream<Item = Result<EventEnvelope>> {
-        let url = format!(
-            "{}/medulla/v1/sessions/{}/stream?token={}",
-            self.base_url,
-            enc(session_id),
-            enc(&self.jwt),
-        );
-        sse::event_stream(self.http.clone(), url, last_event_id)
+        self.sdk
+            .raw()
+            .session_event_stream(session_id, last_event_id)
+            .map(|item| item.map_err(ClientError::from))
     }
 
     // --- Orchestration ---------------------------------------------------
@@ -512,16 +438,13 @@ impl MedullaClient {
     pub async fn run(&self, input: &str, options: RunOptions) -> Result<RunResult> {
         let request = RunRequest {
             input: input.to_string(),
-            session_id: options.session_id.clone(),
+            session_id: options.session_id,
             // Selected by the hosted flavours, not by this client.
             flavor: None,
-            tools: match &options.tools {
-                Some(tools) => tools.iter().map(to_body).collect::<Result<Vec<_>>>()?,
-                None => Vec::new(),
-            },
-            options: options.options.as_ref().map(to_body).transpose()?,
+            tools: options.tools.unwrap_or_default(),
+            options: options.options,
         };
-        parse_run_result(self.sdk.orchestration().run(&request).await?.0)
+        Ok(self.sdk.orchestration().run(&request).await?)
     }
 
     /// Continue a tool-loop run (`POST /orchestration/v1/run/continue`).
@@ -534,21 +457,9 @@ impl MedullaClient {
     ) -> Result<LoopEvent> {
         let request = ContinueRunRequest {
             cycle_id: cycle_id.to_string(),
-            tool_results: tool_results
-                .iter()
-                .map(to_body)
-                .collect::<Result<Vec<_>>>()?,
+            tool_results,
         };
-        decode(self.sdk.orchestration().continue_run(&request).await?.0)
-    }
-}
-
-/// Decide whether a run response is a tool-less reply or a tool-loop event.
-fn parse_run_result(value: Value) -> Result<RunResult> {
-    if value.get("stop").is_some() {
-        Ok(RunResult::Loop(decode(value)?))
-    } else {
-        Ok(RunResult::Reply(decode(value)?))
+        Ok(self.sdk.orchestration().continue_run(&request).await?)
     }
 }
 

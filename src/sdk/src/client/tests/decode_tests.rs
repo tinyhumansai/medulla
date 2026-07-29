@@ -271,27 +271,6 @@ fn decodes_loop_events() {
 }
 
 #[test]
-fn run_result_distinguishes_reply_and_loop() {
-    let reply = parse_run_result(json!({
-        "reply": "hello",
-        "passCount": 1,
-        "sessionId": "s1",
-        "cycleId": "c1",
-    }))
-    .unwrap();
-    assert!(matches!(reply, RunResult::Reply(_)));
-
-    let looped = parse_run_result(json!({
-        "stop": "end",
-        "cycleId": "c1",
-        "sessionId": "s1",
-        "reply": "done",
-    }))
-    .unwrap();
-    assert!(matches!(looped, RunResult::Loop(LoopEvent::End { .. })));
-}
-
-#[test]
 fn run_options_serialize_camel_case() {
     let opts = RunOptions {
         session_id: Some("s1".into()),

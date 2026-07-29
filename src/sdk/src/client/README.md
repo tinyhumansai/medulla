@@ -1,42 +1,43 @@
 # Client
 
-Typed Medulla surface over the shared `tinyhumans-sdk` transport.
+Thin Medulla surface over the shared `tinyhumans-sdk`.
 
-Requests are issued by `tinyhumans_sdk::TinyHumansClient`, which owns credential
-headers, the `{success, data}` envelope, path percent-encoding, and the
-not-exposed-route gate. This module is not a second HTTP client — it adds what
-the shared SDK does not model:
+The SDK owns essentially all of it: transport, credential headers, the
+`{success, data}` envelope, path percent-encoding, the not-exposed-route gate,
+the typed request and response models, and the SSE session stream. `types/` and
+`program/` re-export those models under this crate's established names, so
+callers here keep the names they already use while one definition of the
+contract lives upstream.
 
-- **Typed DTOs.** The SDK returns open `DynamicResponse` JSON for these routes;
-  the models in `types/` and `program/` give them a checked shape.
-- **The `ClientError` taxonomy.** Front ends branch on one predicate
-  (`is_auth_error`), so the SDK's `Status`/`Envelope` split collapses into
-  `ClientError::Api` with the `errorCode` recovered from either.
-- **The SSE event stream.** The SDK's transport buffers a whole response body,
-  which a stream that never ends cannot use.
+What genuinely remains:
 
-A few routes use `TinyHumansClient::raw`, the SDK's own escape hatch, where this
-crate models a contract the SDK's request types cannot express — a tri-state
-recurrence patch, the `sync=1`/`sync=0` message flag, the NDJSON transcript
-upload. Each says why inline. They still share the one transport.
+- **`ClientError`** — the taxonomy front ends branch on (`is_auth_error`),
+  converted from `tinyhumans_sdk::Error` in `error/`. The conversion recovers an
+  `errorCode` from a non-2xx body, without which a 401 carrying `TOKEN_EXPIRED`
+  would stop reaching the login screen.
+- **The history-reward calls** — this crate needs the full settled status and
+  per-metric breakdown the reveal screen renders; the SDK exposes a narrower
+  projection, so these decode through `raw()`.
+- **`RunOptions`** — wraps the SDK's own `RunOptions` to keep
+  `MedullaClient::run`'s signature stable.
+
+Everything else is a one-line delegation.
 
 ## Contents
 
-- [`error/`](./error/) — Error type for the Medulla client, and the conversion from `tinyhumans_sdk::Error`.
-- [`program/`](./program/) — Typed models shared by the public worker-roster and task-program endpoints.
-- [`sse/`](./sse/) — Hand-rolled Server-Sent Events parsing and a reconnecting event stream.
-- [`tests/`](./tests/) — Unit and integration tests for the Medulla client, split by surface: `decode_tests` covers event/run-result JSON decoding and SDK error mapping; `sse_tests` covers the SSE parser, dedupe cursor, and streaming; `integration_tests` covers the HTTP endpoint surface against a TCP stub.
-- [`types/`](./types/) — JSON types mirroring the backend API responses.
-- [`mod.rs`](./mod.rs) — The client itself: one method per endpoint, over the SDK.
+- [`error/`](./error/) — `ClientError` and the conversion from `tinyhumans_sdk::Error`.
+- [`program/`](./program/) — Roster and task-program models, re-exported from the SDK.
+- [`sse/`](./sse/) — Re-export of the SDK's SSE parser and event stream.
+- [`tests/`](./tests/) — `decode_tests` covers event decoding and SDK error mapping; `sse_tests` covers the parser, dedupe cursor, and streaming; `integration_tests` covers the endpoint surface against a TCP stub.
+- [`types/`](./types/) — SDK model re-exports plus the history-reward and run-option types this crate still owns.
+- [`mod.rs`](./mod.rs) — The client: one method per endpoint.
 
 ## Maintenance
 
-Keep this index synchronized when responsibilities move. Put shared data
-structures in `types.rs`, focused unit tests in `tests.rs` or a sibling
-`_tests.rs`, and preserve the module-level Rust documentation as the API source
-of truth.
+New endpoints belong on the SDK's typed namespace methods. If a response needs a
+shape the SDK does not model, prefer widening the SDK over decoding it here —
+this module going back to owning models is how three copies of the contract
+appeared in the first place.
 
-New endpoints should prefer the SDK's typed namespace methods. Reach for `raw()`
-only when this crate's contract is genuinely finer than the SDK's request type,
-and say so in a comment — otherwise the shared transport quietly stops being the
-one place the backend contract lives.
+Reach for `raw()` only where this crate genuinely needs more than the SDK
+exposes, and say so in a comment.

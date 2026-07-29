@@ -19,9 +19,15 @@ use crate::workflows::{ops, WorkflowStore};
 use super::RpcError;
 
 /// Every tool this server exposes, in the order a model meets them.
-pub const TOOL_NAMES: [&str; 9] = [
+///
+/// Two are deliberately absent. There is no tool to *run* a workflow and none to
+/// cancel a run: this server is attached to an authoring turn, and a turn that
+/// can start real work has stopped being an authoring turn. The operator runs a
+/// workflow from the pane they are looking at, where they can see what it does.
+pub const TOOL_NAMES: [&str; 13] = [
     "workflow_list",
     "workflow_get",
+    "workflow_host",
     "workflow_catalog",
     "workflow_create",
     "workflow_apply_ops",
@@ -29,6 +35,9 @@ pub const TOOL_NAMES: [&str; 9] = [
     "workflow_validate",
     "workflow_dry_run",
     "workflow_runs",
+    "workflow_run_get",
+    "workflow_history",
+    "workflow_delete",
 ];
 
 /// A JSON Schema object with the given properties and required keys.
@@ -59,6 +68,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 json!({ "id": { "type": "string", "description": "The workflow id." } }),
                 &["id"],
             ),
+        }),
+        json!({
+            "name": "workflow_host",
+            "description":
+                "What this machine will actually permit a workflow to do: the default worker \
+                 `agent` nodes dispatch to, the tool slugs and HTTP hosts that are allowed, and \
+                 whether `code` nodes may run. Read this before writing a graph that reaches \
+                 outside the process — every one of these is enforced at run time, so a graph \
+                 that ignores them saves and validates cleanly and then fails the first time it \
+                 matters.",
+            "inputSchema": schema(json!({}), &[]),
         }),
         json!({
             "name": "workflow_catalog",
@@ -169,6 +189,41 @@ pub fn tool_definitions() -> Vec<Value> {
                 &["id"],
             ),
         }),
+        json!({
+            "name": "workflow_run_get",
+            "description":
+                "One run in full, by run id: every step, its status, its duration, and the \
+                 expressions that resolved to null on the way. Where to start when asked why a \
+                 workflow failed — the steps say what actually happened, which is more reliable \
+                 than reading the graph and reasoning about what it would do.",
+            "inputSchema": schema(
+                json!({ "runId": { "type": "string", "description": "The run id." } }),
+                &["runId"],
+            ),
+        }),
+        json!({
+            "name": "workflow_history",
+            "description":
+                "The versions of a workflow that have been written over, newest first, each with \
+                 the whole graph as it then was. Useful for saying what changed and when — an \
+                 edit that broke something is often easier to see next to the version before it. \
+                 Restoring one is the operator's own action, not yours.",
+            "inputSchema": schema(
+                json!({ "id": { "type": "string", "description": "The workflow id." } }),
+                &["id"],
+            ),
+        }),
+        json!({
+            "name": "workflow_delete",
+            "description":
+                "Remove a workflow. Only when the operator asked for it in this turn — deleting \
+                 something they did not ask about is not a helpful tidy-up. The version is kept \
+                 in history, so an operator can undo it, but do not treat that as licence.",
+            "inputSchema": schema(
+                json!({ "id": { "type": "string", "description": "The workflow to remove." } }),
+                &["id"],
+            ),
+        }),
     ]
 }
 
@@ -184,6 +239,7 @@ fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
 /// Run a `tools/call`.
 pub(super) async fn call(
     store: &Arc<dyn WorkflowStore>,
+    config: &crate::config::WorkflowsConfig,
     params: &Value,
 ) -> Result<Value, RpcError> {
     let name = params
@@ -239,6 +295,10 @@ pub(super) async fn call(
             ops::dry_run(store, id, input).await.map_err(to_rpc)
         }
         "workflow_runs" => ops::list_runs(store, arg(&arguments, "id")?).map_err(to_rpc),
+        "workflow_run_get" => ops::get_run(store, arg(&arguments, "runId")?).map_err(to_rpc),
+        "workflow_host" => Ok(ops::host_facts(config)),
+        "workflow_history" => ops::list_history(store, arg(&arguments, "id")?).map_err(to_rpc),
+        "workflow_delete" => ops::delete(store, arg(&arguments, "id")?).map_err(to_rpc),
         other => {
             return Err(RpcError::invalid_params(format!(
                 "unknown tool '{other}'; available: {}",

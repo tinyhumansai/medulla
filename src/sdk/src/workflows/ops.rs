@@ -231,6 +231,43 @@ pub fn catalog(kind: Option<&str>) -> Result<Value, WorkflowError> {
     }
 }
 
+/// What this host will actually permit a workflow to do.
+///
+/// The grounding an author most needs and had no way to get. Every one of these
+/// is enforced at *run* time, so a graph that ignores them saves cleanly,
+/// validates cleanly, and then fails the first time it matters — usually
+/// overnight, to nobody watching.
+///
+/// Read from configuration rather than guessed, so the answer is this machine's
+/// and not a plausible default.
+pub fn host_facts(config: &crate::config::WorkflowsConfig) -> Value {
+    json!({
+        "defaultWorker": if config.default_worker.trim().is_empty() {
+            Value::Null
+        } else {
+            Value::String(config.default_worker.clone())
+        },
+        "nativeTools": crate::flow_engine::caps::tools::NATIVE_TOOLS,
+        "toolAllowlist": config.tool_allowlist,
+        "httpAllowlist": config.http_allowlist,
+        "allowCode": config.allow_code,
+        "runTimeoutSecs": config.run_timeout_secs,
+        "notes": [
+            if config.default_worker.trim().is_empty() {
+                "No default worker is configured, so every `agent` node must name a \
+                 `config.agent_ref` — a node without one fails at run time."
+            } else {
+                "An `agent` node with no `config.agent_ref` dispatches to the default worker \
+                 above. Any other value must name a worker this host can actually reach."
+            },
+            "A `tool_call` slug outside `nativeTools` must appear in `toolAllowlist`, and even \
+             then there is no third-party integration registry on this host — it will still \
+             fail at run time. Express host-specific work as an `agent` node.",
+            "Only `manual` triggers fire here. Other kinds are stored and never dispatched.",
+        ],
+    })
+}
+
 /// A record as the document an author sees: the graph, with the host fields
 /// beside it.
 fn record_value(record: &WorkflowRecord) -> Value {

@@ -27,21 +27,49 @@ names what refuses you and what the refusal will say.
 
 # The tools
 
+Reading:
+
 - `workflow_get` — the graph, whole. Read it before you patch it.
+- `workflow_list` — every installed workflow.
 - `workflow_catalog` — what node kinds exist, what config each takes, and this
   host's notes on them. This is the source of truth; where it and this document
   disagree, **the tool wins**. Call it rather than guessing a field name.
+- `workflow_host` — what this machine actually permits: the default worker, the
+  allowed tool slugs and HTTP hosts, whether `code` may run. Call it before
+  writing any step that reaches outside the process. These are enforced at *run*
+  time, so a graph that ignores them saves and validates cleanly and then fails
+  the first time it matters — usually overnight, to nobody watching.
+
+Editing:
+
 - `workflow_preview_ops` — apply a patch to a copy and report the result without
   saving. What you use when you are not sure.
 - `workflow_apply_ops` — apply and save.
+- `workflow_create` — install a whole graph document. New workflows only.
+- `workflow_delete` — remove one. Only when asked for in this turn.
+
+Checking:
+
 - `workflow_validate` — check a graph, saved or inline, and get every failure at
   once rather than the first.
 - `workflow_dry_run` — execute the graph against mocks. See *What a dry run
   proves* below, which is authoritative about what this does and does not tell
   you.
-- `workflow_list` — every installed workflow.
-- `workflow_runs` — a workflow's run history, newest first. Where you look when
-  the operator asks why something failed.
+
+Looking at what happened:
+
+- `workflow_runs` — a workflow's run history, newest first.
+- `workflow_run_get` — one run in full: every step, its status, and the
+  expressions that resolved to null. Start here when asked why something failed.
+  The steps say what *happened*, which beats reading the graph and reasoning
+  about what it would do.
+- `workflow_history` — the versions this workflow has been written over, each
+  with its whole graph. An edit that broke something is easier to see next to
+  the version before it. Restoring one is the operator's action, not yours.
+
+There is no tool here that runs a workflow, and none that cancels a run. That is
+deliberate: you are in an authoring turn. If the operator wants to see it run,
+point them at the Run control rather than offering to do it yourself.
 
 Patch with ops rather than re-creating a workflow. `workflow_create` on an
 existing id replaces the whole document, which silently discards every field you

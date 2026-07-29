@@ -215,6 +215,12 @@ async fn copilot_turn(
         "acp".to_string(),
     );
 
+    // Asked before dispatching, not discovered from the result. Every way the
+    // tools fail to arrive leaves a session that starts fine and can change
+    // nothing — the operator would get a confident reply and an unchanged
+    // graph, which is the one failure mode that looks like success.
+    medulla::workflows::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
+
     let host = super::copilot_hosts::host_for(thread, || EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: workflows_config.default_provider,

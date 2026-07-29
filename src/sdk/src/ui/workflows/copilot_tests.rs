@@ -14,6 +14,21 @@ fn asking_records_the_instruction_and_marks_the_thread_busy() {
 }
 
 #[test]
+fn one_of_two_overlapping_turns_finishing_keeps_the_thread_busy() {
+    let mut state = CopilotState::new("sweep");
+    state.ask("operator edit");
+    state.ask("automatic failure review");
+
+    state.reply("edit done");
+
+    assert!(state.busy);
+    assert_eq!(state.in_flight, 1);
+    state.reply("review done");
+    assert!(!state.busy);
+    assert_eq!(state.in_flight, 0);
+}
+
+#[test]
 fn a_reply_ends_the_turn() {
     let mut state = CopilotState::new("sweep");
     state.ask("go");

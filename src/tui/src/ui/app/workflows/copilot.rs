@@ -250,6 +250,14 @@ impl App {
                 None => self.set_status(format!("{workflow} updated")),
             }
         }
+        if self
+            .wf
+            .copilots
+            .get(&drain_key)
+            .is_some_and(|thread| thread.busy)
+        {
+            return None;
+        }
         // Drained after the catalogue refresh, so the queued turn is dispatched
         // against the graph this one actually left behind rather than the one
         // on screen when it was typed.

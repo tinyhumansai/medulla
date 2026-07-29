@@ -341,6 +341,25 @@ fn a_failed_turn_keeps_its_instruction_so_it_can_be_retried() {
 }
 
 #[test]
+fn automatic_review_does_not_clear_or_drain_a_busy_operator_turn() {
+    let (_home, mut app) = app_with(&[diamond("sweep")]);
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "edit it");
+    app.submit_copilot().expect("operator turn");
+    app.copilot_started("sweep", "review the failed run");
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "then document it");
+    assert!(app.submit_copilot().is_none(), "follow-up queues");
+
+    assert!(app
+        .copilot_finished("sweep", "edit done".into(), Vec::new(), None)
+        .is_none());
+    assert!(app.copilot_busy(), "the automatic review is still running");
+    assert!(matches!(
+        app.copilot_finished("sweep", "review done".into(), Vec::new(), None),
+        Some(Cmd::CopilotTurn { .. })
+    ));
+}
+
+#[test]
 fn retrying_with_nothing_to_retry_says_so() {
     let (_home, mut app) = app_with(&[diamond("sweep")]);
 

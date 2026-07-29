@@ -168,6 +168,26 @@ pub trait WorkflowStore: Send + Sync {
         ))
     }
 
+    /// Save a proposal only while its workflow still has `expected_fingerprint`.
+    ///
+    /// File-backed stores override this atomically with definition writes. The
+    /// default preserves the contract for lightweight test stores that do not
+    /// expose transactions.
+    fn save_proposal_if_fingerprint(
+        &self,
+        proposal: &WorkflowProposal,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let Some(current) = self.get(&proposal.workflow_id)? else {
+            return Ok(false);
+        };
+        if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
+            return Ok(false);
+        }
+        self.save_proposal(proposal)?;
+        Ok(true)
+    }
+
     /// One proposal by id.
     fn get_proposal(&self, id: &str) -> Result<Option<WorkflowProposal>, WorkflowError> {
         let _ = id;

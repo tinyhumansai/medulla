@@ -13,7 +13,6 @@ use tokio::sync::mpsc;
 use super::context::record_failure_note;
 use super::registry::EvolveGuard;
 use super::types::{EvolveConfig, EvolveOutcome, EvolveTrigger};
-use super::verify::verify;
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::hub::TaskRequest;
 use crate::workflows::copilot::{CopilotRequest, FailedRun, Mode};
@@ -167,8 +166,8 @@ impl EvolveSession {
             // the store another way, or one whose graph moved mid-turn, would
             // otherwise offer something unchecked.
             if proposal.verification.is_none() {
-                proposal.verification = Some(verify(&self.store, &proposal).await);
-                self.store.save_proposal(&proposal)?;
+                crate::workflows::ops::verify_proposal(&self.store, &proposal.id).await?;
+                proposal = crate::workflows::require_proposal(self.store.as_ref(), &proposal.id)?;
             }
             proposals.push(proposal);
         }

@@ -516,6 +516,27 @@ impl WorkflowStore for FileWorkflowStore {
         proposals::save(&self.proposals_dir, proposal)
     }
 
+    fn save_proposal_if_fingerprint(
+        &self,
+        proposal: &WorkflowProposal,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.with_definition_lock(&proposal.workflow_id, || {
+            let Some(current) = self.get(&proposal.workflow_id)? else {
+                return Ok(false);
+            };
+            if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
+                return Ok(false);
+            }
+            proposals::save(&self.proposals_dir, proposal)?;
+            Ok(true)
+        })
+    }
+
     fn get_proposal(&self, id: &str) -> Result<Option<WorkflowProposal>, WorkflowError> {
         proposals::read(&self.proposals_dir, id)
     }

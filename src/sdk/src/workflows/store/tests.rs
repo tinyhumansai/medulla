@@ -14,7 +14,9 @@ use serde_json::json;
 use super::file::{new_run_record, parse_workflow, validate_graph, workflow_dirs};
 use super::{require, require_run, rollback, undo_last, FileWorkflowStore, WorkflowStore};
 use crate::workflows::evolve::EvolveGuard;
-use crate::workflows::types::{RunStatus, WorkflowError, WorkflowRecord};
+use crate::workflows::types::{
+    ProposalStatus, RunStatus, WorkflowError, WorkflowProposal, WorkflowRecord,
+};
 use crate::workflows::NoteSource;
 
 /// A store rooted in a temporary directory, with definitions and runs kept
@@ -94,6 +96,36 @@ fn independent_instances_over_the_same_state_share_evolution_claims() {
         EvolveGuard::claim(&second_scope, "deploy").is_none(),
         "another instance over the same state must not start a duplicate review"
     );
+}
+
+#[test]
+fn a_proposal_is_not_published_after_its_base_graph_moves() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let mut record = parse_workflow(&valid_document("deploy"), "deploy").unwrap();
+    store.save(&record).unwrap();
+    let base_fingerprint = crate::workflows::fingerprint(&record.graph);
+    let proposal = WorkflowProposal {
+        id: "proposal".into(),
+        workflow_id: "deploy".into(),
+        created_at: 1,
+        rationale: "change the worker".into(),
+        ops: json!([]),
+        evidence_runs: Vec::new(),
+        note_ids: Vec::new(),
+        base_fingerprint: base_fingerprint.clone(),
+        verification: None,
+        status: ProposalStatus::Pending,
+        decided_at: None,
+        decision_reason: None,
+    };
+    record.graph.nodes[1].name = "Changed concurrently".into();
+    store.save(&record).unwrap();
+
+    assert!(!store
+        .save_proposal_if_fingerprint(&proposal, &base_fingerprint)
+        .unwrap());
+    assert!(store.get_proposal(&proposal.id).unwrap().is_none());
 }
 
 #[test]

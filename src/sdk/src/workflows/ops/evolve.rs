@@ -140,12 +140,13 @@ pub async fn propose(
             .map_err(|err| {
                 WorkflowError::Engine(format!("proposal decision lock task failed: {err}"))
             })??;
-    // The lock may have waited behind an acceptance or another publication.
-    mark_stale_if_base_changed(store, &mut proposal)?;
-
     // A workflow with two undecided proposals asks an operator to hold both in
     // their head at once, and the older one was written from less evidence.
-    store.save_proposal(&proposal)?;
+    publish_against_base(
+        store,
+        &mut proposal,
+        "the workflow changed while this proposal was being verified",
+    )?;
     if proposal.is_applicable() {
         supersede_earlier(store, &proposal)?;
     }
@@ -175,6 +176,24 @@ pub(super) fn mark_stale_if_base_changed(
     proposal.decision_reason =
         Some("the workflow changed while this proposal was being verified".to_string());
     Ok(())
+}
+
+/// Publish a pending proposal only while its captured graph is still current.
+fn publish_against_base(
+    store: &Arc<dyn WorkflowStore>,
+    proposal: &mut WorkflowProposal,
+    stale_reason: &str,
+) -> Result<(), WorkflowError> {
+    if !proposal.is_pending() {
+        return store.save_proposal(proposal);
+    }
+    if store.save_proposal_if_fingerprint(proposal, &proposal.base_fingerprint)? {
+        return Ok(());
+    }
+    proposal.status = ProposalStatus::Stale;
+    proposal.decided_at = Some(crate::clock::now_millis() as u64);
+    proposal.decision_reason = Some(stale_reason.to_string());
+    store.save_proposal(proposal)
 }
 
 /// Mark this workflow's other undecided proposals as stale.
@@ -245,17 +264,12 @@ pub async fn verify_proposal(
     if !proposal.is_pending() {
         return Ok(json!({ "ok": proposal.is_applicable(), "proposal": proposal }));
     }
-    let current = require(store.as_ref(), &proposal.workflow_id)?;
-    if fingerprint(&current.graph) != proposal.base_fingerprint {
-        proposal.status = ProposalStatus::Stale;
-        proposal.decided_at = Some(crate::clock::now_millis() as u64);
-        proposal.decision_reason =
-            Some("the workflow changed after this proposal was written".to_string());
-        store.save_proposal(&proposal)?;
-        return Ok(json!({ "ok": false, "proposal": proposal }));
-    }
     proposal.verification = Some(verification);
-    store.save_proposal(&proposal)?;
+    publish_against_base(
+        store,
+        &mut proposal,
+        "the workflow changed after this proposal was written",
+    )?;
     Ok(json!({ "ok": proposal.is_applicable(), "proposal": proposal }))
 }
 

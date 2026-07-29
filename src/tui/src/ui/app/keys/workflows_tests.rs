@@ -486,3 +486,39 @@ fn alt_held_characters_are_not_typed_into_the_draft() {
     assert!(matches!(result, WorkflowsKey::Unhandled));
     assert!(app.wf.draft.text.is_empty());
 }
+
+#[test]
+fn r_in_the_copilot_retries_only_when_nothing_is_typed() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+    key(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.wf_focus(), WorkflowFocus::Copilot);
+
+    // With a draft in progress `r` is a letter, because every printable key in
+    // this pane types — an `r` that sometimes did something else would be
+    // worse than no retry at all.
+    key(&mut app, KeyCode::Char('g'));
+    key(&mut app, KeyCode::Char('r'));
+    assert_eq!(app.wf.draft.text, "gr");
+
+    // Emptied, so `r` is the retry again.
+    for _ in 0..2 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    let pressed = key(&mut app, KeyCode::Char('r'));
+    assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+    assert!(
+        app.status().contains("Nothing to retry"),
+        "{}",
+        app.status()
+    );
+}
+
+#[test]
+fn f_on_a_run_that_did_not_fail_says_there_is_nothing_to_repair() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+
+    // No runs at all, so the cursor is on the workflow rather than a run.
+    let pressed = key(&mut app, KeyCode::Char('f'));
+
+    assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+}

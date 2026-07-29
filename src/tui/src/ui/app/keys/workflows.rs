@@ -88,6 +88,9 @@ impl App {
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
             KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
             KeyCode::Char('u') => WorkflowsKey::Handled(self.undo_selected_workflow()),
+            // `f` for "fix". Only meaningful with the cursor on a run, which is
+            // where the operator is when they can see one failed.
+            KeyCode::Char('f') => WorkflowsKey::Handled(self.repair_selected_run()),
             // Every other character is swallowed so a stray letter cannot fire a
             // content-pane action from the menu — the settlement Settings makes.
             KeyCode::Char(_) => WorkflowsKey::Handled(None),
@@ -204,6 +207,12 @@ impl App {
                     self.wf.focus = WorkflowFocus::Canvas;
                 }
                 WorkflowsKey::Handled(None)
+            }
+            // Retry, but only with nothing typed: every printable key in this
+            // pane types, and an `r` that sometimes did something else instead
+            // would be worse than no retry at all.
+            KeyCode::Char('r') if self.wf.draft.text.is_empty() => {
+                WorkflowsKey::Handled(self.retry_copilot())
             }
             KeyCode::Char(c) if !alt => {
                 self.wf.draft =

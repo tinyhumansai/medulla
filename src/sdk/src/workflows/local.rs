@@ -65,4 +65,13 @@ impl LocalWorkflowHost {
     pub fn dispatch(&self) -> Arc<dyn HarnessDispatch> {
         self.dispatch.clone()
     }
+
+    /// Stop whatever this host currently has in flight.
+    ///
+    /// Scoped to this host, which is what makes it safe: a copilot pane holds
+    /// one of these per conversation, so stopping "everything here" is stopping
+    /// the turn the operator is watching and nothing else.
+    pub fn abort(&self) {
+        self.dispatch.abort_in_flight();
+    }
 }

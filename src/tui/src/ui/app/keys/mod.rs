@@ -119,6 +119,14 @@ impl App {
                     return None;
                 }
                 KeyCode::Char('x') => {
+                    // On the Workflows tab with a turn in flight, ⌃X means the
+                    // copilot: it is the thing the operator is watching, and
+                    // aborting the chat runtime instead would stop something
+                    // they are not looking at while the pane kept spinning.
+                    #[cfg(feature = "workflows")]
+                    if tab == "Workflows" && self.copilot_busy() {
+                        return self.abort_copilot();
+                    }
                     self.runtime.abort();
                     self.set_status("Abort requested");
                     return None;

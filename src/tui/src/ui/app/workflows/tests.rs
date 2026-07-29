@@ -270,17 +270,127 @@ fn an_empty_instruction_dispatches_nothing() {
 }
 
 #[test]
-fn a_second_instruction_is_refused_while_a_turn_is_in_flight() {
+fn a_second_instruction_is_queued_while_a_turn_is_in_flight() {
     let (_home, mut app) = app_with(&[diamond("sweep")]);
     app.wf.draft = crate::ui::composer::insert_at("", 0, "one");
     app.submit_copilot().expect("first turn");
     app.wf.draft = crate::ui::composer::insert_at("", 0, "two");
 
+    // Queued rather than refused, which this used to be. The reasoning changed
+    // when the pane became one conversation: the follow-up now lands in a
+    // session that has seen the first turn's edit.
+    assert!(app.submit_copilot().is_none(), "not dispatched yet");
+    assert!(app.status().contains("Queued"), "{}", app.status());
     assert!(
-        app.submit_copilot().is_none(),
-        "the agent is editing the graph the second instruction was written against"
+        app.wf.draft.text.is_empty(),
+        "the composer is cleared, so it does not look unsent"
     );
-    assert!(app.status().contains("still working"), "{}", app.status());
+}
+
+#[test]
+fn a_queued_instruction_goes_when_the_running_turn_finishes() {
+    let (_home, mut app) = app_with(&[diamond("sweep")]);
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "one");
+    app.submit_copilot().expect("first turn");
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "and the other node too");
+    app.submit_copilot();
+
+    let queued = app.copilot_finished("sweep", "did the first".into(), Vec::new(), None);
+
+    let Some(Cmd::CopilotTurn { instruction, .. }) = queued else {
+        panic!("the queued instruction should be dispatched, got {queued:?}");
+    };
+    assert_eq!(instruction, "and the other node too");
+    assert!(app.copilot_busy(), "the queued turn is now the running one");
+}
+
+#[test]
+fn a_failed_turn_drops_what_was_queued_behind_it() {
+    let (_home, mut app) = app_with(&[diamond("sweep")]);
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "one");
+    app.submit_copilot().expect("first turn");
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "two");
+    app.submit_copilot();
+
+    app.copilot_failed("sweep", "the harness timed out".into());
+
+    // The follow-up assumed the turn that just failed had happened; running it
+    // anyway would act on a graph nobody edited.
+    assert!(!app.copilot_busy());
+    assert!(app
+        .copilot_finished("sweep", String::new(), Vec::new(), None)
+        .is_none());
+}
+
+#[test]
+fn a_failed_turn_keeps_its_instruction_so_it_can_be_retried() {
+    let (_home, mut app) = app_with(&[diamond("sweep")]);
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "add a slack step");
+    app.submit_copilot().expect("turn");
+
+    app.copilot_failed("sweep", "the harness timed out".into());
+    let retried = app.retry_copilot();
+
+    // A turn that times out after two minutes should not also cost the
+    // operator the sentence they wrote.
+    let Some(Cmd::CopilotTurn { instruction, .. }) = retried else {
+        panic!("expected a retry, got {retried:?}");
+    };
+    assert_eq!(instruction, "add a slack step");
+}
+
+#[test]
+fn retrying_with_nothing_to_retry_says_so() {
+    let (_home, mut app) = app_with(&[diamond("sweep")]);
+
+    assert!(app.retry_copilot().is_none());
+    assert!(
+        app.status().contains("Nothing to retry"),
+        "{}",
+        app.status()
+    );
+}
+
+#[test]
+fn a_new_instruction_supersedes_the_one_that_failed() {
+    let (_home, mut app) = app_with(&[diamond("sweep")]);
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "first attempt");
+    app.submit_copilot().expect("turn");
+    app.copilot_failed("sweep", "timed out".into());
+
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "never mind, do this");
+    app.submit_copilot().expect("second turn");
+    app.copilot_finished("sweep", "done".into(), Vec::new(), None);
+
+    // Offering to retry something the operator has replaced would be offering
+    // to undo their own correction.
+    assert!(app.retry_copilot().is_none());
+}
+
+#[test]
+fn aborting_stops_the_turn_and_drops_anything_behind_it() {
+    let (_home, mut app) = app_with(&[diamond("sweep")]);
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "one");
+    app.submit_copilot().expect("turn");
+    app.wf.draft = crate::ui::composer::insert_at("", 0, "two");
+    app.submit_copilot();
+
+    let aborted = app.abort_copilot();
+
+    assert!(matches!(aborted, Some(Cmd::AbortCopilot { .. })));
+    // The operator is stopping this line of work; finishing what they just
+    // interrupted is not what they asked for.
+    assert!(app
+        .copilot_finished("sweep", String::new(), Vec::new(), None)
+        .is_none());
+}
+
+#[test]
+fn aborting_with_nothing_running_says_so_rather_than_pretending() {
+    let (_home, mut app) = app_with(&[diamond("sweep")]);
+
+    assert!(app.abort_copilot().is_none());
+    assert!(app.status().contains("not running"), "{}", app.status());
 }
 
 #[test]

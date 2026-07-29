@@ -436,6 +436,27 @@ pub enum Cmd {
         /// The workflow to restore.
         id: String,
     },
+    /// Stop the copilot turn running on a thread.
+    #[cfg(feature = "workflows")]
+    AbortCopilot {
+        /// Which copilot thread to stop.
+        thread: String,
+    },
+    /// Ask the copilot to diagnose a failed run and fix its cause.
+    ///
+    /// Separate from [`Cmd::CopilotTurn`] because it carries the failure: the
+    /// run, its error, and the nodes implicated. All three are on screen when
+    /// the operator presses the key, and a turn that had to rediscover them
+    /// would start a step behind.
+    #[cfg(feature = "workflows")]
+    RepairWorkflow {
+        /// The workflow the run belongs to.
+        workflow: String,
+        /// The operator's words, if they typed any.
+        instruction: String,
+        /// The run to diagnose.
+        run_id: String,
+    },
 }
 
 /// The modal state for the "resume a chat" picker overlay.

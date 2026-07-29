@@ -170,6 +170,30 @@ pub(super) fn run_cmd(
         #[cfg(feature = "workflows")]
         Cmd::UndoWorkflow { id } => workflows::spawn_undo(id, msg_tx),
         #[cfg(feature = "workflows")]
+        Cmd::AbortCopilot { thread } => {
+            // Inline: signalling an abort is a lock and a notify, and spawning
+            // a task to do it would only delay the one thing the operator is
+            // waiting for.
+            let status = if copilot_hosts::abort(&thread) {
+                "Stopping the copilot…"
+            } else {
+                "Nothing is running on this thread"
+            };
+            let _ = msg_tx.send(AppMsg::Status(status.to_string()));
+        }
+        #[cfg(feature = "workflows")]
+        Cmd::RepairWorkflow {
+            workflow,
+            instruction,
+            run_id,
+        } => workflows::spawn_repair(
+            workflow,
+            instruction,
+            run_id,
+            _workflows_config.clone(),
+            msg_tx,
+        ),
+        #[cfg(feature = "workflows")]
         Cmd::CopilotTurn {
             workflow,
             instruction,

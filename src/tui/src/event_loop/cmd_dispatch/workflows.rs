@@ -98,6 +98,8 @@ enum Turn {
     Edit(String),
     /// Build a workflow that does not exist yet.
     Create,
+    /// Diagnose a failed run of this workflow and fix its cause.
+    Repair(String, medulla::workflows::FailedRun),
 }
 
 /// Spawn a copilot turn against `workflow`, streaming its progress.
@@ -133,6 +135,50 @@ pub(super) fn spawn_copilot_create(
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
     spawn_turn(Turn::Create, thread, instruction, workflows_config, msg_tx);
+}
+
+/// Spawn a copilot turn that diagnoses `run_id` and fixes what caused it.
+///
+/// The run record is read here rather than in the turn, so the brief can carry
+/// the error and the failing nodes. Reading it costs one directory read against
+/// making the agent spend a tool call rediscovering what this process already
+/// had on screen.
+pub(super) fn spawn_repair(
+    workflow: String,
+    instruction: String,
+    run_id: String,
+    workflows_config: medulla::config::WorkflowsConfig,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
+    let env: HashMap<String, String> = std::env::vars().collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let store = medulla::workflows::discover_store(&env, &cwd);
+
+    // A run that cannot be read still gets a repair turn: the id alone lets the
+    // agent fetch it with `workflow_run_get`, and refusing the turn over a
+    // missing detail would be worse than starting it with less.
+    let record = store.get_run(&run_id).ok().flatten();
+    let run = medulla::workflows::FailedRun {
+        id: run_id,
+        error: record.as_ref().and_then(|r| r.error.clone()),
+        failing_nodes: record
+            .map(|r| {
+                r.steps
+                    .into_iter()
+                    .filter(|step| step.status == "error")
+                    .map(|step| step.node_id)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+
+    spawn_turn(
+        Turn::Repair(workflow.clone(), run),
+        workflow,
+        instruction,
+        workflows_config,
+        msg_tx,
+    );
 }
 
 /// Run `turn` off-thread, forwarding its progress and reporting its result.
@@ -246,6 +292,11 @@ async fn copilot_turn(
     Ok(match turn {
         Turn::Edit(workflow) => session.turn(workflow, instruction, Some(status)).await?,
         Turn::Create => session.create(instruction, Some(status)).await?,
+        Turn::Repair(workflow, run) => {
+            session
+                .repair(workflow, instruction, run.clone(), Some(status))
+                .await?
+        }
     })
 }
 

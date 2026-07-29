@@ -153,7 +153,19 @@ pub(crate) async fn run(
                         if removed {
                             cmd_dispatch::close_copilot_host(&workflow);
                         }
-                        app.copilot_finished(&workflow, reply, changes, created)
+                        // A queued follow-up comes back as a command to run:
+                        // the drain happens after the catalogue refresh, so it
+                        // sees the graph this turn left behind.
+                        let queued = app.copilot_finished(&workflow, reply, changes, created);
+                        if let Some(cmd) = queued {
+                            run_cmd(
+                                cmd,
+                                &runtime,
+                                app.memory_service(),
+                                &app.loaded.config.workflows,
+                                &msg_tx,
+                            );
+                        }
                     }
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotFailed { workflow, error } => {

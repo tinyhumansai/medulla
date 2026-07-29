@@ -82,6 +82,27 @@ pub(super) fn rename(from: &str, to: &str) {
     );
 }
 
+/// Stop whatever `thread`'s turn is doing, if it has a host at all.
+///
+/// A thread with no host has nothing running: the turn never started, or the
+/// cap evicted its conversation. Reported as `false` so the caller can say so
+/// rather than claiming to have stopped something.
+pub(super) fn abort(thread: &str) -> bool {
+    let host = hosts()
+        .lock()
+        .expect("copilot host cache lock")
+        .iter()
+        .find(|(key, _)| key == thread)
+        .map(|(_, host)| host.clone());
+    match host {
+        Some(host) => {
+            host.abort();
+            true
+        }
+        None => false,
+    }
+}
+
 /// End a thread's conversation, stopping its daemon.
 ///
 /// Called when a workflow stops existing. Left uncalled, the entry would sit

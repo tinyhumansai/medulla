@@ -436,6 +436,37 @@ pub enum Cmd {
         /// The run to diagnose.
         run_id: String,
     },
+    /// Review a workflow against its own history.
+    ///
+    /// Unlike [`Cmd::RepairWorkflow`], this turn may not edit: it records what
+    /// it learns and proposes changes for the operator to accept. The two are
+    /// separate commands rather than one with a flag because they are different
+    /// asks — repair is "fix this now", review is "what should change".
+    #[cfg(feature = "workflows")]
+    EvolveWorkflow {
+        /// The workflow to review.
+        workflow: String,
+        /// The failed run to lead with, when the review was triggered by one.
+        run_id: Option<String>,
+    },
+    /// Apply a proposed change to the saved graph.
+    #[cfg(feature = "workflows")]
+    AcceptProposal {
+        /// The workflow being changed, so the pane can be refreshed.
+        workflow: String,
+        /// The proposal to apply.
+        proposal_id: String,
+    },
+    /// Turn a proposed change down.
+    #[cfg(feature = "workflows")]
+    RejectProposal {
+        /// The workflow the proposal was for.
+        workflow: String,
+        /// The proposal to decline.
+        proposal_id: String,
+        /// Why, recorded as a note so a later review does not propose it again.
+        reason: String,
+    },
 }
 
 /// The modal state for the "resume a chat" picker overlay.
@@ -550,6 +581,13 @@ pub struct App {
     /// Why the run history could not be read, if it could not.
     #[cfg(feature = "workflows")]
     pub(super) workflow_runs_error: Option<String>,
+    /// What the selected workflow has learned, newest first.
+    ///
+    /// Cached beside the runs and refreshed with them, for the same reason: a
+    /// render pass must not touch the disk.
+    pub(super) workflow_notes: Vec<medulla::workflows::WorkflowNote>,
+    /// Changes proposed for the selected workflow, newest first.
+    pub(super) workflow_proposals: Vec<medulla::workflows::WorkflowProposal>,
     /// The Workflows tab's panes, cursors, and copilot threads.
     #[cfg(feature = "workflows")]
     pub(super) wf: WorkflowsState,

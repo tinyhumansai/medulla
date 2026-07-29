@@ -94,8 +94,22 @@ impl App {
         let Some(workflow) = self.selected_workflow().map(|w| w.id.clone()) else {
             self.workflow_runs.clear();
             self.workflow_runs_error = None;
+            self.workflow_notes.clear();
+            self.workflow_proposals.clear();
             return;
         };
+        // Both read as "nothing learned" when the store cannot answer. Unlike
+        // the run history there is no error line for these: a journal that
+        // cannot be read is already logged where it is read, and a second
+        // error banner for something passive would crowd out the run's.
+        self.workflow_notes = self
+            .workflow_store()
+            .list_notes(&workflow)
+            .unwrap_or_default();
+        self.workflow_proposals = self
+            .workflow_store()
+            .list_proposals(&workflow)
+            .unwrap_or_default();
         match self.workflow_store().list_runs(&workflow) {
             Ok(runs) => {
                 self.workflow_runs = runs;
@@ -113,6 +127,22 @@ impl App {
             self.wf.run_index = None;
             self.wf.overlay = None;
         }
+    }
+
+    /// What the selected workflow has learned, newest first.
+    pub(in crate::ui::app) fn workflow_notes(&self) -> &[medulla::workflows::WorkflowNote] {
+        &self.workflow_notes
+    }
+
+    /// The one proposal an operator could act on right now.
+    ///
+    /// At most one exists: a review supersedes the workflow's other undecided
+    /// proposals as it stores its own, which is what lets the accept and reject
+    /// keys work without a cursor to pick between them.
+    pub(in crate::ui::app) fn actionable_proposal(
+        &self,
+    ) -> Option<&medulla::workflows::WorkflowProposal> {
+        medulla::ui::workflows::actionable(&self.workflow_proposals)
     }
 
     /// Re-read the workflow store into the page.

@@ -91,6 +91,13 @@ impl App {
             // `f` for "fix". Only meaningful with the cursor on a run, which is
             // where the operator is when they can see one failed.
             KeyCode::Char('f') => WorkflowsKey::Handled(self.repair_selected_run()),
+            // `e` for "evolve": review this workflow and say what should change.
+            // Distinct from `f`, which fixes one run now.
+            KeyCode::Char('e') => WorkflowsKey::Handled(self.evolve_selected_workflow()),
+            // The operator's half of a review. Deliberately keys an agent has no
+            // equivalent of: applying a proposed change is a person's decision.
+            KeyCode::Char('a') => WorkflowsKey::Handled(self.accept_selected_proposal()),
+            KeyCode::Char('n') => WorkflowsKey::Handled(self.reject_selected_proposal()),
             // Every other character is swallowed so a stray letter cannot fire a
             // content-pane action from the menu — the settlement Settings makes.
             KeyCode::Char(_) => WorkflowsKey::Handled(None),

@@ -36,11 +36,23 @@ pub(super) fn spawn_run(
 ) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let status = match run(&id, &workflows_config).await {
-            Ok(summary) => summary,
-            Err(err) => format!("workflow '{id}' failed: {err}"),
+        let outcome = run(&id, &workflows_config).await;
+        let (status, failed) = match outcome {
+            Ok((summary, failed)) => (summary, failed),
+            Err(err) => (format!("workflow '{id}' failed: {err}"), None),
         };
         let _ = tx.send(AppMsg::Status(status));
+
+        // The failure note is already on disk — `run_workflow` wrote it
+        // synchronously. This is the review on top of it, and only when the
+        // operator has asked for that to happen by itself.
+        let Some(run_id) = failed else { return };
+        if !medulla::workflows::evolve::EvolveConfig::from_config(&workflows_config).auto_on_failure
+        {
+            return;
+        }
+        let _ = tx.send(AppMsg::Status(format!("Reviewing why {id} failed…")));
+        spawn_evolve(id, Some(run_id), workflows_config, &tx);
     });
 }
 
@@ -48,7 +60,7 @@ pub(super) fn spawn_run(
 async fn run(
     id: &str,
     workflows_config: &medulla::config::WorkflowsConfig,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<(String, Option<String>)> {
     let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let store = medulla::workflows::discover_store(&env, &cwd);
@@ -87,12 +99,16 @@ async fn run(
     };
 
     let record = run_workflow(context, id, &run_id, serde_json::json!({})).await?;
-    Ok(format!(
+    let summary = format!(
         "{id}: {} · {} step{}",
         medulla::ui::workflows::status_label(record.status),
         record.steps.len(),
         if record.steps.len() == 1 { "" } else { "s" }
-    ))
+    );
+    // The run id travels back only when the run failed, so the caller cannot
+    // start a review off a run that went fine.
+    let failed = (record.status == medulla::workflows::RunStatus::Failed).then_some(record.id);
+    Ok((summary, failed))
 }
 
 /// What a copilot turn is being asked to do.
@@ -377,5 +393,123 @@ pub(super) fn spawn_dry_run(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSen
                 Err(err) => format!("{id}: simulation failed — {err}"),
             };
         let _ = tx.send(AppMsg::Status(status));
+    });
+}
+
+/// Review a workflow against its own history.
+///
+/// Reported through the copilot messages rather than new ones: from the
+/// operator's side this *is* a copilot turn — it runs on the same thread, in
+/// the same pane, and ends with a reply and a list of what it did.
+pub(super) fn spawn_evolve(
+    workflow: String,
+    run_id: Option<String>,
+    workflows_config: medulla::config::WorkflowsConfig,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
+    let tx = msg_tx.clone();
+    tokio::spawn(async move {
+        let env: HashMap<String, String> = std::env::vars().collect();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let store = medulla::workflows::discover_store(&env, &cwd);
+        let trigger = match run_id {
+            Some(run_id) => medulla::workflows::evolve::EvolveTrigger::Failure(run_id),
+            None => medulla::workflows::evolve::EvolveTrigger::Manual,
+        };
+
+        let result = medulla::workflows::local::evolve_here(
+            store,
+            &workflows_config,
+            &cwd,
+            &workflow,
+            trigger,
+        )
+        .await;
+        let message = match result {
+            Ok(outcome) if outcome.skipped => AppMsg::CopilotDone {
+                workflow,
+                reply: "A review of this workflow is already running.".to_string(),
+                changes: Vec::new(),
+                created: None,
+                removed: false,
+            },
+            Ok(outcome) => AppMsg::CopilotDone {
+                workflow,
+                reply: outcome.reply.clone(),
+                // Counted rather than listed: a review that wrote six notes
+                // would otherwise push its own reply off the pane.
+                changes: describe_review(&outcome),
+                created: None,
+                // A review cannot delete anything — it has no verb for it.
+                removed: false,
+            },
+            Err(err) => AppMsg::CopilotFailed {
+                workflow,
+                error: err.to_string(),
+            },
+        };
+        let _ = tx.send(message);
+        // Notes and proposals are read off the store by the page, so it has to
+        // be told to look again even when the graph itself did not move.
+        let _ = tx.send(AppMsg::WorkflowsChanged);
+    });
+}
+
+/// What a review left behind, as transcript lines.
+fn describe_review(outcome: &medulla::workflows::evolve::EvolveOutcome) -> Vec<String> {
+    let mut lines = Vec::new();
+    if !outcome.notes.is_empty() {
+        lines.push(format!(
+            "+ {} note{}",
+            outcome.notes.len(),
+            if outcome.notes.len() == 1 { "" } else { "s" }
+        ));
+    }
+    for proposal in &outcome.proposals {
+        lines.push(format!(
+            "~ proposed: {}{}",
+            proposal.rationale.trim(),
+            if proposal.is_applicable() {
+                ""
+            } else {
+                " (will not apply)"
+            }
+        ));
+    }
+    lines
+}
+
+/// Apply or decline a proposed change.
+///
+/// Both go through one spawner because they are the same shape — a synchronous
+/// store operation whose only outcome is a status line and a refresh — and both
+/// are deliberately *not* things an agent can do.
+pub(super) fn spawn_decision(
+    workflow: String,
+    proposal_id: String,
+    reject_reason: Option<String>,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
+    let tx = msg_tx.clone();
+    tokio::spawn(async move {
+        let status = tokio::task::spawn_blocking(move || {
+            let env: HashMap<String, String> = std::env::vars().collect();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let store = medulla::workflows::discover_store(&env, &cwd);
+            let outcome = match &reject_reason {
+                Some(reason) => {
+                    medulla::workflows::ops::reject_proposal(&store, &proposal_id, reason)
+                        .map(|_| format!("Declined the proposed change to {workflow}."))
+                }
+                None => medulla::workflows::ops::accept_proposal(&store, &proposal_id).map(|_| {
+                    format!("Applied the proposed change to {workflow}. Press u to undo.")
+                }),
+            };
+            outcome.unwrap_or_else(|err| err.to_string())
+        })
+        .await
+        .expect("spawn_blocking join");
+        let _ = tx.send(AppMsg::Status(status));
+        let _ = tx.send(AppMsg::WorkflowsChanged);
     });
 }

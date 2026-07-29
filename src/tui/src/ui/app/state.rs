@@ -78,6 +78,8 @@ impl App {
             workflow_runs: Vec::new(),
             #[cfg(feature = "workflows")]
             workflow_runs_error: None,
+            workflow_notes: Vec::new(),
+            workflow_proposals: Vec::new(),
             #[cfg(feature = "workflows")]
             wf: Default::default(),
             #[cfg(feature = "workflows")]

@@ -318,3 +318,70 @@ impl App {
         self.set_status(format!("Copilot failed: {error} · r to retry"));
     }
 }
+
+impl App {
+    /// Review the selected workflow against its own history.
+    ///
+    /// With the cursor on a failed run the review leads with that run;
+    /// otherwise it reads the whole history. Both are the same ask — "what
+    /// should change" — so they are one key rather than two.
+    pub(in crate::ui::app) fn evolve_selected_workflow(&mut self) -> Option<Cmd> {
+        let workflow = self.selected_workflow()?.id.clone();
+        if self.copilot_busy() {
+            self.set_status("Copilot is still busy — wait for it to finish before reviewing");
+            return None;
+        }
+        let run_id = self
+            .selected_run()
+            .filter(|run| run.status == medulla::workflows::RunStatus::Failed)
+            .map(|run| run.id.clone());
+
+        self.wf.copilot_scroll = 0;
+        let instruction = match &run_id {
+            Some(run_id) => format!("Review this workflow, starting from run {run_id}."),
+            None => "Review this workflow against its history.".to_string(),
+        };
+        self.copilot_mut()?.ask(&instruction);
+        self.wf.focus = super::super::types::WorkflowFocus::Copilot;
+        self.set_status(format!("Reviewing {workflow}…"));
+        Some(Cmd::EvolveWorkflow { workflow, run_id })
+    }
+
+    /// Apply the proposed change waiting on this workflow.
+    pub(in crate::ui::app) fn accept_selected_proposal(&mut self) -> Option<Cmd> {
+        let Some(proposal) = self.actionable_proposal() else {
+            // Said rather than swallowed: `a` with nothing proposed is
+            // otherwise indistinguishable from a keypress the menu absorbed.
+            self.set_status("Nothing is proposed for this workflow");
+            return None;
+        };
+        let proposal_id = proposal.id.clone();
+        let workflow = proposal.workflow_id.clone();
+        self.set_status("Applying the proposed change…");
+        Some(Cmd::AcceptProposal {
+            workflow,
+            proposal_id,
+        })
+    }
+
+    /// Decline the proposed change waiting on this workflow.
+    ///
+    /// The reason is recorded as a note, which is what stops the next review
+    /// proposing the same thing again. A key press cannot carry one, so this
+    /// records that a person declined it — an operator with more to say can use
+    /// `medulla workflow reject --reason`.
+    pub(in crate::ui::app) fn reject_selected_proposal(&mut self) -> Option<Cmd> {
+        let Some(proposal) = self.actionable_proposal() else {
+            self.set_status("Nothing is proposed for this workflow");
+            return None;
+        };
+        let proposal_id = proposal.id.clone();
+        let workflow = proposal.workflow_id.clone();
+        self.set_status("Declined the proposed change");
+        Some(Cmd::RejectProposal {
+            workflow,
+            proposal_id,
+            reason: "declined by the operator".to_string(),
+        })
+    }
+}

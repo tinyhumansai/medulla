@@ -101,13 +101,14 @@ fn the_rail_lists_the_selected_workflows_runs_and_no_others() {
 
     let rows = app.workflow_rail_rows();
 
-    // Two workflows, a note under the selected one saying it has no runs, and
+    // Two workflows, a hint under the selected one saying it has no runs, and
     // the New row that closes every catalogue.
     assert_eq!(rows.len(), 4);
-    assert!(matches!(
-        rows[1],
-        super::WorkflowRailRow::Note("no runs yet")
-    ));
+    assert!(
+        matches!(&rows[1], super::WorkflowRailRow::Hint(hint) if hint == "no runs yet"),
+        "{:?}",
+        rows[1]
+    );
     assert!(matches!(rows[2], super::WorkflowRailRow::Workflow { .. }));
     assert!(matches!(rows[3], super::WorkflowRailRow::New));
 }

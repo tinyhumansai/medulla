@@ -14,12 +14,12 @@ pub mod code;
 pub mod dispatch;
 pub mod http;
 pub mod mocks;
+pub mod script;
 pub mod state;
 pub mod tools;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde_json::Value;
 use tinyflows::caps::{Capabilities, WorkflowResolver};
@@ -33,9 +33,6 @@ use self::dispatch::HarnessDispatch;
 use self::http::{AllowlistHttpClient, HttpCredential};
 use self::state::FileStateStore;
 use self::tools::MedullaToolInvoker;
-
-/// How long a `code` node may run when a host has enabled them.
-const CODE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Everything a run needs from the host, other than its settings.
 ///
@@ -63,7 +60,9 @@ pub fn build_capabilities(
     run_id: &str,
 ) -> Capabilities {
     let code: Arc<dyn tinyflows::caps::CodeRunner> = if settings.allow_code {
-        Arc::new(ProcessCodeRunner::new(CODE_TIMEOUT))
+        // The same bound `medulla:shell` uses, so an author who moves a
+        // script between the two does not silently change its deadline.
+        Arc::new(ProcessCodeRunner::new(settings.script_timeout()))
     } else {
         Arc::new(DeniedCodeRunner)
     };

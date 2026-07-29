@@ -465,14 +465,50 @@ async fn history_and_delete_are_reachable_over_the_tool_surface() {
 }
 
 #[tokio::test]
-async fn there_is_no_tool_that_starts_real_work() {
-    // An authoring turn that can run a workflow has stopped being an authoring
-    // turn: the operator runs it from the pane they are looking at, where they
-    // can see what it does.
-    for forbidden in ["workflow_run", "workflow_cancel", "workflow_cancel_run"] {
+async fn running_a_workflow_is_on_the_belt_but_cancelling_one_is_not() {
+    // `workflow_run` is here deliberately: a copilot that can only simulate
+    // cannot answer "does this work", and a dry run is structurally blind to
+    // the steps most worth checking — a `code` node's script, an `agent`
+    // node's real reply.
+    assert!(TOOL_NAMES.contains(&"workflow_run"));
+
+    // Cancelling is still not. A copilot that started a run is awaiting it; the
+    // operator cancels from the pane, where they can see it.
+    for forbidden in ["workflow_cancel", "workflow_cancel_run", "workflow_resume"] {
         assert!(
             !TOOL_NAMES.contains(&forbidden),
             "{forbidden} must not be on the authoring belt"
         );
     }
+}
+
+#[tokio::test]
+async fn running_a_workflow_that_is_disabled_is_refused_rather_than_silently_skipped() {
+    let (_root, store) = store();
+    let disabled = json!({
+        "id": "paused", "name": "Paused", "enabled": false,
+        "nodes": [{ "id": "t", "kind": "trigger", "name": "start",
+                    "config": { "trigger_kind": "manual" } }],
+        "edges": []
+    })
+    .to_string();
+    call(
+        &store,
+        "workflow_create",
+        json!({ "id": "paused", "document": disabled }),
+    )
+    .await;
+
+    let (result, is_error) = call(&store, "workflow_run", json!({ "id": "paused" })).await;
+
+    // The operator's own off switch. Reporting a skipped run as a successful
+    // one would be the worst possible reading of it.
+    assert!(is_error, "{result}");
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("disabled"),
+        "{result}"
+    );
 }

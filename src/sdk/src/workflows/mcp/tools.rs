@@ -20,11 +20,16 @@ use super::RpcError;
 
 /// Every tool this server exposes, in the order a model meets them.
 ///
-/// Two are deliberately absent. There is no tool to *run* a workflow and none to
-/// cancel a run: this server is attached to an authoring turn, and a turn that
-/// can start real work has stopped being an authoring turn. The operator runs a
-/// workflow from the pane they are looking at, where they can see what it does.
-pub const TOOL_NAMES: [&str; 13] = [
+/// `workflow_run` really does run the thing — harness sessions, scripts, and
+/// whatever else the graph describes. It is here because a copilot that can only
+/// simulate cannot answer "does this work", and a dry run is structurally blind
+/// to exactly the steps most worth checking: a `code` node's script, an
+/// `agent` node's real reply. The operator's own switches still apply
+/// (`workflows.enabled`, and the workflow's own `enabled`).
+///
+/// There is still no tool to *cancel* a run. A copilot that started one is
+/// awaiting it; the operator cancels from the pane, where they can see it.
+pub const TOOL_NAMES: [&str; 14] = [
     "workflow_list",
     "workflow_get",
     "workflow_host",
@@ -34,6 +39,7 @@ pub const TOOL_NAMES: [&str; 13] = [
     "workflow_preview_ops",
     "workflow_validate",
     "workflow_dry_run",
+    "workflow_run",
     "workflow_runs",
     "workflow_run_get",
     "workflow_history",
@@ -180,6 +186,24 @@ pub fn tool_definitions() -> Vec<Value> {
             ),
         }),
         json!({
+            "name": "workflow_run",
+            "description":
+                "Run a workflow for real: dispatch its `agent` steps to actual coding harnesses, \
+                 execute its scripts, and make whatever changes it describes. This is not a \
+                 simulation — prefer workflow_dry_run while you are still wiring, and use this \
+                 when the operator has asked whether it works, or when a dry run cannot settle \
+                 the question (a `code` node's script and an `agent` node's real reply are both \
+                 invisible to one). Returns the whole run record: every step, its status, and \
+                 anything that resolved to null. Can take minutes.",
+            "inputSchema": schema(
+                json!({
+                    "id": { "type": "string", "description": "The workflow to run." },
+                    "input": { "description": "Optional trigger payload; defaults to {}." }
+                }),
+                &["id"],
+            ),
+        }),
+        json!({
             "name": "workflow_runs",
             "description":
                 "The run history for a workflow, newest first — status, steps, and anything a \
@@ -293,6 +317,15 @@ pub(super) async fn call(
             let id = arg(&arguments, "id")?;
             let input = arguments.get("input").cloned().unwrap_or(json!({}));
             ops::dry_run(store, id, input).await.map_err(to_rpc)
+        }
+        "workflow_run" => {
+            let id = arg(&arguments, "id")?;
+            let input = arguments.get("input").cloned().unwrap_or(json!({}));
+            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            ops::run(store, config, &env, &cwd, id, input)
+                .await
+                .map_err(to_rpc)
         }
         "workflow_runs" => ops::list_runs(store, arg(&arguments, "id")?).map_err(to_rpc),
         "workflow_run_get" => ops::get_run(store, arg(&arguments, "runId")?).map_err(to_rpc),

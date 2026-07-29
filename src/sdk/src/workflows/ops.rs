@@ -130,6 +130,31 @@ pub fn list_runs(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, Work
     Ok(json!({ "runs": store.list_runs(id)? }))
 }
 
+/// Run a workflow on this machine, for real.
+///
+/// Unlike [`dry_run`], this dispatches actual harness sessions, runs actual
+/// scripts, and makes whatever changes the graph describes. Refused when the
+/// host or the workflow is disabled — the two switches an operator has.
+///
+/// Returns the whole run record rather than a summary: the caller is usually a
+/// model deciding what to fix next, and every step's status and diagnostics are
+/// what that decision needs.
+pub async fn run(
+    store: &Arc<dyn WorkflowStore>,
+    config: &crate::config::WorkflowsConfig,
+    env: &HashMap<String, String>,
+    cwd: &Path,
+    id: &str,
+    input: Value,
+) -> Result<Value, WorkflowError> {
+    let record =
+        crate::workflows::local::run_here(store.clone(), config, env, cwd, id, input).await?;
+    Ok(json!({
+        "ok": record.status == crate::workflows::RunStatus::Succeeded,
+        "run": record,
+    }))
+}
+
 /// A workflow's edit history: the versions it has been written over, newest
 /// first.
 ///

@@ -396,3 +396,33 @@ fn an_edit_whose_binding_would_resolve_null_is_refused_before_it_is_saved() {
     let after = get(&store, "sweep").unwrap();
     assert_eq!(after["graph"]["nodes"].as_array().unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn a_dry_run_cannot_tell_you_a_script_is_broken() {
+    let (_root, store) = store();
+    // A `code` node whose source is a syntax error in every language.
+    create(
+        &store,
+        &json!({
+            "id": "broken",
+            "name": "Broken",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "compute", "kind": "code", "name": "Compute",
+                  "config": { "language": "javascript", "source": "this is not javascript(" } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "compute" }]
+        })
+        .to_string(),
+        "broken",
+    )
+    .unwrap();
+
+    let result = dry_run(&store, "broken", json!({})).await.unwrap();
+
+    // The simulation swaps in a mock runner, so the script is never executed.
+    // This is the gap `workflow_run` exists to close, and the reason the
+    // copilot's sandbox table says so explicitly.
+    assert_eq!(result["ok"], json!(true), "{result}");
+}

@@ -43,6 +43,13 @@ pub struct CapabilitySettings {
     pub http_allowlist: Vec<String>,
     /// How long one run may take before it is abandoned.
     pub run_timeout_secs: u64,
+    /// The directory a `medulla:shell` script runs in.
+    ///
+    /// The operator's project, normally: a step that shells out almost always
+    /// means to touch the repository the workflow is about. Empty means the
+    /// host did not set one, and a script falls back to its own temporary
+    /// directory rather than to whatever the daemon happened to be started in.
+    pub workspace: String,
 }
 
 /// A run may take ten minutes before the host gives up on it. Matches the
@@ -69,7 +76,19 @@ impl CapabilitySettings {
             tool_allowlist: Vec::new(),
             http_allowlist: Vec::new(),
             run_timeout_secs: DEFAULT_RUN_TIMEOUT_SECS,
+            workspace: String::new(),
         }
+    }
+
+    /// How long one script may run.
+    ///
+    /// A fraction of the run's own bound, so a wedged script fails as a *script*
+    /// — naming itself in the error — rather than by silently consuming the
+    /// whole run's budget and failing as a timeout with nothing to point at.
+    pub fn script_timeout(&self) -> std::time::Duration {
+        const SHARE: u64 = 4;
+        const FLOOR_SECS: u64 = 30;
+        std::time::Duration::from_secs((self.run_timeout_secs / SHARE).max(FLOOR_SECS))
     }
 
     /// Whether `host` is permitted for outbound HTTP.

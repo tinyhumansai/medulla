@@ -127,6 +127,9 @@ fn local_context(
     let loaded = medulla::config::load_config(parsed.config.as_deref(), env, cwd)?;
     let home = medulla::home::medulla_home(env);
     let mut settings = CapabilitySettings::from_config(&loaded.config.workflows, &home);
+    // A `medulla:shell` step runs where the command was invoked, matching what
+    // an operator running it by hand would expect.
+    settings.workspace = cwd.to_string_lossy().to_string();
     // Nodes that name no worker go to the loopback host this command starts,
     // unless the operator pinned a different default.
     if settings.default_worker_address.trim().is_empty() {

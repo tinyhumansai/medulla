@@ -276,6 +276,9 @@ impl DaemonRuntime {
         let mut settings = crate::config::load_config(None, &self.inner.config.env, cwd)
             .map(|loaded| CapabilitySettings::from_config(&loaded.config.workflows, &home))
             .unwrap_or_else(|_| CapabilitySettings::rooted_at(home));
+        // The daemon's own workspace, which is the directory it serves tasks
+        // for — the same one an `agent` node's harness session runs in.
+        settings.workspace = self.inner.config.workspace.clone();
         settings.default_worker_address = self.inner.config.default_provider.as_str().to_string();
         settings.default_provider = Some(self.inner.config.default_provider);
         settings.default_model = self.inner.config.model.clone();

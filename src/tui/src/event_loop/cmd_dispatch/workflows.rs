@@ -55,6 +55,9 @@ async fn run(
 
     let home = medulla::home::medulla_home(&env);
     let mut settings = CapabilitySettings::from_config(workflows_config, &home);
+    // A `medulla:shell` step runs here: the project the operator launched the
+    // TUI in, which is the repository the workflow is about.
+    settings.workspace = cwd.to_string_lossy().to_string();
     if settings.default_worker_address.trim().is_empty() {
         settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
     }

@@ -40,11 +40,22 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
         ],
         "tool_call" => vec![
             format!(
-                "Slugs beginning `{NATIVE_TOOL_PREFIX}` are built into this host and always \
-                 available: {}. Any other slug must be listed in `workflows.toolAllowlist`, and \
-                 is refused otherwise.",
+                "Slugs beginning `{NATIVE_TOOL_PREFIX}` are built into this host: {}. Any other \
+                 slug must be listed in `workflows.toolAllowlist`, and is refused otherwise.",
                 NATIVE_TOOLS.join(", ")
             ),
+            "`medulla:shell` runs a script in the operator's project directory. \
+             `args.script` is the source (required); `args.language` picks the interpreter — \
+             `shell` (the default, run with bash), `javascript`, or `python`; `args.input` is \
+             handed to it on stdin as JSON. It returns `{ output, stderr }`, where `output` is \
+             the script's stdout parsed as JSON when it is JSON. Gated on \
+             `workflows.allowCode` for the same reason `code` nodes are — check `workflow_host`."
+                .to_string(),
+            "Reach for `medulla:shell` before an `agent` node whenever the work is a \
+             deterministic command. An `agent` node is a whole coding-harness session — minutes \
+             of wall clock and a model deciding what to run — which is the right shape for work \
+             needing judgement and a very expensive way to run `npm test`."
+                .to_string(),
             "There is no third-party integration registry on this host, so an allowlisted \
              non-native slug will still fail at run time. Express host-specific steps as a \
              `medulla:` tool call or an `agent` node."
@@ -63,11 +74,28 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
         ],
         "code" => vec![
             "Code nodes are disabled on this host by default: there is no sandbox, so workflow \
-             code would run with the daemon's own privileges. Prefer a `transform` node's \
-             expressions, which the engine evaluates itself."
+             code would run with the daemon's own privileges. `workflows.allowCode` enables \
+             them, out-of-process and time-bounded — an explicit decision to trust whoever \
+             wrote the workflow. Check `workflow_host` before authoring one."
                 .to_string(),
-            "`workflows.allowCode` enables them, out-of-process and time-bounded — but that is \
-             an explicit decision to trust whoever wrote the workflow."
+            // The engine's own example is written for a host that wraps the
+            // source in a function. Medulla executes the file as-is, so that
+            // example is a syntax error here — stating the real convention is
+            // the difference between a node that works and one that does not.
+            "CALLING CONVENTION ON THIS HOST: the source is executed as a whole program, not \
+             wrapped in a function. The input arrives on **stdin as JSON** (and as a file whose \
+             path is `argv[1]` and `$MEDULLA_INPUT`); the result is whatever the program prints \
+             to **stdout**, parsed as JSON when it is JSON and taken as a string otherwise. \
+             `return` at the top level is a syntax error — print instead."
+                .to_string(),
+            "Working javascript: `const i = JSON.parse(require('fs').readFileSync(0, 'utf8')); \
+             console.log(JSON.stringify({ total: i.a + i.b }));`. Working python: `import json, \
+             sys; print(json.dumps({'total': sum(json.load(sys.stdin))}))`."
+                .to_string(),
+            "A `code` node runs in a scratch directory, not the operator's project — it is a \
+             computation over its input. A step that means to touch the repository is a \
+             `tool_call` with the `medulla:shell` slug, which runs in the workspace and says so \
+             in the graph."
                 .to_string(),
         ],
         "sub_workflow" => vec![

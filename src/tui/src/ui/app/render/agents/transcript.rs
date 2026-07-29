@@ -34,18 +34,10 @@ impl App {
         // out of its emulator every frame and typeable. A remote worker's screen
         // is the same picture arrived over the wire, sampled and diffed, and
         // read-only. When both somehow name the selection, the live one wins.
-        let local = self.local_harness_session(selection);
-        // Focus follows the pane, not the other way round. If the cursor moved
-        // off the attached session — or that session ended — the keyboard comes
-        // back to the chrome, because keys landing in a harness the operator is
-        // no longer looking at is the worst failure this feature can have.
-        if let Some(attached) = self.harness_focus.attached_to() {
-            if local.as_deref() != Some(attached) {
-                self.release_harness();
-            }
-        }
-        self.harness_pane_session = local.clone();
-        if let Some(session_id) = local {
+        //
+        // Resolved in `agents_selection`, not here: it decides the layout as
+        // well as the contents, so the split has already been made for it.
+        if let Some(session_id) = selection.harness.clone() {
             self.draw_local_harness(f, area, &session_id);
             return;
         }

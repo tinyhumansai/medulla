@@ -427,6 +427,15 @@ pub enum Cmd {
         /// The workflow to simulate.
         id: String,
     },
+    /// Take back a workflow's most recent edit.
+    ///
+    /// Off-thread with the rest: it reads the history directory and writes a
+    /// definition, and the store's methods are synchronous by contract.
+    #[cfg(feature = "workflows")]
+    UndoWorkflow {
+        /// The workflow to restore.
+        id: String,
+    },
 }
 
 /// The modal state for the "resume a chat" picker overlay.

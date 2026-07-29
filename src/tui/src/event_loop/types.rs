@@ -70,6 +70,13 @@ pub(super) enum AppMsg {
         /// Why it failed.
         error: String,
     },
+    /// The workflow store was written to by something other than a copilot turn,
+    /// so the catalogue on screen is stale.
+    ///
+    /// Carries no payload: what changed is whatever the store now holds, and a
+    /// re-read is both cheaper and more honest than describing the edit twice.
+    #[cfg(feature = "workflows")]
+    WorkflowsChanged,
 }
 
 /// Why the event loop stopped.

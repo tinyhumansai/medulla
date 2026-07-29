@@ -168,6 +168,45 @@ fn d_simulates_and_x_runs_the_selected_workflow_from_the_sidebar() {
 }
 
 #[test]
+fn u_undoes_the_selected_workflow_from_either_pane() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+
+    let from_sidebar = key(&mut app, KeyCode::Char('u'));
+    assert!(matches!(
+        from_sidebar,
+        WorkflowsKey::Handled(Some(Cmd::UndoWorkflow { ref id })) if id == "sweep"
+    ));
+
+    // Also on the canvas: undo answers an edit the operator is *looking at*,
+    // and stepping back out to the list to reach it would be a step away from
+    // the thing they want changed.
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.wf_focus(), WorkflowFocus::Canvas);
+    let from_canvas = key(&mut app, KeyCode::Char('u'));
+    assert!(matches!(
+        from_canvas,
+        WorkflowsKey::Handled(Some(Cmd::UndoWorkflow { ref id })) if id == "sweep"
+    ));
+}
+
+#[test]
+fn u_on_the_new_row_says_there_is_nothing_to_undo_yet() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+    // The New row sits below the whole catalogue, so Down from the last row of
+    // the only workflow lands on it.
+    key(&mut app, KeyCode::Down);
+
+    let pressed = key(&mut app, KeyCode::Char('u'));
+
+    assert!(matches!(pressed, WorkflowsKey::Handled(None)));
+    assert!(
+        app.status().contains("not been created"),
+        "{}",
+        app.status()
+    );
+}
+
+#[test]
 fn x_refuses_a_disabled_workflow_from_the_sidebar_but_d_still_simulates_it() {
     let (_home, mut app) = app_with(&[disabled("paused")]);
 

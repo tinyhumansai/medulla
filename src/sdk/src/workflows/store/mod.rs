@@ -19,9 +19,12 @@ mod tests;
 
 pub use file::{
     new_run_record, parse_workflow, validate_graph, workflow_dirs, FileWorkflowStore, LoadReport,
+    MAX_REVISIONS,
 };
 
-use crate::workflows::types::{RunId, RunRecord, WorkflowId, WorkflowRecord, WorkflowSummary};
+use crate::workflows::types::{
+    RunId, RunRecord, WorkflowId, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+};
 use crate::workflows::WorkflowError;
 
 /// Persistence for workflow definitions and their run history.
@@ -58,6 +61,62 @@ pub trait WorkflowStore: Send + Sync {
 
     /// Every recorded run for a workflow, newest first.
     fn list_runs(&self, workflow_id: &str) -> Result<Vec<RunRecord>, WorkflowError>;
+
+    /// Every superseded copy of a workflow, newest first.
+    ///
+    /// A workflow that has never been written over has no revisions, which is
+    /// an empty listing rather than an error.
+    fn list_revisions(&self, workflow_id: &str) -> Result<Vec<WorkflowRevision>, WorkflowError>;
+
+    /// One superseded copy, by id, scoped to the workflow it belongs to.
+    ///
+    /// Scoped rather than global so a rollback cannot reach another workflow's
+    /// history — that would be a way to write a graph the operator never had.
+    fn revision(
+        &self,
+        workflow_id: &str,
+        revision_id: &str,
+    ) -> Result<Option<WorkflowRevision>, WorkflowError>;
+}
+
+/// Restore `workflow_id` to the state held by `revision_id`.
+///
+/// Goes through [`WorkflowStore::save`], so the graph being replaced is itself
+/// snapshotted first: a rollback is undoable by the same key that performed it.
+///
+/// # Errors
+///
+/// Fails when the workflow or the revision is unknown, or when the restored
+/// graph no longer validates — which can happen if a sub-workflow it referenced
+/// has since been deleted.
+pub fn rollback(
+    store: &dyn WorkflowStore,
+    workflow_id: &str,
+    revision_id: &str,
+) -> Result<WorkflowRecord, WorkflowError> {
+    let revision = store.revision(workflow_id, revision_id)?.ok_or_else(|| {
+        WorkflowError::Malformed(format!(
+            "workflow '{workflow_id}' has no revision '{revision_id}'"
+        ))
+    })?;
+    store.save(&revision.record)?;
+    Ok(revision.record)
+}
+
+/// Restore `workflow_id` to the state before its most recent edit.
+///
+/// What the operator's undo key calls. Returns `None` when there is no history
+/// to go back to, which the caller reports rather than treating as a failure —
+/// a workflow that has never been edited is a normal thing to press undo on.
+pub fn undo_last(
+    store: &dyn WorkflowStore,
+    workflow_id: &str,
+) -> Result<Option<(WorkflowRevision, WorkflowRecord)>, WorkflowError> {
+    let Some(newest) = store.list_revisions(workflow_id)?.into_iter().next() else {
+        return Ok(None);
+    };
+    let restored = rollback(store, workflow_id, &newest.id)?;
+    Ok(Some((newest, restored)))
 }
 
 /// Fetch a workflow by id, turning "no such workflow" into an error.

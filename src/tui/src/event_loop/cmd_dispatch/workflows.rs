@@ -235,6 +235,48 @@ async fn copilot_turn(
     })
 }
 
+/// Spawn an undo of the workflow `id`'s most recent edit.
+///
+/// Reloads the catalogue afterwards so the rail and the graph show the restored
+/// version — an undo the operator cannot see has not visibly happened.
+pub(super) fn spawn_undo(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>) {
+    let tx = msg_tx.clone();
+    tokio::spawn(async move {
+        let env: HashMap<String, String> = std::env::vars().collect();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let store = medulla::workflows::discover_store(&env, &cwd);
+        // Blocking work off the render thread: the store's methods are
+        // synchronous by contract, as the trait's own doc says.
+        let result = tokio::task::spawn_blocking(move || {
+            medulla::workflows::undo_last(store.as_ref(), &id).map(|undone| (id, undone))
+        })
+        .await
+        .unwrap_or_else(|err| Err(medulla::workflows::WorkflowError::Engine(err.to_string())));
+
+        match result {
+            Ok((id, Some((_, restored)))) => {
+                // Name what came back rather than the revision's opaque id: the
+                // operator is checking that undo landed where they meant, and
+                // the workflow's own name is what they recognise.
+                let _ = tx.send(AppMsg::Status(format!(
+                    "Undid the last edit to {}",
+                    restored.name
+                )));
+                let _ = tx.send(AppMsg::WorkflowsChanged);
+                let _ = id;
+            }
+            Ok((id, None)) => {
+                let _ = tx.send(AppMsg::Status(format!(
+                    "{id} has not been edited since it was created — nothing to undo"
+                )));
+            }
+            Err(err) => {
+                let _ = tx.send(AppMsg::Status(format!("undo failed — {err}")));
+            }
+        }
+    });
+}
+
 /// Spawn a dry run of the workflow `id`, reporting the outcome on the status
 /// line.
 ///

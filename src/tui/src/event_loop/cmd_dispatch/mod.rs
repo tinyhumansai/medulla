@@ -150,6 +150,8 @@ pub(super) fn run_cmd(
         #[cfg(feature = "workflows")]
         Cmd::DryRunWorkflow { id } => workflows::spawn_dry_run(id, msg_tx),
         #[cfg(feature = "workflows")]
+        Cmd::UndoWorkflow { id } => workflows::spawn_undo(id, msg_tx),
+        #[cfg(feature = "workflows")]
         Cmd::CopilotTurn {
             workflow,
             instruction,

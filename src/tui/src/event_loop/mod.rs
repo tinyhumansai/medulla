@@ -143,6 +143,8 @@ pub(crate) async fn run(
                     AppMsg::CopilotFailed { workflow, error } => {
                         app.copilot_failed(&workflow, error);
                     }
+                    #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowsChanged => app.reload_workflows(),
                     AppMsg::MemoryResults { hits, query } => {
                         let n = hits.len();
                         app.set_memory_results(hits, query);

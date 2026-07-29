@@ -121,6 +121,60 @@ pub fn list_runs(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, Work
     Ok(json!({ "runs": store.list_runs(id)? }))
 }
 
+/// A workflow's edit history: the versions it has been written over, newest
+/// first.
+///
+/// The graph of each version is included. History is read to decide *which*
+/// version to go back to, and a listing of opaque ids and timestamps does not
+/// support that decision.
+pub fn list_history(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowError> {
+    // Fail on an unknown workflow rather than reporting an empty history, which
+    // would read as "this has never been edited" for a workflow that does not
+    // exist at all.
+    require(store.as_ref(), id)?;
+    Ok(json!({ "revisions": store.list_revisions(id)? }))
+}
+
+/// Restore a workflow to one of its earlier versions.
+///
+/// The restore goes through the normal save, so the version being replaced is
+/// snapshotted in turn: a rollback is itself in the history and can be rolled
+/// back.
+pub fn rollback(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    revision_id: &str,
+) -> Result<Value, WorkflowError> {
+    let record = crate::workflows::store::rollback(store.as_ref(), id, revision_id)?;
+    Ok(json!({
+        "restored": record.id,
+        "revision": revision_id,
+        "workflow": record_value(&record),
+    }))
+}
+
+/// Undo a workflow's most recent edit.
+///
+/// What an operator's undo key calls. A workflow with no history is not a
+/// failure — pressing undo on something never edited is a normal thing to do —
+/// so it comes back as `undone: false` with a reason.
+pub fn undo(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowError> {
+    match crate::workflows::store::undo_last(store.as_ref(), id)? {
+        Some((revision, record)) => Ok(json!({
+            "undone": true,
+            "revision": revision.id,
+            "supersededAt": revision.superseded_at,
+            "workflow": record_value(&record),
+        })),
+        None => Ok(json!({
+            "undone": false,
+            "id": id,
+            "reason": "this workflow has not been edited since it was created, so there is \
+                       nothing to go back to",
+        })),
+    }
+}
+
 /// One run record.
 pub fn get_run(store: &Arc<dyn WorkflowStore>, run_id: &str) -> Result<Value, WorkflowError> {
     let record = crate::workflows::require_run(store.as_ref(), run_id)?;

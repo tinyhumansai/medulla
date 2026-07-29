@@ -99,6 +99,26 @@ pub struct WorkflowSummary {
     pub trigger_kind: Option<String>,
 }
 
+/// A copy of a workflow from before it was last written over.
+///
+/// Kept so an operator can disagree with an edit after the fact. That matters
+/// most for the copilot, which writes to the store directly and would otherwise
+/// leave a misread instruction as the only surviving version of a graph.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRevision {
+    /// This snapshot's id, unique within its workflow. Sorts chronologically.
+    pub id: String,
+    /// Epoch-millisecond stamp of when this copy stopped being current.
+    ///
+    /// When it was *superseded*, not when it was authored — a revision is
+    /// named by the edit that replaced it, which is what an operator scanning
+    /// history is looking for.
+    pub superseded_at: u64,
+    /// The workflow as it was.
+    pub record: WorkflowRecord,
+}
+
 /// Where a run got to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

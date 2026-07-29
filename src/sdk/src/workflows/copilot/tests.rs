@@ -157,6 +157,19 @@ impl WorkflowStore for UnreadableStore {
     ) -> Result<Vec<crate::workflows::RunRecord>, WorkflowError> {
         Err(Self::failure())
     }
+    fn list_revisions(
+        &self,
+        _workflow_id: &str,
+    ) -> Result<Vec<crate::workflows::WorkflowRevision>, WorkflowError> {
+        Err(Self::failure())
+    }
+    fn revision(
+        &self,
+        _workflow_id: &str,
+        _revision_id: &str,
+    ) -> Result<Option<crate::workflows::WorkflowRevision>, WorkflowError> {
+        Err(Self::failure())
+    }
 }
 
 /// A store over a temporary directory, holding `sweep`.

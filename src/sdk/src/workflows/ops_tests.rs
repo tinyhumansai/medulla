@@ -208,3 +208,99 @@ fn cancelling_a_run_that_is_not_executing_reports_that_plainly() {
     assert_eq!(result["cancelled"], false);
     assert_eq!(result["runId"], "never-started");
 }
+
+#[test]
+fn history_carries_the_whole_graph_of_each_earlier_version() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Renamed" }]),
+    )
+    .unwrap();
+
+    let history = list_history(&store, "sweep").unwrap();
+
+    let revisions = history["revisions"].as_array().expect("array");
+    assert_eq!(revisions.len(), 1);
+    // The graph is included: history is read to decide which version to go back
+    // to, and an id with a timestamp does not support that decision.
+    assert_eq!(
+        revisions[0]["record"]["graph"]["nodes"][1]["name"],
+        json!("Work")
+    );
+}
+
+#[test]
+fn history_for_a_workflow_that_does_not_exist_is_an_error_not_an_empty_list() {
+    let (_root, store) = store();
+
+    let err = list_history(&store, "absent").expect_err("must refuse");
+
+    // An empty history would read as "never edited" for something that is not
+    // there at all.
+    assert!(matches!(err, WorkflowError::NotFound(_)), "got {err:?}");
+}
+
+#[test]
+fn undo_puts_the_previous_graph_back_and_says_what_it_restored() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Renamed" }]),
+    )
+    .unwrap();
+
+    let undone = undo(&store, "sweep").unwrap();
+
+    assert_eq!(undone["undone"], json!(true));
+    assert_eq!(
+        undone["workflow"]["graph"]["nodes"][1]["name"],
+        json!("Work")
+    );
+    assert!(undone["revision"].is_string());
+    assert!(undone["supersededAt"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn undo_on_a_workflow_that_was_never_edited_explains_itself_rather_than_failing() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+
+    let undone = undo(&store, "sweep").unwrap();
+
+    assert_eq!(undone["undone"], json!(false));
+    assert!(
+        undone["reason"]
+            .as_str()
+            .unwrap()
+            .contains("nothing to go back to"),
+        "{undone}"
+    );
+}
+
+#[test]
+fn rolling_back_names_the_revision_it_used() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Renamed" }]),
+    )
+    .unwrap();
+    let history = list_history(&store, "sweep").unwrap();
+    let revision = history["revisions"][0]["id"].as_str().unwrap().to_string();
+
+    let restored = rollback(&store, "sweep", &revision).unwrap();
+
+    assert_eq!(restored["restored"], json!("sweep"));
+    assert_eq!(restored["revision"], json!(revision));
+    assert_eq!(
+        restored["workflow"]["graph"]["nodes"][1]["name"],
+        json!("Work")
+    );
+}

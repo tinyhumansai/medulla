@@ -382,6 +382,32 @@ fn new_capabilities_round_trip_budgets_and_readiness() {
 }
 
 #[test]
+fn custom_harness_adverts_round_trip_without_execution_or_credential_details() {
+    let caps = crate::tinyplace::AgentCapabilities {
+        custom_harnesses: vec![crate::tinyplace::CustomHarnessAdvert {
+            id: "deepseek".into(),
+            name: "DeepSeek via Claude".into(),
+            base_harness: HarnessProvider::Claude,
+            model: "deepseek/deepseek-chat".into(),
+            default: false,
+        }],
+        ..Default::default()
+    };
+
+    let value = serde_json::to_value(&caps).expect("serialize capabilities");
+    let advert = &value["customHarnesses"][0];
+    assert_eq!(advert["id"], "deepseek");
+    assert_eq!(advert["baseHarness"], "claude");
+    assert!(advert.get("apiKeyEnv").is_none());
+    assert!(advert.get("baseUrl").is_none());
+    assert_eq!(
+        serde_json::from_value::<crate::tinyplace::AgentCapabilities>(value)
+            .expect("parse capabilities"),
+        caps
+    );
+}
+
+#[test]
 fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
     use crate::harness_work::{kinds, WorkFold};
 

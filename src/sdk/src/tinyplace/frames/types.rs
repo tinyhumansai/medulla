@@ -381,6 +381,16 @@ pub struct AgentCapabilities {
     /// Harness providers the agent can run.
     #[serde(default, deserialize_with = "de_providers")]
     pub providers: Vec<HarnessProvider>,
+    /// Named OpenRouter-backed harness presets this host accepts in task frames.
+    ///
+    /// These descriptors intentionally omit endpoint and credential details.
+    /// They are selection metadata, not execution configuration.
+    #[serde(
+        rename = "customHarnesses",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub custom_harnesses: Vec<CustomHarnessAdvert>,
     /// Tool names the agent exposes.
     #[serde(default, deserialize_with = "de_string_array")]
     pub tools: Vec<String>,
@@ -412,6 +422,23 @@ pub struct AgentCapabilities {
     /// field. Same backward-compatibility contract as the two vectors above.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflows: Vec<WorkflowAdvert>,
+}
+
+/// Fleet-safe description of one named custom harness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomHarnessAdvert {
+    /// Stable id an orchestrator may send as `customHarness`.
+    pub id: String,
+    /// Operator-facing label.
+    pub name: String,
+    /// Coding CLI that executes the task.
+    pub base_harness: HarnessProvider,
+    /// OpenRouter model id.
+    pub model: String,
+    /// Whether this preset handles tasks that name no custom harness.
+    #[serde(default)]
+    pub default: bool,
 }
 
 /// One workflow a worker advertises as runnable.

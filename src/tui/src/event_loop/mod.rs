@@ -165,6 +165,37 @@ pub(crate) async fn run(
                     }
                     #[cfg(feature = "workflows")]
                     AppMsg::WorkflowsChanged => app.reload_workflows(),
+                    AppMsg::FeedbackLoaded { query, page } => {
+                        if !app.set_feedback_page(query, page) {
+                            continue;
+                        }
+                        // Pull the newly selected row's comments in the same beat.
+                        if let Some(cmd) = app.feedback_detail_cmd() {
+                            run_cmd(cmd, &runtime, &app.loaded.config.workflows, &msg_tx);
+                        }
+                    }
+                    AppMsg::FeedbackComments { id, comments } => {
+                        app.set_feedback_comments(id, comments);
+                    }
+                    AppMsg::FeedbackItemUpdated(item) => {
+                        app.apply_feedback_item(item);
+                        app.set_status("Feedback · vote recorded");
+                    }
+                    AppMsg::FeedbackChanged(status) => {
+                        app.set_status(status);
+                        // The board is about to be re-read; forgetting which
+                        // item's comments are loaded is what makes the reload
+                        // fetch them again, so a just-posted comment appears.
+                        app.invalidate_feedback_detail();
+                        // A comment or submission changes the board, so re-pull
+                        // it rather than patching state locally.
+                        run_cmd(
+                            Cmd::LoadFeedback(app.feedback_query()),
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                        );
+                    }
                     AppMsg::UpdateAvailable(notice) => {
                         app.set_update_notice(notice.clone());
                         app.set_status(notice);

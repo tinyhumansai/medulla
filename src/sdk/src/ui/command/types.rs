@@ -51,10 +51,8 @@ pub enum SlashCommand {
     Settings,
     /// `/usage` — show the usage subpage (fetches account usage on entry).
     Usage,
-    /// `/memory [query]`, `/mem [query]` — open the Memory tab. The persona
-    /// layer is out of the build, so the query is parsed and ignored rather
-    /// than the command disappearing from under an operator's fingers.
-    Memory(Option<String>),
+    /// `/feedback`, `/fb` — open the feedback board.
+    Feedback,
     /// `/mouse` — toggle mouse capture.
     ToggleMouse,
     /// `/copy [all|last]` — copy the transcript at the given scope.

@@ -19,8 +19,8 @@ use super::types::{App, TABS};
 
 mod agents;
 mod decisions;
+mod feedback;
 mod harness_modals;
-mod memory;
 mod overview;
 mod points;
 mod prompt;
@@ -531,7 +531,7 @@ impl App {
             "Workflows" => self.draw_workflows_tab(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),
             "Routing" => self.draw_routing(f, area),
-            "Memory" => self.draw_memory(f, area),
+            "Feedback" => self.draw_feedback(f, area),
             // Trace, Context, and Feedback are Settings subpages, not tabs.
             "Settings" => self.draw_settings(f, area),
             _ => self.draw_overview(f, area),

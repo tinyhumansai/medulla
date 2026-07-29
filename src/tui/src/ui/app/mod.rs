@@ -16,6 +16,7 @@ mod commands;
 mod credentials;
 mod custom_harnesses;
 mod decisions;
+mod feedback;
 mod harness_control;
 mod input;
 mod keys;

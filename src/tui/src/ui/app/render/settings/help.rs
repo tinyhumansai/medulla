@@ -31,7 +31,6 @@ impl App {
             TLine::from("        ⌥X cancel task · ⌥A answer a question · Enter opens a template"),
             TLine::from("Agents: selecting an agent with an open question makes Enter answer it"),
             TLine::from("Routing: a add host · Enter/s select · e edit label · d/x remove"),
-            TLine::from("Memory: ↑↓ / j k browse directives, facets & hits · /memory <query> to search"),
             TLine::from(" "),
             TLine::from(Span::styled("Settings", bold)),
             TLine::from("↑↓ move between subpages · 1-8 jump straight to one"),

@@ -2,9 +2,9 @@
 //! runtime.
 //!
 //! Holds the in-memory [`State`] (threads, roster, presence, sessions) and its
-//! per-thread [`Thread`] records, the [`MockRuntime`] handle, and the small
-//! helpers (id generation, event emission, thread summarisation) shared by the
-//! behaviour submodules. The
+//! per-thread [`Thread`] records, the [`MockRuntime`] handle plus its scripted
+//! feedback board, and the small helpers (id generation, event emission,
+//! thread summarisation) shared by the behaviour submodules. The
 //! `Runtime` trait impl lives in [`super::runtime_impl`] and the populated demo
 //! scenario in [`super::scenario`]; both reach the internals here through
 //! `pub(super)` items.
@@ -152,6 +152,9 @@ pub struct MockRuntime {
     pub(super) tx: broadcast::Sender<()>,
     /// Ordered log of runtime methods invoked (test seam).
     calls: Arc<Mutex<Vec<String>>>,
+    /// Scripted feedback board, mutated in place by votes and comments so the
+    /// offline demo's controls behave like the real thing.
+    pub(super) board: Arc<Mutex<super::feedback::MockBoard>>,
 }
 
 impl MockRuntime {
@@ -162,6 +165,7 @@ impl MockRuntime {
             state: Arc::new(Mutex::new(state)),
             tx,
             calls: Arc::new(Mutex::new(Vec::new())),
+            board: super::feedback::demo_board(),
         }
     }
 

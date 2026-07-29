@@ -17,7 +17,7 @@ use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
     App, Cmd, HandbackPolicy, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT,
-    SP_USAGE, TABS,
+    SP_FEEDBACK, SP_USAGE, TABS,
 };
 
 impl App {
@@ -99,6 +99,7 @@ impl App {
             credential_status: super::credentials::detect_credential_status(),
             tokenmaxxing_index: 0,
             tokenmaxxing_focused: false,
+            feedback: Default::default(),
             decision_open: false,
             decision_index: 0,
             dismissed_decisions: Default::default(),
@@ -380,6 +381,7 @@ impl App {
     /// active subpage.
     pub(super) fn tab_enter_cmd(&mut self) -> Option<Cmd> {
         match self.tab() {
+            "Feedback" => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
             // The workflow store is files on this machine, so entering the tab
             // reads them rather than asking the runtime for anything — which is
             // why this arm returns no command and does the work here.
@@ -391,6 +393,7 @@ impl App {
             "Settings" => match self.settings_index {
                 SP_USAGE => Some(Cmd::LoadUsage),
                 SP_CONTEXT => Some(Cmd::InspectContext),
+                SP_FEEDBACK => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
                 _ => None,
             },
             _ => None,

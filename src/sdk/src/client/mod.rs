@@ -1,7 +1,8 @@
 //! Typed Medulla surface over the shared `tinyhumans-sdk` transport.
 //!
 //! Surfaces: auth (`/auth`), durable sessions (`/medulla/v1`), SSE event
-//! streaming, and one-shot orchestration (`/orchestration/v1`).
+//! streaming, one-shot orchestration (`/orchestration/v1`), and the public
+//! feedback board (`/feedback`, in [`feedback`]).
 //!
 //! Every HTTP request is issued by [`tinyhumans_sdk::TinyHumansClient`], which
 //! owns credential headers, the `{ "success": true, "data": ... }` envelope,
@@ -24,11 +25,16 @@
 //! says why inline. They still share the one transport.
 
 pub mod error;
+pub mod feedback;
 pub mod program;
 pub mod sse;
 pub mod types;
 
 pub use error::{ClientError, Result};
+pub use feedback::{
+    FeedbackComment, FeedbackDetail, FeedbackGithub, FeedbackItem, FeedbackPage, FeedbackQuery,
+    FeedbackSort, FeedbackStatus, FeedbackSubmission, FeedbackType,
+};
 pub use program::*;
 pub use types::*;
 

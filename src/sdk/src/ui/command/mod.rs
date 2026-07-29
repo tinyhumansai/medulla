@@ -30,7 +30,7 @@ impl SlashCommand {
 ///
 /// Returns `None` when `input` is not a slash command (no leading `/` after
 /// trimming) so the caller can treat it as a normal prompt. The command token is
-/// matched case-insensitively; free-text arguments (`/memory`) preserve
+/// matched case-insensitively; free-text arguments (`/task`) preserve
 /// their original case, while flag arguments (`/copy`, `/async`) are matched
 /// case-insensitively. Unrecognized commands map to [`SlashCommand::Unknown`] and
 /// invalid arguments to [`SlashCommand::BadUsage`], so no input is silently
@@ -56,7 +56,7 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
         "config" => SlashCommand::Config,
         "settings" | "theme" => SlashCommand::Settings,
         "usage" => SlashCommand::Usage,
-        "memory" | "mem" => SlashCommand::Memory(non_empty(arg)),
+        "feedback" | "fb" => SlashCommand::Feedback,
         "mouse" => SlashCommand::ToggleMouse,
         "copy" => match flag.as_str() {
             "" | "all" => SlashCommand::Copy(CopyScope::All),

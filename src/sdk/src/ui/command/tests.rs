@@ -23,21 +23,13 @@ fn simple_commands_and_aliases() {
     assert_eq!(parse("/clear"), Some(SlashCommand::ClearView));
     assert_eq!(parse("/settings"), Some(SlashCommand::Settings));
     assert_eq!(parse("/theme"), Some(SlashCommand::Settings));
-    assert_eq!(parse("/mem"), Some(SlashCommand::Memory(None)));
+    assert_eq!(parse("/fb"), Some(SlashCommand::Feedback));
 }
 
 #[test]
 fn command_token_is_case_insensitive() {
     assert_eq!(parse("/QUIT"), Some(SlashCommand::Quit));
     assert_eq!(parse("  /New  "), Some(SlashCommand::NewSession));
-}
-
-#[test]
-fn memory_preserves_argument_case() {
-    assert_eq!(
-        parse("/memory Find The Thing"),
-        Some(SlashCommand::Memory(Some("Find The Thing".into())))
-    );
 }
 
 #[test]
@@ -101,8 +93,8 @@ fn every_parseable_command_is_catalogued() {
     // The other direction: a command the parser knows but the catalog omits is
     // undiscoverable — it exists only for whoever read the source.
     for name in [
-        "new", "resume", "abort", "clear", "copy", "memory", "mem", "usage", "settings", "theme",
-        "config", "mouse", "help", "quit", "exit", "q",
+        "new", "resume", "abort", "clear", "copy", "usage", "settings", "theme", "config",
+        "feedback", "fb", "mouse", "help", "quit", "exit", "q",
     ] {
         assert!(
             lookup(name).is_some(),
@@ -125,18 +117,18 @@ fn suggestions_narrow_as_the_name_is_typed() {
     assert_eq!(all.len(), COMMANDS.len());
 
     // …a prefix narrows it, by alias as well as by name…
-    let names: Vec<&str> = suggestions("/me")
+    let names: Vec<&str> = suggestions("/fb")
         .expect("still choosing")
         .iter()
         .map(|spec| spec.name)
         .collect();
-    assert_eq!(names, vec!["memory"], "matched via its `mem` alias");
+    assert_eq!(names, vec!["feedback"], "matched via its `fb` alias");
 
     // …an unknown prefix says so with an empty list rather than by vanishing…
     assert_eq!(suggestions("/zzz").expect("still a command line").len(), 0);
 
     // …and once an argument is being typed the choice is made.
-    assert!(suggestions("/memory rust").is_none());
+    assert!(suggestions("/copy last").is_none());
     assert!(suggestions("hello").is_none(), "not a command at all");
 }
 

@@ -7,7 +7,7 @@
 //!
 //! An earlier design split by key rather than by mode — `↑↓` always drove the
 //! nav, `j/k` and the subpage's letters drove the content. It avoided a focus
-//! toggle, but it did not survive the letter-bound pages: they bind single letters
+//! toggle, but it did not survive Feedback: that page binds nine single letters
 //! as actions, so the keys you would reach for to get around instead voted,
 //! commented, or opened a submission, and the arrow keys jumped you off the page
 //! entirely. Making entry explicit is what makes those letters deliberate.
@@ -18,10 +18,11 @@ use crossterm::event::KeyCode;
 
 use crate::ui::multi_pane::{self, NavAction};
 use crate::ui::theme::THEME_ROLES;
+use medulla::client::FeedbackType;
 
 use super::super::types::{
-    App, Cmd, SETTINGS_SUBPAGES, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_HELP,
-    SP_TRACE, SP_USAGE,
+    App, Cmd, SETTINGS_SUBPAGES, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_FEEDBACK,
+    SP_HELP, SP_TRACE, SP_USAGE,
 };
 
 impl App {
@@ -70,6 +71,7 @@ impl App {
             SP_USAGE => self.usage_key(code),
             SP_APPEARANCE => self.appearance_key(code),
             SP_CONFIG => self.config_key(code),
+            SP_FEEDBACK => self.feedback_key(code),
             SP_TRACE => self.trace_key(code),
             SP_CONTEXT => self.context_key(code),
             SP_ACCOUNT => self.account_key(code),
@@ -95,6 +97,7 @@ impl App {
                 self.move_config_index(up);
                 SettingsKey::handled(None)
             }
+            SP_FEEDBACK => SettingsKey::handled(self.move_feedback_index(up)),
             SP_TRACE => {
                 self.selected = if up {
                     self.selected.saturating_sub(1)
@@ -177,6 +180,57 @@ impl App {
                 let status = self.adjust_setting(delta);
                 self.set_status(status);
                 SettingsKey::handled(None)
+            }
+            _ => SettingsKey::Unhandled,
+        }
+    }
+
+    /// Feedback: browse the board, vote, comment, and submit.
+    ///
+    /// `pub(super)` because the top-level Feedback tab routes its keys here
+    /// too — the board is the same surface in both places, and duplicating the
+    /// bindings is how the two drift apart.
+    pub(super) fn feedback_key(&mut self, code: KeyCode) -> SettingsKey {
+        match code {
+            // The arrows are bound here as well as by the Settings nav wrapper,
+            // which never reaches this function with one: on the top-level tab
+            // there is no wrapper, and the board's own header advertises `↑/↓`.
+            KeyCode::Char('k') | KeyCode::Up => {
+                SettingsKey::handled(self.move_feedback_index(true))
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                SettingsKey::handled(self.move_feedback_index(false))
+            }
+            // The detail pane holds the whole body plus every comment, so it
+            // outgrows its height routinely; the list keeps the arrows, so
+            // paging keys scroll the text.
+            KeyCode::PageUp => {
+                self.scroll_feedback_detail(false);
+                SettingsKey::handled(None)
+            }
+            KeyCode::PageDown => {
+                self.scroll_feedback_detail(true);
+                SettingsKey::handled(None)
+            }
+            KeyCode::Char('u') => SettingsKey::handled(self.vote_selected_feedback(1)),
+            KeyCode::Char('d') => SettingsKey::handled(self.vote_selected_feedback(-1)),
+            KeyCode::Char('c') => {
+                self.open_feedback_comment();
+                SettingsKey::handled(None)
+            }
+            KeyCode::Char('n') => {
+                self.open_feedback_submit(FeedbackType::Feature);
+                SettingsKey::handled(None)
+            }
+            KeyCode::Char('b') => {
+                self.open_feedback_submit(FeedbackType::Bug);
+                SettingsKey::handled(None)
+            }
+            KeyCode::Char('s') => SettingsKey::handled(self.cycle_feedback_sort()),
+            KeyCode::Char('f') => SettingsKey::handled(self.cycle_feedback_filter()),
+            KeyCode::Char('r') | KeyCode::Enter => {
+                self.set_status("Feedback · refreshing…");
+                SettingsKey::handled(self.reload_feedback())
             }
             _ => SettingsKey::Unhandled,
         }

@@ -96,11 +96,11 @@ fn tab_completes_the_highlighted_command() {
     // which also closes the peek — the choice has been made.
     let mut with_arg = agents_app();
     let app = &mut with_arg;
-    type_str(app, "/mem");
+    type_str(app, "/cop");
     let _ = app.on_event(key(KeyCode::Tab));
-    assert_eq!(app.draft_text(), "/memory ");
+    assert_eq!(app.draft_text(), "/copy ");
     let out = render(app, 140, 44);
-    assert!(!out.contains("Load persona memory"), "peek closed: {out}");
+    assert!(!out.contains("Copy the transcript"), "peek closed: {out}");
 }
 
 #[test]

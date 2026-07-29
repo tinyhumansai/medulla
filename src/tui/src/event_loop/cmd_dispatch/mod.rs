@@ -14,6 +14,7 @@ use super::AppMsg;
 
 #[cfg(feature = "workflows")]
 mod copilot_hosts;
+mod feedback;
 #[cfg(feature = "workflows")]
 mod workflows;
 
@@ -64,8 +65,19 @@ pub(super) fn run_cmd(
     _workflows_config: &medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
+    let cmd = match feedback::run_feedback_cmd(cmd, runtime, msg_tx) {
+        Some(cmd) => *cmd,
+        None => return,
+    };
     match cmd {
         Cmd::Quit => {}
+        Cmd::LoadFeedback(_)
+        | Cmd::LoadFeedbackDetail(_)
+        | Cmd::VoteFeedback { .. }
+        | Cmd::CommentFeedback { .. }
+        | Cmd::SubmitFeedback { .. } => {
+            unreachable!("feedback commands return before main dispatch")
+        }
         Cmd::Submit(input) => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

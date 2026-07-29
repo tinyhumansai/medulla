@@ -32,8 +32,12 @@ use medulla_tui::ui::login::LoginOutcome;
 async fn core_runtime(
     core: Arc<medulla::core_host::EmbeddedCore>,
     hub: crate::hub_relay::HubSlot,
+    backend_base_url: &str,
 ) -> Arc<dyn Runtime> {
-    let rt = medulla::runtime::openhuman::OpenHumanRuntime::with_hub(core, hub);
+    // The backend URL rides along for the surfaces the core cannot serve — the
+    // feedback board lives on the cloud deployment this host is configured for.
+    let rt = medulla::runtime::openhuman::OpenHumanRuntime::with_hub(core, hub)
+        .with_backend_base_url(backend_base_url);
     // First fetch before the UI paints, so the initial frame shows real state
     // rather than an empty one that fills in a beat later.
     rt.refresh().await;
@@ -226,7 +230,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     (session, account) = session_of(&core, &loaded.config.backend.base_url).await;
                     let core = Arc::new(core);
                     core_arc = Some(Arc::clone(&core));
-                    runtime = Some(core_runtime(core, hub_slot.clone()).await);
+                    runtime = Some(
+                        core_runtime(core, hub_slot.clone(), &loaded.config.backend.base_url).await,
+                    );
                 }
                 // Signed out is an expected state with an obvious remedy, so it
                 // is the one thing that does not end here: the core is held and
@@ -290,7 +296,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                             session_of(&core, &loaded.config.backend.base_url).await;
                         let core = Arc::new(core);
                         core_arc = Some(Arc::clone(&core));
-                        runtime = Some(core_runtime(core, hub_slot.clone()).await);
+                        runtime = Some(
+                            core_runtime(core, hub_slot.clone(), &loaded.config.backend.base_url)
+                                .await,
+                        );
                     }
                     // Stored and still unusable: the token was for a different
                     // deployment than the one the core resolves, or the backend
@@ -501,7 +510,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     match relogin(&mut terminal, &core, &loaded.config.backend.base_url).await {
                         Ok(true) => {
                             (_, account) = session_of(&core, &loaded.config.backend.base_url).await;
-                            runtime = core_runtime(core, hub_slot.clone()).await;
+                            runtime = core_runtime(
+                                core,
+                                hub_slot.clone(),
+                                &loaded.config.backend.base_url,
+                            )
+                            .await;
                             continue;
                         }
                         // Quit from the login screen: the operator asked to

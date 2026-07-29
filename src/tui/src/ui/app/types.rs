@@ -708,6 +708,11 @@ pub struct App {
     pub(super) command_index: usize,
     /// Selected row on the Routing Hosts page.
     pub(super) host_index: usize,
+    /// Whether ↑↓ on the Hosts page drives the role toggles in the preview
+    /// rather than the host list above it. Tab moves between the two.
+    pub(super) host_roles_focus: bool,
+    /// Selected role in the preview's toggle list, while it has focus.
+    pub(super) host_role_index: usize,
     /// Selected row on the Routing Workspaces page.
     pub(super) workspace_index: usize,
     /// Selected row on the Routing Agent Templates page.

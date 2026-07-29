@@ -172,6 +172,7 @@ fn value_types_are_debug_clone_eq() {
     assert_eq!(ident.clone(), ident);
 
     let worker = WorkerInfo {
+        roles: Vec::new(),
         id: "w1".into(),
         address: "host".into(),
         handle: None,

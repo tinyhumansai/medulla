@@ -101,6 +101,7 @@ pub fn fleet_app() -> App {
         inner,
         workers: vec![medulla::runtime::WorkerInfo {
             id: "w_1".into(),
+            roles: Vec::new(),
             address: "@dev".into(),
             handle: Some("@dev".into()),
             label: Some("primary".into()),

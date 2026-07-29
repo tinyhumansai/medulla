@@ -37,6 +37,7 @@ pub(super) fn hub_worker_to_info(
         address: worker.address,
         label: worker.label,
         harness: Some(worker.harness),
+        roles: worker.roles,
         peer_id: None,
         cpu_cores,
         memory_total_bytes,
@@ -81,6 +82,7 @@ pub(super) async fn apply_worker_op(
                 .await
         }
         WorkerOp::Remove { id } => handle.remove(&id).await,
+        WorkerOp::SetRoles { id, roles } => handle.set_roles(&id, roles).await,
         WorkerOp::RefreshDetails { id } => handle.refresh_system_info(&id).await,
         WorkerOp::ApplyStrategy { strategy } => handle.apply_strategy(strategy),
         WorkerOp::ApplySubscriptionStrategy { strategy } => {

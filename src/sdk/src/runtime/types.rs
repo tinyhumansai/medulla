@@ -128,6 +128,9 @@ pub struct WorkerInfo {
     pub ip_address: Option<String>,
     /// Whether this worker is the current manual default.
     pub selected: bool,
+    /// Agent-template ids this worker is offered for. Empty means unspecified —
+    /// a general worker, not one excluded from everything.
+    pub roles: Vec<String>,
     /// Per-harness token budgets the worker advertised on its capability probe.
     /// Empty when none were reported. Display-only; the orchestrator sizes tasks.
     pub budgets: Vec<crate::tinyplace::HarnessBudget>,
@@ -254,6 +257,18 @@ pub enum WorkerOp {
     Remove {
         /// Registry identifier of the worker.
         id: String,
+    },
+    /// Replace the agent-template roles a worker is offered for.
+    ///
+    /// Distinct from `Update`, whose patch shape mirrors the backend's
+    /// `worker.update` field set. Roles are a whole-list replacement, and
+    /// expressing "clear every role" as a patch value is exactly the ambiguity
+    /// (`""` clears vs. sets-empty) this avoids.
+    SetRoles {
+        /// Registry identifier of the worker.
+        id: String,
+        /// Agent-template ids to offer this worker for; empty leaves it general.
+        roles: Vec<String>,
     },
     /// Ask a worker for current CPU, RAM, and IP details.
     RefreshDetails {

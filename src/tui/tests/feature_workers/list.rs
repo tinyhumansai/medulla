@@ -208,14 +208,19 @@ fn host_list_formats_missing_details_and_megabytes() {
 
     let mut app = app_with_roster(vec![missing, small], None);
     app.focus_routing_subpage("Hosts");
-    let out = render(&mut app, 120, 40);
 
+    // Capacity is the preview's job now, so each host's line is read where the
+    // cursor is — which is the point of the split: one host's detail at a time.
+    let out = render(&mut app, 120, 40);
     assert!(out.contains("details not captured"));
+
+    let _ = app.on_event(key(KeyCode::Down));
+    let out = render(&mut app, 120, 40);
     assert!(out.contains("512 MiB available / 768 MiB total"));
 }
 
 #[test]
-fn host_list_paginates_by_two_line_rows() {
+fn host_list_paginates_by_single_line_rows() {
     let workers = (1..=12)
         .map(|index| worker(&format!("w{index}"), index == 1))
         .collect();
@@ -228,9 +233,81 @@ fn host_list_paginates_by_two_line_rows() {
     let out = render(&mut app, 120, 24);
     assert!(out.contains("w12"), "selected worker should remain visible");
     assert!(
-        out.contains("refresh details"),
+        out.contains("r refresh"),
         "action footer should remain visible"
     );
+}
+
+#[test]
+fn the_preview_follows_the_cursor_rather_than_repeating_every_host() {
+    let mut first = worker("w1", true);
+    first.ip_address = Some("10.0.0.1".into());
+    let mut second = worker("w2", false);
+    second.ip_address = Some("10.0.0.2".into());
+
+    let mut app = app_with_roster(vec![first, second], None);
+    app.focus_routing_subpage("Hosts");
+
+    let out = render(&mut app, 120, 40);
+    assert!(
+        out.contains("Host · w1"),
+        "preview titles the selected host"
+    );
+    assert!(out.contains("IP 10.0.0.1"));
+    assert!(
+        !out.contains("IP 10.0.0.2"),
+        "an unselected host's capacity must not be drawn: {out}"
+    );
+
+    let _ = app.on_event(key(KeyCode::Down));
+    let out = render(&mut app, 120, 40);
+    assert!(out.contains("Host · w2"));
+    assert!(out.contains("IP 10.0.0.2"));
+    assert!(!out.contains("IP 10.0.0.1"));
+}
+
+#[test]
+fn space_on_a_role_offers_the_selected_host_for_it_and_takes_it_back() {
+    let mut app = app_with_roster(vec![worker("w1", true)], None);
+    app.focus_routing_subpage("Hosts");
+
+    // Roles come from the agent-template catalog, which ships built-in coding
+    // roles even with nothing declared — so there is always something to toggle.
+    let out = render(&mut app, 120, 44);
+    assert!(
+        out.contains("none assigned · offered for any role"),
+        "an unassigned host reads as general, not excluded: {out}"
+    );
+
+    let _ = app.on_event(key(KeyCode::Right));
+    let out = render(&mut app, 120, 44);
+    assert!(out.contains("[ ]"), "the toggle list is drawn: {out}");
+
+    let cmd = app.on_event(key(KeyCode::Char(' ')));
+    match cmd {
+        Some(Cmd::WorkerOp(WorkerOp::SetRoles { id, roles })) => {
+            assert_eq!(id, "w1");
+            assert_eq!(roles.len(), 1, "exactly the toggled role");
+        }
+        other => panic!("expected a SetRoles op, got {other:?}"),
+    }
+}
+
+#[test]
+fn leaving_the_role_list_hands_the_arrows_back_to_the_host_roster() {
+    let mut app = app_with_roster(vec![worker("w1", true), worker("w2", false)], None);
+    app.focus_routing_subpage("Hosts");
+
+    let _ = app.on_event(key(KeyCode::Right));
+    // Down now walks roles, so the selected host must not have changed.
+    let _ = app.on_event(key(KeyCode::Down));
+    let out = render(&mut app, 120, 44);
+    assert!(out.contains("Host · w1"), "still previewing w1: {out}");
+
+    let _ = app.on_event(key(KeyCode::Left));
+    let _ = app.on_event(key(KeyCode::Down));
+    let out = render(&mut app, 120, 44);
+    assert!(out.contains("Host · w2"), "back on the roster: {out}");
 }
 
 #[test]
@@ -325,4 +402,49 @@ fn hosts_e_opens_edit_label_prompt_prefilled() {
         }
         other => panic!("expected Update, got {other:?}"),
     }
+}
+
+#[test]
+fn an_assigned_role_is_summarised_and_checked() {
+    let mut w = worker("w1", true);
+    w.roles = vec!["code-reviewer".into()];
+
+    let mut app = app_with_roster(vec![w], None);
+    app.focus_routing_subpage("Hosts");
+    let out = render(&mut app, 130, 44);
+
+    // The summary leads the block, so what a host is offered for is readable
+    // without counting checkboxes.
+    assert!(
+        out.contains("roles      code-reviewer"),
+        "assigned roles summarised: {out}"
+    );
+    assert!(out.contains("[x] code-reviewer"), "and checked: {out}");
+    assert!(out.contains("[ ] implementer"), "others unchecked: {out}");
+    // And the roster row carries the count, so the list still says which hosts
+    // have been given roles at all.
+    assert!(out.contains("· 1 role"), "count on the roster row: {out}");
+}
+
+#[test]
+fn a_role_below_the_fold_stays_visible_when_selected() {
+    // The preview is capped at half the page, so on a short terminal the role
+    // list must scroll — a role that can be selected but not seen is a toggle
+    // the operator flips blind.
+    let mut app = app_with_roster(vec![worker("w1", true)], None);
+    app.focus_routing_subpage("Hosts");
+    let _ = app.on_event(key(KeyCode::Right));
+
+    let out = render(&mut app, 130, 26);
+    let last = "repo-orchestrator";
+    assert!(!out.contains(last), "the tail starts off-screen: {out}");
+
+    for _ in 0..12 {
+        let _ = app.on_event(key(KeyCode::Down));
+    }
+    let out = render(&mut app, 130, 26);
+    assert!(
+        out.contains(&format!("▸ [ ] {last}")),
+        "the window follows the cursor to the last role: {out}"
+    );
 }

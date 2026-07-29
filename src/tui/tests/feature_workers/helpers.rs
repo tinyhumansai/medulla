@@ -94,6 +94,7 @@ impl Runtime for FleetRuntime {
 pub fn worker(id: &str, selected: bool) -> WorkerInfo {
     WorkerInfo {
         id: id.into(),
+        roles: Vec::new(),
         address: format!("{id}.example:9000"),
         handle: Some(format!("@{id}")),
         label: Some(format!("{id} label")),

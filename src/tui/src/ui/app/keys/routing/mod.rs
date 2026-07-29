@@ -73,6 +73,15 @@ impl App {
 
     /// Browse and mutate the registered host roster.
     fn hosts_key(&mut self, code: KeyCode) -> RoutingKey {
+        // The preview's role toggles are a second cursor on the same page, so
+        // they claim the arrows while focused. `→` drills in and `←` backs out,
+        // one rung below the Esc that leaves the content pane entirely — Tab is
+        // deliberately untouched, it still cycles the top-level tabs.
+        if self.host_roles_focus {
+            if let Some(handled) = self.host_roles_key(code) {
+                return handled;
+            }
+        }
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.host_index = crate::ui::selection::moved(
@@ -88,6 +97,19 @@ impl App {
                     self.runtime.workers().len(),
                     false,
                 );
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                if self.selected_host().is_none() {
+                    return RoutingKey::Handled(None);
+                }
+                if self.agent_templates().is_empty() {
+                    self.set_status("No agent templates are declared — nothing to assign");
+                    return RoutingKey::Handled(None);
+                }
+                self.host_roles_focus = true;
+                self.host_role_index = 0;
+                self.set_status("Roles · Space toggles · ← back to the host list");
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('a') => {
@@ -138,6 +160,63 @@ impl App {
                 RoutingKey::Handled(cmd)
             }
             _ => RoutingKey::Unhandled,
+        }
+    }
+
+    /// Drive the selected host's role toggles.
+    ///
+    /// `None` means the key was not a role-list key and the host roster should
+    /// see it — so `a`, `r`, `d` and the rest keep working without leaving the
+    /// preview first.
+    fn host_roles_key(&mut self, code: KeyCode) -> Option<RoutingKey> {
+        let templates = self.agent_templates();
+        // The catalog can empty out under us (a template file is deleted, a
+        // refresh lands). Focus that points at nothing must not strand the arrows.
+        if templates.is_empty() {
+            self.host_roles_focus = false;
+            return None;
+        }
+        match code {
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.host_roles_focus = false;
+                self.set_status("Hosts · → to assign roles");
+                Some(RoutingKey::Handled(None))
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.host_role_index =
+                    crate::ui::selection::moved(self.host_role_index, templates.len(), true);
+                Some(RoutingKey::Handled(None))
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.host_role_index =
+                    crate::ui::selection::moved(self.host_role_index, templates.len(), false);
+                Some(RoutingKey::Handled(None))
+            }
+            KeyCode::Char(' ') | KeyCode::Enter => {
+                let host = self.selected_host()?;
+                let role = templates.get(self.host_role_index)?.id.clone();
+                // Whole-list replacement, so the toggle reads the current set,
+                // flips one entry, and sends the result. Roles ride the hub's
+                // descriptor, so this re-registers — the point is that the
+                // orchestrator starts routing this role here.
+                let mut roles = host.roles.clone();
+                let assigned = if let Some(at) = roles.iter().position(|held| held == &role) {
+                    roles.remove(at);
+                    false
+                } else {
+                    roles.push(role.clone());
+                    true
+                };
+                self.set_status(if assigned {
+                    format!("{} now offered for {role}", host.id)
+                } else {
+                    format!("{} no longer offered for {role}", host.id)
+                });
+                Some(RoutingKey::Handled(Some(Cmd::WorkerOp(
+                    WorkerOp::SetRoles { id: host.id, roles },
+                ))))
+            }
+            _ => None,
         }
     }
 

@@ -69,6 +69,8 @@ impl App {
             chat_scroll: 0,
             command_index: 0,
             host_index: 0,
+            host_roles_focus: false,
+            host_role_index: 0,
             workspace_index: 0,
             template_index: 0,
             custom_harnesses: Vec::new(),
@@ -573,6 +575,14 @@ impl App {
             return medulla::runtime::demo_agents();
         }
         self.snapshot.roster.clone()
+    }
+
+    /// The agent-template catalog, which is the set of roles a host may be
+    /// offered for. Read through [`fleet_capacity`](App::fleet_capacity) so the
+    /// Hosts page and the Agent Templates page can never disagree about which
+    /// roles exist.
+    pub(super) fn agent_templates(&self) -> Vec<medulla::runtime::AgentTemplate> {
+        self.fleet_capacity().templates
     }
 
     /// The index of the active thread in the snapshot's thread list.

@@ -336,6 +336,7 @@ use crate::tinyplace::{BudgetSource, BudgetWindow, HarnessProvider, HarnessReadi
 /// A registered peer with the capacity facts the Hosts page shows.
 fn peer(id: &str) -> WorkerInfo {
     WorkerInfo {
+        roles: Vec::new(),
         id: id.into(),
         address: format!("{id}.example:9000"),
         handle: Some(format!("@{id}")),

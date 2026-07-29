@@ -45,6 +45,16 @@ pub fn apply_workflow_ops(
 }
 
 /// Apply `ops` only if the graph still matches `expected_fingerprint`.
+///
+/// Returns `None` when the expected fingerprint is stale, including when the
+/// graph changes between the initial read and persistence. Returns `Some` only
+/// after applying the ops, validating the graph and host semantic gates, and
+/// durably saving the result.
+///
+/// # Errors
+///
+/// Returns an error when the workflow is missing, an op cannot be applied, the
+/// resulting graph fails validation or semantic checks, or persistence fails.
 pub fn apply_workflow_ops_if_unchanged(
     store: &Arc<dyn WorkflowStore>,
     id: &str,

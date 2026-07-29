@@ -159,6 +159,15 @@ pub async fn run_here(
 /// The trigger is passed in rather than inferred. `medulla workflow evolve`
 /// with no run is a manual review; with one it is the failure pass, which leads
 /// with that run.
+///
+/// The workflow must exist, be enabled, and workflow evolution must be enabled.
+/// This starts an embedded daemon bound to [`LOCAL_WORKER_ADDRESS`] and forces
+/// ACP so the review can use the restricted workflow MCP surface.
+///
+/// # Errors
+///
+/// Returns an error when those preconditions fail, MCP support is unavailable,
+/// the embedded host cannot start, or the review turn fails.
 pub async fn evolve_here(
     store: Arc<dyn crate::workflows::WorkflowStore>,
     config: &crate::config::WorkflowsConfig,
@@ -203,15 +212,10 @@ pub async fn evolve_here(
     })
     .map_err(crate::workflows::WorkflowError::Engine)?;
 
-    let worker_address = if config.default_worker.trim().is_empty() {
-        LOCAL_WORKER_ADDRESS.to_string()
-    } else {
-        config.default_worker.clone()
-    };
     let session = EvolveSession {
         store,
         dispatch: host.dispatch(),
-        worker_address,
+        worker_address: LOCAL_WORKER_ADDRESS.to_string(),
         provider: config.default_provider,
         model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
         // One-shot: a CLI invocation has no pane to be continuous with, and

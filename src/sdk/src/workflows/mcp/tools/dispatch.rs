@@ -201,6 +201,7 @@ fn scope_error(mode: ToolMode, name: &str, arguments: &Value) -> Option<String> 
     scope_error_for(mode, name, arguments, scope.as_deref())
 }
 
+/// Explain when an evolution write targets a workflow outside its review scope.
 pub(crate) fn scope_error_for(
     mode: ToolMode,
     name: &str,

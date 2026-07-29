@@ -79,11 +79,14 @@ impl HarnessDispatch for ErrorThenHangDispatch {
 /// A store, its settings, and a context factory over a temporary directory.
 pub(super) struct Harness {
     _root: tempfile::TempDir,
+    /// File-backed workflow and run state used by the test.
     pub(super) store: Arc<FileWorkflowStore>,
+    /// Capability policy copied into each test run context.
     pub(super) settings: Arc<CapabilitySettings>,
 }
 
 impl Harness {
+    /// Create an isolated permissive workflow harness.
     pub(super) fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let store = Arc::new(FileWorkflowStore::new(
@@ -99,11 +102,13 @@ impl Harness {
         }
     }
 
+    /// Parse and save one workflow fixture under `id`.
     pub(super) fn install(&self, document: &str, id: &str) {
         let record = parse_workflow(document, id).expect("valid fixture");
         self.store.save(&record).expect("saves");
     }
 
+    /// Build a run context using the supplied stand-in dispatch.
     pub(super) fn context(&self, dispatch: Arc<dyn HarnessDispatch>) -> RunContext {
         RunContext {
             store: self.store.clone(),
@@ -116,6 +121,17 @@ impl Harness {
             sink: null_sink(),
         }
     }
+}
+
+/// Wait for a run to enter the process registry, failing instead of hanging.
+async fn wait_until_running(run_id: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !is_running(run_id) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{run_id} was not registered"));
 }
 
 /// A diamond: the trigger fans out to two agent nodes that run concurrently,
@@ -263,9 +279,7 @@ async fn cancelling_an_in_flight_run_settles_it_as_cancelled() {
 
     // Wait for the run to register itself before cancelling — otherwise the
     // test races setup and proves nothing.
-    while !is_running("run-7") {
-        tokio::task::yield_now().await;
-    }
+    wait_until_running("run-7").await;
     assert!(cancel("run-7"), "the run should be cancellable by id");
 
     let record = run.await.unwrap().expect("settles");
@@ -394,9 +408,7 @@ async fn a_run_dropped_mid_flight_is_reconciled_to_interrupted() {
         )
         .await
     });
-    while !is_running("run-11") {
-        tokio::task::yield_now().await;
-    }
+    wait_until_running("run-11").await;
     run.abort();
     let _ = run.await;
 
@@ -436,9 +448,8 @@ async fn two_runs_of_one_workflow_cancel_independently() {
         )
         .await
     });
-    while !is_running("run-a") || !is_running("run-b") {
-        tokio::task::yield_now().await;
-    }
+    wait_until_running("run-a").await;
+    wait_until_running("run-b").await;
 
     cancel("run-a");
     let first = first.await.unwrap().unwrap();
@@ -485,9 +496,7 @@ async fn the_same_run_id_cannot_start_twice_concurrently() {
         )
         .await
     });
-    while !is_running("dup") {
-        tokio::task::yield_now().await;
-    }
+    wait_until_running("dup").await;
 
     let second = run_workflow(second_context, "gated", "dup", json!({}))
         .await

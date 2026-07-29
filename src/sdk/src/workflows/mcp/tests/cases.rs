@@ -13,6 +13,7 @@ use crate::harness_contract::is_reserved_tool_name;
 pub(super) use crate::workflows::mcp::ToolMode;
 pub(super) use crate::workflows::{FileWorkflowStore, WorkflowStore};
 
+/// Create an isolated file store and keep its temporary root alive.
 pub(super) fn store() -> (tempfile::TempDir, Arc<dyn WorkflowStore>) {
     let root = tempfile::tempdir().unwrap();
     let store: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
@@ -22,6 +23,7 @@ pub(super) fn store() -> (tempfile::TempDir, Arc<dyn WorkflowStore>) {
     (root, store)
 }
 
+/// Build the smallest runnable workflow document under `id`.
 pub(super) fn document(id: &str) -> String {
     json!({
         "id": id,

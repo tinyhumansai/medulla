@@ -140,6 +140,10 @@ impl App {
     /// The whole of what retry is: a timeout should cost the operator the two
     /// minutes it took, not the sentence they wrote.
     pub(in crate::ui::app) fn retry_copilot(&mut self) -> Option<Cmd> {
+        if self.copilot_busy() {
+            self.set_status("Copilot is still busy — wait for it to finish before retrying");
+            return None;
+        }
         let Some(instruction) = self.copilot_mut()?.take_failed() else {
             self.set_status("Nothing to retry");
             return None;
@@ -321,16 +325,15 @@ impl App {
     /// Keeps the instruction that failed so `r` can send it again. Anything
     /// queued behind it is dropped: the operator's follow-up assumed the turn
     /// that just failed had happened.
-    pub fn copilot_failed(&mut self, workflow: &str, error: String) {
+    pub fn copilot_failed(&mut self, workflow: &str, instruction: String, error: String) {
         if let Some(thread) = self.wf.copilots.get_mut(workflow) {
-            let attempted = thread
-                .turns
-                .iter()
-                .rev()
-                .find(|turn| turn.role == medulla::ui::workflows::TurnRole::User)
-                .map(|turn| turn.text.clone());
-            thread.take_queued();
-            thread.failed_with(error.clone(), attempted);
+            thread.failed_with(error.clone(), Some(instruction));
+            // A follow-up waits for every overlapping turn. If another turn
+            // remains, it still has a chance to establish the context the
+            // operator queued against; the final failure drops it as before.
+            if !thread.busy {
+                thread.take_queued();
+            }
         }
         self.set_status(format!("Copilot failed: {error} · r to retry"));
     }

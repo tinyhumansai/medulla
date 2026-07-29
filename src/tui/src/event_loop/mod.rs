@@ -160,8 +160,12 @@ pub(crate) async fn run(
                         }
                     }
                     #[cfg(feature = "workflows")]
-                    AppMsg::CopilotFailed { workflow, error } => {
-                        app.copilot_failed(&workflow, error);
+                    AppMsg::CopilotFailed {
+                        workflow,
+                        instruction,
+                        error,
+                    } => {
+                        app.copilot_failed(&workflow, instruction, error);
                     }
                     #[cfg(feature = "workflows")]
                     AppMsg::WorkflowsChanged => app.reload_workflows(),

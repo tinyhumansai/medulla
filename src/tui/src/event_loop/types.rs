@@ -74,6 +74,8 @@ pub(super) enum AppMsg {
     CopilotFailed {
         /// The workflow the turn was scoped to.
         workflow: String,
+        /// The instruction belonging to this specific failed turn.
+        instruction: String,
         /// Why it failed.
         error: String,
     },

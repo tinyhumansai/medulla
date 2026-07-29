@@ -313,7 +313,7 @@ fn a_failed_turn_drops_what_was_queued_behind_it() {
     app.wf.draft = crate::ui::composer::insert_at("", 0, "two");
     app.submit_copilot();
 
-    app.copilot_failed("sweep", "the harness timed out".into());
+    app.copilot_failed("sweep", "one".into(), "the harness timed out".into());
 
     // The follow-up assumed the turn that just failed had happened; running it
     // anyway would act on a graph nobody edited.
@@ -329,7 +329,7 @@ fn a_failed_turn_keeps_its_instruction_so_it_can_be_retried() {
     app.wf.draft = crate::ui::composer::insert_at("", 0, "add a slack step");
     app.submit_copilot().expect("turn");
 
-    app.copilot_failed("sweep", "the harness timed out".into());
+    app.copilot_failed("sweep", "add a slack step".into(), "timed out".into());
     let retried = app.retry_copilot();
 
     // A turn that times out after two minutes should not also cost the
@@ -357,7 +357,7 @@ fn a_new_instruction_supersedes_the_one_that_failed() {
     let (_home, mut app) = app_with(&[diamond("sweep")]);
     app.wf.draft = crate::ui::composer::insert_at("", 0, "first attempt");
     app.submit_copilot().expect("turn");
-    app.copilot_failed("sweep", "timed out".into());
+    app.copilot_failed("sweep", "first attempt".into(), "timed out".into());
 
     app.wf.draft = crate::ui::composer::insert_at("", 0, "never mind, do this");
     app.submit_copilot().expect("second turn");
@@ -457,7 +457,7 @@ fn a_failed_turn_ends_the_thread_and_says_so_on_the_status_line() {
     app.wf.draft = crate::ui::composer::insert_at("", 0, "go");
     app.submit_copilot().expect("turn");
 
-    app.copilot_failed("sweep", "no harness installed".into());
+    app.copilot_failed("sweep", "go".into(), "no harness installed".into());
 
     assert!(!app.copilot().unwrap().busy);
     assert!(

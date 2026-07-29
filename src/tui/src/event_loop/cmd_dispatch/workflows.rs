@@ -255,6 +255,7 @@ fn spawn_turn(
                 },
                 Err(err) => AppMsg::CopilotFailed {
                     workflow: thread.clone(),
+                    instruction: instruction.clone(),
                     error: err.to_string(),
                 },
             };
@@ -413,9 +414,15 @@ pub(super) fn spawn_evolve(
 ) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let trigger = match run_id {
-            Some(run_id) => medulla::workflows::evolve::EvolveTrigger::Failure(run_id),
-            None => medulla::workflows::evolve::EvolveTrigger::Manual,
+        let (trigger, instruction) = match run_id {
+            Some(run_id) => (
+                medulla::workflows::evolve::EvolveTrigger::Failure(run_id.clone()),
+                format!("Review this workflow, starting from run {run_id}."),
+            ),
+            None => (
+                medulla::workflows::evolve::EvolveTrigger::Manual,
+                "Review this workflow against its history.".to_string(),
+            ),
         };
 
         let result = evolve_turn(&workflow, trigger, &workflows_config).await;
@@ -439,6 +446,7 @@ pub(super) fn spawn_evolve(
             },
             Err(err) => AppMsg::CopilotFailed {
                 workflow,
+                instruction,
                 error: err.to_string(),
             },
         };

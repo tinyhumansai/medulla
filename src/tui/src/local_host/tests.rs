@@ -280,6 +280,7 @@ fn dispatch_options(provider: HarnessProvider, bin_env_key: &str) -> RunTaskOpti
         extra_args: Vec::new(),
         skip_permissions: false,
         conversation: String::new(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         abort: Abort::new(),
         router: None,

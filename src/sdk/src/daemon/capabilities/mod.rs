@@ -78,6 +78,10 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         // Unattributed by design: the probe asks this machine about itself, on
         // no peer's behalf, so it must not join any conversation.
         conversation: String::new(),
+        // A probe is a self-contained question. It must never land in a session
+        // serving real work, where its prompt would become part of that
+        // conversation's context.
+        session_class: crate::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider: options.provider,
         prompt,

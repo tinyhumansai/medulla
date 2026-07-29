@@ -93,6 +93,7 @@ fn live_options(
 ) -> RunTaskOptions {
     RunTaskOptions {
         conversation: peer.to_string(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider: HarnessProvider::Codex,
         prompt: prompt.to_string(),

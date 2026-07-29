@@ -110,13 +110,14 @@ impl PtySessionExecutor {
             .ok_or_else(|| format!("{} cannot run watchable tasks", provider.as_str()))?;
 
         // A task frame is discrete work and gets its own session; a
-        // conversational message continues the peer's. `conversation` is the
-        // authenticated sender, so two peers can never share one.
-        let class = if options.conversation.is_empty() {
-            SessionClass::Bounded
-        } else {
-            SessionClass::Unbound
-        };
+        // conversational message continues the peer's. Taken from the caller
+        // rather than inferred from `conversation`: the daemon sets that field
+        // to the authenticated sender for *every* inbound run, so it is never
+        // empty, and the old `is_empty()` test therefore classified every task
+        // frame as unbound. Two unrelated delegated tasks from one orchestrator
+        // then shared a harness, each able to read the other's prompt and tool
+        // context — the exact opposite of what the comment above promises.
+        let class = options.session_class;
         // Built *before* the session is opened, and deliberately so. The tailer
         // snapshots the transcripts that already exist and ignores them, so that
         // the one new file is unambiguously this session's — which means the

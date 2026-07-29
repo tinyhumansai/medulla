@@ -157,18 +157,24 @@ pub async fn run_script(
     })?;
 
     // Written and closed before waiting: a script that reads to EOF would
-    // otherwise block forever on a pipe nobody closed.
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(&body).await;
-        let _ = stdin.shutdown().await;
-    }
-
-    let output = tokio::time::timeout(timeout, child.wait_with_output())
-        .await
-        .map_err(|_| {
-            EngineError::Capability(format!("script: timed out after {}s", timeout.as_secs()))
-        })?
-        .map_err(|err| EngineError::Capability(format!("script: {program}: {err}")))?;
+    // otherwise block forever on a pipe nobody closed. The write is inside the
+    // same timeout as the wait, not before it: an input bigger than the OS pipe
+    // buffer blocks on `write_all` until the child drains it, and a script that
+    // never reads stdin could otherwise hang here for the much longer outer run
+    // deadline instead of this function's own `timeout`.
+    let stdin = child.stdin.take();
+    let output = tokio::time::timeout(timeout, async {
+        if let Some(mut stdin) = stdin {
+            let _ = stdin.write_all(&body).await;
+            let _ = stdin.shutdown().await;
+        }
+        child.wait_with_output().await
+    })
+    .await
+    .map_err(|_| {
+        EngineError::Capability(format!("script: timed out after {}s", timeout.as_secs()))
+    })?
+    .map_err(|err| EngineError::Capability(format!("script: {program}: {err}")))?;
 
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if !output.status.success() {

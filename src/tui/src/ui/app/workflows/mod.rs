@@ -145,6 +145,13 @@ impl App {
         medulla::ui::workflows::actionable(&self.workflow_proposals)
     }
 
+    /// The newest pending proposal, including one whose checks failed.
+    pub(in crate::ui::app) fn visible_proposal(
+        &self,
+    ) -> Option<&medulla::workflows::WorkflowProposal> {
+        medulla::ui::workflows::pending(&self.workflow_proposals)
+    }
+
     /// Re-read the workflow store into the page.
     ///
     /// An unreadable store leaves the page empty and says so, rather than

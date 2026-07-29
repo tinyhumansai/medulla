@@ -47,10 +47,14 @@ pub(super) fn spawn_run(
         // synchronously. This is the review on top of it, and only when the
         // operator has asked for that to happen by itself.
         let Some(run_id) = failed else { return };
-        if !medulla::workflows::evolve::EvolveConfig::from_config(&workflows_config).auto_on_failure
-        {
+        let evolve = medulla::workflows::evolve::EvolveConfig::from_config(&workflows_config);
+        if !evolve.enabled || !evolve.auto_on_failure {
             return;
         }
+        let _ = tx.send(AppMsg::CopilotStarted {
+            workflow: id.clone(),
+            instruction: format!("Review this workflow, starting from run {run_id}."),
+        });
         let _ = tx.send(AppMsg::Status(format!("Reviewing why {id} failed…")));
         spawn_evolve(id, Some(run_id), workflows_config, &tx);
     });
@@ -409,22 +413,12 @@ pub(super) fn spawn_evolve(
 ) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let env: HashMap<String, String> = std::env::vars().collect();
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let store = medulla::workflows::discover_store(&env, &cwd);
         let trigger = match run_id {
             Some(run_id) => medulla::workflows::evolve::EvolveTrigger::Failure(run_id),
             None => medulla::workflows::evolve::EvolveTrigger::Manual,
         };
 
-        let result = medulla::workflows::local::evolve_here(
-            store,
-            &workflows_config,
-            &cwd,
-            &workflow,
-            trigger,
-        )
-        .await;
+        let result = evolve_turn(&workflow, trigger, &workflows_config).await;
         let message = match result {
             Ok(outcome) if outcome.skipped => AppMsg::CopilotDone {
                 workflow,
@@ -453,6 +447,45 @@ pub(super) fn spawn_evolve(
         // be told to look again even when the graph itself did not move.
         let _ = tx.send(AppMsg::WorkflowsChanged);
     });
+}
+
+/// Run an evolution turn on the pane's tracked ACP host.
+///
+/// Sharing the host lifecycle with ordinary copilot turns makes Ctrl-X able to
+/// abort reviews and keeps the MCP tools attached to every evolution session.
+async fn evolve_turn(
+    workflow: &str,
+    trigger: medulla::workflows::evolve::EvolveTrigger,
+    workflows_config: &medulla::config::WorkflowsConfig,
+) -> anyhow::Result<medulla::workflows::evolve::EvolveOutcome> {
+    let mut env: HashMap<String, String> = std::env::vars().collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    env.insert(
+        medulla::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+        "acp".to_string(),
+    );
+    medulla::workflows::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
+    let store = medulla::workflows::discover_store(&env, &cwd);
+    let host = super::copilot_hosts::host_for(workflow, || EmbeddedDaemonOptions {
+        workspace: cwd.to_string_lossy().to_string(),
+        default_provider: workflows_config.default_provider,
+        model: (!workflows_config.default_model.is_empty())
+            .then(|| workflows_config.default_model.clone()),
+        env,
+        ..Default::default()
+    })
+    .map_err(anyhow::Error::msg)?;
+    let session = medulla::workflows::evolve::EvolveSession {
+        store,
+        dispatch: host.dispatch(),
+        worker_address: LOCAL_WORKER_ADDRESS.to_string(),
+        provider: workflows_config.default_provider,
+        model: (!workflows_config.default_model.is_empty())
+            .then(|| workflows_config.default_model.clone()),
+        conversation: workflow.to_string(),
+        config: medulla::workflows::evolve::EvolveConfig::from_config(workflows_config),
+    };
+    Ok(session.evolve(workflow, trigger, None).await?)
 }
 
 /// What a review left behind, as transcript lines.

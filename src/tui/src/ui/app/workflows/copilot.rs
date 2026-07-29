@@ -55,6 +55,15 @@ impl App {
         self.copilot().is_some_and(|thread| thread.busy)
     }
 
+    /// Seed the transcript for a review started automatically after failure.
+    pub fn copilot_started(&mut self, workflow: &str, instruction: &str) {
+        self.wf
+            .copilots
+            .entry(workflow.to_string())
+            .or_insert_with(|| CopilotState::new(workflow.to_string()))
+            .ask(instruction);
+    }
+
     /// Rows one `PageUp`/`PageDown` moves the copilot transcript by.
     ///
     /// A page less one row, so the line the operator was reading stays on

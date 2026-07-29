@@ -54,6 +54,13 @@ pub fn actionable(proposals: &[WorkflowProposal]) -> Option<&WorkflowProposal> {
     proposals.iter().find(|proposal| proposal.is_applicable())
 }
 
+/// The newest proposal still awaiting a decision, including failed checks.
+pub fn pending(proposals: &[WorkflowProposal]) -> Option<&WorkflowProposal> {
+    proposals
+        .iter()
+        .find(|proposal| proposal.status == ProposalStatus::Pending)
+}
+
 /// What a proposal says about itself, for the inspector.
 pub fn proposal_detail(proposal: &WorkflowProposal) -> Vec<DetailRow> {
     let mut rows = vec![

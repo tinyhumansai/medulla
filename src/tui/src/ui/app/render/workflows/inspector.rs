@@ -128,7 +128,7 @@ impl App {
     /// them.
     fn push_learned(&self, lines: &mut Vec<TLine<'static>>, width: usize, dim: Style) {
         let notes = self.workflow_notes();
-        let proposal = self.actionable_proposal();
+        let proposal = self.visible_proposal();
         if notes.is_empty() && proposal.is_none() {
             return;
         }
@@ -143,10 +143,12 @@ impl App {
                     Span::raw(clip(&row.value, value_width)),
                 ]));
             }
-            lines.push(TLine::from(Span::styled(
-                "                  a to apply · n to decline",
-                dim,
-            )));
+            let hint = if proposal.is_applicable() {
+                "                  a to apply · n to decline"
+            } else {
+                "                  checks failed · review diagnostics above"
+            };
+            lines.push(TLine::from(Span::styled(hint, dim)));
         }
 
         if notes.is_empty() {

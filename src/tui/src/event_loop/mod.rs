@@ -123,6 +123,10 @@ pub(crate) async fn run(
                         app.set_status(s);
                     }
                     #[cfg(feature = "workflows")]
+                    AppMsg::CopilotStarted { workflow, instruction } => {
+                        app.copilot_started(&workflow, &instruction);
+                    }
+                    #[cfg(feature = "workflows")]
                     AppMsg::CopilotStatus { workflow, line } => {
                         app.copilot_status(&workflow, line);
                     }

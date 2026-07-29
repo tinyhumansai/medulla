@@ -20,11 +20,15 @@ pub(super) enum AppMsg {
     UsageLoaded(Option<serde_json::Value>),
     /// A newer release was detected by the background update checker.
     UpdateAvailable(String),
+    /// An automatic review began outside the selected pane.
+    #[cfg(feature = "workflows")]
+    CopilotStarted {
+        /// The workflow whose automatic review started.
+        workflow: String,
+        /// The synthetic user turn shown in its transcript.
+        instruction: String,
+    },
     /// A progress line from a running copilot turn.
-    ///
-    /// Addressed by workflow rather than applied to whatever is selected: the
-    /// operator may have moved the rail on while the turn runs, and the line
-    /// belongs to the thread that asked for it.
     #[cfg(feature = "workflows")]
     CopilotStatus {
         /// The workflow whose turn reported it.

@@ -149,7 +149,7 @@ impl App {
     pub(in crate::ui::app) fn visible_proposal(
         &self,
     ) -> Option<&medulla::workflows::WorkflowProposal> {
-        medulla::ui::workflows::pending(&self.workflow_proposals)
+        medulla::ui::workflows::displayed(&self.workflow_proposals)
     }
 
     /// Re-read the workflow store into the page.

@@ -28,6 +28,6 @@ pub use graph::{GraphLayout, Move, PlacedEdge, PlacedNode};
 pub use inspect::{
     find_node as find_node_in, node_detail, DetailRow, NodeRun, NodeRunState, RunOverlay,
 };
-pub use journal::{actionable, note_rows, pending, proposal_detail, proposal_rows};
+pub use journal::{actionable, displayed, note_rows, pending, proposal_detail, proposal_rows};
 pub use progress::{classify as classify_progress, Progress};
 pub use rows::{run_rows, status_color, status_label, workflow_rows, WorkflowRow};

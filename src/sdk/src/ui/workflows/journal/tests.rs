@@ -129,6 +129,29 @@ fn only_a_verified_pending_proposal_is_actionable() {
 }
 
 #[test]
+fn display_prefers_the_same_applicable_proposal_the_keys_will_decide() {
+    let mut failed = proposal(ProposalStatus::Pending, Some(failing()));
+    failed.id = "newer-failed".into();
+    let mut ready = proposal(ProposalStatus::Pending, Some(passing()));
+    ready.id = "older-ready".into();
+    let proposals = vec![failed, ready];
+
+    assert_eq!(displayed(&proposals).unwrap().id, "older-ready");
+    assert_eq!(
+        displayed(&proposals).unwrap().id,
+        actionable(&proposals).unwrap().id
+    );
+}
+
+#[test]
+fn a_failed_proposal_remains_visible_when_nothing_is_actionable() {
+    let proposals = vec![proposal(ProposalStatus::Pending, Some(failing()))];
+
+    assert!(actionable(&proposals).is_none());
+    assert_eq!(displayed(&proposals).unwrap().id, proposals[0].id);
+}
+
+#[test]
 fn a_proposal_row_distinguishes_ready_from_unapplicable() {
     let ready = proposal_rows(&[proposal(ProposalStatus::Pending, Some(passing()))]);
     assert_eq!(ready[0].detail, "ready");

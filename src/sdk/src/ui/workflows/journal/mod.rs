@@ -61,6 +61,15 @@ pub fn pending(proposals: &[WorkflowProposal]) -> Option<&WorkflowProposal> {
         .find(|proposal| proposal.status == ProposalStatus::Pending)
 }
 
+/// The proposal the inspector should display.
+///
+/// Prefer the proposal the decision keys will act on. A failed pending
+/// proposal remains visible when there is no applicable one, because its
+/// diagnostics are still useful evidence.
+pub fn displayed(proposals: &[WorkflowProposal]) -> Option<&WorkflowProposal> {
+    actionable(proposals).or_else(|| pending(proposals))
+}
+
 /// What a proposal says about itself, for the inspector.
 pub fn proposal_detail(proposal: &WorkflowProposal) -> Vec<DetailRow> {
     let mut rows = vec![

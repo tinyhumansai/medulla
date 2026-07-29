@@ -29,6 +29,7 @@ pub fn notes(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, Workflow
 }
 
 /// Record a note about a workflow.
+#[allow(clippy::too_many_arguments)]
 pub fn add_note(
     store: &Arc<dyn WorkflowStore>,
     id: &str,
@@ -36,6 +37,7 @@ pub fn add_note(
     text: &str,
     run_ids: Vec<String>,
     source: NoteSource,
+    supersedes: Vec<String>,
 ) -> Result<Value, WorkflowError> {
     require(store.as_ref(), id)?;
     let text = text.trim();
@@ -60,7 +62,20 @@ pub fn add_note(
         superseded_by: None,
     };
     store.append_note(&note)?;
-    Ok(json!({ "recorded": note.id, "note": note }))
+
+    // Marking what this note replaced is what keeps a journal a set of current
+    // claims rather than an argument with itself: a hypothesis a later run
+    // disproved stays visible to an operator but stops being briefed.
+    let mut superseded = Vec::new();
+    for earlier in supersedes {
+        if earlier == note.id {
+            continue;
+        }
+        store.supersede_note(id, &earlier, &note.id)?;
+        superseded.push(earlier);
+    }
+
+    Ok(json!({ "recorded": note.id, "note": note, "superseded": superseded }))
 }
 
 /// Every proposal for a workflow, newest first.

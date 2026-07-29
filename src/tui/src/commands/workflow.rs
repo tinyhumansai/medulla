@@ -79,6 +79,9 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
             // Typed by a person at a terminal. Pinned as a result, so
             // automation writing observations cannot evict it.
             medulla::workflows::NoteSource::Operator,
+            // An operator superseding a note does it by id, and a key press
+            // cannot carry one; `--supersedes` is the CLI's way to say it.
+            parsed.supersedes.clone(),
         )?,
         WorkflowAction::Proposals(id) => ops::proposals(&store, id)?,
         WorkflowAction::Accept(proposal_id) => ops::accept_proposal(&store, proposal_id)?,

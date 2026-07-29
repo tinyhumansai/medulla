@@ -254,6 +254,7 @@ async fn a_hub_watches_a_real_workers_screen_over_the_relay() {
         harness: None,
         provider: Some(HarnessProvider::Codex),
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });

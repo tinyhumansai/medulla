@@ -370,7 +370,12 @@ impl WorkflowStore for FileWorkflowStore {
         // Under the same lock as `save`/`delete`: appending is a
         // read-modify-write of one file, so two passes writing at once would
         // otherwise lose whichever note lost the race.
-        let _guard = self.write_lock.lock().expect("workflow store write lock");
+        //
+        // Poison-tolerant for the same reason `save` is, and it matters more
+        // here: this runs on the failure path, where the caller has documented
+        // it as best effort. Panicking on a poisoned lock would unwind out of a
+        // run that already completed.
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         journal::append(&self.journal_dir, note)
     }
 
@@ -380,7 +385,7 @@ impl WorkflowStore for FileWorkflowStore {
         note_id: &str,
         by: &str,
     ) -> Result<(), WorkflowError> {
-        let _guard = self.write_lock.lock().expect("workflow store write lock");
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
         journal::supersede(&self.journal_dir, workflow_id, note_id, by)
     }
 

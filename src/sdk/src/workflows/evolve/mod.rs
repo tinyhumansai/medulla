@@ -24,7 +24,7 @@
 mod context;
 pub mod decide;
 mod registry;
-mod session;
+pub(crate) mod session;
 mod types;
 mod verify;
 

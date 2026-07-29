@@ -585,8 +585,10 @@ pub struct App {
     ///
     /// Cached beside the runs and refreshed with them, for the same reason: a
     /// render pass must not touch the disk.
+    #[cfg(feature = "workflows")]
     pub(super) workflow_notes: Vec<medulla::workflows::WorkflowNote>,
     /// Changes proposed for the selected workflow, newest first.
+    #[cfg(feature = "workflows")]
     pub(super) workflow_proposals: Vec<medulla::workflows::WorkflowProposal>,
     /// The Workflows tab's panes, cursors, and copilot threads.
     #[cfg(feature = "workflows")]

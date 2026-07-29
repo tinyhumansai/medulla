@@ -243,6 +243,7 @@ impl DaemonRuntime {
                 harness,
                 provider: None,
                 model: None,
+                tool_mode: None,
                 workflow: None,
                 // Inbound-only, like `provider`, `model`, and `workflow`: this
                 // builds the worker's *responses*, and continuity is the

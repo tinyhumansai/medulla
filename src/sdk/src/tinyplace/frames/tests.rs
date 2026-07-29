@@ -19,6 +19,7 @@ fn encodes_a_minimal_frame() {
         harness: None,
         provider: None,
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });
@@ -46,6 +47,7 @@ fn encodes_optional_fields_when_present() {
         harness: Some(HarnessProvider::Codex),
         provider: Some(HarnessProvider::Claude),
         model: Some("anthropic/claude-opus-4.8".to_string()),
+        tool_mode: None,
         workflow: Some("nightly-sweep".to_string()),
         conversation: None,
     });
@@ -81,6 +83,7 @@ fn round_trips_every_kind() {
             harness: None,
             provider: None,
             model: None,
+            tool_mode: None,
             workflow: None,
             conversation: None,
         });
@@ -122,6 +125,7 @@ fn carries_a_model_hint_through_encode_and_decode() {
         harness: None,
         provider: None,
         model: Some("openrouter/some-model".to_string()),
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });
@@ -411,6 +415,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
             harness: Some(HarnessProvider::Claude),
             provider: None,
             model: None,
+            tool_mode: None,
             workflow: None,
             conversation: None,
         },
@@ -433,6 +438,7 @@ fn an_empty_work_snapshot_is_left_off_the_wire() {
             harness: None,
             provider: None,
             model: None,
+            tool_mode: None,
             workflow: None,
             conversation: None,
         },
@@ -462,4 +468,63 @@ fn a_malformed_work_snapshot_does_not_sink_the_frame() {
     let decoded = decode_task_frame(&body).expect("the frame still decodes");
     assert_eq!(decoded.text, "done");
     assert!(decoded.work.is_none());
+}
+
+#[test]
+fn the_tool_mode_survives_a_frame_round_trip() {
+    // The channel that carries a review turn's restricted tool set to the
+    // worker. If this key is dropped in encoding or decoding, the review is
+    // served the full authoring surface and nothing anywhere says so.
+    let body = encode_task_frame(EncodeFrameInput {
+        kind: TaskFrameKind::Task,
+        task_id: "t1".into(),
+        text: "review it".into(),
+        ts: "2026-01-01T00:00:00Z".into(),
+        correlation_id: None,
+        harness: None,
+        provider: None,
+        model: None,
+        tool_mode: Some("propose".into()),
+        workflow: None,
+        conversation: None,
+    });
+
+    let decoded = decode_task_frame(&body).expect("the frame decodes");
+
+    assert_eq!(decoded.tool_mode.as_deref(), Some("propose"));
+}
+
+#[test]
+fn a_frame_from_a_peer_that_predates_tool_modes_still_decodes() {
+    // Additive in both directions: an older sender omits the key entirely, and
+    // absence must mean the pre-existing behaviour rather than an error.
+    let body = serde_json::json!({
+        "proto": crate::tinyplace::TINYPLACE_PROTO,
+        "kind": "task",
+        "taskId": "t1",
+        "text": "do it",
+        "ts": "2026-01-01T00:00:00Z"
+    })
+    .to_string();
+
+    let decoded = decode_task_frame(&body).expect("the frame decodes");
+
+    assert!(decoded.tool_mode.is_none());
+}
+
+#[test]
+fn a_blank_tool_mode_is_absent_rather_than_a_mode_named_nothing() {
+    let body = serde_json::json!({
+        "proto": crate::tinyplace::TINYPLACE_PROTO,
+        "kind": "task",
+        "taskId": "t1",
+        "text": "do it",
+        "ts": "2026-01-01T00:00:00Z",
+        "tool_mode": "   "
+    })
+    .to_string();
+
+    let decoded = decode_task_frame(&body).expect("the frame decodes");
+
+    assert!(decoded.tool_mode.is_none());
 }

@@ -65,7 +65,7 @@ impl HarnessDispatch for RuntimeDispatch {
             provider,
             prompt: request.instruction,
             cwd: inner.config.workspace.clone(),
-            env: inner.config.env.clone(),
+            env: super::with_tool_mode(inner.config.env.clone(), request.tool_mode.as_deref()),
             timeout_ms: inner.config.task_timeout_ms,
             model: request.model.or_else(|| inner.config.model.clone()),
             agent: inner.config.agent.clone(),
@@ -308,9 +308,12 @@ impl DaemonRuntime {
             worker_address: self.inner.config.default_provider.as_str().to_string(),
             provider: Some(self.inner.config.default_provider),
             model: self.inner.config.model.clone(),
-            // Per workflow, not per run: successive reviews of the same
-            // workflow are the same conversation, which is what lets one build
-            // on what the last concluded.
+            // Per workflow, not per run, so the attribution of successive
+            // reviews reads as one thread. It does not buy harness continuity
+            // here: `RuntimeDispatch` runs every task `Bounded` and ignores
+            // this field. What actually carries knowledge between reviews is
+            // the journal, which is the point — a note survives a restart and a
+            // resumed session does not.
             conversation: format!("evolve:{workflow_id}"),
             config: settings,
         };

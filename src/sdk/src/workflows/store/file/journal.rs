@@ -112,10 +112,17 @@ fn read_all(journal_dir: &Path, workflow_id: &str) -> Result<Vec<WorkflowNote>, 
     match serde_json::from_slice::<Vec<WorkflowNote>>(&body) {
         Ok(notes) => Ok(notes),
         Err(err) => {
+            // Kept, not overwritten. Reading past a corrupt journal is a
+            // deliberate kindness; appending on top of it would destroy
+            // whatever an operator might still have recovered by hand, which
+            // is a different and much less forgivable thing to do.
+            let quarantine = path.with_extension("json.corrupt");
+            let _ = std::fs::rename(&path, &quarantine);
             tracing::warn!(
                 workflow = %workflow_id,
                 path = %path.display(),
-                "workflow journal is unreadable, treating it as empty: {err}"
+                kept = %quarantine.display(),
+                "workflow journal is unreadable; moved aside and starting a new one: {err}"
             );
             Ok(Vec::new())
         }

@@ -195,6 +195,12 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
                     out.reason = Some(v.clone());
                 }
             }
+            // Repeatable: one conclusion can replace several earlier guesses.
+            "--supersedes" => {
+                if let Some(v) = it.next() {
+                    out.supersedes.push(v.clone());
+                }
+            }
             // Repeatable: a paused run may be holding more than one gate, and
             // releasing them one call at a time would restart the run each time.
             "--approve" => {

@@ -164,6 +164,7 @@ pub(super) async fn call(
             // operator's own note comes in through the CLI or the TUI, and the
             // two are weighted differently in a brief.
             crate::workflows::NoteSource::Agent { model: None },
+            string_list(&arguments, "supersedes"),
         )
         .map_err(to_rpc),
         "workflow_proposals" => ops::proposals(store, arg(&arguments, "id")?).map_err(to_rpc),

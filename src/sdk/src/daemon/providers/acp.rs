@@ -29,9 +29,12 @@ use super::types::{OnEvent, RunTaskOptions, RunTaskResult};
 /// when the binary's path cannot be determined — a session without the tools is
 /// a session that can still do its actual job, which is better than failing to
 /// start one.
-fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
+fn workflow_mcp_servers(
+    tool_mode: Option<&str>,
+) -> Vec<agent_client_protocol::schema::v1::McpServer> {
     #[cfg(not(feature = "workflows"))]
     {
+        let _ = tool_mode;
         Vec::new()
     }
     #[cfg(feature = "workflows")]
@@ -59,10 +62,24 @@ fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
         // The subprocess inherits this process's environment, which is what
         // carries MEDULLA_HOME — so the harness edits the same workflow store
         // the operator sees.
-        vec![McpServer::Stdio(
-            McpServerStdio::new(crate::workflows::mcp::SERVER_NAME, binary)
-                .args(vec!["workflow".to_string(), "mcp".to_string()]),
-        )]
+        //
+        // The tool mode is passed *explicitly* rather than inherited, because
+        // it is the one setting that differs per task: this daemon serves
+        // authoring turns and review turns from one process, so an inherited
+        // value could only ever be right for one of them. A review turn that
+        // silently got the full surface could rewrite the graph it was asked
+        // only to review, which is exactly what the mode exists to prevent.
+        let mut server = McpServerStdio::new(crate::workflows::mcp::SERVER_NAME, binary)
+            .args(vec!["workflow".to_string(), "mcp".to_string()]);
+        if let Some(mode) = tool_mode {
+            server
+                .env
+                .push(agent_client_protocol::schema::v1::EnvVariable::new(
+                    crate::workflows::mcp::TOOL_MODE_ENV,
+                    mode,
+                ));
+        }
+        vec![McpServer::Stdio(server)]
     }
 }
 
@@ -80,6 +97,15 @@ pub(super) fn uses_acp(options: &RunTaskOptions) -> bool {
 /// Execute one task through the standard Agent Client Protocol.
 pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
     let agent = agent_for(&options);
+    // Read before `options` is picked apart below, and cloned because the
+    // session setup runs inside an async move closure.
+    #[cfg(feature = "workflows")]
+    let tool_mode: Option<String> = options
+        .env
+        .get(crate::workflows::mcp::TOOL_MODE_ENV)
+        .cloned();
+    #[cfg(not(feature = "workflows"))]
+    let tool_mode: Option<String> = None;
     let state = Arc::new(Mutex::new(FoldState::new(options.on_event)));
     let notification_state = state.clone();
     let approve = options.skip_permissions;
@@ -135,7 +161,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // agent that edits the graph and one that can only discuss
                     // it, and it would fail silently: the model would explain
                     // what it would have done.
-                    request.mcp_servers = workflow_mcp_servers();
+                    request.mcp_servers = workflow_mcp_servers(tool_mode.as_deref());
                     connection.send_request(request).block_task().await?;
                     id.into()
                 }
@@ -145,7 +171,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // *client* here, so this is the only way it can hand a
                     // harness anything to call — and it is what lets a coding
                     // agent author a workflow rather than only run one.
-                    request.mcp_servers = workflow_mcp_servers();
+                    request.mcp_servers = workflow_mcp_servers(tool_mode.as_deref());
                     connection
                         .send_request(request)
                         .block_task()

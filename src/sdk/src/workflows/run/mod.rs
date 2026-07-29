@@ -220,6 +220,11 @@ pub async fn run_workflow(
 /// make `medulla workflow run` silently spawn a second agent. What it *can* do
 /// everywhere is turn a run record into a note.
 ///
+/// Only for a run that settles as `Failed`. A run reconciled to `Interrupted`
+/// by `RunFinalizer::drop` gets none: the process was going away, there is no
+/// diagnosis to write down, and "we were killed" teaches a workflow nothing
+/// about itself.
+///
 /// Best effort by design: a note that could not be written must not turn a run
 /// that already happened into a failure to record it.
 fn remember_failure(store: &Arc<dyn WorkflowStore>, record: &RunRecord) {

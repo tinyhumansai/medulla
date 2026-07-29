@@ -361,17 +361,26 @@ async fn a_second_pass_is_refused_while_one_is_running() {
 
 #[tokio::test]
 async fn the_claim_is_released_when_the_pass_ends() {
-    let (_home, store, _run) = fixture("the-claim-is-released-when-the-pass-ends");
+    let id = "the-claim-is-released-when-the-pass-ends";
+    let (_home, store, _run) = fixture(id);
 
     session(store.clone(), silent(&store, "ok"))
-        .evolve("released", EvolveTrigger::Manual, None)
+        .evolve(id, EvolveTrigger::Manual, None)
         .await
-        .ok();
+        .expect("the pass completes");
 
-    assert!(
-        !is_evolving("released"),
-        "a finished pass releases its claim"
-    );
+    // The release is a `Drop` on the guard, so the assertion only means
+    // anything if a claim was actually taken — hence the `expect` above rather
+    // than swallowing an error, and hence running against the workflow the
+    // fixture installed rather than one that does not exist.
+    assert!(!is_evolving(id), "a finished pass releases its claim");
+
+    // And a second pass can now run, which is the thing the release is for.
+    let again = session(store.clone(), silent(&store, "ok"))
+        .evolve(id, EvolveTrigger::Manual, None)
+        .await
+        .expect("the pass completes");
+    assert!(!again.skipped);
 }
 
 #[tokio::test]
@@ -444,4 +453,164 @@ fn the_config_is_switched_off_by_the_outer_workflows_switch() {
 
     config.evolve.enabled = true;
     assert!(EvolveConfig::from_config(&config).enabled);
+}
+
+#[tokio::test]
+async fn a_review_turn_asks_for_the_restricted_tool_set() {
+    let (_home, store, run) = fixture("a-review-turn-asks-for-restricted-tools");
+    let stub = Arc::new(StubReviewer {
+        reply: "ok".into(),
+        edit: None,
+        store: store.clone(),
+        seen: Mutex::new(Vec::new()),
+    });
+
+    session(store.clone(), stub.clone())
+        .evolve(
+            "a-review-turn-asks-for-restricted-tools",
+            EvolveTrigger::Failure(run.id),
+            None,
+        )
+        .await
+        .expect("the pass completes");
+
+    // The whole autonomy argument rests on this reaching the harness. Asserted
+    // on the dispatch rather than on `ToolMode` in isolation, because the mode
+    // being *correct* and the mode being *sent* are different claims and only
+    // the second one protects the graph.
+    let seen = stub.seen.lock().unwrap();
+    assert_eq!(seen[0].tool_mode.as_deref(), Some("propose"));
+}
+
+#[test]
+fn an_ordinary_copilot_turn_asks_for_nothing_and_gets_the_full_surface() {
+    use crate::workflows::mcp::ToolMode;
+
+    // The default has to stay permissive: every dispatch but a review's leaves
+    // this unset, and a mistake here would silently disarm the copilot.
+    assert_eq!(ToolMode::from_wire(None), ToolMode::Full);
+    assert_eq!(ToolMode::from_wire(Some("propose")), ToolMode::Propose);
+    assert_eq!(ToolMode::from_wire(Some("full")), ToolMode::Full);
+    // Round-trips, so a frame written by one build is read the same by another.
+    assert_eq!(
+        ToolMode::from_wire(Some(ToolMode::Propose.as_wire())),
+        ToolMode::Propose
+    );
+}
+
+#[tokio::test]
+async fn a_failure_already_recorded_is_not_recorded_again() {
+    let id = "a-failure-already-recorded-is-not-again";
+    let (_home, store, run) = fixture(id);
+
+    // What the auto-trigger path does: `run_workflow` writes the note, then a
+    // review starts for the same run. Without the guard the journal fills at
+    // double rate and the brief shows one observation as if it were two.
+    record_failure_note(&store, &run).expect("the first write lands");
+    let outcome = session(store.clone(), silent(&store, "ok"))
+        .evolve(id, EvolveTrigger::Failure(run.id.clone()), None)
+        .await
+        .expect("the pass completes");
+
+    assert!(
+        outcome.notes.is_empty(),
+        "the pass reports nothing new because nothing was new"
+    );
+    assert_eq!(store.list_notes(id).expect("readable").len(), 1);
+}
+
+#[tokio::test]
+async fn a_different_failure_of_the_same_workflow_is_still_recorded() {
+    let id = "a-different-failure-is-still-recorded";
+    let (_home, store, run) = fixture(id);
+    record_failure_note(&store, &run).expect("the first write lands");
+
+    let mut second = new_run_record("run-2", id, 9);
+    second.status = RunStatus::Failed;
+    second.error = Some("a different failure".into());
+    store.record_run(&second).expect("records");
+    record_failure_note(&store, &second).expect("the second write lands");
+
+    // The guard is per run, not per workflow: a workflow that keeps failing has
+    // more to say each time, not less.
+    assert_eq!(store.list_notes(id).expect("readable").len(), 2);
+}
+
+#[test]
+fn the_brief_keeps_rejections_and_constraints_when_observations_crowd_them_out() {
+    let mut notes = Vec::new();
+    // The durable claims are the *oldest* here, which is exactly the case
+    // chronological truncation gets wrong.
+    for (kind, source, text) in [
+        (
+            NoteKind::Rejection,
+            NoteSource::Operator,
+            "do not delete the step",
+        ),
+        (
+            NoteKind::Constraint,
+            NoteSource::Operator,
+            "tests run before deploy",
+        ),
+    ] {
+        notes.push(WorkflowNote {
+            id: mint_note_id(1),
+            workflow_id: "sweep".into(),
+            kind,
+            text: text.into(),
+            recorded_at: 1,
+            source,
+            run_ids: Vec::new(),
+            superseded_by: None,
+            pinned: true,
+        });
+    }
+    for index in 0..50u64 {
+        notes.push(WorkflowNote {
+            id: mint_note_id(100 + index),
+            workflow_id: "sweep".into(),
+            kind: NoteKind::Observation,
+            text: format!("run {index} failed"),
+            recorded_at: 100 + index,
+            source: NoteSource::System,
+            run_ids: Vec::new(),
+            superseded_by: None,
+            pinned: false,
+        });
+    }
+    notes.sort_by(|a, b| b.id.cmp(&a.id));
+
+    let brief = super::session::select_for_brief(notes, 10);
+
+    assert_eq!(brief.len(), 10);
+    assert!(
+        brief.iter().any(|n| n.text == "do not delete the step"),
+        "a rejection that ages out of the brief is a loop that never converges"
+    );
+    assert!(brief.iter().any(|n| n.text == "tests run before deploy"));
+    // The rest of the budget still goes to the newest evidence.
+    assert!(brief.iter().any(|n| n.text == "run 49 failed"));
+    // And the result is still one chronological sequence.
+    let mut sorted = brief.clone();
+    sorted.sort_by(|a, b| b.id.cmp(&a.id));
+    assert_eq!(brief, sorted);
+}
+
+#[test]
+fn a_brief_within_budget_keeps_everything_in_order() {
+    let notes: Vec<WorkflowNote> = (0..3u64)
+        .map(|index| WorkflowNote {
+            id: mint_note_id(index),
+            workflow_id: "sweep".into(),
+            kind: NoteKind::Observation,
+            text: format!("note {index}"),
+            recorded_at: index,
+            source: NoteSource::System,
+            run_ids: Vec::new(),
+            superseded_by: None,
+            pinned: false,
+        })
+        .collect();
+
+    assert_eq!(super::session::select_for_brief(notes.clone(), 40), notes);
 }

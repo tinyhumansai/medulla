@@ -157,6 +157,7 @@ pub fn task_frame(
         harness: None,
         provider: None,
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     })

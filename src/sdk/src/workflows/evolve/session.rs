@@ -17,8 +17,10 @@ use super::verify::verify;
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::hub::TaskRequest;
 use crate::workflows::copilot::{CopilotRequest, FailedRun, Mode};
+use crate::workflows::mcp::ToolMode;
 use crate::workflows::{
-    current_notes, require, RunRecord, WorkflowError, WorkflowNote, WorkflowStore,
+    current_notes, require, NoteKind, NoteSource, RunRecord, WorkflowError, WorkflowNote,
+    WorkflowStore,
 };
 
 /// Everything a pass needs to reach a harness.
@@ -84,7 +86,10 @@ impl EvolveSession {
         let mut notes = Vec::new();
         if let Some(run) = self.triggering_run(&trigger)? {
             match record_failure_note(&self.store, &run) {
-                Ok(note) => notes.push(note),
+                // `None` means `run_workflow` already wrote it, which is the
+                // normal case on the auto-triggered path.
+                Ok(Some(note)) => notes.push(note),
+                Ok(None) => {}
                 // Logged rather than propagated: a pass that could not write
                 // its note has still learned nothing, and failing here would
                 // lose the turn as well.
@@ -95,7 +100,7 @@ impl EvolveSession {
         }
 
         let known = current_notes(self.store.as_ref(), workflow_id)?;
-        let briefed_notes = truncate(known, self.config.max_notes);
+        let briefed_notes = select_for_brief(known, self.config.max_notes);
         let runs = truncate(self.store.list_runs(workflow_id)?, self.config.max_runs);
         let notes_before: Vec<String> = self
             .store
@@ -129,6 +134,10 @@ impl EvolveSession {
             worker_address: self.worker_address.clone(),
             provider: self.provider,
             model: self.model.clone(),
+            // The autonomy boundary, carried to the harness rather than
+            // assumed. Without this the review turn is served the full
+            // authoring surface and the "it cannot edit" claim is only prose.
+            tool_mode: Some(ToolMode::Propose.as_wire().to_string()),
             // Never a workflow: this is a review turn. Setting it would run the
             // graph the pass is reviewing, which for a failure-triggered pass
             // would be the run that triggered it, again.
@@ -195,6 +204,48 @@ impl EvolveSession {
 fn truncate<T>(mut items: Vec<T>, limit: usize) -> Vec<T> {
     items.truncate(limit);
     items
+}
+
+/// Choose which notes reach the brief, by weight rather than by age alone.
+///
+/// Recency alone would quietly break the thing this feature is named for.
+/// Every failed run writes an observation, so after enough failures a
+/// `Rejection` — the note that stops a review re-proposing an idea already
+/// turned down — falls off the end of the budget, and the loop starts
+/// re-deriving it. Operator constraints age out the same way, which would let a
+/// model's own guess outweigh what a person actually said.
+///
+/// So the durable claims are taken first, newest-first within each tier, and
+/// observations fill whatever budget is left.
+pub(crate) fn select_for_brief(notes: Vec<WorkflowNote>, limit: usize) -> Vec<WorkflowNote> {
+    if notes.len() <= limit {
+        return notes;
+    }
+    let mut chosen: Vec<WorkflowNote> = Vec::with_capacity(limit);
+    // Two passes over one newest-first list, so ordering inside a tier is still
+    // chronological and the caller sees one coherent sequence.
+    for keep in [true, false] {
+        for note in &notes {
+            if chosen.len() == limit {
+                break;
+            }
+            if is_durable(note) == keep {
+                chosen.push(note.clone());
+            }
+        }
+    }
+    chosen.sort_by(|a, b| b.id.cmp(&a.id));
+    chosen
+}
+
+/// Whether a note is a standing claim rather than a record of one moment.
+fn is_durable(note: &WorkflowNote) -> bool {
+    note.pinned
+        || matches!(note.source, NoteSource::Operator)
+        || matches!(
+            note.kind,
+            NoteKind::Rejection | NoteKind::Constraint | NoteKind::Fix
+        )
 }
 
 /// What to tell the agent it was asked, given why the pass started.

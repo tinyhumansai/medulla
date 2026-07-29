@@ -64,6 +64,16 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .filter(|id| !id.is_empty())
         .map(str::to_string);
 
+    // Blank is absent for the same reason. An unrecognised value is left alone
+    // rather than rejected: the reader turns anything it does not know into the
+    // full tool surface, which is the pre-existing behaviour.
+    let tool_mode = obj
+        .get("tool_mode")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+        .map(str::to_string);
+
     // Blank is absent, for the same reason a blank workflow id is: an encoder
     // that always writes the key must not put every task into a conversation
     // named "" — which would be one shared context for every unrelated sender.
@@ -84,6 +94,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         harness,
         provider,
         model,
+        tool_mode,
         workflow,
         conversation,
         usage,

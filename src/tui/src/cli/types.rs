@@ -176,6 +176,8 @@ pub struct WorkflowArgs {
     pub text: Option<String>,
     /// `--reason <reason>`: why a proposal was rejected.
     pub reason: Option<String>,
+    /// `--supersedes <note-id>`, repeatable: notes this one replaces.
+    pub supersedes: Vec<String>,
     /// The selected action.
     pub action: WorkflowAction,
 }
@@ -191,6 +193,7 @@ impl Default for WorkflowArgs {
             kind: None,
             text: None,
             reason: None,
+            supersedes: Vec::new(),
             action: WorkflowAction::List,
         }
     }

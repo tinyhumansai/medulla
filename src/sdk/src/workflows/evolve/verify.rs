@@ -2,7 +2,13 @@
 //!
 //! Three gates in order, each answering a different question: do these ops
 //! apply to this graph at all, is the result a graph the engine and this host's
-//! semantic gates accept, and does it actually do something when simulated.
+//! semantic gates accept, and does simulating it surface any new problem — a
+//! binding that resolves to null, an error a policy would swallow.
+//!
+//! Note the third gate's limit: it proves the patched graph is *sound*, not
+//! that it is an improvement. A patch that changes nothing useful simulates
+//! perfectly. Judging whether a change is worth making is the operator's part,
+//! which is why the rationale is what they are shown first.
 //!
 //! A proposal that fails any of them is still *persisted* with the reason. That
 //! is deliberate: a failed check is evidence the next pass reads, and silently

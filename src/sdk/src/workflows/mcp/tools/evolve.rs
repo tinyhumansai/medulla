@@ -42,16 +42,29 @@ const WITHHELD_IN_PROPOSE: [&str; 4] = [
 ];
 
 impl ToolMode {
+    /// This mode's wire spelling, for carrying on a dispatch.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Propose => "propose",
+        }
+    }
+
+    /// The mode named by this string, defaulting to [`ToolMode::Full`].
+    pub fn from_wire(value: Option<&str>) -> Self {
+        match value {
+            Some("propose") => Self::Propose,
+            _ => Self::Full,
+        }
+    }
+
     /// The mode named by this environment, defaulting to [`ToolMode::Full`].
     ///
     /// An unrecognised value is `Full` rather than an error: this runs at
     /// server startup, where failing would leave a turn with no tools at all
     /// and no way to say why.
     pub fn from_env(env: &std::collections::HashMap<String, String>) -> Self {
-        match env.get(TOOL_MODE_ENV).map(String::as_str) {
-            Some("propose") => Self::Propose,
-            _ => Self::Full,
-        }
+        Self::from_wire(env.get(TOOL_MODE_ENV).map(String::as_str))
     }
 
     /// Whether `name` is served in this mode.
@@ -115,6 +128,15 @@ pub fn definitions(schema: impl Fn(Value, &[&str]) -> Value) -> Vec<Value> {
                         "type": "array",
                         "items": { "type": "string" },
                         "description": "The runs this note is evidence from, if any.",
+                    },
+                    "supersedes": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description":
+                            "Ids of earlier notes this one replaces — a hypothesis you have \
+                             now disproved, say. Superseded notes stay in the history an \
+                             operator reads but stop being shown to future reviews, so use \
+                             this instead of writing a contradiction and leaving both.",
                     }
                 }),
                 &["id", "kind", "text"],

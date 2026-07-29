@@ -42,6 +42,7 @@ fn build(
         harness: input.harness,
         provider: input.provider,
         model: input.model,
+        tool_mode: input.tool_mode,
         workflow: input.workflow,
         conversation: input.conversation,
         usage,

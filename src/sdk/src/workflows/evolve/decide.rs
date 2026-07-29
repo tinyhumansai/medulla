@@ -36,6 +36,13 @@ pub fn accept(
     store: &Arc<dyn WorkflowStore>,
     proposal_id: &str,
 ) -> Result<(WorkflowRecord, WorkflowProposal), WorkflowError> {
+    // Claimed for the whole read-modify-write. Two accepts of one proposal —
+    // a double key press, each spawned on its own blocking task — could
+    // otherwise both read it as pending, both pass the fingerprint check, and
+    // both apply the ops.
+    let _claim = AcceptGuard::claim(proposal_id).ok_or_else(|| {
+        WorkflowError::Engine(format!("proposal '{proposal_id}' is already being applied"))
+    })?;
     let mut proposal = require_proposal(store.as_ref(), proposal_id)?;
     if !proposal.is_pending() {
         return Err(WorkflowError::Engine(format!(
@@ -158,5 +165,44 @@ fn note(
             proposal = %proposal.id,
             "could not record the decision as a note: {err}"
         );
+    }
+}
+
+/// Serializes accepts of one proposal within this process.
+///
+/// A guard rather than a flag on the record: the window that matters is between
+/// reading the proposal and writing the graph, and only something that releases
+/// on drop closes it against a task that panics halfway.
+struct AcceptGuard(String);
+
+impl AcceptGuard {
+    /// The one set every guard shares.
+    ///
+    /// A single accessor rather than a `static` in each method: two `OnceLock`s
+    /// spelled the same way are two different sets, and `Drop` would then clear
+    /// one the claim never touched — a lock that silently never unlocks.
+    fn in_flight() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+        static IN_FLIGHT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+            std::sync::OnceLock::new();
+        IN_FLIGHT.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+    }
+
+    fn claim(proposal_id: &str) -> Option<Self> {
+        let mut held = Self::in_flight()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if !held.insert(proposal_id.to_string()) {
+            return None;
+        }
+        Some(Self(proposal_id.to_string()))
+    }
+}
+
+impl Drop for AcceptGuard {
+    fn drop(&mut self) {
+        Self::in_flight()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(&self.0);
     }
 }

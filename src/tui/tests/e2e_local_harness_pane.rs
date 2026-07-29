@@ -113,6 +113,7 @@ fn dispatch(runtime: &DaemonRuntime, task_id: &str) {
         harness: None,
         provider: Some(HarnessProvider::Codex),
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });

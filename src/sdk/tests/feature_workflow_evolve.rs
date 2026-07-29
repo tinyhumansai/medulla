@@ -465,3 +465,154 @@ async fn notes_and_proposals_are_kept_apart_by_workflow() {
     assert_eq!(store.list_proposals("sweep").expect("readable").len(), 1);
     assert!(store.list_proposals("deploy").expect("readable").is_empty());
 }
+
+#[tokio::test]
+async fn a_note_can_replace_an_earlier_one_it_disproves() {
+    let home = tempfile::tempdir().expect("a temp home");
+    let store = store_in(home.path());
+    install_failing(&store, "sweep");
+
+    let guess = ops::add_note(
+        &store,
+        "sweep",
+        "hypothesis",
+        "the step is probably just slow",
+        Vec::new(),
+        NoteSource::Agent { model: None },
+        Vec::new(),
+    )
+    .expect("the note records");
+    let guess_id = guess["recorded"].as_str().expect("an id").to_string();
+
+    let settled = ops::add_note(
+        &store,
+        "sweep",
+        "observation",
+        "the host refuses code nodes; speed was never the issue",
+        Vec::new(),
+        NoteSource::Agent { model: None },
+        vec![guess_id.clone()],
+    )
+    .expect("the note records");
+
+    assert_eq!(settled["superseded"], json!([guess_id]));
+
+    // History keeps both, so an operator can see what was believed and when.
+    let all = store.list_notes("sweep").expect("readable");
+    assert_eq!(all.len(), 2);
+    // But only the surviving claim reaches a brief — asking a model to reason
+    // from something already known to be wrong is worse than telling it nothing.
+    let current = medulla::workflows::current_notes(store.as_ref(), "sweep").expect("readable");
+    assert_eq!(current.len(), 1);
+    assert!(current[0].text.contains("refuses code nodes"));
+}
+
+#[tokio::test]
+async fn a_note_cannot_supersede_itself() {
+    let home = tempfile::tempdir().expect("a temp home");
+    let store = store_in(home.path());
+    install_failing(&store, "sweep");
+
+    let recorded = ops::add_note(
+        &store,
+        "sweep",
+        "observation",
+        "something",
+        Vec::new(),
+        NoteSource::Operator,
+        // A model echoing back an id it was just given must not erase the note
+        // it is currently writing.
+        vec!["self".into()],
+    )
+    .expect("the note records");
+    let id = recorded["recorded"].as_str().expect("an id").to_string();
+
+    let echoed = ops::add_note(
+        &store,
+        "sweep",
+        "observation",
+        "another",
+        Vec::new(),
+        NoteSource::Operator,
+        vec![id.clone(), id],
+    )
+    .expect("the note records");
+    let echoed_id = echoed["recorded"].as_str().expect("an id");
+
+    let current = medulla::workflows::current_notes(store.as_ref(), "sweep").expect("readable");
+    assert!(
+        current.iter().any(|note| note.id == echoed_id),
+        "the note doing the superseding must survive"
+    );
+}
+
+#[tokio::test]
+async fn an_operator_note_is_pinned_and_an_agent_note_is_not() {
+    let home = tempfile::tempdir().expect("a temp home");
+    let store = store_in(home.path());
+    install_failing(&store, "sweep");
+
+    ops::add_note(
+        &store,
+        "sweep",
+        "constraint",
+        "never remove the work step",
+        Vec::new(),
+        NoteSource::Operator,
+        Vec::new(),
+    )
+    .expect("records");
+    ops::add_note(
+        &store,
+        "sweep",
+        "hypothesis",
+        "maybe it is the timeout",
+        Vec::new(),
+        NoteSource::Agent { model: None },
+        Vec::new(),
+    )
+    .expect("records");
+
+    let notes = store.list_notes("sweep").expect("readable");
+    let operator = notes
+        .iter()
+        .find(|n| n.source == NoteSource::Operator)
+        .expect("the operator's note");
+    let agent = notes
+        .iter()
+        .find(|n| matches!(n.source, NoteSource::Agent { .. }))
+        .expect("the agent's note");
+
+    // Automation writing a hundred observations must not evict what a person said.
+    assert!(operator.pinned);
+    assert!(!agent.pinned);
+}
+
+#[tokio::test]
+async fn a_run_that_succeeded_is_never_recorded_as_a_failure() {
+    let home = tempfile::tempdir().expect("a temp home");
+    let store = store_in(home.path());
+    let document = json!({
+        "id": "fine",
+        "name": "Fine",
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "work", "kind": "transform", "name": "Work",
+              "config": { "set": { "ok": true } } }
+        ],
+        "edges": [{ "from_node": "t", "to_node": "work" }]
+    })
+    .to_string();
+    ops::create(&store, &document, "fine").expect("installs");
+    run_once(&store, home.path(), "fine").await;
+    let run = store.list_runs("fine").expect("readable").remove(0);
+
+    // `medulla workflow evolve --run-id` takes whatever it is given; recording
+    // "Run X ended as Succeeded" would put noise in every brief after it.
+    let recorded = medulla::workflows::evolve::record_failure_note(&store, &run)
+        .expect("not an error, just nothing to say");
+
+    assert!(recorded.is_none());
+    assert!(store.list_notes("fine").expect("readable").is_empty());
+}

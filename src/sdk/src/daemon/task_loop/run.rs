@@ -256,7 +256,10 @@ impl DaemonRuntime {
             provider,
             prompt: frame.text.clone(),
             cwd: self.inner.config.workspace.clone(),
-            env: self.inner.config.env.clone(),
+            // Per-task, like the model and provider hints below. A review turn
+            // asks for the restricted workflow tools here, which is the only
+            // channel that reaches the MCP server the harness spawns.
+            env: super::with_tool_mode(self.inner.config.env.clone(), frame.tool_mode.as_deref()),
             timeout_ms: self.inner.config.task_timeout_ms,
             // Per-task model hint (parallels the per-task `provider`): honor the
             // orchestrator's requested model, falling back to the daemon default.

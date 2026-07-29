@@ -293,6 +293,20 @@ pub struct TaskFrame {
     /// id it could not find.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub workflow: Option<String>,
+    /// Inbound-only: which slice of the workflow tools this task's harness is
+    /// served.
+    ///
+    /// Absent — every ordinary task — means the full authoring surface. The one
+    /// sender that sets it is an evolution pass, which asks for `"propose"` so
+    /// the review turn is served no verb that writes or runs a graph. Carried
+    /// per task rather than configured per worker because the same worker
+    /// dispatches authoring turns and review turns minutes apart.
+    ///
+    /// Additive and optional in both directions: a peer that predates this
+    /// omits the key, and a worker that does not understand it serves its usual
+    /// tools — which is the pre-existing behaviour, not a new hazard.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool_mode: Option<String>,
     /// Inbound-only: the continuity group this task belongs to, when the sender
     /// wants successive tasks to share one harness session.
     ///
@@ -361,6 +375,8 @@ pub struct EncodeFrameInput {
     /// Inbound-only advisory model hint (parallels `provider`); `None` on the
     /// responses a worker daemon emits.
     pub model: Option<String>,
+    /// Inbound-only: which slice of the workflow tools the harness is served.
+    pub tool_mode: Option<String>,
     /// Inbound-only: the installed workflow to run instead of treating `text` as
     /// an instruction. `None` on every response and on ordinary tasks.
     pub workflow: Option<String>,

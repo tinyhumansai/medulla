@@ -141,10 +141,7 @@ impl CustomHarnessConfig {
             ("ANTHROPIC_SMALL_FAST_MODEL".into(), fast.to_string()),
         ];
         if let Some(window) = self.context_window {
-            env.push((
-                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(),
-                window.to_string(),
-            ));
+            env.push(("CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(), window.to_string()));
         }
         env
     }
@@ -175,9 +172,7 @@ impl CustomHarnessConfig {
     pub fn from_editor_line(line: &str) -> Result<Self, String> {
         let fields: Vec<&str> = line.split('|').map(str::trim).collect();
         if fields.len() != 6 {
-            return Err(
-                "expected: id | name | claude|codex | model | fast-model | host-id".into(),
-            );
+            return Err("expected: id | name | claude|codex | model | fast-model | host-id".into());
         }
         let base_harness = HarnessProvider::from_wire(fields[2])
             .ok_or_else(|| "base harness must be claude or codex".to_string())?;

@@ -31,8 +31,8 @@ mod urls_tests;
 
 pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
 pub use custom_harnesses::{
-    load_custom_harnesses, CustomHarnessConfig, OPENROUTER_ANTHROPIC_URL,
-    OPENROUTER_API_KEY_ENV, OPENROUTER_OPENAI_URL,
+    load_custom_harnesses, CustomHarnessConfig, OPENROUTER_ANTHROPIC_URL, OPENROUTER_API_KEY_ENV,
+    OPENROUTER_OPENAI_URL,
 };
 pub use load::{default_tinyplace_config, load_config};
 pub use persist::{

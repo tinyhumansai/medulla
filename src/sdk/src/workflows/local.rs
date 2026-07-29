@@ -102,6 +102,23 @@ pub async fn run_here(
     use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
     use crate::workflows::{RunContext, StoreWorkflowResolver};
 
+    // Checked before the host, not after: starting a host requires a
+    // coding-agent CLI on `PATH`, a cost a disabled workflow (or a host with
+    // workflows turned off) should never pay just to be told no. Every path
+    // here still runs `run_workflow`'s own checks too — this is an early exit
+    // for the common refusal, not a replacement for the authoritative one.
+    if !config.enabled {
+        return Err(crate::workflows::WorkflowError::Engine(
+            "workflows are disabled on this host (workflows.enabled = false)".to_string(),
+        ));
+    }
+    let workflow = crate::workflows::store::require(store.as_ref(), id)?;
+    if !workflow.enabled {
+        return Err(crate::workflows::WorkflowError::Engine(format!(
+            "workflow '{id}' is disabled"
+        )));
+    }
+
     let home = crate::home::medulla_home(env);
     let mut settings = CapabilitySettings::from_config(config, &home);
     settings.workspace = cwd.to_string_lossy().to_string();

@@ -177,7 +177,12 @@ pub async fn evolve_here(
     // Checked before the host starts, for the same reason `run_here` checks
     // `enabled`: standing up an embedded daemon needs a coding-agent CLI on
     // `PATH`, and a workflow that does not exist should not cost that.
-    crate::workflows::store::require(store.as_ref(), id)?;
+    let workflow = crate::workflows::store::require(store.as_ref(), id)?;
+    if !workflow.enabled {
+        return Err(crate::workflows::WorkflowError::Engine(format!(
+            "workflow '{id}' is disabled"
+        )));
+    }
 
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),

@@ -29,6 +29,13 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+// Unix-only: these drive a real child on a real pseudo-terminal via `/bin/sh`,
+// which Windows has no equivalent of. The pane layer itself is portable; this
+// half of its tests is not.
+#[cfg(all(test, unix))]
+#[path = "session_tests.rs"]
+mod session_tests;
+
 pub use types::{HarnessFocus, LocalHarnesses};
 
 /// The chord that hands the keyboard to a harness, and takes it back.

@@ -40,9 +40,11 @@ pub fn accept(
     // a double key press, each spawned on its own blocking task — could
     // otherwise both read it as pending, both pass the fingerprint check, and
     // both apply the ops.
-    let _claim = DecisionGuard::claim(&format!("proposal:{proposal_id}")).ok_or_else(|| {
-        WorkflowError::Engine(format!("proposal '{proposal_id}' is already being applied"))
-    })?;
+    let decision_scope = store.proposal_decision_scope();
+    let _claim = DecisionGuard::claim(&format!("{decision_scope}:proposal:{proposal_id}"))
+        .ok_or_else(|| {
+            WorkflowError::Engine(format!("proposal '{proposal_id}' is already being applied"))
+        })?;
     let proposal = require_proposal(store.as_ref(), proposal_id)?;
     let _store_claim = store.lock_proposal_decision(&proposal.workflow_id)?;
     // The proposal may have changed while this process waited for another
@@ -52,13 +54,16 @@ pub fn accept(
     // the same base graph. Hold this claim from status/fingerprint validation
     // through persistence so neither can validate against a graph the other
     // changes before applying its ops.
-    let _workflow_claim = DecisionGuard::claim(&format!("workflow:{}", proposal.workflow_id))
-        .ok_or_else(|| {
-            WorkflowError::Engine(format!(
-                "another proposal for workflow '{}' is already being applied",
-                proposal.workflow_id
-            ))
-        })?;
+    let _workflow_claim = DecisionGuard::claim(&format!(
+        "{decision_scope}:workflow:{}",
+        proposal.workflow_id
+    ))
+    .ok_or_else(|| {
+        WorkflowError::Engine(format!(
+            "another proposal for workflow '{}' is already being applied",
+            proposal.workflow_id
+        ))
+    })?;
     if !proposal.is_pending() {
         return Err(WorkflowError::Engine(format!(
             "proposal '{proposal_id}' is already {:?} and cannot be applied again",
@@ -138,9 +143,11 @@ pub fn reject(
     proposal_id: &str,
     reason: &str,
 ) -> Result<WorkflowProposal, WorkflowError> {
-    let _claim = DecisionGuard::claim(&format!("proposal:{proposal_id}")).ok_or_else(|| {
-        WorkflowError::Engine(format!("proposal '{proposal_id}' is already being decided"))
-    })?;
+    let decision_scope = store.proposal_decision_scope();
+    let _claim = DecisionGuard::claim(&format!("{decision_scope}:proposal:{proposal_id}"))
+        .ok_or_else(|| {
+            WorkflowError::Engine(format!("proposal '{proposal_id}' is already being decided"))
+        })?;
     let proposal = require_proposal(store.as_ref(), proposal_id)?;
     let _store_claim = store.lock_proposal_decision(&proposal.workflow_id)?;
     // Re-read under the store claim so a decision that completed while this

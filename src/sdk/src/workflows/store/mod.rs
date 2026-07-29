@@ -50,6 +50,15 @@ impl ProposalDecisionGuard for NoopProposalDecisionGuard {}
 /// on an async runtime should wrap these in `spawn_blocking`, as the TUI already
 /// does for its task repository.
 pub trait WorkflowStore: Send + Sync {
+    /// Identity used to scope in-process proposal decision guards.
+    ///
+    /// Workflow and proposal ids are only unique within a store. Including the
+    /// store identity prevents two independent catalogs with the same ids from
+    /// blocking each other.
+    fn proposal_decision_scope(&self) -> String {
+        format!("{self:p}")
+    }
+
     /// Every known workflow, in a stable display order.
     fn list(&self) -> Result<Vec<WorkflowSummary>, WorkflowError>;
 

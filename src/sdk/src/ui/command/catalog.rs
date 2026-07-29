@@ -71,6 +71,24 @@ pub const COMMANDS: &[CommandSpec] = &[
         description: "Pick up an earlier saved session",
     },
     CommandSpec {
+        name: "harness",
+        aliases: &[],
+        args: "[provider] [path]",
+        description: "Start a harness the orchestrator will not touch",
+    },
+    CommandSpec {
+        name: "takecontrol",
+        aliases: &["take"],
+        args: "",
+        description: "Take this harness from the orchestrator",
+    },
+    CommandSpec {
+        name: "handoff",
+        aliases: &["hand"],
+        args: "",
+        description: "Give this harness back to the orchestrator",
+    },
+    CommandSpec {
         name: "abort",
         aliases: &[],
         args: "",

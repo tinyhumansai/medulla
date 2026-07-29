@@ -12,17 +12,24 @@
 
 use super::types::App;
 use crate::ui::agents::AgentRow;
+use crate::worker::pty::SessionRow;
 
 /// One row of the Agents rail.
 #[derive(Debug, Clone)]
 pub enum RailRow {
     /// A lane, task sublane, or lane-list divider.
     ///
-    /// The only variant, now that the declared fleet no longer hangs below the
-    /// lanes. Kept as an enum rather than collapsed into `AgentRow` so the rail
-    /// kept its seam: the lane list's own `── functions ──` separator is an
-    /// `AgentRow::Separator`, and a future second group would land here.
+    /// The lane list's own `── functions ──` separator is an
+    /// `AgentRow::Separator`; this variant is the group, not the row type.
     Agent(AgentRow),
+    /// The `── your harnesses ──` divider above the operator's own sessions.
+    HarnessSeparator,
+    /// A harness the operator started, which no lane will ever describe.
+    ///
+    /// Lanes are folded from task events, so a session nothing dispatched into
+    /// produces none — which is exactly the state an unmanaged harness lives in.
+    /// Without its own group it would be running, costing tokens, and invisible.
+    Harness(SessionRow),
 }
 
 impl RailRow {
@@ -30,6 +37,16 @@ impl RailRow {
     pub fn selectable(&self) -> bool {
         match self {
             RailRow::Agent(row) => row.selectable(),
+            RailRow::HarnessSeparator => false,
+            RailRow::Harness(_) => true,
+        }
+    }
+
+    /// The PTY session this row names, when it names one directly.
+    pub fn session_id(&self) -> Option<&str> {
+        match self {
+            RailRow::Harness(row) => Some(row.id.as_str()),
+            _ => None,
         }
     }
 }
@@ -45,7 +62,35 @@ impl App {
     /// already excluded here in favour of Routing's Agent Templates page. What
     /// remained was duplication, so the rail now shows what is *running* and
     /// nothing else.
+    /// Operator-started harnesses hang below the lanes under their own divider,
+    /// because they are the one thing running on this device that the event fold
+    /// cannot see.
     pub(super) fn rail_rows(&self) -> Vec<RailRow> {
-        self.agent_rows().into_iter().map(RailRow::Agent).collect()
+        let mut rows: Vec<RailRow> = self.agent_rows().into_iter().map(RailRow::Agent).collect();
+        let own = self.own_harness_rows();
+        if !own.is_empty() {
+            rows.push(RailRow::HarnessSeparator);
+            rows.extend(own.into_iter().map(RailRow::Harness));
+        }
+        rows
+    }
+
+    /// The harnesses this operator started, oldest first.
+    ///
+    /// Exited ones stay listed: the last screen is often the reason it exited,
+    /// and a row that vanishes on failure is a row that hides the failure. They
+    /// leave when the operator forgets them.
+    pub(super) fn own_harness_rows(&self) -> Vec<SessionRow> {
+        let Some(harnesses) = self.harnesses.as_ref() else {
+            return Vec::new();
+        };
+        let mut rows: Vec<SessionRow> = harnesses
+            .sessions
+            .rows()
+            .into_iter()
+            .filter(|row| row.user_spawned)
+            .collect();
+        rows.sort_by_key(|row| row.started_at);
+        rows
     }
 }

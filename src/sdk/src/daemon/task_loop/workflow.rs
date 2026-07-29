@@ -11,7 +11,6 @@
 //! gets, so an orchestrator that knows nothing about workflows still sees a
 //! task it dispatched and a task that answered.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -26,7 +25,7 @@ use crate::workflows::{
 };
 
 use super::super::providers::{Abort, RunTaskOptions};
-use super::super::types::{DaemonRuntime, FrameAttachments};
+use super::super::types::{DaemonRuntime, FrameAttachments, CAPACITY_REJECTION_PREFIX};
 
 /// Dispatch a workflow's `agent` nodes through this daemon's own executor.
 ///
@@ -142,13 +141,16 @@ impl DaemonRuntime {
             return;
         }
 
-        if self.inner.admitted.load(Ordering::SeqCst) >= self.inner.config.max_pending {
+        // Held for the rest of the call, including the validation rejections
+        // below: releasing it is the guard's job, never a hand-written
+        // decrement that an unwind can skip.
+        let Some(admission) = self.admit() else {
             self.reply(
                 &from,
                 TaskFrameKind::Error,
                 &frame.task_id,
                 &format!(
-                    "daemon at capacity ({} pending tasks); retry later",
+                    "{CAPACITY_REJECTION_PREFIX} ({} pending tasks); retry later",
                     self.inner.config.max_pending
                 ),
                 correlation.as_deref(),
@@ -156,7 +158,7 @@ impl DaemonRuntime {
             )
             .await;
             return;
-        }
+        };
 
         let store = self.workflow_store();
         if store.get(&id).ok().flatten().is_none() {
@@ -201,7 +203,6 @@ impl DaemonRuntime {
             return;
         }
 
-        self.inner.admitted.fetch_add(1, Ordering::SeqCst);
         self.reply(
             &from,
             TaskFrameKind::Ack,
@@ -231,7 +232,6 @@ impl DaemonRuntime {
         // The frame's task id becomes the run id, so the orchestrator's existing
         // `abort` for that task is exactly what cancels the run.
         let outcome = run_workflow(context, &id, &frame.task_id, trigger_input(&frame.text)).await;
-        self.inner.admitted.fetch_sub(1, Ordering::SeqCst);
 
         let work = fold.lock().ok().map(|fold| fold.snapshot().clone());
         let attachments = FrameAttachments { usage: None, work };
@@ -267,6 +267,10 @@ impl DaemonRuntime {
                 .await;
             }
         }
+
+        // After the terminal frame, never before: the slot this run occupied is
+        // only genuinely free once the requester has been told how it ended.
+        drop(admission);
     }
 
     /// Capability settings for workflows run on this worker.

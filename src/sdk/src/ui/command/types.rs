@@ -22,6 +22,23 @@ pub enum SlashCommand {
     NewSession,
     /// `/resume` — open the saved-chat picker.
     Resume,
+    /// `/harness [provider] [path]` — start a harness the orchestrator will not
+    /// dispatch into.
+    ///
+    /// Both arguments are optional: with neither, the front end opens its
+    /// picker. Parsing does not validate the path — only the front end knows
+    /// what the active workspace is, and a path that does not exist is a
+    /// spawn-time error with a much better message than a parse-time one.
+    NewHarness {
+        /// The harness CLI to run, lowercased, when one was named.
+        provider: Option<String>,
+        /// The working directory to start it in, when one was given.
+        path: Option<String>,
+    },
+    /// `/takecontrol` — take the selected harness from the orchestrator.
+    TakeControl,
+    /// `/handoff` — give the selected harness back to the orchestrator.
+    HandOff,
     /// `/abort` — request cancellation of the running cycle.
     Abort,
     /// `/clear` — reset the view (runtime history is retained).

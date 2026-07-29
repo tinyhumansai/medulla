@@ -145,3 +145,58 @@ fn usage_renders_the_argument_hint_only_when_there_is_one() {
     assert_eq!(lookup("copy").unwrap().usage(), "/copy [all|last]");
     assert_eq!(lookup("clear").unwrap().usage(), "/clear");
 }
+
+#[test]
+fn harness_takes_an_optional_provider_and_path() {
+    // Bare: the front end opens its picker rather than guessing.
+    assert_eq!(
+        parse("/harness"),
+        Some(SlashCommand::NewHarness {
+            provider: None,
+            path: None,
+        })
+    );
+    assert_eq!(
+        parse("/harness codex"),
+        Some(SlashCommand::NewHarness {
+            provider: Some("codex".to_string()),
+            path: None,
+        })
+    );
+    assert_eq!(
+        parse("/harness Claude ~/work/foo"),
+        Some(SlashCommand::NewHarness {
+            provider: Some("claude".to_string()),
+            path: Some("~/work/foo".to_string()),
+        }),
+        "the provider is matched case-insensitively, the path is left alone"
+    );
+}
+
+#[test]
+fn an_unknown_harness_provider_is_a_usage_error_not_a_default() {
+    // Silently falling back to the default provider would start the wrong CLI
+    // in the operator's workspace, and they would not find out until it did
+    // something.
+    assert_eq!(
+        parse("/harness claud"),
+        Some(SlashCommand::BadUsage(
+            "Usage: /harness [claude|codex|opencode] [path]"
+        ))
+    );
+    assert_eq!(
+        parse("/harness ~/work/foo"),
+        Some(SlashCommand::BadUsage(
+            "Usage: /harness [claude|codex|opencode] [path]"
+        )),
+        "a bare path is ambiguous with a provider name, so it is refused"
+    );
+}
+
+#[test]
+fn control_handover_has_both_a_long_and_a_short_spelling() {
+    assert_eq!(parse("/takecontrol"), Some(SlashCommand::TakeControl));
+    assert_eq!(parse("/take"), Some(SlashCommand::TakeControl));
+    assert_eq!(parse("/handoff"), Some(SlashCommand::HandOff));
+    assert_eq!(parse("/hand"), Some(SlashCommand::HandOff));
+}

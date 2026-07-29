@@ -19,6 +19,7 @@ use super::types::{App, TABS};
 
 mod agents;
 mod decisions;
+mod harness_modals;
 mod memory;
 mod overview;
 mod points;
@@ -340,6 +341,15 @@ impl App {
         }
         if self.template_modal {
             self.draw_template_modal(f, rows[2]);
+        }
+        // Above the content, and above each other in answer order: the picker
+        // can open the directory prompt, and the hand-back question is asked
+        // over whichever pane the operator is releasing.
+        if self.harness_picker.is_some() {
+            self.draw_harness_picker(f, rows[2]);
+        }
+        if self.handback_prompt.is_some() {
+            self.draw_handback_prompt(f, rows[2]);
         }
         if has_prompt {
             self.draw_prompt(f, rows[3]);

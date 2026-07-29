@@ -15,7 +15,9 @@
 //! Responsibilities:
 //! - [`LocalHarnesses`] — resolving "what is the cursor on" to a live session;
 //! - [`HarnessFocus`] — which of the TUI and the harness owns the keyboard;
-//! - [`keys`] — encoding a crossterm key back into the bytes a terminal sends.
+//! - [`keys`] — encoding a crossterm key back into the bytes a terminal sends;
+//! - [`spawn`] — starting a harness the orchestrator will not dispatch into,
+//!   and handing one between the operator and the orchestrator.
 //!
 //! The emulator, the child processes, and the screen-to-ratatui translation are
 //! not here: they are [`crate::worker::pty`] and [`crate::worker::screen`],
@@ -25,6 +27,7 @@ use crate::worker::pty::{PtyManager, ScreenSnapshot};
 
 pub mod keys;
 pub mod mouse;
+mod spawn;
 mod types;
 
 #[cfg(test)]

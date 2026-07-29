@@ -446,6 +446,58 @@ pub(super) struct ResumePicker {
     pub(super) index: usize,
 }
 
+/// The modal state for the "start a harness" picker overlay.
+pub(super) struct HarnessPicker {
+    /// The providers this device actually has, in offer order.
+    pub(super) providers: Vec<medulla::tinyplace::HarnessProvider>,
+    /// The highlighted row.
+    pub(super) index: usize,
+    /// Where the harness will be started. Defaults to the host's workspace and
+    /// is editable from inside the picker.
+    pub(super) cwd: String,
+}
+
+/// The "you still hold this harness" confirmation shown on release.
+///
+/// Modelled on an unsaved-changes prompt, and for the same reason: an operator
+/// who took a harness over and walked away has left the orchestrator locked out
+/// of it, and the moment they release the keyboard is the only moment they are
+/// certainly thinking about it. Silently handing it back would be worse — it
+/// would resume dispatch into a harness mid-thought.
+pub(super) struct HandbackPrompt {
+    /// The session the operator is releasing.
+    pub(super) session: String,
+    /// Whether attaching is what took control, as opposed to an explicit
+    /// `/takecontrol`. An explicit take is a decision, so the prompt says so
+    /// rather than implying the operator got here by accident.
+    pub(super) took_control: bool,
+}
+
+/// What to do when the operator releases a harness they hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HandbackPolicy {
+    /// Ask, every time.
+    #[default]
+    Ask,
+    /// Always hand back without asking.
+    Always,
+    /// Never hand back; releasing the keyboard keeps control.
+    Never,
+}
+
+impl HandbackPolicy {
+    /// Parse the `[harness].handback` config value, falling back to
+    /// [`Ask`](Self::Ask) for anything unrecognized — a typo in a config file
+    /// should not silently change who controls a harness.
+    pub fn from_config(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "always" => HandbackPolicy::Always,
+            "never" => HandbackPolicy::Never,
+            _ => HandbackPolicy::Ask,
+        }
+    }
+}
+
 /// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
     /// Create a task from a title line.
@@ -464,6 +516,8 @@ pub(super) enum PromptKind {
     CustomHarnessAdd,
     /// Edit the custom harness with the given stable id.
     CustomHarnessEdit(String),
+    /// Set the directory the harness picker will start its harness in.
+    HarnessCwd,
     /// Answer a pending sub-agent question.
     AnswerQuestion {
         /// The cycle the question belongs to.
@@ -710,4 +764,22 @@ pub struct App {
     // is where the rail cursor is turned into a selection; cleared at the top of
     // every draw so it can never name a pane that is no longer on screen.
     pub(super) harness_pane_session: Option<String>,
+    /// The "start a harness" picker, while it is open.
+    pub(super) harness_picker: Option<HarnessPicker>,
+    /// The "you still hold this harness" confirmation, while it is open.
+    pub(super) handback_prompt: Option<HandbackPrompt>,
+    /// How far the Help page is scrolled, in lines.
+    pub(super) help_scroll: u16,
+    /// What releasing a held harness does, from `[harness].handback`.
+    pub(super) handback_policy: HandbackPolicy,
+    /// Whether attaching is what took control of the current harness.
+    ///
+    /// Distinguishes "you picked this up by focusing in" from "you asked for it
+    /// with /takecontrol", which the release prompt words differently: the
+    /// second was a decision, and re-asking about it as though it were an
+    /// accident is how a confirmation becomes noise.
+    pub(super) harness_took_control: bool,
+    /// Whether operator-started harnesses launch with the permission-bypass
+    /// flag, from `[harness].skipPermissions`.
+    pub(super) harness_skip_permissions: bool,
 }

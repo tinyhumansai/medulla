@@ -33,7 +33,7 @@ use medulla::sessions::{SessionClass, TurnStream};
 use medulla::tinyplace::HarnessProvider;
 use medulla::wrapper::tail::SessionTailer;
 
-use super::pty::{LaunchSpec, PtyManager};
+use super::pty::{HarnessControl, LaunchSpec, PtyManager};
 
 /// How often the transcript is polled while a turn runs.
 ///
@@ -301,6 +301,11 @@ impl PtySessionExecutor {
             label,
             model: options.model.clone(),
             session_id: None,
+            // Opened to serve a task frame, so the orchestrator holds it. An
+            // operator can still take it over later; that is what stops the
+            // next frame landing in a composer they are typing in.
+            control: HarnessControl::Orchestrator,
+            user_spawned: false,
         })?;
         let harness_session_id = self.sessions.row(&id).and_then(|row| row.session_id);
         Ok(OpenedSession {

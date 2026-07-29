@@ -515,6 +515,7 @@ fn the_tool_mode_survives_a_frame_round_trip() {
         correlation_id: None,
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
         tool_mode: Some("propose".into()),
         workflow: None,

@@ -133,6 +133,7 @@ impl EvolveSession {
             instruction: prompt,
             worker_address: self.worker_address.clone(),
             provider: self.provider,
+            custom_harness: None,
             model: self.model.clone(),
             // The autonomy boundary, carried to the harness rather than
             // assumed. Without this the review turn is served the full

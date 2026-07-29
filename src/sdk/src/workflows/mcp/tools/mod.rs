@@ -11,5 +11,7 @@ pub mod evolve;
 
 pub use definitions::tool_definitions;
 pub(super) use dispatch::call;
+#[cfg(test)]
+pub(crate) use dispatch::scope_error_for;
 pub use dispatch::TOOL_NAMES;
 pub use evolve::{ToolMode, TOOL_MODE_ENV, TOOL_SCOPE_ENV};

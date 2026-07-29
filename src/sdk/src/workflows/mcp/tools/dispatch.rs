@@ -197,10 +197,20 @@ pub(crate) async fn call(
 
 /// Refuse evolution writes that target a workflow other than the reviewed one.
 fn scope_error(mode: ToolMode, name: &str, arguments: &Value) -> Option<String> {
+    let scope = std::env::var(super::evolve::TOOL_SCOPE_ENV).ok();
+    scope_error_for(mode, name, arguments, scope.as_deref())
+}
+
+pub(crate) fn scope_error_for(
+    mode: ToolMode,
+    name: &str,
+    arguments: &Value,
+    scope: Option<&str>,
+) -> Option<String> {
     if mode != ToolMode::Propose || !matches!(name, "workflow_note_add" | "workflow_propose") {
         return None;
     }
-    let scope = std::env::var(super::evolve::TOOL_SCOPE_ENV).ok()?;
+    let scope = scope?;
     let requested = arguments.get("id").and_then(Value::as_str).unwrap_or("");
     (requested != scope).then(|| {
         format!(

@@ -478,6 +478,41 @@ async fn a_trigger_refuses_a_run_from_another_workflow() {
     );
 }
 
+#[tokio::test]
+async fn verification_allows_findings_already_present_in_the_base_graph() {
+    let (_home, store, _run) = fixture("verification-compares-with-the-base");
+    ops::create(
+        &store,
+        &json!({
+            "id": "verification-compares-with-the-base",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "say", "kind": "tool_call", "name": "Say",
+                  "config": { "slug": "medulla:echo", "on_error": "continue",
+                              "args": { "text": "=run.trigger.absent" } } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "say" }]
+        })
+        .to_string(),
+        "verification-compares-with-the-base",
+    )
+    .expect("installs input-dependent workflow");
+
+    let proposed = ops::propose(
+        &store,
+        "verification-compares-with-the-base",
+        "Clarify the step name without changing its bindings",
+        &json!([{ "op": "set_node_name", "id": "say", "name": "Notify" }]),
+        Vec::new(),
+        Vec::new(),
+    )
+    .await
+    .expect("proposal verifies");
+
+    assert_eq!(proposed["ok"], json!(true), "{proposed}");
+}
+
 #[test]
 fn the_config_is_switched_off_by_the_outer_workflows_switch() {
     let mut config = crate::config::WorkflowsConfig {

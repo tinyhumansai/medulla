@@ -91,6 +91,9 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
             parsed.reason.as_deref().unwrap_or_default(),
         )?,
         WorkflowAction::Evolve(id) => {
+            if let Some(path) = parsed.config.as_deref() {
+                std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+            }
             let config = load_workflows_config(&parsed, &env, &cwd);
             ops::evolve(&store, &config, &cwd, id, parsed.run_id.as_deref()).await?
         }

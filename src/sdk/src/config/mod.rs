@@ -34,10 +34,10 @@ pub use persist::{
     persist_tinyplace_peers, persist_welcome_completed, persist_workflow_workspaces,
 };
 pub use types::{
-    BackendConfig, BudgetConfig, CoreConfig, FleetConfig, HostSection, HubSection, HubWorkerConfig,
-    LoadedConfig, MedullaConfig, OnboardingConfig, OpencodeConfig, Peer, ProviderBudgetConfig,
-    RouterConfig, RouterProviderConfig, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
-    WorkflowConfig, WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
+    BackendConfig, BudgetConfig, CoreConfig, FleetConfig, HarnessSection, HostSection, HubSection,
+    HubWorkerConfig, LoadedConfig, MedullaConfig, OnboardingConfig, OpencodeConfig, Peer,
+    ProviderBudgetConfig, RouterConfig, RouterProviderConfig, ThemeConfig, TinyplaceConfig,
+    TuiConfig, UpdateConfig, WorkflowConfig, WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, display_host, is_staging,

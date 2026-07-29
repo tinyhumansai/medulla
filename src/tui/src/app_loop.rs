@@ -414,6 +414,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 sessions: harness_sessions.clone(),
                 runtime: host.runtime(),
                 hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
+                env: env.clone(),
+                workspace: host.workspace().to_string(),
+                providers: host.providers().to_vec(),
+                router: loaded.config.router.clone(),
             });
     let local_dispatch = crate::hub_relay::LocalDispatch {
         network: local_network,

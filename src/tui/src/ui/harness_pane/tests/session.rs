@@ -77,6 +77,10 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         sessions,
         runtime: medulla::daemon::DaemonRuntime::new(config, run_task, send),
         hub_address: "medulla-orchestrator".to_string(),
+        env: HashMap::new(),
+        workspace: "/".to_string(),
+        providers: vec![HarnessProvider::Codex],
+        router: None,
     }
 }
 

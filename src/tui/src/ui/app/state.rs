@@ -16,8 +16,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
-    App, Cmd, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT, SP_USAGE, TABS,
-    TASKS_SUBPAGES,
+    App, Cmd, HandbackPolicy, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT,
+    SP_USAGE, TABS, TASKS_SUBPAGES,
 };
 
 impl App {
@@ -46,6 +46,9 @@ impl App {
                     .position(|option| option.strategy == strategy)
             })
             .unwrap_or(0);
+        // Read before `loaded` is moved into the struct below.
+        let handback_policy = HandbackPolicy::from_config(&loaded.config.harness.handback);
+        let harness_skip_permissions = loaded.config.harness.skip_permissions;
         App {
             runtime,
             loaded,
@@ -132,6 +135,11 @@ impl App {
             harnesses: None,
             harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
             harness_pane_session: None,
+            harness_picker: None,
+            handback_prompt: None,
+            handback_policy,
+            harness_took_control: false,
+            harness_skip_permissions,
             copy_capture: None,
         }
     }

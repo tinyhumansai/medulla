@@ -234,6 +234,40 @@ pub struct OpencodeConfig {
     pub max_concurrency: u32,
 }
 
+/// The `harness` section: how harnesses the operator starts themselves behave.
+///
+/// Distinct from [`HostSection`], which is about the harnesses the *orchestrator*
+/// starts to serve tasks. These are the ones an operator opens by hand and the
+/// orchestrator is not allowed to touch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HarnessSection {
+    /// What releasing the keyboard does when the operator holds the harness:
+    /// `ask` (the default), `always`, or `never`.
+    ///
+    /// `ask` prompts, the way an editor prompts about unsaved changes — an
+    /// operator who took a harness over and walked away has locked the
+    /// orchestrator out of it, and releasing the keyboard is the last moment
+    /// they are certainly thinking about it.
+    pub handback: String,
+    /// Whether an operator-started harness launches with its provider's
+    /// permission-bypass flag.
+    ///
+    /// Off by default, and deliberately the opposite of the host's own
+    /// `skipPermissions`: that flag exists because an unattended session hangs
+    /// on a permission dialog, and this session is by definition attended.
+    pub skip_permissions: bool,
+}
+
+impl Default for HarnessSection {
+    fn default() -> Self {
+        HarnessSection {
+            handback: "ask".to_string(),
+            skip_permissions: false,
+        }
+    }
+}
+
 /// The `host` section: whether this machine also *runs* the work the
 /// orchestrator hands out, and how.
 ///
@@ -744,6 +778,9 @@ pub struct TuiConfig {
     /// Whether this device also hosts the tasks the orchestrator hands out.
     #[serde(default)]
     pub host: HostSection,
+    /// How operator-started harnesses behave.
+    #[serde(default)]
+    pub harness: HarnessSection,
     /// Custom OpenAI-compatible router. Absent means routing is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub router: Option<RouterConfig>,
@@ -781,6 +818,7 @@ impl Default for TuiConfig {
             workflows: WorkflowsConfig::default(),
             hub: HubSection::default(),
             host: HostSection::default(),
+            harness: HarnessSection::default(),
             router: None,
             budget: None,
             routing_strategy: None,

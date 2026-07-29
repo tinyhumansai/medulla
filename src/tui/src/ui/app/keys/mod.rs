@@ -45,12 +45,31 @@ impl App {
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
 
+        // The hand-back question outranks even the attached harness, and has to:
+        // it is asked *while still attached*, because releasing the keyboard
+        // before it is answered would hide the pane the question is about. So
+        // for the few keystrokes it is open, the chrome takes the keyboard back.
+        if self.handback_prompt.is_some() {
+            self.handle_handback_key(k.code);
+            return None;
+        }
+
         // An attached harness owns the keyboard outright — ahead of the
         // overlays and the quit chord both. Anything less is not a terminal:
         // the operator would be typing into Claude Code with a handful of keys
         // mysteriously reserved, and `Ctrl-C` (interrupt the harness) would quit
         // the orchestrator instead.
         if self.handle_harness_key(k) {
+            return None;
+        }
+
+        // The harness picker owns navigation while open.
+        if self.harness_picker.is_some() {
+            if ctrl && k.code == KeyCode::Char('c') {
+                self.should_quit = true;
+            } else {
+                self.handle_harness_picker_key(k.code);
+            }
             return None;
         }
 
@@ -133,6 +152,19 @@ impl App {
                 }
                 KeyCode::Char('n') => {
                     self.new_thread();
+                    return None;
+                }
+                // Start a harness of your own. `Ctrl-T` for terminal; `Ctrl-N`
+                // is already a new thread, which is the thing it would
+                // otherwise be confused with.
+                KeyCode::Char('t') => {
+                    self.open_harness_picker();
+                    return None;
+                }
+                // Grab or give: one chord for both directions, because the rail
+                // row and the pane title both say which way it will go.
+                KeyCode::Char('g') => {
+                    self.toggle_harness_control();
                     return None;
                 }
                 // Walk the open threads. The bare arrows belong to the composer,

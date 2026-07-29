@@ -241,13 +241,25 @@ fn extra_options(
     let mut options = primary.clone();
     options.workspace = extra.workspace.clone();
     if !extra.providers.is_empty() {
-        options.providers = Some(
-            extra
-                .providers
-                .iter()
-                .map(|name| parse_provider(name))
-                .collect::<Result<Vec<_>, _>>()?,
-        );
+        let providers = extra
+            .providers
+            .iter()
+            .map(|name| parse_provider(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        // An inherited default that the new list does not contain is not a
+        // default at all — it names a harness this host was just told not to
+        // run. `providers = ["codex"]` with no default of its own would
+        // otherwise keep the primary's claude and reproduce the wrong-harness
+        // bug through a config that is entirely valid. Cleared to `None`, which
+        // is the same "pick from what is allowed" the primary uses when its own
+        // `defaultProvider` is blank.
+        if !options
+            .default_provider
+            .is_some_and(|held| providers.contains(&held))
+        {
+            options.default_provider = None;
+        }
+        options.providers = Some(providers);
     }
     if !extra.default_provider.trim().is_empty() {
         options.default_provider = Some(parse_provider(&extra.default_provider)?);

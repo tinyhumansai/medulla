@@ -585,3 +585,49 @@ fn an_unnamed_extras_address_is_derived_from_its_config_index() {
         vec![host_address(&primary), "local-host-1".to_string()],
     );
 }
+
+#[test]
+fn an_extra_that_replaces_the_provider_list_drops_a_default_outside_it() {
+    // Provider-only is a valid configuration, and inheriting the primary's
+    // default there names a harness this host was just told not to run — the
+    // same wrong-harness outcome, reached without a typo.
+    let primary = EmbeddedDaemonOptions {
+        providers: Some(vec![HarnessProvider::Claude]),
+        default_provider: Some(HarnessProvider::Claude),
+        ..Default::default()
+    };
+    let extra = HostSection {
+        workspace: "/extra".to_string(),
+        providers: vec!["codex".to_string()],
+        default_provider: String::new(),
+        ..HostSection::default()
+    };
+
+    let options = extra_options(&primary, &extra).expect("valid providers");
+    assert_eq!(options.providers, Some(vec![HarnessProvider::Codex]));
+    assert_eq!(
+        options.default_provider, None,
+        "the inherited default is not in the new list, so it is not a default"
+    );
+}
+
+#[test]
+fn an_inherited_default_survives_when_the_new_list_still_allows_it() {
+    // Widening rather than replacing: claude is still permitted, so the
+    // primary's default is still a sensible answer and clearing it would make
+    // the host pick arbitrarily.
+    let primary = EmbeddedDaemonOptions {
+        providers: Some(vec![HarnessProvider::Claude]),
+        default_provider: Some(HarnessProvider::Claude),
+        ..Default::default()
+    };
+    let extra = HostSection {
+        workspace: "/extra".to_string(),
+        providers: vec!["claude".to_string(), "codex".to_string()],
+        default_provider: String::new(),
+        ..HostSection::default()
+    };
+
+    let options = extra_options(&primary, &extra).expect("valid providers");
+    assert_eq!(options.default_provider, Some(HarnessProvider::Claude));
+}

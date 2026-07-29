@@ -445,6 +445,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // would contradict both the message it shows and the no-session startup path
     // they would then have to trigger by relaunching.
     let mut status = startup_status.or(tinyplace_status).or(log_note);
+    let mut restart_requested = false;
     let result = loop {
         let exit = run(
             &mut terminal,
@@ -485,6 +486,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 break Ok(());
             }
             Ok(SessionExit::Quit) => break Ok(()),
+            Ok(SessionExit::Restart) => {
+                restart_requested = true;
+                break Ok(());
+            }
             Err(e) => break Err(e),
         }
     };
@@ -493,5 +498,29 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Explicit teardown (the guard also runs on drop / panic).
     drop(guard);
     drop(tinyplace_service); // aborts the background loops.
-    result
+    if restart_requested && result.is_ok() {
+        // The update checker has already replaced the executable. Relaunch with
+        // the same command-line arguments so the new version takes effect.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let error = std::process::Command::new(std::env::current_exe()?)
+                .args(raw)
+                .exec();
+            Err(anyhow::anyhow!("failed to restart after update: {error}"))
+        }
+        #[cfg(windows)]
+        {
+            std::process::Command::new(std::env::current_exe()?)
+                .args(raw)
+                .spawn()?;
+            Ok(())
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            result
+        }
+    } else {
+        result
+    }
 }

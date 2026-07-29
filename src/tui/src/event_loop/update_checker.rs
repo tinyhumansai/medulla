@@ -30,9 +30,27 @@ pub(super) fn spawn_update_checker(
             first = false;
             tokio::time::sleep(delay).await;
             if let Ok(Some(info)) = medulla::update::check_for_update(&url, current).await {
-                let notice = format!("update v{} available — run `medulla update`", info.version);
-                if tx.send(AppMsg::UpdateAvailable(notice)).is_err() {
-                    break;
+                let version = info.version.clone();
+                match medulla::update::install_update(&info).await {
+                    Ok(()) => {
+                        if tx
+                            .send(AppMsg::UpdateInstalled(format!(
+                                "updated to medulla {version}; restarting…"
+                            )))
+                            .is_err()
+                        {
+                            break;
+                        }
+                        break;
+                    }
+                    Err(error) => {
+                        let notice = format!(
+                            "update v{version} available (automatic update failed: {error})"
+                        );
+                        if tx.send(AppMsg::UpdateAvailable(notice)).is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         }

@@ -350,6 +350,7 @@ pub async fn resume_workflow(
     let earlier_steps = record.steps.len();
     record.steps.extend(observer.steps());
     record.finished_at = Some(crate::clock::now_millis() as u64);
+    let terminal_engine_error = matches!(&settled, Err(Settle::Failed(_)));
     match settled {
         Ok(outcome) => {
             record.pending_approvals = outcome.pending_approvals.clone();
@@ -375,11 +376,7 @@ pub async fn resume_workflow(
     // diagnosis would report every earlier node as one that never ran. Merged
     // rather than replaced, for the same reason the steps are appended.
     let resumed_steps = observer.execution_steps();
-    let resumed = diagnose_record(
-        &workflow.graph,
-        &resumed_steps,
-        record.status == RunStatus::Failed,
-    );
+    let resumed = diagnose_record(&workflow.graph, &resumed_steps, terminal_engine_error);
     record.diagnosis = Some(match record.diagnosis.take() {
         Some(earlier) => merge_diagnoses(earlier, resumed, &record.steps[..earlier_steps]),
         None => resumed,

@@ -144,3 +144,40 @@ async fn a_resume_may_reject_the_only_gate_without_approving_anything() {
 
     assert!(settled.status.is_settled(), "got {:?}", settled.status);
 }
+
+#[tokio::test]
+async fn a_resumed_timeout_keeps_errors_swallowed_before_the_timeout() {
+    let harness = Harness::new();
+    harness.install(&gated_error_then_hang(), "gated-error-then-hang");
+    run_workflow(
+        harness.context(Arc::new(StubDispatch::default())),
+        "gated-error-then-hang",
+        "run-resume-timeout",
+        json!({}),
+    )
+    .await
+    .expect("pauses");
+
+    let mut context = harness.context(Arc::new(ErrorThenHangDispatch));
+    let mut impatient = (*harness.settings).clone();
+    impatient.run_timeout_secs = 1;
+    context.settings = Arc::new(impatient);
+    let record = resume_workflow(
+        context,
+        "run-resume-timeout",
+        vec!["review".into()],
+        Vec::new(),
+    )
+    .await
+    .expect("timeout is recorded");
+
+    assert_eq!(record.status, RunStatus::Failed);
+    assert!(
+        record.diagnosis.as_ref().is_some_and(|diagnosis| diagnosis
+            .hidden_errors
+            .iter()
+            .any(|error| error.node_id == "swallowed")),
+        "the host timeout must not reclassify the earlier swallowed error: {:?}",
+        record.diagnosis
+    );
+}

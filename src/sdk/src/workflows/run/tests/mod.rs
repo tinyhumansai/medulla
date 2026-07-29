@@ -53,6 +53,29 @@ impl HarnessDispatch for HangingDispatch {
     }
 }
 
+/// A resumed leg that swallows one node error before remaining in flight.
+struct ErrorThenHangDispatch;
+
+#[async_trait]
+impl HarnessDispatch for ErrorThenHangDispatch {
+    async fn dispatch(&self, request: TaskRequest) -> Result<TaskOutcome, RunError> {
+        if request.instruction == "fail" {
+            return Err(RunError::Worker("expected failure".into()));
+        }
+        if request.instruction == "hang" {
+            return std::future::pending().await;
+        }
+        Ok(TaskOutcome {
+            reply: "approved".into(),
+            usage: crate::tinyplace::TokenUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            harness: None,
+        })
+    }
+}
+
 /// A store, its settings, and a context factory over a temporary directory.
 struct Harness {
     _root: tempfile::TempDir,
@@ -133,6 +156,30 @@ fn gated() -> String {
               "config": { "prompt": "review it", "requires_approval": true } }
         ],
         "edges": [{ "from_node": "t", "to_node": "review" }]
+    })
+    .to_string()
+}
+
+/// A gated graph whose resumed leg swallows an error and then hangs.
+fn gated_error_then_hang() -> String {
+    json!({
+        "id": "gated-error-then-hang",
+        "name": "Gated error then hang",
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "review", "kind": "agent", "name": "Review",
+              "config": { "prompt": "review it", "requires_approval": true } },
+            { "id": "swallowed", "kind": "agent", "name": "Swallowed",
+              "config": { "prompt": "fail", "on_error": "continue" } },
+            { "id": "hang", "kind": "agent", "name": "Hang",
+              "config": { "prompt": "hang" } }
+        ],
+        "edges": [
+            { "from_node": "t", "to_node": "review" },
+            { "from_node": "review", "to_node": "swallowed" },
+            { "from_node": "swallowed", "to_node": "hang" }
+        ]
     })
     .to_string()
 }

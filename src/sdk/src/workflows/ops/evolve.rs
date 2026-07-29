@@ -132,7 +132,14 @@ pub async fn propose(
     };
     proposal.verification = Some(verify(store, &proposal).await);
     mark_stale_if_base_changed(store, &mut proposal)?;
-    let _decision = store.lock_proposal_decision(id)?;
+    let lock_store = store.clone();
+    let lock_id = id.to_string();
+    let _decision =
+        tokio::task::spawn_blocking(move || lock_store.lock_proposal_decision(&lock_id))
+            .await
+            .map_err(|err| {
+                WorkflowError::Engine(format!("proposal decision lock task failed: {err}"))
+            })??;
     // The lock may have waited behind an acceptance or another publication.
     mark_stale_if_base_changed(store, &mut proposal)?;
 

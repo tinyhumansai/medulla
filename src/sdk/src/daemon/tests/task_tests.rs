@@ -16,8 +16,8 @@ use crate::daemon::DaemonRuntime;
 use crate::tinyplace::{HarnessProvider, TaskFrameKind};
 
 use super::{
-    abort_frame, abortable_runner, base_config, blocking_runner, decoded_frames, input_frame,
-    recording_send, stdin_runner, task_frame, wait_ready,
+    abort_frame, abortable_runner, base_config, blocking_runner, conversation_runner,
+    decoded_frames, input_frame, recording_send, stdin_runner, task_frame, wait_ready,
 };
 
 #[tokio::test]
@@ -95,6 +95,42 @@ async fn unknown_custom_harness_is_rejected_before_a_provider_runs() {
                 .text
                 .contains("custom harness \"missing\" is not configured")
     }));
+}
+
+#[tokio::test]
+async fn explicit_provider_is_not_replaced_by_the_default_custom_harness() {
+    let observed = Arc::new(StdMutex::new(None));
+    let capture = observed.clone();
+    let run_task: RunTaskFn = Arc::new(move |options: RunTaskOptions| {
+        let capture = capture.clone();
+        Box::pin(async move {
+            *capture.lock().unwrap() = Some(options.provider);
+            Ok(RunTaskResult {
+                provider: options.provider,
+                reply: "done".into(),
+                events: 0,
+                usage: None,
+                session_id: None,
+            })
+        })
+    });
+    let mut config = base_config();
+    config.providers.push(HarnessProvider::Codex);
+    let mut default = crate::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek via Claude | claude | deepseek/pro | | this-device",
+    )
+    .unwrap();
+    default.default = true;
+    config.custom_harnesses = vec![default];
+    let (send, _) = recording_send();
+    let runtime = DaemonRuntime::new(config, run_task, send);
+    let mut frame = task_frame("explicit-provider", "work", None);
+    frame.provider = Some(HarnessProvider::Codex);
+
+    runtime.handle_message("peer".into(), String::new(), Some(frame));
+    runtime.idle().await;
+
+    assert_eq!(*observed.lock().unwrap(), Some(HarnessProvider::Codex));
 }
 
 #[tokio::test]

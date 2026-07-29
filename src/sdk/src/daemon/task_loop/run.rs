@@ -39,13 +39,14 @@ impl DaemonRuntime {
                     return;
                 }
             },
-            None => self
+            None if frame.provider.is_none() => self
                 .inner
                 .config
                 .custom_harnesses
                 .iter()
                 .find(|harness| harness.default)
                 .cloned(),
+            None => None,
         };
         let requested_provider = custom_harness
             .as_ref()

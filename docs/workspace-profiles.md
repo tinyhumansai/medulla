@@ -110,7 +110,7 @@ template outside the crate root fails that build.
 | `--offline` | Skip the model call and write the editable stub. |
 | `--config <path>` | Explicit config file for the backend/model settings. |
 
-**Model resolution** matches `medulla memory ingest`: an explicit
+**Model resolution** takes one order: an explicit
 `OPENROUTER_API_KEY` wins, otherwise the backend's inference surface is used with
 the JWT from `medulla login`. With neither — or if the model call fails — `init`
 writes the stub and says so, so it always leaves you a usable file.

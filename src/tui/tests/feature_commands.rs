@@ -158,10 +158,41 @@ fn help_lists_every_command_from_the_catalog() {
     type_str(&mut app, "/help");
     let _ = app.on_event(key(KeyCode::Enter));
     assert_eq!(app.settings_subpage(), "Help");
-    let out = render(&mut app, 160, 50);
+    // Tall enough to hold the whole page. Help outgrew a short terminal once the
+    // harness bindings landed on it, so it scrolls now (see below) — what this
+    // asserts is that every command is *on* the page, not that the page fits in
+    // any particular window.
+    let out = render(&mut app, 160, 64);
     for spec in medulla::ui::command::COMMANDS {
         assert!(out.contains(spec.name), "help omits /{}: {out}", spec.name);
     }
+}
+
+#[test]
+fn help_scrolls_so_a_short_terminal_can_reach_the_commands() {
+    // The page is longer than a small window, and a keyboard reference whose
+    // bottom half is unreachable is not one.
+    let mut app = agents_app();
+    type_str(&mut app, "/help");
+    let _ = app.on_event(key(KeyCode::Enter));
+
+    let top = render(&mut app, 160, 40);
+    assert!(top.contains("Tab / Shift-Tab switch views"), "{top}");
+    assert!(
+        !top.contains("/handoff"),
+        "the tail starts off-screen: {top}"
+    );
+
+    // Step into the content pane, then walk down to the end.
+    let _ = app.on_event(key(KeyCode::Enter));
+    for _ in 0..60 {
+        let _ = app.on_event(key(KeyCode::Down));
+    }
+    let bottom = render(&mut app, 160, 40);
+    assert!(
+        bottom.contains("/handoff"),
+        "scrolling must reach the command list: {bottom}"
+    );
 }
 
 #[test]

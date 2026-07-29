@@ -8,6 +8,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::command::COMMANDS;
+use crate::ui::harness_pane::FOCUS_CHORD_LABEL;
 
 use super::super::super::types::App;
 
@@ -42,6 +43,16 @@ impl App {
             TLine::from(" "),
             TLine::from("Ctrl-N new thread · Ctrl-↑↓ switch threads · Ctrl-C quit"),
             TLine::from(" "),
+            TLine::from(Span::styled("Harnesses", bold)),
+            TLine::from(format!(
+                "{FOCUS_CHORD_LABEL} type into the selected harness (and take it from the orchestrator)"
+            )),
+            TLine::from("Ctrl-T start a harness of your own · Ctrl-G grab it or give it back"),
+            TLine::from(Span::styled(
+                "While you hold a harness the orchestrator will not dispatch into it",
+                dim,
+            )),
+            TLine::from(" "),
             TLine::from(Span::styled("Copy", bold)),
             TLine::from("Ctrl-Y copies the whole chat · /copy last copies just the latest reply"),
             TLine::from(" "),
@@ -68,10 +79,18 @@ impl App {
                 Span::styled(format!("  {}", spec.description), dim),
             ]));
         }
+        // Clamped here rather than at the key press: how far this page can
+        // scroll depends on the terminal it is being drawn into, which the key
+        // handler does not know.
+        let block = self.panel("Keyboard & REPL help");
+        let visible = block.inner(area).height as usize;
+        let max_scroll = lines.len().saturating_sub(visible) as u16;
+        self.help_scroll = self.help_scroll.min(max_scroll);
         f.render_widget(
             Paragraph::new(Text::from(lines))
                 .wrap(Wrap { trim: true })
-                .block(self.panel("Keyboard & REPL help")),
+                .scroll((self.help_scroll, 0))
+                .block(block),
             area,
         );
     }

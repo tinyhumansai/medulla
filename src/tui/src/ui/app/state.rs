@@ -137,6 +137,7 @@ impl App {
             harness_pane_session: None,
             harness_picker: None,
             handback_prompt: None,
+            help_scroll: 0,
             handback_policy,
             harness_took_control: false,
             harness_skip_permissions,
@@ -339,6 +340,15 @@ impl App {
     /// The live harness sessions this device is running, if it hosts.
     pub fn local_harnesses(&self) -> Option<&crate::ui::harness_pane::LocalHarnesses> {
         self.harnesses.as_ref()
+    }
+
+    /// The harness session the last draw resolved for the rail cursor.
+    ///
+    /// Inspection seam: it is set during render, so a test that wants to act on
+    /// "the selected harness" has to be able to see when the cursor has reached
+    /// one rather than counting rows it does not control.
+    pub fn harness_pane_session_for_test(&self) -> Option<&str> {
+        self.harness_pane_session.as_deref()
     }
 
     /// The harness session currently receiving the operator's keystrokes.

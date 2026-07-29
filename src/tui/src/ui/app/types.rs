@@ -730,6 +730,8 @@ pub struct App {
     pub(super) harness_picker: Option<HarnessPicker>,
     /// The "you still hold this harness" confirmation, while it is open.
     pub(super) handback_prompt: Option<HandbackPrompt>,
+    /// How far the Help page is scrolled, in lines.
+    pub(super) help_scroll: u16,
     /// What releasing a held harness does, from `[harness].handback`.
     pub(super) handback_policy: HandbackPolicy,
     /// Whether attaching is what took control of the current harness.

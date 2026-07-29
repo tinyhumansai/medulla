@@ -24,6 +24,12 @@ openhuman = { path = "vendor/openhuman", default-features = false }
 # declaration style: mixing the two yields two PackageIds for one crate and an
 # E0308 where the types look identical.
 tinyplace = "2.0"
+# The shared TinyHumans backend client. A path dependency into OpenHuman's own
+# vendored copy — NOT a second checkout — so this host and the embedded core
+# link one `tinyhumans-sdk` and agree on the backend contract by construction.
+# It has no registry coordinate, so unlike the tiny* crates below it is not
+# declared-then-patched.
+tinyhumans-sdk = { path = "vendor/openhuman/vendor/tinyhumans-sdk" }
 # The workflow engine. Declared as a registry dependency and redirected to the
 # vendored submodule by `[patch.crates-io]` below, matching how the sibling
 # openhuman host consumes it — one shared pin, one shared upgrade cadence.
@@ -37,6 +43,12 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "process", "fs", "signal", "net"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
+# Depended on only to pick a TLS backend explicitly. rustls 0.23 refuses to
+# guess when more than one provider is compiled in, and this workspace has two:
+# `ring` arrives with reqwest's `rustls-tls`, `aws-lc-rs` with the vendored
+# OpenHuman core. Neither wins by default, so every TLS handshake panicked on
+# whichever tokio worker reached it first.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 portable-pty = "0.9"

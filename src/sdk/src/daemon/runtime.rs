@@ -76,6 +76,18 @@ impl DaemonRuntime {
     /// Fire-and-forget dispatch of one inbound message. Never panics to the
     /// caller; the work runs on a spawned task tracked by [`DaemonRuntime::idle`].
     pub fn handle_message(&self, from: String, text: String, frame: Option<TaskFrame>) {
+        // A screen message is never a prompt. The plain-text path types whatever
+        // it is given into a harness, so a `medulla.screen.v1` body reaching it
+        // is executed rather than ignored — a subscribe arriving as an
+        // instruction to claude. Callers that can actually serve one classify it
+        // before getting here; this refuses it for every caller that cannot, so
+        // the mistake is not one each new drain has to remember to avoid.
+        if crate::tinyplace::parse_screen_message(&text).is_some() {
+            self.log(&format!(
+                "screen: ignored a screen message from {from} — this daemon serves no watchable sessions"
+            ));
+            return;
+        }
         self.inner.inflight_count.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
         tokio::spawn(async move {

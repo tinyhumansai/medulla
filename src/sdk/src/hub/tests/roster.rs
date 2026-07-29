@@ -5,7 +5,15 @@
 //! and a tiny.place address, so these pin the resolution rules rather than the
 //! transport — dispatch itself is covered in [`super::super::dispatch`].
 
-use super::super::roster::{address_of, register_payload, HubWorker};
+use super::super::roster::{
+    address_of, addresses_of, register_payload, unreachable_addresses, HubWorker,
+};
+
+/// No liveness opinion — what a bridge with no presence signal reports, and
+/// what most of these tests want, since they are about payload shape.
+fn no_presence() -> std::collections::HashMap<String, bool> {
+    std::collections::HashMap::new()
+}
 use super::super::roster::{subscription_for_strategy, worker_for_strategy};
 use crate::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 use crate::tinyplace::{
@@ -180,7 +188,7 @@ fn subscription_routing_excludes_not_ready_and_fails_open_without_numbers() {
 
 #[test]
 fn register_payload_advertises_id_address_and_harness() {
-    let payload = register_payload(&[worker("w1", "GRVaddr")]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence());
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents.len(), 1);
     assert_eq!(agents[0]["id"], "w1");
@@ -196,7 +204,7 @@ fn register_payload_advertises_id_address_and_harness() {
 fn register_payload_advertises_a_known_workspace() {
     let mut w = worker("this-device", "this-device");
     w.workspace = Some("/srv/repos/medulla".to_string());
-    let payload = register_payload(&[w]);
+    let payload = register_payload(&[w], &no_presence());
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["metadata"]["workspace"], "/srv/repos/medulla");
 }
@@ -206,13 +214,13 @@ fn register_payload_advertises_a_known_workspace() {
 /// win that fallback and place the agent nowhere.
 #[test]
 fn register_payload_omits_an_unknown_or_blank_workspace() {
-    let payload = register_payload(&[worker("w1", "GRVaddr")]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence());
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert!(agents[0]["metadata"].get("workspace").is_none());
 
     let mut blank = worker("w2", "ADDR2");
     blank.workspace = Some("   ".to_string());
-    let payload = register_payload(&[blank]);
+    let payload = register_payload(&[blank], &no_presence());
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert!(agents[0]["metadata"].get("workspace").is_none());
 }
@@ -258,7 +266,7 @@ fn an_advertised_worker_is_online_so_it_can_be_auto_assigned() {
     // availability is exactly "online". Advertising a blank one excluded this
     // hub's workers from every fan-out, and rendered as an empty column in
     // agent_list — which reads as a broken row, not an idle worker.
-    let payload = register_payload(&[worker("w1", "GRVaddr")]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence());
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["availability"], "online");
 }
@@ -438,7 +446,7 @@ fn an_unlabelled_worker_advertises_one_token_not_two() {
     // `agent_list` renders `id (name)`. When those differ and both read as
     // names, the model picks one and may pick the unroutable one — which is the
     // original bug. Unlabelled, they must coincide.
-    let payload = register_payload(&[worker("claude-worker", "3Hob1Fxu")]);
+    let payload = register_payload(&[worker("claude-worker", "3Hob1Fxu")], &no_presence());
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["id"], "claude-worker");
     assert_eq!(
@@ -449,8 +457,66 @@ fn an_unlabelled_worker_advertises_one_token_not_two() {
     // A labelled one keeps its human name; the id stays a visible slug of it.
     let mut labelled = worker("sanil-laptop", "3Hob1Fxu");
     labelled.label = Some("Sanil Laptop".to_string());
-    let payload = register_payload(&[labelled]);
+    let payload = register_payload(&[labelled], &no_presence());
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["id"], "sanil-laptop");
     assert_eq!(agents[0]["name"], "Sanil Laptop");
+}
+
+#[test]
+fn a_worker_the_relay_reports_down_is_withheld_entirely() {
+    // Not advertised as offline — withheld. Marking it down only stops the
+    // *automatic* assignment of an untargeted task; a task naming it still
+    // resolves and dispatches into the void, which is the stall being fixed.
+    let online = std::collections::HashMap::from([("GRVdead".to_string(), false)]);
+    let payload = register_payload(
+        &[worker("live", "GRVlive"), worker("dead", "GRVdead")],
+        &online,
+    );
+    let agents = payload["agents"].as_array().expect("an agent list");
+
+    assert_eq!(agents.len(), 1, "only the reachable one is offered");
+    assert_eq!(agents[0]["id"], "live");
+    // What survives is advertised online, because the orchestrator only
+    // auto-assigns to an agent whose availability is exactly that.
+    assert_eq!(agents[0]["availability"], "online");
+}
+
+#[test]
+fn a_worker_the_relay_reports_up_is_advertised() {
+    let online = std::collections::HashMap::from([("GRVaddr".to_string(), true)]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &online);
+    assert_eq!(payload["agents"].as_array().expect("agents").len(), 1);
+    assert_eq!(payload["agents"][0]["availability"], "online");
+}
+
+#[test]
+fn no_answer_from_the_relay_advertises_everything() {
+    // "The relay did not say" is not "the worker is down". One dropped request
+    // must not empty a live roster.
+    let payload = register_payload(
+        &[worker("w1", "GRVone"), worker("w2", "GRVtwo")],
+        &no_presence(),
+    );
+    assert_eq!(payload["agents"].as_array().expect("agents").len(), 2);
+}
+
+#[test]
+fn every_roster_address_is_asked_about_in_one_batch() {
+    // One request for the whole roster, not one per worker: a hub with a dozen
+    // workers should not spend a dozen round trips to redraw one column.
+    let workers = [worker("w1", "GRVone"), worker("w2", "GRVtwo")];
+    assert_eq!(addresses_of(&workers), vec!["GRVone", "GRVtwo"]);
+}
+
+#[test]
+fn the_withheld_addresses_are_reportable() {
+    // Named in the log rather than silently dropped: a roster that quietly
+    // shrinks is indistinguishable from one that was never configured.
+    let online = std::collections::HashMap::from([
+        ("GRVdead".to_string(), false),
+        ("GRVlive".to_string(), true),
+    ]);
+    let workers = [worker("live", "GRVlive"), worker("dead", "GRVdead")];
+    assert_eq!(unreachable_addresses(&workers, &online), vec!["GRVdead"]);
 }

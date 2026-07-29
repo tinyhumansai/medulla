@@ -602,75 +602,36 @@ pub struct HistoryRewardClaim {
 
 #[allow(unused_imports)]
 use super::*;
+
 /// Client for the Medulla backend HTTP + SSE API.
-#[derive(Debug, Clone)]
+///
+/// Holds the shared [`tinyhumans_sdk::TinyHumansClient`] every request is
+/// issued through. `base_url`, `jwt`, and `http` are retained alongside it
+/// because the SDK does not expose them back and the SSE stream — which has no
+/// SDK equivalent — has to build its own authenticated URL.
+#[derive(Clone)]
 pub struct MedullaClient {
     pub(super) base_url: String,
     pub(super) jwt: String,
     pub(super) http: reqwest::Client,
+    pub(super) sdk: tinyhumans_sdk::TinyHumansClient,
 }
+
+/// Hand-written because [`tinyhumans_sdk::TinyHumansClient`] is not `Debug`.
+/// The JWT is deliberately not printed.
+impl std::fmt::Debug for MedullaClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MedullaClient")
+            .field("base_url", &self.base_url)
+            .field("authenticated", &!self.jwt.is_empty())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Builder for [`MedullaClient`].
 #[derive(Debug, Default)]
 pub struct MedullaClientBuilder {
     pub(super) base_url: Option<String>,
     pub(super) jwt: Option<String>,
     pub(super) http: Option<reqwest::Client>,
-}
-/// Raw response envelope shared by every endpoint.
-#[derive(Debug, Deserialize)]
-pub(super) struct RawEnvelope {
-    #[serde(default)]
-    pub(super) success: bool,
-    #[serde(default)]
-    pub(super) data: Option<Value>,
-    #[serde(default)]
-    pub(super) error: Option<String>,
-    #[serde(rename = "errorCode", default)]
-    pub(super) error_code: Option<String>,
-    #[serde(default)]
-    pub(super) details: Option<Value>,
-}
-
-/// Request body for exchanging a one-time login token.
-#[derive(serde::Serialize)]
-pub(super) struct ConsumeLoginTokenBody {
-    pub(super) token: String,
-}
-
-/// Request body for creating a durable session.
-///
-/// `workspaceProfiles` carries the authored `MEDULLA.md` for each active
-/// workspace root; the backend session-mint accepts and distils them. Omitted
-/// entirely when no workspace has a profile, so a plain session mint is unchanged.
-#[derive(serde::Serialize)]
-pub(super) struct CreateSessionBody<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) title: Option<&'a str>,
-    #[serde(
-        rename = "workspaceProfiles",
-        skip_serializing_if = "<[WorkspaceProfileInput]>::is_empty"
-    )]
-    pub(super) workspace_profiles: &'a [WorkspaceProfileInput],
-}
-
-/// Request body for adding a message to a session.
-#[derive(serde::Serialize)]
-pub(super) struct SendMessageBody<'a> {
-    pub(super) body: &'a str,
-}
-
-/// Request body for starting an orchestration run.
-#[derive(serde::Serialize)]
-pub(super) struct RunBody<'a> {
-    pub(super) input: &'a str,
-    #[serde(flatten)]
-    pub(super) options: &'a RunOptions,
-}
-
-/// Request body for continuing an orchestration run.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ContinueRunBody<'a> {
-    pub(super) cycle_id: &'a str,
-    pub(super) tool_results: Vec<ToolResult>,
 }

@@ -89,8 +89,8 @@ impl App {
             return;
         }
         match self.tab() {
-            // Over the rail, the wheel walks the cursor over lanes and fleet
-            // rows; anywhere else on the tab it scrolls the transcript.
+            // Over the rail, the wheel walks the cursor over the lanes and
+            // their tasks; anywhere else on the tab it scrolls the transcript.
             "Agents" => match self.hit_agents {
                 Some((rail, _)) if rail.contains((x, y).into()) => self.move_agent_index(up),
                 _ => self.scroll_transcript(up, 3),
@@ -207,11 +207,11 @@ impl App {
             if let Some((rect, window_start)) = self.hit_agents {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
-                    // The *rail's* rows, not the lane rows: the rail also holds
-                    // the dividers, the declared fleet, and the template
-                    // catalog, and `agent_index` indexes all of it. Reading the
-                    // shorter list here meant every click below the lanes fell
-                    // off the end and silently did nothing.
+                    // The *rail's* rows, which include the unselectable ones —
+                    // the `── functions ──` separator and the `+N more` counter
+                    // — because `agent_index` indexes all of them. Reading a
+                    // list that skipped those would shift every row below one
+                    // out of alignment, so a click would select its neighbour.
                     let rows = self.rail_rows();
                     let idx = window_start + rel;
                     if let Some(row) = rows.get(idx) {
@@ -258,8 +258,10 @@ impl App {
 
     /// Move the Agents-rail cursor to the next/previous selectable row.
     ///
-    /// The rail spans the lanes and the declared fleet, so this walks straight
-    /// from the last agent into the first host rather than stopping short.
+    /// Not every row can hold the cursor: the `── functions ──` separator and
+    /// the `+N more` counter are labels, not destinations. So this steps over
+    /// them to the next lane or task rather than stopping on one, and a cursor
+    /// that would leave the list stays where it was.
     pub(super) fn move_agent_index(&mut self, up: bool) {
         let rows = self.rail_rows();
         if rows.is_empty() {

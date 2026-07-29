@@ -19,6 +19,9 @@ use super::super::types::{HubLog, TaskOutcome};
 use super::super::ActivityLog;
 use super::{CapabilitiesWaiters, SystemInfoWaiters, Waiters};
 
+#[cfg(test)]
+mod tests;
+
 /// How many inbound messages to drain per pump tick.
 const DRAIN_LIMIT: i64 = 50;
 
@@ -92,10 +95,15 @@ pub(super) async fn route_frame(
     // empty read the same from here — and neither said whether the worker had
     // been talking at all.
     if let Some(log) = log {
+        // Named, because an anonymous frame cannot be attributed. A roster of
+        // several workers answering the same kind of probe produced a column of
+        // identical-looking lines, and telling which one had replied — or which
+        // had stayed silent — meant guessing from the payload's `cwd`.
         log(&format!(
-            "hub ← task {} {} · {} chars: {}",
+            "hub ← task {} {} from {} · {} chars: {}",
             frame.task_id,
             frame.kind.as_str(),
+            from,
             frame.text.chars().count(),
             crate::logging::preview(&frame.text),
         ));
@@ -209,9 +217,27 @@ async fn route_screen(
         return;
     };
     let task_id = frame.task_id.clone();
-    if screens.apply(from, &frame, crate::clock::now_millis())
-        == crate::tinyplace::ApplyOutcome::NeedsResync
-    {
+    let watching = screens.is_watching(from, &task_id);
+    // Whether this is the first frame for the task, read before the fold moves
+    // it in. Worth one line: until it appears, "the worker is not sending" and
+    // "the pane is showing something else" look identical from here.
+    let first = screens.get(from, &task_id).is_none();
+    let (cols, rows) = (frame.cols, frame.rows);
+    // Applied whether or not anyone is watching. The frame crossed the relay
+    // and was decrypted before this function saw it, so dropping it now saves
+    // nothing and throws away the freshest screen we will ever hold for this
+    // task — which is exactly what the operator wants on screen the moment
+    // they look back at it.
+    let outcome = screens.apply(from, &frame, crate::clock::now_millis());
+
+    if outcome == crate::tinyplace::ApplyOutcome::NeedsResync {
+        // Only ever asked for while watching. A resync request is a *subscribe*,
+        // so sending one for a task nobody is watching restarts the stream that
+        // was just stopped — which is how an unwatched stream used to come back
+        // about a second after it ended and then run forever.
+        if !watching {
+            return;
+        }
         if let Some(log) = log {
             log(&format!(
                 "hub ← screen {task_id} from {from}: out of step at seq {} — resyncing",
@@ -225,6 +251,16 @@ async fn route_screen(
                 resync: true,
             });
         let _ = relay.send(from, &body).await;
+        return;
+    }
+    // Once per stream, not once per frame: at a frame a second the latter would
+    // bury every other line in the log.
+    if first {
+        if let Some(log) = log {
+            log(&format!(
+                "hub ← screen {task_id} from {from}: streaming at {cols}x{rows}"
+            ));
+        }
     }
 }
 

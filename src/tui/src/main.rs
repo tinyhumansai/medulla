@@ -30,7 +30,23 @@ mod worker_loop;
 /// core is a dependency of the SDK, not of this crate — so that is the only
 /// place able to source the values from it rather than restating them.
 fn main() -> anyhow::Result<()> {
+    install_crypto_provider();
     medulla::tokio_tuning::build_runtime()?.block_on(async_main())
+}
+
+/// Pick the TLS backend before anything opens a connection.
+///
+/// rustls 0.23 refuses to guess when more than one provider is compiled in, and
+/// this binary has two: `ring` arrives with reqwest's `rustls-tls`, `aws-lc-rs`
+/// with the vendored OpenHuman core. Neither wins by default, so the first TLS
+/// handshake panicked — on a tokio worker thread, which meant the process
+/// survived and the TUI kept drawing while every relay call died silently.
+///
+/// Done here rather than at each call site because the choice is process-wide
+/// and must be made before the first handshake, whichever subcommand runs.
+/// A failure means a provider is already installed, which is equally fine.
+fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 async fn async_main() -> anyhow::Result<()> {

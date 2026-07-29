@@ -208,3 +208,251 @@ fn cancelling_a_run_that_is_not_executing_reports_that_plainly() {
     assert_eq!(result["cancelled"], false);
     assert_eq!(result["runId"], "never-started");
 }
+
+#[test]
+fn history_carries_the_whole_graph_of_each_earlier_version() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Renamed" }]),
+    )
+    .unwrap();
+
+    let history = list_history(&store, "sweep").unwrap();
+
+    let revisions = history["revisions"].as_array().expect("array");
+    assert_eq!(revisions.len(), 1);
+    // The graph is included: history is read to decide which version to go back
+    // to, and an id with a timestamp does not support that decision.
+    assert_eq!(
+        revisions[0]["record"]["graph"]["nodes"][1]["name"],
+        json!("Work")
+    );
+}
+
+#[test]
+fn history_for_a_workflow_that_does_not_exist_is_an_error_not_an_empty_list() {
+    let (_root, store) = store();
+
+    let err = list_history(&store, "absent").expect_err("must refuse");
+
+    // An empty history would read as "never edited" for something that is not
+    // there at all.
+    assert!(matches!(err, WorkflowError::NotFound(_)), "got {err:?}");
+}
+
+#[test]
+fn history_stays_reachable_after_the_workflow_itself_is_deleted() {
+    // Regression: `delete` snapshots a revision of what it removed
+    // specifically so that edit is recoverable, but `list_history` used to
+    // gate on the *live* record and would report `NotFound` the moment that
+    // record was gone — the one moment an operator most needs to see what a
+    // deletion can still be undone from.
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Renamed" }]),
+    )
+    .unwrap();
+    store.delete("sweep").unwrap();
+
+    let history = list_history(&store, "sweep").expect("history must still be reachable");
+
+    // Both revisions delete captured: the edit before it, and the deletion
+    // itself.
+    let revisions = history["revisions"].as_array().expect("array");
+    assert_eq!(revisions.len(), 2, "{revisions:?}");
+
+    // Undo (which restores from a revision, not the live record) must also
+    // still work through the ops surface after the delete.
+    let undone = undo(&store, "sweep").expect("undo must still work");
+    assert_eq!(undone["undone"], json!(true));
+}
+
+#[test]
+fn undo_puts_the_previous_graph_back_and_says_what_it_restored() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Renamed" }]),
+    )
+    .unwrap();
+
+    let undone = undo(&store, "sweep").unwrap();
+
+    assert_eq!(undone["undone"], json!(true));
+    assert_eq!(
+        undone["workflow"]["graph"]["nodes"][1]["name"],
+        json!("Work")
+    );
+    assert!(undone["revision"].is_string());
+    assert!(undone["supersededAt"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn undo_on_a_workflow_that_was_never_edited_explains_itself_rather_than_failing() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+
+    let undone = undo(&store, "sweep").unwrap();
+
+    assert_eq!(undone["undone"], json!(false));
+    assert!(
+        undone["reason"]
+            .as_str()
+            .unwrap()
+            .contains("nothing to go back to"),
+        "{undone}"
+    );
+}
+
+#[test]
+fn rolling_back_names_the_revision_it_used() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+    apply_ops(
+        &store,
+        "sweep",
+        &json!([{ "op": "set_node_name", "id": "work", "name": "Renamed" }]),
+    )
+    .unwrap();
+    let history = list_history(&store, "sweep").unwrap();
+    let revision = history["revisions"][0]["id"].as_str().unwrap().to_string();
+
+    let restored = rollback(&store, "sweep", &revision).unwrap();
+
+    assert_eq!(restored["restored"], json!("sweep"));
+    assert_eq!(restored["revision"], json!(revision));
+    assert_eq!(
+        restored["workflow"]["graph"]["nodes"][1]["name"],
+        json!("Work")
+    );
+}
+
+#[tokio::test]
+async fn a_dry_run_reports_a_failure_the_error_policy_swallowed() {
+    let (_root, store) = store();
+    // The blind spot these diagnostics exist for. `medulla:echo` refuses a null
+    // argument, so this node fails — but `on_error: continue` means the *run*
+    // succeeds, the outcome is a JSON object, and the failed step carries no
+    // diagnostics of its own. Everything downstream reads it as a clean run.
+    create(
+        &store,
+        &json!({
+            "id": "quiet",
+            "name": "Quiet",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "say", "kind": "tool_call", "name": "Say",
+                  "config": { "slug": "medulla:echo", "on_error": "continue",
+                              "args": { "text": "=run.trigger.absent" } } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "say" }]
+        })
+        .to_string(),
+        "quiet",
+    )
+    .unwrap();
+
+    let result = dry_run(&store, "quiet", json!({})).await.unwrap();
+
+    // The single most misleading thing this surface could say is `ok: true` for
+    // a graph whose work did not happen.
+    assert_eq!(result["ok"], json!(false), "{result}");
+    let hidden = result["diagnostics"]["hiddenErrors"]
+        .as_array()
+        .expect("array");
+    assert_eq!(hidden.len(), 1, "{result}");
+    assert_eq!(hidden[0]["nodeId"], json!("say"));
+}
+
+#[tokio::test]
+async fn a_dry_run_of_a_soundly_wired_graph_reports_ok() {
+    let (_root, store) = store();
+    create(
+        &store,
+        &json!({
+            "id": "loud",
+            "name": "Loud",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "say", "kind": "tool_call", "name": "Say",
+                  "config": { "slug": "medulla:echo", "args": { "text": "hello" } } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "say" }]
+        })
+        .to_string(),
+        "loud",
+    )
+    .unwrap();
+
+    let result = dry_run(&store, "loud", json!({})).await.unwrap();
+
+    assert_eq!(result["ok"], json!(true), "{result}");
+}
+
+#[test]
+fn an_edit_whose_binding_would_resolve_null_is_refused_before_it_is_saved() {
+    let (_root, store) = store();
+    create(&store, &document("sweep"), "sweep").unwrap();
+
+    // `work` is an agent node, so its output is wrapped as {json, text, raw} —
+    // reading `.item.title` off it resolves null at run time.
+    let err = apply_ops(
+        &store,
+        "sweep",
+        &json!([
+            { "op": "add_node", "node": { "id": "say", "kind": "tool_call", "name": "Say",
+              "config": { "slug": "medulla:echo",
+                          "args": { "text": "=nodes.work.item.title" } } } },
+            { "op": "add_edge", "edge": { "from_node": "work", "to_node": "say" } }
+        ]),
+    )
+    .expect_err("must refuse");
+
+    let WorkflowError::Invalid { messages, .. } = err else {
+        panic!("expected Invalid, got {err:?}");
+    };
+    assert!(messages[0].contains("json"), "{messages:?}");
+    // Refused whole: the workflow is left exactly as it was.
+    let after = get(&store, "sweep").unwrap();
+    assert_eq!(after["graph"]["nodes"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_dry_run_cannot_tell_you_a_script_is_broken() {
+    let (_root, store) = store();
+    // A `code` node whose source is a syntax error in every language.
+    create(
+        &store,
+        &json!({
+            "id": "broken",
+            "name": "Broken",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "compute", "kind": "code", "name": "Compute",
+                  "config": { "language": "javascript", "source": "this is not javascript(" } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "compute" }]
+        })
+        .to_string(),
+        "broken",
+    )
+    .unwrap();
+
+    let result = dry_run(&store, "broken", json!({})).await.unwrap();
+
+    // The simulation swaps in a mock runner, so the script is never executed.
+    // This is the gap `workflow_run` exists to close, and the reason the
+    // copilot's sandbox table says so explicitly.
+    assert_eq!(result["ok"], json!(true), "{result}");
+}

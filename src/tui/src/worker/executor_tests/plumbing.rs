@@ -150,6 +150,37 @@ async fn a_configured_router_layers_its_endpoint_and_resolved_key_into_the_spawn
 }
 
 #[tokio::test]
+async fn task_scoped_environment_reaches_the_spawned_harness() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let rollout = dir.path().join("rollout-task-env.jsonl");
+    let bin = recording_fake_harness(dir.path(), &rollout.to_string_lossy(), &cwd, "ok");
+    let (executor, env) = harness_with_env(
+        dir.path(),
+        &cwd,
+        &[("TINYPLACE_CODEX_BIN", &bin.to_string_lossy())],
+    );
+    let mut opts = options(&env, "peer-task-env", "unused", &cwd);
+    opts.extra_args = Vec::new();
+    opts.env.insert(
+        "ANTHROPIC_DEFAULT_OPUS_MODEL".into(),
+        "openrouter/task-model".into(),
+    );
+
+    tokio::time::timeout(Duration::from_secs(30), executor.clone().run_for_test(opts))
+        .await
+        .expect("must settle")
+        .expect("must succeed");
+
+    let spawned_env = read_captured(&dir.path().join("env.txt"));
+    assert!(
+        spawned_env.contains("ANTHROPIC_DEFAULT_OPUS_MODEL=openrouter/task-model"),
+        "task-scoped harness overrides must reach the child: {spawned_env}"
+    );
+    executor.sessions_for_test().shutdown();
+}
+
+#[tokio::test]
 async fn a_router_key_env_that_is_not_set_fails_the_turn_before_it_ever_spawns() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_string_lossy().into_owned();

@@ -10,7 +10,10 @@ use medulla::tinyplace::HarnessProvider;
 use medulla_tui::worker::executor::PtySessionExecutor;
 use medulla_tui::worker::pty::PtyManager;
 
-use super::{host_address, host_enabled, options_from_config, run_task, start};
+use super::{
+    host_address, host_enabled, options_from_config, options_from_config_with_custom, run_task,
+    start,
+};
 
 /// A path that is guaranteed to exist and be executable on every platform.
 ///
@@ -108,6 +111,57 @@ fn an_empty_provider_list_means_detect_rather_than_serve_nothing() {
     assert_eq!(options.providers, None);
     assert_eq!(options.default_provider, None);
     assert_eq!(options.model, None);
+}
+
+#[test]
+fn a_custom_harness_is_attached_only_to_its_fleet_host() {
+    let mut local = medulla::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek | codex | deepseek/deepseek-chat | | this-device",
+    )
+    .expect("valid custom harness");
+    local.default = true;
+    let remote = medulla::config::CustomHarnessConfig::from_editor_line(
+        "remote | Remote | claude | anthropic/claude-sonnet | | other-device",
+    )
+    .expect("valid custom harness");
+
+    let options = options_from_config_with_custom(
+        &HostSection::default(),
+        &HashMap::new(),
+        None,
+        None,
+        None,
+        &[local.clone(), remote],
+    )
+    .expect("valid host options");
+
+    assert_eq!(options.providers, Some(vec![HarnessProvider::Codex]));
+    assert_eq!(options.default_provider, Some(HarnessProvider::Codex));
+    assert_eq!(options.custom_harnesses, vec![local]);
+}
+
+#[test]
+fn custom_harness_matching_uses_the_effective_host_address() {
+    let local = medulla::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek | codex | deepseek/deepseek-chat | | this-device",
+    )
+    .expect("valid custom harness");
+    let config = HostSection {
+        address: "  ".into(),
+        ..HostSection::default()
+    };
+
+    let options = options_from_config_with_custom(
+        &config,
+        &HashMap::new(),
+        None,
+        None,
+        None,
+        std::slice::from_ref(&local),
+    )
+    .expect("valid host options");
+
+    assert_eq!(options.custom_harnesses, vec![local]);
 }
 
 #[test]

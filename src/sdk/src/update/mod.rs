@@ -35,5 +35,7 @@ pub use check::{
     bin_name, check_for_update, is_newer, parse_manifest, pick_platform, platform_key, sha256_hex,
     update_url,
 };
-pub use install::{backup_path, download_and_stage, exe_is_writable, install_binary, run_update};
+pub use install::{
+    backup_path, download_and_stage, exe_is_writable, install_binary, install_update, run_update,
+};
 pub use types::{Manifest, PlatformEntry, UpdateInfo, DEFAULT_UPDATE_URL};

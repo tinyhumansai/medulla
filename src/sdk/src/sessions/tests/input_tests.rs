@@ -20,10 +20,12 @@ fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
         correlation_id: Some("cyc/t1/abcd".to_string()),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
         usage: None,
         work: None,
         workflow: None,
+        conversation: None,
     }
 }
 
@@ -32,7 +34,7 @@ fn a_task_frame_folds_to_a_bounded_turn_anchored_on_the_authenticated_sender() {
     let folded = fold(
         SessionInput::Frame {
             from: "peer-crypto-id".to_string(),
-            frame: task_frame(TaskFrameKind::Task, "t1", "ship it"),
+            frame: Box::new(task_frame(TaskFrameKind::Task, "t1", "ship it")),
         },
         HarnessProvider::Claude,
         SessionPolicy::Auto,
@@ -58,7 +60,7 @@ fn an_input_frame_folds_to_steering_not_a_new_turn() {
     let folded = fold(
         SessionInput::Frame {
             from: "peer".to_string(),
-            frame: task_frame(TaskFrameKind::Input, "t1", "actually, use rust"),
+            frame: Box::new(task_frame(TaskFrameKind::Input, "t1", "actually, use rust")),
         },
         HarnessProvider::Claude,
         SessionPolicy::Auto,
@@ -80,7 +82,7 @@ fn response_frames_fold_to_nothing() {
         let folded = fold(
             SessionInput::Frame {
                 from: "peer".to_string(),
-                frame: task_frame(kind, "t1", "…"),
+                frame: Box::new(task_frame(kind, "t1", "…")),
             },
             HarnessProvider::Claude,
             SessionPolicy::Auto,
@@ -264,7 +266,7 @@ fn a_frames_own_provider_overrides_the_default() {
     let Folded::Turn(turn) = fold(
         SessionInput::Frame {
             from: "peer".to_string(),
-            frame,
+            frame: Box::new(frame),
         },
         HarnessProvider::Claude,
         SessionPolicy::Auto,

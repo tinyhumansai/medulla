@@ -56,6 +56,7 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         project: git.project.clone(),
         branch: git.branch.clone(),
         providers: options.providers.clone(),
+        custom_harnesses: Vec::new(),
         tools: Vec::new(),
         mcp_servers: Vec::new(),
         // Filled in by the daemon from its own workflow store: this probe

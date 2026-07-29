@@ -33,7 +33,7 @@ use medulla::sessions::{SessionClass, TurnStream};
 use medulla::tinyplace::HarnessProvider;
 use medulla::wrapper::tail::SessionTailer;
 
-use super::pty::{LaunchSpec, PtyManager};
+use super::pty::{HarnessControl, LaunchSpec, PtyManager};
 
 /// How often the transcript is polled while a turn runs.
 ///
@@ -301,6 +301,11 @@ impl PtySessionExecutor {
             label,
             model: options.model.clone(),
             session_id: None,
+            // Opened to serve a task frame, so the orchestrator holds it. An
+            // operator can still take it over later; that is what stops the
+            // next frame landing in a composer they are typing in.
+            control: HarnessControl::Orchestrator,
+            user_spawned: false,
         })?;
         let harness_session_id = self.sessions.row(&id).and_then(|row| row.session_id);
         Ok(OpenedSession {
@@ -311,7 +316,7 @@ impl PtySessionExecutor {
     }
 
     /// The environment and extra argv a fresh launch spawns with: this
-    /// executor's base environment, layered with the `[router]` injection the
+    /// task-scoped environment, layered with the `[router]` injection the
     /// headless executor already applies at its own spawn seam.
     ///
     /// Without this, switching the local host to `PtySessionExecutor` silently
@@ -329,7 +334,7 @@ impl PtySessionExecutor {
         &self,
         options: &RunTaskOptions,
     ) -> Result<(HashMap<String, String>, Vec<String>), String> {
-        let mut env = self.env.clone();
+        let mut env = options.env.clone();
         let mut extra_args = options.extra_args.clone();
         if let Some(router) = &options.router {
             let injection = medulla::tinyplace::env::router_env(options.provider, router);
@@ -337,7 +342,7 @@ impl PtySessionExecutor {
                 env.insert(key, value);
             }
             for (child_var, source_name) in injection.secret_env {
-                match self.env.get(&source_name).filter(|v| !v.is_empty()) {
+                match options.env.get(&source_name).filter(|v| !v.is_empty()) {
                     Some(secret) => {
                         env.insert(child_var, secret.clone());
                     }

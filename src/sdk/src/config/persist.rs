@@ -89,6 +89,22 @@ pub fn persist_subscription_routing_strategy(path: &Path, wire_value: &str) -> a
     write_document(path, &doc)
 }
 
+/// Replace the top-level `customHarnesses` array while preserving all unrelated
+/// configuration.
+///
+/// Presets contain only model routing and environment-variable names. The
+/// referenced key value never enters this function or the resulting document.
+pub fn persist_custom_harnesses(
+    path: &Path,
+    harnesses: &[crate::config::CustomHarnessConfig],
+) -> anyhow::Result<()> {
+    let mut doc = read_document(path)?;
+    let value = toml::Value::try_from(harnesses)
+        .map_err(|error| anyhow::anyhow!("Cannot serialize custom harnesses: {error}"))?;
+    doc.insert("customHarnesses".to_string(), value);
+    write_document(path, &doc)
+}
+
 /// Parse `path` into a TOML table, treating an absent file as an empty document.
 fn read_document(path: &Path) -> anyhow::Result<toml::Table> {
     match std::fs::read_to_string(path) {

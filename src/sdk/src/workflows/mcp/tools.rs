@@ -19,16 +19,31 @@ use crate::workflows::{ops, WorkflowStore};
 use super::RpcError;
 
 /// Every tool this server exposes, in the order a model meets them.
-pub const TOOL_NAMES: [&str; 9] = [
+///
+/// `workflow_run` really does run the thing — harness sessions, scripts, and
+/// whatever else the graph describes. It is here because a copilot that can only
+/// simulate cannot answer "does this work", and a dry run is structurally blind
+/// to exactly the steps most worth checking: a `code` node's script, an
+/// `agent` node's real reply. The operator's own switches still apply
+/// (`workflows.enabled`, and the workflow's own `enabled`).
+///
+/// There is still no tool to *cancel* a run. A copilot that started one is
+/// awaiting it; the operator cancels from the pane, where they can see it.
+pub const TOOL_NAMES: [&str; 14] = [
     "workflow_list",
     "workflow_get",
+    "workflow_host",
     "workflow_catalog",
     "workflow_create",
     "workflow_apply_ops",
     "workflow_preview_ops",
     "workflow_validate",
     "workflow_dry_run",
+    "workflow_run",
     "workflow_runs",
+    "workflow_run_get",
+    "workflow_history",
+    "workflow_delete",
 ];
 
 /// A JSON Schema object with the given properties and required keys.
@@ -59,6 +74,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 json!({ "id": { "type": "string", "description": "The workflow id." } }),
                 &["id"],
             ),
+        }),
+        json!({
+            "name": "workflow_host",
+            "description":
+                "What this machine will actually permit a workflow to do: the default worker \
+                 `agent` nodes dispatch to, the tool slugs and HTTP hosts that are allowed, and \
+                 whether `code` nodes may run. Read this before writing a graph that reaches \
+                 outside the process — every one of these is enforced at run time, so a graph \
+                 that ignores them saves and validates cleanly and then fails the first time it \
+                 matters.",
+            "inputSchema": schema(json!({}), &[]),
         }),
         json!({
             "name": "workflow_catalog",
@@ -160,12 +186,65 @@ pub fn tool_definitions() -> Vec<Value> {
             ),
         }),
         json!({
+            "name": "workflow_run",
+            "description":
+                "Run a workflow for real: dispatch its `agent` steps to actual coding harnesses, \
+                 execute its scripts, and make whatever changes it describes. This is not a \
+                 simulation — prefer workflow_dry_run while you are still wiring, and use this \
+                 when the operator has asked whether it works, or when a dry run cannot settle \
+                 the question (a `code` node's script and an `agent` node's real reply are both \
+                 invisible to one). Returns the whole run record: every step, its status, and \
+                 anything that resolved to null. Can take minutes.",
+            "inputSchema": schema(
+                json!({
+                    "id": { "type": "string", "description": "The workflow to run." },
+                    "input": { "description": "Optional trigger payload; defaults to {}." }
+                }),
+                &["id"],
+            ),
+        }),
+        json!({
             "name": "workflow_runs",
             "description":
                 "The run history for a workflow, newest first — status, steps, and anything a \
                  run is waiting for approval on.",
             "inputSchema": schema(
                 json!({ "id": { "type": "string", "description": "The workflow id." } }),
+                &["id"],
+            ),
+        }),
+        json!({
+            "name": "workflow_run_get",
+            "description":
+                "One run in full, by run id: every step, its status, its duration, and the \
+                 expressions that resolved to null on the way. Where to start when asked why a \
+                 workflow failed — the steps say what actually happened, which is more reliable \
+                 than reading the graph and reasoning about what it would do.",
+            "inputSchema": schema(
+                json!({ "runId": { "type": "string", "description": "The run id." } }),
+                &["runId"],
+            ),
+        }),
+        json!({
+            "name": "workflow_history",
+            "description":
+                "The versions of a workflow that have been written over, newest first, each with \
+                 the whole graph as it then was. Useful for saying what changed and when — an \
+                 edit that broke something is often easier to see next to the version before it. \
+                 Restoring one is the operator's own action, not yours.",
+            "inputSchema": schema(
+                json!({ "id": { "type": "string", "description": "The workflow id." } }),
+                &["id"],
+            ),
+        }),
+        json!({
+            "name": "workflow_delete",
+            "description":
+                "Remove a workflow. Only when the operator asked for it in this turn — deleting \
+                 something they did not ask about is not a helpful tidy-up. The version is kept \
+                 in history, so an operator can undo it, but do not treat that as licence.",
+            "inputSchema": schema(
+                json!({ "id": { "type": "string", "description": "The workflow to remove." } }),
                 &["id"],
             ),
         }),
@@ -184,6 +263,7 @@ fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
 /// Run a `tools/call`.
 pub(super) async fn call(
     store: &Arc<dyn WorkflowStore>,
+    config: &crate::config::WorkflowsConfig,
     params: &Value,
 ) -> Result<Value, RpcError> {
     let name = params
@@ -238,7 +318,20 @@ pub(super) async fn call(
             let input = arguments.get("input").cloned().unwrap_or(json!({}));
             ops::dry_run(store, id, input).await.map_err(to_rpc)
         }
+        "workflow_run" => {
+            let id = arg(&arguments, "id")?;
+            let input = arguments.get("input").cloned().unwrap_or(json!({}));
+            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            ops::run(store, config, &env, &cwd, id, input)
+                .await
+                .map_err(to_rpc)
+        }
         "workflow_runs" => ops::list_runs(store, arg(&arguments, "id")?).map_err(to_rpc),
+        "workflow_run_get" => ops::get_run(store, arg(&arguments, "runId")?).map_err(to_rpc),
+        "workflow_host" => Ok(ops::host_facts(config)),
+        "workflow_history" => ops::list_history(store, arg(&arguments, "id")?).map_err(to_rpc),
+        "workflow_delete" => ops::delete(store, arg(&arguments, "id")?).map_err(to_rpc),
         other => {
             return Err(RpcError::invalid_params(format!(
                 "unknown tool '{other}'; available: {}",

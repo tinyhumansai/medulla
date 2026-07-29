@@ -63,6 +63,22 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    let custom_harness = obj
+        .get("customHarness")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(Box::<str>::from);
+
+    // Blank is absent, for the same reason a blank workflow id is: an encoder
+    // that always writes the key must not put every task into a conversation
+    // named "" — which would be one shared context for every unrelated sender.
+    let conversation = obj
+        .get("conversation")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
 
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
@@ -73,8 +89,10 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         correlation_id,
         harness,
         provider,
+        custom_harness,
         model,
         workflow,
+        conversation,
         usage,
         work,
     })

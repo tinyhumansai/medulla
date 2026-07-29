@@ -76,6 +76,7 @@ pub(crate) fn host_address(config: &HostSection) -> String {
 /// unattended work would go to a CLI nobody chose, with permission prompts
 /// bypassed. The same applies to `defaultProvider`, where an unknown name would
 /// quietly fall back to whichever CLI happened to be detected first.
+#[cfg(test)]
 pub(crate) fn options_from_config(
     config: &HostSection,
     env: &HashMap<String, String>,
@@ -83,13 +84,45 @@ pub(crate) fn options_from_config(
     budget: Option<medulla::config::BudgetConfig>,
     log: Option<medulla::hub::HubLog>,
 ) -> Result<EmbeddedDaemonOptions, String> {
-    let providers = config
+    options_from_config_with_custom(config, env, router, budget, log, &[])
+}
+
+/// Translate host config and named custom-harness presets into start-up options.
+///
+/// Presets attach by `hostId`; a preset for another fleet machine is not
+/// advertised or executable on this device. Its base CLI is added to an
+/// explicit provider allowlist because declaring a custom harness is itself an
+/// explicit request to run that CLI.
+pub(crate) fn options_from_config_with_custom(
+    config: &HostSection,
+    env: &HashMap<String, String>,
+    router: Option<medulla::config::RouterConfig>,
+    budget: Option<medulla::config::BudgetConfig>,
+    log: Option<medulla::hub::HubLog>,
+    custom_harnesses: &[medulla::config::CustomHarnessConfig],
+) -> Result<EmbeddedDaemonOptions, String> {
+    let address = host_address(config);
+    let mut providers = config
         .providers
         .iter()
         .map(|name| parse_provider(name))
         .collect::<Result<Vec<_>, _>>()?;
+    let custom_harnesses: Vec<_> = custom_harnesses
+        .iter()
+        .filter(|harness| harness.host_id == address)
+        .cloned()
+        .collect();
+    for provider in custom_harnesses.iter().map(|harness| harness.base_harness) {
+        if !providers.contains(&provider) {
+            providers.push(provider);
+        }
+    }
+    let custom_default = custom_harnesses
+        .iter()
+        .find(|harness| harness.default)
+        .map(|harness| harness.base_harness);
     let default_provider = match config.default_provider.trim() {
-        "" => None,
+        "" => custom_default,
         name => Some(parse_provider(name)?),
     };
     Ok(EmbeddedDaemonOptions {
@@ -103,6 +136,7 @@ pub(crate) fn options_from_config(
         skip_permissions: config.skip_permissions,
         env: env.clone(),
         router,
+        custom_harnesses,
         budget,
         log,
         ..Default::default()

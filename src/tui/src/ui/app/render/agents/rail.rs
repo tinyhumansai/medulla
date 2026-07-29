@@ -14,6 +14,7 @@ use ratatui::Frame;
 
 use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
 use crate::ui::util::fmt_tokens;
+use crate::worker::pty::{HarnessControl, SessionRow};
 
 use super::super::super::rail::RailRow;
 use super::super::super::types::App;
@@ -131,8 +132,7 @@ impl App {
         f.render_widget(Paragraph::new(Text::from(view)), inner);
     }
 
-    /// Format one rail row. Every row is a lane row; the wrapper survives so
-    /// the rail can carry a second group again without reshaping its callers.
+    /// Format one rail row: a lane row, or one of the operator's own harnesses.
     pub(super) fn rail_row_line(
         &self,
         row: &RailRow,
@@ -141,7 +141,40 @@ impl App {
     ) -> TLine<'static> {
         match row {
             RailRow::Agent(row) => self.agent_row_line(row, lanes, active),
+            RailRow::HarnessSeparator => TLine::from(Span::styled(
+                "── your harnesses ──",
+                Style::default().add_modifier(Modifier::DIM),
+            )),
+            RailRow::Harness(row) => self.own_harness_line(row, active),
         }
+    }
+
+    /// Format one operator-started harness row.
+    ///
+    /// Says who holds it in words rather than only by colour: "unmanaged" is the
+    /// whole reason the row exists, and an operator who hands one to the
+    /// orchestrator needs to see that it took effect.
+    fn own_harness_line(&self, row: &SessionRow, active: bool) -> TLine<'static> {
+        let control = match row.control {
+            HarnessControl::User => " · unmanaged",
+            HarnessControl::Orchestrator => " · orchestrator",
+        };
+        // The directory is what distinguishes two harnesses of the same
+        // provider, which is the common case once more than one is open.
+        let where_ = short_path(&row.cwd);
+        let text = format!(
+            "   {} {} · {where_}{control}",
+            row.state.glyph(),
+            row.provider.as_str(),
+        );
+        let style = if active {
+            self.theme.selection()
+        } else if row.control == HarnessControl::User {
+            Style::default().fg(color("cyan"))
+        } else {
+            Style::default()
+        };
+        TLine::from(Span::styled(text, style))
     }
 
     /// Format one Agents-list row (separator, "more", sub-task, or lane).
@@ -311,5 +344,19 @@ impl App {
         } else {
             String::new()
         }
+    }
+}
+
+/// The tail of a path, for a rail row that has one column to spare.
+///
+/// A harness's working directory is usually a long absolute path whose last two
+/// segments are the only part that distinguishes it from the next one. Showing
+/// the head instead would give every row the same prefix and no information.
+fn short_path(path: &str) -> String {
+    let parts: Vec<&str> = path.trim_end_matches('/').rsplit('/').take(2).collect();
+    match parts.len() {
+        0 => "/".to_string(),
+        1 => parts[0].to_string(),
+        _ => format!("{}/{}", parts[1], parts[0]),
     }
 }

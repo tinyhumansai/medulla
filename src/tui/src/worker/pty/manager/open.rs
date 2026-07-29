@@ -112,7 +112,14 @@ impl PtyManager {
                 // Opened because a turn is about to run in it. Claimed here so a
                 // concurrent task cannot take it in the gap before that turn
                 // starts.
-                busy: true,
+                //
+                // Not so for an operator-spawned session: nothing is about to
+                // run in it, it is sitting at a prompt waiting to be typed in.
+                // Leaving it claimed would make the rail read "busy" for a
+                // harness that is plainly idle.
+                busy: !spec.user_spawned,
+                control: spec.control,
+                user_spawned: spec.user_spawned,
             },
             screen: screen.clone(),
             master: pty.master,

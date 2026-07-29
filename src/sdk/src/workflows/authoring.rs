@@ -36,6 +36,10 @@ pub fn apply_workflow_ops(
         WorkflowError::Engine(format!("workflow '{id}': {err}"))
     })?;
     validate_graph(id, &record.graph)?;
+    // The engine's validation answers "would this compile". The gates answer
+    // "would this do anything" — a binding that resolves null at run time
+    // compiles fine and quietly does nothing.
+    crate::workflows::gates::check(id, &record.graph)?;
     store.save(&record)?;
     Ok(record)
 }
@@ -53,11 +57,18 @@ pub fn preview_workflow_ops(
     let graph = apply_ops(&record.graph, ops)
         .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
     validate_graph(id, &graph)?;
+    crate::workflows::gates::check(id, &graph)?;
     Ok(graph)
 }
 
 /// Create a workflow from a whole graph document, replacing any existing one of
 /// the same id.
+///
+/// Parses, then validates, then saves — the same order [`apply_workflow_ops`]
+/// uses, and for the same reason. A document that parses is not necessarily a
+/// graph the engine would compile, and a create path that skipped validation
+/// would be the one way to get an unrunnable workflow into a store whose
+/// listings are otherwise trustworthy.
 pub fn create_workflow(
     store: &Arc<dyn WorkflowStore>,
     document: &str,
@@ -65,6 +76,8 @@ pub fn create_workflow(
 ) -> Result<WorkflowRecord, WorkflowError> {
     let record = crate::workflows::store::parse_workflow(document, id_fallback)
         .map_err(WorkflowError::Malformed)?;
+    validate_graph(&record.id, &record.graph)?;
+    crate::workflows::gates::check(&record.id, &record.graph)?;
     store.save(&record)?;
     Ok(record)
 }
@@ -104,6 +117,7 @@ pub fn validate_handle(
 ) -> Result<WorkflowRecord, WorkflowError> {
     let record = handle.resolve(store)?;
     validate_graph(&record.id, &record.graph)?;
+    crate::workflows::gates::check(&record.id, &record.graph)?;
     Ok(record)
 }
 

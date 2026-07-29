@@ -90,8 +90,10 @@ async fn a_task_round_trips_from_the_orchestrator_to_this_device_and_back() {
                 instruction: "summarize the repo".to_string(),
                 worker_address: HOST.to_string(),
                 provider: None,
+                custom_harness: None,
                 model: None,
                 workflow: None,
+                conversation: None,
             },
             None,
         )
@@ -154,8 +156,10 @@ async fn concurrent_tasks_are_correlated_back_to_the_right_caller() {
                             instruction: format!("instruction {index}"),
                             worker_address: HOST.to_string(),
                             provider: None,
+                            custom_harness: None,
                             model: None,
                             workflow: None,
+                            conversation: None,
                         },
                         None,
                     )

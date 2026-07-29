@@ -258,12 +258,34 @@ impl App {
     /// Re-read both halves of a harness on demand: the credentials it spends
     /// (detected locally) and the declarations it appears in (from the runtime).
     fn harnesses_key(&mut self, code: KeyCode) -> RoutingKey {
-        if code == KeyCode::Char('r') {
-            self.refresh_credential_status_if_needed();
-            self.set_status("Harnesses refreshed");
-            RoutingKey::Handled(Some(Cmd::RefreshFleet))
-        } else {
-            RoutingKey::Unhandled
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_custom_harness_selection(true);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_custom_harness_selection(false);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('a') => {
+                self.open_add_custom_harness();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('e') => {
+                self.open_edit_custom_harness();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('d') => {
+                self.delete_selected_custom_harness();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('r') => {
+                self.reload_custom_harnesses();
+                self.refresh_credential_status_if_needed();
+                self.set_status("Harnesses refreshed");
+                RoutingKey::Handled(Some(Cmd::RefreshFleet))
+            }
+            _ => RoutingKey::Unhandled,
         }
     }
 

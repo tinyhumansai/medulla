@@ -43,6 +43,9 @@ pub(super) enum AppMsg {
         changes: Vec<String>,
         /// The workflow the turn created, for a create turn that made one.
         created: Option<String>,
+        /// Whether the workflow the turn was scoped to no longer exists, so its
+        /// conversation can be closed down with it.
+        removed: bool,
     },
     /// A copilot turn failed.
     #[cfg(feature = "workflows")]
@@ -52,6 +55,13 @@ pub(super) enum AppMsg {
         /// Why it failed.
         error: String,
     },
+    /// The workflow store was written to by something other than a copilot turn,
+    /// so the catalogue on screen is stale.
+    ///
+    /// Carries no payload: what changed is whatever the store now holds, and a
+    /// re-read is both cheaper and more honest than describing the edit twice.
+    #[cfg(feature = "workflows")]
+    WorkflowsChanged,
 }
 
 /// Why the event loop stopped.

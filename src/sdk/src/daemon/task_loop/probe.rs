@@ -1,6 +1,6 @@
 //! Answering a peer's capability probe from the cached snapshot.
 
-use crate::tinyplace::{AgentCapabilities, TaskFrame, TaskFrameKind};
+use crate::tinyplace::{AgentCapabilities, CustomHarnessAdvert, TaskFrame, TaskFrameKind};
 
 use super::super::capabilities::{probe_capabilities, ProbeOptions};
 use super::super::providers::Abort;
@@ -18,6 +18,23 @@ impl DaemonRuntime {
         {
             capabilities.workflows = self.installed_workflows();
         }
+        capabilities.custom_harnesses = self
+            .inner
+            .config
+            .custom_harnesses
+            .iter()
+            .filter(|harness| {
+                harness.key_present(&self.inner.config.env)
+                    && self.inner.config.providers.contains(&harness.base_harness)
+            })
+            .map(|harness| CustomHarnessAdvert {
+                id: harness.id.clone(),
+                name: harness.name.clone(),
+                base_harness: harness.base_harness,
+                model: harness.model.clone(),
+                default: harness.default,
+            })
+            .collect();
         let text = serde_json::to_string(&capabilities).unwrap_or_else(|_| "{}".to_string());
         self.reply(
             &from,

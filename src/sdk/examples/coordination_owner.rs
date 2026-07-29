@@ -227,8 +227,10 @@ async fn run() -> Result<(), String> {
         correlation_id: Some(format!("{}-corr", args.task_id)),
         harness: None,
         provider: args.provider,
+        custom_harness: None,
         model: args.model.clone(),
         workflow: None,
+        conversation: None,
     });
     transport
         .send(&to, &frame)

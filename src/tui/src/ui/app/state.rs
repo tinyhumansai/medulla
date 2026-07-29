@@ -16,7 +16,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
-    App, Cmd, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT, SP_USAGE, TABS,
+    App, Cmd, HandbackPolicy, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT,
+    SP_USAGE, TABS,
 };
 
 impl App {
@@ -45,6 +46,9 @@ impl App {
                     .position(|option| option.strategy == strategy)
             })
             .unwrap_or(0);
+        // Read before `loaded` is moved into the struct below.
+        let handback_policy = HandbackPolicy::from_config(&loaded.config.harness.handback);
+        let harness_skip_permissions = loaded.config.harness.skip_permissions;
         App {
             runtime,
             loaded,
@@ -67,6 +71,8 @@ impl App {
             host_index: 0,
             workspace_index: 0,
             template_index: 0,
+            custom_harnesses: Vec::new(),
+            custom_harness_index: 0,
             template_scroll: 0,
             template_modal: false,
             #[cfg(feature = "workflows")]
@@ -126,6 +132,12 @@ impl App {
             harnesses: None,
             harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
             harness_pane_session: None,
+            harness_picker: None,
+            handback_prompt: None,
+            help_scroll: 0,
+            handback_policy,
+            harness_took_control: false,
+            harness_skip_permissions,
             copy_capture: None,
         }
     }
@@ -139,6 +151,7 @@ impl App {
     /// so feature tests avoid the real home.
     pub fn set_config_path(&mut self, path: std::path::PathBuf) {
         self.config_path = Some(path);
+        self.reload_custom_harnesses();
     }
 
     /// Record who the core is signed in as, for the Account subpage.
@@ -299,6 +312,15 @@ impl App {
     /// The live harness sessions this device is running, if it hosts.
     pub fn local_harnesses(&self) -> Option<&crate::ui::harness_pane::LocalHarnesses> {
         self.harnesses.as_ref()
+    }
+
+    /// The harness session the last draw resolved for the rail cursor.
+    ///
+    /// Inspection seam: it is set during render, so a test that wants to act on
+    /// "the selected harness" has to be able to see when the cursor has reached
+    /// one rather than counting rows it does not control.
+    pub fn harness_pane_session_for_test(&self) -> Option<&str> {
+        self.harness_pane_session.as_deref()
     }
 
     /// The harness session currently receiving the operator's keystrokes.

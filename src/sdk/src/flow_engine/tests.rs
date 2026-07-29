@@ -4,6 +4,10 @@
 //! real graph through the real engine into the real agent adapter, and asserts
 //! on the task frame that came out the other side — that is the claim "a
 //! workflow step is a harness session" reduced to something checkable.
+//!
+//! The `medulla:shell` tool's own cases live in the sibling `shell_tests`
+//! module, split out once they pushed this file over the 500-line ceiling.
+//! `settings` below is `pub(super)` so that module can reuse it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -85,7 +89,7 @@ fn empty_resolver(root: &std::path::Path) -> Arc<StoreWorkflowResolver> {
     )))
 }
 
-fn settings(root: &std::path::Path) -> Arc<CapabilitySettings> {
+pub(super) fn settings(root: &std::path::Path) -> Arc<CapabilitySettings> {
     let mut settings = CapabilitySettings::rooted_at(root);
     settings.default_worker_address = "local-worker".into();
     Arc::new(settings)

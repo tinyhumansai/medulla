@@ -1,6 +1,5 @@
 //! Executing one delegated task: slots, status forwarding, fallback.
 
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
@@ -11,13 +10,57 @@ use crate::tinyplace::{TaskFrame, TaskFrameKind};
 use super::super::mappers;
 use super::super::providers::{Abort, RunTaskOptions};
 use super::super::status::{status_detail, work_detail};
-use super::super::types::{DaemonRuntime, FrameAttachments, RunningTask};
+use super::super::types::{
+    DaemonRuntime, FrameAttachments, RunningTask, CAPACITY_REJECTION_PREFIX,
+};
+
+/// What a task waiting for a harness slot reports while it waits.
+const QUEUED_STATUS: &str = "queued for a harness slot";
+
+/// What a running task reports through a stretch with no harness events —
+/// a single long tool call, typically.
+const HEARTBEAT_STATUS: &str = "still working";
 
 impl DaemonRuntime {
     /// Admit, execute, and reply to a `task` frame, forwarding throttled status.
     pub(super) async fn handle_task(&self, from: String, frame: TaskFrame) {
         let correlation = frame.correlation_id.clone();
-        let provider = match self.select_provider(frame.provider) {
+        let custom_harness = match frame.custom_harness.as_deref() {
+            Some(id) => match self
+                .inner
+                .config
+                .custom_harnesses
+                .iter()
+                .find(|harness| harness.id == id)
+            {
+                Some(harness) => Some(harness.clone()),
+                None => {
+                    self.reply(
+                        &from,
+                        TaskFrameKind::Error,
+                        &frame.task_id,
+                        &format!("custom harness \"{id}\" is not configured on this host"),
+                        correlation.as_deref(),
+                        None,
+                    )
+                    .await;
+                    return;
+                }
+            },
+            None if frame.provider.is_none() => self
+                .inner
+                .config
+                .custom_harnesses
+                .iter()
+                .find(|harness| harness.default && harness.key_present(&self.inner.config.env))
+                .cloned(),
+            None => None,
+        };
+        let requested_provider = custom_harness
+            .as_ref()
+            .map(|harness| harness.base_harness)
+            .or(frame.provider);
+        let provider = match self.select_provider(requested_provider) {
             Some(provider) => provider,
             None => {
                 let offered = self
@@ -33,8 +76,7 @@ impl DaemonRuntime {
                 } else {
                     offered
                 };
-                let requested = frame
-                    .provider
+                let requested = requested_provider
                     .map(|p| format!(" for requested \"{}\"", p.as_str()))
                     .unwrap_or_default();
                 self.reply(
@@ -50,13 +92,16 @@ impl DaemonRuntime {
             }
         };
 
-        if self.inner.admitted.load(Ordering::SeqCst) >= self.inner.config.max_pending {
+        // Admission is RAII: the guard releases the slot on every exit from this
+        // function, including an unwind, and carries the `running` record and
+        // controller registration with it.
+        let Some(mut admission) = self.admit() else {
             self.reply(
                 &from,
                 TaskFrameKind::Error,
                 &frame.task_id,
                 &format!(
-                    "daemon at capacity ({} pending tasks); retry later",
+                    "{CAPACITY_REJECTION_PREFIX} ({} pending tasks); retry later",
                     self.inner.config.max_pending
                 ),
                 correlation.as_deref(),
@@ -64,7 +109,7 @@ impl DaemonRuntime {
             )
             .await;
             return;
-        }
+        };
 
         let key = Self::task_key(&from, &frame.task_id);
         // An active duplicate (same sender + taskId) must not clobber the record.
@@ -93,8 +138,8 @@ impl DaemonRuntime {
                 session_id: None,
             },
         );
-        self.inner.admitted.fetch_add(1, Ordering::SeqCst);
-        let controller_id = self.register_controller(abort.clone());
+        admission.attach_task(key.clone());
+        admission.attach_controller(self.register_controller(abort.clone()));
 
         self.reply(
             &from,
@@ -109,12 +154,54 @@ impl DaemonRuntime {
         self.log(&format!("task {} → {}", frame.task_id, provider.as_str()));
 
         // Slot-limited execution (FIFO via the semaphore).
-        let permit = self
-            .inner
-            .slots
-            .acquire()
-            .await
-            .expect("semaphore is never closed");
+        //
+        // The wait is neither silent nor uninterruptible. Silent, it looks
+        // exactly like a crashed worker to the requester's no-progress
+        // watchdog: the ack satisfies the first-sign-of-life window and then
+        // nothing is sent until a slot frees, which with `max_pending` at 16 and
+        // `concurrency` at 2 is routinely longer than the watchdog allows. And
+        // an abort that arrives while queued has to be honoured here, or the
+        // task acquires its slot later and runs work nobody is waiting for.
+        let heartbeat = self.heartbeat_interval();
+        let permit = {
+            let mut ticks = tokio::time::interval(heartbeat);
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            ticks.tick().await; // the first tick completes immediately
+            loop {
+                tokio::select! {
+                    biased;
+                    // `Semaphore::acquire` is cancel-safe: losing this branch to
+                    // another arm never consumes a permit.
+                    permit = self.inner.slots.acquire() => {
+                        break permit.expect("semaphore is never closed");
+                    }
+                    _ = abort.cancelled() => {
+                        self.reply(
+                            &from,
+                            TaskFrameKind::Error,
+                            &frame.task_id,
+                            "task aborted while queued for a harness slot",
+                            correlation.as_deref(),
+                            Some(provider),
+                        )
+                        .await;
+                        self.log(&format!("task {} ⨯ aborted while queued", frame.task_id));
+                        return;
+                    }
+                    _ = ticks.tick() => {
+                        self.reply(
+                            &from,
+                            TaskFrameKind::Status,
+                            &frame.task_id,
+                            QUEUED_STATUS,
+                            correlation.as_deref(),
+                            Some(provider),
+                        )
+                        .await;
+                    }
+                }
+            }
+        };
 
         // What the harness is working on, folded from its own stream. Shared
         // with the reply below so the terminal frame carries the final picture
@@ -178,15 +265,69 @@ impl DaemonRuntime {
             }) as Box<dyn FnOnce(mpsc::UnboundedSender<String>) + Send>
         };
 
+        // The conversation this task belongs to, if it named one. Scoped to the
+        // *authenticated* sender rather than taken bare from the frame: the
+        // frame body cannot be trusted to name its own author, so without this
+        // one peer could name another's conversation and resume into a session
+        // holding someone else's context.
+        let session_key = frame.conversation.as_deref().map(|conversation| {
+            crate::sessions::SessionKey::new(format!("{from}/{conversation}"), provider)
+        });
+        // Held for the rest of this turn, past the `plan()` below and through
+        // `run_task` — including the `on_session` callback that records the
+        // binding once the harness opens one. Without it, two frames naming
+        // the same conversation could both `plan()` before either recorded a
+        // session: the first pair would each open their own session and race
+        // to bind it (whichever `on_session` fires last silently wins, and the
+        // other harness session is orphaned); a later pair could both resume
+        // the *same* now-bound session concurrently, interleaving two turns on
+        // one harness. `acquire_turn` is a no-op (`None`) for anything but
+        // `Unbound`, so a task frame with no named conversation never
+        // serializes against unrelated work.
+        let turn_guard = match &session_key {
+            Some(key) => {
+                self.inner
+                    .sessions
+                    .acquire_turn(key, crate::sessions::SessionClass::Unbound)
+                    .await
+            }
+            None => None,
+        };
+        // An `Unbound` class because these turns are a conversation, not
+        // discrete work — that is the whole of what the sender opted into. The
+        // registry still declines to resume a provider that cannot
+        // (`opencode`), which costs continuity but never correctness.
+        let plan = session_key.as_ref().map(|key| {
+            self.inner
+                .sessions
+                .plan(key, crate::sessions::SessionClass::Unbound)
+        });
+        let resume_session_id = plan
+            .as_ref()
+            .and_then(|plan| plan.resume_session_id.clone());
+
         // Reported as soon as the executor opens a session, not with the
         // result: the point of knowing it is to watch the task while it runs.
         let on_session = {
             let this = self.clone();
             let key = key.clone();
+            let session_key = session_key.clone();
             Box::new(move |session_id: String| {
+                // Bind before the turn finishes. A turn that opens a session and
+                // then times out has still moved the conversation on, and the
+                // next instruction has to resume *that* session rather than
+                // starting a third one the operator never sees.
+                if let Some(session_key) = &session_key {
+                    this.inner.sessions.record(session_key, session_id.clone());
+                }
                 this.record_task_session(&key, session_id);
             }) as Box<dyn FnOnce(String) + Send>
         };
+
+        let mut run_env = self.inner.config.env.clone();
+        if let Some(harness) = &custom_harness {
+            run_env.extend(harness.harness_env());
+        }
 
         let options = RunTaskOptions {
             // The *authenticated* sender, never anything from the frame body: a
@@ -195,38 +336,76 @@ impl DaemonRuntime {
             // context with the sender's other work.
             conversation: from.clone(),
             // A task frame is discrete work, so it gets its own session and can
-            // see nothing of the sender's other tasks.
+            // see nothing of the sender's other tasks — `Bounded` even when the
+            // frame names a conversation, because this field only chooses
+            // between "a fresh session" and "whichever of the sender's sessions
+            // is idle", and the latter cannot tell two of that sender's
+            // conversations apart. Continuity, when a sender asks for it,
+            // arrives through `resume_session_id` below, which names one
+            // specific prior session scoped to `{sender}/{conversation}`.
             session_class: crate::sessions::SessionClass::Bounded,
-            resume_session_id: None,
+            resume_session_id,
             provider,
             prompt: frame.text.clone(),
             cwd: self.inner.config.workspace.clone(),
-            env: self.inner.config.env.clone(),
+            env: run_env,
             timeout_ms: self.inner.config.task_timeout_ms,
             // Per-task model hint (parallels the per-task `provider`): honor the
             // orchestrator's requested model, falling back to the daemon default.
             model: frame
                 .model
                 .clone()
+                .or_else(|| custom_harness.as_ref().map(|harness| harness.model.clone()))
                 .or_else(|| self.inner.config.model.clone()),
             agent: self.inner.config.agent.clone(),
             extra_args: self.inner.config.extra_args.clone(),
             skip_permissions: self.inner.config.skip_permissions,
             abort: abort.clone(),
-            router: self.inner.config.router.clone(),
+            router: custom_harness
+                .as_ref()
+                .map(crate::config::CustomHarnessConfig::router)
+                .or_else(|| self.inner.config.router.clone()),
             on_event: Some(on_event),
             on_stdin: Some(on_stdin),
             on_session: Some(on_session),
         };
 
-        // Consume status details in order while the task runs.
+        // Consume status details in order while the task runs, and heartbeat
+        // through silence.
+        //
+        // `on_event` only speaks when the harness does. One long tool call — a
+        // repository-wide search, a slow test run — emits no semantic event at
+        // all, and minutes of that is indistinguishable from a dead worker to
+        // the requester's no-progress watchdog. The throttle above is a rate
+        // *cap* on event-driven frames and never produces one of its own, so the
+        // floor has to live here: every heartbeat period without a frame, send
+        // the current work snapshot unchanged.
         let status_consumer = {
             let this = self.clone();
             let from = from.clone();
             let task_id = frame.task_id.clone();
             let correlation = correlation.clone();
+            let work = work.clone();
             tokio::spawn(async move {
-                while let Some((detail, snapshot)) = status_rx.recv().await {
+                let mut ticks = tokio::time::interval(heartbeat);
+                ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                ticks.tick().await; // the first tick completes immediately
+                loop {
+                    let (detail, snapshot) = tokio::select! {
+                        biased;
+                        received = status_rx.recv() => match received {
+                            Some((detail, snapshot)) => {
+                                // A real update restarts the silence clock.
+                                ticks.reset();
+                                (detail, snapshot)
+                            }
+                            None => break,
+                        },
+                        _ = ticks.tick() => (
+                            HEARTBEAT_STATUS.to_string(),
+                            work.lock().ok().map(|fold| fold.snapshot().clone()),
+                        ),
+                    };
                     this.reply_with(
                         &from,
                         TaskFrameKind::Status,
@@ -245,6 +424,10 @@ impl DaemonRuntime {
         };
 
         let result = (self.inner.run_task)(options).await;
+        // Released only now: the guard must outlive the `on_session` callback
+        // above, which is the thing recording the binding the next queued turn
+        // will plan against.
+        drop(turn_guard);
         // The task future is dropped here, dropping its on_event (and its status
         // sender); the consumer then drains and ends.
         let _ = status_consumer.await;
@@ -296,9 +479,11 @@ impl DaemonRuntime {
         }
 
         drop(permit);
-        self.inner.running.lock().unwrap().remove(&key);
-        self.unregister_controller(controller_id);
-        self.inner.admitted.fetch_sub(1, Ordering::SeqCst);
+        // Released only now, after the terminal frame is on the wire: the guard
+        // frees the task id as well as the admission slot, and a peer's
+        // immediate follow-up task reusing that id must not be admitted before
+        // its predecessor's reply lands.
+        drop(admission);
     }
 
     /// Run a plain-text DM through the default provider, replying with raw text.
@@ -309,7 +494,9 @@ impl DaemonRuntime {
                 .await;
             return;
         }
-        if self.inner.admitted.load(Ordering::SeqCst) >= self.inner.config.max_pending {
+        let Some(mut admission) = self.admit() else {
+            // Prose for a human reading a DM, not the machine-readable rejection
+            // the frame path sends: nothing parses this one.
             self.send_raw(
                 &from,
                 &format!(
@@ -319,10 +506,9 @@ impl DaemonRuntime {
             )
             .await;
             return;
-        }
+        };
         let abort = Abort::new();
-        let controller_id = self.register_controller(abort.clone());
-        self.inner.admitted.fetch_add(1, Ordering::SeqCst);
+        admission.attach_controller(self.register_controller(abort.clone()));
 
         let permit = self
             .inner
@@ -362,7 +548,6 @@ impl DaemonRuntime {
             }
         }
         drop(permit);
-        self.unregister_controller(controller_id);
-        self.inner.admitted.fetch_sub(1, Ordering::SeqCst);
+        drop(admission);
     }
 }

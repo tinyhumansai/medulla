@@ -95,6 +95,30 @@ tokenEnv = "MEDULLA_TOKEN"
 # skipPermissions = true
 
 # ---------------------------------------------------------------------------
+# customHarnesses — OpenRouter models through Claude Code or Codex
+# ---------------------------------------------------------------------------
+# When OPENROUTER_API_KEY is present, Routing › Harnesses can add and edit these
+# presets. The coding CLI remains the agent harness while OpenRouter supplies
+# the model. This makes, for example, DeepSeek through Claude Code available as
+# named capacity on one fleet host.
+#
+# apiKeyEnv stores only the environment-variable name; never put the key value
+# in this file. Claude presets map the main model onto Opus and fastModel onto
+# the Sonnet/Haiku tiers so sub-agents keep using OpenRouter. Codex receives the
+# model through its normal -m argument.
+# [[customHarnesses]]
+# id = "deepseek"
+# name = "DeepSeek via Claude"
+# baseHarness = "claude"              # claude | codex
+# model = "deepseek/deepseek-chat"
+# fastModel = "deepseek/deepseek-chat"
+# hostId = "this-device"               # must match [host].address
+# default = false
+# apiKeyEnv = "OPENROUTER_API_KEY"
+# baseUrl = "https://openrouter.ai/api" # optional; defaults per base harness
+# contextWindow = 114000                # optional; Claude auto-compaction window
+
+# ---------------------------------------------------------------------------
 # core — the medulla-serve NDJSON orchestration socket (optional)
 # ---------------------------------------------------------------------------
 # [core]

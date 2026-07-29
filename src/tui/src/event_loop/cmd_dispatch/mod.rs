@@ -13,7 +13,40 @@ use medulla_tui::ui::app::Cmd;
 use super::AppMsg;
 
 #[cfg(feature = "workflows")]
+mod copilot_hosts;
+#[cfg(feature = "workflows")]
 mod workflows;
+
+/// Move a copilot conversation onto the id of the workflow it just created.
+///
+/// Exposed here rather than reached into directly so the event loop has one
+/// door into the host cache, matching how it reaches every other spawned
+/// concern in this module.
+#[cfg(feature = "workflows")]
+pub(super) fn adopt_copilot_host(thread: &str, created: &str) {
+    copilot_hosts::rename(thread, created);
+}
+
+/// End a copilot conversation whose workflow no longer exists.
+#[cfg(feature = "workflows")]
+pub(super) fn close_copilot_host(thread: &str) {
+    copilot_hosts::forget(thread);
+}
+
+/// Drop every cached copilot host and stop its daemon.
+///
+/// The cache is process-global and keyed by workflow id, not by account — see
+/// [`copilot_hosts::clear_all`] for why that makes a relogin the one place
+/// this must be called.
+#[cfg(feature = "workflows")]
+pub(crate) fn clear_copilot_hosts() {
+    copilot_hosts::clear_all();
+}
+
+/// No-op build without the `workflows` feature: there is no host cache to
+/// clear, but the relogin call site is unconditional.
+#[cfg(not(feature = "workflows"))]
+pub(crate) fn clear_copilot_hosts() {}
 
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so
@@ -138,6 +171,32 @@ pub(super) fn run_cmd(
         Cmd::RunWorkflow { id } => workflows::spawn_run(id, _workflows_config.clone(), msg_tx),
         #[cfg(feature = "workflows")]
         Cmd::DryRunWorkflow { id } => workflows::spawn_dry_run(id, msg_tx),
+        #[cfg(feature = "workflows")]
+        Cmd::UndoWorkflow { id } => workflows::spawn_undo(id, msg_tx),
+        #[cfg(feature = "workflows")]
+        Cmd::AbortCopilot { thread } => {
+            // Inline: signalling an abort is a lock and a notify, and spawning
+            // a task to do it would only delay the one thing the operator is
+            // waiting for.
+            let status = if copilot_hosts::abort(&thread) {
+                "Stopping the copilot…"
+            } else {
+                "Nothing is running on this thread"
+            };
+            let _ = msg_tx.send(AppMsg::Status(status.to_string()));
+        }
+        #[cfg(feature = "workflows")]
+        Cmd::RepairWorkflow {
+            workflow,
+            instruction,
+            run_id,
+        } => workflows::spawn_repair(
+            workflow,
+            instruction,
+            run_id,
+            _workflows_config.clone(),
+            msg_tx,
+        ),
         #[cfg(feature = "workflows")]
         Cmd::CopilotTurn {
             workflow,

@@ -275,6 +275,16 @@ pub struct TaskFrame {
     /// Inbound-only hint naming the agent the orchestrator wants to run this task.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only named custom harness preset to run on the selected host.
+    ///
+    /// Additive to `provider`: older peers ignore it, while a current worker
+    /// resolves it to its configured base CLI, model, and OpenRouter route.
+    #[serde(
+        rename = "customHarness",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub custom_harness: Option<Box<str>>,
     /// Inbound-only advisory hint naming the model the orchestrator wants this
     /// task run on (parallels `provider`). The worker daemon may honor it as the
     /// harness `--model`/`-m` or fall back to its configured model; never echoed
@@ -293,6 +303,28 @@ pub struct TaskFrame {
     /// id it could not find.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub workflow: Option<String>,
+    /// Inbound-only: the continuity group this task belongs to, when the sender
+    /// wants successive tasks to share one harness session.
+    ///
+    /// Absent by default, and that default is load-bearing. A task frame is
+    /// discrete work, so two tasks must never see each other's context — which
+    /// is why [`route_session_class`] routes a task
+    /// [`Bounded`](crate::sessions::SessionClass::Bounded) and the worker
+    /// resumes nothing. Naming a conversation is how a sender says *these* tasks
+    /// are one conversation and should remember each other.
+    ///
+    /// The workflow copilot is what this exists for: its pane is a chat, so the
+    /// second instruction has to know what the first one did. A workflow's
+    /// `agent` nodes deliberately do *not* set it — each node is its own unit of
+    /// work, and sharing context between them would make a graph's behaviour
+    /// depend on the order its branches happened to run in.
+    ///
+    /// The value is scoped to the authenticated sender by the worker, so one
+    /// peer cannot name another's conversation and read its context.
+    ///
+    /// [`route_session_class`]: crate::sessions::route_session_class
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub conversation: Option<String>,
     /// Reported on `reply` frames when the child harness surfaced token counts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TokenUsage>,
@@ -336,12 +368,18 @@ pub struct EncodeFrameInput {
     pub harness: Option<HarnessProvider>,
     /// Inbound-only hint naming the agent the orchestrator wants to run this task.
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only named custom harness preset.
+    pub custom_harness: Option<String>,
     /// Inbound-only advisory model hint (parallels `provider`); `None` on the
     /// responses a worker daemon emits.
     pub model: Option<String>,
     /// Inbound-only: the installed workflow to run instead of treating `text` as
     /// an instruction. `None` on every response and on ordinary tasks.
     pub workflow: Option<String>,
+    /// Inbound-only: the continuity group successive tasks share a session
+    /// through. `None` on every response and on ordinary tasks, which stay
+    /// context-free by design — see [`TaskFrame::conversation`].
+    pub conversation: Option<String>,
 }
 
 /// What an agent reports it can do, merged with facts its host establishes.
@@ -369,6 +407,16 @@ pub struct AgentCapabilities {
     /// Harness providers the agent can run.
     #[serde(default, deserialize_with = "de_providers")]
     pub providers: Vec<HarnessProvider>,
+    /// Named OpenRouter-backed harness presets this host accepts in task frames.
+    ///
+    /// These descriptors intentionally omit endpoint and credential details.
+    /// They are selection metadata, not execution configuration.
+    #[serde(
+        rename = "customHarnesses",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub custom_harnesses: Vec<CustomHarnessAdvert>,
     /// Tool names the agent exposes.
     #[serde(default, deserialize_with = "de_string_array")]
     pub tools: Vec<String>,
@@ -400,6 +448,23 @@ pub struct AgentCapabilities {
     /// field. Same backward-compatibility contract as the two vectors above.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflows: Vec<WorkflowAdvert>,
+}
+
+/// Fleet-safe description of one named custom harness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomHarnessAdvert {
+    /// Stable id an orchestrator may send as `customHarness`.
+    pub id: String,
+    /// Operator-facing label.
+    pub name: String,
+    /// Coding CLI that executes the task.
+    pub base_harness: HarnessProvider,
+    /// OpenRouter model id.
+    pub model: String,
+    /// Whether this preset handles tasks that name no custom harness.
+    #[serde(default)]
+    pub default: bool,
 }
 
 /// One workflow a worker advertises as runnable.

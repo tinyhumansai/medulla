@@ -1,5 +1,10 @@
 //! Unit tests for workflow directory layering, document parsing, and the
-//! file-backed store's read/write/delete and run-history behaviour.
+//! file-backed store's read/write/delete, run-history, and undo behaviour.
+//!
+//! The mechanics of snapshot files — ordering, the cap, scoping — are tested
+//! next to them in `file/revisions_tests.rs`. What is tested here is the part
+//! that matters to a caller: that saving captures history at all, and that
+//! rolling back lands where the operator expects.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -7,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use super::file::{new_run_record, parse_workflow, validate_graph, workflow_dirs};
-use super::{require, require_run, FileWorkflowStore, WorkflowStore};
+use super::{require, require_run, rollback, undo_last, FileWorkflowStore, WorkflowStore};
 use crate::workflows::types::{RunStatus, WorkflowError, WorkflowRecord};
 
 /// A store rooted in a temporary directory, with definitions and runs kept
@@ -367,4 +372,150 @@ fn a_run_id_that_escapes_is_refused_too() {
 
     assert!(matches!(err, WorkflowError::Malformed(_)), "got {err:?}");
     assert!(!root.path().join("escaped.json").exists());
+}
+
+#[test]
+fn a_workflow_saved_for_the_first_time_has_no_history_to_go_back_to() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+
+    store
+        .save(&parse_workflow(&valid_document("greet"), "greet").unwrap())
+        .unwrap();
+
+    // Nothing was replaced, so nothing was superseded.
+    assert!(store.list_revisions("greet").unwrap().is_empty());
+    assert!(undo_last(&store, "greet").unwrap().is_none());
+}
+
+#[test]
+fn saving_over_a_workflow_snapshots_the_version_it_replaced() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let mut record = parse_workflow(&valid_document("greet"), "greet").unwrap();
+    store.save(&record).unwrap();
+
+    record.description = "rewritten by the copilot".into();
+    store.save(&record).unwrap();
+
+    let history = store.list_revisions("greet").unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].record.description, "says hello");
+}
+
+#[test]
+fn undo_restores_the_previous_version_and_is_itself_undoable() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let mut record = parse_workflow(&valid_document("greet"), "greet").unwrap();
+    store.save(&record).unwrap();
+    record.description = "rewritten by the copilot".into();
+    store.save(&record).unwrap();
+
+    let (revision, restored) = undo_last(&store, "greet").unwrap().expect("history");
+
+    assert_eq!(restored.description, "says hello");
+    assert_eq!(
+        store.get("greet").unwrap().unwrap().description,
+        "says hello"
+    );
+    // The rollback went through `save`, so the version it replaced was
+    // snapshotted too: pressing undo twice returns to where you started.
+    let history = store.list_revisions("greet").unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].record.description, "rewritten by the copilot");
+    assert_ne!(history[0].id, revision.id);
+}
+
+#[test]
+fn rolling_back_to_a_named_revision_restores_exactly_that_one() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let mut record = parse_workflow(&valid_document("greet"), "greet").unwrap();
+    for description in ["first", "second", "third"] {
+        record.description = description.into();
+        store.save(&record).unwrap();
+    }
+
+    // Three saves, but the first replaced nothing — so history holds the two
+    // versions that were superseded, newest first, and the last entry is the
+    // oldest of those.
+    let history = store.list_revisions("greet").unwrap();
+    assert_eq!(history.len(), 2);
+    let oldest = history.last().expect("history");
+    let restored = rollback(&store, "greet", &oldest.id).unwrap();
+
+    assert_eq!(restored.description, "first");
+}
+
+#[test]
+fn rolling_back_to_a_revision_that_does_not_exist_is_an_error() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    store
+        .save(&parse_workflow(&valid_document("greet"), "greet").unwrap())
+        .unwrap();
+
+    let err = rollback(&store, "greet", "no-such-revision").expect_err("must refuse");
+
+    assert!(matches!(err, WorkflowError::Malformed(_)), "got {err:?}");
+}
+
+#[test]
+fn deleting_a_workflow_leaves_it_recoverable() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    store
+        .save(&parse_workflow(&valid_document("greet"), "greet").unwrap())
+        .unwrap();
+
+    store.delete("greet").unwrap();
+
+    // A delete has nothing left to diff against, which is exactly why it is
+    // snapshotted: without this it is the one edit that cannot be taken back.
+    assert!(store.get("greet").unwrap().is_none());
+    let history = store.list_revisions("greet").unwrap();
+    assert_eq!(history.len(), 1);
+    rollback(&store, "greet", &history[0].id).unwrap();
+    assert!(store.get("greet").unwrap().is_some());
+}
+
+#[test]
+fn history_does_not_show_up_in_the_workflow_listing() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let mut record = parse_workflow(&valid_document("greet"), "greet").unwrap();
+    store.save(&record).unwrap();
+    record.description = "again".into();
+    store.save(&record).unwrap();
+
+    // Snapshots sit in a subdirectory of the definition directory; a load that
+    // wandered into it would show every past version as a workflow of its own.
+    assert_eq!(store.list().unwrap().len(), 1);
+    assert!(store.load().errors.is_empty());
+}
+
+#[test]
+fn shadowing_a_home_workflow_with_a_project_one_snapshots_what_it_shadowed() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let project = root.path().join("project");
+    write(&home.join("greet.json"), &valid_document("greet"));
+    let store = FileWorkflowStore::new(vec![home, project], root.path().join("runs"));
+
+    // The first project-level save writes a file that did not exist, so nothing
+    // in the write directory is overwritten — but the operator *does* see the
+    // graph change, because the project copy now shadows the home one.
+    let mut record = require(&store, "greet").unwrap();
+    record.description = "edited in this project".into();
+    store.save(&record).unwrap();
+
+    let history = store.list_revisions("greet").unwrap();
+    assert_eq!(history.len(), 1, "the shadowed version must be recoverable");
+    assert_eq!(history[0].record.description, "says hello");
+    rollback(&store, "greet", &history[0].id).unwrap();
+    assert_eq!(
+        store.get("greet").unwrap().unwrap().description,
+        "says hello"
+    );
 }

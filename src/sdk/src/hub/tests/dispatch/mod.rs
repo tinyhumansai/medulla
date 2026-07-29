@@ -36,6 +36,35 @@ async fn surfaces_a_worker_error_frame() {
 
     let err = runner.run(req("x"), None).await.expect_err("errors");
     assert_eq!(err, RunError::Worker("boom".to_string()));
+    assert!(
+        !crate::hub::socket::is_retryable(&err),
+        "a task the harness attempted and rejected must not be re-dispatched"
+    );
+}
+
+#[tokio::test]
+async fn a_capacity_rejection_is_backpressure_not_a_task_failure() {
+    // A worker at `max_pending` refuses the task without attempting it. That
+    // arrives as an ordinary `error` frame, so it used to settle as
+    // `RunError::Worker` and reach the orchestrator with `retryable: false` — a
+    // message that says "retry later" delivered as a permanent failure. It has
+    // to settle as `Busy` and be retryable instead.
+    let message = format!(
+        "{} (16 pending tasks); retry later",
+        crate::daemon::CAPACITY_REJECTION_PREFIX
+    );
+    let worker = FakeWorker::new(Mode::Error(message.clone()));
+    let runner = TaskRunner::start(worker, Duration::from_millis(5));
+
+    let err = runner.run(req("x"), None).await.expect_err("is shed");
+    assert_eq!(err, RunError::Busy(message.clone()));
+    assert!(
+        crate::hub::socket::is_retryable(&err),
+        "backpressure must be re-dispatched, not failed"
+    );
+    // The worker's own wording survives, so an operator reading the failure
+    // still sees which worker was full and why.
+    assert_eq!(err.to_string(), format!("worker busy: {message}"));
 }
 
 #[tokio::test]

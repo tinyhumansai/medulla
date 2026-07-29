@@ -69,6 +69,12 @@ project. It is routing context, not a permission grant: a delegated task still
 runs in `[host].workspace`. The list persists to `[host].workspaces` and is
 advertised from the next launch.
 
+**Routing › Harnesses** also manages named OpenRouter-backed presets that reuse
+Claude Code or Codex as the coding harness. Presets select an OpenRouter model
+and fleet host while referring to `OPENROUTER_API_KEY` by environment-variable
+name only; restart the local host after saving one. See
+[`config.example.toml`](config.example.toml) for the complete shape.
+
 Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
 ## What It Does

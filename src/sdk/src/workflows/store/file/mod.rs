@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
 
 use crate::home::medulla_home;
 use crate::workflows::types::{
@@ -149,11 +150,20 @@ impl FileWorkflowStore {
         }
     }
 
+    /// A store whose host state is isolated to one workspace.
+    pub fn with_workspace_state(dirs: Vec<PathBuf>, state_dir: &Path, workspace: &Path) -> Self {
+        let identity =
+            std::fs::canonicalize(workspace).unwrap_or_else(|_| absolute_path(workspace));
+        let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
+        let scope = format!("{digest:x}");
+        Self::with_state(dirs, &state_dir.join("scopes").join(&scope[..16]))
+    }
+
     /// A store over the conventional locations for this environment and working
     /// directory.
     pub fn discover(env: &HashMap<String, String>, cwd: &Path) -> Self {
         let state_dir = medulla_home(env).join("state").join("workflows");
-        Self::with_state(workflow_dirs(env, cwd), &state_dir)
+        Self::with_workspace_state(workflow_dirs(env, cwd), &state_dir, cwd)
     }
 
     /// The definition directories, lowest precedence first.
@@ -284,6 +294,16 @@ impl FileWorkflowStore {
         }
         result
     }
+}
+
+/// Make a stable best-effort absolute identity when a path does not yet exist.
+fn absolute_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(path)
 }
 
 impl WorkflowStore for FileWorkflowStore {

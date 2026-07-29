@@ -20,7 +20,7 @@ use super::super::types::{App, Cmd};
 
 /// A workflow whose graph is trigger → check, branching to two agents that both
 /// feed a merge: enough shape to test lanes, edges, and cursor movement.
-fn diamond(id: &str) -> WorkflowRecord {
+pub(super) fn diamond(id: &str) -> WorkflowRecord {
     WorkflowRecord {
         id: id.to_string(),
         name: format!("{id} workflow"),
@@ -53,7 +53,7 @@ fn diamond(id: &str) -> WorkflowRecord {
 }
 
 /// An app pointed at a temporary home holding `workflows`, already loaded.
-fn app_with(workflows: &[WorkflowRecord]) -> (tempfile::TempDir, App) {
+pub(super) fn app_with(workflows: &[WorkflowRecord]) -> (tempfile::TempDir, App) {
     let home = tempfile::tempdir().expect("tempdir");
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
@@ -338,25 +338,6 @@ fn a_failed_turn_keeps_its_instruction_so_it_can_be_retried() {
         panic!("expected a retry, got {retried:?}");
     };
     assert_eq!(instruction, "add a slack step");
-}
-
-#[test]
-fn automatic_review_does_not_clear_or_drain_a_busy_operator_turn() {
-    let (_home, mut app) = app_with(&[diamond("sweep")]);
-    app.wf.draft = crate::ui::composer::insert_at("", 0, "edit it");
-    app.submit_copilot().expect("operator turn");
-    app.copilot_started("sweep", "review the failed run");
-    app.wf.draft = crate::ui::composer::insert_at("", 0, "then document it");
-    assert!(app.submit_copilot().is_none(), "follow-up queues");
-
-    assert!(app
-        .copilot_finished("sweep", "edit done".into(), Vec::new(), None)
-        .is_none());
-    assert!(app.copilot_busy(), "the automatic review is still running");
-    assert!(matches!(
-        app.copilot_finished("sweep", "review done".into(), Vec::new(), None),
-        Some(Cmd::CopilotTurn { .. })
-    ));
 }
 
 #[test]

@@ -14,6 +14,7 @@ use serde_json::json;
 use super::file::{new_run_record, parse_workflow, validate_graph, workflow_dirs};
 use super::{require, require_run, rollback, undo_last, FileWorkflowStore, WorkflowStore};
 use crate::workflows::types::{RunStatus, WorkflowError, WorkflowRecord};
+use crate::workflows::NoteSource;
 
 /// A store rooted in a temporary directory, with definitions and runs kept
 /// apart the way the discovered layout keeps them.
@@ -43,6 +44,36 @@ fn valid_document(id: &str) -> String {
 fn write(path: &Path, body: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, body).unwrap();
+}
+
+#[test]
+fn discovered_stores_isolate_evolution_state_by_workspace() {
+    let root = tempfile::tempdir().unwrap();
+    let env = HashMap::from([(
+        "MEDULLA_HOME".to_string(),
+        root.path().join("home").to_string_lossy().to_string(),
+    )]);
+    let repo_a = root.path().join("repo-a");
+    let repo_b = root.path().join("repo-b");
+    let store_a = std::sync::Arc::new(FileWorkflowStore::discover(&env, &repo_a));
+    let store_b = std::sync::Arc::new(FileWorkflowStore::discover(&env, &repo_b));
+    let record = parse_workflow(&valid_document("deploy"), "deploy").unwrap();
+    store_a.save(&record).unwrap();
+    store_b.save(&record).unwrap();
+
+    crate::workflows::ops::add_note(
+        &(store_a.clone() as std::sync::Arc<dyn WorkflowStore>),
+        "deploy",
+        "observation",
+        "repo A only",
+        Vec::new(),
+        NoteSource::System,
+        Vec::new(),
+    )
+    .unwrap();
+
+    assert_eq!(store_a.list_notes("deploy").unwrap().len(), 1);
+    assert!(store_b.list_notes("deploy").unwrap().is_empty());
 }
 
 #[test]

@@ -22,6 +22,8 @@ mod rail;
 pub(in crate::ui::app) use rail::{WorkflowRailRow, NEW_LABEL};
 
 #[cfg(test)]
+mod copilot_overlap_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;
@@ -48,12 +50,13 @@ impl App {
             // An injected home (tests, and `main` once it has resolved the real
             // one) must win over the env, or a test would read the developer's
             // own workflows.
-            Some(home) => Arc::new(medulla::workflows::FileWorkflowStore::new(
+            Some(home) => Arc::new(medulla::workflows::FileWorkflowStore::with_workspace_state(
                 vec![
                     home.join("workflows"),
                     cwd.join(".medulla").join("workflows"),
                 ],
-                home.join("state").join("workflows").join("runs"),
+                &home.join("state").join("workflows"),
+                &cwd,
             )),
             None => medulla::workflows::discover_store(&env, &cwd),
         }

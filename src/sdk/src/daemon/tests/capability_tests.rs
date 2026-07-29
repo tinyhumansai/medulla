@@ -100,10 +100,14 @@ async fn capabilities_advertise_only_custom_harnesses_with_available_keys() {
     )
     .unwrap();
     unavailable.api_key_env = "MISSING_OPENROUTER_KEY".into();
+    let unavailable_provider = crate::config::CustomHarnessConfig::from_editor_line(
+        "codex | Codex | codex | openrouter/codex | | this-device",
+    )
+    .unwrap();
     config
         .env
         .insert(ready.api_key_env.clone(), "configured".into());
-    config.custom_harnesses = vec![ready, unavailable];
+    config.custom_harnesses = vec![ready, unavailable, unavailable_provider];
     let runtime = DaemonRuntime::new(config, run_task, send);
 
     runtime.handle_message(

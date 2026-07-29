@@ -270,25 +270,52 @@ fn decodes_loop_events() {
     assert!(matches!(pending, LoopEvent::Pending { .. }));
 }
 
+/// The SDK decides reply-vs-loop; this crate re-encodes either arm into its own
+/// [`RunResult`]. Pin that both arms survive the round-trip with their fields.
 #[test]
-fn run_result_distinguishes_reply_and_loop() {
-    let reply = parse_run_result(json!({
-        "reply": "hello",
-        "passCount": 1,
-        "sessionId": "s1",
-        "cycleId": "c1",
-    }))
-    .unwrap();
-    assert!(matches!(reply, RunResult::Reply(_)));
+fn sdk_run_result_converts_into_client_run_result() {
+    use tinyhumans_sdk::api::orchestration as sdk;
 
-    let looped = parse_run_result(json!({
-        "stop": "end",
-        "cycleId": "c1",
-        "sessionId": "s1",
-        "reply": "done",
-    }))
-    .unwrap();
-    assert!(matches!(looped, RunResult::Loop(LoopEvent::End { .. })));
+    let reply: RunResult = match sdk::RunResult::Reply(Box::new(sdk::RunReply {
+        reply: "hello".into(),
+        pass_count: Some(1),
+        compressed_history: Vec::new(),
+        escalations: Vec::new(),
+        session_id: Some("s1".into()),
+        cycle_id: Some("c1".into()),
+    })) {
+        sdk::RunResult::Reply(r) => RunResult::Reply(convert(*r).unwrap()),
+        sdk::RunResult::Loop(e) => RunResult::Loop(convert(*e).unwrap()),
+    };
+    match reply {
+        RunResult::Reply(reply) => {
+            assert_eq!(reply.reply, "hello");
+            assert_eq!(reply.pass_count, Some(1));
+            assert_eq!(reply.cycle_id.as_deref(), Some("c1"));
+        }
+        other => panic!("expected reply, got {other:?}"),
+    }
+
+    let looped: RunResult = match sdk::RunResult::Loop(Box::new(sdk::LoopEvent::End {
+        cycle_id: "c1".into(),
+        session_id: "s1".into(),
+        reply: "done".into(),
+        pass_count: Some(2),
+        compressed_history: Vec::new(),
+        escalations: Vec::new(),
+    })) {
+        sdk::RunResult::Reply(r) => RunResult::Reply(convert(*r).unwrap()),
+        sdk::RunResult::Loop(e) => RunResult::Loop(convert(*e).unwrap()),
+    };
+    match looped {
+        RunResult::Loop(LoopEvent::End {
+            reply, pass_count, ..
+        }) => {
+            assert_eq!(reply, "done");
+            assert_eq!(pass_count, Some(2));
+        }
+        other => panic!("expected loop end, got {other:?}"),
+    }
 }
 
 #[test]

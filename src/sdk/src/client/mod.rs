@@ -9,10 +9,13 @@
 //! failures arrive as [`ClientError::Api`] with the `errorCode` preserved — see
 //! the conversion in [`error`].
 //!
-//! What remains here is the part the shared SDK does not model. The SDK returns
-//! open `DynamicResponse` JSON for these routes, so this module decodes into the
-//! typed DTOs in [`types`] and [`program`]; and it adds the reconnecting [`sse`]
-//! event stream, which the SDK has no equivalent for.
+//! What remains here is the part the shared SDK does not model. Routes it
+//! returns as open `DynamicResponse` JSON are decoded into the typed DTOs in
+//! [`types`] and [`program`]; routes it now models itself are re-encoded into
+//! those same DTOs by [`convert`], because the UI is written against them and a
+//! few (task recurrence, dispatch state) are finer than the SDK's. On top of
+//! that this module adds the reconnecting [`sse`] event stream, which the SDK
+//! has no equivalent for.
 //!
 //! A few routes go through [`tinyhumans_sdk::TinyHumansClient::raw`], the SDK's
 //! own escape hatch, because this crate models their contract more precisely
@@ -35,7 +38,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use tinyhumans_sdk::api::medulla::{CreateSessionRequest, WorkspaceProfile};
-use tinyhumans_sdk::api::orchestration::RunRequest;
+use tinyhumans_sdk::api::orchestration::{RunRequest, RunResult as SdkRunResult};
 use tinyhumans_sdk::api::types::{ContinueRunRequest, LoginTokenRequest};
 use tinyhumans_sdk::{enc, QueryParam, TinyHumansClient};
 
@@ -103,6 +106,18 @@ fn decode<T: DeserializeOwned>(value: Value) -> Result<T> {
 /// exists only because `serde_json` cannot say so in the type.
 fn to_body<T: Serialize>(value: &T) -> Result<Value> {
     serde_json::to_value(value).map_err(|e| ClientError::Decode(e.to_string()))
+}
+
+/// Re-encode one of the SDK's typed models into this crate's own DTO.
+///
+/// The SDK now models the `/medulla/v1` and `/orchestration/v1` responses
+/// itself, but this crate keeps its own DTOs: the TUI depends on them, and a
+/// few carry fields (task recurrence, dispatch state) the SDK types do not. The
+/// two sides agree on the wire shape, so a serde round-trip through the JSON
+/// representation is the conversion — and it keeps the SDK's typed surface from
+/// leaking into the UI layer.
+fn convert<S: Serialize, T: DeserializeOwned>(value: S) -> Result<T> {
+    decode(to_body(&value)?)
 }
 
 impl MedullaClient {
@@ -277,22 +292,22 @@ impl MedullaClient {
                 .collect(),
             ..CreateSessionRequest::default()
         };
-        decode(self.sdk.medulla().create_session(&request).await?.0)
+        convert(self.sdk.medulla().create_session(&request).await?)
     }
 
     /// List sessions (`GET /medulla/v1/sessions`).
     pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
-        decode(self.sdk.medulla().list_sessions(&[]).await?.0)
+        convert(self.sdk.medulla().list_sessions(&[]).await?)
     }
 
     /// Fetch a session's state (`GET /medulla/v1/sessions/:id`).
     pub async fn get_session(&self, session_id: &str) -> Result<SessionDetail> {
-        decode(self.sdk.medulla().get_session(session_id).await?.0)
+        convert(self.sdk.medulla().get_session(session_id).await?)
     }
 
     /// Archive a session (`DELETE /medulla/v1/sessions/:id`).
     pub async fn archive_session(&self, session_id: &str) -> Result<SessionArchived> {
-        decode(self.sdk.medulla().delete_session(session_id).await?.0)
+        convert(self.sdk.medulla().delete_session(session_id).await?)
     }
 
     /// Send a message (`POST /medulla/v1/sessions/:id/messages`).
@@ -324,12 +339,11 @@ impl MedullaClient {
         after: Option<i64>,
     ) -> Result<Vec<Message>> {
         let query: [QueryParam; 1] = [("after", after.map(|a| a.to_string()))];
-        decode(
+        convert(
             self.sdk
                 .medulla()
                 .session_messages(session_id, &query)
-                .await?
-                .0,
+                .await?,
         )
     }
 
@@ -340,18 +354,17 @@ impl MedullaClient {
         after: Option<i64>,
     ) -> Result<Vec<EventEnvelope>> {
         let query: [QueryParam; 1] = [("after", after.map(|a| a.to_string()))];
-        decode(
+        convert(
             self.sdk
                 .medulla()
                 .session_events(session_id, &query)
-                .await?
-                .0,
+                .await?,
         )
     }
 
     /// Abort the running cycle (`POST /medulla/v1/sessions/:id/abort`).
     pub async fn abort(&self, session_id: &str) -> Result<AbortResult> {
-        decode(self.sdk.medulla().abort_session(session_id).await?.0)
+        convert(self.sdk.medulla().abort_session(session_id).await?)
     }
 
     /// Read the backend's configured worker routing strategy
@@ -363,8 +376,8 @@ impl MedullaClient {
     pub async fn get_routing_strategy(&self) -> Result<Option<crate::runtime::RoutingStrategy>> {
         let value = self.sdk.medulla().routing_strategy().await?;
         Ok(value
-            .get("strategy")
-            .and_then(|v| v.as_str())
+            .strategy
+            .as_deref()
             .and_then(crate::runtime::RoutingStrategy::from_wire))
     }
 
@@ -383,14 +396,12 @@ impl MedullaClient {
 
     /// Read the connected worker roster (`GET /medulla/v1/roster`).
     pub async fn roster(&self) -> Result<Vec<RosterWorker>> {
-        let payload: Roster = decode(self.sdk.medulla().roster().await?.0)?;
-        Ok(payload.workers)
+        convert(self.sdk.medulla().roster().await?)
     }
 
     /// List the operator-owned program task ledger (`GET /medulla/v1/tasks`).
     pub async fn list_program_tasks(&self) -> Result<Vec<ProgramTask>> {
-        let payload: TasksPayload = decode(self.sdk.medulla().list_tasks(&[]).await?.0)?;
-        Ok(payload.tasks)
+        convert(self.sdk.medulla().list_tasks(&[]).await?)
     }
 
     /// Create an operator-owned program task (`POST /medulla/v1/tasks`).
@@ -431,14 +442,12 @@ impl MedullaClient {
 
     /// Delete an operator-owned program task (`DELETE /medulla/v1/tasks/:id`).
     pub async fn delete_program_task(&self, task_id: &str) -> Result<bool> {
-        let payload: DeleteProgramItem = decode(self.sdk.medulla().delete_task(task_id).await?.0)?;
-        Ok(payload.deleted)
+        Ok(self.sdk.medulla().delete_task(task_id).await?)
     }
 
     /// List configured GitHub task sources (`GET /medulla/v1/tasks/sources`).
     pub async fn list_program_task_sources(&self) -> Result<Vec<ProgramTaskSource>> {
-        let payload: TaskSourcesPayload = decode(self.sdk.medulla().list_task_sources().await?.0)?;
-        Ok(payload.sources)
+        convert(self.sdk.medulla().list_task_sources().await?)
     }
 
     /// Configure a GitHub task source (`POST /medulla/v1/tasks/sources`).
@@ -465,16 +474,12 @@ impl MedullaClient {
 
     /// Synchronize one GitHub source into the task ledger.
     pub async fn sync_program_task_source(&self, source_id: &str) -> Result<TaskSourceSyncResult> {
-        let payload: TaskSourceSyncPayload =
-            decode(self.sdk.medulla().sync_task_source(source_id).await?.0)?;
-        Ok(payload.result)
+        convert(self.sdk.medulla().sync_task_source(source_id).await?)
     }
 
     /// Remove a configured GitHub task source.
     pub async fn delete_program_task_source(&self, source_id: &str) -> Result<bool> {
-        let payload: DeleteProgramItem =
-            decode(self.sdk.medulla().delete_task_source(source_id).await?.0)?;
-        Ok(payload.deleted)
+        Ok(self.sdk.medulla().delete_task_source(source_id).await?)
     }
 
     // --- SSE -------------------------------------------------------------
@@ -516,12 +521,15 @@ impl MedullaClient {
             // Selected by the hosted flavours, not by this client.
             flavor: None,
             tools: match &options.tools {
-                Some(tools) => tools.iter().map(to_body).collect::<Result<Vec<_>>>()?,
+                Some(tools) => tools.iter().map(convert).collect::<Result<Vec<_>>>()?,
                 None => Vec::new(),
             },
-            options: options.options.as_ref().map(to_body).transpose()?,
+            options: options.options.as_ref().map(convert).transpose()?,
         };
-        parse_run_result(self.sdk.orchestration().run(&request).await?.0)
+        match self.sdk.orchestration().run(&request).await? {
+            SdkRunResult::Reply(reply) => Ok(RunResult::Reply(convert(*reply)?)),
+            SdkRunResult::Loop(event) => Ok(RunResult::Loop(convert(*event)?)),
+        }
     }
 
     /// Continue a tool-loop run (`POST /orchestration/v1/run/continue`).
@@ -536,19 +544,10 @@ impl MedullaClient {
             cycle_id: cycle_id.to_string(),
             tool_results: tool_results
                 .iter()
-                .map(to_body)
+                .map(convert)
                 .collect::<Result<Vec<_>>>()?,
         };
-        decode(self.sdk.orchestration().continue_run(&request).await?.0)
-    }
-}
-
-/// Decide whether a run response is a tool-less reply or a tool-loop event.
-fn parse_run_result(value: Value) -> Result<RunResult> {
-    if value.get("stop").is_some() {
-        Ok(RunResult::Loop(decode(value)?))
-    } else {
-        Ok(RunResult::Reply(decode(value)?))
+        convert(self.sdk.orchestration().continue_run(&request).await?)
     }
 }
 

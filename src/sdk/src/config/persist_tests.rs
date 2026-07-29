@@ -253,6 +253,7 @@ fn the_hub_roster_round_trips_through_the_config_file() {
 
     let workers = vec![
         crate::config::HubWorkerConfig {
+            roles: Vec::new(),
             id: "alpha".into(),
             address: "3Hob1FxUwsy1K2rweppbmCkuPef6unAr5Amj6kQ2fM3A".into(),
             harness: "claude".into(),
@@ -260,6 +261,7 @@ fn the_hub_roster_round_trips_through_the_config_file() {
             selected: true,
         },
         crate::config::HubWorkerConfig {
+            roles: Vec::new(),
             id: "beta".into(),
             address: "@someone".into(),
             harness: "codex".into(),
@@ -290,6 +292,7 @@ fn removing_the_last_worker_is_remembered_as_removal() {
     super::persist_hub_workers(
         &path,
         &[crate::config::HubWorkerConfig {
+            roles: Vec::new(),
             id: "alpha".into(),
             address: "addr".into(),
             harness: "claude".into(),

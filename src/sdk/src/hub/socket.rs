@@ -68,16 +68,20 @@ fn str_field(obj: &Value, key: &str) -> Option<String> {
 /// long a task may run; `runner` only reaps a dispatch that goes silent. Returns
 /// the connected client (which the [`HubHandle`](super::HubHandle) re-emits
 /// through); drop it to disconnect.
+#[allow(clippy::too_many_arguments)]
 pub async fn connect_harness(
     backend_url: &str,
     jwt: &str,
     roster: SharedRoster,
+    catalog: Arc<Vec<crate::runtime::AgentTemplate>>,
     runner: Arc<TaskRunner>,
     subscription_strategy: SharedSubscriptionStrategy,
     log: super::types::HubLog,
     activity: Option<super::ActivityLog>,
 ) -> anyhow::Result<Client> {
     let connect_roster = roster.clone();
+    let connect_catalog = catalog.clone();
+    let cap_catalog = catalog.clone();
     let connect_relay = runner.relay();
     let connect_log = log.clone();
     let run_log = log.clone();
@@ -111,6 +115,7 @@ pub async fn connect_harness(
         // (Re)advertise the current roster on connect.
         .on(Event::Connect, move |_payload, socket| {
             let roster = connect_roster.clone();
+            let catalog = connect_catalog.clone();
             let relay = connect_relay.clone();
             let connect_log = connect_log.clone();
             async move {
@@ -151,7 +156,8 @@ pub async fn connect_harness(
                         format!(" — withholding {} from agent_list", withheld.len())
                     }
                 ));
-                let payload = { register_payload(&roster.lock().expect("roster lock"), &online) };
+                let payload =
+                    { register_payload(&roster.lock().expect("roster lock"), &online, &catalog) };
                 let _ = socket.emit("medulla:register_agents", payload).await;
             }
             .boxed()
@@ -224,9 +230,12 @@ pub async fn connect_harness(
         // every later delegation while this process still looks alive.
         .on("medulla:capabilities_request", move |payload, socket| {
             let roster = cap_roster.clone();
+            let catalog = cap_catalog.clone();
             let runner = cap_runner.clone();
             async move {
-                tokio::spawn(handle_capabilities(payload, socket, roster, runner));
+                tokio::spawn(handle_capabilities(
+                    payload, socket, roster, catalog, runner,
+                ));
             }
             .boxed()
         })
@@ -464,6 +473,7 @@ async fn handle_capabilities(
     payload: Payload,
     socket: Client,
     roster: SharedRoster,
+    catalog: Arc<Vec<crate::runtime::AgentTemplate>>,
     runner: Arc<TaskRunner>,
 ) {
     let Some(obj) = first_obj(payload) else {
@@ -485,9 +495,31 @@ async fn handle_capabilities(
         };
         found.cloned()
     };
-    let (harness, address) = match &worker {
-        Some(w) => (w.harness.clone(), Some(w.address.clone())),
-        None => (String::new(), None),
+    let (harness, address, roles) = match &worker {
+        Some(w) => (w.harness.clone(), Some(w.address.clone()), w.roles.clone()),
+        None => (String::new(), None, Vec::new()),
+    };
+    // The union of the toggled roles' tool allowlists. `None` when the worker
+    // names no roles, or names only roles with no allowlist of their own —
+    // both mean "unconstrained", which must stay distinct from "allowed
+    // nothing" or an unspecified worker would advertise no tools at all.
+    let allowed_tools: Option<Vec<String>> = {
+        let mut allowed: Vec<String> = Vec::new();
+        let mut constrained = false;
+        for role in roles
+            .iter()
+            .filter_map(|id| catalog.iter().find(|t| &t.id == id))
+        {
+            if let Some(tools) = &role.tools {
+                constrained = true;
+                for tool in tools {
+                    if !allowed.iter().any(|held| held == tool) {
+                        allowed.push(tool.clone());
+                    }
+                }
+            }
+        }
+        constrained.then_some(allowed)
     };
     // Ask the worker what it can actually do, and answer with that. Fails open:
     // a transport error, timeout, or malformed reply leaves only the static
@@ -496,7 +528,12 @@ async fn handle_capabilities(
         Some(address) => runner.capabilities(&address).await.ok(),
         None => None,
     };
-    let capabilities = super::probe::capabilities_payload(&harness, caps.as_ref());
+    let capabilities = super::probe::capabilities_payload(
+        &harness,
+        caps.as_ref(),
+        allowed_tools.as_deref(),
+        &roles,
+    );
     let _ = socket
         .emit(
             "medulla:capabilities_result",

@@ -31,9 +31,27 @@ use crate::tinyplace::AgentCapabilities;
 /// Empty values are omitted rather than sent blank: the backend drops empty
 /// strings and arrays anyway, and an absent key is the honest encoding of "not
 /// reported" where `""` reads as a measurement someone took.
-pub(super) fn capabilities_payload(harness: &str, caps: Option<&AgentCapabilities>) -> Value {
+pub(super) fn capabilities_payload(
+    harness: &str,
+    caps: Option<&AgentCapabilities>,
+    allowed_tools: Option<&[String]>,
+    roles: &[String],
+) -> Value {
     let harness = harness.trim();
     let mut obj = Map::new();
+
+    // The roles this worker is offered for, so an orchestrator that asks what
+    // an agent can do is told what it is *for* as well as what it *has*.
+    // Omitted when empty, like every other value here: an absent key reads as
+    // "not specified", where `[]` reads as "deliberately none".
+    //
+    // Whether the backend keeps this depends on its `sanitizeCapabilities`,
+    // which drops keys it does not know. The descriptor carries the same roles
+    // through `description` and `tags`, which are certainly preserved — so this
+    // is completeness, not the mechanism anything relies on.
+    if !roles.is_empty() {
+        obj.insert("roles".to_string(), json!(roles));
+    }
 
     // Providers: what the probe found installed, else the one the roster names.
     let providers: Vec<String> = match caps {
@@ -78,11 +96,27 @@ pub(super) fn capabilities_payload(harness: &str, caps: Option<&AgentCapabilitie
             ("tools", &caps.tools),
             ("mcpServers", &caps.mcp_servers),
         ] {
-            let values: Vec<&str> = values
+            let mut values: Vec<&str> = values
                 .iter()
                 .map(|v| v.trim())
                 .filter(|v| !v.is_empty())
                 .collect();
+            // The probe reports what the *harness* has; a role says what this
+            // worker is *allowed*. Reporting the first unfiltered makes the two
+            // channels contradict each other about the same worker — the
+            // descriptor saying "reviews diffs" while capabilities claim it can
+            // edit files — and capabilities is the one the reasoning tier reads
+            // for "what can this agent do?".
+            //
+            // Applied here rather than asked of the probe: the allowlist is
+            // known locally and exactly, whereas telling a harness to limit
+            // itself is a request it may or may not honour, and would cost a
+            // fresh run every time a role changed.
+            if key == "tools" {
+                if let Some(allowed) = allowed_tools {
+                    values.retain(|tool| allowed.iter().any(|a| a.eq_ignore_ascii_case(tool)));
+                }
+            }
             if !values.is_empty() {
                 obj.insert(key.to_string(), json!(values));
             }

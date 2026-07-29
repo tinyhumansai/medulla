@@ -72,6 +72,7 @@ pub(super) async fn apply_worker_op(
                     address,
                     harness: harness.unwrap_or_else(|| "claude".to_string()),
                     label,
+                    roles: Vec::new(),
                     selected: false,
                     // A peer added by address: this hub has no idea where it
                     // runs tasks. The backend falls back to its probed cwd.

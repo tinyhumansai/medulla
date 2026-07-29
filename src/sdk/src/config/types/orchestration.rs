@@ -96,6 +96,9 @@ pub struct HubWorkerConfig {
     /// Whether this worker is the selected default.
     #[serde(default)]
     pub selected: bool,
+    /// Agent-template ids this worker is offered for. Empty means unspecified.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<String>,
 }
 
 /// The `hub` section: the orchestrator's worker roster, remembered across runs.

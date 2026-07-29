@@ -34,6 +34,13 @@ pub struct HubConfig {
     pub identity_dir: PathBuf,
     /// The workers to advertise initially (may be empty; add more at runtime).
     pub workers: Vec<WorkerSpec>,
+    /// The agent-role catalog, for resolving the roles a worker is toggled on
+    /// for into the tags and description it advertises.
+    ///
+    /// Passed in rather than read here: the catalog is layered config the TUI
+    /// already loads, and a second read could disagree with what the operator
+    /// is looking at on the Agent Templates page.
+    pub agent_templates: Vec<crate::runtime::AgentTemplate>,
     /// How often the runner drains the encrypted inbox.
     pub poll: Duration,
     /// Where diagnostics go. Defaults to stderr; a TUI supplies its own so the

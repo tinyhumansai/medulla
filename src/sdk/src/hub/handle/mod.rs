@@ -138,6 +138,7 @@ impl HubHandle {
             address: wiring.address,
             public_key: wiring.public_key,
             relay: wiring.relay,
+            catalog: wiring.catalog,
             runner: wiring.runner,
             system_info: Arc::new(Mutex::new(HashMap::new())),
             log: wiring.log,
@@ -398,7 +399,7 @@ impl HubHandle {
     async fn reregister(&self) -> anyhow::Result<()> {
         let workers = self.list();
         let online = self.relay.presence(&addresses_of(&workers)).await;
-        let payload = register_payload(&workers, &online);
+        let payload = register_payload(&workers, &online, &self.catalog);
         self.socket
             .emit("medulla:register_agents", payload)
             .await

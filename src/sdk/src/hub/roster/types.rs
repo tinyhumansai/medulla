@@ -14,6 +14,17 @@ pub struct HubWorker {
     pub label: Option<String>,
     /// Whether this worker is the currently-selected default.
     pub selected: bool,
+    /// Agent-template ids this worker is offered for.
+    ///
+    /// A worker is a *harness* — a claude or codex daemon. A role is a
+    /// *template*: a description, a tool allowlist, a model tier. Naming roles
+    /// here says "this machine is available for these", which is what lets the
+    /// orchestrator route a matching subtask to it rather than treating every
+    /// worker as an interchangeable code runner.
+    ///
+    /// Empty means unspecified, and is advertised exactly as before — a general
+    /// worker, not one excluded from everything.
+    pub roles: Vec<String>,
     /// Absolute path of the workspace this worker runs tasks in, when known.
     ///
     /// Advertised to the backend as `metadata.workspace`, which is what turns a

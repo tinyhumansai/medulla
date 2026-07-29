@@ -17,7 +17,41 @@ impl DaemonRuntime {
     /// Admit, execute, and reply to a `task` frame, forwarding throttled status.
     pub(super) async fn handle_task(&self, from: String, frame: TaskFrame) {
         let correlation = frame.correlation_id.clone();
-        let provider = match self.select_provider(frame.provider) {
+        let custom_harness = match frame.custom_harness.as_deref() {
+            Some(id) => match self
+                .inner
+                .config
+                .custom_harnesses
+                .iter()
+                .find(|harness| harness.id == id)
+            {
+                Some(harness) => Some(harness.clone()),
+                None => {
+                    self.reply(
+                        &from,
+                        TaskFrameKind::Error,
+                        &frame.task_id,
+                        &format!("custom harness \"{id}\" is not configured on this host"),
+                        correlation.as_deref(),
+                        None,
+                    )
+                    .await;
+                    return;
+                }
+            },
+            None => self
+                .inner
+                .config
+                .custom_harnesses
+                .iter()
+                .find(|harness| harness.default)
+                .cloned(),
+        };
+        let requested_provider = custom_harness
+            .as_ref()
+            .map(|harness| harness.base_harness)
+            .or(frame.provider);
+        let provider = match self.select_provider(requested_provider) {
             Some(provider) => provider,
             None => {
                 let offered = self
@@ -33,8 +67,7 @@ impl DaemonRuntime {
                 } else {
                     offered
                 };
-                let requested = frame
-                    .provider
+                let requested = requested_provider
                     .map(|p| format!(" for requested \"{}\"", p.as_str()))
                     .unwrap_or_default();
                 self.reply(
@@ -188,6 +221,11 @@ impl DaemonRuntime {
             }) as Box<dyn FnOnce(String) + Send>
         };
 
+        let mut run_env = self.inner.config.env.clone();
+        if let Some(harness) = &custom_harness {
+            run_env.extend(harness.harness_env());
+        }
+
         let options = RunTaskOptions {
             // The *authenticated* sender, never anything from the frame body: a
             // frame cannot be trusted to name its own author. This says *whose*
@@ -201,19 +239,23 @@ impl DaemonRuntime {
             provider,
             prompt: frame.text.clone(),
             cwd: self.inner.config.workspace.clone(),
-            env: self.inner.config.env.clone(),
+            env: run_env,
             timeout_ms: self.inner.config.task_timeout_ms,
             // Per-task model hint (parallels the per-task `provider`): honor the
             // orchestrator's requested model, falling back to the daemon default.
             model: frame
                 .model
                 .clone()
+                .or_else(|| custom_harness.as_ref().map(|harness| harness.model.clone()))
                 .or_else(|| self.inner.config.model.clone()),
             agent: self.inner.config.agent.clone(),
             extra_args: self.inner.config.extra_args.clone(),
             skip_permissions: self.inner.config.skip_permissions,
             abort: abort.clone(),
-            router: self.inner.config.router.clone(),
+            router: custom_harness
+                .as_ref()
+                .map(crate::config::CustomHarnessConfig::router)
+                .or_else(|| self.inner.config.router.clone()),
             on_event: Some(on_event),
             on_stdin: Some(on_stdin),
             on_session: Some(on_session),

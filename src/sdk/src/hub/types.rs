@@ -44,6 +44,8 @@ pub struct TaskRequest {
     pub worker_address: String,
     /// Optional harness hint (`claude`/`codex`/`opencode`).
     pub provider: Option<HarnessProvider>,
+    /// Optional named custom harness preset exposed by the worker.
+    pub custom_harness: Option<String>,
     /// Optional model hint (the worker maps it to `--model`/`-m`, else its
     /// configured default).
     pub model: Option<String>,

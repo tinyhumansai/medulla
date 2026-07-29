@@ -81,6 +81,7 @@ fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
         skip_permissions: false,
         accessible_dirs: Vec::new(),
         router: None,
+        custom_harnesses: Vec::new(),
         budget: None,
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
@@ -112,6 +113,7 @@ fn dispatch(runtime: &DaemonRuntime, task_id: &str) {
         correlation_id: Some(format!("cyc/{task_id}/0")),
         harness: None,
         provider: Some(HarnessProvider::Codex),
+        custom_harness: None,
         model: None,
         workflow: None,
     });

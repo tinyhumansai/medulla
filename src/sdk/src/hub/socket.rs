@@ -263,6 +263,7 @@ async fn handle_task_run(
     let requested_provider = str_field(&obj, "provider")
         .as_deref()
         .and_then(crate::tinyplace::HarnessProvider::from_wire);
+    let custom_harness = str_field(&obj, "customHarness").or_else(|| str_field(&obj, "harnessId"));
     let model = str_field(&obj, "model");
     // The frame's own `timeoutMs` is deliberately ignored: that is the BACKEND's
     // task deadline, and the backend now enforces it (aborting a running task via
@@ -378,6 +379,7 @@ async fn handle_task_run(
         instruction,
         worker_address,
         provider,
+        custom_harness,
         model,
         // Forwarded rather than dropped: a worker advertises the workflows it
         // has installed, so the orchestrator naming one here is the other half

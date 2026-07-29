@@ -295,6 +295,7 @@ impl TaskRunner {
                 correlation_id: Some(cid.clone()),
                 harness: None,
                 provider: req.provider,
+                custom_harness: req.custom_harness.clone(),
                 model: req.model.clone(),
                 workflow: req.workflow.clone(),
             });
@@ -393,6 +394,7 @@ async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) 
         correlation_id: Some(cid.to_string()),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
         workflow: None,
     });

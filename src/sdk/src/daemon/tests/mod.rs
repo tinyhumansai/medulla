@@ -70,6 +70,7 @@ pub(super) fn base_config() -> DaemonConfig {
         skip_permissions: false,
         budget: None,
         router: None,
+        custom_harnesses: Vec::new(),
     }
 }
 
@@ -86,6 +87,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
         correlation_id: correlation.map(str::to_string),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
         workflow: None,
     }

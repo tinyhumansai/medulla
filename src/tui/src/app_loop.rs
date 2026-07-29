@@ -366,12 +366,18 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // A bad `[host]` section is reported exactly like a failed start: this
     // machine does not host, and the operator is told why. `and_then` keeps the
     // two failure kinds — unparseable config, unstartable host — on one path.
-    let local_host = match crate::local_host::options_from_config(
+    let custom_harnesses = medulla::config::load_custom_harnesses(&active_config_path)
+        .unwrap_or_else(|error| {
+            hub_logs.push(format!("custom harnesses: cannot load ({error})"));
+            Vec::new()
+        });
+    let local_host = match crate::local_host::options_from_config_with_custom(
         &loaded.config.host,
         &env,
         loaded.config.router.clone(),
         loaded.config.budget.clone(),
         Some(hub_logs.sink()),
+        &custom_harnesses,
     )
     .and_then(|options| {
         crate::local_host::start(

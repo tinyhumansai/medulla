@@ -275,6 +275,16 @@ pub struct TaskFrame {
     /// Inbound-only hint naming the agent the orchestrator wants to run this task.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only named custom harness preset to run on the selected host.
+    ///
+    /// Additive to `provider`: older peers ignore it, while a current worker
+    /// resolves it to its configured base CLI, model, and OpenRouter route.
+    #[serde(
+        rename = "customHarness",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub custom_harness: Option<String>,
     /// Inbound-only advisory hint naming the model the orchestrator wants this
     /// task run on (parallels `provider`). The worker daemon may honor it as the
     /// harness `--model`/`-m` or fall back to its configured model; never echoed
@@ -336,6 +346,8 @@ pub struct EncodeFrameInput {
     pub harness: Option<HarnessProvider>,
     /// Inbound-only hint naming the agent the orchestrator wants to run this task.
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only named custom harness preset.
+    pub custom_harness: Option<String>,
     /// Inbound-only advisory model hint (parallels `provider`); `None` on the
     /// responses a worker daemon emits.
     pub model: Option<String>,

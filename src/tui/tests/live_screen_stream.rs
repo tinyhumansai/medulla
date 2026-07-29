@@ -108,6 +108,7 @@ fn worker_runtime(session_id: String) -> DaemonRuntime {
         skip_permissions: false,
         accessible_dirs: Vec::new(),
         router: None,
+        custom_harnesses: Vec::new(),
         budget: None,
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
@@ -253,6 +254,7 @@ async fn a_hub_watches_a_real_workers_screen_over_the_relay() {
         correlation_id: Some(format!("live/{task_id}/0")),
         harness: None,
         provider: Some(HarnessProvider::Codex),
+        custom_harness: None,
         model: None,
         workflow: None,
     });

@@ -61,6 +61,8 @@ pub struct EmbeddedDaemonOptions {
     pub env: HashMap<String, String>,
     /// Optional custom OpenAI-compatible router layered into every spawn.
     pub router: Option<RouterConfig>,
+    /// Named OpenRouter presets exposed by this host.
+    pub custom_harnesses: Vec<crate::config::CustomHarnessConfig>,
     /// Operator-declared per-provider token budgets.
     pub budget: Option<BudgetConfig>,
     /// Where diagnostics go. `None` discards them, which is what a TUI wants
@@ -83,6 +85,7 @@ impl Default for EmbeddedDaemonOptions {
             skip_permissions: true,
             env: HashMap::new(),
             router: None,
+            custom_harnesses: Vec::new(),
             budget: None,
             log: None,
         }

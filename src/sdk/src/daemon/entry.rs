@@ -270,7 +270,7 @@ pub async fn run_daemon(
         &env,
         std::path::Path::new(&workspace),
     ) {
-        Ok(loaded) => Some(loaded.config),
+        Ok(loaded) => Some(loaded),
         Err(err) => {
             log(&format!(
                 "config load failed ({err}); routing and budgets are off"
@@ -278,8 +278,23 @@ pub async fn run_daemon(
             None
         }
     };
-    let router = loaded_config.as_ref().and_then(|c| c.router.clone());
-    let budget = loaded_config.as_ref().and_then(|c| c.budget.clone());
+    let router = loaded_config
+        .as_ref()
+        .and_then(|loaded| loaded.config.router.clone());
+    let budget = loaded_config
+        .as_ref()
+        .and_then(|loaded| loaded.config.budget.clone());
+    let custom_harnesses = loaded_config
+        .as_ref()
+        .map(|loaded| {
+            crate::config::load_custom_harnesses(std::path::Path::new(&loaded.path)).unwrap_or_else(
+                |error| {
+                    log(&format!("custom harness config load failed ({error})"));
+                    Vec::new()
+                },
+            )
+        })
+        .unwrap_or_default();
     let config = DaemonConfig {
         providers: providers.clone(),
         default_provider,
@@ -298,6 +313,7 @@ pub async fn run_daemon(
         // The custom OpenAI-compatible router from the layered `[router]` config,
         // layered into every task's spawn environment by the executor.
         router,
+        custom_harnesses,
         // Operator-declared per-provider budgets from the `[budget]` config,
         // advertised on the capability probe as `source: configured`.
         budget,

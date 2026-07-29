@@ -414,6 +414,9 @@ fn trigger_input(text: &str) -> Value {
 /// the reply frame and another way in its own record is a run an operator has
 /// to reconcile by hand.
 fn summarize(record: &crate::workflows::RunRecord) -> String {
+    if record.status == RunStatus::Failed {
+        return crate::workflows::run::summarize(record);
+    }
     record
         .summary
         .clone()

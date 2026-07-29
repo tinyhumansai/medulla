@@ -293,6 +293,16 @@ impl App {
         // Same reasoning as above: a stale rect would route the wheel into a
         // terminal that is no longer on screen.
         self.hit_harness = None;
+        // Focus follows the pane, not the other way round. `agents_selection`
+        // (called only while drawing the Agents tab) is what notices the cursor
+        // moving off the attached session; it has nothing to say once the
+        // operator has left the tab entirely. Without this, `harness_focus`
+        // stayed `Attached` after a click elsewhere, and the next keystroke —
+        // meant for whatever tab was now on screen — was typed into a harness
+        // pane the operator could no longer see.
+        if self.harness_focus.attached_to().is_some() && self.tab() != "Agents" {
+            self.release_harness();
+        }
         // The composer now lives inside the Agents pane, so the only things that
         // still claim a row of their own below the content are the inline prompt
         // and the resume picker.

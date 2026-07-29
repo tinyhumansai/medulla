@@ -40,10 +40,21 @@ pub fn accept(
     // a double key press, each spawned on its own blocking task — could
     // otherwise both read it as pending, both pass the fingerprint check, and
     // both apply the ops.
-    let _claim = AcceptGuard::claim(proposal_id).ok_or_else(|| {
+    let _claim = AcceptGuard::claim(&format!("proposal:{proposal_id}")).ok_or_else(|| {
         WorkflowError::Engine(format!("proposal '{proposal_id}' is already being applied"))
     })?;
     let mut proposal = require_proposal(store.as_ref(), proposal_id)?;
+    // Different proposals for one workflow are also positional edits against
+    // the same base graph. Hold this claim from status/fingerprint validation
+    // through persistence so neither can validate against a graph the other
+    // changes before applying its ops.
+    let _workflow_claim =
+        AcceptGuard::claim(&format!("workflow:{}", proposal.workflow_id)).ok_or_else(|| {
+            WorkflowError::Engine(format!(
+                "another proposal for workflow '{}' is already being applied",
+                proposal.workflow_id
+            ))
+        })?;
     if !proposal.is_pending() {
         return Err(WorkflowError::Engine(format!(
             "proposal '{proposal_id}' is already {:?} and cannot be applied again",
@@ -168,7 +179,7 @@ fn note(
     }
 }
 
-/// Serializes accepts of one proposal within this process.
+/// Serializes accepts of one proposal or workflow within this process.
 ///
 /// A guard rather than a flag on the record: the window that matters is between
 /// reading the proposal and writing the graph, and only something that releases
@@ -187,14 +198,14 @@ impl AcceptGuard {
         IN_FLIGHT.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
     }
 
-    fn claim(proposal_id: &str) -> Option<Self> {
+    fn claim(key: &str) -> Option<Self> {
         let mut held = Self::in_flight()
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        if !held.insert(proposal_id.to_string()) {
+        if !held.insert(key.to_string()) {
             return None;
         }
-        Some(Self(proposal_id.to_string()))
+        Some(Self(key.to_string()))
     }
 }
 

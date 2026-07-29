@@ -23,9 +23,10 @@
 use medulla::bridge::{Bridge, LocalBridgeNetwork};
 use medulla::config::HostSection;
 use medulla::daemon::embedded::{resolve_workspace, EmbeddedDaemon, EmbeddedDaemonOptions};
+use medulla::daemon::providers::{run_provider_task, RunTaskFn, RunTaskOptions};
 use medulla::hub::WorkerSpec;
 use medulla::tinyplace::HarnessProvider;
-use medulla_tui::worker::executor::PtySessionExecutor;
+use medulla_tui::worker::executor::{agent_kind, PtySessionExecutor};
 use medulla_tui::worker::pty::PtyManager;
 use std::collections::HashMap;
 
@@ -155,12 +156,20 @@ fn spec_for(daemon: &EmbeddedDaemon) -> WorkerSpec {
 /// it, because an orchestrator with no host silently does nothing at all.
 ///
 /// Tasks run in **live harness sessions** on `sessions`, not in headless
-/// one-shots. That is the whole difference between this and the old embedded
-/// host: `claude`/`codex` are started the way a human starts them — no `-p`, no
+/// one-shots — for the providers that write a transcript this can tail.
+/// `claude`/`codex` are started the way a human starts them — no `-p`, no
 /// `--output-format` — so they paint their own interface, and the Agents tab
 /// renders that interface instead of a transcript reconstructed from JSON. The
 /// manager is passed in rather than built here because the UI needs the same
 /// one to read screens from and type into.
+///
+/// OpenCode is the one provider this does not cover
+/// ([`agent_kind`] returns `None` for it: no flat transcript to tail, so no way
+/// to know a turn ended) and [`run_task`] routes it to the headless executor
+/// instead, exactly as `EmbeddedDaemon::start` would have. Detection still
+/// advertises whatever is installed regardless of which executor serves it —
+/// an OpenCode-only machine must still start and actually complete tasks, not
+/// merely start and then fail every one against `PtySessionExecutor`'s refusal.
 pub(crate) fn start(
     config: &HostSection,
     env: &HashMap<String, String>,
@@ -180,14 +189,36 @@ pub(crate) fn start(
     // about to resolve. The two must agree — this is the directory the session
     // tailer searches for the harness's transcript.
     let executor =
-        PtySessionExecutor::new(sessions, env.clone(), resolve_workspace(&options.workspace))
-            .into_run_task();
+        PtySessionExecutor::new(sessions, env.clone(), resolve_workspace(&options.workspace));
     let daemon = EmbeddedDaemon::start_with_executor(
         std::sync::Arc::new(bridge) as std::sync::Arc<dyn Bridge>,
         &address,
         options,
-        executor,
+        run_task(executor),
     )?;
     let spec = spec_for(&daemon);
     Ok(Some(LocalHost { daemon, spec }))
+}
+
+/// Route each task by what it can actually run: [`PtySessionExecutor`] for a
+/// provider it can tail, the headless one-shot executor for the one it
+/// cannot.
+///
+/// A single provider check per task rather than two separate host paths —
+/// dispatching per-task, not per-host, is what keeps a mixed installation
+/// (say, claude *and* opencode both detected) fully usable: the claude lane
+/// gets the watchable pane, the opencode lane still completes its work.
+fn run_task(pty: PtySessionExecutor) -> RunTaskFn {
+    let watchable = pty.into_run_task();
+    std::sync::Arc::new(move |options: RunTaskOptions| {
+        // `agent_kind` is the authority, not a provider allow-list: it answers
+        // "is there a transcript this can tail", which is the actual
+        // precondition `PtySessionExecutor` fails on. A list would silently
+        // stop matching the moment a provider gained or lost one.
+        if agent_kind(options.provider).is_some() {
+            watchable(options)
+        } else {
+            Box::pin(run_provider_task(options))
+        }
+    })
 }

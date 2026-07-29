@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use crate::workflows::authoring::apply_workflow_ops;
+use crate::workflows::authoring::apply_workflow_ops_if_unchanged;
 use crate::workflows::store::require_proposal;
 use crate::workflows::{
     fingerprint, mint_note_id, ops, require, NoteKind, NoteSource, ProposalStatus, WorkflowError,
@@ -89,7 +89,22 @@ pub fn accept(
     }
 
     let ops = ops::parse_ops(&proposal.ops)?;
-    let record = apply_workflow_ops(store, &proposal.workflow_id, &ops)?;
+    let Some(record) = apply_workflow_ops_if_unchanged(
+        store,
+        &proposal.workflow_id,
+        &ops,
+        &proposal.base_fingerprint,
+    )?
+    else {
+        proposal.status = ProposalStatus::Stale;
+        proposal.decided_at = Some(crate::clock::now_millis() as u64);
+        proposal.decision_reason =
+            Some("the workflow changed while this proposal was being applied".to_string());
+        store.save_proposal(&proposal)?;
+        return Err(WorkflowError::Engine(format!(
+            "proposal '{proposal_id}' became stale while it was being applied"
+        )));
+    };
 
     let decided_at = crate::clock::now_millis() as u64;
     proposal.status = ProposalStatus::Accepted;

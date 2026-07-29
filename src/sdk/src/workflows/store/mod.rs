@@ -52,6 +52,25 @@ pub trait WorkflowStore: Send + Sync {
     /// runnable.
     fn save(&self, record: &WorkflowRecord) -> Result<(), WorkflowError>;
 
+    /// Save only when the current graph still has `expected_fingerprint`.
+    ///
+    /// File-backed stores override this atomically. The default preserves the
+    /// contract for lightweight test stores that do not expose transactions.
+    fn save_if_fingerprint(
+        &self,
+        record: &WorkflowRecord,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let Some(current) = self.get(&record.id)? else {
+            return Ok(false);
+        };
+        if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
+            return Ok(false);
+        }
+        self.save(record)?;
+        Ok(true)
+    }
+
     /// Remove a workflow. Removing one that does not exist is an error, so a
     /// caller cannot mistake a typo for a successful delete.
     fn delete(&self, id: &str) -> Result<(), WorkflowError>;

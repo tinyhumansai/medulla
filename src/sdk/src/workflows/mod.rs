@@ -36,7 +36,8 @@ mod types;
 mod tests;
 
 pub use authoring::{
-    apply_workflow_ops, create_workflow, preview_workflow_ops, validate_handle, GraphHandle,
+    apply_workflow_ops, apply_workflow_ops_if_unchanged, create_workflow, preview_workflow_ops,
+    validate_handle, GraphHandle,
 };
 pub use copilot::{CopilotOutcome, CopilotRequest, CopilotSession, FailedRun};
 pub use local::{LocalWorkflowHost, LOCAL_WORKER_ADDRESS};

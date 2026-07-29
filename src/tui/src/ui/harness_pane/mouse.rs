@@ -59,7 +59,12 @@ pub fn wheel(
         MouseProtocolEncoding::Sgr => {
             // Decimal and 1-based. `M` is a press; the wheel has no release, so
             // there is no matching `m` report to send after it.
-            format!("\x1b[<{};{};{}M", button, col + 1, row + 1).into_bytes()
+            format!(
+                "\x1b[<{button};{};{}M",
+                u32::from(col) + 1,
+                u32::from(row) + 1
+            )
+            .into_bytes()
         }
         // UTF-8 encoding (DECSET 1005) is a dead end almost nothing negotiates,
         // and its multi-byte coordinates decode ambiguously. Treating it as the
@@ -67,8 +72,14 @@ pub fn wheel(
         // coordinates that fit in both, which is every coordinate a pane of this
         // size produces.
         MouseProtocolEncoding::Default | MouseProtocolEncoding::Utf8 => {
-            let cx = (col + 1 + NORMAL_OFFSET).min(NORMAL_MAX_COORD + NORMAL_OFFSET);
-            let cy = (row + 1 + NORMAL_OFFSET).min(NORMAL_MAX_COORD + NORMAL_OFFSET);
+            // Widened before the `+ 1`, not after. The clamp below bounds the
+            // *result*, which is no help if the arithmetic reaching it has
+            // already overflowed — `u16::MAX + 1` panics in a debug build
+            // before the `.min()` is ever evaluated.
+            let offset = u32::from(NORMAL_OFFSET);
+            let ceiling = u32::from(NORMAL_MAX_COORD) + offset;
+            let cx = (u32::from(col) + 1 + offset).min(ceiling);
+            let cy = (u32::from(row) + 1 + offset).min(ceiling);
             vec![
                 0x1b,
                 b'[',

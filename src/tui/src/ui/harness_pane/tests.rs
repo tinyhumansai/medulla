@@ -8,8 +8,24 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::keys::encode;
+use super::keys::{encode, is_focus_chord};
 use super::HarnessFocus;
+
+/// Decode a raw input byte the way crossterm does, so chord tests assert against
+/// what a terminal actually delivers rather than against a key event we invented.
+///
+/// This mirrors `crossterm::event::sys::unix::parse`: `0x01..=0x1A` count up from
+/// `'a'`, and the `0x1C..=0x1F` block counts up from `'4'`. That second rule is
+/// the whole reason this helper exists — it means `Ctrl-]` (`0x1D`) arrives as
+/// `Ctrl+'5'`, and a chord matched on `Ctrl+']'` never fires on a real terminal.
+fn as_terminal_sends(byte: u8) -> KeyEvent {
+    let code = match byte {
+        0x01..=0x1A => KeyCode::Char((byte - 0x1 + b'a') as char),
+        0x1C..=0x1F => KeyCode::Char((byte - 0x1C + b'4') as char),
+        other => KeyCode::Char(other as char),
+    };
+    KeyEvent::new(code, KeyModifiers::CONTROL)
+}
 
 /// Encode a key with no modifiers.
 fn plain(code: KeyCode) -> Vec<u8> {
@@ -127,6 +143,41 @@ fn keys_with_no_terminal_form_encode_to_nothing() {
         KeyModifiers::NONE
     ))
     .is_none());
+}
+
+#[test]
+fn the_focus_chord_is_recognised_as_the_terminal_actually_sends_it() {
+    // The regression this pins: `Ctrl-]` is the byte 0x1D, which crossterm
+    // decodes to `Ctrl+'5'`. Matching only `Ctrl+']'` compiles, passes a
+    // synthetic round-trip test, and then does nothing at all when a human
+    // presses the key.
+    assert!(is_focus_chord(as_terminal_sends(0x1d)));
+    // The kitty keyboard protocol reports the real key instead, so both
+    // spellings have to work.
+    assert!(is_focus_chord(KeyEvent::new(
+        KeyCode::Char(']'),
+        KeyModifiers::CONTROL
+    )));
+}
+
+#[test]
+fn ordinary_keys_are_not_mistaken_for_the_focus_chord() {
+    // Neighbours in the same C0 block: Ctrl-\ (0x1C) and Ctrl-^ (0x1E) must not
+    // release the keyboard.
+    assert!(!is_focus_chord(as_terminal_sends(0x1c)));
+    assert!(!is_focus_chord(as_terminal_sends(0x1e)));
+    // Ctrl-C has to reach the harness — interrupting it is the single most
+    // important key an attached pane forwards.
+    assert!(!is_focus_chord(as_terminal_sends(0x03)));
+    // The chord needs Ctrl: a bare `]` is text the operator is typing.
+    assert!(!is_focus_chord(KeyEvent::new(
+        KeyCode::Char(']'),
+        KeyModifiers::NONE
+    )));
+    assert!(!is_focus_chord(KeyEvent::new(
+        KeyCode::Char('5'),
+        KeyModifiers::NONE
+    )));
 }
 
 #[test]

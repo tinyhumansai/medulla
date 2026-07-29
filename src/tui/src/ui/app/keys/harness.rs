@@ -6,23 +6,22 @@
 //! kept a handful of keys for itself would be a wrapper that intercepts exactly
 //! the keys the harness needs at the moment it needs them.
 //!
-//! The single exception is [`FOCUS_CHORD`](crate::ui::harness_pane::FOCUS_CHORD).
-//! One reserved key is the minimum that leaves a way out, and `Ctrl-]` is the
-//! traditional choice precisely because full-screen programs do not bind it.
+//! The single exception is the focus chord, `Ctrl-]`. One reserved key is the
+//! minimum that leaves a way out, and it is the traditional choice precisely
+//! because full-screen programs do not bind it. Recognising it is
+//! [`is_focus_chord`](crate::ui::harness_pane::keys::is_focus_chord) rather than
+//! a character comparison — terminals do not deliver it the way it is written.
 
-use crossterm::event::{KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 
-use crate::ui::harness_pane::{keys::encode, HarnessFocus, FOCUS_CHORD, FOCUS_CHORD_LABEL};
+use crate::ui::harness_pane::{
+    keys::{encode, is_focus_chord},
+    HarnessFocus, FOCUS_CHORD_LABEL,
+};
 
 use super::super::types::App;
 
 impl App {
-    /// Whether `key` is the reserved attach/detach chord.
-    fn is_focus_chord(key: KeyEvent) -> bool {
-        key.modifiers.contains(KeyModifiers::CONTROL)
-            && key.code == crossterm::event::KeyCode::Char(FOCUS_CHORD)
-    }
-
     /// Take the keyboard back from whatever harness has it.
     ///
     /// Safe to call when nothing is attached; that is the common case on the
@@ -40,7 +39,7 @@ impl App {
     /// shortcut is not one.
     pub(super) fn handle_harness_key(&mut self, key: KeyEvent) -> bool {
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
-            if Self::is_focus_chord(key) {
+            if is_focus_chord(key) {
                 self.release_harness();
                 self.set_status(format!(
                     "Released the harness · {FOCUS_CHORD_LABEL} to type again"
@@ -50,7 +49,7 @@ impl App {
             self.type_into_harness(&session, key);
             return true;
         }
-        if Self::is_focus_chord(key) {
+        if is_focus_chord(key) {
             self.attach_to_pane_harness();
             // Consumed either way: the chord is reserved, so it must not fall
             // through to a tab binding just because there was nothing to attach

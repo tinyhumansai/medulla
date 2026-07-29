@@ -38,16 +38,16 @@ mod session_tests;
 
 pub use types::{HarnessFocus, LocalHarnesses};
 
-/// The chord that hands the keyboard to a harness, and takes it back.
-///
-/// One key for both directions, and it is `Ctrl-]` for the same reason telnet
-/// chose it: no full-screen program binds it, so it can be reserved without
-/// taking anything away from the harness. Every *other* key belongs to whoever
-/// currently has focus — which is what makes an attached pane a real terminal
-/// rather than a text box with opinions.
-pub const FOCUS_CHORD: char = ']';
-
 /// How the focus chord is written in hints and titles.
+///
+/// The chord itself is `Ctrl-]`, chosen for the same reason telnet chose it: no
+/// full-screen program binds it, so it can be reserved without taking anything
+/// away from the harness. Every *other* key belongs to whoever currently has
+/// focus — which is what makes an attached pane a real terminal rather than a
+/// text box with opinions.
+///
+/// Recognising it is [`keys::is_focus_chord`], not a character comparison:
+/// terminals do not deliver this key the way it is written.
 pub const FOCUS_CHORD_LABEL: &str = "Ctrl-]";
 
 impl LocalHarnesses {

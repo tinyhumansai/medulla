@@ -21,6 +21,24 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+/// Whether `key` is the reserved attach/detach chord, `Ctrl-]`.
+///
+/// Two spellings, because a terminal has two ways of telling us. Under the
+/// legacy encoding the operator's `Ctrl-]` arrives as the single byte `0x1D`,
+/// and crossterm decodes the `0x1C..=0x1F` block by counting up from `'4'` —
+/// so it surfaces as `Ctrl+'5'`, never as `Ctrl+']'`. Under the kitty keyboard
+/// protocol the real key is reported and it arrives as `Ctrl+']'`. Matching only
+/// the second is the mistake this function exists to prevent: the chord then
+/// silently does nothing on every ordinary terminal.
+///
+/// The cost is that `Ctrl-5` is also the chord on legacy terminals. That is not
+/// a choice we can make differently — both keys send the same byte, so nothing
+/// downstream can tell them apart.
+pub fn is_focus_chord(key: KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char(']') | KeyCode::Char('5'))
+}
+
 /// Encode one key press as the bytes a terminal would send for it.
 ///
 /// Returns `None` for a key with no terminal representation — modifier presses

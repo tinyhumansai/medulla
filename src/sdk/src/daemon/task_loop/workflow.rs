@@ -323,6 +323,13 @@ impl DaemonRuntime {
         };
         let workflow_id = workflow_id.to_string();
         let trigger = EvolveTrigger::Failure(run_id.to_string());
+        // `--once` waits on the same counter as inbound tasks. Register the
+        // detached review before spawning it so the daemon cannot observe an
+        // idle gap and exit between the workflow reply and this turn.
+        self.inner
+            .inflight_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let runtime = self.clone();
         tokio::spawn(async move {
             match session.evolve(&workflow_id, trigger, None).await {
                 Ok(outcome) if outcome.skipped => {
@@ -338,6 +345,14 @@ impl DaemonRuntime {
                     tracing::warn!(workflow = %workflow_id, "review failed: {err}")
                 }
             }
+            if runtime
+                .inner
+                .inflight_count
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+                == 1
+            {
+                runtime.inner.inflight_idle.notify_waiters();
+            }
         });
     }
 
@@ -345,9 +360,13 @@ impl DaemonRuntime {
     /// unreadable.
     fn evolve_settings(&self) -> EvolveConfig {
         let cwd = std::path::Path::new(&self.inner.config.workspace);
-        crate::config::load_config(None, &self.inner.config.env, cwd)
-            .map(|loaded| EvolveConfig::from_config(&loaded.config.workflows))
-            .unwrap_or_default()
+        crate::config::load_config(
+            crate::config::explicit_config_from_env(&self.inner.config.env),
+            &self.inner.config.env,
+            cwd,
+        )
+        .map(|loaded| EvolveConfig::from_config(&loaded.config.workflows))
+        .unwrap_or_default()
     }
 
     /// Capability settings for workflows run on this worker.
@@ -359,9 +378,13 @@ impl DaemonRuntime {
     fn workflow_settings(&self) -> Arc<CapabilitySettings> {
         let home = crate::home::medulla_home(&self.inner.config.env);
         let cwd = std::path::Path::new(&self.inner.config.workspace);
-        let mut settings = crate::config::load_config(None, &self.inner.config.env, cwd)
-            .map(|loaded| CapabilitySettings::from_config(&loaded.config.workflows, &home))
-            .unwrap_or_else(|_| CapabilitySettings::rooted_at(home));
+        let mut settings = crate::config::load_config(
+            crate::config::explicit_config_from_env(&self.inner.config.env),
+            &self.inner.config.env,
+            cwd,
+        )
+        .map(|loaded| CapabilitySettings::from_config(&loaded.config.workflows, &home))
+        .unwrap_or_else(|_| CapabilitySettings::rooted_at(home));
         // The daemon's own workspace, which is the directory it serves tasks
         // for — the same one an `agent` node's harness session runs in.
         settings.workspace = self.inner.config.workspace.clone();

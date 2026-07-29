@@ -63,6 +63,26 @@ impl App {
             return None;
         }
 
+        // A picker may open the ordinary inline prompt to edit one of its
+        // values. Route that prompt first while leaving the picker behind it,
+        // ready to resume once the edit is submitted or cancelled.
+        if self.prompt.is_some() {
+            if ctrl && k.code == KeyCode::Char('c') {
+                self.should_quit = true;
+            } else {
+                let action = edit_prompt(self.prompt.as_mut().expect("prompt is present"), k);
+                match action {
+                    PromptAction::Cancel => {
+                        self.prompt = None;
+                        self.set_status("Cancelled");
+                    }
+                    PromptAction::Submit => return self.submit_prompt(),
+                    PromptAction::Editing => {}
+                }
+            }
+            return None;
+        }
+
         // The harness picker owns navigation while open.
         if self.harness_picker.is_some() {
             if ctrl && k.code == KeyCode::Char('c') {
@@ -96,24 +116,6 @@ impl App {
                     }
                 }
                 _ => {}
-            }
-            return None;
-        }
-
-        // The inline prompt (Workers add/edit, Agents answer) owns input while open.
-        if self.prompt.is_some() {
-            if ctrl && k.code == KeyCode::Char('c') {
-                self.should_quit = true;
-            } else {
-                let action = edit_prompt(self.prompt.as_mut().expect("prompt is present"), k);
-                match action {
-                    PromptAction::Cancel => {
-                        self.prompt = None;
-                        self.set_status("Cancelled");
-                    }
-                    PromptAction::Submit => return self.submit_prompt(),
-                    PromptAction::Editing => {}
-                }
             }
             return None;
         }

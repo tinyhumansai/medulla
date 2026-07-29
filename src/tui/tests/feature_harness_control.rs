@@ -202,6 +202,27 @@ fn the_picker_cancels_without_starting_anything() {
 }
 
 #[test]
+fn the_picker_directory_can_be_edited_before_starting() {
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+
+    let _ = app.on_event(ctrl('t'));
+    let _ = app.on_event(key(KeyCode::Char('e')));
+    type_str(&mut app, "tmp");
+    let _ = app.on_event(key(KeyCode::Enter));
+
+    let out = render(&mut app, 140, 44);
+    assert!(out.contains("/tmp"), "the picker must show the edited path: {out}");
+    assert!(sessions.rows().is_empty(), "editing must not start the harness");
+
+    let _ = app.on_event(key(KeyCode::Enter));
+    wait_for("the harness to open", || sessions.rows().len() == 1);
+    assert_eq!(sessions.rows().remove(0).cwd, "/tmp");
+
+    sessions.shutdown();
+}
+
+#[test]
 fn ctrl_g_hands_a_harness_over_and_back() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());

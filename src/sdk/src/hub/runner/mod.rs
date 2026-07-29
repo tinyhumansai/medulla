@@ -49,6 +49,16 @@ const ACK_WINDOW: Duration = Duration::from_secs(12);
 /// crashed or vanished worker (which stops sending frames) cannot pin its
 /// correlation entry and spawned handler forever: without this bound, a worker
 /// that acks and then dies before sending a terminal frame would leak.
+///
+/// It is deliberately shorter than the runtime a worker permits a task, and that
+/// is only sound because the worker heartbeats: a task waiting for a harness
+/// slot, or grinding through one long tool call, emits a status frame every
+/// heartbeat period (a small multiple of its status throttle, capped at 60s)
+/// even when the harness itself says nothing. Silence past this window therefore
+/// means the worker is gone, not that the work is slow. Shortening the worker's
+/// heartbeat guarantee without shortening this window — or lengthening it past
+/// this window — brings back the failure this pairing exists to prevent: healthy
+/// dispatches reaped as `bridge task timed out`.
 const IDLE_WINDOW: Duration = Duration::from_secs(240);
 
 /// How many times to reset the Signal session + resend before giving up. Covers
@@ -400,11 +410,20 @@ async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) 
 }
 
 /// Map the oneshot outcome into a [`RunError`].
+///
+/// A worker's load-shed rejection is separated out here rather than at the far
+/// end: it arrives as an ordinary `error` frame, but it means "I did not try
+/// this", not "this failed". Recognised by the prefix the daemon builds every
+/// such message from, so the two ends share one constant instead of a copied
+/// literal.
 fn settle(
     terminal: Result<Result<TaskOutcome, String>, oneshot::error::RecvError>,
 ) -> Result<TaskOutcome, RunError> {
     match terminal {
         Ok(Ok(outcome)) => Ok(outcome),
+        Ok(Err(msg)) if msg.starts_with(crate::daemon::CAPACITY_REJECTION_PREFIX) => {
+            Err(RunError::Busy(msg))
+        }
         Ok(Err(msg)) => Err(RunError::Worker(msg)),
         Err(_) => Err(RunError::Transport("dispatch waiter dropped".into())),
     }

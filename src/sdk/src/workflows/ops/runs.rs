@@ -131,7 +131,8 @@ pub fn undo(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowE
 /// One run record.
 pub fn get_run(store: &Arc<dyn WorkflowStore>, run_id: &str) -> Result<Value, WorkflowError> {
     let record = crate::workflows::require_run(store.as_ref(), run_id)?;
-    Ok(serde_json::to_value(record).unwrap_or(Value::Null))
+    serde_json::to_value(record)
+        .map_err(|err| WorkflowError::Engine(format!("could not serialize run '{run_id}': {err}")))
 }
 
 /// Cancel a run executing in *this* process.
@@ -152,6 +153,8 @@ pub fn cancel_run(run_id: &str) -> Value {
     json!({
         "cancelled": false,
         "runId": run_id,
-        "reason": "no run with this id is executing in this process; a run started by another                    process must be cancelled where it runs (the TUI that started it, or an                    orchestrator abort to the daemon executing it)",
+        "reason": "no run with this id is executing in this process; a run started by another \
+                   process must be cancelled where it runs (the TUI that started it, or an \
+                   orchestrator abort to the daemon executing it)",
     })
 }

@@ -384,7 +384,9 @@ pub async fn resume_workflow(
         Some(earlier) => merge_diagnoses(earlier, resumed, &record.steps[..earlier_steps]),
         None => resumed,
     });
-    record.summary = final_summary(&record, &observer);
+    // The observer only saw this resumed leg; the record holds the complete
+    // pre-gate and post-gate history.
+    record.summary = Some(summary::summarize(&record));
 
     finalizer.disarm();
     context.store.record_run(&record)?;

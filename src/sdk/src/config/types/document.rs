@@ -44,6 +44,18 @@ pub struct TuiConfig {
     /// Whether this device also hosts the tasks the orchestrator hands out.
     #[serde(default)]
     pub host: HostSection,
+    /// Additional hosts on this same machine, each working in its own directory.
+    ///
+    /// One laptop routinely holds several unrelated repos, and `[host]` can only
+    /// name one working directory — its `workspaces` list is advisory, so a task
+    /// still runs in the primary. Each entry here binds its own device-local
+    /// address and registers as its own agent, so the orchestrator can be told
+    /// *which project* to work in rather than only *which machine*.
+    ///
+    /// Additive: `[host]` keeps its meaning, and a config with no `[[hosts]]`
+    /// behaves exactly as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<HostSection>,
     /// How operator-started harnesses behave.
     #[serde(default)]
     pub harness: HarnessSection,
@@ -84,6 +96,7 @@ impl Default for TuiConfig {
             workflows: WorkflowsConfig::default(),
             hub: HubSection::default(),
             host: HostSection::default(),
+            hosts: Vec::new(),
             harness: HarnessSection::default(),
             router: None,
             budget: None,

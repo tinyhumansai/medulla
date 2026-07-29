@@ -101,7 +101,7 @@ fn a_saved_roster_comes_back_on_the_next_launch() {
         "nothing remembered before anything is saved"
     );
 
-    let sink = super::roster_sink(home, medulla::hub::stderr_log(), String::new());
+    let sink = super::roster_sink(home, medulla::hub::stderr_log(), Vec::new());
     sink(&[
         worker("alpha", "3Hob1Fxu", true),
         worker("beta", "@peer", false),
@@ -121,7 +121,7 @@ fn an_explicit_environment_roster_is_not_merged_with_the_saved_one() {
     // quietly re-add a worker the operator had removed.
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
-    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[worker(
+    super::roster_sink(home, medulla::hub::stderr_log(), Vec::new())(&[worker(
         "saved",
         "addr-saved",
         false,
@@ -144,7 +144,7 @@ fn saving_over_a_config_leaves_its_other_sections_alone() {
     )
     .expect("seed");
 
-    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[worker(
+    super::roster_sink(home, medulla::hub::stderr_log(), Vec::new())(&[worker(
         "alpha", "addr", false,
     )]);
 
@@ -159,7 +159,7 @@ fn an_unwritable_roster_path_does_not_take_the_hub_down() {
     let sink = super::roster_sink(
         std::path::Path::new("/proc/nonexistent/nope"),
         medulla::hub::stderr_log(),
-        String::new(),
+        Vec::new(),
     );
     sink(&[worker("alpha", "addr", false)]);
 }
@@ -171,7 +171,11 @@ fn the_device_local_host_is_never_written_into_the_saved_roster() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
 
-    super::roster_sink(home, medulla::hub::stderr_log(), "this-device".to_string())(&[
+    super::roster_sink(
+        home,
+        medulla::hub::stderr_log(),
+        vec!["this-device".to_string()],
+    )(&[
         worker("this-device", "this-device", false),
         worker("beta", "3Hob1Fxu", false),
     ]);
@@ -190,7 +194,7 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
     // Write it the way a build without the filter would have.
-    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[
+    super::roster_sink(home, medulla::hub::stderr_log(), Vec::new())(&[
         worker("this-device", "this-device", false),
         worker("beta", "3Hob1Fxu", false),
     ]);
@@ -208,9 +212,9 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
         Some(super::LocalDispatch {
             network: medulla::bridge::LocalBridgeNetwork::new(),
             hub_address: "medulla-orchestrator".to_string(),
-            host_address: "this-device".to_string(),
+            host_addresses: vec!["this-device".to_string()],
             // Hosting is off: nothing is bound at `this-device` this run.
-            host: None,
+            hosts: Vec::new(),
         }),
         Some(&session),
     )

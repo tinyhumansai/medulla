@@ -167,7 +167,7 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
     );
     let harnesses = LocalHarnesses {
         sessions: sessions.clone(),
-        runtime: runtime.clone(),
+        runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
         env: HashMap::new(),
         workspace: "/".to_string(),
@@ -214,7 +214,7 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
     );
     let harnesses = LocalHarnesses {
         sessions: sessions.clone(),
-        runtime: runtime.clone(),
+        runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
         env: HashMap::new(),
         workspace: "/".to_string(),
@@ -249,7 +249,7 @@ async fn a_task_that_names_no_session_shows_no_screen_rather_than_someone_elses(
     let runtime = runtime_over(sessions.clone(), "sleep 30");
     let harnesses = LocalHarnesses {
         sessions: sessions.clone(),
-        runtime: runtime.clone(),
+        runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
         env: HashMap::new(),
         workspace: "/".to_string(),

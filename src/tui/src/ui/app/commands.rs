@@ -12,7 +12,7 @@ use medulla::runtime::{WorkerInfo, WorkerOp};
 
 use super::types::{
     tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_HELP,
-    SP_USAGE,
+    SP_MEMORY, SP_USAGE,
 };
 
 impl App {
@@ -120,6 +120,10 @@ impl App {
         match p.kind {
             PromptKind::HostAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
+                    // Land on the list the add is about. Staying on Add Host
+                    // leaves the operator on a page describing work they have
+                    // just finished, with no sight of whether it landed.
+                    self.focus_routing_subpage("Hosts");
                     self.set_status("Adding worker…");
                     Some(Cmd::WorkerOp(op))
                 }
@@ -150,6 +154,7 @@ impl App {
                 self.set_status("Pick a harness · Enter start · Esc cancel");
                 None
             }
+            PromptKind::LocalHostWorkspace(harness) => self.add_local_host(harness, &text),
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text));

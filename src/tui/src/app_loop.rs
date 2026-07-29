@@ -390,7 +390,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             hub_logs.push(format!("custom harnesses: cannot load ({error})"));
             Vec::new()
         });
-    let local_host = match crate::local_host::options_from_config_with_custom(
+    let local_hosts = match crate::local_host::options_from_config_with_custom(
         &loaded.config.host,
         &env,
         loaded.config.router.clone(),
@@ -398,26 +398,38 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         Some(hub_logs.sink()),
         &custom_harnesses,
     )
-    .and_then(|options| {
-        crate::local_host::start(
+    .map(|options| {
+        crate::local_host::start_all(
             &loaded.config.host,
+            &loaded.config.hosts,
             &env,
             &local_network,
             options,
             harness_sessions.clone(),
         )
     }) {
-        Ok(host) => host,
+        Ok((hosts, problems)) => {
+            for problem in problems {
+                // Reported per host: one mistyped directory should cost that
+                // host, not hosting altogether, and the operator needs to know
+                // *which* one is missing rather than that something is.
+                hub_logs.push(format!(
+                    "host: not hosting one of this device's directories ({problem})"
+                ));
+                startup_status.get_or_insert(format!("not hosting one directory ({problem})"));
+            }
+            hosts
+        }
         Err(e) => {
             // Not fatal: the orchestrator still drives remote workers. But it is
             // the difference between "nothing happens" and "nothing happens
             // *here*", so it goes on the status line rather than only the log.
             hub_logs.push(format!("host: not hosting on this device ({e})"));
             startup_status.get_or_insert(format!("not hosting on this device ({e})"));
-            None
+            Vec::new()
         }
     };
-    if let Some(host) = &local_host {
+    for host in &local_hosts {
         hub_logs.push(format!(
             "host: serving [{}] as {} in {}",
             host.providers()
@@ -432,25 +444,75 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Only meaningful with a host: with hosting off nothing runs here, so there
     // is no local screen to resolve and the Agents tab keeps its remote/
     // transcript behaviour unchanged.
-    let local_harnesses =
-        local_host
-            .as_ref()
-            .map(|host| medulla_tui::ui::harness_pane::LocalHarnesses {
-                sessions: harness_sessions.clone(),
-                runtime: host.runtime(),
-                hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
-                env: env.clone(),
-                workspace: host.workspace().to_string(),
-                providers: host.providers().to_vec(),
-                router: loaded.config.router.clone(),
-            });
+    let hosting = !local_hosts.is_empty();
+    let host_runtimes = std::sync::Arc::new(std::sync::Mutex::new(
+        local_hosts
+            .iter()
+            .map(|host| host.runtime())
+            .collect::<Vec<_>>(),
+    ));
+    // The started hosts live here for the session: dropping a `LocalHost` stops
+    // it, so this list is what keeps them running — and it is shared so a host
+    // added later joins the same list rather than a copy of it.
+    // `workspace` and `providers` stay singular: they are the default a
+    // *manually started* harness inherits, and the primary is the right default
+    // for that. Only task resolution needs every host, which is `runtimes`.
+    // Read before the list moves into the shared handle below.
+    let primary_defaults = local_hosts
+        .first()
+        .map(|primary| (primary.workspace().to_string(), primary.providers().to_vec()));
+    let started_hosts = std::sync::Arc::new(std::sync::Mutex::new(local_hosts));
+    let local_harnesses = primary_defaults.map(|(workspace, providers)| {
+        medulla_tui::ui::harness_pane::LocalHarnesses {
+            sessions: harness_sessions.clone(),
+            runtimes: host_runtimes.clone(),
+            hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
+            env: env.clone(),
+            workspace,
+            providers,
+            router: loaded.config.router.clone(),
+        }
+    });
+    // Only meaningful while this device hosts: with hosting off there is no bus
+    // binding or session manager to hand a new host.
+    let local_host_spawner = hosting
+        .then(|| {
+            crate::local_host::options_from_config_with_custom(
+                &loaded.config.host,
+                &env,
+                loaded.config.router.clone(),
+                loaded.config.budget.clone(),
+                Some(hub_logs.sink()),
+                &custom_harnesses,
+            )
+            .ok()
+            .map(|options| {
+                crate::local_host::LocalHostSpawner::new(
+                    local_network.clone(),
+                    harness_sessions.clone(),
+                    options,
+                    env.clone(),
+                    host_runtimes.clone(),
+                    started_hosts.clone(),
+                )
+            })
+        })
+        .flatten();
     let local_dispatch = crate::hub_relay::LocalDispatch {
         network: local_network,
         hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
         // Always known, even with hosting off — it is what identifies a
         // remembered local roster entry that must not be inherited.
-        host_address: crate::local_host::host_address(&loaded.config.host),
-        host: local_host.as_ref().map(|host| host.spec().clone()),
+        host_addresses: crate::local_host::all_host_addresses(
+            &loaded.config.host,
+            &loaded.config.hosts,
+        ),
+        hosts: started_hosts
+            .lock()
+            .expect("started hosts")
+            .iter()
+            .map(|host| host.spec().clone())
+            .collect(),
     };
 
     // Start the hub unconditionally. It used to be gated on an authenticated
@@ -475,10 +537,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // they would then have to trigger by relaunching.
     let mut status = startup_status.or(tinyplace_status).or(log_note);
     let result = loop {
+        // Read before the wiring is built: holding the lock into an awaited call
+        // would park every other host operation behind this session for as long
+        // as it runs.
+        let primary_observation = started_hosts
+            .lock()
+            .expect("started hosts")
+            .first()
+            .map(|host| host.observation());
         let exit = run(
             &mut terminal,
             runtime.clone(),
             SessionWiring {
+                local_hosts: local_host_spawner.clone(),
                 loaded: loaded.clone(),
                 startup_status: status.take(),
                 tinyplace_obs: tinyplace_obs.clone(),
@@ -487,7 +558,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 account: account.clone(),
                 sharing: sharing.take(),
                 onboarding_path: active_config_path.clone(),
-                host: local_host.as_ref().map(|host| host.observation()),
+                // The primary's counters only. The Overview device panel shows
+                // one host, so extras are served and dispatchable but not yet
+                // reflected there — a UI gap, not a hosting one.
+                host: primary_observation.clone(),
                 harnesses: local_harnesses.clone(),
             },
         )

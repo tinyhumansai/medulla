@@ -102,6 +102,10 @@ pub(crate) enum SessionExit {
 pub(crate) struct SessionWiring {
     /// The loaded configuration for this session.
     pub loaded: medulla::config::LoadedConfig,
+    /// Starts a host on this device after launch. `None` when this device is
+    /// not hosting — there is then no bus binding or session manager to hand a
+    /// new host, and the command says so rather than half-starting one.
+    pub local_hosts: Option<crate::local_host::LocalHostSpawner>,
     /// A note to show on the status line at startup, if any.
     pub startup_status: Option<String>,
     /// The tiny.place presence observation, when that service is running.

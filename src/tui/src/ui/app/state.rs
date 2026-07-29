@@ -87,6 +87,9 @@ impl App {
             wf: Default::default(),
             #[cfg(feature = "workflows")]
             workflow_store_override: None,
+            add_host_kind: 0,
+            add_host_harness: 0,
+            add_host_kind_chosen: false,
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index,

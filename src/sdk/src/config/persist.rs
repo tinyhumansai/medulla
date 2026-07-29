@@ -41,6 +41,17 @@ pub fn persist_setting(
     write_document(path, &doc)
 }
 
+/// Replace a top-level key, preserving every other key and section.
+///
+/// Distinct from [`persist_setting`], which writes *into* a `[section]`. An
+/// array-of-tables such as `[[hosts]]` is a root-level value, and nesting it
+/// under a section would silently produce a key nothing reads.
+pub fn persist_root_setting(path: &Path, key: &str, value: toml::Value) -> anyhow::Result<()> {
+    let mut doc = read_document(path)?;
+    doc.insert(key.to_string(), value);
+    write_document(path, &doc)
+}
+
 /// Replace one complete TOML section while preserving every other section.
 ///
 /// This is the reusable boundary for components such as the theme editor whose
@@ -185,6 +196,64 @@ pub fn persist_workflow_workspaces(path: &Path, workspaces: &[String]) -> anyhow
                 .collect(),
         ),
     )
+}
+
+/// Replace the extra hosts this machine runs (`[[hosts]]`).
+///
+/// Replacing rather than merging is what makes a removal durable: a merge would
+/// leave a host the operator deleted still on disk, and it would bind an address
+/// and start a harness again on the next launch.
+///
+/// Only the fields that make a host distinct are written. The rest are left to
+/// the section defaults, so a config stays readable and a later change to those
+/// defaults reaches hosts declared today.
+pub fn persist_local_hosts(
+    path: &Path,
+    hosts: &[crate::config::HostSection],
+) -> anyhow::Result<()> {
+    let rows: Vec<toml::Value> = hosts
+        .iter()
+        .map(|host| {
+            let mut row = toml::map::Map::new();
+            if !host.name.trim().is_empty() {
+                row.insert("name".into(), toml::Value::String(host.name.clone()));
+            }
+            // The section default is not a choice, so writing it back would
+            // turn "no address, derive one" into "bind the primary's address"
+            // — and every extra would collide on the next launch. Only an
+            // address the operator actually picked is persisted.
+            let address = host.address.trim();
+            if !address.is_empty() && address != crate::config::HostSection::default().address {
+                row.insert("address".into(), toml::Value::String(address.to_string()));
+            }
+            if !host.workspace.trim().is_empty() {
+                row.insert(
+                    "workspace".into(),
+                    toml::Value::String(host.workspace.clone()),
+                );
+            }
+            if !host.providers.is_empty() {
+                row.insert(
+                    "providers".into(),
+                    toml::Value::Array(
+                        host.providers
+                            .iter()
+                            .cloned()
+                            .map(toml::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+            if !host.default_provider.trim().is_empty() {
+                row.insert(
+                    "defaultProvider".into(),
+                    toml::Value::String(host.default_provider.clone()),
+                );
+            }
+            toml::Value::Table(row)
+        })
+        .collect();
+    persist_root_setting(path, "hosts", toml::Value::Array(rows))
 }
 
 /// Replace the extra directories this device advertises (`[host].workspaces`).

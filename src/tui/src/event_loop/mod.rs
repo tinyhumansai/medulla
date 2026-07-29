@@ -43,6 +43,7 @@ pub(crate) async fn run(
 ) -> anyhow::Result<SessionExit> {
     let SessionWiring {
         loaded,
+        local_hosts,
         startup_status,
         tinyplace_obs,
         config_path,
@@ -95,7 +96,13 @@ pub(crate) async fn run(
             maybe_event = reader.next() => {
                 if let Some(Ok(ev)) = maybe_event {
                     if let Some(cmd) = app.on_event(ev) {
-                        run_cmd(cmd, &runtime, &app.loaded.config.workflows, &msg_tx);
+                        run_cmd(
+                            cmd,
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
                     }
                 }
             }
@@ -103,7 +110,13 @@ pub(crate) async fn run(
                 if recv.is_ok() {
                     app.refresh_snapshot();
                     if should_refresh_context(&mut app) {
-                        run_cmd(Cmd::InspectContext, &runtime, &app.loaded.config.workflows, &msg_tx);
+                        run_cmd(
+                            Cmd::InspectContext,
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
                     }
                 }
             }
@@ -152,7 +165,13 @@ pub(crate) async fn run(
                         // sees the graph this turn left behind.
                         let queued = app.copilot_finished(&workflow, reply, changes, created);
                         if let Some(cmd) = queued {
-                            run_cmd(cmd, &runtime, &app.loaded.config.workflows, &msg_tx);
+                            run_cmd(
+                                cmd,
+                                &runtime,
+                                &app.loaded.config.workflows,
+                                &msg_tx,
+                                local_hosts.as_ref(),
+                            );
                         }
                     }
                     #[cfg(feature = "workflows")]
@@ -167,7 +186,13 @@ pub(crate) async fn run(
                         }
                         // Pull the newly selected row's comments in the same beat.
                         if let Some(cmd) = app.feedback_detail_cmd() {
-                            run_cmd(cmd, &runtime, &app.loaded.config.workflows, &msg_tx);
+                            run_cmd(
+                                cmd,
+                                &runtime,
+                                &app.loaded.config.workflows,
+                                &msg_tx,
+                                local_hosts.as_ref(),
+                            );
                         }
                     }
                     AppMsg::FeedbackComments { id, comments } => {
@@ -190,6 +215,7 @@ pub(crate) async fn run(
                             &runtime,
                             &app.loaded.config.workflows,
                             &msg_tx,
+                            local_hosts.as_ref(),
                         );
                     }
                     AppMsg::UpdateAvailable(notice) => {

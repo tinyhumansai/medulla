@@ -54,7 +54,11 @@ impl LocalHarnesses {
     /// pane stops claiming a screen for work that is over rather than showing a
     /// dead one indefinitely.
     pub fn session_for_task(&self, task_id: &str) -> Option<String> {
-        self.runtime.session_for_task(&self.hub_address, task_id)
+        self.runtimes
+            .lock()
+            .expect("local harness runtimes")
+            .iter()
+            .find_map(|runtime| runtime.session_for_task(&self.hub_address, task_id))
     }
 
     /// The current screen of `session_id`, ready to render.

@@ -37,7 +37,8 @@ pub use custom_harnesses::{
 pub use load::{default_tinyplace_config, explicit_config_from_env, load_config, CONFIG_PATH_ENV};
 pub use persist::{
     clear_setting, persist_custom_harnesses, persist_host_workspaces, persist_hub_workers,
-    persist_routing_strategy, persist_section, persist_setting,
+    persist_local_hosts, persist_root_setting, persist_routing_strategy, persist_section,
+    persist_setting,
     persist_subscription_routing_strategy, persist_tinyplace_peers, persist_welcome_completed,
     persist_workflow_workspaces,
 };

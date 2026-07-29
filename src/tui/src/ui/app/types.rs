@@ -37,13 +37,17 @@ use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 /// exists, and a workflow is *work* — a plan they read, edit, and run, with a
 /// graph to navigate and a copilot to edit it by. Three panes' worth of surface
 /// does not fit in a subpage of something else.
+/// `Tasks` and `Memory` are commented out rather than deleted: the code behind
+/// both still builds and their render paths are intact, so restoring either is
+/// putting one line back. Memory is out of the build entirely (its tab said
+/// "coming soon"); Tasks duplicates what the Agents tab already shows per lane.
 #[cfg(feature = "workflows")]
 pub const TABS: [&str; 7] = [
     "Overview",
     "Agents",
     "Workflows",
     "TokenMaxxxing",
-    "Routing",
+    "Hosts",
     "Feedback",
     "Settings",
 ];
@@ -55,7 +59,7 @@ pub const TABS: [&str; 6] = [
     "Overview",
     "Agents",
     "TokenMaxxxing",
-    "Routing",
+    "Hosts",
     "Feedback",
     "Settings",
 ];
@@ -75,20 +79,18 @@ pub const TABS: [&str; 6] = [
 /// beside the lanes running on it. These pages are the *management* surfaces —
 /// what you register, authenticate, and choose — not the picture. Workflows is
 /// not here either: it is a tab of its own (see [`TABS`]).
-pub const ROUTING_SUBPAGES: [&str; 6] = [
-    "Hosts",
-    "Harnesses",
-    "Workspaces",
-    "Agent Templates",
-    "Add Host",
-    "Strategies",
-];
+/// Harnesses, Workspaces, Agent Templates and Strategies are commented out
+/// rather than deleted: their draw arms, key handlers and state all still
+/// build, so restoring one is putting its name back in this list and renumbering.
+pub const ROUTING_SUBPAGES: [&str; 2] = ["Hosts", "Add Host"];
 
 pub(super) const RP_HOSTS: usize = 0;
-pub(super) const RP_HARNESSES: usize = 1;
-pub(super) const RP_WORKSPACES: usize = 2;
-pub(super) const RP_TEMPLATES: usize = 3;
-pub(super) const RP_ADD_HOST: usize = 4;
+pub(super) const RP_ADD_HOST: usize = 1;
+// Past the end of `ROUTING_SUBPAGES`, so the nav clamp cannot reach them and
+// their arms are unreachable — the pages are off without their code rotting.
+pub(super) const RP_HARNESSES: usize = 2;
+pub(super) const RP_WORKSPACES: usize = 3;
+pub(super) const RP_TEMPLATES: usize = 4;
 pub(super) const RP_STRATEGIES: usize = 5;
 
 /// The TokenMaxxxing tab's sidebar pages.
@@ -167,11 +169,12 @@ pub(super) const SUBSCRIPTION_STRATEGIES: [SubscriptionStrategyOption; 3] = [
 ///
 /// This is the flat, selectable list [`App::settings_index`] indexes into.
 /// [`SETTINGS_GROUPS`] overlays the display-only headings.
-pub const SETTINGS_SUBPAGES: [&str; 8] = [
+pub const SETTINGS_SUBPAGES: [&str; 9] = [
     "Usage",
     "Appearance",
     "Config",
     "Feedback",
+    "Memory",
     "Trace",
     "Context",
     "Account",
@@ -194,10 +197,52 @@ pub(super) const SP_USAGE: usize = 0;
 pub(super) const SP_APPEARANCE: usize = 1;
 pub(super) const SP_CONFIG: usize = 2;
 pub(super) const SP_FEEDBACK: usize = 3;
-pub(super) const SP_TRACE: usize = 4;
-pub(super) const SP_CONTEXT: usize = 5;
-pub(super) const SP_ACCOUNT: usize = 6;
-pub(super) const SP_HELP: usize = 7;
+/// Persona memory. A settings page rather than a tab: the layer is out of the
+/// build, so it describes something the operator may switch on later rather
+/// than a surface they work in — which is what the rest of GENERAL is.
+pub(super) const SP_MEMORY: usize = 4;
+pub(super) const SP_TRACE: usize = 5;
+pub(super) const SP_CONTEXT: usize = 6;
+pub(super) const SP_ACCOUNT: usize = 7;
+pub(super) const SP_HELP: usize = 8;
+
+/// Which kind of host the Add Host page is collecting.
+///
+/// The two differ in everything that matters — a remote is reached by address
+/// over tiny.place, a local one by a directory on this machine — so asking
+/// which first is what lets each ask only for what it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddHostKind {
+    /// A directory on this machine, served in-process.
+    Local,
+    /// Another machine, reached by its tiny.place address.
+    Remote,
+}
+
+impl AddHostKind {
+    /// The choices in the order they are offered.
+    pub const ALL: [AddHostKind; 2] = [AddHostKind::Local, AddHostKind::Remote];
+
+    /// The one-word name shown in the picker.
+    pub fn label(self) -> &'static str {
+        match self {
+            AddHostKind::Local => "Local",
+            AddHostKind::Remote => "Remote",
+        }
+    }
+
+    /// What choosing this actually does, so the picker explains itself.
+    pub fn description(self) -> &'static str {
+        match self {
+            AddHostKind::Local => {
+                "a directory on this machine · runs in this process, watchable and typeable"
+            }
+            AddHostKind::Remote => {
+                "another machine · reached by its tiny.place address, needs a contact edge"
+            }
+        }
+    }
+}
 
 /// The index of a tab by name, or 0 if unknown. Keeps tab jumps robust as the tab
 /// list grows.
@@ -333,6 +378,11 @@ pub enum Cmd {
     Logout,
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
+    /// Start a host on this device now, and register it with the hub.
+    ///
+    /// Carries the declaration rather than an index into config: the config is
+    /// the app's, and the loop that can actually start a host is not.
+    StartLocalHost(Box<medulla::config::HostSection>),
     /// Retarget the live screen subscription: stop watching one task, start
     /// watching another. Both halves ride one command so the change is atomic
     /// from the loop's point of view — a stop that landed without its start
@@ -524,6 +574,9 @@ pub(super) enum PromptKind {
     CustomHarnessEdit(String),
     /// Set the directory the harness picker will start its harness in.
     HarnessCwd,
+    /// The working directory for a new local host, with the harness already
+    /// chosen. Blank accepts the default — where this process is running.
+    LocalHostWorkspace(medulla::tinyplace::HarnessProvider),
     /// Answer a pending sub-agent question.
     AnswerQuestion {
         /// The cycle the question belongs to.
@@ -690,6 +743,15 @@ pub struct App {
     /// session does.
     #[cfg(feature = "workflows")]
     pub(super) workflow_store_override: Option<Arc<dyn medulla::workflows::WorkflowStore>>,
+    /// Which kind of host the Add Host page is offering — a cursor into
+    /// [`AddHostKind::ALL`].
+    pub(super) add_host_kind: usize,
+    /// Which harness a new local host will run — a cursor into the detected
+    /// provider list.
+    pub(super) add_host_harness: usize,
+    /// Whether the kind picker has been answered, so the arrows move on to the
+    /// harness list rather than re-picking local versus remote.
+    pub(super) add_host_kind_chosen: bool,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.

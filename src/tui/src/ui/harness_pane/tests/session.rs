@@ -76,7 +76,9 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
     });
     LocalHarnesses {
         sessions,
-        runtime: medulla::daemon::DaemonRuntime::new(config, run_task, send),
+        runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
+            medulla::daemon::DaemonRuntime::new(config, run_task, send),
+        ])),
         hub_address: "medulla-orchestrator".to_string(),
         env: HashMap::new(),
         workspace: "/".to_string(),

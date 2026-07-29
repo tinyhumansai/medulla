@@ -65,6 +65,86 @@ pub(crate) fn host_address(config: &HostSection) -> String {
     }
 }
 
+/// Every device-local address a host could bind, running or not.
+///
+/// Known without starting anything, because it comes from the config rather
+/// than from a started host — and it is needed in exactly the case where none
+/// started, to recognise remembered local roster entries and drop them.
+pub(crate) fn all_host_addresses(primary: &HostSection, extras: &[HostSection]) -> Vec<String> {
+    std::iter::once(host_address(primary))
+        .chain(
+            extras
+                .iter()
+                .enumerate()
+                .map(|(index, extra)| extra_host_address(extra, index)),
+        )
+        .collect()
+}
+
+/// The bus address for an extra host, derived from its name when it declared
+/// none of its own.
+///
+/// Two hosts cannot share an address — the second `bind` fails — so an operator
+/// who adds `[[hosts]]` without thinking about addressing would otherwise get
+/// one working host and one startup error. Deriving from the name means the
+/// field is optional in the common case and explicit when it matters.
+fn extra_host_address(config: &HostSection, fallback_index: usize) -> String {
+    // The section default counts as unchosen, not as a choice. `[[hosts]]`
+    // shares `HostSection`, so an entry that names no address inherits the
+    // primary's — and two hosts on one address means the second never binds.
+    // An operator who *typed* the primary's address has made the same mistake,
+    // so both are treated the same way.
+    let chosen = config.address.trim();
+    let chosen = if chosen == HostSection::default().address {
+        ""
+    } else {
+        chosen
+    };
+    match chosen {
+        "" => {
+            let slug = slug_of(&config.name);
+            if slug.is_empty() {
+                format!("local-host-{}", fallback_index + 1)
+            } else {
+                format!("local-{slug}")
+            }
+        }
+        value => value.to_string(),
+    }
+}
+
+/// A lowercase, hyphenated form of `name`, safe to use as a bus address.
+fn slug_of(name: &str) -> String {
+    let mut out = String::new();
+    let mut hyphen = false;
+    for ch in name.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            hyphen = false;
+        } else if !out.is_empty() && !hyphen {
+            out.push('-');
+            hyphen = true;
+        }
+    }
+    out.trim_end_matches('-').to_string()
+}
+
+/// What to call a host that named itself nothing.
+///
+/// The primary is "this device" — it is the machine the operator is looking at.
+/// An extra is named for the directory it works in, because that is the only
+/// thing distinguishing it from the primary.
+pub(crate) fn display_name(config: &HostSection, workspace: &str, primary: bool) -> String {
+    match config.name.trim() {
+        "" if primary => "this device".to_string(),
+        "" => std::path::Path::new(workspace)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| workspace.to_string()),
+        value => value.to_string(),
+    }
+}
+
 /// Translate the `[host]` section into the SDK's start-up options.
 ///
 /// # Errors
@@ -156,13 +236,15 @@ fn parse_provider(name: &str) -> Result<HarnessProvider, String> {
 /// The roster entry describing a host running on this machine.
 ///
 /// Labelled rather than left to the default name so the fleet view can say "this
-/// device" instead of showing a bare address the operator never chose.
-fn spec_for(daemon: &EmbeddedDaemon) -> WorkerSpec {
+/// device" instead of showing a bare address the operator never chose. Extra
+/// hosts get their own name: several hosts on one machine differ only by where
+/// they work, so "this device" three times would describe none of them.
+fn spec_for(daemon: &EmbeddedDaemon, name: &str) -> WorkerSpec {
     let harness = daemon.default_provider().as_str().to_string();
     WorkerSpec {
         id: daemon.address().to_string(),
         address: daemon.address().to_string(),
-        name: "this device".to_string(),
+        name: name.to_string(),
         description: format!(
             "{} on this machine · {}",
             daemon
@@ -214,7 +296,159 @@ pub(crate) fn start(
     if !host_enabled(config, env) {
         return Ok(None);
     }
-    let address = host_address(config);
+    start_at(
+        config,
+        env,
+        network,
+        options,
+        sessions,
+        host_address(config),
+        true,
+    )
+    .map(Some)
+}
+
+/// Starts a host on this device after the app is already running.
+///
+/// Everything a host needs to exist — the in-process bus, the session manager,
+/// the daemon options — is built once at launch and owned by the app loop. A
+/// host declared later has no way to reach any of it, which is why adding one
+/// used to mean restarting. This carries exactly those pieces to wherever the
+/// command is handled.
+///
+/// Cheap to clone: every field is already shared.
+#[derive(Clone)]
+pub(crate) struct LocalHostSpawner {
+    /// The bus the hub dispatches over.
+    network: LocalBridgeNetwork,
+    /// The session manager the UI reads screens from and types into. Shared, so
+    /// a host started now is as watchable as one started at launch.
+    sessions: PtyManager,
+    /// The primary's options, used as the template every extra inherits.
+    options: EmbeddedDaemonOptions,
+    /// The process environment, for provider detection and the host switch.
+    env: HashMap<String, String>,
+    /// The runtimes the harness pane resolves tasks against. A new host's
+    /// runtime is pushed here or its screen would never be found.
+    runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
+    /// The started hosts, kept alive for the session. Dropping a `LocalHost`
+    /// stops it, so a spawner that did not hold them would start a host and
+    /// immediately kill it.
+    started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
+}
+
+impl LocalHostSpawner {
+    /// Build a spawner over the pieces the app loop owns.
+    pub(crate) fn new(
+        network: LocalBridgeNetwork,
+        sessions: PtyManager,
+        options: EmbeddedDaemonOptions,
+        env: HashMap<String, String>,
+        runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
+        started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
+    ) -> Self {
+        Self {
+            network,
+            sessions,
+            options,
+            env,
+            runtimes,
+            started,
+        }
+    }
+
+    /// Start `config` now and return the roster entry describing it.
+    ///
+    /// The address is derived from the count of hosts already started, so a
+    /// second unnamed host does not collide with the first.
+    pub(crate) fn spawn(&self, config: &HostSection) -> Result<WorkerSpec, String> {
+        let index = self.started.lock().expect("started hosts").len();
+        let mut options = self.options.clone();
+        options.workspace = config.workspace.clone();
+        let host = start_at(
+            config,
+            &self.env,
+            &self.network,
+            options,
+            self.sessions.clone(),
+            extra_host_address(config, index),
+            false,
+        )?;
+        let spec = host.spec().clone();
+        self.runtimes
+            .lock()
+            .expect("local harness runtimes")
+            .push(host.runtime());
+        self.started.lock().expect("started hosts").push(host);
+        Ok(spec)
+    }
+}
+
+/// Start every host this machine declares: the `[host]` primary, then each
+/// `[[hosts]]` entry.
+///
+/// One process, several working directories. Each entry binds its own bus
+/// address and registers as its own agent, so the orchestrator can be told which
+/// *project* to work in rather than only which machine — and because they share
+/// this process's session manager, every one of them stays readable and typeable
+/// in the Agents pane, which is what spawning separate daemons costs you.
+///
+/// A failing extra does not take the others down. An operator who mistypes one
+/// directory should lose that host, not hosting altogether, so the error is
+/// returned alongside the hosts that did start and the caller reports it.
+pub(crate) fn start_all(
+    primary: &HostSection,
+    extras: &[HostSection],
+    env: &HashMap<String, String>,
+    network: &LocalBridgeNetwork,
+    options: EmbeddedDaemonOptions,
+    sessions: PtyManager,
+) -> (Vec<LocalHost>, Vec<String>) {
+    let mut hosts = Vec::new();
+    let mut problems = Vec::new();
+
+    match start(primary, env, network, options.clone(), sessions.clone()) {
+        Ok(Some(host)) => hosts.push(host),
+        Ok(None) => {}
+        Err(error) => problems.push(error),
+    }
+
+    for (index, extra) in extras.iter().enumerate() {
+        if !host_enabled(extra, env) {
+            continue;
+        }
+        // Each extra overrides only what makes it distinct — where it works —
+        // and inherits the rest of the primary's options, so declaring one is a
+        // directory and nothing else.
+        let mut extra_options = options.clone();
+        extra_options.workspace = extra.workspace.clone();
+        let address = extra_host_address(extra, index);
+        match start_at(
+            extra,
+            env,
+            network,
+            extra_options,
+            sessions.clone(),
+            address,
+            false,
+        ) {
+            Ok(host) => hosts.push(host),
+            Err(error) => problems.push(error),
+        }
+    }
+    (hosts, problems)
+}
+
+/// Bind one host at `address` and wrap it in its roster entry.
+fn start_at(
+    config: &HostSection,
+    env: &HashMap<String, String>,
+    network: &LocalBridgeNetwork,
+    options: EmbeddedDaemonOptions,
+    sessions: PtyManager,
+    address: String,
+    primary: bool,
+) -> Result<LocalHost, String> {
     let bridge = network
         .bind(&address)
         .map_err(|e| format!("could not host on this device ({e})"))?;
@@ -230,8 +464,9 @@ pub(crate) fn start(
         options,
         run_task(executor),
     )?;
-    let spec = spec_for(&daemon);
-    Ok(Some(LocalHost { daemon, spec }))
+    let name = display_name(config, daemon.workspace(), primary);
+    let spec = spec_for(&daemon, &name);
+    Ok(LocalHost { daemon, spec })
 }
 
 /// Route each task by what it can actually run: [`PtySessionExecutor`] for a

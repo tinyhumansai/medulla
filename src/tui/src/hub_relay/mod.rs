@@ -86,13 +86,13 @@ fn subscription_strategy_from_config(home: &Path) -> medulla::runtime::Subscript
 fn roster_sink(
     home: &Path,
     log: medulla::hub::HubLog,
-    local_address: String,
+    local_addresses: Vec<String>,
 ) -> medulla::hub::RosterSink {
     let path = roster_path(home);
     Arc::new(move |workers: &[medulla::hub::HubWorker]| {
         let rows: Vec<medulla::config::HubWorkerConfig> = workers
             .iter()
-            .filter(|w| w.address != local_address)
+            .filter(|w| !local_addresses.contains(&w.address))
             .map(|w| medulla::config::HubWorkerConfig {
                 id: w.id.clone(),
                 address: w.address.clone(),
@@ -210,8 +210,10 @@ pub(crate) fn build_hub_config_with_host(
     // heard the name.
     let (local_network, local_address) = match &local {
         Some(dispatch) => {
-            workers.retain(|worker| worker.address != dispatch.host_address);
-            if let Some(host) = &dispatch.host {
+            workers.retain(|worker| !dispatch.host_addresses.contains(&worker.address));
+            // Inserted in declaration order, so the primary leads and the
+            // extras follow it the way they read in the config.
+            for host in dispatch.hosts.iter().rev() {
                 workers.retain(|worker| worker.address != host.address);
                 workers.insert(0, host.clone());
             }
@@ -233,7 +235,7 @@ pub(crate) fn build_hub_config_with_host(
         .unwrap_or(DEFAULT_POLL_MS);
     let persisted_local = local
         .as_ref()
-        .map(|dispatch| dispatch.host_address.clone())
+        .map(|dispatch| dispatch.host_addresses.clone())
         .unwrap_or_default();
     Some(HubConfig {
         persist: Some(roster_sink(home, log.clone(), persisted_local)),

@@ -22,13 +22,15 @@ pub(crate) struct LocalDispatch {
     pub(crate) network: medulla::bridge::LocalBridgeNetwork,
     /// The address the hub itself binds on that bus.
     pub(crate) hub_address: String,
-    /// The address a host on this device binds, whether or not one is running.
+    /// Every address a host on this device binds, whether or not one is
+    /// running.
     ///
     /// Known even when hosting is off, because it comes from `[host].address`
-    /// rather than from a started host — and it is needed in exactly that case,
-    /// to recognise a remembered local entry and drop it.
-    pub(crate) host_address: String,
-    /// The host running on this device, as a roster entry. `None` when hosting
-    /// is switched off — the bus is still shared, so a host can appear later.
-    pub(crate) host: Option<WorkerSpec>,
+    /// and the `[[hosts]]` entries rather than from a started host — and it is
+    /// needed in exactly that case, to recognise a remembered local entry and
+    /// drop it.
+    pub(crate) host_addresses: Vec<String>,
+    /// The hosts running on this device, as roster entries. Empty when hosting
+    /// is switched off — the bus is still shared, so hosts can appear later.
+    pub(crate) hosts: Vec<WorkerSpec>,
 }

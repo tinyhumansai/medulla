@@ -18,9 +18,18 @@ use super::*;
 pub struct LocalHarnesses {
     /// Every PTY-backed harness running on this device.
     pub sessions: PtyManager,
-    /// The host's task state machine, for
+    /// Each host's task state machine, for
     /// [`session_for_task`](medulla::daemon::DaemonRuntime::session_for_task).
-    pub runtime: medulla::daemon::DaemonRuntime,
+    ///
+    /// One per host on this device. A task belongs to exactly one of them, so
+    /// resolving means asking each until one claims it — which is cheap, since
+    /// a machine hosts a handful of directories, not a fleet.
+    ///
+    /// Shared rather than owned because a host can be added while the app runs.
+    /// This value is cloned into the session, so a plain `Vec` would leave the
+    /// pane reading a snapshot taken at startup: the new host would run, and its
+    /// screen would be unwatchable for the rest of the session.
+    pub runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
     /// The address local work is dispatched *from* — the `from` half of the
     /// `(sender, task id)` key `session_for_task` is keyed on.
     ///

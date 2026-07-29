@@ -222,6 +222,12 @@ pub struct HostSection {
     /// Whether to host tasks on this device. `MEDULLA_HOST=0` overrides it off
     /// for a single run without editing the file.
     pub enabled: bool,
+    /// What to call this host in the roster. Empty means "this device", which
+    /// is right for the primary and wrong for every extra: several hosts on one
+    /// machine differ only by where they work, so the directory is the name
+    /// worth showing.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
     /// The address the host binds on the device-local bus. Orchestrator-facing
     /// only — it never leaves this machine — so it is a readable name rather
     /// than a key.
@@ -262,6 +268,7 @@ impl Default for HostSection {
     fn default() -> Self {
         HostSection {
             enabled: true,
+            name: String::new(),
             address: d_host_address(),
             workspace: String::new(),
             workspaces: Vec::new(),

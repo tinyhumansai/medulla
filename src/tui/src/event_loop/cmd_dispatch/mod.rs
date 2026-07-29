@@ -64,6 +64,7 @@ pub(super) fn run_cmd(
     runtime: &Arc<dyn Runtime>,
     _workflows_config: &medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+    local_hosts: Option<&crate::local_host::LocalHostSpawner>,
 ) {
     let cmd = match feedback::run_feedback_cmd(cmd, runtime, msg_tx) {
         Some(cmd) => *cmd,
@@ -166,6 +167,46 @@ pub(super) fn run_cmd(
                         let _ = tx.send(AppMsg::Status(format!("Cannot watch {task_id}: {e}")));
                     }
                 }
+            });
+        }
+        Cmd::StartLocalHost(host) => {
+            let Some(spawner) = local_hosts.cloned() else {
+                let _ = msg_tx.send(AppMsg::Status(
+                    "This device is not hosting, so a local host cannot start here".to_string(),
+                ));
+                return;
+            };
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                // Start it first, register it second. A roster entry whose
+                // address nothing answers on is the failure this whole feature
+                // exists to avoid — the orchestrator would dispatch to it and
+                // the task would vanish.
+                let spec = match spawner.spawn(&host) {
+                    Ok(spec) => spec,
+                    Err(error) => {
+                        let _ =
+                            tx.send(AppMsg::Status(format!("Local host did not start: {error}")));
+                        return;
+                    }
+                };
+                let workspace = spec.workspace.clone().unwrap_or_default();
+                // Registered through the same op a remote add uses, so both
+                // kinds reach the roster by one path.
+                let status = match rt
+                    .worker_op(medulla::runtime::WorkerOp::Add {
+                        address: Some(spec.address.clone()),
+                        handle: None,
+                        label: Some(spec.name.clone()),
+                        harness: Some(spec.harness.clone()),
+                    })
+                    .await
+                {
+                    Ok(()) => format!("Local host running · {workspace}"),
+                    Err(e) => format!("Started, but not registered: {e}"),
+                };
+                let _ = tx.send(AppMsg::Status(status));
             });
         }
         Cmd::WorkerOp(op) => {

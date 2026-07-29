@@ -160,6 +160,7 @@ pub fn task_frame(
         custom_harness: None,
         model: None,
         workflow: None,
+        conversation: None,
     })
 }
 

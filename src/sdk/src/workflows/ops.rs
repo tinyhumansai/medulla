@@ -23,7 +23,8 @@ use crate::workflows::authoring::{
 use crate::workflows::node_contracts::{all_node_kind_contracts, node_kind_contract};
 use crate::workflows::store::require;
 use crate::workflows::{
-    FileWorkflowStore, StoreWorkflowResolver, WorkflowError, WorkflowRecord, WorkflowStore,
+    FileWorkflowStore, StoreWorkflowResolver, WorkflowError, WorkflowId, WorkflowRecord,
+    WorkflowStore,
 };
 
 /// The store every operation reads and writes, discovered for this environment.
@@ -112,13 +113,110 @@ pub async fn dry_run(
     input: Value,
 ) -> Result<Value, WorkflowError> {
     let resolver = Arc::new(StoreWorkflowResolver::new(store.clone()));
-    let output = crate::workflows::run::dry_run(store.clone(), resolver, id, input).await?;
-    Ok(json!({ "ok": true, "output": output }))
+    let result = crate::workflows::run::dry_run(store.clone(), resolver, id, input).await?;
+
+    // `ok` is about the *diagnosis*, not about whether the engine returned. A
+    // graph whose only binding resolved to null completes perfectly and does
+    // nothing, so reporting that as `ok: true` is the single most misleading
+    // thing this surface could say.
+    Ok(json!({
+        "ok": result.diagnosis.is_clean(),
+        "output": result.output,
+        "diagnostics": result.diagnosis,
+    }))
 }
 
 /// A workflow's run history, newest first.
 pub fn list_runs(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowError> {
     Ok(json!({ "runs": store.list_runs(id)? }))
+}
+
+/// Run a workflow on this machine, for real.
+///
+/// Unlike [`dry_run`], this dispatches actual harness sessions, runs actual
+/// scripts, and makes whatever changes the graph describes. Refused when the
+/// host or the workflow is disabled — the two switches an operator has.
+///
+/// Returns the whole run record rather than a summary: the caller is usually a
+/// model deciding what to fix next, and every step's status and diagnostics are
+/// what that decision needs.
+pub async fn run(
+    store: &Arc<dyn WorkflowStore>,
+    config: &crate::config::WorkflowsConfig,
+    env: &HashMap<String, String>,
+    cwd: &Path,
+    id: &str,
+    input: Value,
+) -> Result<Value, WorkflowError> {
+    let record =
+        crate::workflows::local::run_here(store.clone(), config, env, cwd, id, input).await?;
+    Ok(json!({
+        "ok": record.status == crate::workflows::RunStatus::Succeeded,
+        "run": record,
+    }))
+}
+
+/// A workflow's edit history: the versions it has been written over, newest
+/// first.
+///
+/// The graph of each version is included. History is read to decide *which*
+/// version to go back to, and a listing of opaque ids and timestamps does not
+/// support that decision.
+///
+/// Reachable for a workflow `workflow_delete` just removed, not only a live
+/// one: `delete` captures a revision of what it removed (see
+/// `FileWorkflowStore::delete`), and `undo`/`rollback` restore from a revision
+/// without needing the live record either — gating this on the live record
+/// alone would report a deleted workflow as `NotFound` in the one moment an
+/// operator most needs to see what it can still be recovered from.
+pub fn list_history(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowError> {
+    let revisions = store.list_revisions(id)?;
+    // Still an error for an id that was never anything — a truly unknown
+    // workflow has neither a live record nor any revision to report.
+    if revisions.is_empty() && store.get(id)?.is_none() {
+        return Err(WorkflowError::NotFound(WorkflowId::from(id)));
+    }
+    Ok(json!({ "revisions": revisions }))
+}
+
+/// Restore a workflow to one of its earlier versions.
+///
+/// The restore goes through the normal save, so the version being replaced is
+/// snapshotted in turn: a rollback is itself in the history and can be rolled
+/// back.
+pub fn rollback(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    revision_id: &str,
+) -> Result<Value, WorkflowError> {
+    let record = crate::workflows::store::rollback(store.as_ref(), id, revision_id)?;
+    Ok(json!({
+        "restored": record.id,
+        "revision": revision_id,
+        "workflow": record_value(&record),
+    }))
+}
+
+/// Undo a workflow's most recent edit.
+///
+/// What an operator's undo key calls. A workflow with no history is not a
+/// failure — pressing undo on something never edited is a normal thing to do —
+/// so it comes back as `undone: false` with a reason.
+pub fn undo(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowError> {
+    match crate::workflows::store::undo_last(store.as_ref(), id)? {
+        Some((revision, record)) => Ok(json!({
+            "undone": true,
+            "revision": revision.id,
+            "supersededAt": revision.superseded_at,
+            "workflow": record_value(&record),
+        })),
+        None => Ok(json!({
+            "undone": false,
+            "id": id,
+            "reason": "this workflow has not been edited since it was created, so there is \
+                       nothing to go back to",
+        })),
+    }
 }
 
 /// One run record.
@@ -166,6 +264,56 @@ pub fn catalog(kind: Option<&str>) -> Result<Value, WorkflowError> {
         }
         None => Ok(json!({ "contracts": all_node_kind_contracts() })),
     }
+}
+
+/// What this host will actually permit a workflow to do.
+///
+/// The grounding an author most needs and had no way to get. Every one of these
+/// is enforced at *run* time, so a graph that ignores them saves cleanly,
+/// validates cleanly, and then fails the first time it matters — usually
+/// overnight, to nobody watching.
+///
+/// Read from configuration rather than guessed, so the answer is this machine's
+/// and not a plausible default.
+pub fn host_facts(config: &crate::config::WorkflowsConfig) -> Value {
+    // `run_script` refuses `ScriptLanguage::Shell` on Windows rather than
+    // emulating a POSIX shell there (see its doc comment) — an author needs to
+    // know that before writing a `medulla:shell`/`code` step, not after it
+    // fails on whichever host actually runs the workflow.
+    let shell_available = !cfg!(windows);
+    json!({
+        "defaultWorker": if config.default_worker.trim().is_empty() {
+            Value::Null
+        } else {
+            Value::String(config.default_worker.clone())
+        },
+        "nativeTools": crate::flow_engine::caps::tools::NATIVE_TOOLS,
+        "toolAllowlist": config.tool_allowlist,
+        "httpAllowlist": config.http_allowlist,
+        "allowCode": config.allow_code,
+        "runTimeoutSecs": config.run_timeout_secs,
+        "shellScriptsAvailable": shell_available,
+        "notes": [
+            if config.default_worker.trim().is_empty() {
+                "No default worker is configured, so every `agent` node must name a \
+                 `config.agent_ref` — a node without one fails at run time."
+            } else {
+                "An `agent` node with no `config.agent_ref` dispatches to the default worker \
+                 above. Any other value must name a worker this host can actually reach."
+            },
+            "A `tool_call` slug outside `nativeTools` must appear in `toolAllowlist`, and even \
+             then there is no third-party integration registry on this host — it will still \
+             fail at run time. Express host-specific work as an `agent` node.",
+            "Only `manual` triggers fire here. Other kinds are stored and never dispatched.",
+            if shell_available {
+                "`medulla:shell` may use `language: shell` here."
+            } else {
+                "This host is Windows: `medulla:shell` must use `language: javascript` or \
+                 `language: python` — `shell` is refused, not emulated. (A `code` node never \
+                 accepts `shell` at all, on any host.)"
+            },
+        ],
+    })
 }
 
 /// A record as the document an author sees: the graph, with the host fields

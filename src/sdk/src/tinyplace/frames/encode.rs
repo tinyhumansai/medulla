@@ -44,6 +44,7 @@ fn build(
         custom_harness: input.custom_harness.map(String::into_boxed_str),
         model: input.model,
         workflow: input.workflow,
+        conversation: input.conversation,
         usage,
         // An empty snapshot says nothing and would only cost bytes on every
         // status frame, so it is dropped rather than sent.

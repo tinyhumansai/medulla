@@ -38,6 +38,7 @@ impl DaemonRuntime {
                 inflight_idle: Notify::new(),
                 capabilities: TokioMutex::new(None),
                 accessible_dirs: StdMutex::new(accessible_dirs),
+                sessions: crate::sessions::SessionRegistry::default(),
             }),
         }
     }
@@ -244,6 +245,10 @@ impl DaemonRuntime {
                 custom_harness: None,
                 model: None,
                 workflow: None,
+                // Inbound-only, like `provider`, `model`, and `workflow`: this
+                // builds the worker's *responses*, and continuity is the
+                // sender's decision, not something a reply restates.
+                conversation: None,
             },
             attachments.usage,
             attachments.work,

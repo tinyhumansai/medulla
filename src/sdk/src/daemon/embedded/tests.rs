@@ -119,6 +119,7 @@ fn task_frame(task_id: &str, prompt: &str) -> String {
         custom_harness: None,
         model: None,
         workflow: None,
+        conversation: None,
     })
 }
 
@@ -239,6 +240,7 @@ async fn the_host_answers_a_capability_probe_with_what_this_machine_has() {
             custom_harness: None,
             model: None,
             workflow: None,
+            conversation: None,
         }),
     )
     .await

@@ -25,6 +25,8 @@ use super::*;
 mod capability_tests;
 mod provider_tests;
 mod system_info_tests;
+mod task_attribution_tests;
+mod task_continuity_tests;
 mod task_tests;
 
 /// A [`SendFn`] that records every `(to, body)` it is handed, paired with the
@@ -90,6 +92,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
         custom_harness: None,
         model: None,
         workflow: None,
+        conversation: None,
     }
 }
 
@@ -223,6 +226,37 @@ pub(super) fn conversation_runner(seen: Arc<StdMutex<Vec<String>>>) -> RunTaskFn
         Box::pin(async move {
             Ok(RunTaskResult {
                 session_id: None,
+                usage: None,
+                provider: opts.provider,
+                reply: "done".to_string(),
+                events: 0,
+            })
+        })
+    })
+}
+
+/// A runner that records the `resume_session_id` each run was given, and
+/// reports `session_id` as the session it opened.
+///
+/// Together those are the whole of session continuity from the daemon's side:
+/// what it was told to resume, and what it captured to resume next time.
+pub(super) fn resume_runner(
+    resumed: Arc<StdMutex<Vec<Option<String>>>>,
+    session_id: &str,
+) -> RunTaskFn {
+    let session_id = session_id.to_string();
+    Arc::new(move |opts: RunTaskOptions| {
+        resumed.lock().unwrap().push(opts.resume_session_id.clone());
+        let session_id = session_id.clone();
+        // Reported through `on_session` as a real executor does — the binding is
+        // recorded when the session opens, not when the turn settles, so a turn
+        // that later times out has still moved the conversation on.
+        if let Some(on_session) = opts.on_session {
+            on_session(session_id.clone());
+        }
+        Box::pin(async move {
+            Ok(RunTaskResult {
+                session_id: Some(session_id),
                 usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),

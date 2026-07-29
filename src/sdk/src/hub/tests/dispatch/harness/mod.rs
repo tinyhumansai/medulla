@@ -75,6 +75,7 @@ impl Relay for FakeWorker {
                         custom_harness: None,
                         model: None,
                         workflow: None,
+                        conversation: None,
                     },
                     None,
                 ),
@@ -97,6 +98,7 @@ impl Relay for FakeWorker {
                             custom_harness: None,
                             model: None,
                             workflow: None,
+                            conversation: None,
                         },
                         None,
                     ),
@@ -133,6 +135,7 @@ impl Relay for FakeWorker {
                     custom_harness: None,
                     model: None,
                     workflow: None,
+                    conversation: None,
                 },
                 usage,
             ),
@@ -167,6 +170,7 @@ impl Relay for FakeWorker {
                             custom_harness: None,
                             model: None,
                             workflow: None,
+                            conversation: None,
                         },
                         None,
                     ),
@@ -255,6 +259,7 @@ pub(super) fn req(instruction: &str) -> TaskRequest {
         custom_harness: None,
         model: None,
         workflow: None,
+        conversation: None,
     }
 }
 

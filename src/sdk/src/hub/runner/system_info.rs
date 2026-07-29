@@ -45,6 +45,7 @@ impl TaskRunner {
                 custom_harness: None,
                 model: None,
                 workflow: None,
+                conversation: None,
             });
             if let Err(error) = self.relay.send(address, &body).await {
                 self.system_info_waiters

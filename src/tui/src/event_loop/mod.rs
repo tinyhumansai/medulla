@@ -30,6 +30,7 @@ use types::AppMsg;
 pub(crate) use types::{SessionExit, SessionWiring};
 use update_checker::spawn_update_checker;
 
+pub(crate) use cmd_dispatch::clear_copilot_hosts;
 use cmd_dispatch::run_cmd;
 
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
@@ -132,11 +133,35 @@ pub(crate) async fn run(
                         reply,
                         changes,
                         created,
-                    } => app.copilot_finished(&workflow, reply, changes, created),
+                        removed,
+                    } => {
+                        // The conversation follows the workflow. A create turn
+                        // ran on a sentinel thread because there was no id yet;
+                        // now there is one, so the harness session moves onto it
+                        // and the operator's follow-up is turn two of the same
+                        // conversation rather than turn one of a new one.
+                        if let Some(created) = &created {
+                            cmd_dispatch::adopt_copilot_host(&workflow, created);
+                        }
+                        // Nothing left to continue, and no reason to keep a
+                        // daemon and its harness processes alive for it.
+                        if removed {
+                            cmd_dispatch::close_copilot_host(&workflow);
+                        }
+                        // A queued follow-up comes back as a command to run:
+                        // the drain happens after the catalogue refresh, so it
+                        // sees the graph this turn left behind.
+                        let queued = app.copilot_finished(&workflow, reply, changes, created);
+                        if let Some(cmd) = queued {
+                            run_cmd(cmd, &runtime, &app.loaded.config.workflows, &msg_tx);
+                        }
+                    }
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotFailed { workflow, error } => {
                         app.copilot_failed(&workflow, error);
                     }
+                    #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowsChanged => app.reload_workflows(),
                     AppMsg::UpdateAvailable(notice) => {
                         app.set_update_notice(notice.clone());
                         app.set_status(notice);

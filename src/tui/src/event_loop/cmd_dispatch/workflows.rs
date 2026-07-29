@@ -55,6 +55,9 @@ async fn run(
 
     let home = medulla::home::medulla_home(&env);
     let mut settings = CapabilitySettings::from_config(workflows_config, &home);
+    // A `medulla:shell` step runs here: the project the operator launched the
+    // TUI in, which is the repository the workflow is about.
+    settings.workspace = cwd.to_string_lossy().to_string();
     if settings.default_worker_address.trim().is_empty() {
         settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
     }
@@ -98,6 +101,8 @@ enum Turn {
     Edit(String),
     /// Build a workflow that does not exist yet.
     Create,
+    /// Diagnose a failed run of this workflow and fix its cause.
+    Repair(String, medulla::workflows::FailedRun),
 }
 
 /// Spawn a copilot turn against `workflow`, streaming its progress.
@@ -135,6 +140,64 @@ pub(super) fn spawn_copilot_create(
     spawn_turn(Turn::Create, thread, instruction, workflows_config, msg_tx);
 }
 
+/// Spawn a copilot turn that diagnoses `run_id` and fixes what caused it.
+///
+/// The run record is read here rather than in the turn, so the brief can carry
+/// the error and the failing nodes. Reading it costs one directory read against
+/// making the agent spend a tool call rediscovering what this process already
+/// had on screen.
+///
+/// The read itself happens on a blocking task, not inline: this function runs
+/// synchronously on the render thread (called straight from `run_cmd`, itself
+/// inline in the TUI's `tokio::select!` loop), and `discover_store`/`get_run`
+/// are synchronous filesystem I/O — the same reason `spawn_undo` off-loads to
+/// `spawn_blocking` rather than reading straight from the caller.
+pub(super) fn spawn_repair(
+    workflow: String,
+    instruction: String,
+    run_id: String,
+    workflows_config: medulla::config::WorkflowsConfig,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
+    let tx = msg_tx.clone();
+    tokio::spawn(async move {
+        let run = tokio::task::spawn_blocking(move || {
+            let env: HashMap<String, String> = std::env::vars().collect();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let store = medulla::workflows::discover_store(&env, &cwd);
+
+            // A run that cannot be read still gets a repair turn: the id alone
+            // lets the agent fetch it with `workflow_run_get`, and refusing the
+            // turn over a missing detail would be worse than starting it with
+            // less.
+            let record = store.get_run(&run_id).ok().flatten();
+            medulla::workflows::FailedRun {
+                id: run_id,
+                error: record.as_ref().and_then(|r| r.error.clone()),
+                failing_nodes: record
+                    .map(|r| {
+                        r.steps
+                            .into_iter()
+                            .filter(|step| step.status == "error")
+                            .map(|step| step.node_id)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
+        })
+        .await
+        .expect("spawn_blocking join");
+
+        spawn_turn(
+            Turn::Repair(workflow.clone(), run),
+            workflow,
+            instruction,
+            workflows_config,
+            &tx,
+        );
+    });
+}
+
 /// Run `turn` off-thread, forwarding its progress and reporting its result.
 fn spawn_turn(
     turn: Turn,
@@ -161,18 +224,20 @@ fn spawn_turn(
             }
         });
 
-        let message = match copilot_turn(&turn, &instruction, status_tx, &workflows_config).await {
-            Ok(outcome) => AppMsg::CopilotDone {
-                workflow: thread.clone(),
-                reply: outcome.reply,
-                changes: outcome.changes,
-                created: outcome.created,
-            },
-            Err(err) => AppMsg::CopilotFailed {
-                workflow: thread.clone(),
-                error: err.to_string(),
-            },
-        };
+        let message =
+            match copilot_turn(&turn, &thread, &instruction, status_tx, &workflows_config).await {
+                Ok(outcome) => AppMsg::CopilotDone {
+                    workflow: thread.clone(),
+                    reply: outcome.reply,
+                    changes: outcome.changes,
+                    created: outcome.created,
+                    removed: outcome.removed,
+                },
+                Err(err) => AppMsg::CopilotFailed {
+                    workflow: thread.clone(),
+                    error: err.to_string(),
+                },
+            };
         // The forwarder ends when the session drops its sender, which it has by
         // now; awaiting it keeps a trailing status line from arriving after the
         // reply and reading as part of the next turn.
@@ -183,13 +248,15 @@ fn spawn_turn(
 
 /// Run one copilot turn to completion.
 ///
-/// The host is started per turn and dropped with it, which unbinds the loopback
-/// endpoints so the next turn — or a workflow run — can bind them again.
+/// The host is kept per thread rather than per turn (see [`copilot_hosts`]),
+/// because the harness session a turn opens is remembered by the daemon — a
+/// daemon that died with the turn would take the conversation with it.
 /// `workflows_config` is the already-loaded `[workflows]` section (see
 /// [`spawn_copilot`]) rather than a fresh [`medulla::config::load_config`] call
 /// — reloading with no explicit path would silently drop a `--config` override.
 async fn copilot_turn(
     turn: &Turn,
+    thread: &str,
     instruction: &str,
     status: tokio::sync::mpsc::UnboundedSender<String>,
     workflows_config: &medulla::config::WorkflowsConfig,
@@ -211,7 +278,13 @@ async fn copilot_turn(
         "acp".to_string(),
     );
 
-    let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
+    // Asked before dispatching, not discovered from the result. Every way the
+    // tools fail to arrive leaves a session that starts fine and can change
+    // nothing — the operator would get a confident reply and an unchanged
+    // graph, which is the one failure mode that looks like success.
+    medulla::workflows::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
+
+    let host = super::copilot_hosts::host_for(thread, || EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: workflows_config.default_provider,
         model: (!workflows_config.default_model.is_empty())
@@ -228,11 +301,62 @@ async fn copilot_turn(
         provider: workflows_config.default_provider,
         model: (!workflows_config.default_model.is_empty())
             .then(|| workflows_config.default_model.clone()),
+        // The pane's thread is the conversation. Two workflows open side by side
+        // are two threads and therefore two conversations, which is what the
+        // operator means by having them open separately.
+        conversation: thread.to_string(),
     };
     Ok(match turn {
         Turn::Edit(workflow) => session.turn(workflow, instruction, Some(status)).await?,
         Turn::Create => session.create(instruction, Some(status)).await?,
+        Turn::Repair(workflow, run) => {
+            session
+                .repair(workflow, instruction, run.clone(), Some(status))
+                .await?
+        }
     })
+}
+
+/// Spawn an undo of the workflow `id`'s most recent edit.
+///
+/// Reloads the catalogue afterwards so the rail and the graph show the restored
+/// version — an undo the operator cannot see has not visibly happened.
+pub(super) fn spawn_undo(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>) {
+    let tx = msg_tx.clone();
+    tokio::spawn(async move {
+        let env: HashMap<String, String> = std::env::vars().collect();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let store = medulla::workflows::discover_store(&env, &cwd);
+        // Blocking work off the render thread: the store's methods are
+        // synchronous by contract, as the trait's own doc says.
+        let result = tokio::task::spawn_blocking(move || {
+            medulla::workflows::undo_last(store.as_ref(), &id).map(|undone| (id, undone))
+        })
+        .await
+        .unwrap_or_else(|err| Err(medulla::workflows::WorkflowError::Engine(err.to_string())));
+
+        match result {
+            Ok((id, Some((_, restored)))) => {
+                // Name what came back rather than the revision's opaque id: the
+                // operator is checking that undo landed where they meant, and
+                // the workflow's own name is what they recognise.
+                let _ = tx.send(AppMsg::Status(format!(
+                    "Undid the last edit to {}",
+                    restored.name
+                )));
+                let _ = tx.send(AppMsg::WorkflowsChanged);
+                let _ = id;
+            }
+            Ok((id, None)) => {
+                let _ = tx.send(AppMsg::Status(format!(
+                    "{id} has not been edited since it was created — nothing to undo"
+                )));
+            }
+            Err(err) => {
+                let _ = tx.send(AppMsg::Status(format!("undo failed — {err}")));
+            }
+        }
+    });
 }
 
 /// Spawn a dry run of the workflow `id`, reporting the outcome on the status

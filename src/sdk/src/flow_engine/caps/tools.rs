@@ -18,15 +18,22 @@ use tinyflows::error::{EngineError, Result};
 
 use crate::flow_engine::settings::CapabilitySettings;
 
+use super::script::{run_script, ScriptLanguage};
+
 /// The prefix marking a slug this host implements natively.
 pub const NATIVE_TOOL_PREFIX: &str = "medulla:";
 
 /// The native operations a workflow may call.
 ///
-/// Small on purpose: a workflow's real work happens in `agent` nodes dispatched
-/// to a harness, and every native tool added here is surface a workflow author
+/// Small on purpose: every native tool added here is surface a workflow author
 /// can reach without an operator's say-so.
-pub const NATIVE_TOOLS: [&str; 2] = ["medulla:echo", "medulla:now"];
+///
+/// `medulla:shell` is the exception to that smallness and earns it. A workflow
+/// step that runs a script in the operator's project used to be expressible only
+/// as an `agent` node — a whole coding session, minutes of wall clock, and a
+/// model deciding what to run — for work that is a deterministic command. It is
+/// gated on `workflows.allowCode` for exactly the reason `code` nodes are.
+pub const NATIVE_TOOLS: [&str; 3] = ["medulla:echo", "medulla:now", "medulla:shell"];
 
 /// Whether a slug names a native operation.
 pub fn is_native(slug: &str) -> bool {
@@ -46,7 +53,7 @@ impl MedullaToolInvoker {
     }
 
     /// Run one native operation.
-    fn native(&self, slug: &str, args: Value) -> Result<Value> {
+    async fn native(&self, slug: &str, args: Value) -> Result<Value> {
         match slug {
             // Echoes its arguments. The graph author's smoke test: it proves a
             // `tool_call` node is wired and its expressions resolve, without
@@ -55,11 +62,72 @@ impl MedullaToolInvoker {
             // The host's clock, so a workflow does not have to trust a node's
             // idea of "now" or shell out for it.
             "medulla:now" => Ok(json!({ "epoch_ms": crate::clock::now_millis() })),
+            "medulla:shell" => self.shell(args).await,
             _ => Err(EngineError::Capability(format!(
                 "tool_call: unknown native tool '{slug}'; known: {}",
                 NATIVE_TOOLS.join(", ")
             ))),
         }
+    }
+
+    /// Run a script in the operator's workspace.
+    ///
+    /// Gated on `allow_code` alongside `code` nodes, because it is the same
+    /// decision: this host has no sandbox, so a workflow's script runs with the
+    /// daemon's privileges. The difference from a `code` node is *where* — this
+    /// one runs in the workspace, because a step that shells out almost always
+    /// means to touch the project.
+    async fn shell(&self, args: Value) -> Result<Value> {
+        if !self.settings.allow_code {
+            return Err(EngineError::Capability(
+                "medulla:shell is disabled: this host has no sandbox, so a workflow's script \
+                 would run with the daemon's full privileges. Enable `workflows.allowCode` only \
+                 where that is acceptable."
+                    .to_string(),
+            ));
+        }
+
+        let source = args
+            .get("script")
+            .and_then(Value::as_str)
+            .filter(|source| !source.trim().is_empty())
+            .ok_or_else(|| {
+                EngineError::Capability(
+                    "medulla:shell: `args.script` is required and must be the script to run"
+                        .to_string(),
+                )
+            })?;
+
+        // Defaults to shell because that is what the slug says; naming another
+        // language is how a step runs a short node or python program in the
+        // workspace rather than in a `code` node's temporary directory.
+        let language = match args.get("language").and_then(Value::as_str) {
+            Some(name) => ScriptLanguage::parse(name).ok_or_else(|| {
+                EngineError::Capability(format!(
+                    "medulla:shell: unknown language '{name}'; known: {}",
+                    ScriptLanguage::NAMES.join(", ")
+                ))
+            })?,
+            None => ScriptLanguage::Shell,
+        };
+
+        let workspace = std::path::Path::new(&self.settings.workspace);
+        let output = run_script(
+            language,
+            source,
+            args.get("input").unwrap_or(&Value::Null),
+            self.settings.script_timeout(),
+            workspace.is_dir().then_some(workspace),
+        )
+        .await?;
+
+        Ok(json!({
+            "output": output.value,
+            // Carried rather than dropped: a script that succeeds and warns
+            // wrote that warning for a reader, and the run record is the only
+            // place a reader will look.
+            "stderr": output.stderr,
+        }))
     }
 }
 
@@ -67,7 +135,7 @@ impl MedullaToolInvoker {
 impl ToolInvoker for MedullaToolInvoker {
     async fn invoke(&self, slug: &str, args: Value, _conn: Option<&str>) -> Result<Value> {
         if is_native(slug) {
-            return self.native(slug, args);
+            return self.native(slug, args).await;
         }
         if !self.settings.tool_allowed(slug) {
             return Err(EngineError::Capability(format!(

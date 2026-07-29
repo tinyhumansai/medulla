@@ -413,7 +413,7 @@ async fn a_dry_run_exercises_the_graph_without_dispatching_anything() {
     // Held only to prove it is never called.
     let _unused: Arc<dyn HarnessDispatch> = dispatch.clone();
 
-    let output = dry_run(
+    let result = dry_run(
         harness.store.clone(),
         Arc::new(StoreWorkflowResolver::new(harness.store.clone())),
         "diamond",
@@ -423,9 +423,13 @@ async fn a_dry_run_exercises_the_graph_without_dispatching_anything() {
     .expect("simulates");
 
     assert!(
-        output["nodes"]["join"].is_object(),
-        "the whole graph should have run: {output}"
+        result.output["nodes"]["join"].is_object(),
+        "the whole graph should have run: {:?}",
+        result.output
     );
+    // Observing the run must not change what it does: the same graph, the same
+    // outcome, plus a reading of the steps.
+    assert!(result.diagnosis.is_clean(), "{:?}", result.diagnosis);
     assert!(
         dispatch.seen.lock().unwrap().is_empty(),
         "a dry run must start no harness session"

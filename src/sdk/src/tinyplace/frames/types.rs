@@ -303,6 +303,28 @@ pub struct TaskFrame {
     /// id it could not find.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub workflow: Option<String>,
+    /// Inbound-only: the continuity group this task belongs to, when the sender
+    /// wants successive tasks to share one harness session.
+    ///
+    /// Absent by default, and that default is load-bearing. A task frame is
+    /// discrete work, so two tasks must never see each other's context — which
+    /// is why [`route_session_class`] routes a task
+    /// [`Bounded`](crate::sessions::SessionClass::Bounded) and the worker
+    /// resumes nothing. Naming a conversation is how a sender says *these* tasks
+    /// are one conversation and should remember each other.
+    ///
+    /// The workflow copilot is what this exists for: its pane is a chat, so the
+    /// second instruction has to know what the first one did. A workflow's
+    /// `agent` nodes deliberately do *not* set it — each node is its own unit of
+    /// work, and sharing context between them would make a graph's behaviour
+    /// depend on the order its branches happened to run in.
+    ///
+    /// The value is scoped to the authenticated sender by the worker, so one
+    /// peer cannot name another's conversation and read its context.
+    ///
+    /// [`route_session_class`]: crate::sessions::route_session_class
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub conversation: Option<String>,
     /// Reported on `reply` frames when the child harness surfaced token counts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TokenUsage>,
@@ -354,6 +376,10 @@ pub struct EncodeFrameInput {
     /// Inbound-only: the installed workflow to run instead of treating `text` as
     /// an instruction. `None` on every response and on ordinary tasks.
     pub workflow: Option<String>,
+    /// Inbound-only: the continuity group successive tasks share a session
+    /// through. `None` on every response and on ordinary tasks, which stay
+    /// context-free by design — see [`TaskFrame::conversation`].
+    pub conversation: Option<String>,
 }
 
 /// What an agent reports it can do, merged with facts its host establishes.

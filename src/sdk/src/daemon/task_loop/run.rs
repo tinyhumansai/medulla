@@ -211,12 +211,61 @@ impl DaemonRuntime {
             }) as Box<dyn FnOnce(mpsc::UnboundedSender<String>) + Send>
         };
 
+        // The conversation this task belongs to, if it named one. Scoped to the
+        // *authenticated* sender rather than taken bare from the frame: the
+        // frame body cannot be trusted to name its own author, so without this
+        // one peer could name another's conversation and resume into a session
+        // holding someone else's context.
+        let session_key = frame.conversation.as_deref().map(|conversation| {
+            crate::sessions::SessionKey::new(format!("{from}/{conversation}"), provider)
+        });
+        // Held for the rest of this turn, past the `plan()` below and through
+        // `run_task` — including the `on_session` callback that records the
+        // binding once the harness opens one. Without it, two frames naming
+        // the same conversation could both `plan()` before either recorded a
+        // session: the first pair would each open their own session and race
+        // to bind it (whichever `on_session` fires last silently wins, and the
+        // other harness session is orphaned); a later pair could both resume
+        // the *same* now-bound session concurrently, interleaving two turns on
+        // one harness. `acquire_turn` is a no-op (`None`) for anything but
+        // `Unbound`, so a task frame with no named conversation never
+        // serializes against unrelated work.
+        let turn_guard = match &session_key {
+            Some(key) => {
+                self.inner
+                    .sessions
+                    .acquire_turn(key, crate::sessions::SessionClass::Unbound)
+                    .await
+            }
+            None => None,
+        };
+        // An `Unbound` class because these turns are a conversation, not
+        // discrete work — that is the whole of what the sender opted into. The
+        // registry still declines to resume a provider that cannot
+        // (`opencode`), which costs continuity but never correctness.
+        let plan = session_key.as_ref().map(|key| {
+            self.inner
+                .sessions
+                .plan(key, crate::sessions::SessionClass::Unbound)
+        });
+        let resume_session_id = plan
+            .as_ref()
+            .and_then(|plan| plan.resume_session_id.clone());
+
         // Reported as soon as the executor opens a session, not with the
         // result: the point of knowing it is to watch the task while it runs.
         let on_session = {
             let this = self.clone();
             let key = key.clone();
+            let session_key = session_key.clone();
             Box::new(move |session_id: String| {
+                // Bind before the turn finishes. A turn that opens a session and
+                // then times out has still moved the conversation on, and the
+                // next instruction has to resume *that* session rather than
+                // starting a third one the operator never sees.
+                if let Some(session_key) = &session_key {
+                    this.inner.sessions.record(session_key, session_id.clone());
+                }
                 this.record_task_session(&key, session_id);
             }) as Box<dyn FnOnce(String) + Send>
         };
@@ -233,9 +282,15 @@ impl DaemonRuntime {
             // context with the sender's other work.
             conversation: from.clone(),
             // A task frame is discrete work, so it gets its own session and can
-            // see nothing of the sender's other tasks.
+            // see nothing of the sender's other tasks — `Bounded` even when the
+            // frame names a conversation, because this field only chooses
+            // between "a fresh session" and "whichever of the sender's sessions
+            // is idle", and the latter cannot tell two of that sender's
+            // conversations apart. Continuity, when a sender asks for it,
+            // arrives through `resume_session_id` below, which names one
+            // specific prior session scoped to `{sender}/{conversation}`.
             session_class: crate::sessions::SessionClass::Bounded,
-            resume_session_id: None,
+            resume_session_id,
             provider,
             prompt: frame.text.clone(),
             cwd: self.inner.config.workspace.clone(),
@@ -287,6 +342,10 @@ impl DaemonRuntime {
         };
 
         let result = (self.inner.run_task)(options).await;
+        // Released only now: the guard must outlive the `on_session` callback
+        // above, which is the thing recording the binding the next queued turn
+        // will plan against.
+        drop(turn_guard);
         // The task future is dropped here, dropping its on_event (and its status
         // sender); the consumer then drains and ends.
         let _ = status_consumer.await;

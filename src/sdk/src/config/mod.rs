@@ -34,7 +34,7 @@ pub use custom_harnesses::{
     load_custom_harnesses, CustomHarnessConfig, OPENROUTER_ANTHROPIC_URL, OPENROUTER_API_KEY_ENV,
     OPENROUTER_OPENAI_URL,
 };
-pub use load::{default_tinyplace_config, load_config};
+pub use load::{default_tinyplace_config, explicit_config_from_env, load_config, CONFIG_PATH_ENV};
 pub use persist::{
     clear_setting, persist_custom_harnesses, persist_host_workspaces, persist_hub_workers,
     persist_routing_strategy, persist_section, persist_setting,

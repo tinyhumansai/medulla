@@ -257,6 +257,7 @@ async fn a_hub_watches_a_real_workers_screen_over_the_relay() {
         custom_harness: None,
         model: None,
         workflow: None,
+        conversation: None,
     });
     hub_tx
         .send(&worker_addr, &body)

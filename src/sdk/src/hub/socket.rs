@@ -391,6 +391,10 @@ async fn handle_task_run(
             .map(str::trim)
             .filter(|id| !id.is_empty())
             .map(str::to_string),
+        // Not forwarded from the orchestrator. A backend-dispatched task is
+        // discrete work, and honouring a conversation named on the wire would
+        // let one caller's task resume a session opened for another's.
+        conversation: None,
     };
 
     let outcome = runner.run(req, Some(tx)).await;

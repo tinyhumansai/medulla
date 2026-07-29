@@ -354,3 +354,69 @@ fn a_synthesized_tinyplace_section_honours_the_staging_switch() {
         .into_owned();
     assert_eq!(default_tinyplace_config(&prod).identity_dir, expected);
 }
+
+#[test]
+fn explicit_config_from_env_reads_the_path_a_parent_process_recorded() {
+    // A subprocess (the `medulla workflow mcp` tool server, an ACP harness)
+    // only inherits environment, not the parent's parsed `--config` flag. This
+    // is the one place that env var is read back, so every subprocess call
+    // site agrees on how to find it.
+    let with_path = env(&[(CONFIG_PATH_ENV, "/tmp/explicit.toml")]);
+    assert_eq!(
+        explicit_config_from_env(&with_path),
+        Some("/tmp/explicit.toml")
+    );
+}
+
+#[test]
+fn explicit_config_from_env_is_none_when_the_parent_never_set_it() {
+    // The common case — the TUI was launched without `--config` — must not
+    // manufacture a path that then fails to open.
+    assert_eq!(explicit_config_from_env(&HashMap::new()), None);
+}
+
+#[test]
+fn a_subprocess_reading_the_recorded_path_loads_the_same_config_the_parent_did() {
+    // The end-to-end claim the fix makes: a subprocess that resolves its
+    // config via `explicit_config_from_env` sees the exact file the parent's
+    // own `--config` pointed at, not whatever `config_file_layers` would have
+    // discovered from `cwd` on its own. Before the fix, every such subprocess
+    // passed `None` unconditionally and could silently answer with a more
+    // permissive default config (e.g. `allowCode = true`) than the one the
+    // operator explicitly chose.
+    let home = temp_dir("subprocess-home");
+    let discoverable_cwd = temp_dir("subprocess-cwd");
+    // A config file `cwd` would happily discover if nothing overrode it —
+    // permissive, so the test fails loudly if the override is ignored.
+    std::fs::write(
+        discoverable_cwd.join("medulla.toml"),
+        "[workflows]\nallowCode = true\n",
+    )
+    .unwrap();
+
+    // The explicit file the parent process actually chose — restrictive, and
+    // in a different directory than `cwd` so nothing but the env var can find
+    // it.
+    let explicit_dir = temp_dir("subprocess-explicit");
+    let explicit_path = explicit_dir.join("chosen.toml");
+    std::fs::write(&explicit_path, "[workflows]\nallowCode = false\n").unwrap();
+
+    let mut parent_env = env(&[("MEDULLA_HOME", home.to_str().unwrap())]);
+    parent_env.insert(
+        CONFIG_PATH_ENV.to_string(),
+        explicit_path.to_string_lossy().into_owned(),
+    );
+
+    let loaded = load_config(
+        explicit_config_from_env(&parent_env),
+        &parent_env,
+        &discoverable_cwd,
+    )
+    .unwrap();
+
+    assert!(
+        !loaded.config.workflows.allow_code,
+        "the subprocess must load the explicit config the parent recorded, \
+         not silently discover the more permissive one sitting in its cwd"
+    );
+}

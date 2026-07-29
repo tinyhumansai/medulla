@@ -12,11 +12,18 @@
 use tinyflows::model::{Node, WorkflowGraph};
 
 use crate::ui::workflows::graph::kind_wire;
+use crate::workflows::WorkflowRecord;
 
 /// One change between two graphs, already phrased for a transcript line.
 pub type Change = String;
 
 /// Describe how `after` differs from `before`, newest structure first.
+///
+/// Takes whole records rather than bare graphs because the record is what the
+/// operator is looking at. A turn that only edited the description or disabled
+/// the workflow changed something real, and reporting no changes there is not
+/// merely terse — the caller treats an empty result as "nothing happened" and
+/// skips the catalogue refresh, so the rail would keep showing the old state.
 ///
 /// Nodes are matched by id, so a renamed id reads as a removal plus an addition.
 /// That is the honest reading — the engine treats it as one too, since every
@@ -26,7 +33,29 @@ pub type Change = String;
 /// Returns empty when nothing changed, which the caller reports as "no edit"
 /// rather than saying nothing: a turn that claimed to change the graph and did
 /// not is exactly what an operator needs to be told.
-pub fn describe(before: &WorkflowGraph, after: &WorkflowGraph) -> Vec<Change> {
+pub fn describe(before: &WorkflowRecord, after: &WorkflowRecord) -> Vec<Change> {
+    let mut changes = describe_graph(&before.graph, &after.graph);
+
+    // The record's own name is what a listing shows; it is derived from the
+    // graph's, so comparing it here covers both without reporting twice.
+    if before.name != after.name {
+        changes.push(format!("~ name {} → {}", before.name, after.name));
+    }
+    if before.description != after.description {
+        changes.push("~ description".to_string());
+    }
+    if before.enabled != after.enabled {
+        changes.push(format!(
+            "~ {}",
+            if after.enabled { "enabled" } else { "disabled" }
+        ));
+    }
+
+    changes
+}
+
+/// The structural difference between two graphs.
+fn describe_graph(before: &WorkflowGraph, after: &WorkflowGraph) -> Vec<Change> {
     let mut changes = Vec::new();
 
     for node in &after.nodes {
@@ -50,10 +79,6 @@ pub fn describe(before: &WorkflowGraph, after: &WorkflowGraph) -> Vec<Change> {
         if !after.edges.contains(edge) {
             changes.push(format!("− edge {}", edge_label(edge)));
         }
-    }
-
-    if before.name != after.name {
-        changes.push(format!("~ name {} → {}", before.name, after.name));
     }
 
     changes

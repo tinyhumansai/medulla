@@ -112,6 +112,7 @@ pub fn frame(
         custom_harness: None,
         model: None,
         workflow: None,
+        conversation: None,
     }
 }
 

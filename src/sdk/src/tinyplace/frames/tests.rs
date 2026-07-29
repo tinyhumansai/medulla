@@ -21,6 +21,7 @@ fn encodes_a_minimal_frame() {
         custom_harness: None,
         model: None,
         workflow: None,
+        conversation: None,
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["proto"], TINYPLACE_PROTO);
@@ -48,6 +49,7 @@ fn encodes_optional_fields_when_present() {
         custom_harness: Some("deepseek-claude".into()),
         model: Some("anthropic/claude-opus-4.8".to_string()),
         workflow: Some("nightly-sweep".to_string()),
+        conversation: None,
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["kind"], "capabilities_result");
@@ -83,6 +85,7 @@ fn round_trips_every_kind() {
             custom_harness: None,
             model: None,
             workflow: None,
+            conversation: None,
         });
         let decoded = decode_task_frame(&body).expect("valid frame decodes");
         assert_eq!(decoded.kind, kind);
@@ -124,6 +127,7 @@ fn carries_a_model_hint_through_encode_and_decode() {
         custom_harness: None,
         model: Some("openrouter/some-model".to_string()),
         workflow: None,
+        conversation: None,
     });
     let decoded = decode_task_frame(&body).unwrap();
     assert_eq!(decoded.model.as_deref(), Some("openrouter/some-model"));
@@ -439,6 +443,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
             custom_harness: None,
             model: None,
             workflow: None,
+            conversation: None,
         },
         None,
         Some(snapshot.clone()),
@@ -461,6 +466,7 @@ fn an_empty_work_snapshot_is_left_off_the_wire() {
             custom_harness: None,
             model: None,
             workflow: None,
+            conversation: None,
         },
         None,
         Some(crate::harness_work::WorkSnapshot::default()),

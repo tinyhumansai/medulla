@@ -116,6 +116,7 @@ fn dispatch(runtime: &DaemonRuntime, task_id: &str) {
         custom_harness: None,
         model: None,
         workflow: None,
+        conversation: None,
     });
     let frame = medulla::tinyplace::decode_task_frame(&body);
     runtime.handle_message(HUB.to_string(), body, frame);

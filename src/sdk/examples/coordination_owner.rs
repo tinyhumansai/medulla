@@ -230,6 +230,7 @@ async fn run() -> Result<(), String> {
         custom_harness: None,
         model: args.model.clone(),
         workflow: None,
+        conversation: None,
     });
     transport
         .send(&to, &frame)

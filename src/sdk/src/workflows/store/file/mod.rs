@@ -300,6 +300,7 @@ impl WorkflowStore for FileWorkflowStore {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(&lock_path)
             .map_err(|source| WorkflowError::Io {
                 path: lock_path.clone(),

@@ -154,10 +154,21 @@ impl App {
     }
 
     /// Ask the copilot to diagnose the selected run and fix what caused it.
+    ///
+    /// Refused rather than queued while a turn is already running: unlike a
+    /// composer submission, a repair carries a specific `run_id` the drain path
+    /// (`drain_copilot_queue`) has nowhere to hold, so queuing it would either
+    /// drop that context or dispatch two turns on the same thread at once —
+    /// whichever ran second would arrive out of order and its completion could
+    /// clear `busy` while the other turn was still in flight.
     pub(in crate::ui::app) fn repair_selected_run(&mut self) -> Option<Cmd> {
         let run = self.selected_run()?.clone();
         if run.status != medulla::workflows::RunStatus::Failed {
             self.set_status("That run did not fail — nothing to repair");
+            return None;
+        }
+        if self.copilot_busy() {
+            self.set_status("Copilot is still busy — wait for it to finish before repairing");
             return None;
         }
         let workflow = run.workflow_id.clone();

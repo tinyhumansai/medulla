@@ -41,9 +41,15 @@ fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
         // tools that would be refused.
         let env: std::collections::HashMap<String, String> = std::env::vars().collect();
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let enabled = crate::config::load_config(None, &env, &cwd)
-            .map(|loaded| loaded.config.workflows.enabled)
-            .unwrap_or(true);
+        // Respects the parent's `--config`, if one was recorded — see
+        // `crate::config::CONFIG_PATH_ENV`. Rediscovering here regardless of
+        // that would let a policy the operator explicitly chose (say,
+        // `allowCode = false`) be silently overridden by whatever config this
+        // subprocess's own `cwd` happens to discover.
+        let enabled =
+            crate::config::load_config(crate::config::explicit_config_from_env(&env), &env, &cwd)
+                .map(|loaded| loaded.config.workflows.enabled)
+                .unwrap_or(true);
         if !enabled {
             return Vec::new();
         }

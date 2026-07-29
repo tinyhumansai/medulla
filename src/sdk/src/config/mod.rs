@@ -27,7 +27,7 @@ mod types_tests;
 mod urls_tests;
 
 pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
-pub use load::{default_tinyplace_config, load_config};
+pub use load::{default_tinyplace_config, explicit_config_from_env, load_config, CONFIG_PATH_ENV};
 pub use persist::{
     clear_setting, persist_host_workspaces, persist_hub_workers, persist_routing_strategy,
     persist_section, persist_setting, persist_subscription_routing_strategy,

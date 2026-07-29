@@ -71,9 +71,10 @@ pub const SERVER_NAME: &str = "medulla-workflows";
 /// Returns the reason the tools would be missing, phrased for an operator who
 /// has to fix it.
 pub fn preflight(env: &HashMap<String, String>, cwd: &Path) -> Result<(), String> {
-    let enabled = crate::config::load_config(None, env, cwd)
-        .map(|loaded| loaded.config.workflows.enabled)
-        .unwrap_or(true);
+    let enabled =
+        crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
+            .map(|loaded| loaded.config.workflows.enabled)
+            .unwrap_or(true);
     if !enabled {
         return Err(
             "workflows are turned off on this host (workflows.enabled = false), so the copilot \
@@ -182,7 +183,13 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // file on every tool call for. Defaults on failure — a server that refused
     // to start because config was unreadable would take the copilot's tools
     // with it, which is worse than answering `workflow_host` conservatively.
-    let config = crate::config::load_config(None, env, cwd)
+    // Respects the parent's `--config`, if it recorded one before spawning this
+    // subprocess — see `crate::config::CONFIG_PATH_ENV`. Passing `None`
+    // unconditionally here used to make this server re-discover its own
+    // config from `cwd`, silently answering with a different policy
+    // (`allowCode`, `enabled`, …) than the harness session it serves was
+    // actually launched under.
+    let config = crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
         .map(|loaded| loaded.config.workflows)
         .unwrap_or_default();
     let mut lines = BufReader::new(tokio::io::stdin()).lines();

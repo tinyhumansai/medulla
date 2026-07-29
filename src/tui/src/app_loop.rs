@@ -110,6 +110,15 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
+    // An explicit `--config` is recorded in this process's own environment
+    // before anything spawns off it, so every subprocess that later re-reads
+    // config (the `medulla workflow mcp` tool server, an ACP harness advertised
+    // its MCP servers) inherits the same choice instead of silently
+    // rediscovering a different one from its own `cwd`. See
+    // `medulla::config::CONFIG_PATH_ENV`.
+    if let Some(path) = args.config.as_deref() {
+        std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+    }
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let loaded = load_config(args.config.as_deref(), &env, &cwd)?;

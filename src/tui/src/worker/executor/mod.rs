@@ -235,6 +235,26 @@ impl PtySessionExecutor {
         outcome
     }
 
+    /// Interrupt a running turn and take its session out of service.
+    ///
+    /// The interrupt goes first and is a real `Ctrl-C`, exactly what an operator
+    /// would press: harnesses handle it as "stop what you are doing" and unwind
+    /// their tool calls, where killing the process leaves whatever it was
+    /// mid-write half-written.
+    ///
+    /// Then the session is closed rather than released, and deliberately so even
+    /// for an unbound conversation. A harness that has just been interrupted is
+    /// not *known* to be idle — the interrupt is a request, not a fence — and
+    /// `claim_idle` only skips sessions that are no longer running. Handing a
+    /// conversation a fresh session costs it continuity; handing the next task a
+    /// harness still finishing the last one interleaves two prompts into one
+    /// composer, which is the failure that produces confidently wrong answers
+    /// rather than an error.
+    fn stop_turn(&self, id: &str) {
+        let _ = self.sessions.write(id, &[0x03]);
+        self.sessions.close(id);
+    }
+
     /// Find or open the session that serves this task.
     fn session_for(
         &self,
@@ -426,6 +446,14 @@ impl PtySessionExecutor {
             // configured ceiling (never observed from `[host]`, whose default is
             // nonzero, but a defensive floor all the same).
             if timeout_ms > 0 && idle_ms as u64 >= timeout_ms {
+                // Stop the harness before reporting the failure. A timeout is
+                // only silence on the *transcript* — the child is very much
+                // alive and may still be editing the workspace. Returning
+                // without stopping it tells the peer the task failed while the
+                // work carries on unattributed, and an unbound session would
+                // then be released as idle for the next task to claim, landing
+                // its prompt in a harness that is still mid-turn.
+                self.stop_turn(id);
                 return Err(format!(
                     "{} task idle for {timeout_ms}ms (no events)",
                     provider.as_str()

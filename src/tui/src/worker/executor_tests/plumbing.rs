@@ -278,3 +278,53 @@ sleep 30
     );
     executor.sessions_for_test().shutdown();
 }
+
+#[tokio::test]
+async fn a_timed_out_turn_stops_its_harness_instead_of_leaving_it_running() {
+    // Honouring `taskTimeoutMs` without stopping the child is worse than not
+    // honouring it: the peer is told the task failed while the harness keeps
+    // editing the workspace, and an unbound session is then released as idle so
+    // the *next* task claims a harness that is still mid-turn and pastes its
+    // prompt into the same composer.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
+
+    // A harness that starts, greets the pty so the session is live, and then
+    // says nothing further — silence on the transcript with a child very much
+    // alive, which is exactly what the idle watchdog is for.
+    let script = "printf 'ready\\n'; sleep 600";
+    // Named sender + unbound: the case where the session would otherwise be
+    // handed straight to the next turn.
+    let mut options = options(&env, "peerA", script, &cwd);
+    options.session_class = medulla::sessions::SessionClass::Unbound;
+    options.timeout_ms = 1_500;
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(30),
+        executor.clone().run_for_test(options),
+    )
+    .await
+    .expect("the watchdog must fire well inside this budget")
+    .expect_err("a turn that never produces a transcript line is a failure");
+    assert!(
+        error.contains("idle for 1500ms"),
+        "the configured ceiling should be what fired: {error}"
+    );
+
+    // The point of the fix: nothing is left running for the next task to claim.
+    let rows = sessions.rows();
+    assert!(
+        !rows.iter().any(|row| row.state.is_running()),
+        "a timed-out turn must not leave its harness alive: {:?}",
+        rows.iter().map(|r| r.state).collect::<Vec<_>>()
+    );
+    assert!(
+        sessions
+            .claim_idle("peerA", medulla::tinyplace::HarnessProvider::Codex)
+            .is_none(),
+        "a timed-out session must not be reusable by the next task"
+    );
+    sessions.shutdown();
+}

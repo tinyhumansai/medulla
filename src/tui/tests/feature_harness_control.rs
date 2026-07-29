@@ -51,6 +51,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
         skip_permissions: false,
         router: None,
         budget: None,
+        custom_harnesses: Vec::new(),
     };
     let run_task: medulla::daemon::providers::RunTaskFn =
         Arc::new(|_| Box::pin(async { Err("not used in these tests".to_string()) }));

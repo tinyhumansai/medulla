@@ -19,8 +19,8 @@ use crate::hub::TaskRequest;
 use crate::workflows::copilot::{CopilotRequest, FailedRun, Mode};
 use crate::workflows::mcp::ToolMode;
 use crate::workflows::{
-    current_notes, require, NoteKind, NoteSource, RunRecord, WorkflowError, WorkflowNote,
-    WorkflowStore,
+    current_notes, require, NoteKind, NoteSource, RunRecord, RunStatus, WorkflowError,
+    WorkflowNote, WorkflowStore,
 };
 
 /// Everything a pass needs to reach a harness.
@@ -84,7 +84,7 @@ impl EvolveSession {
         // The durable floor. Before any dispatch, deliberately: this is the
         // part that still happens when there is no harness to ask.
         let mut notes = Vec::new();
-        if let Some(run) = self.triggering_run(&trigger)? {
+        if let Some(run) = self.triggering_run(workflow_id, &trigger)? {
             match record_failure_note(&self.store, &run) {
                 // `None` means `run_workflow` already wrote it, which is the
                 // normal case on the auto-triggered path.
@@ -119,7 +119,7 @@ impl EvolveSession {
             mode: Mode::Evolve,
             instruction: instruction_for(&trigger),
             record: Some(&record),
-            run: self.failed_run(&trigger)?,
+            run: self.failed_run(workflow_id, &trigger)?,
             notes: &briefed_notes,
             runs: &runs,
         }
@@ -184,20 +184,45 @@ impl EvolveSession {
     ///
     /// A trigger naming a run the store has lost is not fatal: the pass still
     /// has the journal and the rest of the history to work from.
-    fn triggering_run(&self, trigger: &EvolveTrigger) -> Result<Option<RunRecord>, WorkflowError> {
-        match trigger.run_id() {
-            Some(run_id) => self.store.get_run(run_id),
-            None => Ok(None),
+    fn triggering_run(
+        &self,
+        workflow_id: &str,
+        trigger: &EvolveTrigger,
+    ) -> Result<Option<RunRecord>, WorkflowError> {
+        let Some(run_id) = trigger.run_id() else {
+            return Ok(None);
+        };
+        let Some(run) = self.store.get_run(run_id)? else {
+            return Ok(None);
+        };
+        if run.workflow_id != workflow_id {
+            return Err(WorkflowError::Malformed(format!(
+                "run '{run_id}' belongs to workflow '{}', not '{workflow_id}'",
+                run.workflow_id
+            )));
         }
+        if run.status != RunStatus::Failed {
+            return Err(WorkflowError::Malformed(format!(
+                "run '{run_id}' is {:?}, not a failed run",
+                run.status
+            )));
+        }
+        Ok(Some(run))
     }
 
     /// The failing run, in the shape the brief wants it.
-    fn failed_run(&self, trigger: &EvolveTrigger) -> Result<Option<FailedRun>, WorkflowError> {
-        Ok(self.triggering_run(trigger)?.map(|run| FailedRun {
-            id: run.id.clone(),
-            error: run.error.clone(),
-            failing_nodes: super::context::failing_nodes(&run),
-        }))
+    fn failed_run(
+        &self,
+        workflow_id: &str,
+        trigger: &EvolveTrigger,
+    ) -> Result<Option<FailedRun>, WorkflowError> {
+        Ok(self
+            .triggering_run(workflow_id, trigger)?
+            .map(|run| FailedRun {
+                id: run.id.clone(),
+                error: run.error.clone(),
+                failing_nodes: super::context::failing_nodes(&run),
+            }))
     }
 }
 

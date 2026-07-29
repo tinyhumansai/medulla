@@ -438,6 +438,46 @@ async fn a_trigger_naming_a_lost_run_still_reviews_the_rest() {
     assert_eq!(outcome.reply, "ok");
 }
 
+#[tokio::test]
+async fn a_trigger_refuses_a_successful_run() {
+    let (_home, store, mut run) = fixture("a-trigger-refuses-a-successful-run");
+    run.status = RunStatus::Succeeded;
+    run.error = None;
+    store.record_run(&run).expect("updates the run");
+
+    let err = session(store.clone(), silent(&store, "must not dispatch"))
+        .evolve(
+            "a-trigger-refuses-a-successful-run",
+            EvolveTrigger::Failure(run.id),
+            None,
+        )
+        .await
+        .expect_err("only failures can trigger failure review");
+
+    assert!(err.to_string().contains("not a failed run"), "got: {err}");
+}
+
+#[tokio::test]
+async fn a_trigger_refuses_a_run_from_another_workflow() {
+    let (_home, store, mut run) = fixture("a-trigger-refuses-a-foreign-run");
+    run.workflow_id = "some-other-workflow".into();
+    store.record_run(&run).expect("updates the run");
+
+    let err = session(store.clone(), silent(&store, "must not dispatch"))
+        .evolve(
+            "a-trigger-refuses-a-foreign-run",
+            EvolveTrigger::Failure(run.id),
+            None,
+        )
+        .await
+        .expect_err("a workflow cannot review another workflow's run");
+
+    assert!(
+        err.to_string().contains("belongs to workflow"),
+        "got: {err}"
+    );
+}
+
 #[test]
 fn the_config_is_switched_off_by_the_outer_workflows_switch() {
     let mut config = crate::config::WorkflowsConfig {

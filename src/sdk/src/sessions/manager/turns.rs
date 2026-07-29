@@ -327,6 +327,9 @@ impl SessionManager {
         let provider = self.provider_for(request);
         let options = RunTaskOptions {
             conversation: String::new(),
+            // A one-shot turn owns its process for exactly that turn; continuity
+            // across turns comes from `resume`, not from a retained session.
+            session_class: SessionClass::Bounded,
             provider,
             prompt: request.text.clone(),
             cwd: self.inner.config.workspace.clone(),

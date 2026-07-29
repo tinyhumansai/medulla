@@ -110,13 +110,14 @@ impl PtySessionExecutor {
             .ok_or_else(|| format!("{} cannot run watchable tasks", provider.as_str()))?;
 
         // A task frame is discrete work and gets its own session; a
-        // conversational message continues the peer's. `conversation` is the
-        // authenticated sender, so two peers can never share one.
-        let class = if options.conversation.is_empty() {
-            SessionClass::Bounded
-        } else {
-            SessionClass::Unbound
-        };
+        // conversational message continues the peer's. Taken from the caller
+        // rather than inferred from `conversation`: the daemon sets that field
+        // to the authenticated sender for *every* inbound run, so it is never
+        // empty, and the old `is_empty()` test therefore classified every task
+        // frame as unbound. Two unrelated delegated tasks from one orchestrator
+        // then shared a harness, each able to read the other's prompt and tool
+        // context — the exact opposite of what the comment above promises.
+        let class = options.session_class;
         // Built *before* the session is opened, and deliberately so. The tailer
         // snapshots the transcripts that already exist and ignores them, so that
         // the one new file is unambiguously this session's — which means the
@@ -232,6 +233,26 @@ impl PtySessionExecutor {
             self.sessions.release(&id);
         }
         outcome
+    }
+
+    /// Interrupt a running turn and take its session out of service.
+    ///
+    /// The interrupt goes first and is a real `Ctrl-C`, exactly what an operator
+    /// would press: harnesses handle it as "stop what you are doing" and unwind
+    /// their tool calls, where killing the process leaves whatever it was
+    /// mid-write half-written.
+    ///
+    /// Then the session is closed rather than released, and deliberately so even
+    /// for an unbound conversation. A harness that has just been interrupted is
+    /// not *known* to be idle — the interrupt is a request, not a fence — and
+    /// `claim_idle` only skips sessions that are no longer running. Handing a
+    /// conversation a fresh session costs it continuity; handing the next task a
+    /// harness still finishing the last one interleaves two prompts into one
+    /// composer, which is the failure that produces confidently wrong answers
+    /// rather than an error.
+    fn stop_turn(&self, id: &str) {
+        let _ = self.sessions.write(id, &[0x03]);
+        self.sessions.close(id);
     }
 
     /// Find or open the session that serves this task.
@@ -425,6 +446,14 @@ impl PtySessionExecutor {
             // configured ceiling (never observed from `[host]`, whose default is
             // nonzero, but a defensive floor all the same).
             if timeout_ms > 0 && idle_ms as u64 >= timeout_ms {
+                // Stop the harness before reporting the failure. A timeout is
+                // only silence on the *transcript* — the child is very much
+                // alive and may still be editing the workspace. Returning
+                // without stopping it tells the peer the task failed while the
+                // work carries on unattributed, and an unbound session would
+                // then be released as idle for the next task to claim, landing
+                // its prompt in a harness that is still mid-turn.
+                self.stop_turn(id);
                 return Err(format!(
                     "{} task idle for {timeout_ms}ms (no events)",
                     provider.as_str()

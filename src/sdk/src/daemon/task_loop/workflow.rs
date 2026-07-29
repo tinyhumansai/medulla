@@ -55,6 +55,11 @@ impl HarnessDispatch for RuntimeDispatch {
 
         let options = RunTaskOptions {
             conversation: self.conversation.clone(),
+            // A workflow node is discrete work, like the task frame that
+            // started the graph — nodes share a conversation for attribution,
+            // not a harness. Two nodes of one graph running in the same session
+            // would let a later node read an earlier one's prompt as context.
+            session_class: crate::sessions::SessionClass::Bounded,
             resume_session_id: None,
             provider,
             prompt: request.instruction,

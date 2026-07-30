@@ -118,6 +118,44 @@ impl LocalHarnesses {
         self.sessions.scroll_history(session_id, rows, up);
     }
 
+    /// Whether `session_id`'s child asked for the mouse at all.
+    ///
+    /// The question the *caller* has to answer before it decides who owns the
+    /// pointer, and it must be asked once per gesture rather than per event: a
+    /// child in press-only mode takes the press but not the release, and
+    /// letting our own drag-selection pick up the leftovers would start
+    /// selecting text in the middle of a click the harness is already handling.
+    pub fn takes_mouse(&self, session_id: &str) -> bool {
+        self.sessions
+            .mouse_protocol(session_id)
+            .is_some_and(|(mode, _)| mode != vt100::MouseProtocolMode::None)
+    }
+
+    /// Forward one button event to `session_id` at pane-relative `(col, row)`.
+    ///
+    /// Silently does nothing when the child's mode does not cover this motion —
+    /// [`takes_mouse`](Self::takes_mouse) has already told the caller the
+    /// pointer belongs to the harness, and a press it does not want is better
+    /// dropped than translated into something it never asked for.
+    pub fn mouse_button(
+        &self,
+        session_id: &str,
+        col: u16,
+        row: u16,
+        button: mouse::Button,
+        motion: mouse::Motion,
+    ) {
+        let Some((mode, encoding)) = self.sessions.mouse_protocol(session_id) else {
+            return;
+        };
+        if let Some(bytes) = mouse::button(mode, encoding, col, row, button, motion) {
+            // A failed write means the child died between the last frame and
+            // this click; the pane notices on its next draw, and a lost click
+            // is not worth a message of its own.
+            let _ = self.sessions.write(session_id, &bytes);
+        }
+    }
+
     /// Snap the pane back to the live screen.
     ///
     /// Only meaningful for a session being scrolled through our own emulator; a

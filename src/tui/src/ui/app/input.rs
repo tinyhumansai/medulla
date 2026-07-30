@@ -16,6 +16,32 @@ use super::types::{App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_S
 /// one that takes mouse reports decides what a notch means itself.
 const SCROLL_ROWS: usize = 3;
 
+/// Translate a crossterm pointer event into the button and motion a mouse
+/// report names, or `None` for one that is not a button event.
+///
+/// Bare motion with no button held (`Moved`) is excluded on purpose. Only
+/// `DECSET 1003` asks for it, almost nothing negotiates that, and forwarding it
+/// would put a report on the wire for every cell the pointer crosses the pane.
+fn pointer_report(
+    kind: MouseEventKind,
+) -> Option<(
+    crate::ui::harness_pane::mouse::Button,
+    crate::ui::harness_pane::mouse::Motion,
+)> {
+    use crate::ui::harness_pane::mouse::{Button, Motion};
+    let button = |b: MouseButton| match b {
+        MouseButton::Left => Button::Left,
+        MouseButton::Middle => Button::Middle,
+        MouseButton::Right => Button::Right,
+    };
+    match kind {
+        MouseEventKind::Down(b) => Some((button(b), Motion::Press)),
+        MouseEventKind::Up(b) => Some((button(b), Motion::Release)),
+        MouseEventKind::Drag(b) => Some((button(b), Motion::Drag)),
+        _ => None,
+    }
+}
+
 impl App {
     /// Route a terminal event to the key or mouse handler, producing any command
     /// the event loop must run.
@@ -35,6 +61,13 @@ impl App {
         // The harness picker is one: a click that navigated the rail behind it
         // left an overlay on screen describing a row nobody was pointing at.
         if self.resume_picker.is_some() || self.harness_picker.is_some() {
+            return None;
+        }
+        // An attached harness is a terminal, and a terminal owns the pointer
+        // over it exactly as it owns the keyboard. Placed ahead of everything
+        // else for the same reason `handle_harness_key` runs first: attached is
+        // a mode, and a mode that keeps a few gestures for itself is not one.
+        if self.forward_harness_mouse(&m) {
             return None;
         }
         match m.kind {
@@ -75,6 +108,52 @@ impl App {
             _ => {}
         }
         None
+    }
+
+    /// Hand a pointer event to the attached harness, if it is the harness's.
+    ///
+    /// Returns `true` when the event was consumed, so the caller must not also
+    /// route it — a click that both reached Claude Code's permission dialog and
+    /// armed our drag-selection would leave a selection nobody asked for
+    /// hanging over the pane the child just redrew.
+    ///
+    /// Three conditions, all necessary:
+    ///
+    /// - a harness holds the keyboard, so the operator has already said the
+    ///   pane is what they are working in;
+    /// - the pointer is inside *that* harness's screen, not another pane;
+    /// - the child enabled mouse reporting. A harness that never asked keeps
+    ///   our own drag-to-select-and-copy, which is the only way to get text out
+    ///   of one — and forwarding to it would type `ESC [ < 0 ; 4 ; 9 M` into
+    ///   its composer.
+    ///
+    /// The wheel is deliberately absent: [`scroll_at`](Self::scroll_at) already
+    /// forwards notches over any harness pane, attached or not, because reading
+    /// back through a harness's output should not cost a chord first.
+    fn forward_harness_mouse(&mut self, m: &crossterm::event::MouseEvent) -> bool {
+        let Some(session) = self.harness_focus.attached_to().map(str::to_string) else {
+            return false;
+        };
+        let Some((rect, id)) = self.hit_harness.clone() else {
+            return false;
+        };
+        if id != session || !rect.contains((m.column, m.row).into()) {
+            return false;
+        }
+        let Some((button, motion)) = pointer_report(m.kind) else {
+            return false;
+        };
+        let Some(harnesses) = self.harnesses.clone() else {
+            return false;
+        };
+        if !harnesses.takes_mouse(&session) {
+            return false;
+        }
+        // Pane-relative: the child believes its screen starts at its own
+        // origin, and reporting our absolute position would put the event
+        // somewhere else entirely on it.
+        harnesses.mouse_button(&session, m.column - rect.x, m.row - rect.y, button, motion);
+        true
     }
 
     /// Scroll whatever the pointer is over, rather than whatever has focus.

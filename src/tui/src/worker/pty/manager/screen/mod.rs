@@ -1,8 +1,10 @@
 //! The emulator surface the UI renders, and the cells it renders into.
 
+use std::sync::atomic::Ordering;
+
 use portable_pty::PtySize;
 
-use super::PtyManager;
+use super::{PtyManager, MAX_QUEUED_WRITE_BYTES};
 
 impl PtyManager {
     /// Whether the child has turned bracketed-paste mode on (DECSET 2004).
@@ -180,15 +182,31 @@ impl PtyManager {
     /// same lock every frame, which made one unread paste a total TUI freeze: no
     /// repaint, no keys, no navigation. Nothing here may block, for that reason.
     ///
+    /// Queueing cannot block, so the queue is bounded by *refusal* instead:
+    /// [`MAX_QUEUED_WRITE_BYTES`](super::MAX_QUEUED_WRITE_BYTES) of unwritten
+    /// bytes per session, past which a write is rejected rather than waited out.
+    /// A child that never drains its stdin therefore cannot make this grow
+    /// without limit.
+    ///
     /// # Errors
     ///
-    /// When `id` names no session, when that session has exited, or when its
+    /// When `id` names no session, when that session has exited, when `bytes`
+    /// alone exceeds the queue, when the queue is already full, or when the
     /// writer thread is gone. A failure of the *write itself* has no caller left
     /// to reach and is recorded on the row's `last_error` instead.
     pub fn write(&self, id: &str, bytes: &[u8]) -> Result<(), String> {
+        // Refused before anything is copied: a write larger than the whole budget
+        // can never be admitted, however empty the queue is, and saying so here
+        // beats reserving and unwinding.
+        if bytes.len() > MAX_QUEUED_WRITE_BYTES {
+            return Err(format!(
+                "{id}: {} bytes is more than the {MAX_QUEUED_WRITE_BYTES}-byte write queue holds",
+                bytes.len()
+            ));
+        }
         // The queue handle is cloned out and the guard dropped *before* the send,
         // so the manager's lock is held for a lookup and nothing more.
-        let writes = {
+        let (writes, queued_bytes) = {
             let sessions = self.inner.sessions.lock().unwrap();
             let Some(session) = sessions.iter().find(|s| s.row.id == id) else {
                 return Err(format!("no session {id}"));
@@ -196,13 +214,28 @@ impl PtyManager {
             if !session.row.state.is_running() {
                 return Err(format!("{id} has exited"));
             }
-            session.writes.clone()
+            (session.writes.clone(), session.queued_bytes.clone())
         };
+        // Reserved before queueing, and atomically, so two concurrent writers
+        // cannot both observe room and both take it.
+        if queued_bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                let wanted = queued + bytes.len();
+                (wanted <= MAX_QUEUED_WRITE_BYTES).then_some(wanted)
+            })
+            .is_err()
+        {
+            return Err(format!(
+                "{id}: the write queue is full ({MAX_QUEUED_WRITE_BYTES} bytes unwritten) — \
+                 the harness is not reading its input"
+            ));
+        }
         // Fails only if the writer thread has stopped, which means the pty stopped
         // accepting bytes. Worth reporting: the caller's keystrokes went nowhere.
-        writes
-            .send(bytes.to_vec())
-            .map_err(|_| format!("{id}: the writer thread is gone"))
+        writes.send(bytes.to_vec()).map_err(|_| {
+            queued_bytes.fetch_sub(bytes.len(), Ordering::AcqRel);
+            format!("{id}: the writer thread is gone")
+        })
     }
 }
 

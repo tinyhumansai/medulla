@@ -1,6 +1,7 @@
 //! Data model for PTY-backed harness sessions: how one is launched, what the
 //! operator watches about it, and the handle the UI holds.
 
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
 use medulla::tinyplace::HarnessProvider;
@@ -217,10 +218,21 @@ pub(super) struct PtySession {
     /// that blocking write with the lock held, so one unread paste froze the
     /// whole TUI.
     ///
-    /// Unbounded on purpose: a bounded queue blocks its sender once full, which
-    /// is the very failure being removed. What travels here is prompts and
-    /// keystrokes, so a wedged harness backs up by kilobytes.
+    /// The channel itself is unbounded, because a bounded one blocks its sender
+    /// once full — the very failure being removed. The bound lives in
+    /// [`queued_bytes`](Self::queued_bytes) instead, where it can be enforced by
+    /// refusing rather than by waiting.
     pub(super) writes: std::sync::mpsc::Sender<Vec<u8>>,
+    /// How many bytes sit in [`writes`](Self::writes) still unwritten.
+    ///
+    /// The budget a caller is admitted against, so a child that never drains its
+    /// stdin cannot make the queue grow without limit. Reserved before queueing
+    /// and released as each write leaves, so two concurrent writers cannot both
+    /// see room and both take it.
+    ///
+    /// Counted in bytes rather than messages: one write is an arbitrarily long
+    /// paste, so a message count would bound nothing that matters.
+    pub(super) queued_bytes: Arc<AtomicUsize>,
     /// The child handle, for signalling and reaping.
     ///
     /// `Option` so the reaper can take it out and block on `wait()` *without*

@@ -30,6 +30,20 @@ use super::types::PtySession;
 /// Read buffer for the PTY master, sized for a full-screen redraw burst.
 const BUF_LEN: usize = 8192;
 
+/// How many unwritten bytes one session's write queue may hold.
+///
+/// The queue cannot block its sender — that is the freeze this module exists to
+/// avoid — so it is bounded by refusal instead: a write that would exceed this
+/// is rejected synchronously and the caller is told the harness is not reading.
+///
+/// Bounded by *bytes* rather than by message count, because one write is an
+/// arbitrarily long paste and a count would bound nothing. Generous enough that
+/// no real prompt or burst of keystrokes can reach it — a delegated instruction
+/// is kilobytes, and `inject_prompt` retries a paste three times at most — so in
+/// practice this is a backstop against a caller that does not yet exist rather
+/// than a limit anything legitimate will meet.
+const MAX_QUEUED_WRITE_BYTES: usize = 1024 * 1024;
+
 /// How many times to retry a failed `openpty` before giving up.
 ///
 /// Pty allocation is a shared, finite system resource, so it can fail

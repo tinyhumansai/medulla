@@ -1,7 +1,7 @@
 //! Launching a harness on a fresh pty, and draining it into the emulator.
 
 use std::io::{Read, Write};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 
@@ -100,6 +100,7 @@ impl PtyManager {
         // the queue, so no caller can block on the child while holding the
         // manager's lock. See `PtySession::writes`.
         let (writes, queued) = channel::<Vec<u8>>();
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
         let now = self.now();
         let id = format!("w_{}", self.inner.next_id.fetch_add(1, Ordering::SeqCst));
 
@@ -129,6 +130,7 @@ impl PtyManager {
             screen: screen.clone(),
             master: pty.master,
             writes,
+            queued_bytes: queued_bytes.clone(),
             child: Some(child),
         });
 
@@ -139,7 +141,7 @@ impl PtyManager {
         // failures against the row, so it needs the record to exist for the same
         // reason.
         self.spawn_reader(id.clone(), reader, screen);
-        self.spawn_writer(id.clone(), writer, queued);
+        self.spawn_writer(id.clone(), writer, queued, queued_bytes);
 
         Ok(id)
     }
@@ -185,18 +187,43 @@ impl PtyManager {
         id: String,
         mut writer: Box<dyn Write + Send>,
         queued: Receiver<Vec<u8>>,
+        queued_bytes: Arc<AtomicUsize>,
     ) {
         let manager = self.clone();
         std::thread::spawn(move || {
-            for bytes in queued {
-                if let Err(err) = writer.write_all(&bytes).and_then(|()| writer.flush()) {
-                    // Recorded rather than returned: the write is asynchronous
-                    // now, so there is no caller left to hand this to, and a
-                    // silently dropped paste is the failure hardest to diagnose
-                    // from the outside.
-                    manager.record_write_error(&id, &format!("{id}: {err}"));
+            let mut failure = None;
+            // `recv` rather than `for`, so the receiver survives the loop and the
+            // bytes still waiting can be accounted for below.
+            while let Ok(bytes) = queued.recv() {
+                let wrote = writer.write_all(&bytes).and_then(|()| writer.flush());
+                // Released whether or not it landed: the budget counts what is
+                // *waiting*, and these bytes are not waiting any more.
+                queued_bytes.fetch_sub(bytes.len(), Ordering::AcqRel);
+                if let Err(err) = wrote {
+                    failure = Some(err.to_string());
                     break;
                 }
+            }
+            // Whatever is still queued will never reach the child. Counted, not
+            // dropped in silence: every one of those bytes had a caller that was
+            // told `Ok`, and "your paste was slow" and "your paste was lost" are
+            // different problems with different fixes.
+            let abandoned: usize = queued.try_iter().map(|bytes| bytes.len()).sum();
+            // A queue nothing will ever drain must not keep occupying the budget,
+            // or a later write would be refused as "full" against bytes that are
+            // already gone. Racing a concurrent reservation can only leave this
+            // permissive, which is safe: writes to a dead session fail anyway.
+            queued_bytes.store(0, Ordering::Release);
+            // Only a real failure is worth recording. A session closed normally
+            // drops its sender to end this loop, and its record is usually gone
+            // by now anyway.
+            if let Some(err) = failure {
+                let lost = if abandoned > 0 {
+                    format!(" ({abandoned} queued byte(s) never written)")
+                } else {
+                    String::new()
+                };
+                manager.record_write_error(&id, &format!("{id}: {err}{lost}"));
             }
         });
     }

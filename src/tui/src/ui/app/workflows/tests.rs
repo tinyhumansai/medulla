@@ -20,7 +20,7 @@ use super::super::types::{App, Cmd};
 
 /// A workflow whose graph is trigger → check, branching to two agents that both
 /// feed a merge: enough shape to test lanes, edges, and cursor movement.
-fn diamond(id: &str) -> WorkflowRecord {
+pub(super) fn diamond(id: &str) -> WorkflowRecord {
     WorkflowRecord {
         id: id.to_string(),
         name: format!("{id} workflow"),
@@ -53,7 +53,7 @@ fn diamond(id: &str) -> WorkflowRecord {
 }
 
 /// An app pointed at a temporary home holding `workflows`, already loaded.
-fn app_with(workflows: &[WorkflowRecord]) -> (tempfile::TempDir, App) {
+pub(super) fn app_with(workflows: &[WorkflowRecord]) -> (tempfile::TempDir, App) {
     let home = tempfile::tempdir().expect("tempdir");
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
@@ -101,13 +101,14 @@ fn the_rail_lists_the_selected_workflows_runs_and_no_others() {
 
     let rows = app.workflow_rail_rows();
 
-    // Two workflows, a note under the selected one saying it has no runs, and
+    // Two workflows, a hint under the selected one saying it has no runs, and
     // the New row that closes every catalogue.
     assert_eq!(rows.len(), 4);
-    assert!(matches!(
-        rows[1],
-        super::WorkflowRailRow::Note("no runs yet")
-    ));
+    assert!(
+        matches!(&rows[1], super::WorkflowRailRow::Hint(hint) if hint == "no runs yet"),
+        "{:?}",
+        rows[1]
+    );
     assert!(matches!(rows[2], super::WorkflowRailRow::Workflow { .. }));
     assert!(matches!(rows[3], super::WorkflowRailRow::New));
 }
@@ -312,7 +313,7 @@ fn a_failed_turn_drops_what_was_queued_behind_it() {
     app.wf.draft = crate::ui::composer::insert_at("", 0, "two");
     app.submit_copilot();
 
-    app.copilot_failed("sweep", "the harness timed out".into());
+    app.copilot_failed("sweep", "one".into(), "the harness timed out".into());
 
     // The follow-up assumed the turn that just failed had happened; running it
     // anyway would act on a graph nobody edited.
@@ -328,7 +329,7 @@ fn a_failed_turn_keeps_its_instruction_so_it_can_be_retried() {
     app.wf.draft = crate::ui::composer::insert_at("", 0, "add a slack step");
     app.submit_copilot().expect("turn");
 
-    app.copilot_failed("sweep", "the harness timed out".into());
+    app.copilot_failed("sweep", "add a slack step".into(), "timed out".into());
     let retried = app.retry_copilot();
 
     // A turn that times out after two minutes should not also cost the
@@ -356,7 +357,7 @@ fn a_new_instruction_supersedes_the_one_that_failed() {
     let (_home, mut app) = app_with(&[diamond("sweep")]);
     app.wf.draft = crate::ui::composer::insert_at("", 0, "first attempt");
     app.submit_copilot().expect("turn");
-    app.copilot_failed("sweep", "timed out".into());
+    app.copilot_failed("sweep", "first attempt".into(), "timed out".into());
 
     app.wf.draft = crate::ui::composer::insert_at("", 0, "never mind, do this");
     app.submit_copilot().expect("second turn");
@@ -456,7 +457,7 @@ fn a_failed_turn_ends_the_thread_and_says_so_on_the_status_line() {
     app.wf.draft = crate::ui::composer::insert_at("", 0, "go");
     app.submit_copilot().expect("turn");
 
-    app.copilot_failed("sweep", "no harness installed".into());
+    app.copilot_failed("sweep", "go".into(), "no harness installed".into());
 
     assert!(!app.copilot().unwrap().busy);
     assert!(

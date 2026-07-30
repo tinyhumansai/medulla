@@ -48,6 +48,7 @@ impl TaskRunner {
                 provider: None,
                 custom_harness: None,
                 model: None,
+                tool_mode: None,
                 workflow: None,
                 conversation: None,
             });

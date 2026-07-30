@@ -49,6 +49,20 @@ pub struct TaskRequest {
     /// Optional model hint (the worker maps it to `--model`/`-m`, else its
     /// configured default).
     pub model: Option<String>,
+    /// Which slice of the workflow tools this dispatch's harness is served.
+    ///
+    /// `None` — every ordinary dispatch — means the full authoring surface.
+    /// `Some("propose:<workflow-id>")` withholds graph writes and scopes review writes,
+    /// which is what an evolution pass gets.
+    ///
+    /// Carried on the request rather than read from the ambient environment
+    /// because it varies *per turn*: the same daemon dispatches authoring turns
+    /// and review turns minutes apart, and a process-wide switch could only
+    /// ever be right for one of them.
+    ///
+    /// A plain string rather than the typed `ToolMode` so this type does not
+    /// depend on the `workflows` feature being compiled in.
+    pub tool_mode: Option<String>,
     /// Optional installed-workflow id: run that saved graph instead of handing
     /// [`instruction`](Self::instruction) to a harness as a prompt.
     ///

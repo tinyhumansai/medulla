@@ -162,7 +162,7 @@ pub fn parse_workspace_args(args: &[String]) -> WorkspaceArgs {
 pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
     let mut out = WorkflowArgs::default();
     let mut bare: Vec<String> = Vec::new();
-    let mut it = args.iter();
+    let mut it = args.iter().peekable();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--config" => {
@@ -178,6 +178,28 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
             "--run-id" => {
                 if let Some(v) = it.next() {
                     out.run_id = Some(v.clone());
+                }
+            }
+            "--kind" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.kind = it.next().cloned();
+                }
+            }
+            "--text" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.text = it.next().cloned();
+                }
+            }
+            "--reason" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.reason = it.next().cloned();
+                }
+            }
+            // Repeatable: one conclusion can replace several earlier guesses.
+            "--supersedes" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.supersedes
+                        .push(it.next().expect("peeked value exists").clone());
                 }
             }
             // Repeatable: a paused run may be holding more than one gate, and
@@ -225,6 +247,14 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
         }
         Some("get-run") => operand.map_or(WorkflowAction::List, WorkflowAction::GetRun),
         Some("catalog") | Some("kinds") => WorkflowAction::Catalog(operand),
+        Some("notes") => operand.map_or(WorkflowAction::List, WorkflowAction::Notes),
+        Some("note") => operand.map_or(WorkflowAction::List, WorkflowAction::AddNote),
+        Some("evolve") | Some("review") => {
+            operand.map_or(WorkflowAction::List, WorkflowAction::Evolve)
+        }
+        Some("proposals") => operand.map_or(WorkflowAction::List, WorkflowAction::Proposals),
+        Some("accept") => operand.map_or(WorkflowAction::List, WorkflowAction::Accept),
+        Some("reject") => operand.map_or(WorkflowAction::List, WorkflowAction::Reject),
         Some("mcp") => WorkflowAction::Mcp,
         _ => WorkflowAction::List,
     };

@@ -146,6 +146,8 @@ impl CopilotSession {
             instruction,
             record: Some(&before),
             run,
+            notes: &[],
+            runs: &[],
         }
         .render();
 
@@ -161,6 +163,7 @@ impl CopilotSession {
             model: self.model.clone(),
             // Never a workflow: this dispatch is an *authoring* turn, and
             // setting this would run the graph the operator is trying to edit.
+            tool_mode: None,
             workflow: None,
             conversation: Some(self.conversation.clone()),
         };
@@ -222,6 +225,8 @@ impl CopilotSession {
                 // an existing one is how an agent talks itself into editing it.
                 record: None,
                 run: None,
+                notes: &[],
+                runs: &[],
             }
             .render(),
             worker_address: self.worker_address.clone(),
@@ -230,6 +235,7 @@ impl CopilotSession {
             model: self.model.clone(),
             // Never a workflow, for the same reason an edit is not: this is an
             // authoring turn, not a run.
+            tool_mode: None,
             workflow: None,
             conversation: Some(self.conversation.clone()),
         };

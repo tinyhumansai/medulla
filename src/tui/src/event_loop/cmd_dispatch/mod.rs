@@ -251,6 +251,21 @@ pub(super) fn run_cmd(
             msg_tx,
         ),
         #[cfg(feature = "workflows")]
+        Cmd::EvolveWorkflow { workflow, run_id } => {
+            workflows::spawn_evolve(workflow, run_id, _workflows_config.clone(), msg_tx)
+        }
+        #[cfg(feature = "workflows")]
+        Cmd::AcceptProposal {
+            workflow,
+            proposal_id,
+        } => workflows::spawn_decision(workflow, proposal_id, None, msg_tx),
+        #[cfg(feature = "workflows")]
+        Cmd::RejectProposal {
+            workflow,
+            proposal_id,
+            reason,
+        } => workflows::spawn_decision(workflow, proposal_id, Some(reason), msg_tx),
+        #[cfg(feature = "workflows")]
         Cmd::CopilotTurn {
             workflow,
             instruction,

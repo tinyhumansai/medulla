@@ -30,6 +30,8 @@ mod system_info_tests;
 mod task_attribution_tests;
 mod task_continuity_tests;
 mod task_tests;
+#[cfg(feature = "workflows")]
+mod workflow_tests;
 
 /// A [`SendFn`] that records every `(to, body)` it is handed, paired with the
 /// shared sink the test reads back.
@@ -93,6 +95,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
         provider: None,
         custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     }

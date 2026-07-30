@@ -149,3 +149,80 @@ pub async fn run_here(
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
     crate::workflows::run_workflow(context, id, &run_id, input).await
 }
+
+/// Review a workflow against its own history, on this machine.
+///
+/// The evolution counterpart to [`run_here`], and it starts the same embedded
+/// host for the same reason: a review is a harness turn, and the CLI has no
+/// daemon to borrow one from.
+///
+/// The trigger is passed in rather than inferred. `medulla workflow evolve`
+/// with no run is a manual review; with one it is the failure pass, which leads
+/// with that run.
+///
+/// The workflow must exist, be enabled, and workflow evolution must be enabled.
+/// This starts an embedded daemon bound to [`LOCAL_WORKER_ADDRESS`] and forces
+/// ACP so the review can use the restricted workflow MCP surface.
+///
+/// # Errors
+///
+/// Returns an error when those preconditions fail, MCP support is unavailable,
+/// the embedded host cannot start, or the review turn fails.
+pub async fn evolve_here(
+    store: Arc<dyn crate::workflows::WorkflowStore>,
+    config: &crate::config::WorkflowsConfig,
+    cwd: &std::path::Path,
+    id: &str,
+    trigger: crate::workflows::evolve::EvolveTrigger,
+) -> Result<crate::workflows::evolve::EvolveOutcome, crate::workflows::WorkflowError> {
+    use crate::workflows::evolve::{EvolveConfig, EvolveSession};
+
+    let settings = EvolveConfig::from_config(config);
+    if !settings.enabled {
+        return Err(crate::workflows::WorkflowError::Engine(
+            "workflow evolution is disabled on this host".to_string(),
+        ));
+    }
+    // Checked before the host starts, for the same reason `run_here` checks
+    // `enabled`: standing up an embedded daemon needs a coding-agent CLI on
+    // `PATH`, and a workflow that does not exist should not cost that.
+    let workflow = crate::workflows::store::require(store.as_ref(), id)?;
+    if !workflow.enabled {
+        return Err(crate::workflows::WorkflowError::Engine(format!(
+            "workflow '{id}' is disabled"
+        )));
+    }
+
+    // Evolution depends on the restricted workflow MCP surface. The legacy
+    // provider transport cannot attach MCP servers, so an otherwise successful
+    // review would be unable to record a note or proposal.
+    let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    env.insert(
+        crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+        "acp".to_string(),
+    );
+    crate::workflows::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
+
+    let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
+        workspace: cwd.to_string_lossy().to_string(),
+        default_provider: config.default_provider,
+        model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+        env,
+        ..Default::default()
+    })
+    .map_err(crate::workflows::WorkflowError::Engine)?;
+
+    let session = EvolveSession {
+        store,
+        dispatch: host.dispatch(),
+        worker_address: LOCAL_WORKER_ADDRESS.to_string(),
+        provider: config.default_provider,
+        model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+        // One-shot: a CLI invocation has no pane to be continuous with, and
+        // sharing a conversation key across invocations would have each review
+        // inherit the last one's context whether or not that is wanted.
+        conversation: format!("evolve-{}-{}", id, uuid::Uuid::new_v4()),
+        config: settings,
+    };
+    session.evolve(id, trigger, None).await
+}

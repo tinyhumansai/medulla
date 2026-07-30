@@ -70,6 +70,26 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .filter(|id| !id.is_empty())
         .map(Box::<str>::from);
 
+    // Blank is absent for compatibility with encoders that always write the
+    // key. Unknown non-empty modes fail closed: silently turning one into the
+    // full tool surface could grant a review turn authoring capabilities.
+    let tool_mode = match obj.get("tool_mode") {
+        None => None,
+        Some(serde_json::Value::String(mode)) if mode.trim().is_empty() => None,
+        Some(serde_json::Value::String(mode)) => {
+            let mode = mode.trim();
+            let valid_scoped_propose = mode
+                .strip_prefix("propose:")
+                .is_some_and(|scope| !scope.trim().is_empty());
+            if matches!(mode, "full" | "propose") || valid_scoped_propose {
+                Some(mode.to_string())
+            } else {
+                return None;
+            }
+        }
+        Some(_) => return None,
+    };
+
     // Blank is absent, for the same reason a blank workflow id is: an encoder
     // that always writes the key must not put every task into a conversation
     // named "" — which would be one shared context for every unrelated sender.
@@ -91,6 +111,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         provider,
         custom_harness,
         model,
+        tool_mode,
         workflow,
         conversation,
         usage,

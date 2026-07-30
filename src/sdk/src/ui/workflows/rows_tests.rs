@@ -29,6 +29,8 @@ fn run(id: &str, status: RunStatus) -> RunRecord {
         }],
         pending_approvals: Vec::new(),
         error: None,
+        summary: None,
+        diagnosis: None,
     }
 }
 

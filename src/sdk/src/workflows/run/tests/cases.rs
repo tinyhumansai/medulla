@@ -5,23 +5,25 @@
 //! a coding agent.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+pub(super) use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use serde_json::json;
+pub(super) use serde_json::json;
 
-use super::{cancel, dry_run, is_running, resume_workflow, run_workflow, RunContext};
-use crate::flow_engine::caps::dispatch::HarnessDispatch;
+pub(super) use super::super::{
+    cancel, dry_run, is_running, resume_workflow, run_workflow, RunContext,
+};
+pub(super) use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::flow_engine::{null_sink, CapabilitySettings, HostServices};
-use crate::hub::{RunError, TaskOutcome, TaskRequest};
+pub(super) use crate::hub::{RunError, TaskOutcome, TaskRequest};
 use crate::workflows::store::parse_workflow;
-use crate::workflows::{
+pub(super) use crate::workflows::{
     require_run, FileWorkflowStore, RunStatus, StoreWorkflowResolver, WorkflowError, WorkflowStore,
 };
 
 /// A dispatch that answers immediately, recording what it saw.
 #[derive(Default)]
-struct StubDispatch {
+pub(super) struct StubDispatch {
     seen: Mutex<Vec<TaskRequest>>,
 }
 
@@ -42,7 +44,7 @@ impl HarnessDispatch for StubDispatch {
 
 /// A dispatch that never returns, so a test can cancel a run that is genuinely
 /// in flight rather than one that has already finished.
-struct HangingDispatch;
+pub(super) struct HangingDispatch;
 
 #[async_trait]
 impl HarnessDispatch for HangingDispatch {
@@ -51,15 +53,41 @@ impl HarnessDispatch for HangingDispatch {
     }
 }
 
+/// A resumed leg that swallows one node error before remaining in flight.
+pub(super) struct ErrorThenHangDispatch;
+
+#[async_trait]
+impl HarnessDispatch for ErrorThenHangDispatch {
+    async fn dispatch(&self, request: TaskRequest) -> Result<TaskOutcome, RunError> {
+        if request.instruction == "fail" {
+            return Err(RunError::Worker("expected failure".into()));
+        }
+        if request.instruction == "hang" {
+            return std::future::pending().await;
+        }
+        Ok(TaskOutcome {
+            reply: "approved".into(),
+            usage: crate::tinyplace::TokenUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            harness: None,
+        })
+    }
+}
+
 /// A store, its settings, and a context factory over a temporary directory.
-struct Harness {
+pub(super) struct Harness {
     _root: tempfile::TempDir,
-    store: Arc<FileWorkflowStore>,
-    settings: Arc<CapabilitySettings>,
+    /// File-backed workflow and run state used by the test.
+    pub(super) store: Arc<FileWorkflowStore>,
+    /// Capability policy copied into each test run context.
+    pub(super) settings: Arc<CapabilitySettings>,
 }
 
 impl Harness {
-    fn new() -> Self {
+    /// Create an isolated permissive workflow harness.
+    pub(super) fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let store = Arc::new(FileWorkflowStore::new(
             vec![root.path().join("workflows")],
@@ -74,12 +102,14 @@ impl Harness {
         }
     }
 
-    fn install(&self, document: &str, id: &str) {
+    /// Parse and save one workflow fixture under `id`.
+    pub(super) fn install(&self, document: &str, id: &str) {
         let record = parse_workflow(document, id).expect("valid fixture");
         self.store.save(&record).expect("saves");
     }
 
-    fn context(&self, dispatch: Arc<dyn HarnessDispatch>) -> RunContext {
+    /// Build a run context using the supplied stand-in dispatch.
+    pub(super) fn context(&self, dispatch: Arc<dyn HarnessDispatch>) -> RunContext {
         RunContext {
             store: self.store.clone(),
             settings: self.settings.clone(),
@@ -93,10 +123,21 @@ impl Harness {
     }
 }
 
+/// Wait for a run to enter the process registry, failing instead of hanging.
+async fn wait_until_running(run_id: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !is_running(run_id) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{run_id} was not registered"));
+}
+
 /// A diamond: the trigger fans out to two agent nodes that run concurrently,
 /// then a `merge` waits for both. Exercises parallel execution and the fan-in
 /// barrier in one graph.
-fn diamond() -> String {
+pub(super) fn diamond() -> String {
     json!({
         "id": "diamond",
         "name": "Diamond",
@@ -120,7 +161,7 @@ fn diamond() -> String {
 }
 
 /// A graph whose single step is an approval gate.
-fn gated() -> String {
+pub(super) fn gated() -> String {
     json!({
         "id": "gated",
         "name": "Gated",
@@ -131,6 +172,30 @@ fn gated() -> String {
               "config": { "prompt": "review it", "requires_approval": true } }
         ],
         "edges": [{ "from_node": "t", "to_node": "review" }]
+    })
+    .to_string()
+}
+
+/// A gated graph whose resumed leg swallows an error and then hangs.
+pub(super) fn gated_error_then_hang() -> String {
+    json!({
+        "id": "gated-error-then-hang",
+        "name": "Gated error then hang",
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "review", "kind": "agent", "name": "Review",
+              "config": { "prompt": "review it", "requires_approval": true } },
+            { "id": "swallowed", "kind": "agent", "name": "Swallowed",
+              "config": { "prompt": "fail", "on_error": "continue" } },
+            { "id": "hang", "kind": "agent", "name": "Hang",
+              "config": { "prompt": "hang" } }
+        ],
+        "edges": [
+            { "from_node": "t", "to_node": "review" },
+            { "from_node": "review", "to_node": "swallowed" },
+            { "from_node": "swallowed", "to_node": "hang" }
+        ]
     })
     .to_string()
 }
@@ -197,114 +262,6 @@ async fn a_run_is_recorded_and_can_be_read_back_by_id() {
 }
 
 #[tokio::test]
-async fn an_approval_gate_pauses_the_run_and_names_what_it_is_waiting_on() {
-    let harness = Harness::new();
-    harness.install(&gated(), "gated");
-
-    let record = run_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "gated",
-        "run-3",
-        json!({}),
-    )
-    .await
-    .expect("runs");
-
-    assert_eq!(record.status, RunStatus::PendingApproval);
-    assert_eq!(record.pending_approvals, vec!["review".to_string()]);
-    assert!(!record.status.is_settled(), "a gate is resumable");
-}
-
-#[tokio::test]
-async fn approving_the_gate_resumes_the_run_to_completion() {
-    let harness = Harness::new();
-    harness.install(&gated(), "gated");
-    run_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "gated",
-        "run-4",
-        json!({}),
-    )
-    .await
-    .unwrap();
-
-    let resumed = resume_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "run-4",
-        vec!["review".into()],
-        Vec::new(),
-    )
-    .await
-    .expect("resumes");
-
-    assert_eq!(resumed.status, RunStatus::Succeeded);
-    assert!(resumed.pending_approvals.is_empty());
-}
-
-#[tokio::test]
-async fn a_resume_naming_no_pending_gate_is_refused() {
-    // The engine treats the resume call itself as consent, so without this
-    // check any resume would release every gate the run is holding.
-    let harness = Harness::new();
-    harness.install(&gated(), "gated");
-    run_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "gated",
-        "run-5",
-        json!({}),
-    )
-    .await
-    .unwrap();
-
-    let err = resume_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "run-5",
-        vec!["some-other-node".into()],
-        Vec::new(),
-    )
-    .await
-    .expect_err("must not release the gate");
-
-    assert!(
-        err.to_string().contains("review"),
-        "say which gate is actually waiting: {err}"
-    );
-    assert_eq!(
-        require_run(harness.store.as_ref(), "run-5").unwrap().status,
-        RunStatus::PendingApproval,
-        "the run must still be parked"
-    );
-}
-
-#[tokio::test]
-async fn resuming_a_run_that_is_not_waiting_is_refused() {
-    let harness = Harness::new();
-    harness.install(&diamond(), "diamond");
-    run_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "diamond",
-        "run-6",
-        json!({}),
-    )
-    .await
-    .unwrap();
-
-    let err = resume_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "run-6",
-        vec!["anything".into()],
-        Vec::new(),
-    )
-    .await
-    .expect_err("already finished");
-
-    assert!(
-        err.to_string().contains("not awaiting approval"),
-        "got {err}"
-    );
-}
-
-#[tokio::test]
 async fn cancelling_an_in_flight_run_settles_it_as_cancelled() {
     let harness = Harness::new();
     harness.install(&gated(), "gated");
@@ -322,9 +279,7 @@ async fn cancelling_an_in_flight_run_settles_it_as_cancelled() {
 
     // Wait for the run to register itself before cancelling — otherwise the
     // test races setup and proves nothing.
-    while !is_running("run-7") {
-        tokio::task::yield_now().await;
-    }
+    wait_until_running("run-7").await;
     assert!(cancel("run-7"), "the run should be cancellable by id");
 
     let record = run.await.unwrap().expect("settles");
@@ -453,9 +408,7 @@ async fn a_run_dropped_mid_flight_is_reconciled_to_interrupted() {
         )
         .await
     });
-    while !is_running("run-11") {
-        tokio::task::yield_now().await;
-    }
+    wait_until_running("run-11").await;
     run.abort();
     let _ = run.await;
 
@@ -495,9 +448,8 @@ async fn two_runs_of_one_workflow_cancel_independently() {
         )
         .await
     });
-    while !is_running("run-a") || !is_running("run-b") {
-        tokio::task::yield_now().await;
-    }
+    wait_until_running("run-a").await;
+    wait_until_running("run-b").await;
 
     cancel("run-a");
     let first = first.await.unwrap().unwrap();
@@ -544,9 +496,7 @@ async fn the_same_run_id_cannot_start_twice_concurrently() {
         )
         .await
     });
-    while !is_running("dup") {
-        tokio::task::yield_now().await;
-    }
+    wait_until_running("dup").await;
 
     let second = run_workflow(second_context, "gated", "dup", json!({}))
         .await
@@ -567,7 +517,7 @@ async fn a_cancel_that_arrives_before_the_run_waits_is_not_lost() {
     // dropped and the run would carry on regardless.
     let harness = Harness::new();
     harness.install(&gated(), "gated");
-    let (guard, signal) = super::RunGuard::register("early");
+    let (guard, signal) = super::super::RunGuard::register("early");
     assert!(cancel("early"), "the run is registered");
     assert!(
         signal.is_cancelled(),
@@ -579,33 +529,6 @@ async fn a_cancel_that_arrives_before_the_run_waits_is_not_lost() {
         .await
         .expect("a cancel that already happened must not block");
     drop(guard);
-}
-
-#[tokio::test]
-async fn a_resume_may_reject_the_only_gate_without_approving_anything() {
-    let harness = Harness::new();
-    harness.install(&gated(), "gated");
-    run_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "gated",
-        "run-reject",
-        json!({}),
-    )
-    .await
-    .unwrap();
-
-    // Rejecting is a legitimate way to settle a run; requiring an approval
-    // would make --reject unusable on a single-gate workflow.
-    let settled = resume_workflow(
-        harness.context(Arc::new(StubDispatch::default())),
-        "run-reject",
-        Vec::new(),
-        vec!["review".into()],
-    )
-    .await
-    .expect("a rejection is a decision");
-
-    assert!(settled.status.is_settled(), "got {:?}", settled.status);
 }
 
 #[tokio::test]

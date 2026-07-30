@@ -96,6 +96,12 @@ pub struct CopilotState {
     pub turns: Vec<CopilotTurn>,
     /// Whether a turn is in flight.
     pub busy: bool,
+    /// Number of turns in flight on this thread.
+    ///
+    /// Usually one, but an automatic failure review can start while an
+    /// operator turn is already running. Counting keeps the first completion
+    /// from making the still-running second turn look idle.
+    pub in_flight: usize,
     /// An instruction typed while a turn was running, to send when it finishes.
     ///
     /// Queued rather than refused, which it used to be. The old reasoning was
@@ -132,6 +138,7 @@ impl CopilotState {
             workflow_id: workflow_id.into(),
             turns: Vec::new(),
             busy: false,
+            in_flight: 0,
             queued: None,
             last_failed: None,
         }
@@ -141,6 +148,7 @@ impl CopilotState {
     pub fn ask(&mut self, instruction: impl Into<String>) {
         self.turns
             .push(CopilotTurn::new(TurnRole::User, instruction));
+        self.in_flight = self.in_flight.saturating_add(1);
         self.busy = true;
         // A new instruction supersedes the failed one: the operator has moved
         // on, and offering to retry something they have replaced would be
@@ -214,7 +222,7 @@ impl CopilotState {
         if !text.trim().is_empty() {
             self.turns.push(CopilotTurn::new(TurnRole::Agent, text));
         }
-        self.busy = false;
+        self.finish_turn();
     }
 
     /// Record what the turn changed in the graph.
@@ -237,7 +245,13 @@ impl CopilotState {
     /// Record a failure and end the turn.
     pub fn failed(&mut self, text: impl Into<String>) {
         self.turns.push(CopilotTurn::new(TurnRole::Error, text));
-        self.busy = false;
+        self.finish_turn();
+    }
+
+    /// Settle one concurrent turn without hiding any others still running.
+    fn finish_turn(&mut self) {
+        self.in_flight = self.in_flight.saturating_sub(1);
+        self.busy = self.in_flight > 0;
     }
 
     /// Drop the oldest status lines once there are too many of them.

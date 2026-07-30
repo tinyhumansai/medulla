@@ -52,13 +52,13 @@ impl App {
                     dim: match row {
                         WorkflowRailRow::Workflow { row, .. }
                         | WorkflowRailRow::Run { row, .. } => row.degraded,
-                        WorkflowRailRow::Note(_) => true,
+                        WorkflowRailRow::Hint(_) => true,
                         // Never dim: it is the one row that is an offer rather
                         // than a record, and on an empty machine it is the only
                         // thing there is to do.
                         WorkflowRailRow::New => false,
                     },
-                    selectable: !matches!(row, WorkflowRailRow::Note(_)),
+                    selectable: !matches!(row, WorkflowRailRow::Hint(_)),
                 })
                 .collect();
 
@@ -83,7 +83,7 @@ fn rail_label(row: &WorkflowRailRow) -> String {
             medulla::ui::workflows::rows::short_run_id(&row.label),
             row.detail
         ),
-        WorkflowRailRow::Note(note) => (*note).to_string(),
+        WorkflowRailRow::Hint(hint) => hint.clone(),
         WorkflowRailRow::New => NEW_LABEL.to_string(),
     }
 }

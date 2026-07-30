@@ -11,6 +11,7 @@
 //!   through it.
 //! - [`inspect`] — what a selected node says about itself, and how a run marks
 //!   the graph up.
+//! - [`journal`] — what a workflow has learned, and what it suggests changing.
 //! - [`copilot`] — the transcript model for the graph-editing assistant.
 //! - [`progress`] — reading that assistant's progress frames as tool calls or
 //!   chatter.
@@ -18,6 +19,7 @@
 pub mod copilot;
 pub mod graph;
 pub mod inspect;
+pub mod journal;
 pub mod progress;
 pub mod rows;
 
@@ -26,5 +28,6 @@ pub use graph::{GraphLayout, Move, PlacedEdge, PlacedNode};
 pub use inspect::{
     find_node as find_node_in, node_detail, DetailRow, NodeRun, NodeRunState, RunOverlay,
 };
+pub use journal::{actionable, displayed, note_rows, pending, proposal_detail, proposal_rows};
 pub use progress::{classify as classify_progress, Progress};
 pub use rows::{run_rows, status_color, status_label, workflow_rows, WorkflowRow};

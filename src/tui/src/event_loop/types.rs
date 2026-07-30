@@ -20,6 +20,14 @@ pub(super) enum AppMsg {
     UsageLoaded(Option<serde_json::Value>),
     /// A newer release was detected by the background update checker.
     UpdateAvailable(String),
+    /// An automatic review began outside the selected pane.
+    #[cfg(feature = "workflows")]
+    CopilotStarted {
+        /// The workflow whose automatic review started.
+        workflow: String,
+        /// The synthetic user turn shown in its transcript.
+        instruction: String,
+    },
     /// A page of the feedback board. `None` = this runtime has no board.
     FeedbackLoaded {
         /// The query that produced it, so a superseded load can be dropped.
@@ -39,10 +47,6 @@ pub(super) enum AppMsg {
     /// A feedback action finished; reload the board and report `status`.
     FeedbackChanged(String),
     /// A progress line from a running copilot turn.
-    ///
-    /// Addressed by workflow rather than applied to whatever is selected: the
-    /// operator may have moved the rail on while the turn runs, and the line
-    /// belongs to the thread that asked for it.
     #[cfg(feature = "workflows")]
     CopilotStatus {
         /// The workflow whose turn reported it.
@@ -70,6 +74,8 @@ pub(super) enum AppMsg {
     CopilotFailed {
         /// The workflow the turn was scoped to.
         workflow: String,
+        /// The instruction belonging to this specific failed turn.
+        instruction: String,
         /// Why it failed.
         error: String,
     },

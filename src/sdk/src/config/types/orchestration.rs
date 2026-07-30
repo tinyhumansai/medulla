@@ -340,6 +340,55 @@ pub struct WorkflowsConfig {
     /// How long one run may take before the host abandons it.
     #[serde(default = "d_run_timeout_secs")]
     pub run_timeout_secs: u64,
+    /// Whether and how a workflow reviews its own history.
+    #[serde(default)]
+    pub evolve: EvolveSettings,
+}
+
+/// The `workflows.evolve` section: reviewing a workflow against its own runs.
+///
+/// On by default, unlike the capability switches above, because a pass cannot
+/// change anything: it records notes and produces proposals an operator has to
+/// accept. `autoOnFailure` is the one worth turning off — it spends a harness
+/// session per failed workflow, which an operator running many may not want.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct EvolveSettings {
+    /// Whether a review may run at all.
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    /// Whether a failed run starts one by itself.
+    #[serde(default = "d_true")]
+    pub auto_on_failure: bool,
+    /// How many recent runs reach the review's brief.
+    #[serde(default = "d_evolve_max_runs")]
+    pub max_runs: usize,
+    /// How many current notes reach the review's brief.
+    #[serde(default = "d_evolve_max_notes")]
+    pub max_notes: usize,
+}
+
+/// Enough runs to see a pattern, few enough that the brief is still mostly the
+/// graph and the notes.
+fn d_evolve_max_runs() -> usize {
+    5
+}
+
+/// Well under the journal's cap: a review that reads a hundred notes is one
+/// whose brief is mostly history.
+fn d_evolve_max_notes() -> usize {
+    40
+}
+
+impl Default for EvolveSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_on_failure: true,
+            max_runs: d_evolve_max_runs(),
+            max_notes: d_evolve_max_notes(),
+        }
+    }
 }
 
 /// A run may take ten minutes: long enough for real work on a coding harness,
@@ -359,6 +408,7 @@ impl Default for WorkflowsConfig {
             tool_allowlist: Vec::new(),
             http_allowlist: Vec::new(),
             run_timeout_secs: d_run_timeout_secs(),
+            evolve: EvolveSettings::default(),
         }
     }
 }

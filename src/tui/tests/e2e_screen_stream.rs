@@ -117,6 +117,7 @@ async fn start_task(runtime: &DaemonRuntime, from: &str, task_id: &str) {
         provider: Some(HarnessProvider::Codex),
         custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });

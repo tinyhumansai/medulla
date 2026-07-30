@@ -20,14 +20,26 @@ mod concurrency_tests;
 mod tests;
 
 pub use file::{
-    new_run_record, parse_workflow, validate_graph, workflow_dirs, FileWorkflowStore, LoadReport,
-    MAX_REVISIONS,
+    mint_note_id, mint_proposal_id, new_run_record, parse_workflow, validate_graph, workflow_dirs,
+    FileWorkflowStore, LoadReport, MAX_NOTES, MAX_REVISIONS,
 };
 
 use crate::workflows::types::{
-    RunId, RunRecord, WorkflowId, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    RunId, RunRecord, WorkflowId, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision,
+    WorkflowSummary,
 };
 use crate::workflows::WorkflowError;
+
+/// An exclusive claim over proposal decisions for one workflow.
+///
+/// The value has no operations: holding it is the operation, and dropping it
+/// releases the backing store's claim.
+pub trait ProposalDecisionGuard: Send {}
+
+/// Default guard for stores that need no external transaction primitive.
+struct NoopProposalDecisionGuard;
+
+impl ProposalDecisionGuard for NoopProposalDecisionGuard {}
 
 /// Persistence for workflow definitions and their run history.
 ///
@@ -38,6 +50,15 @@ use crate::workflows::WorkflowError;
 /// on an async runtime should wrap these in `spawn_blocking`, as the TUI already
 /// does for its task repository.
 pub trait WorkflowStore: Send + Sync {
+    /// Identity used to scope in-process proposal decision guards.
+    ///
+    /// Workflow and proposal ids are only unique within a store. Including the
+    /// store identity prevents two independent catalogs with the same ids from
+    /// blocking each other.
+    fn proposal_decision_scope(&self) -> String {
+        format!("{self:p}")
+    }
+
     /// Every known workflow, in a stable display order.
     fn list(&self) -> Result<Vec<WorkflowSummary>, WorkflowError>;
 
@@ -50,6 +71,25 @@ pub trait WorkflowStore: Send + Sync {
     /// the engine would refuse to compile, so a listing can be trusted to be
     /// runnable.
     fn save(&self, record: &WorkflowRecord) -> Result<(), WorkflowError>;
+
+    /// Save only when the current graph still has `expected_fingerprint`.
+    ///
+    /// File-backed stores override this atomically. The default preserves the
+    /// contract for lightweight test stores that do not expose transactions.
+    fn save_if_fingerprint(
+        &self,
+        record: &WorkflowRecord,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let Some(current) = self.get(&record.id)? else {
+            return Ok(false);
+        };
+        if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
+            return Ok(false);
+        }
+        self.save(record)?;
+        Ok(true)
+    }
 
     /// Remove a workflow. Removing one that does not exist is an error, so a
     /// caller cannot mistake a typo for a successful delete.
@@ -79,6 +119,124 @@ pub trait WorkflowStore: Send + Sync {
         workflow_id: &str,
         revision_id: &str,
     ) -> Result<Option<WorkflowRevision>, WorkflowError>;
+
+    /// Every note recorded about a workflow, newest first, including notes a
+    /// later one superseded.
+    ///
+    /// Defaulted so a store that keeps no journal — a read-only catalogue, a
+    /// test stand-in — is not obliged to invent one. The asymmetry with
+    /// [`WorkflowStore::append_note`] is deliberate: reporting "nothing
+    /// learned" is honest, whereas silently discarding something the host
+    /// claims to have learned is not.
+    fn list_notes(&self, workflow_id: &str) -> Result<Vec<WorkflowNote>, WorkflowError> {
+        let _ = workflow_id;
+        Ok(Vec::new())
+    }
+
+    /// Record a note.
+    fn append_note(&self, note: &WorkflowNote) -> Result<(), WorkflowError> {
+        let _ = note;
+        Err(WorkflowError::Engine(
+            "this workflow store does not keep notes".to_string(),
+        ))
+    }
+
+    /// Mark a note as replaced by a later one, returning whether it changed.
+    ///
+    /// The superseded note stays listed; it simply stops being briefed.
+    fn supersede_note(
+        &self,
+        workflow_id: &str,
+        note_id: &str,
+        by: &str,
+    ) -> Result<bool, WorkflowError> {
+        let _ = (workflow_id, note_id, by);
+        Err(WorkflowError::Engine(
+            "this workflow store does not keep notes".to_string(),
+        ))
+    }
+
+    /// Write a proposal, replacing any earlier state for the same id.
+    ///
+    /// Every transition goes through here — verified, accepted, rejected, made
+    /// stale — so a proposal's stored form is its current state rather than a
+    /// log to replay.
+    fn save_proposal(&self, proposal: &WorkflowProposal) -> Result<(), WorkflowError> {
+        let _ = proposal;
+        Err(WorkflowError::Engine(
+            "this workflow store does not keep proposals".to_string(),
+        ))
+    }
+
+    /// Save a proposal only while its workflow still has `expected_fingerprint`.
+    ///
+    /// File-backed stores override this atomically with definition writes. The
+    /// default preserves the contract for lightweight test stores that do not
+    /// expose transactions.
+    fn save_proposal_if_fingerprint(
+        &self,
+        proposal: &WorkflowProposal,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let Some(current) = self.get(&proposal.workflow_id)? else {
+            return Ok(false);
+        };
+        if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
+            return Ok(false);
+        }
+        self.save_proposal(proposal)?;
+        Ok(true)
+    }
+
+    /// One proposal by id.
+    fn get_proposal(&self, id: &str) -> Result<Option<WorkflowProposal>, WorkflowError> {
+        let _ = id;
+        Ok(None)
+    }
+
+    /// Every proposal for a workflow, newest first, decided ones included.
+    fn list_proposals(&self, workflow_id: &str) -> Result<Vec<WorkflowProposal>, WorkflowError> {
+        let _ = workflow_id;
+        Ok(Vec::new())
+    }
+
+    /// Claim exclusive decision access for every proposal on one workflow.
+    ///
+    /// File stores override this with a cross-process lock held across reading
+    /// the proposal, applying or rejecting it, and persisting the outcome.
+    fn lock_proposal_decision(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Box<dyn ProposalDecisionGuard>, WorkflowError> {
+        let _ = workflow_id;
+        Ok(Box::new(NoopProposalDecisionGuard))
+    }
+}
+
+/// Fetch a proposal by id, turning absence into an error.
+pub fn require_proposal(
+    store: &dyn WorkflowStore,
+    id: &str,
+) -> Result<WorkflowProposal, WorkflowError> {
+    store
+        .get_proposal(id)?
+        .ok_or_else(|| WorkflowError::Malformed(format!("no proposal with id '{id}'")))
+}
+
+/// A workflow's current notes — what a brief should be built from.
+///
+/// Superseded notes are deliberately excluded: they are history worth showing
+/// an operator, but asking a model to reason from a claim already known to be
+/// wrong is worse than telling it nothing.
+pub fn current_notes(
+    store: &dyn WorkflowStore,
+    workflow_id: &str,
+) -> Result<Vec<WorkflowNote>, WorkflowError> {
+    Ok(store
+        .list_notes(workflow_id)?
+        .into_iter()
+        .filter(WorkflowNote::is_current)
+        .collect())
 }
 
 /// Restore `workflow_id` to the state held by `revision_id`.

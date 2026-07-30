@@ -136,6 +136,10 @@ pub(crate) async fn run(
                         app.set_status(s);
                     }
                     #[cfg(feature = "workflows")]
+                    AppMsg::CopilotStarted { workflow, instruction } => {
+                        app.copilot_started(&workflow, &instruction);
+                    }
+                    #[cfg(feature = "workflows")]
                     AppMsg::CopilotStatus { workflow, line } => {
                         app.copilot_status(&workflow, line);
                     }
@@ -175,8 +179,12 @@ pub(crate) async fn run(
                         }
                     }
                     #[cfg(feature = "workflows")]
-                    AppMsg::CopilotFailed { workflow, error } => {
-                        app.copilot_failed(&workflow, error);
+                    AppMsg::CopilotFailed {
+                        workflow,
+                        instruction,
+                        error,
+                    } => {
+                        app.copilot_failed(&workflow, instruction, error);
                     }
                     #[cfg(feature = "workflows")]
                     AppMsg::WorkflowsChanged => app.reload_workflows(),

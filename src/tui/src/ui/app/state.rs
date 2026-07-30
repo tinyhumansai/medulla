@@ -87,6 +87,10 @@ impl App {
             #[cfg(feature = "workflows")]
             workflow_runs_error: None,
             #[cfg(feature = "workflows")]
+            workflow_notes: Vec::new(),
+            #[cfg(feature = "workflows")]
+            workflow_proposals: Vec::new(),
+            #[cfg(feature = "workflows")]
             wf: Default::default(),
             #[cfg(feature = "workflows")]
             workflow_store_override: None,

@@ -131,6 +131,7 @@ fn frame(task_id: &str, text: &str, workflow: Option<&str>) -> String {
         provider: None,
         custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: workflow.map(str::to_string),
         conversation: None,
     })
@@ -259,6 +260,7 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
             provider: None,
             custom_harness: None,
             model: None,
+            tool_mode: None,
             workflow: None,
             conversation: None,
         }),

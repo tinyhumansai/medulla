@@ -55,6 +55,15 @@ impl App {
         self.copilot().is_some_and(|thread| thread.busy)
     }
 
+    /// Seed the transcript for a review started automatically after failure.
+    pub fn copilot_started(&mut self, workflow: &str, instruction: &str) {
+        self.wf
+            .copilots
+            .entry(workflow.to_string())
+            .or_insert_with(|| CopilotState::new(workflow.to_string()))
+            .ask(instruction);
+    }
+
     /// Rows one `PageUp`/`PageDown` moves the copilot transcript by.
     ///
     /// A page less one row, so the line the operator was reading stays on
@@ -131,6 +140,10 @@ impl App {
     /// The whole of what retry is: a timeout should cost the operator the two
     /// minutes it took, not the sentence they wrote.
     pub(in crate::ui::app) fn retry_copilot(&mut self) -> Option<Cmd> {
+        if self.copilot_busy() {
+            self.set_status("Copilot is still busy — wait for it to finish before retrying");
+            return None;
+        }
         let Some(instruction) = self.copilot_mut()?.take_failed() else {
             self.set_status("Nothing to retry");
             return None;
@@ -241,6 +254,14 @@ impl App {
                 None => self.set_status(format!("{workflow} updated")),
             }
         }
+        if self
+            .wf
+            .copilots
+            .get(&drain_key)
+            .is_some_and(|thread| thread.busy)
+        {
+            return None;
+        }
         // Drained after the catalogue refresh, so the queued turn is dispatched
         // against the graph this one actually left behind rather than the one
         // on screen when it was typed.
@@ -304,17 +325,84 @@ impl App {
     /// Keeps the instruction that failed so `r` can send it again. Anything
     /// queued behind it is dropped: the operator's follow-up assumed the turn
     /// that just failed had happened.
-    pub fn copilot_failed(&mut self, workflow: &str, error: String) {
+    pub fn copilot_failed(&mut self, workflow: &str, instruction: String, error: String) {
         if let Some(thread) = self.wf.copilots.get_mut(workflow) {
-            let attempted = thread
-                .turns
-                .iter()
-                .rev()
-                .find(|turn| turn.role == medulla::ui::workflows::TurnRole::User)
-                .map(|turn| turn.text.clone());
-            thread.take_queued();
-            thread.failed_with(error.clone(), attempted);
+            thread.failed_with(error.clone(), Some(instruction));
+            // A follow-up waits for every overlapping turn. If another turn
+            // remains, it still has a chance to establish the context the
+            // operator queued against; the final failure drops it as before.
+            if !thread.busy {
+                thread.take_queued();
+            }
         }
         self.set_status(format!("Copilot failed: {error} · r to retry"));
+    }
+}
+
+impl App {
+    /// Review the selected workflow against its own history.
+    ///
+    /// With the cursor on a failed run the review leads with that run;
+    /// otherwise it reads the whole history. Both are the same ask — "what
+    /// should change" — so they are one key rather than two.
+    pub(in crate::ui::app) fn evolve_selected_workflow(&mut self) -> Option<Cmd> {
+        let workflow = self.selected_workflow()?.id.clone();
+        if self.copilot_busy() {
+            self.set_status("Copilot is still busy — wait for it to finish before reviewing");
+            return None;
+        }
+        let run_id = self
+            .selected_run()
+            .filter(|run| run.status == medulla::workflows::RunStatus::Failed)
+            .map(|run| run.id.clone());
+
+        self.wf.copilot_scroll = 0;
+        let instruction = match &run_id {
+            Some(run_id) => format!("Review this workflow, starting from run {run_id}."),
+            None => "Review this workflow against its history.".to_string(),
+        };
+        self.copilot_mut()?.ask(&instruction);
+        self.wf.focus = super::super::types::WorkflowFocus::Copilot;
+        self.set_status(format!("Reviewing {workflow}…"));
+        Some(Cmd::EvolveWorkflow { workflow, run_id })
+    }
+
+    /// Apply the proposed change waiting on this workflow.
+    pub(in crate::ui::app) fn accept_selected_proposal(&mut self) -> Option<Cmd> {
+        let Some(proposal) = self.actionable_proposal() else {
+            // Said rather than swallowed: `a` with nothing proposed is
+            // otherwise indistinguishable from a keypress the menu absorbed.
+            self.set_status("Nothing is proposed for this workflow");
+            return None;
+        };
+        let proposal_id = proposal.id.clone();
+        let workflow = proposal.workflow_id.clone();
+        self.set_status("Applying the proposed change…");
+        Some(Cmd::AcceptProposal {
+            workflow,
+            proposal_id,
+        })
+    }
+
+    /// Decline the proposed change waiting on this workflow.
+    ///
+    /// The reason is recorded as a note, which is what stops the next review
+    /// proposing the same thing again. Open the shared inline prompt so the
+    /// keyboard shortcut still captures that required context.
+    pub(in crate::ui::app) fn reject_selected_proposal(&mut self) -> Option<Cmd> {
+        let Some(proposal) = self.visible_proposal() else {
+            self.set_status("Nothing is proposed for this workflow");
+            return None;
+        };
+        self.prompt = Some(super::super::types::Prompt {
+            kind: super::super::types::PromptKind::RejectProposal {
+                workflow: proposal.workflow_id.clone(),
+                proposal_id: proposal.id.clone(),
+            },
+            title: "Why reject this proposal?".to_string(),
+            draft: crate::ui::composer::Draft::new(),
+        });
+        self.set_status("Explain the rejection · Enter submit · Esc cancel");
+        None
     }
 }

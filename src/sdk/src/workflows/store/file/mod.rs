@@ -19,20 +19,28 @@
 
 mod dirs;
 mod document;
+mod journal;
 mod paths;
+mod proposals;
 mod revisions;
 
 pub use dirs::workflow_dirs;
 pub use document::{new_run_record, parse_workflow, validate_graph};
+pub use journal::{mint_id as mint_note_id, MAX_NOTES};
+pub use proposals::mint_id as mint_proposal_id;
 pub use revisions::MAX_REVISIONS;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use fs2::FileExt;
+use sha2::{Digest, Sha256};
+
 use crate::home::medulla_home;
 use crate::workflows::types::{
-    RunRecord, WorkflowError, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    RunRecord, WorkflowError, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision,
+    WorkflowSummary,
 };
 
 use document::{read_workflow, to_document};
@@ -41,7 +49,23 @@ use paths::{is_json, write_atomic};
 // guard is the one piece of this module worth asserting on from outside it.
 pub(crate) use paths::safe_component;
 
-use super::WorkflowStore;
+use super::{ProposalDecisionGuard, WorkflowStore};
+
+/// A file-backed proposal decision claim released when dropped.
+struct FileProposalDecisionGuard {
+    file: std::fs::File,
+    path: PathBuf,
+}
+
+impl ProposalDecisionGuard for FileProposalDecisionGuard {}
+
+impl Drop for FileProposalDecisionGuard {
+    fn drop(&mut self) {
+        if let Err(source) = FileExt::unlock(&self.file) {
+            tracing::warn!(path = %self.path.display(), "failed to release proposal decision lock: {source}");
+        }
+    }
+}
 
 /// What one read of the workflow directories found.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -64,6 +88,20 @@ pub struct FileWorkflowStore {
     /// artifact, so they live under the state directory rather than beside the
     /// definitions an operator edits.
     runs_dir: PathBuf,
+    /// Where per-workflow notes are written.
+    ///
+    /// Beside the runs rather than beside the definitions for the same reason:
+    /// a journal is what this host observed while running the workflow, not
+    /// part of the document an operator edits and commits.
+    journal_dir: PathBuf,
+    /// Where proposed graph changes are written, awaiting an operator.
+    proposals_dir: PathBuf,
+    /// Stable identity for in-process decisions and evolution claims.
+    ///
+    /// Derived from the persistent proposal directory rather than this
+    /// object's address because daemon tasks construct independent store
+    /// instances over the same on-disk state.
+    decision_scope: String,
     /// Serializes `save`/`delete` against each other on *this store instance*.
     ///
     /// Both are read-modify-write: read what a save would supersede or what a
@@ -75,12 +113,8 @@ pub struct FileWorkflowStore {
     /// so every clone of this store shares the one lock rather than each
     /// getting its own and serializing nothing.
     ///
-    /// Scoped to a process, not a filesystem: two *separate* store instances
-    /// (a `medulla workflow` CLI invocation racing a running daemon) are not
-    /// covered by this, the same limitation `write_atomic`'s rename already
-    /// has. Closing that would need real cross-process file locking, which is
-    /// a larger change than this store's current single-writer-per-process
-    /// deployment shape calls for.
+    /// Separate store instances and processes additionally synchronize through
+    /// the per-workflow file lock acquired by every definition writer.
     write_lock: Arc<Mutex<()>>,
 }
 
@@ -88,21 +122,58 @@ impl FileWorkflowStore {
     /// A store over explicit directories. Mostly for tests; production callers
     /// want [`FileWorkflowStore::discover`].
     pub fn new(dirs: Vec<PathBuf>, runs_dir: PathBuf) -> Self {
+        // The journal is derived from the runs directory rather than taken as a
+        // parameter, so every existing caller of this constructor keeps working
+        // and still gets a working journal. `with_state` is the explicit form.
+        let journal_dir = runs_dir
+            .parent()
+            .map(|state| state.join("journal"))
+            .unwrap_or_else(|| PathBuf::from("journal"));
+        let proposals_dir = runs_dir
+            .parent()
+            .map(|state| state.join("proposals"))
+            .unwrap_or_else(|| PathBuf::from("proposals"));
+        let decision_scope = file_store_scope(&proposals_dir);
         Self {
             dirs,
             runs_dir,
+            journal_dir,
+            proposals_dir,
+            decision_scope,
             write_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    /// A store whose host state lives under one directory.
+    ///
+    /// The explicit form of [`FileWorkflowStore::new`], for callers that know
+    /// where state belongs rather than only where runs go.
+    pub fn with_state(dirs: Vec<PathBuf>, state_dir: &Path) -> Self {
+        let proposals_dir = state_dir.join("proposals");
+        Self {
+            dirs,
+            runs_dir: state_dir.join("runs"),
+            journal_dir: state_dir.join("journal"),
+            decision_scope: file_store_scope(&proposals_dir),
+            proposals_dir,
+            write_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// A store whose host state is isolated to one workspace.
+    pub fn with_workspace_state(dirs: Vec<PathBuf>, state_dir: &Path, workspace: &Path) -> Self {
+        let identity =
+            std::fs::canonicalize(workspace).unwrap_or_else(|_| absolute_path(workspace));
+        let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
+        let scope = format!("{digest:x}");
+        Self::with_state(dirs, &state_dir.join("scopes").join(&scope[..16]))
     }
 
     /// A store over the conventional locations for this environment and working
     /// directory.
     pub fn discover(env: &HashMap<String, String>, cwd: &Path) -> Self {
-        let runs_dir = medulla_home(env)
-            .join("state")
-            .join("workflows")
-            .join("runs");
-        Self::new(workflow_dirs(env, cwd), runs_dir)
+        let state_dir = medulla_home(env).join("state").join("workflows");
+        Self::with_workspace_state(workflow_dirs(env, cwd), &state_dir, cwd)
     }
 
     /// The definition directories, lowest precedence first.
@@ -197,9 +268,64 @@ impl FileWorkflowStore {
             .runs_dir
             .join(format!("{}.json", safe_component(run_id)?)))
     }
+
+    /// Run one workflow definition mutation while holding its filesystem lock.
+    fn with_definition_lock<T>(
+        &self,
+        workflow_id: &str,
+        operation: impl FnOnce() -> Result<T, WorkflowError>,
+    ) -> Result<T, WorkflowError> {
+        std::fs::create_dir_all(self.write_dir()).map_err(|source| WorkflowError::Io {
+            path: self.write_dir().to_path_buf(),
+            source,
+        })?;
+        let lock_path = self
+            .write_dir()
+            .join(format!(".{}.lock", safe_component(workflow_id)?));
+        let file_lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|source| WorkflowError::Io {
+                path: lock_path.clone(),
+                source,
+            })?;
+        file_lock
+            .lock_exclusive()
+            .map_err(|source| WorkflowError::Io {
+                path: lock_path.clone(),
+                source,
+            })?;
+        let result = operation();
+        if let Err(source) = FileExt::unlock(&file_lock) {
+            tracing::warn!(path = %lock_path.display(), "failed to release workflow lock: {source}");
+        }
+        result
+    }
+}
+
+/// Make a stable best-effort absolute identity when a path does not yet exist.
+fn absolute_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(path)
+}
+
+/// A stable process-local key for every store instance over `proposals_dir`.
+fn file_store_scope(proposals_dir: &Path) -> String {
+    format!("file:{}", absolute_path(proposals_dir).to_string_lossy())
 }
 
 impl WorkflowStore for FileWorkflowStore {
+    fn proposal_decision_scope(&self) -> String {
+        self.decision_scope.clone()
+    }
+
     fn list(&self) -> Result<Vec<WorkflowSummary>, WorkflowError> {
         Ok(self
             .load()
@@ -225,20 +351,47 @@ impl WorkflowStore for FileWorkflowStore {
             // every future save failing too.
             poison.into_inner()
         });
-        // The id decides a filename, so it is checked before anything else:
-        // a document's own `id` overrides what the caller asked for, and a
-        // document may have been written by an agent.
-        let path = self.definition_path(&record.id)?;
-        // Validate before writing so a listing can be trusted to be runnable.
-        validate_graph(&record.id, &record.graph)?;
-        let document = to_document(record)?;
-        // Snapshot what is about to be replaced, before replacing it. Doing it
-        // here rather than at each call site is what makes every authoring
-        // surface undoable without any of them having to opt in.
-        if let Some(superseded) = self.superseded_by(&path, &record.id)? {
-            revisions::capture(self.write_dir(), &superseded)?;
-        }
-        write_atomic(&path, &document)
+        self.with_definition_lock(&record.id, || {
+            // The id decides a filename, so it is checked before anything else:
+            // a document's own `id` overrides what the caller asked for, and a
+            // document may have been written by an agent.
+            let path = self.definition_path(&record.id)?;
+            // Validate before writing so a listing can be trusted to be runnable.
+            validate_graph(&record.id, &record.graph)?;
+            let document = to_document(record)?;
+            // Snapshot what is about to be replaced, before replacing it. Doing it
+            // here rather than at each call site is what makes every authoring
+            // surface undoable without any of them having to opt in.
+            if let Some(superseded) = self.superseded_by(&path, &record.id)? {
+                revisions::capture(self.write_dir(), &superseded)?;
+            }
+            write_atomic(&path, &document)
+        })
+    }
+
+    fn save_if_fingerprint(
+        &self,
+        record: &WorkflowRecord,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.with_definition_lock(&record.id, || {
+            let Some(current) = self.get(&record.id)? else {
+                return Ok(false);
+            };
+            if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
+                return Ok(false);
+            }
+            let path = self.definition_path(&record.id)?;
+            validate_graph(&record.id, &record.graph)?;
+            let document = to_document(record)?;
+            revisions::capture(self.write_dir(), &current)?;
+            write_atomic(&path, &document)?;
+            Ok(true)
+        })
     }
 
     fn delete(&self, id: &str) -> Result<(), WorkflowError> {
@@ -248,24 +401,26 @@ impl WorkflowStore for FileWorkflowStore {
             .write_lock
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        // Delete wherever it was found, not only in the write directory: an
-        // operator asking to remove a workflow they can see means the one they
-        // can see.
-        let existing = self
-            .load()
-            .workflows
-            .into_iter()
-            .find(|w| w.id == id)
-            .ok_or_else(|| WorkflowError::NotFound(id.to_string()))?;
-        let path = match existing.source_path.clone() {
-            Some(path) => path,
-            None => self.definition_path(id)?,
-        };
-        // Snapshot before removing. A delete is the one edit that leaves
-        // nothing to diff against afterwards, so without this it is the one
-        // edit that cannot be undone.
-        revisions::capture(self.write_dir(), &existing)?;
-        std::fs::remove_file(&path).map_err(|source| WorkflowError::Io { path, source })
+        self.with_definition_lock(id, || {
+            // Delete wherever it was found, not only in the write directory: an
+            // operator asking to remove a workflow they can see means the one they
+            // can see.
+            let existing = self
+                .load()
+                .workflows
+                .into_iter()
+                .find(|w| w.id == id)
+                .ok_or_else(|| WorkflowError::NotFound(id.to_string()))?;
+            let path = match existing.source_path.clone() {
+                Some(path) => path,
+                None => self.definition_path(id)?,
+            };
+            // Snapshot before removing. A delete is the one edit that leaves
+            // nothing to diff against afterwards, so without this it is the one
+            // edit that cannot be undone.
+            revisions::capture(self.write_dir(), &existing)?;
+            std::fs::remove_file(&path).map_err(|source| WorkflowError::Io { path, source })
+        })
     }
 
     fn record_run(&self, run: &RunRecord) -> Result<(), WorkflowError> {
@@ -323,6 +478,100 @@ impl WorkflowStore for FileWorkflowStore {
         revision_id: &str,
     ) -> Result<Option<WorkflowRevision>, WorkflowError> {
         revisions::read(self.write_dir(), workflow_id, revision_id)
+    }
+
+    fn list_notes(&self, workflow_id: &str) -> Result<Vec<WorkflowNote>, WorkflowError> {
+        journal::list(&self.journal_dir, workflow_id)
+    }
+
+    fn append_note(&self, note: &WorkflowNote) -> Result<(), WorkflowError> {
+        // Under the same lock as `save`/`delete`: appending is a
+        // read-modify-write of one file, so two passes writing at once would
+        // otherwise lose whichever note lost the race.
+        //
+        // Poison-tolerant for the same reason `save` is, and it matters more
+        // here: this runs on the failure path, where the caller has documented
+        // it as best effort. Panicking on a poisoned lock would unwind out of a
+        // run that already completed.
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
+        journal::append(&self.journal_dir, note)
+    }
+
+    fn supersede_note(
+        &self,
+        workflow_id: &str,
+        note_id: &str,
+        by: &str,
+    ) -> Result<bool, WorkflowError> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
+        journal::supersede(&self.journal_dir, workflow_id, note_id, by)
+    }
+
+    fn save_proposal(&self, proposal: &WorkflowProposal) -> Result<(), WorkflowError> {
+        // Every proposal transition (verification, rejection, acceptance, and
+        // supersession) funnels through this method. Serialize those writes on
+        // the shared store lock so clones cannot concurrently replace the same
+        // proposal document.
+        let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
+        proposals::save(&self.proposals_dir, proposal)
+    }
+
+    fn save_proposal_if_fingerprint(
+        &self,
+        proposal: &WorkflowProposal,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.with_definition_lock(&proposal.workflow_id, || {
+            let Some(current) = self.get(&proposal.workflow_id)? else {
+                return Ok(false);
+            };
+            if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
+                return Ok(false);
+            }
+            proposals::save(&self.proposals_dir, proposal)?;
+            Ok(true)
+        })
+    }
+
+    fn get_proposal(&self, id: &str) -> Result<Option<WorkflowProposal>, WorkflowError> {
+        proposals::read(&self.proposals_dir, id)
+    }
+
+    fn list_proposals(&self, workflow_id: &str) -> Result<Vec<WorkflowProposal>, WorkflowError> {
+        proposals::list_for(&self.proposals_dir, workflow_id)
+    }
+
+    fn lock_proposal_decision(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Box<dyn ProposalDecisionGuard>, WorkflowError> {
+        std::fs::create_dir_all(&self.proposals_dir).map_err(|source| WorkflowError::Io {
+            path: self.proposals_dir.clone(),
+            source,
+        })?;
+        let path = self.proposals_dir.join(format!(
+            ".workflow-{}.decision.lock",
+            safe_component(workflow_id)?
+        ));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|source| WorkflowError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        file.lock_exclusive().map_err(|source| WorkflowError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        Ok(Box::new(FileProposalDecisionGuard { file, path }))
     }
 }
 

@@ -20,6 +20,7 @@ fn encodes_a_minimal_frame() {
         provider: None,
         custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });
@@ -48,6 +49,7 @@ fn encodes_optional_fields_when_present() {
         provider: Some(HarnessProvider::Claude),
         custom_harness: Some("deepseek-claude".into()),
         model: Some("anthropic/claude-opus-4.8".to_string()),
+        tool_mode: None,
         workflow: Some("nightly-sweep".to_string()),
         conversation: None,
     });
@@ -84,6 +86,7 @@ fn round_trips_every_kind() {
             provider: None,
             custom_harness: None,
             model: None,
+            tool_mode: None,
             workflow: None,
             conversation: None,
         });
@@ -126,6 +129,7 @@ fn carries_a_model_hint_through_encode_and_decode() {
         provider: None,
         custom_harness: None,
         model: Some("openrouter/some-model".to_string()),
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });
@@ -442,6 +446,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
             provider: None,
             custom_harness: None,
             model: None,
+            tool_mode: None,
             workflow: None,
             conversation: None,
         },
@@ -465,6 +470,7 @@ fn an_empty_work_snapshot_is_left_off_the_wire() {
             provider: None,
             custom_harness: None,
             model: None,
+            tool_mode: None,
             workflow: None,
             conversation: None,
         },

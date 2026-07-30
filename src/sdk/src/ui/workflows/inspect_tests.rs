@@ -28,6 +28,8 @@ fn record(steps: Vec<RunStep>, pending: Vec<String>) -> RunRecord {
         steps,
         pending_approvals: pending,
         error: None,
+        summary: None,
+        diagnosis: None,
     }
 }
 

@@ -10,6 +10,7 @@
 use std::path::Path;
 use std::sync::{Arc, Barrier};
 
+use fs2::FileExt;
 use serde_json::json;
 
 use super::file::FileWorkflowStore;
@@ -123,4 +124,68 @@ fn a_save_racing_a_delete_leaves_the_deletion_recoverable() {
         !revisions.is_empty(),
         "at least the seed version must have been captured: {revisions:?}"
     );
+}
+
+#[test]
+fn separate_store_instances_use_the_same_definition_lock() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let first = store_in(root.path());
+    let second = store_in(root.path());
+    first.save(&document("race", "v0")).expect("seed save");
+
+    let lock_path = root.path().join("workflows").join(".race.lock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .expect("definition lock exists");
+    lock.lock_exclusive().expect("claim definition lock");
+
+    let (sent, received) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        sent.send(second.save(&document("race", "v1")))
+            .expect("report save");
+    });
+    assert!(
+        received
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "a separate store must wait for the filesystem lock"
+    );
+
+    FileExt::unlock(&lock).expect("release definition lock");
+    received
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("save completes after unlock")
+        .expect("save succeeds");
+    writer.join().expect("writer thread");
+}
+
+#[test]
+fn separate_store_instances_serialize_proposal_decisions() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let first = store_in(root.path());
+    let second = store_in(root.path());
+    let first_claim = first
+        .lock_proposal_decision("race")
+        .expect("claim proposal decisions");
+
+    let (sent, received) = std::sync::mpsc::channel();
+    let contender = std::thread::spawn(move || {
+        let claim = second.lock_proposal_decision("race");
+        sent.send(claim.map(drop)).expect("report decision claim");
+    });
+    assert!(
+        received
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "another store must wait before deciding the same workflow"
+    );
+
+    drop(first_claim);
+    received
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("claim completes after unlock")
+        .expect("claim succeeds");
+    contender.join().expect("contender thread");
 }

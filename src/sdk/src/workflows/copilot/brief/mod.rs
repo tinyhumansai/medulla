@@ -12,18 +12,19 @@
 //! because its copilot hands back a proposal card; Medulla's edits land in the
 //! store and are taken back with undo instead, so the modes here differ in what
 //! they *tell the agent to do* rather than in when they persist.
+//!
+//! Rendering the *situation* — the graph, and anything else the turn is
+//! grounded in — lives in [`context`], because those sections grow with what
+//! the host learns about a workflow while the turn structure here does not.
 
-use tinyflows::model::WorkflowGraph;
+mod context;
 
-use crate::workflows::WorkflowRecord;
+#[cfg(test)]
+mod tests;
 
-/// How much of the current graph is pasted into the brief.
-///
-/// A large graph would crowd out the instruction and cost a round trip's worth
-/// of tokens on something the agent can fetch itself. Past this it gets the
-/// summary and is told to call `workflow_get` — which it needs to do anyway
-/// before patching, so nothing is lost.
-const MAX_INLINE_GRAPH_BYTES: usize = 6000;
+use crate::workflows::{RunRecord, WorkflowNote, WorkflowRecord};
+
+use context::{graph_section, notes_section, runs_section, MAX_INLINE_GRAPH_BYTES};
 
 /// Which kind of authoring turn this is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +40,14 @@ pub enum Mode {
     /// only the graph — not the run, not the error, not which node stopped —
     /// and the agent had to go looking for all three before it could start.
     Repair,
+    /// Review a workflow's own history and write down what it teaches.
+    ///
+    /// The one mode that may not edit. It reads the journal and the recent
+    /// runs, records what it learns, and — if a change would help — describes
+    /// one as a proposal for an operator to accept. The restriction is enforced
+    /// by the tools it is served, not by this directive; the directive is here
+    /// so the agent is not surprised by a refusal.
+    Evolve,
 }
 
 // There is deliberately no `Explain` mode. A question is answered by a
@@ -71,6 +80,17 @@ impl Mode {
                  that was not installed, a host that refused the connection), say so \
                  and change nothing."
             }
+            Mode::Evolve => {
+                "Review the workflow named below against its own history, and write down \
+                 what you learn. Record at least one note with `workflow_note_add` even if \
+                 you conclude nothing should change — a pass that learns nothing still \
+                 rules something out, and saying so stops the next pass re-deriving it. \
+                 If a change to the graph would help, describe it with `workflow_propose`; \
+                 you cannot edit the graph in this turn, and a proposal is reviewed by an \
+                 operator before anything is applied. Prefer one well-argued proposal to \
+                 several speculative ones. Read the notes below first: a change already \
+                 rejected should not be proposed again unless you have new evidence."
+            }
         }
     }
 }
@@ -87,6 +107,14 @@ pub struct CopilotRequest<'a> {
     pub record: Option<&'a WorkflowRecord>,
     /// The failed run this turn is about, for [`Mode::Repair`].
     pub run: Option<FailedRun>,
+    /// What the host has already learned about this workflow.
+    ///
+    /// Empty for every mode but [`Mode::Evolve`]. A revise turn is told what to
+    /// do; an evolve turn has to work it out, and the journal is most of what
+    /// it works from.
+    pub notes: &'a [WorkflowNote],
+    /// Recent runs, newest first.
+    pub runs: &'a [RunRecord],
 }
 
 /// What is known about the run a [`Mode::Repair`] turn is fixing.
@@ -173,6 +201,16 @@ impl CopilotRequest<'_> {
             }
         }
 
+        if !self.notes.is_empty() || self.mode == Mode::Evolve {
+            prompt.push_str("\n\n## What this workflow has learned\n\n");
+            prompt.push_str(&notes_section(self.notes));
+        }
+
+        if !self.runs.is_empty() {
+            prompt.push_str("\n\n## Recent runs\n\n");
+            prompt.push_str(&runs_section(self.runs));
+        }
+
         prompt.push_str("\n\n## The instruction\n\n");
         prompt.push_str(self.instruction.trim());
         prompt.push('\n');
@@ -186,38 +224,4 @@ impl CopilotRequest<'_> {
 /// it is edited far more often than the code around it, and a change to it
 /// should read as a change to a document in review rather than as a diff
 /// through escaped quotes.
-const STANDING: &str = include_str!("prompt.md");
-
-/// The graph itself, inline when it is small enough to be worth pasting.
-fn graph_section(graph: &WorkflowGraph) -> String {
-    let json = serde_json::to_string_pretty(graph).unwrap_or_else(|_| "{}".to_string());
-    if json.len() <= MAX_INLINE_GRAPH_BYTES {
-        return format!("Current graph:\n\n```json\n{json}\n```");
-    }
-    // Too big to paste: the outline is enough to plan against, and the agent
-    // fetches the detail for the nodes it actually touches.
-    let outline: Vec<String> = graph
-        .nodes
-        .iter()
-        .map(|node| {
-            format!(
-                "- {} ({}){}",
-                node.id,
-                crate::ui::workflows::graph::kind_wire(&node.kind),
-                if node.name.trim().is_empty() {
-                    String::new()
-                } else {
-                    format!(" — {}", node.name.trim())
-                }
-            )
-        })
-        .collect();
-    format!(
-        "The graph is too large to paste. Call `workflow_get` for it. Its nodes:\n\n{}",
-        outline.join("\n")
-    )
-}
-
-#[cfg(test)]
-#[path = "brief_tests.rs"]
-mod tests;
+const STANDING: &str = include_str!("../prompt.md");

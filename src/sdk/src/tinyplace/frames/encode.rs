@@ -43,6 +43,7 @@ fn build(
         provider: input.provider,
         custom_harness: input.custom_harness.map(String::into_boxed_str),
         model: input.model,
+        tool_mode: input.tool_mode,
         workflow: input.workflow,
         conversation: input.conversation,
         usage,

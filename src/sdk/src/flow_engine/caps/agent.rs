@@ -164,6 +164,7 @@ impl HarnessAgentRunner {
             // A node dispatches an instruction, never another workflow: nesting
             // is expressed with a `sub_workflow` node, which the engine expands
             // itself and applies its own depth limit to.
+            tool_mode: None,
             workflow: None,
         }
     }

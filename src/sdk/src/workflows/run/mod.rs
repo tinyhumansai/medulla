@@ -27,12 +27,14 @@
 
 pub mod diagnose;
 mod registry;
+mod summary;
 
 #[cfg(test)]
 mod tests;
 
 pub use diagnose::{diagnose, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding};
 pub use registry::{cancel, is_running, RunGuard};
+pub use summary::summarize;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,7 +45,7 @@ use crate::flow_engine::execute;
 use crate::flow_engine::observability::{WorkEventSink, WorkflowRunObserver};
 use crate::flow_engine::{build_capabilities, open_checkpointer, CapabilitySettings, HostServices};
 use crate::workflows::store::{new_run_record, require, require_run};
-use crate::workflows::{RunRecord, RunStatus, WorkflowError, WorkflowStore};
+use crate::workflows::{RunRecord, RunStatus, RunStep, WorkflowError, WorkflowStore};
 
 /// Everything one run needs beyond the workflow itself.
 pub struct RunContext {
@@ -181,6 +183,7 @@ pub async fn run_workflow(
     let mut record = record;
     record.steps = observer.steps();
     record.finished_at = Some(crate::clock::now_millis() as u64);
+    let terminal_engine_error = matches!(&settled, Err(Settle::Failed(_)));
     match settled {
         Ok(outcome) => {
             record.pending_approvals = outcome.pending_approvals.clone();
@@ -202,10 +205,45 @@ pub async fn run_workflow(
             record.error = Some(message);
         }
     }
+    record_evidence(
+        &mut record,
+        &observer,
+        &workflow.graph,
+        terminal_engine_error,
+    );
 
     finalizer.disarm();
     context.store.record_run(&record)?;
+    remember_failure(&context.store, &record);
     Ok(record)
+}
+
+/// Write the observation a failed run earns, before anyone asks for one.
+///
+/// The sync half of the evolution trigger, and deliberately the only half that
+/// lives here. This body is shared by the CLI, the daemon, and the TUI; it
+/// holds no dispatch and no worker address, so starting a harness from it would
+/// make `medulla workflow run` silently spawn a second agent. What it *can* do
+/// everywhere is turn a run record into a note.
+///
+/// Only for a run that settles as `Failed`. A run reconciled to `Interrupted`
+/// by `RunFinalizer::drop` gets none: the process was going away, there is no
+/// diagnosis to write down, and "we were killed" teaches a workflow nothing
+/// about itself.
+///
+/// Best effort by design: a note that could not be written must not turn a run
+/// that already happened into a failure to record it.
+fn remember_failure(store: &Arc<dyn WorkflowStore>, record: &RunRecord) {
+    if record.status != RunStatus::Failed {
+        return;
+    }
+    if let Err(err) = crate::workflows::evolve::record_failure_note(store, record) {
+        tracing::warn!(
+            run = %record.id,
+            workflow = %record.workflow_id,
+            "could not record what this failure taught: {err}"
+        );
+    }
 }
 
 /// How a run stopped, when it did not produce an outcome.
@@ -309,8 +347,10 @@ pub async fn resume_workflow(
 
     // Steps from this leg are appended: the record is the whole run's history,
     // not just its latest attempt.
+    let earlier_steps = record.steps.len();
     record.steps.extend(observer.steps());
     record.finished_at = Some(crate::clock::now_millis() as u64);
+    let terminal_engine_error = matches!(&settled, Err(Settle::Failed(_)));
     match settled {
         Ok(outcome) => {
             record.pending_approvals = outcome.pending_approvals.clone();
@@ -332,10 +372,104 @@ pub async fn resume_workflow(
             record.error = Some(message);
         }
     }
+    // A resumed leg only observed the nodes that ran *after* the gate, so its
+    // diagnosis would report every earlier node as one that never ran. Merged
+    // rather than replaced, for the same reason the steps are appended.
+    let resumed_steps = observer.execution_steps();
+    let resumed = diagnose_record(&workflow.graph, &resumed_steps, terminal_engine_error);
+    record.diagnosis = Some(match record.diagnosis.take() {
+        Some(earlier) => merge_diagnoses(earlier, resumed, &record.steps[..earlier_steps]),
+        None => resumed,
+    });
+    // The observer only saw this resumed leg; the record holds the complete
+    // pre-gate and post-gate history.
+    record.summary = Some(summary::summarize(&record));
 
     finalizer.disarm();
     context.store.record_run(&record)?;
+    remember_failure(&context.store, &record);
     Ok(record)
+}
+
+/// Attach what the run *taught*, as distinct from whether it succeeded.
+///
+/// Called once the status is final, because the fallback summary reads the
+/// status to phrase itself. Both fields are additive and neither can fail, so
+/// this never has a say in whether a run is recorded.
+fn record_evidence(
+    record: &mut RunRecord,
+    observer: &WorkflowRunObserver,
+    graph: &tinyflows::model::WorkflowGraph,
+    terminal_engine_error: bool,
+) {
+    // The observer's own sentence when it has one: it saw the engine settle and
+    // can count what actually ran. The fallback only knows the record.
+    record.summary = final_summary(record, observer);
+    let steps = observer.execution_steps();
+    record.diagnosis = Some(diagnose_record(graph, &steps, terminal_engine_error));
+}
+
+/// Diagnose a settled run without calling its terminal error "swallowed".
+fn diagnose_record(
+    graph: &tinyflows::model::WorkflowGraph,
+    steps: &[tinyflows::observability::ExecutionStep],
+    failed: bool,
+) -> diagnose::Diagnosis {
+    let mut diagnosis = diagnose::diagnose(graph, steps);
+    if failed {
+        let terminal = steps
+            .iter()
+            .rev()
+            .find(|step| matches!(step.status, tinyflows::observability::StepStatus::Error));
+        if let Some(position) = terminal.and_then(|step| {
+            diagnosis
+                .hidden_errors
+                .iter()
+                .rposition(|error| error.node_id == step.node_id)
+        }) {
+            diagnosis.hidden_errors.remove(position);
+        }
+    }
+    diagnosis
+}
+
+/// Prefer the observer's richer summary except when a run paused for approval.
+///
+/// The observer only knows whether engine execution returned successfully; it
+/// cannot describe the host-level `PendingApproval` state or name its gates.
+fn final_summary(record: &RunRecord, observer: &WorkflowRunObserver) -> Option<String> {
+    if record.status == RunStatus::PendingApproval {
+        return Some(summary::summarize(record));
+    }
+    observer
+        .summary()
+        .or_else(|| Some(summary::summarize(record)))
+}
+
+/// Fold a resumed leg's diagnosis into the one from before the gate.
+///
+/// Findings accumulate, but `never_ran` is intersected with what the resumed
+/// leg still believes never ran, minus the nodes the earlier leg did run — a
+/// node that executed before the pause did execute, however blind this leg was
+/// to it.
+fn merge_diagnoses(
+    mut earlier: diagnose::Diagnosis,
+    resumed: diagnose::Diagnosis,
+    earlier_steps: &[RunStep],
+) -> diagnose::Diagnosis {
+    earlier.null_bindings.extend(resumed.null_bindings);
+    earlier.empty_prompts.extend(resumed.empty_prompts);
+    earlier.hidden_errors.extend(resumed.hidden_errors);
+    earlier.never_ran = resumed
+        .never_ran
+        .into_iter()
+        .filter(|missing| {
+            !earlier_steps
+                .iter()
+                .any(|step| step.node_id == missing.node_id)
+        })
+        .collect();
+    earlier
 }
 
 /// Validate a workflow by simulating it: every expression resolved, every
@@ -350,7 +484,25 @@ pub async fn dry_run(
     input: Value,
 ) -> Result<DryRun, WorkflowError> {
     let workflow = require(store.as_ref(), workflow_id)?;
-    let compiled = execute::compile(&workflow.graph).map_err(WorkflowError::Engine)?;
+    dry_run_graph(&workflow.graph, resolver, input).await
+}
+
+/// Simulate a graph that is not necessarily saved anywhere.
+///
+/// The same check as [`dry_run`], against a candidate rather than a record.
+/// What a proposal needs: the whole question is whether a patched graph *would*
+/// work, and answering it by saving the patch first would be the silent
+/// mutation the proposal exists to avoid.
+///
+/// # Errors
+///
+/// Returns [`WorkflowError`] if the graph cannot be compiled or simulated.
+pub async fn dry_run_graph(
+    graph: &tinyflows::model::WorkflowGraph,
+    resolver: Arc<dyn tinyflows::caps::WorkflowResolver>,
+    input: Value,
+) -> Result<DryRun, WorkflowError> {
+    let compiled = execute::compile(graph).map_err(WorkflowError::Engine)?;
     let capabilities = crate::flow_engine::build_dry_run_capabilities(resolver);
 
     // Observed, because the steps are what a dry run is *for* at authoring
@@ -363,6 +515,6 @@ pub async fn dry_run(
 
     Ok(DryRun {
         output: outcome.output,
-        diagnosis: diagnose::diagnose(&workflow.graph, &capture.steps()),
+        diagnosis: diagnose::diagnose(graph, &capture.steps()),
     })
 }

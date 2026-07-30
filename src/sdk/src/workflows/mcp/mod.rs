@@ -20,7 +20,7 @@ mod tools;
 #[cfg(test)]
 mod tests;
 
-pub use tools::{tool_definitions, TOOL_NAMES};
+pub use tools::{tool_definitions, ToolMode, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV};
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -99,6 +99,7 @@ pub fn preflight(env: &HashMap<String, String>, cwd: &Path) -> Result<(), String
 pub async fn handle_request(
     store: &Arc<dyn WorkflowStore>,
     config: &crate::config::WorkflowsConfig,
+    mode: ToolMode,
     request: &Value,
 ) -> Option<Value> {
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
@@ -117,8 +118,8 @@ pub async fn handle_request(
             "capabilities": { "tools": {} },
             "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
         })),
-        "tools/list" => Ok(json!({ "tools": tool_definitions() })),
-        "tools/call" => tools::call(store, config, &params).await,
+        "tools/list" => Ok(json!({ "tools": tool_definitions(mode) })),
+        "tools/call" => tools::call(store, config, mode, &params).await,
         // Answered rather than errored: some clients probe for these before
         // deciding what the server offers, and an error reads as a broken
         // server rather than an empty list.
@@ -192,6 +193,10 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     let config = crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
         .map(|loaded| loaded.config.workflows)
         .unwrap_or_default();
+    // The mode the parent asked for. Read once at startup for the same reason
+    // config is: this process serves exactly one harness session, and which
+    // kind of turn that is was decided before it was spawned.
+    let mode = ToolMode::from_env(env);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut stdout = tokio::io::stdout();
 
@@ -200,7 +205,7 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_request(&store, &config, &request).await,
+            Ok(request) => handle_request(&store, &config, mode, &request).await,
             Err(err) => Some(json!({
                 "jsonrpc": "2.0",
                 "id": Value::Null,

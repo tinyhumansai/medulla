@@ -4,15 +4,17 @@
 //! the protocol handshake is well-formed, and that a tool's *failure* comes back
 //! as readable content rather than a protocol error the client swallows.
 
-use std::sync::Arc;
+pub(super) use std::sync::Arc;
 
-use serde_json::json;
+pub(super) use serde_json::json;
 
-use super::*;
+pub(super) use super::super::*;
 use crate::harness_contract::is_reserved_tool_name;
-use crate::workflows::{FileWorkflowStore, WorkflowStore};
+pub(super) use crate::workflows::mcp::ToolMode;
+pub(super) use crate::workflows::{FileWorkflowStore, WorkflowStore};
 
-fn store() -> (tempfile::TempDir, Arc<dyn WorkflowStore>) {
+/// Create an isolated file store and keep its temporary root alive.
+pub(super) fn store() -> (tempfile::TempDir, Arc<dyn WorkflowStore>) {
     let root = tempfile::tempdir().unwrap();
     let store: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
         vec![root.path().join("workflows")],
@@ -21,7 +23,8 @@ fn store() -> (tempfile::TempDir, Arc<dyn WorkflowStore>) {
     (root, store)
 }
 
-fn document(id: &str) -> String {
+/// Build the smallest runnable workflow document under `id`.
+pub(super) fn document(id: &str) -> String {
     json!({
         "id": id,
         "name": "Sweep",
@@ -38,17 +41,21 @@ fn document(id: &str) -> String {
 
 /// The host configuration these tests run against: permissive defaults, which
 /// is what a machine with no `[workflows]` section has.
-fn config() -> crate::config::WorkflowsConfig {
+pub(super) fn config() -> crate::config::WorkflowsConfig {
     crate::config::WorkflowsConfig::default()
 }
 
 /// Call a tool and return its parsed result payload plus the error flag.
-async fn call(store: &Arc<dyn WorkflowStore>, name: &str, arguments: Value) -> (Value, bool) {
+pub(super) async fn call(
+    store: &Arc<dyn WorkflowStore>,
+    name: &str,
+    arguments: Value,
+) -> (Value, bool) {
     let request = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": { "name": name, "arguments": arguments },
     });
-    let response = handle_request(store, &config(), &request)
+    let response = handle_request(store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
     let result = &response["result"];
@@ -64,7 +71,7 @@ async fn initialize_answers_with_the_protocol_version_and_tool_capability() {
     let (_root, store) = store();
     let request = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} });
 
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
 
@@ -83,9 +90,11 @@ async fn a_notification_gets_no_reply() {
     let (_root, store) = store();
     let notification = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
 
-    assert!(handle_request(&store, &config(), &notification)
-        .await
-        .is_none());
+    assert!(
+        handle_request(&store, &config(), ToolMode::Full, &notification)
+            .await
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -93,7 +102,7 @@ async fn tools_list_returns_every_tool_with_a_schema_and_a_description() {
     let (_root, store) = store();
     let request = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
 
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
     let tools = response["result"]["tools"].as_array().expect("a tool list");
@@ -123,7 +132,7 @@ fn no_tool_name_collides_with_a_harness_reserved_name() {
 fn the_catalog_description_is_generated_from_the_node_contracts() {
     // Generated rather than written, so it cannot go stale when a node kind is
     // added or renamed upstream.
-    let catalog = tool_definitions()
+    let catalog = tool_definitions(ToolMode::Full)
         .into_iter()
         .find(|tool| tool["name"] == "workflow_catalog")
         .expect("the catalog tool");
@@ -165,7 +174,7 @@ async fn a_tool_failure_comes_back_as_readable_content_not_a_protocol_error() {
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": { "name": "workflow_get", "arguments": { "id": "ghost" } },
     });
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
 
@@ -186,7 +195,7 @@ async fn a_missing_required_argument_is_a_protocol_error_naming_the_argument() {
         "params": { "name": "workflow_get", "arguments": {} },
     });
 
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
 
@@ -226,7 +235,7 @@ async fn validate_accepts_either_a_saved_id_or_an_unsaved_document() {
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": { "name": "workflow_validate", "arguments": {} },
     });
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
     assert!(response["error"]["message"]
@@ -301,7 +310,7 @@ async fn an_unknown_tool_lists_the_ones_that_exist() {
         "params": { "name": "workflow_teleport", "arguments": {} },
     });
 
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
 
@@ -314,7 +323,7 @@ async fn an_unknown_method_is_a_method_not_found() {
     let (_root, store) = store();
     let request = json!({ "jsonrpc": "2.0", "id": 1, "method": "sampling/createMessage" });
 
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
 
@@ -328,7 +337,7 @@ async fn resource_and_prompt_probes_are_answered_with_empty_lists() {
     let (_root, store) = store();
     for method in ["resources/list", "prompts/list"] {
         let request = json!({ "jsonrpc": "2.0", "id": 1, "method": method });
-        let response = handle_request(&store, &config(), &request)
+        let response = handle_request(&store, &config(), ToolMode::Full, &request)
             .await
             .expect("a response");
         assert!(response.get("error").is_none(), "{method}: {response}");
@@ -343,7 +352,7 @@ async fn initialize_answers_with_the_version_the_client_asked_for_when_it_is_one
         "params": { "protocolVersion": "2025-03-26" },
     });
 
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
 
@@ -360,7 +369,7 @@ async fn initialize_falls_back_to_our_own_version_for_one_we_do_not_speak() {
         "params": { "protocolVersion": "1999-01-01" },
     });
 
-    let response = handle_request(&store, &config(), &request)
+    let response = handle_request(&store, &config(), ToolMode::Full, &request)
         .await
         .expect("a response");
 
@@ -371,7 +380,7 @@ async fn initialize_falls_back_to_our_own_version_for_one_we_do_not_speak() {
 async fn every_advertised_tool_is_one_the_dispatch_actually_handles() {
     let (_root, store) = store();
 
-    for definition in tool_definitions() {
+    for definition in tool_definitions(ToolMode::Full) {
         let name = definition["name"].as_str().expect("a name");
         assert!(
             TOOL_NAMES.contains(&name),
@@ -385,7 +394,7 @@ async fn every_advertised_tool_is_one_the_dispatch_actually_handles() {
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": { "name": name, "arguments": {} },
         });
-        let response = handle_request(&store, &config(), &request)
+        let response = handle_request(&store, &config(), ToolMode::Full, &request)
             .await
             .expect("a response");
         let message = response["error"]["message"].as_str().unwrap_or_default();

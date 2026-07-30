@@ -328,6 +328,7 @@ impl TaskRunner {
                 provider: req.provider,
                 custom_harness: req.custom_harness.clone(),
                 model: req.model.clone(),
+                tool_mode: req.tool_mode.clone(),
                 workflow: req.workflow.clone(),
                 conversation: req.conversation.clone(),
             });
@@ -428,6 +429,7 @@ async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) 
         provider: None,
         custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });

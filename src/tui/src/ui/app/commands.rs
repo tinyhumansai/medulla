@@ -155,6 +155,21 @@ impl App {
                 None
             }
             PromptKind::LocalHostWorkspace(harness) => self.add_local_host(harness, &text),
+            PromptKind::RejectProposal {
+                workflow,
+                proposal_id,
+            } => {
+                if text.is_empty() {
+                    self.set_status("Proposal rejection cancelled (empty)");
+                    return None;
+                }
+                self.set_status("Declining the proposed change…");
+                Some(Cmd::RejectProposal {
+                    workflow,
+                    proposal_id,
+                    reason: text,
+                })
+            }
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text));

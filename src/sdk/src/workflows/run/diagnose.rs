@@ -35,7 +35,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tinyflows::model::{NodeKind, WorkflowGraph};
 use tinyflows::observability::{ExecutionStep, Run, RunObserver, StepStatus};
 
@@ -64,7 +64,7 @@ impl RunObserver for CapturingObserver {
 }
 
 /// One expression that resolved to null during the simulation.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct NullBinding {
     /// The node whose config held it.
@@ -90,7 +90,7 @@ pub struct NullBinding {
 }
 
 /// A node that errored where the graph's own error policy hid it.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HiddenError {
     /// The node that failed.
@@ -101,7 +101,7 @@ pub struct HiddenError {
 }
 
 /// A node the simulation never reached.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct NeverRan {
     /// The node that did not execute.
@@ -113,7 +113,7 @@ pub struct NeverRan {
 }
 
 /// What a simulation says about a graph, beyond whether it completed.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnosis {
     /// Bindings that resolved to null.

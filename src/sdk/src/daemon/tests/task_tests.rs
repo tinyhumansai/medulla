@@ -20,6 +20,32 @@ use super::{
     recording_send, stdin_runner, task_frame, wait_ready,
 };
 
+#[cfg(feature = "workflows")]
+#[test]
+fn task_without_tool_mode_clears_an_inherited_mode() {
+    let mut env = std::collections::HashMap::from([(
+        crate::workflows::mcp::TOOL_MODE_ENV.to_string(),
+        "propose".to_string(),
+    )]);
+
+    env = crate::daemon::task_loop::with_tool_mode(env, None);
+
+    assert!(!env.contains_key(crate::workflows::mcp::TOOL_MODE_ENV));
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn task_with_tool_mode_forces_acp_transport() {
+    let env =
+        crate::daemon::task_loop::with_tool_mode(std::collections::HashMap::new(), Some("propose"));
+
+    assert_eq!(
+        env.get(crate::daemon::providers::HARNESS_PROTOCOL_ENV)
+            .map(String::as_str),
+        Some("acp")
+    );
+}
+
 #[tokio::test]
 async fn rejects_duplicate_task_id_from_same_sender() {
     let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();

@@ -258,6 +258,7 @@ async fn mailbox_poll_decodes_skips_and_acknowledges() {
         provider: None,
         custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });

@@ -44,6 +44,37 @@ pub fn apply_workflow_ops(
     Ok(record)
 }
 
+/// Apply `ops` only if the graph still matches `expected_fingerprint`.
+///
+/// Returns `None` when the expected fingerprint is stale, including when the
+/// graph changes between the initial read and persistence. Returns `Some` only
+/// after applying the ops, validating the graph and host semantic gates, and
+/// durably saving the result.
+///
+/// # Errors
+///
+/// Returns an error when the workflow is missing, an op cannot be applied, the
+/// resulting graph fails validation or semantic checks, or persistence fails.
+pub fn apply_workflow_ops_if_unchanged(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    ops: &[GraphOp],
+    expected_fingerprint: &str,
+) -> Result<Option<WorkflowRecord>, WorkflowError> {
+    let mut record = require(store.as_ref(), id)?;
+    if crate::workflows::fingerprint(&record.graph) != expected_fingerprint {
+        return Ok(None);
+    }
+    record.graph = apply_ops(&record.graph, ops)
+        .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
+    validate_graph(id, &record.graph)?;
+    crate::workflows::gates::check(id, &record.graph)?;
+    if !store.save_if_fingerprint(&record, expected_fingerprint)? {
+        return Ok(None);
+    }
+    Ok(Some(record))
+}
+
 /// Preview `ops` against the workflow `id` without saving.
 ///
 /// The same checks as [`apply_workflow_ops`], minus the write. What an author

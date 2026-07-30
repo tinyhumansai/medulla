@@ -413,6 +413,7 @@ async fn handle_task_run(
         // has installed, so the orchestrator naming one here is the other half
         // of that conversation. Blank is treated as absent so an emitter that
         // always writes the key still dispatches an ordinary instruction.
+        tool_mode: None,
         workflow: obj
             .get("workflow")
             .and_then(|value| value.as_str())

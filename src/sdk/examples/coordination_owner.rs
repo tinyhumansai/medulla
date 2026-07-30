@@ -229,6 +229,7 @@ async fn run() -> Result<(), String> {
         provider: args.provider,
         custom_harness: None,
         model: args.model.clone(),
+        tool_mode: None,
         workflow: None,
         conversation: None,
     });

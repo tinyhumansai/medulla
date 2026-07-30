@@ -3,8 +3,9 @@
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
+use unicode_width::UnicodeWidthStr;
 
-use super::rail::{flow_path, short_home, wrap_line, wrap_path};
+use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
 
 #[test]
 fn a_row_that_fits_is_left_exactly_as_it_was() {
@@ -55,6 +56,23 @@ fn wrapping_keeps_each_span_style() {
 }
 
 #[test]
+fn wide_characters_wrap_by_display_column_not_char_count() {
+    // Each CJK character below occupies two terminal columns. A char-count
+    // wrap would accept twice as many as actually fit and clip the row
+    // instead of wrapping it.
+    let line = TLine::from(Span::raw("任务一二三四五六七八九十"));
+    let out = wrap_line(&line, 10, 0);
+
+    assert!(out.len() > 1, "a row this wide must wrap: {out:?}");
+    for wrapped in &out {
+        assert!(
+            wrapped.width() <= 10,
+            "no line may overrun the pane: {wrapped:?}"
+        );
+    }
+}
+
+#[test]
 fn a_path_breaks_on_separators() {
     let out = flow_path("~/work/tinyhumans/medulla", 12);
     for line in &out {
@@ -87,6 +105,17 @@ fn a_path_too_long_to_fit_keeps_its_tail() {
         joined.starts_with('…'),
         "and the row says it was shortened: {joined:?}"
     );
+}
+
+#[test]
+fn a_path_segment_of_wide_characters_hard_cuts_by_display_column() {
+    // A single unbreakable segment made of two-column characters must still
+    // land within the width budget per line, not the char-count budget.
+    let out = flow_path("任务一二三四五六七八九十", 10);
+    for line in &out {
+        assert!(line.width() <= 10, "{line:?} overruns");
+    }
+    assert_eq!(out.concat(), "任务一二三四五六七八九十");
 }
 
 #[test]

@@ -31,8 +31,6 @@ mod types;
 mod work;
 
 #[cfg(test)]
-mod rail_tests;
-#[cfg(test)]
 mod work_tests;
 
 use types::{AgentsPanes, Selection};

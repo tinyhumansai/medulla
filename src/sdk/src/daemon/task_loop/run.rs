@@ -426,6 +426,28 @@ impl DaemonRuntime {
             })
         };
 
+        // Hand the consumer to the scheduler before the executor can pin this
+        // thread.
+        //
+        // A task spawned from inside a worker lands in that worker's LIFO slot,
+        // which tokio deliberately does not let other workers steal. `run_task`
+        // is an executor seam and may block its thread rather than await — a pty
+        // write to a child that has stopped draining its stdin does exactly
+        // that, for as long as the child stays wedged. The consumer spawned two
+        // lines up would then be stranded in the slot of a thread that never
+        // comes back, and the heartbeat below it — the *only* frame a silent
+        // turn ever sends — would never fire. The requester sees an ack and then
+        // nothing at all, its no-progress watchdog never trips because a stalled
+        // dispatch and a dead one look identical, and the task hangs until
+        // something upstream gives up.
+        //
+        // Yielding once puts the consumer on a stealable queue and parks it on
+        // its own timer, after which any worker can drive it. Costs one
+        // scheduler hop per task; buys the liveness guarantee this whole
+        // heartbeat exists to provide, without making it depend on every present
+        // and future executor being scrupulously non-blocking.
+        tokio::task::yield_now().await;
+
         let result = (self.inner.run_task)(options).await;
         // Released only now: the guard must outlive the `on_session` callback
         // above, which is the thing recording the binding the next queued turn

@@ -52,6 +52,30 @@ fn render(app: &mut App, w: u16, h: u16) -> String {
         .collect()
 }
 
+/// Render and return the screen row containing `needle`.
+///
+/// Agent rows may wrap as the rail narrows, so mouse tests must click the row
+/// they can actually see instead of assuming the second item begins on a fixed
+/// terminal line.
+fn rendered_row(app: &mut App, w: u16, h: u16, needle: &str) -> u16 {
+    let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+    terminal.draw(|f| app.draw(f)).unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .chunks(w as usize)
+        .position(|cells| {
+            cells
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .contains(needle)
+        })
+        .map(|row| row as u16)
+        .unwrap_or_else(|| panic!("missing rendered row containing {needle:?}"))
+}
+
 fn click(app: &mut App, x: u16, y: u16) {
     app.on_event(Event::Mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -230,11 +254,10 @@ fn clicking_a_row_selects_it_and_takes_focus() {
     // the fleet and template rows, so every click below the lanes indexed off
     // the end of the shorter list and silently did nothing.
     let mut app = agents_app();
-    render(&mut app, 120, 40);
+    let worker_row = rendered_row(&mut app, 120, 40, "dev-1");
     let start = app.agent_index();
 
-    // Row 2 of the rail's interior: past the panel border and the first row.
-    click(&mut app, 3, 4);
+    click(&mut app, 3, worker_row);
 
     assert!(app.agents_rail_focused(), "a click should take focus");
     assert_ne!(app.agent_index(), start, "the click should have selected");

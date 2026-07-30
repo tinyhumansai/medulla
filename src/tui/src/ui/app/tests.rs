@@ -111,6 +111,25 @@ fn typing_inserts_into_draft() {
 }
 
 #[test]
+fn enter_on_a_harness_uses_the_attach_path_in_normal_mode() {
+    let mut a = app();
+    a.tab_index = tab("Agents");
+    a.focus_agents_rail();
+    // The render pass records the harness behind the visible pane. A vanished
+    // session exercises the refusal path without opening a real child here;
+    // importantly, Enter is still consumed as an attach attempt instead of
+    // returning to the composer or submitting a turn.
+    a.harness_pane_session = Some("just-exited".to_string());
+
+    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(cmd.is_none());
+    assert!(a.agents_rail_focused());
+    assert!(a.status().contains("harness has exited"), "{}", a.status());
+    assert_eq!(a.attached_harness(), None);
+}
+
+#[test]
 fn clicking_a_context_chunk_selects_it() {
     // Context is a Settings *subpage*, not a top-level tab, so the click router
     // has to match on the subpage — matching on the tab made this branch

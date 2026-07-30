@@ -10,10 +10,11 @@
 //!
 //! Focus is therefore explicit, and moved with keys every terminal can send:
 //! `Esc` steps out of the composer to the rail, `Enter` steps back, and typing
-//! anywhere returns to the composer with the character intact. This mirrors the
-//! menu/content model [`multi_pane`](crate::ui::multi_pane) already gives
-//! Settings and Routing. `Alt`+`↑`/`↓` still works for anyone whose terminal
-//! sends it.
+//! anywhere returns to the composer with the character intact. When the
+//! selected row resolves to an embedded harness, Enter instead attaches to its
+//! terminal. This mirrors the menu/content model
+//! [`multi_pane`](crate::ui::multi_pane) already gives Settings and Routing.
+//! `Alt`+`↑`/`↓` still works for anyone whose terminal sends it.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -90,7 +91,8 @@ impl App {
                 AgentsKey::Handled(self.retarget_watch())
             }
             // Enter is "I have found the row I wanted; let me type" — except on
-            // the action row, where it is the action.
+            // the action row, where it is the action. A visible harness consumes
+            // it earlier and takes the keyboard instead.
             KeyCode::Enter => {
                 if self.on_new_harness_row() {
                     self.open_harness_picker();

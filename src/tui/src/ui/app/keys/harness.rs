@@ -8,11 +8,13 @@
 //!
 //! The single exception is the focus chord, `Ctrl-]`. One reserved key is the
 //! minimum that leaves a way out, and it is the traditional choice precisely
-//! because full-screen programs do not bind it. Recognising it is
+//! because full-screen programs do not bind it. While the chrome owns the
+//! keyboard, plain Enter also attaches when the selected pane is a harness;
+//! everywhere else Enter keeps its normal meaning. Recognising the chord is
 //! [`is_focus_chord`](crate::ui::harness_pane::keys::is_focus_chord) rather than
 //! a character comparison — terminals do not deliver it the way it is written.
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::ui::harness_pane::{
     keys::{encode, is_focus_chord},
@@ -64,12 +66,14 @@ impl App {
             self.type_into_harness(&session, key);
             return true;
         }
-        if is_focus_chord(key) {
+        let enter_on_harness = key.code == KeyCode::Enter
+            && key.modifiers == KeyModifiers::NONE
+            && self.harness_pane_session.is_some();
+        if is_focus_chord(key) || enter_on_harness {
             self.attach_to_pane_harness();
-            // Consumed either way: the chord is reserved, so it must not fall
-            // through to a tab binding just because there was nothing to attach
-            // to. Falling through would make `Ctrl-]` mean different things
-            // depending on what the cursor happened to be on.
+            // Consumed either way. The chord is reserved, while Enter reaches
+            // this branch only when the visible pane resolved to a harness; it
+            // must not submit a hidden composer or return focus to one.
             return true;
         }
         false

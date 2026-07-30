@@ -140,7 +140,7 @@ impl App {
         if attached {
             format!("{what} · typing here · {FOCUS_CHORD_LABEL} to release")
         } else {
-            format!("{what} · {FOCUS_CHORD_LABEL} to type")
+            format!("{what} · Enter or {FOCUS_CHORD_LABEL} to type")
         }
     }
 }

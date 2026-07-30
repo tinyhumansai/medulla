@@ -6,6 +6,12 @@
 //! result back (`medulla:task_result`, with `medulla:task_envelope` progress).
 //! The roster is shared with the [`HubHandle`](super::HubHandle), so a worker
 //! added at runtime is targetable and re-advertised immediately.
+//!
+//! The same connection carries the *workflow* plane: this host's saved graphs
+//! are advertised beside the roster (`medulla:register_workflows`) and the reads
+//! the orchestrator round-trips back (`medulla:workflow_request`) are served
+//! from the installed bridge. See [`super::workflows`] for why every one of
+//! those frames must be answered.
 
 use std::sync::Arc;
 
@@ -15,12 +21,20 @@ use rust_socketio::{Event, Payload, TransportType};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
+use openhuman_core::openhuman::socket::medulla::payloads::{
+    EVENT_REGISTER_WORKFLOWS, EVENT_WORKFLOW_REQUEST, EVENT_WORKFLOW_RESULT,
+};
+
 use super::roster::{
     address_of, addresses_of, register_payload, unreachable_addresses, SharedRoster,
     SharedSubscriptionStrategy,
 };
 use super::runner::TaskRunner;
 use super::types::{RunError, TaskRequest};
+use super::workflows::{self, WorkflowPlane};
+
+mod types;
+pub(super) use types::HarnessWiring;
 
 /// Monotonic suffix making each dispatch's worker-facing task id unique.
 static DISPATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -62,28 +76,35 @@ fn str_field(obj: &Value, key: &str) -> Option<String> {
 
 /// Connect to the backend harness plane and wire every down-event to the runner.
 ///
-/// Authenticates with `jwt` in the Socket.IO handshake, advertises `roster` on
-/// every (re)connect, and dispatches `medulla:task_run` frames through `runner`.
-/// The hub owns no task deadline — the backend does — so nothing here bounds how
-/// long a task may run; `runner` only reaps a dispatch that goes silent. Returns
-/// the connected client (which the [`HubHandle`](super::HubHandle) re-emits
-/// through); drop it to disconnect.
-#[allow(clippy::too_many_arguments)]
-pub async fn connect_harness(
+/// Authenticates with `jwt` in the Socket.IO handshake, advertises the roster
+/// and (when one is installed) the workflow adverts on every (re)connect, and
+/// dispatches `medulla:task_run` frames through the runner. The hub owns no task
+/// deadline — the backend does — so nothing here bounds how long a task may run;
+/// the runner only reaps a dispatch that goes silent. Returns the connected
+/// client (which the [`HubHandle`](super::HubHandle) re-emits through); drop it
+/// to disconnect.
+pub(super) async fn connect_harness(
     backend_url: &str,
     jwt: &str,
-    roster: SharedRoster,
-    catalog: Arc<Vec<crate::runtime::AgentTemplate>>,
-    runner: Arc<TaskRunner>,
-    subscription_strategy: SharedSubscriptionStrategy,
-    log: super::types::HubLog,
-    activity: Option<super::ActivityLog>,
+    wiring: HarnessWiring,
 ) -> anyhow::Result<Client> {
+    let HarnessWiring {
+        roster,
+        catalog,
+        runner,
+        subscription_strategy,
+        log,
+        activity,
+        workflows: workflow_plane,
+    } = wiring;
     let connect_roster = roster.clone();
     let connect_catalog = catalog.clone();
     let cap_catalog = catalog.clone();
     let connect_relay = runner.relay();
     let connect_log = log.clone();
+    let connect_workflows = workflow_plane.clone();
+    let request_workflows = workflow_plane;
+    let request_log = log.clone();
     let run_log = log.clone();
     let run_activity = activity.clone();
     let run_roster = roster.clone();
@@ -112,12 +133,14 @@ pub async fn connect_harness(
         // that a network which blocks websockets can no longer fall back to
         // polling — an acceptable trade, since polling cannot work here anyway.
         .transport_type(TransportType::Websocket)
-        // (Re)advertise the current roster on connect.
+        // (Re)advertise the current roster — and this host's workflows — on
+        // connect.
         .on(Event::Connect, move |_payload, socket| {
             let roster = connect_roster.clone();
             let catalog = connect_catalog.clone();
             let relay = connect_relay.clone();
             let connect_log = connect_log.clone();
+            let workflows = connect_workflows.clone();
             async move {
                 // Liveness first, so the opening advertisement is already
                 // truthful. Registering optimistically and correcting later
@@ -159,6 +182,31 @@ pub async fn connect_harness(
                 let payload =
                     { register_payload(&roster.lock().expect("roster lock"), &online, &catalog) };
                 let _ = socket.emit("medulla:register_agents", payload).await;
+                // Beside the roster, not instead of it: the backend keys a
+                // workflow advert to the socket that sent it and drops the whole
+                // entry on disconnect, so a reconnect that re-registered only
+                // the agents would leave this host's graphs invisible until it
+                // restarted.
+                if let Some(workflows) = &workflows {
+                    advertise_workflows(&socket, workflows, &connect_log).await;
+                }
+            }
+            .boxed()
+        })
+        // A workflow round trip: read this host's store (or run one authoring
+        // turn) and answer by `requestId`.
+        //
+        // Registered even when no bridge is installed, and spawned rather than
+        // awaited: the backend holds a waiter for ten seconds on a read and ten
+        // MINUTES on a copilot turn, so a request that goes unanswered is far
+        // more expensive than one that is refused — and awaiting a copilot turn
+        // inside the callback would starve engine.io's ping/pong exactly as a
+        // long task would.
+        .on(EVENT_WORKFLOW_REQUEST, move |payload, socket| {
+            let bridge = request_workflows.clone();
+            let log = request_log.clone();
+            async move {
+                tokio::spawn(handle_workflow_request(payload, socket, bridge, log));
             }
             .boxed()
         })
@@ -248,6 +296,77 @@ pub async fn connect_harness(
         .await?;
 
     Ok(client)
+}
+
+/// Emit `medulla:register_workflows` for the installed bridge.
+///
+/// Withholds the frame entirely when the bridge could not be read (see
+/// [`workflows::advert_batch`]): the backend replaces this socket's whole entry
+/// on each registration, so an empty batch sent by mistake would retract graphs
+/// that are still installed.
+async fn advertise_workflows(socket: &Client, bridge: &WorkflowPlane, log: &super::types::HubLog) {
+    let Some(batch) = workflows::advert_batch(bridge).await else {
+        log("hub: workflow store could not be read — advertising no workflows");
+        return;
+    };
+    let count = batch.workflows.len();
+    let Ok(payload) = serde_json::to_value(batch) else {
+        log("hub: workflow adverts could not be serialized — advertising none");
+        return;
+    };
+    log(&format!("hub: advertising {count} workflow(s)"));
+    let _ = socket.emit(EVENT_REGISTER_WORKFLOWS, payload).await;
+}
+
+/// Answer one `medulla:workflow_request` with exactly one `workflow_result`.
+///
+/// The only frame this can leave unanswered is one carrying no `requestId` at
+/// all — there is then nothing to correlate a reply with. Every other outcome,
+/// including a bridge that panics, comes back as a result frame; see
+/// [`workflows::answer`].
+async fn handle_workflow_request(
+    payload: Payload,
+    socket: Client,
+    bridge: Option<WorkflowPlane>,
+    log: super::types::HubLog,
+) {
+    let Some(raw) = first_obj(payload) else {
+        log("hub: workflow_request carried no payload — cannot answer");
+        return;
+    };
+    // Read before the frame is consumed, to decide whether the store may have
+    // changed underneath the adverts.
+    let was_copilot = raw.get("op").and_then(Value::as_str) == Some("copilot");
+    let Some(result) = workflows::answer(raw, bridge.clone()).await else {
+        log("hub: workflow_request carried no requestId — cannot answer");
+        return;
+    };
+    match &result.error {
+        Some(error) => log(&format!(
+            "hub: workflow request {} failed — {error}",
+            result.request_id
+        )),
+        None => log(&format!("hub: workflow request {} ok", result.request_id)),
+    }
+    let ok = result.ok;
+    match serde_json::to_value(result) {
+        Ok(payload) => {
+            let _ = socket.emit(EVENT_WORKFLOW_RESULT, payload).await;
+        }
+        // Unreachable in practice (the frame is strings and opaque JSON), but a
+        // silent return here would be the one drop this module exists to avoid.
+        Err(err) => log(&format!(
+            "hub: workflow result could not be serialized: {err}"
+        )),
+    }
+    // An authoring turn is the one op that changes what this host holds, and the
+    // hub has no other signal that the store moved — so the adverts are refreshed
+    // here rather than left stale until the next reconnect.
+    if was_copilot && ok {
+        if let Some(bridge) = &bridge {
+            advertise_workflows(&socket, bridge, &log).await;
+        }
+    }
 }
 
 /// Relay one `task_run` to its worker and emit the terminal `task_result`.

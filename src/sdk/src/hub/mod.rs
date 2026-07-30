@@ -19,6 +19,7 @@ mod runner;
 mod screens;
 mod socket;
 mod types;
+mod workflows;
 
 #[cfg(test)]
 mod tests;
@@ -31,3 +32,4 @@ pub use roster::HubWorker;
 pub use runner::TaskRunner;
 pub use screens::{ScreenStore, WatchedScreen};
 pub use types::{stderr_log, HubLog, RosterSink, RunError, TaskOutcome, TaskRequest};
+pub use workflows::{WorkflowBridge, WorkflowPlane};

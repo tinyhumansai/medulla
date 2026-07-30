@@ -134,12 +134,18 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
     let socket = connect_harness(
         &config.backend_url,
         &config.jwt,
-        roster.clone(),
-        catalog.clone(),
-        runner.clone(),
-        subscription_strategy.clone(),
-        config.log.clone(),
-        Some(activity.clone()),
+        super::socket::HarnessWiring {
+            roster: roster.clone(),
+            catalog: catalog.clone(),
+            runner: runner.clone(),
+            subscription_strategy: subscription_strategy.clone(),
+            log: config.log.clone(),
+            activity: Some(activity.clone()),
+            // Installed here and nowhere else: this is the one place a hub's
+            // uplink is built, so a bridge the host supplied on its config is
+            // the bridge the socket serves.
+            workflows: config.workflows.clone(),
+        },
     )
     .await?;
     (config.log)("hub: connected + registered — relaying tasks to tiny.place workers");

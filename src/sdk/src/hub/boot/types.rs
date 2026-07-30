@@ -61,6 +61,18 @@ pub struct HubConfig {
     pub local_address: String,
     /// How untargeted tasks choose among provider subscriptions on a host.
     pub subscription_strategy: crate::runtime::SubscriptionRoutingStrategy,
+    /// This host's saved workflows, as the cloud plane's store side.
+    ///
+    /// `Some` advertises them to the orchestrator on every (re)connect and
+    /// serves the reads and the authoring turn it round-trips back —
+    /// [`crate::workflows::StoreWorkflowBridge`] is the implementation this host
+    /// ships. `None` advertises nothing and refuses (rather than drops) any
+    /// workflow request that still arrives.
+    ///
+    /// Install it only when workflows are *enabled*: the bridge is a view of the
+    /// store and applies no policy, so advertising graphs this host would refuse
+    /// to run only teaches the orchestrator to delegate work that will bounce.
+    pub workflows: Option<crate::hub::WorkflowPlane>,
 }
 /// A running hub: the live [`HubHandle`] plus the client/runner kept alive for
 /// the session (dropping this disconnects and stops the pump).

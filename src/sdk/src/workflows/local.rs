@@ -16,7 +16,7 @@ use std::time::Duration;
 use crate::bridge::LocalBridgeNetwork;
 use crate::daemon::embedded::{EmbeddedDaemon, EmbeddedDaemonOptions};
 use crate::flow_engine::caps::dispatch::{HarnessDispatch, TaskRunnerDispatch};
-use crate::hub::TaskRunner;
+use crate::hub::{RunError, TaskOutcome, TaskRequest, TaskRunner};
 
 /// How often the loopback bridge is drained. Short, because both ends are in
 /// this process and the only cost is a poll on an in-memory queue.
@@ -226,3 +226,55 @@ pub async fn evolve_here(
     };
     session.evolve(id, trigger, None).await
 }
+
+/// A copilot dispatch that starts its loopback host per turn.
+///
+/// The authoring copilot has to run *here*, on the machine holding the workflow
+/// store: its edits land through the `medulla-workflows` MCP tools, which are
+/// attached to the session by [`LocalWorkflowHost`] and point at this host's own
+/// store. Dispatching the turn to a remote worker instead would run the prompt
+/// somewhere its edits could never reach the graph the orchestrator asked about.
+///
+/// Per turn, not per process: the host binds two loopback addresses and holds a
+/// daemon draining them, and keeping that alive between turns would occupy the
+/// endpoints the TUI's own copilot pane and every workflow run also bind. Turns
+/// are minutes apart at best, so starting one costs nothing that matters.
+pub struct LocalCopilotDispatch {
+    /// How the per-turn daemon is configured — workspace, provider, model, env.
+    options: EmbeddedDaemonOptions,
+}
+
+impl LocalCopilotDispatch {
+    /// A dispatch that starts a host per turn with `options`.
+    pub fn new(options: EmbeddedDaemonOptions) -> Self {
+        Self { options }
+    }
+}
+
+#[async_trait::async_trait]
+impl HarnessDispatch for LocalCopilotDispatch {
+    async fn dispatch(&self, request: TaskRequest) -> Result<TaskOutcome, RunError> {
+        self.dispatch_with_status(request, None).await
+    }
+
+    /// Start a host, run the turn on it, and drop the host with the turn.
+    ///
+    /// # Errors
+    ///
+    /// A host that cannot start — no coding-agent CLI installed, an address
+    /// already bound — is reported as a transport failure rather than awaited.
+    /// The caller is answering a request the backend is holding a ten-minute
+    /// promise for, and "this host cannot author" is worth saying immediately.
+    async fn dispatch_with_status(
+        &self,
+        request: TaskRequest,
+        status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ) -> Result<TaskOutcome, RunError> {
+        let host = LocalWorkflowHost::start(self.options.clone()).map_err(RunError::Transport)?;
+        host.dispatch().dispatch_with_status(request, status).await
+    }
+}
+
+#[cfg(test)]
+#[path = "local_tests.rs"]
+mod tests;

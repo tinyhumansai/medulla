@@ -51,10 +51,14 @@ fn the_hub_never_writes_to_the_terminal_the_tui_owns() {
     //
     // Asserted against the source rather than at runtime: the failure is a
     // stray write from a background task, which no unit test would observe.
+    // Paths, not globs: each of these became a directory module after the test
+    // was written, and a stale path silently asserts nothing (the read below
+    // skips what it cannot find).
     for path in [
-        "src/sdk/src/hub/boot.rs",
-        "src/sdk/src/hub/socket.rs",
-        "src/tui/src/hub_relay.rs",
+        "src/sdk/src/hub/boot/mod.rs",
+        "src/sdk/src/hub/socket/mod.rs",
+        "src/sdk/src/hub/workflows.rs",
+        "src/tui/src/hub_relay/mod.rs",
     ] {
         let full = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -271,4 +275,90 @@ fn a_host_added_after_launch_is_not_remembered_as_a_remote_peer() {
         vec!["3Hob1Fxu"],
         "only the genuinely remote peer is remembered"
     );
+}
+
+// ------------------------------------------------------------- workflows ---
+
+/// Install a workflow document in `<home>/workflows`, the layer
+/// `medulla::workflows::discover_store` reads for a `MEDULLA_HOME`.
+#[cfg(feature = "workflows")]
+fn seed_workflow(home: &std::path::Path, id: &str) {
+    let dir = home.join("workflows");
+    std::fs::create_dir_all(&dir).expect("workflow dir");
+    let document = serde_json::json!({
+        "id": id,
+        "name": "Nightly sweep",
+        "description": "sweeps the estate",
+        "nodes": [
+            { "id": "start", "kind": "trigger", "name": "Start",
+              "config": { "trigger_kind": "manual" } }
+        ],
+        "edges": []
+    });
+    std::fs::write(dir.join(format!("{id}.json")), document.to_string()).expect("write");
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn the_hub_is_handed_a_bridge_over_the_workflows_this_host_has_installed() {
+    // The gap this closes: `StoreWorkflowBridge` was written, exported and unit
+    // tested, and nothing in the product ever installed it — so every workflow
+    // the orchestrator asked this host about was unanswerable however healthy
+    // the socket was.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+    seed_workflow(home, "sweep");
+    let session = medulla::auth::Credentials {
+        base_url: "https://api.example".into(),
+        jwt: "jwt".into(),
+    };
+
+    let config = super::build_hub_config_with_log(
+        &env(&[("MEDULLA_HOME", &home.to_string_lossy())]),
+        home,
+        medulla::hub::stderr_log(),
+        Some(&session),
+    )
+    .expect("the hub config builds with a session present");
+
+    let bridge = config
+        .workflows
+        .expect("the hub is handed this host's workflow store");
+    let adverts = bridge.list();
+    assert_eq!(adverts.len(), 1, "{adverts:?}");
+    assert_eq!(adverts[0].id, "sweep");
+    assert_eq!(adverts[0].name, "Nightly sweep");
+    // And it answers a read from the same store, which is what the socket's
+    // `medulla:workflow_request` handler calls.
+    assert_eq!(bridge.get("sweep").expect("the graph")["id"], "sweep");
+    // The capability probe reads this host's working directory off the same
+    // bridge, so an installed bridge that cannot name one costs every probe its
+    // `cwd`.
+    assert!(bridge.action_dir().is_some());
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn a_host_with_workflows_disabled_advertises_none() {
+    // The bridge applies no policy of its own, so advertising graphs this host
+    // would refuse to run only teaches the orchestrator to delegate work that
+    // bounces.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+    seed_workflow(home, "sweep");
+    std::fs::write(home.join("config.toml"), "[workflows]\nenabled = false\n").expect("seed");
+    let session = medulla::auth::Credentials {
+        base_url: "https://api.example".into(),
+        jwt: "jwt".into(),
+    };
+
+    let config = super::build_hub_config_with_log(
+        &env(&[("MEDULLA_HOME", &home.to_string_lossy())]),
+        home,
+        medulla::hub::stderr_log(),
+        Some(&session),
+    )
+    .expect("the hub config builds with a session present");
+
+    assert!(config.workflows.is_none());
 }

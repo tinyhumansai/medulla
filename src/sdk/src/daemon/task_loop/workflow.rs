@@ -14,12 +14,16 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::Value;
 
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
 use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert};
+// `trigger_input` is shared with the cloud plane's adapter
+// ([`crate::workflows::bridge`]) rather than defined twice: a frame's text must
+// become the same trigger payload whether it arrived over tiny.place or over the
+// backend socket, and two copies of that rule would eventually disagree.
+use crate::workflows::bridge::trigger_input;
 use crate::workflows::evolve::{EvolveConfig, EvolveSession, EvolveTrigger};
 use crate::workflows::{
     run_workflow, FileWorkflowStore, RunContext, RunStatus, StoreWorkflowResolver, WorkflowStore,
@@ -412,19 +416,6 @@ impl DaemonRuntime {
         settings.default_model = self.inner.config.model.clone();
         Arc::new(settings)
     }
-}
-
-/// The trigger payload for a workflow run, from a frame's text.
-///
-/// JSON when the orchestrator sent JSON, and `{ "text": … }` otherwise — so a
-/// frame carrying an ordinary instruction still gives the graph something its
-/// expressions can read.
-fn trigger_input(text: &str) -> Value {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Value::Object(Default::default());
-    }
-    serde_json::from_str(trimmed).unwrap_or_else(|_| serde_json::json!({ "text": text }))
 }
 
 /// A one-line account of how a run ended, for the reply frame's text.

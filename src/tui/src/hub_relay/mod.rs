@@ -152,6 +152,89 @@ fn workers_from_env(env: &HashMap<String, String>) -> Vec<WorkerSpec> {
     Vec::new()
 }
 
+/// The `[workflows]` policy remembered beside the roster.
+///
+/// Read straight from the file for the same reason the roster is: this module
+/// runs before (and independently of) the TUI's own config load.
+#[cfg(feature = "workflows")]
+fn workflows_config(home: &Path) -> medulla::config::WorkflowsConfig {
+    std::fs::read_to_string(roster_path(home))
+        .ok()
+        .and_then(|text| toml::from_str::<medulla::config::TuiConfig>(&text).ok())
+        .map(|config| config.workflows)
+        .unwrap_or_default()
+}
+
+/// The workflow store this hub advertises to the hosted orchestrator, or `None`
+/// when it should advertise none.
+///
+/// This is the installation the cloud workflow plane exists for: the same
+/// layered store the Workflows tab, the `medulla workflow` subcommand and the
+/// MCP tools read, handed to the hub so a `medulla:workflow_request` is answered
+/// from the one catalogue rather than a second view of it.
+///
+/// Withheld when `[workflows] enabled` is false. The bridge applies no policy of
+/// its own — the refusal lives in the run path — so advertising graphs this host
+/// would decline to run would only teach the orchestrator to delegate work that
+/// bounces.
+#[cfg(feature = "workflows")]
+fn workflow_bridge(
+    env: &HashMap<String, String>,
+    home: &Path,
+) -> Option<medulla::hub::WorkflowPlane> {
+    let config = workflows_config(home);
+    if !config.enabled {
+        return None;
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let store = medulla::workflows::discover_store(env, &cwd);
+    let model = (!config.default_model.is_empty()).then(|| config.default_model.clone());
+
+    // ACP, not the legacy provider transport, for the same reason the TUI's own
+    // copilot pane forces it: Medulla is an ACP *client*, and `session/new`'s
+    // `mcpServers` is the only channel it has for handing the harness the
+    // `medulla-workflows` tools. Without them an authoring turn is a chatbot
+    // that cannot touch the graph it was asked to edit.
+    let mut harness_env = env.clone();
+    harness_env.insert(
+        medulla::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+        "acp".to_string(),
+    );
+    let copilot = std::sync::Arc::new(medulla::workflows::LocalCopilotDispatch::new(
+        medulla::daemon::embedded::EmbeddedDaemonOptions {
+            workspace: cwd.to_string_lossy().to_string(),
+            default_provider: config.default_provider,
+            model: model.clone(),
+            env: harness_env,
+            ..Default::default()
+        },
+    ));
+
+    Some(std::sync::Arc::new(
+        medulla::workflows::StoreWorkflowBridge::new(store)
+            .with_copilot(
+                copilot,
+                medulla::workflows::LOCAL_WORKER_ADDRESS,
+                config.default_provider,
+                model,
+            )
+            // The same directory the copilot's harness runs in, which is what a
+            // capability probe means by "where does this agent work". The core
+            // reads it off the bridge, so leaving it unset would omit `cwd` from
+            // every probe this host answers.
+            .with_action_dir(cwd.to_string_lossy().to_string()),
+    ))
+}
+
+/// Without the engine compiled in this host has no workflow store to advertise.
+#[cfg(not(feature = "workflows"))]
+fn workflow_bridge(
+    _env: &HashMap<String, String>,
+    _home: &Path,
+) -> Option<medulla::hub::WorkflowPlane> {
+    None
+}
+
 /// Whether the hub should run. **On by default** in the backend runtime — a
 /// plain `medulla` login is enough, and workers are added live from the Workers
 /// tab (or pre-seeded via `MEDULLA_TINYPLACE_PEER` / `MEDULLA_HUB_WORKERS`).
@@ -259,6 +342,7 @@ pub(crate) fn build_hub_config_with_host(
         local_network,
         local_address,
         subscription_strategy: subscription_strategy_from_config(home),
+        workflows: workflow_bridge(env, home),
     })
 }
 

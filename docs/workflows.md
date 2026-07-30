@@ -158,6 +158,55 @@ compatible:
 Aborting the task cancels the run: the frame's task id is the run id, and every
 node dispatched by that run carries it as its `abort_id`.
 
+## How the hosted orchestrator sees them
+
+The section above is the tiny.place peer contract: one hub, one worker, one task
+frame. The *cloud* plane is the other direction — the hosted brain in the backend
+asking this machine what it has, over the same Socket.IO connection the hub
+already holds for `medulla:task_run`.
+
+Four `medulla:*` events carry it:
+
+| event | direction | what it says |
+| --- | --- | --- |
+| `medulla:register_workflows` | hub → backend | `{ workflows: [...], agentId? }` — every installed graph as an advert: id, name, description, step count, whether it is enabled, what triggers it |
+| `medulla:workflow_request` | backend → hub | `{ requestId, op, workflowId?, kind?, instruction? }` where `op` is `get`, `node_kinds`, `runs`, or `copilot` |
+| `medulla:workflow_result` | hub → backend | `{ requestId, ok, data?, error? }` — `data` is this host's own JSON, passed through the backend unparsed |
+| `medulla:task_run` with `workflow` | backend → hub | the delegation itself, exactly as described above |
+
+The adverts go up on every connect *and* reconnect, beside the worker roster: the
+backend keys them to the socket that sent them and drops the whole entry when
+that socket goes, so a hub that re-registered only its agents would come back
+invisible. They are re-sent after a successful `copilot` turn, which is the one
+request that changes what this host holds.
+
+Everything is served from the same layered store the Workflows tab, the
+`medulla workflow` subcommand and the MCP tools read — a socket `get` and
+`medulla workflow get` are one implementation, so they cannot drift. `copilot` is
+not a read: it is a whole authoring turn on this machine's own harness, with the
+`medulla-workflows` tools attached, and its result is derived from re-reading the
+store afterwards rather than from what the model said it did.
+
+Three properties are load-bearing rather than incidental:
+
+- **Every request is answered.** The backend correlates by `requestId` and waits
+  on a deadline — ten seconds for a read, ten *minutes* for a copilot turn — so a
+  dropped request is not a cheap no-op, it burns that whole window. An unknown
+  `op` from a newer backend, a frame this build cannot decode (the `requestId` is
+  recovered from the raw JSON), a missing `workflowId`, an unknown workflow, a
+  store that fails, even a store that *panics*: all of them come back as
+  `ok: false` with a sentence the orchestrator can render as a tool error. The
+  only unanswerable frame is one carrying no `requestId` at all.
+- **Nothing long-running blocks the socket.** Reads run on a blocking thread and
+  a copilot turn on its own task, because awaiting either inside the Socket.IO
+  callback starves engine.io's ping/pong — the backend then drops the hub, and
+  every later delegation fails with "no harness connected" while the process
+  still looks alive.
+- **A host with workflows disabled advertises none.** The bridge is a view of the
+  store and applies no policy; the refusal lives in the run path. Advertising
+  graphs this host would decline to run would only teach the orchestrator to
+  delegate work that bounces.
+
 ## Progress
 
 A run reports itself in the *existing* `harness_work` vocabulary — a

@@ -19,14 +19,14 @@ use super::types::{App, TABS};
 
 mod agents;
 mod decisions;
-mod memory;
+mod feedback;
+mod harness_modals;
 mod overview;
 mod points;
 mod prompt;
 mod routing;
 mod selection;
 mod settings;
-mod tasks;
 mod template_modal;
 #[cfg(feature = "workflows")]
 pub(super) mod workflows;
@@ -341,6 +341,15 @@ impl App {
         if self.template_modal {
             self.draw_template_modal(f, rows[2]);
         }
+        // Above the content, and above each other in answer order: the picker
+        // can open the directory prompt, and the hand-back question is asked
+        // over whichever pane the operator is releasing.
+        if self.harness_picker.is_some() {
+            self.draw_harness_picker(f, rows[2]);
+        }
+        if self.handback_prompt.is_some() {
+            self.draw_handback_prompt(f, rows[2]);
+        }
         if has_prompt {
             self.draw_prompt(f, rows[3]);
         } else if picking {
@@ -518,12 +527,11 @@ impl App {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
             "Agents" => self.draw_agents(f, area),
-            "Tasks" => self.draw_tasks(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),
-            "Routing" => self.draw_routing(f, area),
-            "Memory" => self.draw_memory(f, area),
+            "Hosts" => self.draw_routing(f, area),
+            "Feedback" => self.draw_feedback(f, area),
             // Trace, Context, and Feedback are Settings subpages, not tabs.
             "Settings" => self.draw_settings(f, area),
             _ => self.draw_overview(f, area),

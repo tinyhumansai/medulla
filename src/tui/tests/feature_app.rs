@@ -234,8 +234,9 @@ fn tab_and_backtab_cycle_tabs() {
     assert_eq!(app.tab(), "Overview");
     let _ = app.on_event(key(KeyCode::Tab));
     assert_eq!(app.tab(), "Agents");
+    // Tasks is commented out of `TABS`, so Agents is followed by Workflows.
     let _ = app.on_event(key(KeyCode::Tab));
-    assert_eq!(app.tab(), "Tasks");
+    assert_eq!(app.tab(), "Workflows");
     let _ = app.on_event(key_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
     assert_eq!(app.tab(), "Agents");
     // Wrap backwards from Overview to the last tab (Settings).
@@ -259,7 +260,7 @@ fn each_tab_renders_its_signature() {
         ("Agents", "Agents ·"),
         ("Agents", "orchestrator"),
         ("TokenMaxxxing", "Coming soon"),
-        ("Routing", "Routing"),
+        ("Hosts", "Hosts"),
         ("Settings", "Settings"),
     ];
     for (name, sig) in signatures {

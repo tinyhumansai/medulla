@@ -51,10 +51,14 @@ fn the_hub_never_writes_to_the_terminal_the_tui_owns() {
     //
     // Asserted against the source rather than at runtime: the failure is a
     // stray write from a background task, which no unit test would observe.
+    // Paths, not globs: each of these became a directory module after the test
+    // was written, and a stale path silently asserts nothing (the read below
+    // skips what it cannot find).
     for path in [
-        "src/sdk/src/hub/boot.rs",
-        "src/sdk/src/hub/socket.rs",
-        "src/tui/src/hub_relay.rs",
+        "src/sdk/src/hub/boot/mod.rs",
+        "src/sdk/src/hub/socket/mod.rs",
+        "src/sdk/src/hub/workflows.rs",
+        "src/tui/src/hub_relay/mod.rs",
     ] {
         let full = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -79,6 +83,7 @@ fn the_hub_never_writes_to_the_terminal_the_tui_owns() {
 /// A live roster entry, as the hub holds it.
 fn worker(id: &str, address: &str, selected: bool) -> medulla::hub::HubWorker {
     medulla::hub::HubWorker {
+        roles: Vec::new(),
         id: id.to_string(),
         address: address.to_string(),
         harness: "claude".to_string(),
@@ -101,7 +106,7 @@ fn a_saved_roster_comes_back_on_the_next_launch() {
         "nothing remembered before anything is saved"
     );
 
-    let sink = super::roster_sink(home, medulla::hub::stderr_log(), String::new());
+    let sink = super::roster_sink(home, medulla::hub::stderr_log(), shared(Vec::new()));
     sink(&[
         worker("alpha", "3Hob1Fxu", true),
         worker("beta", "@peer", false),
@@ -121,7 +126,7 @@ fn an_explicit_environment_roster_is_not_merged_with_the_saved_one() {
     // quietly re-add a worker the operator had removed.
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
-    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[worker(
+    super::roster_sink(home, medulla::hub::stderr_log(), shared(Vec::new()))(&[worker(
         "saved",
         "addr-saved",
         false,
@@ -144,7 +149,7 @@ fn saving_over_a_config_leaves_its_other_sections_alone() {
     )
     .expect("seed");
 
-    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[worker(
+    super::roster_sink(home, medulla::hub::stderr_log(), shared(Vec::new()))(&[worker(
         "alpha", "addr", false,
     )]);
 
@@ -153,13 +158,18 @@ fn saving_over_a_config_leaves_its_other_sections_alone() {
     assert!(text.contains("addr"), "got: {text}");
 }
 
+/// The shared device-local address list the sink reads at save time.
+fn shared(addresses: Vec<String>) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+    std::sync::Arc::new(std::sync::Mutex::new(addresses))
+}
+
 #[test]
 fn an_unwritable_roster_path_does_not_take_the_hub_down() {
     // Losing the roster is a nuisance; failing to start is an outage.
     let sink = super::roster_sink(
         std::path::Path::new("/proc/nonexistent/nope"),
         medulla::hub::stderr_log(),
-        String::new(),
+        shared(Vec::new()),
     );
     sink(&[worker("alpha", "addr", false)]);
 }
@@ -171,7 +181,11 @@ fn the_device_local_host_is_never_written_into_the_saved_roster() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
 
-    super::roster_sink(home, medulla::hub::stderr_log(), "this-device".to_string())(&[
+    super::roster_sink(
+        home,
+        medulla::hub::stderr_log(),
+        shared(vec!["this-device".to_string()]),
+    )(&[
         worker("this-device", "this-device", false),
         worker("beta", "3Hob1Fxu", false),
     ]);
@@ -190,7 +204,7 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
     // Write it the way a build without the filter would have.
-    super::roster_sink(home, medulla::hub::stderr_log(), String::new())(&[
+    super::roster_sink(home, medulla::hub::stderr_log(), shared(Vec::new()))(&[
         worker("this-device", "this-device", false),
         worker("beta", "3Hob1Fxu", false),
     ]);
@@ -208,11 +222,12 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
         Some(super::LocalDispatch {
             network: medulla::bridge::LocalBridgeNetwork::new(),
             hub_address: "medulla-orchestrator".to_string(),
-            host_address: "this-device".to_string(),
+            host_addresses: shared(vec!["this-device".to_string()]),
             // Hosting is off: nothing is bound at `this-device` this run.
-            host: None,
+            hosts: Vec::new(),
         }),
         Some(&session),
+        Vec::new(),
     )
     .expect("the hub config builds with a session present");
 
@@ -227,4 +242,123 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
     );
     assert_eq!(config.workers.len(), 1);
     assert_eq!(config.workers[0].address, "3Hob1Fxu");
+}
+
+#[test]
+fn a_host_added_after_launch_is_not_remembered_as_a_remote_peer() {
+    // The sink filters at *save* time, so a launch-time snapshot of the local
+    // addresses did not know about a host started mid-session through
+    // `LocalHostSpawner`. Its device-local entry was written into the saved
+    // roster and would be advertised on a later run at an address nothing binds.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+
+    let addresses = shared(vec!["this-device".to_string()]);
+    let sink = super::roster_sink(home, medulla::hub::stderr_log(), addresses.clone());
+
+    // The spawner binds a second host and appends its address.
+    addresses
+        .lock()
+        .expect("host addresses")
+        .push("local-backend".to_string());
+
+    sink(&[
+        worker("this-device", "this-device", false),
+        worker("local-backend", "local-backend", false),
+        worker("beta", "3Hob1Fxu", false),
+    ]);
+
+    let saved = super::workers_from_config(home);
+    let addresses: Vec<&str> = saved.iter().map(|w| w.address.as_str()).collect();
+    assert_eq!(
+        addresses,
+        vec!["3Hob1Fxu"],
+        "only the genuinely remote peer is remembered"
+    );
+}
+
+// ------------------------------------------------------------- workflows ---
+
+/// Install a workflow document in `<home>/workflows`, the layer
+/// `medulla::workflows::discover_store` reads for a `MEDULLA_HOME`.
+#[cfg(feature = "workflows")]
+fn seed_workflow(home: &std::path::Path, id: &str) {
+    let dir = home.join("workflows");
+    std::fs::create_dir_all(&dir).expect("workflow dir");
+    let document = serde_json::json!({
+        "id": id,
+        "name": "Nightly sweep",
+        "description": "sweeps the estate",
+        "nodes": [
+            { "id": "start", "kind": "trigger", "name": "Start",
+              "config": { "trigger_kind": "manual" } }
+        ],
+        "edges": []
+    });
+    std::fs::write(dir.join(format!("{id}.json")), document.to_string()).expect("write");
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn the_hub_is_handed_a_bridge_over_the_workflows_this_host_has_installed() {
+    // The gap this closes: `StoreWorkflowBridge` was written, exported and unit
+    // tested, and nothing in the product ever installed it — so every workflow
+    // the orchestrator asked this host about was unanswerable however healthy
+    // the socket was.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+    seed_workflow(home, "sweep");
+    let session = medulla::auth::Credentials {
+        base_url: "https://api.example".into(),
+        jwt: "jwt".into(),
+    };
+
+    let config = super::build_hub_config_with_log(
+        &env(&[("MEDULLA_HOME", &home.to_string_lossy())]),
+        home,
+        medulla::hub::stderr_log(),
+        Some(&session),
+    )
+    .expect("the hub config builds with a session present");
+
+    let bridge = config
+        .workflows
+        .expect("the hub is handed this host's workflow store");
+    let adverts = bridge.list();
+    assert_eq!(adverts.len(), 1, "{adverts:?}");
+    assert_eq!(adverts[0].id, "sweep");
+    assert_eq!(adverts[0].name, "Nightly sweep");
+    // And it answers a read from the same store, which is what the socket's
+    // `medulla:workflow_request` handler calls.
+    assert_eq!(bridge.get("sweep").expect("the graph")["id"], "sweep");
+    // The capability probe reads this host's working directory off the same
+    // bridge, so an installed bridge that cannot name one costs every probe its
+    // `cwd`.
+    assert!(bridge.action_dir().is_some());
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn a_host_with_workflows_disabled_advertises_none() {
+    // The bridge applies no policy of its own, so advertising graphs this host
+    // would refuse to run only teaches the orchestrator to delegate work that
+    // bounces.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+    seed_workflow(home, "sweep");
+    std::fs::write(home.join("config.toml"), "[workflows]\nenabled = false\n").expect("seed");
+    let session = medulla::auth::Credentials {
+        base_url: "https://api.example".into(),
+        jwt: "jwt".into(),
+    };
+
+    let config = super::build_hub_config_with_log(
+        &env(&[("MEDULLA_HOME", &home.to_string_lossy())]),
+        home,
+        medulla::hub::stderr_log(),
+        Some(&session),
+    )
+    .expect("the hub config builds with a session present");
+
+    assert!(config.workflows.is_none());
 }

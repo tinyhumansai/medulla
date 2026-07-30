@@ -33,7 +33,7 @@ use medulla::sessions::{SessionClass, TurnStream};
 use medulla::tinyplace::HarnessProvider;
 use medulla::wrapper::tail::SessionTailer;
 
-use super::pty::{LaunchSpec, PtyManager};
+use super::pty::{HarnessControl, LaunchSpec, PtyManager};
 
 /// How often the transcript is polled while a turn runs.
 ///
@@ -110,13 +110,14 @@ impl PtySessionExecutor {
             .ok_or_else(|| format!("{} cannot run watchable tasks", provider.as_str()))?;
 
         // A task frame is discrete work and gets its own session; a
-        // conversational message continues the peer's. `conversation` is the
-        // authenticated sender, so two peers can never share one.
-        let class = if options.conversation.is_empty() {
-            SessionClass::Bounded
-        } else {
-            SessionClass::Unbound
-        };
+        // conversational message continues the peer's. Taken from the caller
+        // rather than inferred from `conversation`: the daemon sets that field
+        // to the authenticated sender for *every* inbound run, so it is never
+        // empty, and the old `is_empty()` test therefore classified every task
+        // frame as unbound. Two unrelated delegated tasks from one orchestrator
+        // then shared a harness, each able to read the other's prompt and tool
+        // context — the exact opposite of what the comment above promises.
+        let class = options.session_class;
         // Built *before* the session is opened, and deliberately so. The tailer
         // snapshots the transcripts that already exist and ignores them, so that
         // the one new file is unambiguously this session's — which means the
@@ -234,6 +235,26 @@ impl PtySessionExecutor {
         outcome
     }
 
+    /// Interrupt a running turn and take its session out of service.
+    ///
+    /// The interrupt goes first and is a real `Ctrl-C`, exactly what an operator
+    /// would press: harnesses handle it as "stop what you are doing" and unwind
+    /// their tool calls, where killing the process leaves whatever it was
+    /// mid-write half-written.
+    ///
+    /// Then the session is closed rather than released, and deliberately so even
+    /// for an unbound conversation. A harness that has just been interrupted is
+    /// not *known* to be idle — the interrupt is a request, not a fence — and
+    /// `claim_idle` only skips sessions that are no longer running. Handing a
+    /// conversation a fresh session costs it continuity; handing the next task a
+    /// harness still finishing the last one interleaves two prompts into one
+    /// composer, which is the failure that produces confidently wrong answers
+    /// rather than an error.
+    fn stop_turn(&self, id: &str) {
+        let _ = self.sessions.write(id, &[0x03]);
+        self.sessions.close(id);
+    }
+
     /// Find or open the session that serves this task.
     fn session_for(
         &self,
@@ -280,6 +301,11 @@ impl PtySessionExecutor {
             label,
             model: options.model.clone(),
             session_id: None,
+            // Opened to serve a task frame, so the orchestrator holds it. An
+            // operator can still take it over later; that is what stops the
+            // next frame landing in a composer they are typing in.
+            control: HarnessControl::Orchestrator,
+            user_spawned: false,
         })?;
         let harness_session_id = self.sessions.row(&id).and_then(|row| row.session_id);
         Ok(OpenedSession {
@@ -290,7 +316,7 @@ impl PtySessionExecutor {
     }
 
     /// The environment and extra argv a fresh launch spawns with: this
-    /// executor's base environment, layered with the `[router]` injection the
+    /// task-scoped environment, layered with the `[router]` injection the
     /// headless executor already applies at its own spawn seam.
     ///
     /// Without this, switching the local host to `PtySessionExecutor` silently
@@ -308,7 +334,7 @@ impl PtySessionExecutor {
         &self,
         options: &RunTaskOptions,
     ) -> Result<(HashMap<String, String>, Vec<String>), String> {
-        let mut env = self.env.clone();
+        let mut env = options.env.clone();
         let mut extra_args = options.extra_args.clone();
         if let Some(router) = &options.router {
             let injection = medulla::tinyplace::env::router_env(options.provider, router);
@@ -316,7 +342,7 @@ impl PtySessionExecutor {
                 env.insert(key, value);
             }
             for (child_var, source_name) in injection.secret_env {
-                match self.env.get(&source_name).filter(|v| !v.is_empty()) {
+                match options.env.get(&source_name).filter(|v| !v.is_empty()) {
                     Some(secret) => {
                         env.insert(child_var, secret.clone());
                     }
@@ -425,6 +451,14 @@ impl PtySessionExecutor {
             // configured ceiling (never observed from `[host]`, whose default is
             // nonzero, but a defensive floor all the same).
             if timeout_ms > 0 && idle_ms as u64 >= timeout_ms {
+                // Stop the harness before reporting the failure. A timeout is
+                // only silence on the *transcript* — the child is very much
+                // alive and may still be editing the workspace. Returning
+                // without stopping it tells the peer the task failed while the
+                // work carries on unattributed, and an unbound session would
+                // then be released as idle for the next task to claim, landing
+                // its prompt in a harness that is still mid-turn.
+                self.stop_turn(id);
                 return Err(format!(
                     "{} task idle for {timeout_ms}ms (no events)",
                     provider.as_str()

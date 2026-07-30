@@ -131,14 +131,31 @@ impl Bridge for RoutingBridge {
         self.remote.as_ref()?.resolve_handle(name).await
     }
 
-    /// Asked of the remote only. A device-local address is served in-process,
-    /// so it has no heartbeat to read and needs none — it is up exactly when
-    /// this process is.
+    /// Split by where the address lives. A device-local one is answered here as
+    /// live — it names something bound in this process, so it has no heartbeat
+    /// to read and needs none. Only the rest are forwarded to the remote.
     async fn presence(&self, addresses: &[String]) -> std::collections::HashMap<String, bool> {
-        match &self.remote {
-            Some(remote) => remote.presence(addresses).await,
-            None => std::collections::HashMap::new(),
+        // A device-local address is answered here, not asked of the relay. It
+        // names something bound in this process, so its liveness is knowable
+        // exactly — and tiny.place has never heard of it, because it is not a
+        // tiny.place identity and never heartbeats. Forwarding it returns "no
+        // record", which reads as offline and takes every host on this machine
+        // out of the roster.
+        let mut out = std::collections::HashMap::new();
+        let mut remote_addresses = Vec::new();
+        for address in addresses {
+            if self.is_local(address).await {
+                out.insert(address.clone(), true);
+            } else {
+                remote_addresses.push(address.clone());
+            }
         }
+        if let Some(remote) = &self.remote {
+            if !remote_addresses.is_empty() {
+                out.extend(remote.presence(&remote_addresses).await);
+            }
+        }
+        out
     }
 
     async fn is_device_local(&self, address: &str) -> bool {

@@ -134,6 +134,7 @@ impl EmbeddedDaemon {
             extra_args: Vec::new(),
             skip_permissions: options.skip_permissions,
             router: options.router.clone(),
+            custom_harnesses: options.custom_harnesses.clone(),
             budget: options.budget.clone(),
         };
 

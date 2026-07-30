@@ -6,7 +6,7 @@ members = ["src/sdk", "src/tui"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/medulla"
@@ -49,7 +49,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 # OpenHuman core. Neither wins by default, so every TLS handshake panicked on
 # whichever tokio worker reached it first.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-ratatui = "0.29"
+ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 portable-pty = "0.9"
 # Terminal emulator: parses a PTY's VT/ANSI stream into a screen grid so a live
@@ -71,6 +71,10 @@ fs2 = "0.4"
 regex = "1"
 sha2 = "0.10"
 tempfile = "3"
+# Terminal-cell width for wide characters (CJK, emoji), matching how ratatui's
+# own `Line::width()` measures — a char-count wrap would clip or over-wrap a
+# row containing wide glyphs.
+unicode-width = "0.2"
 
 # `[patch.crates-io]` applies ONLY from the workspace root. Once OpenHuman is a
 # path dependency its own patch table is ignored, as is

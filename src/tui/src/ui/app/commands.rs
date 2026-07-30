@@ -26,10 +26,14 @@ impl App {
     }
 
     /// The task under the Agents-list cursor, when a `Sub` (task) row is selected.
+    ///
+    /// Indexes the rail's rows, which is what `agent_index` counts — the lane
+    /// list alone is shorter than the rail and reading it here would answer for
+    /// whichever row happened to share the offset.
     pub(super) fn selected_agent_task(&self) -> Option<TaskState> {
-        let rows = self.agent_rows();
-        match rows.get(self.agent_index) {
-            Some(AgentRow::Sub { task, .. }) => Some(task.clone()),
+        let rows = self.rail_rows();
+        match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
+            Some(super::rail::RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
             _ => None,
         }
     }
@@ -118,61 +122,12 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
-            PromptKind::TaskCreate => {
-                if text.is_empty() {
-                    self.set_status("Tasks · title is required");
-                    return None;
-                }
-                let now = medulla::tasks::now_timestamp();
-                Some(Cmd::SaveTask(Box::new(medulla::tasks::Task {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    title: text,
-                    description: String::new(),
-                    status: Default::default(),
-                    source: None,
-                    recurrence: None,
-                    created_at: now.clone(),
-                    updated_at: now,
-                    last_synced_at: None,
-                    dispatch: serde_json::Value::Null,
-                })))
-            }
-            PromptKind::TaskEdit(id) => {
-                if text.is_empty() {
-                    self.set_status("Tasks · title is required");
-                    return None;
-                }
-                let Some(mut task) = self.tasks.tasks.iter().find(|task| task.id == id).cloned()
-                else {
-                    self.set_status("Tasks · task no longer exists");
-                    return None;
-                };
-                task.title = text;
-                task.updated_at = medulla::tasks::now_timestamp();
-                Some(Cmd::SaveTask(Box::new(task)))
-            }
-            PromptKind::SourceAdd => {
-                let repository = text.trim().to_string();
-                if repository.is_empty() {
-                    self.set_status("Sources · repository is required");
-                    return None;
-                }
-                let source = medulla::tasks::SourceConfig {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    provider: "github".into(),
-                    enabled: true,
-                    repository,
-                    state: "open".into(),
-                    labels: Vec::new(),
-                    filter: None,
-                    token: std::env::var("GITHUB_TOKEN").ok(),
-                };
-                let mut document = self.tasks.clone();
-                document.sources.push(source);
-                Some(Cmd::SaveTasks(Box::new(document)))
-            }
             PromptKind::HostAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
+                    // Land on the list the add is about. Staying on Add Host
+                    // leaves the operator on a page describing work they have
+                    // just finished, with no sight of whether it landed.
+                    self.focus_routing_subpage("Hosts");
                     self.set_status("Adding worker…");
                     Some(Cmd::WorkerOp(op))
                 }
@@ -184,6 +139,40 @@ impl App {
             PromptKind::WorkspaceAdd => {
                 self.add_workspace(&text);
                 None
+            }
+            PromptKind::CustomHarnessAdd => {
+                self.save_custom_harness(None, &text);
+                None
+            }
+            PromptKind::CustomHarnessEdit(id) => {
+                self.save_custom_harness(Some(&id), &text);
+                None
+            }
+            // Back to the picker with the new directory, rather than spawning
+            // straight from here: the operator has still not said *which*
+            // harness, and the picker is where that choice lives.
+            PromptKind::HarnessCwd => {
+                if let Some(picker) = &mut self.harness_picker {
+                    picker.cwd = text;
+                }
+                self.set_status("Pick a harness · Enter start · Esc cancel");
+                None
+            }
+            PromptKind::LocalHostWorkspace(harness) => self.add_local_host(harness, &text),
+            PromptKind::RejectProposal {
+                workflow,
+                proposal_id,
+            } => {
+                if text.is_empty() {
+                    self.set_status("Proposal rejection cancelled (empty)");
+                    return None;
+                }
+                self.set_status("Declining the proposed change…");
+                Some(Cmd::RejectProposal {
+                    workflow,
+                    proposal_id,
+                    reason: text,
+                })
             }
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
@@ -224,6 +213,36 @@ impl App {
                 self.dismissed_decisions.insert(decision_id);
                 self.set_status("Decision answered");
                 None
+            }
+            PromptKind::FeedbackComment { id } => {
+                if text.is_empty() {
+                    self.set_status("Comment cancelled (empty)");
+                    return None;
+                }
+                self.set_status("Posting comment…");
+                Some(Cmd::CommentFeedback { id, body: text })
+            }
+            // Step one captures the title and re-opens the prompt for the body;
+            // nothing is sent until step two.
+            PromptKind::FeedbackTitle { kind } => {
+                if text.is_empty() {
+                    self.set_status("New feedback cancelled (empty title)");
+                    return None;
+                }
+                self.open_feedback_body(kind, text);
+                None
+            }
+            PromptKind::FeedbackBody { kind, title } => {
+                if text.is_empty() {
+                    self.set_status("New feedback cancelled (empty description)");
+                    return None;
+                }
+                self.set_status("Submitting feedback…");
+                Some(Cmd::SubmitFeedback {
+                    kind,
+                    title,
+                    body: text,
+                })
             }
         }
     }
@@ -333,6 +352,11 @@ impl App {
                 self.new_thread();
             }
             SlashCommand::Resume => return Some(Cmd::ListChats),
+            SlashCommand::NewHarness { provider, path } => {
+                self.start_harness_command(provider.as_deref(), path.as_deref());
+            }
+            SlashCommand::TakeControl => self.take_harness_control(),
+            SlashCommand::HandOff => self.hand_harness_back(),
             SlashCommand::Abort => {
                 self.runtime.abort();
                 self.set_status("Abort requested");
@@ -351,11 +375,10 @@ impl App {
                 self.enter_settings_subpage(SP_APPEARANCE);
             }
             SlashCommand::Usage => return self.set_settings_subpage(SP_USAGE),
-            // The persona-memory layer is out of the build; the tab it lands
-            // on says so rather than the command silently doing nothing.
-            SlashCommand::Memory(_) => {
-                self.tab_index = tab_pos("Memory");
-                self.set_status("Memory · coming soon");
+            SlashCommand::Feedback => {
+                self.tab_index = tab_pos("Feedback");
+                self.set_status("Feedback · loading the board…");
+                return self.reload_feedback();
             }
             SlashCommand::ToggleMouse => self.toggle_mouse(),
             SlashCommand::Copy(scope) => self.copy_chat(scope),

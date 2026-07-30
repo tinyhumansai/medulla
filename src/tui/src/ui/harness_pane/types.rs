@@ -18,15 +18,39 @@ use super::*;
 pub struct LocalHarnesses {
     /// Every PTY-backed harness running on this device.
     pub sessions: PtyManager,
-    /// The host's task state machine, for
+    /// Each host's task state machine, for
     /// [`session_for_task`](medulla::daemon::DaemonRuntime::session_for_task).
-    pub runtime: medulla::daemon::DaemonRuntime,
+    ///
+    /// One per host on this device. A task belongs to exactly one of them, so
+    /// resolving means asking each until one claims it — which is cheap, since
+    /// a machine hosts a handful of directories, not a fleet.
+    ///
+    /// Shared rather than owned because a host can be added while the app runs.
+    /// This value is cloned into the session, so a plain `Vec` would leave the
+    /// pane reading a snapshot taken at startup: the new host would run, and its
+    /// screen would be unwatchable for the rest of the session.
+    pub runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
     /// The address local work is dispatched *from* — the `from` half of the
     /// `(sender, task id)` key `session_for_task` is keyed on.
     ///
     /// Locally dispatched work carries the hub's own bus address, not the
     /// operator's identity, because the hub is what put the frame on the bus.
     pub hub_address: String,
+    /// The environment an operator-started harness is spawned with.
+    ///
+    /// The same map the host's executor uses, so a harness the operator starts
+    /// by hand sees exactly what one started for a task would. Anything else
+    /// would make "it works when I run it myself" a real and confusing
+    /// difference rather than a figure of speech.
+    pub env: std::collections::HashMap<String, String>,
+    /// The host's workspace, used as the default directory for a new harness.
+    pub workspace: String,
+    /// The coding-agent CLIs this device actually has, in the order the picker
+    /// should offer them.
+    pub providers: Vec<medulla::tinyplace::HarnessProvider>,
+    /// The configured `[router]`, injected into an operator-started harness the
+    /// same way the executor injects it into a task's.
+    pub router: Option<medulla::config::RouterConfig>,
 }
 
 /// Where the operator's keystrokes are going.

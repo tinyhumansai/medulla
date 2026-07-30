@@ -56,7 +56,10 @@ pub(crate) async fn run_core(args: &[String]) -> anyhow::Result<()> {
     let core = medulla::core_host::boot()
         .await
         .map_err(|e| anyhow::anyhow!("failed to start the embedded OpenHuman core: {e}"))?;
-    let runtime = Arc::new(OpenHumanRuntime::new(Arc::new(core)));
+    let runtime = Arc::new(
+        OpenHumanRuntime::new(Arc::new(core))
+            .with_backend_base_url(&loaded.config.backend.base_url),
+    );
     // Replies arrive by polled replay, so the driver would see nothing at all
     // unless the loop runs — the same wiring the TUI does at boot.
     runtime.spawn_poll_loop();

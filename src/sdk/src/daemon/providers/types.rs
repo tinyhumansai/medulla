@@ -12,6 +12,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Notify};
 
 use crate::config::RouterConfig;
+use crate::sessions::SessionClass;
 use crate::tinyplace::HarnessProvider;
 use std::collections::HashMap;
 
@@ -99,11 +100,28 @@ pub struct RunTaskOptions {
     ///
     /// The headless executor ignores it: a one-shot run is context-free by
     /// construction. A session-backed executor cannot work without it, because
-    /// "which session serves this task" and "may these two tasks see each
-    /// other's context" are both questions about *whose* work it is. Empty means
-    /// unattributed, which routes as its own conversation rather than sharing
-    /// one.
+    /// "which session serves this task" is a question about *whose* work it is.
+    ///
+    /// Ownership only. Whether two runs may *share* context is
+    /// [`session_class`](Self::session_class), which is a separate question with
+    /// a separate answer — see that field for why conflating them was a bug.
     pub conversation: String,
+    /// Whether this run gets its own session or continues the sender's.
+    ///
+    /// Stated by the caller rather than inferred, because the inference this
+    /// replaces was wrong in the one case that matters. A session-backed
+    /// executor used to read `conversation.is_empty()` as "bounded" — but the
+    /// daemon sets `conversation` to the *authenticated sender* for every
+    /// inbound run, so it is never empty in practice. Every task frame therefore
+    /// classified as unbound and reclaimed the sender's idle session, and two
+    /// unrelated delegated tasks from one orchestrator ran in the same harness,
+    /// each able to see and act on the other's prompt and tool context.
+    ///
+    /// A task frame is discrete work and gets [`SessionClass::Bounded`]; a
+    /// conversational message continues the sender's session and gets
+    /// [`SessionClass::Unbound`]. The headless executor ignores this — a
+    /// one-shot run has no session to share either way.
+    pub session_class: SessionClass,
     /// A previously captured harness session id to resume, giving this run the
     /// conversation's prior context.
     ///

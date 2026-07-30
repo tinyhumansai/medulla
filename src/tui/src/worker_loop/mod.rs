@@ -219,6 +219,9 @@ pub(super) fn worker_runtime(
         // Layered into every peer task's spawn env by the same executor the
         // headless daemon uses, so `--tui` and headless route identically.
         router: router.clone(),
+        // The standalone worker TUI does not yet expose a config editor; named
+        // presets are loaded by the orchestrator's embedded host.
+        custom_harnesses: Vec::new(),
         // Operator-declared budgets from the `[budget]` config, advertised on the
         // capability probe as `source: configured` for matching providers.
         budget: budget.clone(),

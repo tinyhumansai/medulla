@@ -69,6 +69,34 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
         WorkflowAction::Catalog(kind) => ops::catalog(kind.as_deref())?,
         WorkflowAction::Run(id) => execute(&parsed, &store, &env, &cwd, id).await?,
         WorkflowAction::Resume(run_id) => resume(&parsed, &store, &env, &cwd, run_id).await?,
+        WorkflowAction::Notes(id) => ops::notes(&store, id)?,
+        WorkflowAction::AddNote(id) => ops::add_note(
+            &store,
+            id,
+            parsed.kind.as_deref().unwrap_or("observation"),
+            parsed.text.as_deref().unwrap_or_default(),
+            parsed.run_id.clone().into_iter().collect(),
+            // Typed by a person at a terminal. Pinned as a result, so
+            // automation writing observations cannot evict it.
+            medulla::workflows::NoteSource::Operator,
+            // An operator superseding a note does it by id, and a key press
+            // cannot carry one; `--supersedes` is the CLI's way to say it.
+            parsed.supersedes.clone(),
+        )?,
+        WorkflowAction::Proposals(id) => ops::proposals(&store, id)?,
+        WorkflowAction::Accept(proposal_id) => ops::accept_proposal(&store, proposal_id)?,
+        WorkflowAction::Reject(proposal_id) => ops::reject_proposal(
+            &store,
+            proposal_id,
+            parsed.reason.as_deref().unwrap_or_default(),
+        )?,
+        WorkflowAction::Evolve(id) => {
+            if let Some(path) = parsed.config.as_deref() {
+                std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+            }
+            let config = load_workflows_config(&parsed, &env, &cwd)?;
+            ops::evolve(&store, &config, &cwd, id, parsed.run_id.as_deref()).await?
+        }
         WorkflowAction::Mcp => unreachable!("handled above, before stdout is claimed"),
     };
 
@@ -124,9 +152,20 @@ fn local_context(
     env: &HashMap<String, String>,
     cwd: &std::path::Path,
 ) -> anyhow::Result<(RunContext, String)> {
+    // Recorded before `LocalWorkflowHost::start` below, which spawns an
+    // embedded daemon that may in turn spawn ACP harness subprocesses — those
+    // read this env var (see `medulla::config::CONFIG_PATH_ENV`) to resolve
+    // the same `--config` this command was given, rather than rediscovering a
+    // possibly different one from their own `cwd`.
+    if let Some(path) = parsed.config.as_deref() {
+        std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+    }
     let loaded = medulla::config::load_config(parsed.config.as_deref(), env, cwd)?;
     let home = medulla::home::medulla_home(env);
     let mut settings = CapabilitySettings::from_config(&loaded.config.workflows, &home);
+    // A `medulla:shell` step runs where the command was invoked, matching what
+    // an operator running it by hand would expect.
+    settings.workspace = cwd.to_string_lossy().to_string();
     // Nodes that name no worker go to the loopback host this command starts,
     // unless the operator pinned a different default.
     if settings.default_worker_address.trim().is_empty() {
@@ -193,4 +232,21 @@ fn read_stdin(what: &str) -> anyhow::Result<String> {
 fn read_stdin_json(what: &str) -> anyhow::Result<Value> {
     let body = read_stdin(what)?;
     serde_json::from_str(&body).map_err(|err| anyhow::anyhow!("{what}: invalid JSON: {err}"))
+}
+
+/// This machine's workflow settings.
+///
+/// An explicitly selected config is part of the command contract, so a read or
+/// parse failure is returned instead of silently launching a review under
+/// defaults the operator did not request.
+fn load_workflows_config(
+    parsed: &WorkflowArgs,
+    env: &HashMap<String, String>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<medulla::config::WorkflowsConfig> {
+    Ok(
+        medulla::config::load_config(parsed.config.as_deref(), env, cwd)?
+            .config
+            .workflows,
+    )
 }

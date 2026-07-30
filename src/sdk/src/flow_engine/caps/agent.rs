@@ -154,10 +154,17 @@ impl HarnessAgentRunner {
             instruction,
             worker_address,
             provider: self.settings.default_provider,
+            custom_harness: None,
             model: self.settings.default_model.clone(),
+            // No conversation, deliberately. Each node is its own unit of work,
+            // and letting two share a harness session would make a graph's
+            // behaviour depend on the order its branches happened to run in —
+            // the same reason a task frame routes `Bounded` by default.
+            conversation: None,
             // A node dispatches an instruction, never another workflow: nesting
             // is expressed with a `sub_workflow` node, which the engine expands
             // itself and applies its own depth limit to.
+            tool_mode: None,
             workflow: None,
         }
     }

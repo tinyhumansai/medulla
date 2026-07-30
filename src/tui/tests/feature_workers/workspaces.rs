@@ -4,6 +4,15 @@
 //! The page exists so the orchestrator has something to reason about beyond
 //! "there is a claude daemon on this laptop". What is declared here for this
 //! device is exactly what reaches it as `capabilities.accessibleDirs`.
+//!
+//! **Currently ignored.** Workspaces is commented out of `ROUTING_SUBPAGES`, so
+//! `focus_routing_subpage` cannot land on it. The page's rendering, keys and
+//! `[host].workspaces` persistence are untouched — putting its name back in the
+//! list restores both the page and this suite.
+//!
+//! Adding a *host* per directory (Add Host › Local) largely supersedes what this
+//! page did: an extra workspace was advisory routing context, whereas a host
+//! actually runs work there.
 
 use crate::helpers::*;
 
@@ -23,6 +32,7 @@ fn app_with_workspaces(dirs: &[&str], config: &std::path::Path) -> App {
     app
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn the_page_lists_this_devices_directories_and_marks_where_work_runs() {
     let dir = tempfile::tempdir().unwrap();
@@ -38,6 +48,7 @@ fn the_page_lists_this_devices_directories_and_marks_where_work_runs() {
     assert!(out.contains("a add a directory"), "{out}");
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn a_directory_that_is_not_on_disk_is_flagged_rather_than_hidden() {
     // Declaring a path on a mount that is not up yet is legitimate; silently
@@ -49,6 +60,7 @@ fn a_directory_that_is_not_on_disk_is_flagged_rather_than_hidden() {
     assert!(out.contains("missing on disk"), "{out}");
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn adding_a_directory_writes_it_to_the_config() {
     let dir = tempfile::tempdir().unwrap();
@@ -81,6 +93,7 @@ fn adding_a_directory_writes_it_to_the_config() {
     assert!(app.status().contains("Added workspace"), "{}", app.status());
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn the_same_directory_is_not_declared_twice() {
     let dir = tempfile::tempdir().unwrap();
@@ -105,6 +118,7 @@ fn the_same_directory_is_not_declared_twice() {
     );
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn removing_a_declared_directory_takes_it_out_of_the_config() {
     let dir = tempfile::tempdir().unwrap();
@@ -127,6 +141,7 @@ fn removing_a_declared_directory_takes_it_out_of_the_config() {
     );
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn the_working_directory_cannot_be_removed_from_this_page() {
     // Removing it would leave the host with nowhere to run tasks; it is the
@@ -142,6 +157,7 @@ fn the_working_directory_cannot_be_removed_from_this_page() {
     );
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn another_machines_workspace_is_shown_but_not_removable_here() {
     // The scripted fleet declares a workspace on `workshop`. It belongs to that
@@ -170,6 +186,7 @@ fn another_machines_workspace_is_shown_but_not_removable_here() {
     );
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn a_relative_path_is_stored_absolute() {
     // `canonicalize` fails for a directory that is not there yet, and persisting
@@ -201,13 +218,14 @@ fn a_relative_path_is_stored_absolute() {
     );
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn entering_the_page_pulls_a_fresh_read_of_the_fleet() {
     // A backend session starts with an empty capacity snapshot, so without this
     // the page showed only this device's directories until the operator happened
     // to visit another capacity page first.
     let mut app = app_with_workers(None);
-    tab(&mut app, "Routing");
+    tab(&mut app, "Hosts");
     // Walk the nav down to Workspaces, then step in.
     let _ = app.on_event(key(KeyCode::Down));
     let _ = app.on_event(key(KeyCode::Down));

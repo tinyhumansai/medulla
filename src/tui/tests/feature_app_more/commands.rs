@@ -92,8 +92,8 @@ fn arrow_keys_walk_the_settings_nav_and_load_each_subpage() {
     // Arrows only walk the nav from the nav; step out of the content pane first.
     app.on_event(key(KeyCode::Esc));
     assert!(!app.settings_focused());
-    // Down from Appearance → Config → Trace → Context.
-    for expected in ["Config", "Trace", "Context"] {
+    // Down from Appearance → Config → Feedback → Trace → Context.
+    for expected in ["Config", "Feedback", "Trace", "Context"] {
         let cmd = app.on_event(key(KeyCode::Down));
         assert_eq!(app.settings_subpage(), expected);
         if expected == "Context" {

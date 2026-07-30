@@ -68,6 +68,7 @@ fn config_becomes_settings_with_every_field_carried_across() {
         tool_allowlist: vec!["github.create_issue".into()],
         http_allowlist: vec!["api.github.com".into()],
         run_timeout_secs: 30,
+        evolve: Default::default(),
     };
 
     let settings = CapabilitySettings::from_config(&config, "/home/.medulla");
@@ -94,6 +95,7 @@ fn an_empty_default_model_becomes_no_hint_rather_than_an_empty_one() {
 fn a_zero_timeout_falls_back_to_the_default_rather_than_abandoning_every_run() {
     let config = WorkflowsConfig {
         run_timeout_secs: 0,
+        evolve: Default::default(),
         ..Default::default()
     };
 
@@ -108,5 +110,46 @@ fn the_shipped_config_default_matches_the_seams_own_default_timeout() {
     assert_eq!(
         WorkflowsConfig::default().run_timeout_secs,
         DEFAULT_RUN_TIMEOUT_SECS
+    );
+}
+
+#[test]
+fn a_short_run_timeout_never_gives_a_script_more_budget_than_the_run_itself() {
+    // Regression: the quarter-share floor (30s) used to apply unconditionally,
+    // so any run shorter than 120s handed its scripts a *bigger* budget than
+    // the run's own — the opposite of "a wedged script fails as a script
+    // before it can consume the run's whole budget."
+    let mut settings = CapabilitySettings::rooted_at("/home");
+    settings.run_timeout_secs = 20;
+
+    assert_eq!(
+        settings.script_timeout(),
+        std::time::Duration::from_secs(20),
+        "a script must never outlive the run that bounds it"
+    );
+}
+
+#[test]
+fn a_generous_run_timeout_still_gives_a_script_only_a_quarter_share() {
+    let mut settings = CapabilitySettings::rooted_at("/home");
+    settings.run_timeout_secs = 400;
+
+    assert_eq!(
+        settings.script_timeout(),
+        std::time::Duration::from_secs(100)
+    );
+}
+
+#[test]
+fn a_mid_sized_run_timeout_still_gets_the_thirty_second_floor() {
+    // Below 120s the quarter-share is under the 30s floor, but the floor
+    // itself must stay under the run's own budget (see the short-timeout case
+    // above) — this pins the boundary where the floor applies uncapped.
+    let mut settings = CapabilitySettings::rooted_at("/home");
+    settings.run_timeout_secs = 60;
+
+    assert_eq!(
+        settings.script_timeout(),
+        std::time::Duration::from_secs(30)
     );
 }

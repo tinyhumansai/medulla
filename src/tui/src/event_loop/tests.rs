@@ -29,19 +29,19 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let cfg = medulla::config::WorkflowsConfig::default();
 
-    run_cmd(Cmd::Quit, &runtime, &cfg, &tx);
+    run_cmd(Cmd::Quit, &runtime, &cfg, &tx, None);
     assert!(rx.try_recv().is_err());
 
-    run_cmd(Cmd::Submit("hello".into()), &runtime, &cfg, &tx);
+    run_cmd(Cmd::Submit("hello".into()), &runtime, &cfg, &tx, None);
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s == "Cycle complete"));
 
-    run_cmd(Cmd::Resume("tui-demo-1".into()), &runtime, &cfg, &tx);
+    run_cmd(Cmd::Resume("tui-demo-1".into()), &runtime, &cfg, &tx, None);
     assert!(matches!(next(&mut rx).await, AppMsg::Resumed(s) if s == "Resumed chat"));
 
-    run_cmd(Cmd::ListChats, &runtime, &cfg, &tx);
+    run_cmd(Cmd::ListChats, &runtime, &cfg, &tx, None);
     assert!(matches!(next(&mut rx).await, AppMsg::OpenResume(chats) if chats.len() == 2));
 
-    run_cmd(Cmd::InspectContext, &runtime, &cfg, &tx);
+    run_cmd(Cmd::InspectContext, &runtime, &cfg, &tx, None);
     assert!(matches!(next(&mut rx).await, AppMsg::Contexts(items) if items.len() == 2));
 
     run_cmd(
@@ -54,10 +54,11 @@ async fn dispatches_conversation_fleet_usage_and_context_commands() {
         &runtime,
         &cfg,
         &tx,
+        None,
     );
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s == "Worker registry updated"));
 
-    run_cmd(Cmd::LoadUsage, &runtime, &cfg, &tx);
+    run_cmd(Cmd::LoadUsage, &runtime, &cfg, &tx, None);
     assert!(matches!(next(&mut rx).await, AppMsg::UsageLoaded(None)));
 }
 
@@ -81,7 +82,7 @@ async fn dispatcher_surfaces_resume_errors() {
     let cfg = medulla::config::WorkflowsConfig::default();
 
     concrete.set_running(true);
-    run_cmd(Cmd::Resume("any".into()), &runtime, &cfg, &tx);
+    run_cmd(Cmd::Resume("any".into()), &runtime, &cfg, &tx, None);
     assert!(matches!(next(&mut rx).await, AppMsg::Status(s) if s.contains("cannot resume")));
     concrete.set_running(false);
 }
@@ -161,7 +162,7 @@ async fn a_non_blocking_submit_reports_acceptance_not_completion() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let cfg = medulla::config::WorkflowsConfig::default();
 
-    run_cmd(Cmd::Submit("hello".into()), &runtime, &cfg, &tx);
+    run_cmd(Cmd::Submit("hello".into()), &runtime, &cfg, &tx, None);
     assert!(matches!(
         next(&mut rx).await,
         AppMsg::Status(s) if s.starts_with("Sent")

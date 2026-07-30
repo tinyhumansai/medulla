@@ -27,7 +27,7 @@ use medulla::hub::ScreenStore;
 use medulla::tinyplace::{
     parse_screen_message, ApplyOutcome, HarnessProvider, ScreenMessage, TaskFrameKind,
 };
-use medulla_tui::worker::pty::{LaunchSpec, PtyManager};
+use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 use medulla_tui::worker::stream::{send_fn, ScreenRouter};
 
 /// How long to allow for a child to paint and a frame to be sampled.
@@ -57,6 +57,8 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
         label: label.to_string(),
         session_id: None,
         model: None,
+        control: HarnessControl::Orchestrator,
+        user_spawned: false,
     }
 }
 
@@ -84,6 +86,7 @@ fn runtime_serving(session_id: String) -> DaemonRuntime {
         skip_permissions: false,
         accessible_dirs: Vec::new(),
         router: None,
+        custom_harnesses: Vec::new(),
         budget: None,
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
@@ -112,8 +115,11 @@ async fn start_task(runtime: &DaemonRuntime, from: &str, task_id: &str) {
         correlation_id: Some(format!("cyc/{task_id}/0")),
         harness: None,
         provider: Some(HarnessProvider::Codex),
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
+        conversation: None,
     });
     let frame = medulla::tinyplace::decode_task_frame(&body);
     runtime.handle_message(from.to_string(), body, frame);

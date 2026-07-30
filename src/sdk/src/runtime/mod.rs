@@ -23,6 +23,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::broadcast;
 
+use crate::client::{
+    FeedbackComment, FeedbackDetail, FeedbackItem, FeedbackPage, FeedbackQuery, FeedbackSubmission,
+    FeedbackType,
+};
 use crate::ui::chat_store::{ChatMessage, MainChatSummary};
 use crate::ui::events::{EventEnvelope, TaskDigest};
 
@@ -229,6 +233,61 @@ pub trait Runtime: Send + Sync {
     fn stream_state(&self) -> Option<StreamState> {
         None
     }
+
+    // --- feedback board (additive; backend-backed runtimes only) -----------
+    // The board lives on the cloud backend, so only the runtimes that hold a
+    // backend client override these. `list_feedback` returning `Ok(None)` means
+    // "this runtime has no board", which the UI renders as a sign-in hint
+    // rather than an empty list; the mutating calls fail loudly for that case.
+
+    /// A page of the public feedback board. `Ok(None)` = this runtime has no
+    /// backend to serve one.
+    fn list_feedback(
+        &self,
+        _query: FeedbackQuery,
+    ) -> BoxFuture<'static, anyhow::Result<Option<FeedbackPage>>> {
+        Box::pin(std::future::ready(Ok(None)))
+    }
+
+    /// One board item with its comments.
+    fn feedback_detail(&self, _id: String) -> BoxFuture<'static, anyhow::Result<FeedbackDetail>> {
+        Box::pin(std::future::ready(Err(no_feedback_backend())))
+    }
+
+    /// Cast, change, or retract a vote (`1`, `-1`, `0`). Returns the item with
+    /// recomputed tallies.
+    fn vote_feedback(
+        &self,
+        _id: String,
+        _value: i8,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackItem>> {
+        Box::pin(std::future::ready(Err(no_feedback_backend())))
+    }
+
+    /// Post a comment on a board item.
+    fn comment_feedback(
+        &self,
+        _id: String,
+        _body: String,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackComment>> {
+        Box::pin(std::future::ready(Err(no_feedback_backend())))
+    }
+
+    /// Submit new feedback. A moderation rejection is a successful call with
+    /// [`FeedbackSubmission::accepted`] false — not an error.
+    fn submit_feedback(
+        &self,
+        _kind: FeedbackType,
+        _title: String,
+        _body: String,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackSubmission>> {
+        Box::pin(std::future::ready(Err(no_feedback_backend())))
+    }
+}
+
+/// The error every feedback mutation returns on a runtime with no backend.
+fn no_feedback_backend() -> anyhow::Error {
+    anyhow::anyhow!("the feedback board requires a signed-in backend connection")
 }
 
 #[cfg(test)]

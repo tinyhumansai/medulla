@@ -129,8 +129,11 @@ fn frame(task_id: &str, text: &str, workflow: Option<&str>) -> String {
         correlation_id: Some(format!("corr-{task_id}")),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: workflow.map(str::to_string),
+        conversation: None,
     })
 }
 
@@ -255,8 +258,11 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
             correlation_id: Some("corr-probe".to_string()),
             harness: None,
             provider: None,
+            custom_harness: None,
             model: None,
+            tool_mode: None,
             workflow: None,
+            conversation: None,
         }),
     )
     .await

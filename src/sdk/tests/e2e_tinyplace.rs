@@ -256,8 +256,11 @@ async fn mailbox_poll_decodes_skips_and_acknowledges() {
         correlation_id: Some("corr-1".to_string()),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
+        conversation: None,
     });
 
     let mock = MockTinyplace::start(MockConfig {

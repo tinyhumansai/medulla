@@ -13,6 +13,8 @@ pub struct HubHandle {
     /// The encrypted transport, used to open a contact edge with a peer the
     /// moment it is added rather than at first dispatch.
     pub(super) relay: Arc<dyn Relay>,
+    /// The agent-role catalog, read when re-advertising the roster.
+    pub(super) catalog: Arc<Vec<crate::runtime::AgentTemplate>>,
     /// Sender/receiver correlation used for lightweight worker probes.
     pub(super) runner: Arc<super::super::runner::TaskRunner>,
     /// Latest capacity details keyed by stable worker id.
@@ -45,6 +47,10 @@ pub(in super::super) struct HandleWiring {
     pub public_key: String,
     /// The encrypted transport, for opening contact edges.
     pub relay: Arc<dyn Relay>,
+    /// The agent-role catalog, for resolving a worker's roles into what it
+    /// advertises. Shared and read-only: registration reads it, nothing here
+    /// writes it.
+    pub catalog: Arc<Vec<crate::runtime::AgentTemplate>>,
     /// Runner used to request lightweight details from workers.
     pub runner: Arc<super::super::runner::TaskRunner>,
     /// Where roster mutations are narrated.

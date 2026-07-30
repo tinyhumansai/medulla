@@ -8,6 +8,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::command::COMMANDS;
+use crate::ui::harness_pane::FOCUS_CHORD_LABEL;
 
 use super::super::super::types::App;
 
@@ -30,7 +31,6 @@ impl App {
             TLine::from("        ⌥X cancel task · ⌥A answer a question · Enter opens a template"),
             TLine::from("Agents: selecting an agent with an open question makes Enter answer it"),
             TLine::from("Routing: a add host · Enter/s select · e edit label · d/x remove"),
-            TLine::from("Memory: ↑↓ / j k browse directives, facets & hits · /memory <query> to search"),
             TLine::from(" "),
             TLine::from(Span::styled("Settings", bold)),
             TLine::from("↑↓ move between subpages · 1-8 jump straight to one"),
@@ -41,6 +41,16 @@ impl App {
             TLine::from("Account: Enter twice to log out · Usage: r refresh"),
             TLine::from(" "),
             TLine::from("Ctrl-N new thread · Ctrl-↑↓ switch threads · Ctrl-C quit"),
+            TLine::from(" "),
+            TLine::from(Span::styled("Harnesses", bold)),
+            TLine::from(format!(
+                "{FOCUS_CHORD_LABEL} type into the selected harness (and take it from the orchestrator)"
+            )),
+            TLine::from("Ctrl-T start a harness of your own · Ctrl-G grab it or give it back"),
+            TLine::from(Span::styled(
+                "While you hold a harness the orchestrator will not dispatch into it",
+                dim,
+            )),
             TLine::from(" "),
             TLine::from(Span::styled("Copy", bold)),
             TLine::from("Ctrl-Y copies the whole chat · /copy last copies just the latest reply"),
@@ -68,11 +78,18 @@ impl App {
                 Span::styled(format!("  {}", spec.description), dim),
             ]));
         }
-        f.render_widget(
-            Paragraph::new(Text::from(lines))
-                .wrap(Wrap { trim: true })
-                .block(self.panel("Keyboard & REPL help")),
-            area,
-        );
+        // Clamped here rather than at the key press: how far this page can
+        // scroll depends on the terminal it is being drawn into, which the key
+        // handler does not know.
+        let block = self.panel("Keyboard & REPL help");
+        let inner = block.inner(area);
+        let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true });
+        // Logical lines are not screen rows once wrapping is enabled. Ask the
+        // widget's own line breaker for its rendered height so narrow terminals
+        // can scroll through every wrapped description to the final command.
+        let rendered = paragraph.line_count(inner.width);
+        let max_scroll = rendered.saturating_sub(inner.height as usize) as u16;
+        self.help_scroll = self.help_scroll.min(max_scroll);
+        f.render_widget(paragraph.scroll((self.help_scroll, 0)).block(block), area);
     }
 }

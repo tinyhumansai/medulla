@@ -24,7 +24,6 @@ The Rust module tree for the `medulla` SDK crate. `lib.rs` defines the public su
 - [`runtime/`](./runtime/) — The `Runtime` trait the UI drives, plus its snapshot contract. Concrete implementations live alongside: `openhuman` (the embedded core, which the product runs on) and `mock` (tests and demos). The UI depends only on the trait and its types.
 - [`session_history/`](./session_history/) — Recent-session history for local harness sessions.
 - [`sessions/`](./sessions/) — Interactive coding-agent session management: the two lifetime classes, the two turn-source drivers, and the machinery that runs them.
-- [`tasks/`](./tasks/) — Durable local tasks and provider configuration.
 - [`tinyplace/`](./tinyplace/) — tinyplace protocol + agent-runtime layer for the medulla TUI/daemon.
 - [`ui/`](./ui/) — UI-facing data surface shared with the terminal app: `events` (the folded event log + `TuiEvent`), `agents` lane folding, `stream` token/thread derivations, the `chat_store`, the `work` panel over a harness's own todos and sub-agents, and small `util` helpers. Rendering-heavy screens (app, login, composer, theme) and the interactive onboarding screen live in the `medulla-tui` crate, which re-exports these data modules.
 - [`update/`](./update/) — Release update checking and self-update.

@@ -29,9 +29,32 @@ pub(super) enum AgentsKey {
 }
 
 impl App {
+    /// Whether a composer is actually drawn for the row under the cursor.
+    ///
+    /// It belongs to the orchestrator lane and nowhere else, and a harness takes
+    /// the whole right column when one is on it. Both conditions are the ones
+    /// [`agents_panes`](crate::ui::app::render) lays out from, so the keyboard
+    /// and the screen cannot disagree about whether there is somewhere to type.
+    pub fn agents_composer_shown(&self) -> bool {
+        self.on_orchestrator_lane() && self.harness_pane_session.is_none()
+    }
+
     /// Whether the Agents rail currently holds the keyboard.
+    ///
+    /// The rail takes it unconditionally when no composer is drawn. Without
+    /// that, stepping out of an attached harness — or simply arrowing onto a
+    /// harness row — left focus on a composer that is not on screen: arrows
+    /// drove an invisible caret and characters landed in a draft nobody could
+    /// see, which reads exactly like the keyboard having died.
     pub fn agents_rail_focused(&self) -> bool {
-        self.agents_focus == AgentsFocus::Rail
+        self.agents_focus == AgentsFocus::Rail || !self.agents_composer_shown()
+    }
+
+    /// Whether the rail cursor sits on the `+ New harness` action row.
+    pub(in crate::ui::app) fn on_new_harness_row(&self) -> bool {
+        let rows = self.rail_rows();
+        rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
+            .is_some_and(|row| row.is_new_harness())
     }
 
     /// Move the keyboard to the rail. Nothing else about the draft changes, so
@@ -66,9 +89,14 @@ impl App {
                 // Arrowing onto a task watches it, exactly as clicking does.
                 AgentsKey::Handled(self.retarget_watch())
             }
-            // Enter is "I have found the row I wanted; let me type".
+            // Enter is "I have found the row I wanted; let me type" — except on
+            // the action row, where it is the action.
             KeyCode::Enter => {
-                self.focus_agents_composer();
+                if self.on_new_harness_row() {
+                    self.open_harness_picker();
+                } else {
+                    self.focus_agents_composer();
+                }
                 AgentsKey::Handled(None)
             }
             // Esc returns focus to the composer, so the key that moved focus out
@@ -77,17 +105,32 @@ impl App {
                 self.focus_agents_composer();
                 AgentsKey::Handled(None)
             }
-            // Typing is never swallowed: the character lands in the composer and
-            // focus follows it. Without this, a user who stepped out to look at
-            // a lane would type a whole message into nothing.
-            KeyCode::Char(c) if !ctrl && !alt => {
+            // Typing lands in the composer and focus follows it — but only
+            // where there *is* a composer. It is drawn for the orchestrator
+            // lane and nowhere else, so doing this on an agent row moved the
+            // keyboard into an invisible input: the character vanished, and
+            // every arrow after it drove a caret nobody could see instead of
+            // the rail. That reads exactly like navigation having died.
+            KeyCode::Char(c) if !ctrl && !alt && self.on_orchestrator_lane() => {
                 self.focus_agents_composer();
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, &c.to_string());
                 self.command_index = 0;
                 AgentsKey::Handled(None)
             }
-            // Backspace is typing too — it edits the draft it belongs to.
-            KeyCode::Backspace => {
+            // On any other row the rail keeps the keyboard and says why, rather
+            // than swallowing the key or stealing focus for a hidden box.
+            KeyCode::Char(c) if !ctrl && !alt => {
+                let _ = c;
+                if self.on_new_harness_row() {
+                    self.set_status("⏎ starts a harness of your own");
+                } else {
+                    self.set_status("Select the orchestrator lane to type an instruction");
+                }
+                AgentsKey::Handled(None)
+            }
+            // Backspace is typing too — it edits the draft it belongs to, and
+            // only where that draft is on screen.
+            KeyCode::Backspace if self.on_orchestrator_lane() => {
                 self.focus_agents_composer();
                 AgentsKey::Unhandled
             }

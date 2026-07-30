@@ -32,8 +32,12 @@ use medulla_tui::ui::login::LoginOutcome;
 async fn core_runtime(
     core: Arc<medulla::core_host::EmbeddedCore>,
     hub: crate::hub_relay::HubSlot,
+    backend_base_url: &str,
 ) -> Arc<dyn Runtime> {
-    let rt = medulla::runtime::openhuman::OpenHumanRuntime::with_hub(core, hub);
+    // The backend URL rides along for the surfaces the core cannot serve — the
+    // feedback board lives on the cloud deployment this host is configured for.
+    let rt = medulla::runtime::openhuman::OpenHumanRuntime::with_hub(core, hub)
+        .with_backend_base_url(backend_base_url);
     // First fetch before the UI paints, so the initial frame shows real state
     // rather than an empty one that fills in a beat later.
     rt.refresh().await;
@@ -110,9 +114,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
+    // An explicit `--config` is recorded in this process's own environment
+    // before anything spawns off it, so every subprocess that later re-reads
+    // config (the `medulla workflow mcp` tool server, an ACP harness advertised
+    // its MCP servers) inherits the same choice instead of silently
+    // rediscovering a different one from its own `cwd`. See
+    // `medulla::config::CONFIG_PATH_ENV`.
+    if let Some(path) = args.config.as_deref() {
+        std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+    }
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let loaded = load_config(args.config.as_deref(), &env, &cwd)?;
+    prompt_for_update(&loaded.config.update, &env).await;
     let home = medulla::home::medulla_home(&env);
 
     // Bind the embedded core's state directory to this process's Medulla home
@@ -216,7 +230,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     (session, account) = session_of(&core, &loaded.config.backend.base_url).await;
                     let core = Arc::new(core);
                     core_arc = Some(Arc::clone(&core));
-                    runtime = Some(core_runtime(core, hub_slot.clone()).await);
+                    runtime = Some(
+                        core_runtime(core, hub_slot.clone(), &loaded.config.backend.base_url).await,
+                    );
                 }
                 // Signed out is an expected state with an obvious remedy, so it
                 // is the one thing that does not end here: the core is held and
@@ -280,7 +296,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                             session_of(&core, &loaded.config.backend.base_url).await;
                         let core = Arc::new(core);
                         core_arc = Some(Arc::clone(&core));
-                        runtime = Some(core_runtime(core, hub_slot.clone()).await);
+                        runtime = Some(
+                            core_runtime(core, hub_slot.clone(), &loaded.config.backend.base_url)
+                                .await,
+                        );
                     }
                     // Stored and still unusable: the token was for a different
                     // deployment than the one the core resolves, or the backend
@@ -366,33 +385,51 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // A bad `[host]` section is reported exactly like a failed start: this
     // machine does not host, and the operator is told why. `and_then` keeps the
     // two failure kinds — unparseable config, unstartable host — on one path.
-    let local_host = match crate::local_host::options_from_config(
+    let custom_harnesses = medulla::config::load_layered_custom_harnesses(&loaded.sources)
+        .unwrap_or_else(|error| {
+            hub_logs.push(format!("custom harnesses: cannot load ({error})"));
+            Vec::new()
+        });
+    let local_hosts = match crate::local_host::options_from_config_with_custom(
         &loaded.config.host,
         &env,
         loaded.config.router.clone(),
         loaded.config.budget.clone(),
         Some(hub_logs.sink()),
+        &custom_harnesses,
     )
-    .and_then(|options| {
-        crate::local_host::start(
+    .map(|options| {
+        crate::local_host::start_all(
             &loaded.config.host,
+            &loaded.config.hosts,
             &env,
             &local_network,
             options,
             harness_sessions.clone(),
         )
     }) {
-        Ok(host) => host,
+        Ok((hosts, problems)) => {
+            for problem in problems {
+                // Reported per host: one mistyped directory should cost that
+                // host, not hosting altogether, and the operator needs to know
+                // *which* one is missing rather than that something is.
+                hub_logs.push(format!(
+                    "host: not hosting one of this device's directories ({problem})"
+                ));
+                startup_status.get_or_insert(format!("not hosting one directory ({problem})"));
+            }
+            hosts
+        }
         Err(e) => {
             // Not fatal: the orchestrator still drives remote workers. But it is
             // the difference between "nothing happens" and "nothing happens
             // *here*", so it goes on the status line rather than only the log.
             hub_logs.push(format!("host: not hosting on this device ({e})"));
             startup_status.get_or_insert(format!("not hosting on this device ({e})"));
-            None
+            Vec::new()
         }
     };
-    if let Some(host) = &local_host {
+    for host in &local_hosts {
         hub_logs.push(format!(
             "host: serving [{}] as {} in {}",
             host.providers()
@@ -407,21 +444,82 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Only meaningful with a host: with hosting off nothing runs here, so there
     // is no local screen to resolve and the Agents tab keeps its remote/
     // transcript behaviour unchanged.
-    let local_harnesses =
-        local_host
-            .as_ref()
-            .map(|host| medulla_tui::ui::harness_pane::LocalHarnesses {
-                sessions: harness_sessions.clone(),
-                runtime: host.runtime(),
-                hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
-            });
+    let hosting = !local_hosts.is_empty();
+    let host_runtimes = std::sync::Arc::new(std::sync::Mutex::new(
+        local_hosts
+            .iter()
+            .map(|host| host.runtime())
+            .collect::<Vec<_>>(),
+    ));
+    // The started hosts live here for the session: dropping a `LocalHost` stops
+    // it, so this list is what keeps them running — and it is shared so a host
+    // added later joins the same list rather than a copy of it.
+    // `workspace` and `providers` stay singular: they are the default a
+    // *manually started* harness inherits, and the primary is the right default
+    // for that. Only task resolution needs every host, which is `runtimes`.
+    // Read before the list moves into the shared handle below.
+    let primary_defaults = local_hosts.first().map(|primary| {
+        (
+            primary.workspace().to_string(),
+            primary.providers().to_vec(),
+        )
+    });
+    let started_hosts = std::sync::Arc::new(std::sync::Mutex::new(local_hosts));
+    let local_harnesses = primary_defaults.map(|(workspace, providers)| {
+        medulla_tui::ui::harness_pane::LocalHarnesses {
+            sessions: harness_sessions.clone(),
+            runtimes: host_runtimes.clone(),
+            hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
+            env: env.clone(),
+            workspace,
+            providers,
+            router: loaded.config.router.clone(),
+        }
+    });
+    // Shared with the hub's roster filter and appended to by the spawner, so a
+    // host added mid-session is recognised as device-local the next time the
+    // roster is saved rather than being remembered as a remote peer.
+    let local_addresses = std::sync::Arc::new(std::sync::Mutex::new(
+        crate::local_host::all_host_addresses(&loaded.config.host, &loaded.config.hosts),
+    ));
+    // Only meaningful while this device hosts: with hosting off there is no bus
+    // binding or session manager to hand a new host.
+    let local_host_spawner = hosting
+        .then(|| {
+            crate::local_host::options_from_config_with_custom(
+                &loaded.config.host,
+                &env,
+                loaded.config.router.clone(),
+                loaded.config.budget.clone(),
+                Some(hub_logs.sink()),
+                &custom_harnesses,
+            )
+            .ok()
+            .map(|options| {
+                crate::local_host::LocalHostSpawner::new(
+                    local_network.clone(),
+                    harness_sessions.clone(),
+                    options,
+                    env.clone(),
+                    host_runtimes.clone(),
+                    started_hosts.clone(),
+                    local_addresses.clone(),
+                )
+            })
+        })
+        .flatten();
     let local_dispatch = crate::hub_relay::LocalDispatch {
         network: local_network,
         hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
         // Always known, even with hosting off — it is what identifies a
         // remembered local roster entry that must not be inherited.
-        host_address: crate::local_host::host_address(&loaded.config.host),
-        host: local_host.as_ref().map(|host| host.spec().clone()),
+        host_addresses: local_addresses,
+        hosts: started_hosts
+            .lock()
+            .expect("started hosts")
+            .iter()
+            .map(|host| host.spec().clone())
+            .collect(),
     };
 
     // Start the hub unconditionally. It used to be gated on an authenticated
@@ -436,6 +534,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         hub_logs.clone(),
         Some(local_dispatch.clone()),
         session.as_ref(),
+        // The roles a worker can be toggled on for. Read from the same layered
+        // config the Agent Templates page shows, so the two cannot disagree.
+        loaded.config.fleet.agent_templates.clone(),
     )
     .await;
 
@@ -446,10 +547,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // they would then have to trigger by relaunching.
     let mut status = startup_status.or(tinyplace_status).or(log_note);
     let result = loop {
+        // Read before the wiring is built: holding the lock into an awaited call
+        // would park every other host operation behind this session for as long
+        // as it runs.
+        let primary_observation = started_hosts
+            .lock()
+            .expect("started hosts")
+            .first()
+            .map(|host| host.observation());
         let exit = run(
             &mut terminal,
             runtime.clone(),
             SessionWiring {
+                local_hosts: local_host_spawner.clone(),
                 loaded: loaded.clone(),
                 startup_status: status.take(),
                 tinyplace_obs: tinyplace_obs.clone(),
@@ -458,7 +568,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 account: account.clone(),
                 sharing: sharing.take(),
                 onboarding_path: active_config_path.clone(),
-                host: local_host.as_ref().map(|host| host.observation()),
+                // The primary's counters only. The Overview device panel shows
+                // one host, so extras are served and dispatchable but not yet
+                // reflected there — a UI gap, not a hosting one.
+                host: primary_observation.clone(),
                 harnesses: local_harnesses.clone(),
             },
         )
@@ -466,6 +579,14 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
 
         match exit {
             Ok(SessionExit::Relogin) => {
+                // The copilot host cache is process-global and keyed by
+                // workflow id, not by account (see
+                // `event_loop::clear_copilot_hosts`'s doc). Left alive across
+                // this boundary, a second account opening a workflow that
+                // happens to share an id with one the first account had a
+                // live conversation on would silently inherit that daemon's
+                // harness session and context.
+                crate::event_loop::clear_copilot_hosts();
                 // Only the embedded core can be signed back in; every other
                 // runtime reports that it holds no session, so its logout never
                 // succeeds and this arm is unreachable for it.
@@ -473,7 +594,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     match relogin(&mut terminal, &core, &loaded.config.backend.base_url).await {
                         Ok(true) => {
                             (_, account) = session_of(&core, &loaded.config.backend.base_url).await;
-                            runtime = core_runtime(core, hub_slot.clone()).await;
+                            runtime = core_runtime(
+                                core,
+                                hub_slot.clone(),
+                                &loaded.config.backend.base_url,
+                            )
+                            .await;
                             continue;
                         }
                         // Quit from the login screen: the operator asked to
@@ -494,4 +620,32 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     drop(guard);
     drop(tinyplace_service); // aborts the background loops.
     result
+}
+
+/// Offer an available release before the interactive session starts, so an
+/// accepted update never interrupts an active turn or terminal session.
+async fn prompt_for_update(
+    config: &medulla::config::UpdateConfig,
+    env: &std::collections::HashMap<String, String>,
+) {
+    if !config.enabled(env) {
+        return;
+    }
+    let current = env!("CARGO_PKG_VERSION");
+    let Ok(Some(info)) =
+        medulla::update::check_for_update(&medulla::update::update_url(), current).await
+    else {
+        return;
+    };
+    println!(
+        "medulla {} is available (current {}). Install now? [y/N]",
+        info.version, current
+    );
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_ok() && answer.trim().eq_ignore_ascii_case("y") {
+        match medulla::update::install_update(&info).await {
+            Ok(()) => println!("updated successfully; starting medulla {}.", info.version),
+            Err(error) => eprintln!("update failed; continuing with medulla {current}: {error}"),
+        }
+    }
 }

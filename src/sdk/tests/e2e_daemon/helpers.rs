@@ -81,6 +81,7 @@ pub fn config(
         extra_args: Vec::new(),
         skip_permissions: false,
         router: None,
+        custom_harnesses: Vec::new(),
         budget: None,
     }
 }
@@ -108,8 +109,11 @@ pub fn frame(
         correlation_id: correlation.map(str::to_string),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
+        conversation: None,
     }
 }
 

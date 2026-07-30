@@ -10,8 +10,7 @@ use std::sync::Arc;
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::{AgentPresence, PeerSession, Runtime};
-use medulla::ui::agents::{AgentLane, AgentRole, AgentRow, TaskState, TaskStatus};
-use ratatui::style::{Color, Modifier};
+use medulla::ui::agents::{AgentLane, AgentRole};
 
 use crate::ui::app::App;
 
@@ -36,19 +35,6 @@ fn lane(role: AgentRole) -> AgentLane {
         parent_agent_id: None,
         descriptor: None,
         active_tasks: 0,
-        work: None,
-    }
-}
-
-fn task(status: TaskStatus, attention: bool, at: i64) -> TaskState {
-    TaskState {
-        task_id: format!("task-{at}"),
-        status,
-        turns: 1,
-        last_at: at,
-        turn_blocks: Vec::new(),
-        attention: attention.then(|| "confirm: continue?".to_string()),
-        question_id: attention.then(|| "question-1".to_string()),
         work: None,
     }
 }
@@ -158,103 +144,6 @@ fn a_session_lane_reflects_its_peer_session_state() {
     let mut parentless = lane(AgentRole::Agent);
     parentless.session_id = Some("s-live".to_string());
     assert_eq!(a.session_state(&parentless), None);
-}
-
-#[test]
-fn harness_rows_color_each_lifecycle_state_and_only_working_flashes() {
-    let a = app();
-    let row = AgentRow::Lane { lane_index: 0 };
-
-    let cases = [
-        (Vec::new(), 0, Color::DarkGray, false, " · inactive"),
-        (
-            vec![task(TaskStatus::Running, false, 1)],
-            1,
-            Color::Green,
-            true,
-            " · working",
-        ),
-        (
-            vec![task(TaskStatus::Running, true, 1)],
-            1,
-            Color::Yellow,
-            false,
-            " · needs input",
-        ),
-        (
-            vec![task(TaskStatus::Failed, false, 1)],
-            0,
-            Color::Red,
-            false,
-            " · errored",
-        ),
-        (
-            vec![task(TaskStatus::Done, false, 1)],
-            0,
-            Color::Green,
-            false,
-            " · completed",
-        ),
-    ];
-
-    for (tasks, active_tasks, color, flashes, suffix) in cases {
-        let mut harness = lane(AgentRole::Agent);
-        harness.tasks = tasks;
-        harness.active_tasks = active_tasks;
-        let line = a.agent_row_line(&row, std::slice::from_ref(&harness), false);
-        let style = line.spans[0].style;
-        assert_eq!(style.fg, Some(color), "row: {}", line);
-        assert_eq!(
-            style.add_modifier.contains(Modifier::SLOW_BLINK),
-            flashes,
-            "row: {}",
-            line
-        );
-        assert_eq!(a.lane_state(&harness), suffix);
-    }
-}
-
-#[test]
-fn current_harness_activity_takes_priority_over_an_old_error() {
-    let a = app();
-    let mut harness = lane(AgentRole::Agent);
-    harness.tasks = vec![
-        task(TaskStatus::Failed, false, 1),
-        task(TaskStatus::Running, false, 2),
-    ];
-    harness.active_tasks = 1;
-
-    let line = a.agent_row_line(
-        &AgentRow::Lane { lane_index: 0 },
-        std::slice::from_ref(&harness),
-        false,
-    );
-
-    assert_eq!(line.spans[0].style.fg, Some(Color::Green));
-    assert!(line.spans[0]
-        .style
-        .add_modifier
-        .contains(Modifier::SLOW_BLINK));
-    assert_eq!(a.lane_state(&harness), " · working");
-}
-
-#[test]
-fn selected_working_harness_keeps_its_status_color_and_flash() {
-    let a = app();
-    let mut harness = lane(AgentRole::Agent);
-    harness.tasks = vec![task(TaskStatus::Running, false, 1)];
-    harness.active_tasks = 1;
-
-    let line = a.agent_row_line(
-        &AgentRow::Lane { lane_index: 0 },
-        std::slice::from_ref(&harness),
-        true,
-    );
-    let style = line.spans[0].style;
-
-    assert_eq!(style.fg, Some(Color::Green));
-    assert_eq!(style.bg, Some(a.theme.primary));
-    assert!(style.add_modifier.contains(Modifier::SLOW_BLINK));
 }
 
 // ----------------------------------------------------- chat tool activity ---

@@ -33,4 +33,4 @@ mod tests;
 
 pub use inject::inject_prompt;
 pub use manager::{PtyManager, ScreenCell, ScreenSnapshot};
-pub use types::{LaunchSpec, PtyState, SessionRow};
+pub use types::{HarnessControl, LaunchSpec, PtyState, SessionRow};

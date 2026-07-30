@@ -47,6 +47,16 @@ pub async fn run_daemon(
     onboarding_ui: Option<OnboardingUi>,
 ) -> anyhow::Result<()> {
     let flags = Flags::parse(args).map_err(|e| anyhow::anyhow!(e))?;
+    // Recorded before anything spawns a subprocess: a task this daemon runs
+    // over ACP hands the harness an MCP server served by another invocation of
+    // this same binary (`medulla workflow mcp`, see `daemon::providers::acp`),
+    // and that subprocess only sees environment, not this process's parsed
+    // flags. Without this, `medulla daemon --config foo.toml` would still have
+    // its harness sessions' workflow tools re-discover a different config from
+    // their own `cwd`. See `crate::config::CONFIG_PATH_ENV`.
+    if let Some(path) = flags.string("config") {
+        std::env::set_var(crate::config::CONFIG_PATH_ENV, path);
+    }
     let env: HashMap<String, String> = std::env::vars().collect();
     let log = |line: &str| eprintln!("medulla daemon: {line}");
 
@@ -270,7 +280,7 @@ pub async fn run_daemon(
         &env,
         std::path::Path::new(&workspace),
     ) {
-        Ok(loaded) => Some(loaded.config),
+        Ok(loaded) => Some(loaded),
         Err(err) => {
             log(&format!(
                 "config load failed ({err}); routing and budgets are off"
@@ -278,8 +288,21 @@ pub async fn run_daemon(
             None
         }
     };
-    let router = loaded_config.as_ref().and_then(|c| c.router.clone());
-    let budget = loaded_config.as_ref().and_then(|c| c.budget.clone());
+    let router = loaded_config
+        .as_ref()
+        .and_then(|loaded| loaded.config.router.clone());
+    let budget = loaded_config
+        .as_ref()
+        .and_then(|loaded| loaded.config.budget.clone());
+    let custom_harnesses = loaded_config
+        .as_ref()
+        .map(|loaded| {
+            crate::config::load_layered_custom_harnesses(&loaded.sources).unwrap_or_else(|error| {
+                log(&format!("custom harness config load failed ({error})"));
+                Vec::new()
+            })
+        })
+        .unwrap_or_default();
     let config = DaemonConfig {
         providers: providers.clone(),
         default_provider,
@@ -298,6 +321,7 @@ pub async fn run_daemon(
         // The custom OpenAI-compatible router from the layered `[router]` config,
         // layered into every task's spawn environment by the executor.
         router,
+        custom_harnesses,
         // Operator-declared per-provider budgets from the `[budget]` config,
         // advertised on the capability probe as `source: configured`.
         budget,

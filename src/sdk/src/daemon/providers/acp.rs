@@ -29,9 +29,12 @@ use super::types::{OnEvent, RunTaskOptions, RunTaskResult};
 /// when the binary's path cannot be determined — a session without the tools is
 /// a session that can still do its actual job, which is better than failing to
 /// start one.
-fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
+fn workflow_mcp_servers(
+    tool_mode: Option<&str>,
+) -> Vec<agent_client_protocol::schema::v1::McpServer> {
     #[cfg(not(feature = "workflows"))]
     {
+        let _ = tool_mode;
         Vec::new()
     }
     #[cfg(feature = "workflows")]
@@ -41,9 +44,15 @@ fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
         // tools that would be refused.
         let env: std::collections::HashMap<String, String> = std::env::vars().collect();
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let enabled = crate::config::load_config(None, &env, &cwd)
-            .map(|loaded| loaded.config.workflows.enabled)
-            .unwrap_or(true);
+        // Respects the parent's `--config`, if one was recorded — see
+        // `crate::config::CONFIG_PATH_ENV`. Rediscovering here regardless of
+        // that would let a policy the operator explicitly chose (say,
+        // `allowCode = false`) be silently overridden by whatever config this
+        // subprocess's own `cwd` happens to discover.
+        let enabled =
+            crate::config::load_config(crate::config::explicit_config_from_env(&env), &env, &cwd)
+                .map(|loaded| loaded.config.workflows.enabled)
+                .unwrap_or(true);
         if !enabled {
             return Vec::new();
         }
@@ -53,10 +62,35 @@ fn workflow_mcp_servers() -> Vec<agent_client_protocol::schema::v1::McpServer> {
         // The subprocess inherits this process's environment, which is what
         // carries MEDULLA_HOME — so the harness edits the same workflow store
         // the operator sees.
-        vec![McpServer::Stdio(
-            McpServerStdio::new(crate::workflows::mcp::SERVER_NAME, binary)
-                .args(vec!["workflow".to_string(), "mcp".to_string()]),
-        )]
+        //
+        // The tool mode is passed *explicitly* rather than inherited, because
+        // it is the one setting that differs per task: this daemon serves
+        // authoring turns and review turns from one process, so an inherited
+        // value could only ever be right for one of them. A review turn that
+        // silently got the full surface could rewrite the graph it was asked
+        // only to review, which is exactly what the mode exists to prevent.
+        let mut server = McpServerStdio::new(crate::workflows::mcp::SERVER_NAME, binary)
+            .args(vec!["workflow".to_string(), "mcp".to_string()]);
+        if let Some(mode) = tool_mode {
+            let (mode, scope) = mode
+                .split_once(':')
+                .map_or((mode, None), |(mode, scope)| (mode, Some(scope)));
+            server
+                .env
+                .push(agent_client_protocol::schema::v1::EnvVariable::new(
+                    crate::workflows::mcp::TOOL_MODE_ENV,
+                    mode,
+                ));
+            if let Some(scope) = scope {
+                server
+                    .env
+                    .push(agent_client_protocol::schema::v1::EnvVariable::new(
+                        crate::workflows::mcp::TOOL_SCOPE_ENV,
+                        scope,
+                    ));
+            }
+        }
+        vec![McpServer::Stdio(server)]
     }
 }
 
@@ -74,6 +108,15 @@ pub(super) fn uses_acp(options: &RunTaskOptions) -> bool {
 /// Execute one task through the standard Agent Client Protocol.
 pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
     let agent = agent_for(&options);
+    // Read before `options` is picked apart below, and cloned because the
+    // session setup runs inside an async move closure.
+    #[cfg(feature = "workflows")]
+    let tool_mode: Option<String> = options
+        .env
+        .get(crate::workflows::mcp::TOOL_MODE_ENV)
+        .cloned();
+    #[cfg(not(feature = "workflows"))]
+    let tool_mode: Option<String> = None;
     let state = Arc::new(Mutex::new(FoldState::new(options.on_event)));
     let notification_state = state.clone();
     let approve = options.skip_permissions;
@@ -120,10 +163,17 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
 
             let session_id = match resume {
                 Some(id) => {
-                    connection
-                        .send_request(LoadSessionRequest::new(id.clone(), cwd.clone()))
-                        .block_task()
-                        .await?;
+                    let mut request = LoadSessionRequest::new(id.clone(), cwd.clone());
+                    // The same servers a new session gets, and for the same
+                    // reason. A loaded session restores the *transcript*, not
+                    // the client's tool offer — so omitting this hands the
+                    // harness a conversation it remembers and no way to act on
+                    // it. For the copilot that is the difference between an
+                    // agent that edits the graph and one that can only discuss
+                    // it, and it would fail silently: the model would explain
+                    // what it would have done.
+                    request.mcp_servers = workflow_mcp_servers(tool_mode.as_deref());
+                    connection.send_request(request).block_task().await?;
                     id.into()
                 }
                 None => {
@@ -132,7 +182,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // *client* here, so this is the only way it can hand a
                     // harness anything to call — and it is what lets a coding
                     // agent author a workflow rather than only run one.
-                    request.mcp_servers = workflow_mcp_servers();
+                    request.mcp_servers = workflow_mcp_servers(tool_mode.as_deref());
                     connection
                         .send_request(request)
                         .block_task()

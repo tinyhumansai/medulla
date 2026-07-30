@@ -9,3 +9,7 @@ mod capabilities;
 mod dispatch;
 mod roster;
 mod system_info;
+// The cloud workflow plane is exercised against the real store adapter, which
+// only exists when the engine is compiled in.
+#[cfg(feature = "workflows")]
+mod workflows;

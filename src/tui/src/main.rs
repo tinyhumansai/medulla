@@ -160,6 +160,13 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         })
         .unwrap_or_else(|| cwd.clone());
     let explicit_config = flag_value(args, "--config");
+    // Recorded before anything spawns off this process — see
+    // `medulla::config::CONFIG_PATH_ENV` and the matching comment in
+    // `app_loop::run_tui`. This worker TUI runs the same daemon that spawns
+    // ACP harness subprocesses, so it needs the same propagation.
+    if let Some(path) = explicit_config.as_deref() {
+        std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+    }
     let loaded =
         medulla::config::load_config(explicit_config.as_deref(), &env, std::path::Path::new(&cwd))?;
     let config_path = explicit_config

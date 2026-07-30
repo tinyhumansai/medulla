@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use medulla::daemon::providers::{Abort, RunTaskOptions};
+use medulla::sessions::SessionClass;
 use medulla::tinyplace::HarnessProvider;
 
 use super::executor::PtySessionExecutor;
@@ -97,6 +98,18 @@ fn options(
 ) -> RunTaskOptions {
     RunTaskOptions {
         conversation: conversation.to_string(),
+        // The fixture maps its two shapes onto the classes the daemon gives
+        // them: a named peer is a conversation (unbound, reuses that peer's
+        // session), an empty one is unattributed work (bounded, its own
+        // session). Deriving it *here* is fine and is not the bug that was
+        // fixed — production code no longer infers the class, it is told;
+        // this just spares every call site a third argument while keeping each
+        // test asserting what it was written to assert.
+        session_class: if conversation.is_empty() {
+            SessionClass::Bounded
+        } else {
+            SessionClass::Unbound
+        },
         resume_session_id: None,
         provider: HarnessProvider::Codex,
         prompt: "ship the fix".to_string(),

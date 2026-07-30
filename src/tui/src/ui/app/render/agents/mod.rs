@@ -83,10 +83,21 @@ impl App {
             Some(RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
             _ => None,
         };
-        let on_orchestrator = lanes
-            .get(lane_index)
-            .map(|l| l.role == AgentRole::Orchestrator)
-            .unwrap_or(true);
+        // Only a *lane* row can be the orchestrator's. The action row and the
+        // operator's own harnesses fall back to lane 0 for the transcript
+        // behind them, and reading the role off that fallback claimed the
+        // orchestrator's composer for rows that are not it — a text box under a
+        // row with nothing to say to. Mirrors
+        // [`App::on_orchestrator_lane`](crate::ui::app), which the keyboard
+        // reads, so focus and layout cannot disagree.
+        let on_orchestrator = match rows.get(active) {
+            Some(RailRow::Agent(_)) => lanes
+                .get(lane_index)
+                .map(|l| l.role == AgentRole::Orchestrator)
+                .unwrap_or(true),
+            None => true,
+            Some(_) => false,
+        };
         let mut selection = Selection {
             rows,
             active,
@@ -114,17 +125,25 @@ impl App {
     ///
     /// The rail is sized to its widest row rather than to a percentage: its
     /// labels are short and fixed-ish, and the transcript is what benefits from
-    /// width. The threads strip takes rows only when more than one thread is
-    /// open — with a single thread the pane title already names it.
+    /// width. It is also capped at [`rail::RAIL_MAX_CONTENT`]: rows that want
+    /// more than that wrap, so one harness with a deep working directory can no
+    /// longer buy the whole left third of the screen for a path. The threads
+    /// strip takes rows only when more than one thread is open — with a single
+    /// thread the pane title already names it.
     fn agents_panes(&mut self, area: Rect, selection: &Selection) -> AgentsPanes {
         let threads = self.thread_rows();
+        // Measured at the cap, since that is the width the rows will wrap to.
         let widest = selection
             .rows
             .iter()
-            .map(|row| self.rail_row_line(row, &selection.lanes, false).width())
+            .flat_map(|row| {
+                self.rail_row_lines(row, &selection.lanes, false, rail::RAIL_MAX_CONTENT)
+            })
+            .map(|line| line.width())
             .chain(threads.iter().map(|line| line.width()))
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .min(rail::RAIL_MAX_CONTENT);
         let columns = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([

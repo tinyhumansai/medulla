@@ -1,6 +1,7 @@
 //! Unit tests for the embedded harness pane, split so no file exceeds the
 //! repo's 500-line ceiling: this module covers key encoding, mouse-wheel
-//! encoding, and focus; [`session`] drives a real child on a real
+//! encoding, and focus; [`buttons`] covers click/drag/release encoding and the
+//! per-mode gate on it; [`session`] drives a real child on a real
 //! pseudo-terminal to cover the session-facing half of [`super::LocalHarnesses`].
 //!
 //! The encoder is where a mistake is invisible until an operator is sitting in
@@ -16,6 +17,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 // half of its tests is not.
 #[cfg(unix)]
 mod session;
+
+mod buttons;
 
 use super::keys::{encode, is_focus_chord};
 use super::mouse;
@@ -313,4 +316,35 @@ fn every_reporting_mode_takes_wheel_notches() {
             "{mode:?} should report a wheel notch"
         );
     }
+}
+
+#[test]
+fn a_wheel_at_the_extreme_of_the_coordinate_space_does_not_overflow() {
+    // `col + 1` on a `u16` panics in a debug build at `u16::MAX`, and the clamp
+    // that was supposed to bound it runs afterwards — too late to help. A pane
+    // never gets this wide, but a panic reachable from a public encoder is a
+    // panic, and the widening costs nothing.
+    let sgr = mouse::wheel(
+        vt100::MouseProtocolMode::Press,
+        vt100::MouseProtocolEncoding::Sgr,
+        u16::MAX,
+        u16::MAX,
+        true,
+    )
+    .expect("a reporting child still gets a report");
+    assert_eq!(
+        sgr,
+        format!("\x1b[<64;{};{}M", 65_536u32, 65_536u32).as_bytes()
+    );
+
+    let normal = mouse::wheel(
+        vt100::MouseProtocolMode::Press,
+        vt100::MouseProtocolEncoding::Default,
+        u16::MAX,
+        u16::MAX,
+        false,
+    )
+    .expect("a reporting child still gets a report");
+    // Clamped to the byte ceiling rather than wrapped to the opposite corner.
+    assert_eq!(normal, vec![0x1b, b'[', b'M', 32 + 65, 255, 255]);
 }

@@ -43,6 +43,7 @@ fn router_options(
     let _ = bin;
     RunTaskOptions {
         conversation: String::new(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider,
         prompt: "do it".to_string(),

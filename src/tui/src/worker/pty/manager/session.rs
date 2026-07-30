@@ -2,7 +2,7 @@
 
 use medulla::tinyplace::HarnessProvider;
 
-use super::super::types::{PtyState, SessionRow};
+use super::super::types::{HarnessControl, PtyState, SessionRow};
 
 use super::PtyManager;
 
@@ -51,17 +51,61 @@ impl PtyManager {
     /// idle session and both take it — which is precisely the collision this
     /// exists to prevent, and it would show up only under a real fan-out.
     ///
+    /// A session the operator holds is never returned, however idle it looks.
+    /// That is the whole of the unmanaged-harness feature and the whole of
+    /// takeover: [`HarnessControl`] is the gate, and this is where it bites.
+    /// Without it, attaching to a pane and typing does not stop the orchestrator
+    /// pasting a task prompt into the same composer — the exact two-writers
+    /// collision the `busy` flag above exists to prevent, reachable by an
+    /// operator simply focusing a harness.
+    ///
+    /// A handed-back operator session still has its synthetic `you:<provider>`
+    /// label. The first real conversation to claim it adopts that conversation
+    /// label, making subsequent reuse obey the same exact-label rule as every
+    /// task-spawned session.
+    ///
     /// `None` when there is no idle session, and the caller opens a fresh one.
     pub fn claim_idle(&self, label: &str, provider: HarnessProvider) -> Option<SessionRow> {
         let mut sessions = self.inner.sessions.lock().unwrap();
         let session = sessions.iter_mut().find(|s| {
-            s.row.label == label
+            (s.row.label == label || is_unassigned_operator_session(&s.row))
                 && s.row.provider == provider
                 && s.row.state.is_running()
                 && !s.row.busy
+                && s.row.control.is_orchestrator()
         })?;
+        if is_unassigned_operator_session(&session.row) {
+            session.row.label = label.to_string();
+        }
         session.row.busy = true;
         Some(session.row.clone())
+    }
+
+    /// Who currently holds `id`, if it is a session we know about.
+    pub fn control(&self, id: &str) -> Option<HarnessControl> {
+        self.inner
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.row.id == id)
+            .map(|s| s.row.control)
+    }
+
+    /// Hand `id` to `control`, returning whether the session existed.
+    ///
+    /// Deliberately leaves `busy` alone. The two flags answer different
+    /// questions — `busy` is "is a turn running in it", `control` is "who is
+    /// allowed to start one" — and a session taken over mid-turn is still
+    /// running that turn. Clearing `busy` on handback would advertise a harness
+    /// as free while it was still finishing someone else's work.
+    pub fn set_control(&self, id: &str, control: HarnessControl) -> bool {
+        let mut sessions = self.inner.sessions.lock().unwrap();
+        let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) else {
+            return false;
+        };
+        session.row.control = control;
+        true
     }
 
     /// Mark a session free for the next turn.
@@ -160,4 +204,9 @@ impl PtyManager {
             }
         }
     }
+}
+
+/// Whether an operator-spawned session has not yet served a real conversation.
+fn is_unassigned_operator_session(row: &SessionRow) -> bool {
+    row.user_spawned && row.label.starts_with("you:")
 }

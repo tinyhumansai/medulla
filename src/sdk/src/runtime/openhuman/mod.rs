@@ -59,6 +59,7 @@ use super::Runtime;
 use crate::ui::chat_store::MainChatSummary;
 
 pub mod cell;
+mod feedback;
 pub mod fold;
 mod worker_ops;
 
@@ -102,6 +103,15 @@ pub struct OpenHumanRuntime {
     /// the Workers tab reads empty and, worse, its mutations inherit the trait's
     /// no-op success.
     hub: HubSlot,
+    /// The backend deployment this host is configured for, when one is known.
+    ///
+    /// Only the feedback board needs it: the board lives on the cloud backend
+    /// rather than in the core, so those calls mint a short-lived
+    /// [`MedullaClient`](crate::client::MedullaClient) against this URL with the
+    /// core's stored session. `None` — an unconfigured host — leaves the board
+    /// reporting itself unavailable rather than dialling a default deployment
+    /// the operator never signed in to.
+    backend_base_url: Option<String>,
 }
 
 /// Shared slot the hub fills with its handle once connected.
@@ -139,7 +149,20 @@ impl OpenHumanRuntime {
             cursor: Arc::new(tokio::sync::Mutex::new(None)),
             poll_failures: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             hub,
+            backend_base_url: None,
         }
+    }
+
+    /// Point the backend-facing surfaces (today: the feedback board) at the
+    /// deployment this host is configured for.
+    ///
+    /// The URL comes from the caller's loaded config rather than the core: the
+    /// core resolves the same deployment by construction but exposes no RPC for
+    /// the URL it settled on.
+    #[must_use]
+    pub fn with_backend_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.backend_base_url = Some(base_url.into());
+        self
     }
 
     /// The hub handle, if one has connected.
@@ -527,5 +550,48 @@ impl Runtime for OpenHumanRuntime {
         // way to build a second one — the context is a `OnceLock`, so a relogin
         // could never recover.
         Box::pin(async { Ok(()) })
+    }
+
+    // --- feedback board ---------------------------------------------------
+    // Served by the cloud backend rather than the core; the bodies live in
+    // [`feedback`], which mints a client per call from the core's session.
+
+    fn list_feedback(
+        &self,
+        query: crate::client::FeedbackQuery,
+    ) -> BoxFuture<'static, anyhow::Result<Option<crate::client::FeedbackPage>>> {
+        self.board_list(query)
+    }
+
+    fn feedback_detail(
+        &self,
+        id: String,
+    ) -> BoxFuture<'static, anyhow::Result<crate::client::FeedbackDetail>> {
+        self.board_detail(id)
+    }
+
+    fn vote_feedback(
+        &self,
+        id: String,
+        value: i8,
+    ) -> BoxFuture<'static, anyhow::Result<crate::client::FeedbackItem>> {
+        self.board_vote(id, value)
+    }
+
+    fn comment_feedback(
+        &self,
+        id: String,
+        body: String,
+    ) -> BoxFuture<'static, anyhow::Result<crate::client::FeedbackComment>> {
+        self.board_comment(id, body)
+    }
+
+    fn submit_feedback(
+        &self,
+        kind: crate::client::FeedbackType,
+        title: String,
+        body: String,
+    ) -> BoxFuture<'static, anyhow::Result<crate::client::FeedbackSubmission>> {
+        self.board_submit(kind, title, body)
     }
 }

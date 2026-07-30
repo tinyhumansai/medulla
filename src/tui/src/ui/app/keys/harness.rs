@@ -18,6 +18,7 @@ use crate::ui::harness_pane::{
     keys::{encode, is_focus_chord},
     HarnessFocus, FOCUS_CHORD_LABEL,
 };
+use crate::worker::pty::HarnessControl;
 
 use super::super::types::App;
 
@@ -40,10 +41,24 @@ impl App {
     pub(super) fn handle_harness_key(&mut self, key: KeyEvent) -> bool {
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
             if is_focus_chord(key) {
-                self.release_harness();
-                self.set_status(format!(
-                    "Released the harness · {FOCUS_CHORD_LABEL} to type again"
-                ));
+                // Releasing the keyboard is also the moment to settle who holds
+                // the harness. `begin_harness_release` answers `false` when it
+                // opened a prompt about that, and the keyboard must stay put
+                // until it is answered — moving it out from under the question
+                // would leave the operator answering about a pane they can no
+                // longer see the state of.
+                if self.begin_harness_release(&session) {
+                    self.release_harness();
+                    // The keyboard has to land somewhere it can be seen. The
+                    // cursor is on a harness row, which draws no composer, so
+                    // the rail is the only half of the tab that can answer a
+                    // keystroke — leaving focus on the composer is what made
+                    // every key after a release look like a dead terminal.
+                    self.focus_agents_rail();
+                    self.set_status(format!(
+                        "Released the harness · {FOCUS_CHORD_LABEL} to type again"
+                    ));
+                }
                 return true;
             }
             self.type_into_harness(&session, key);
@@ -65,7 +80,12 @@ impl App {
     /// Refuses, with a reason, rather than silently doing nothing: an operator
     /// who pressed the chord and saw no change has no way to tell "wrong row"
     /// from "the feature is broken".
-    fn attach_to_pane_harness(&mut self) {
+    ///
+    /// Reachable from the pointer as well as from the chord: clicking into a
+    /// terminal is what every other terminal on the machine means by "type
+    /// here", and requiring a chord to do it made the embedded pane the one
+    /// exception.
+    pub(in crate::ui::app) fn attach_to_pane_harness(&mut self) {
         let Some(session) = self.harness_pane_session.clone() else {
             self.set_status("No harness on this row — select a running task to type into one");
             return;
@@ -78,9 +98,25 @@ impl App {
             self.set_status("That harness has exited — its last screen is all that is left");
             return;
         }
+        // Focusing in *is* taking over. Keyboard ownership without control is
+        // the trap this whole feature exists to close: the orchestrator's next
+        // task frame would be pasted into the composer the operator is typing
+        // in, and a harness serves one turn at a time, so the two prompts come
+        // back as one confidently wrong answer rather than as an error.
+        let took = self
+            .harnesses
+            .as_ref()
+            .and_then(|harnesses| harnesses.control(&session))
+            == Some(HarnessControl::Orchestrator);
+        if took {
+            if let Some(harnesses) = self.harnesses.clone() {
+                harnesses.set_control(&session, HarnessControl::User);
+            }
+            self.harness_took_control = true;
+        }
         self.harness_focus = HarnessFocus::Attached(session);
         self.set_status(format!(
-            "Typing into the harness · {FOCUS_CHORD_LABEL} to release the keyboard"
+            "Typing into the harness · you have control · {FOCUS_CHORD_LABEL} to release"
         ));
     }
 
@@ -100,6 +136,14 @@ impl App {
             return;
         };
         if let Err(err) = harnesses.write(session, &bytes) {
+            // The child died between the last frame and this keystroke. Give
+            // the session back on the way out: a dead harness left under user
+            // control is a slot nothing can ever reclaim, and there is nobody
+            // left to answer a hand-back prompt about it.
+            if self.harness_took_control {
+                harnesses.set_control(session, HarnessControl::Orchestrator);
+                self.harness_took_control = false;
+            }
             self.release_harness();
             self.set_status(format!("Harness stopped listening ({err})"));
             return;

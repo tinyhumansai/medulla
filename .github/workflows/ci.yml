@@ -41,20 +41,18 @@ jobs:
           cache-on-failure: true
 
       # The e2e suite exercises the real opencode CLI when it is on PATH.
-      # CI builds it from git (pinned to the version used for benchmarking)
-      # so that leg runs here instead of skipping.
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install opencode from git
+      # Install the pinned release artifact rather than the development
+      # monorepo: old frozen lockfiles can reference ephemeral pkg.pr.new
+      # packages that disappear even though the tagged release remains valid.
+      - name: Install opencode release
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch v1.17.18 https://github.com/sst/opencode /tmp/opencode
-          (cd /tmp/opencode && bun install --frozen-lockfile)
-          sudo tee /usr/local/bin/opencode > /dev/null <<'SH'
-          #!/bin/sh
-          exec bun run /tmp/opencode/packages/opencode/src/index.ts "$@"
-          SH
-          sudo chmod +x /usr/local/bin/opencode
+          curl -fsSL \
+            https://github.com/anomalyco/opencode/releases/download/v1.17.18/opencode-linux-x64.tar.gz \
+            -o /tmp/opencode-linux-x64.tar.gz
+          echo "e149d32ee5667c0cd5fb84d0bf8393b312e93782eeb4d74d29bbb0392de7133c  /tmp/opencode-linux-x64.tar.gz" \
+            | sha256sum --check -
+          sudo tar -xzf /tmp/opencode-linux-x64.tar.gz -C /usr/local/bin
           opencode --version
 
       - name: Check formatting
@@ -128,7 +126,7 @@ jobs:
         timeout-minutes: 100
         run: >-
           cargo llvm-cov --locked
-          --ignore-filename-regex '(^|/)vendor/|src/tui/src/(app_loop|commands|main)\.rs|src/tui/src/(event_loop|terminal|hub_relay|worker_loop)(/.*)?\.rs|src/tui/src/harness_pty/mod\.rs|src/tui/src/ui/onboarding/run(/.*)?\.rs|src/tui/src/ui/app/render/tasks\.rs|src/tui/src/worker/executor_tests/live\.rs|src/sdk/src/daemon/(entry\.rs|transport/mod\.rs)|src/sdk/src/wrapper/(run|bridge)/mod\.rs|src/sdk/src/hub/(socket|relay)\.rs|src/sdk/src/hub/(boot|handle)(/.*)?\.rs'
+          --ignore-filename-regex '(^|/)vendor/|src/tui/src/(app_loop|commands|main)\.rs|src/tui/src/(event_loop|terminal|hub_relay|worker_loop)(/.*)?\.rs|src/tui/src/harness_pty/mod\.rs|src/tui/src/ui/onboarding/run(/.*)?\.rs|src/tui/src/worker/executor_tests/live\.rs|src/sdk/src/daemon/(entry\.rs|transport/mod\.rs)|src/sdk/src/wrapper/(run|bridge)/mod\.rs|src/sdk/src/hub/(socket|relay)\.rs|src/sdk/src/hub/(boot|handle)(/.*)?\.rs'
           --fail-under-lines 80
           --summary-only
 

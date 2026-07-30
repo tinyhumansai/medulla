@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 use medulla::tinyplace::HarnessProvider;
 
 use super::manager::PtyManager;
-use super::types::{LaunchSpec, PtyState};
+use super::types::{HarnessControl, LaunchSpec, PtyState};
 
+mod control;
 mod identity;
 mod session;
 
@@ -41,6 +42,8 @@ fn sh(script: &str) -> LaunchSpec {
         label: "test".to_string(),
         session_id: None,
         model: None,
+        control: HarnessControl::Orchestrator,
+        user_spawned: false,
     }
 }
 

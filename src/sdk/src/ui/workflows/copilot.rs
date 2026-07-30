@@ -94,11 +94,33 @@ pub struct CopilotState {
     pub workflow_id: String,
     /// The transcript, oldest first.
     pub turns: Vec<CopilotTurn>,
-    /// Whether a turn is in flight. While it is, the composer refuses new
-    /// instructions rather than queueing them: the agent is editing the graph
-    /// under the operator, and a second instruction against the pre-edit graph
-    /// is one the operator did not mean.
+    /// Whether a turn is in flight.
     pub busy: bool,
+    /// Number of turns in flight on this thread.
+    ///
+    /// Usually one, but an automatic failure review can start while an
+    /// operator turn is already running. Counting keeps the first completion
+    /// from making the still-running second turn look idle.
+    pub in_flight: usize,
+    /// An instruction typed while a turn was running, to send when it finishes.
+    ///
+    /// Queued rather than refused, which it used to be. The old reasoning was
+    /// that a second instruction written against the pre-edit graph is one the
+    /// operator did not mean — but that was only true while every turn was a
+    /// fresh session. Now that a pane is one conversation, the follow-up lands
+    /// in a session that has seen the first turn's edit, which is exactly the
+    /// context that makes it intelligible.
+    ///
+    /// One deep on purpose: the operator gets a "queued" line and can see it
+    /// waiting. A queue that accepted five would run four of them against a
+    /// graph none of their authors had looked at.
+    pub queued: Option<String>,
+    /// The last instruction that failed, kept so it can be sent again without
+    /// being retyped.
+    ///
+    /// A failed turn used to clear the composer and leave nothing behind, so a
+    /// timeout cost the operator their whole instruction.
+    pub last_failed: Option<String>,
 }
 
 /// How many status lines one turn keeps.
@@ -116,6 +138,9 @@ impl CopilotState {
             workflow_id: workflow_id.into(),
             turns: Vec::new(),
             busy: false,
+            in_flight: 0,
+            queued: None,
+            last_failed: None,
         }
     }
 
@@ -123,7 +148,36 @@ impl CopilotState {
     pub fn ask(&mut self, instruction: impl Into<String>) {
         self.turns
             .push(CopilotTurn::new(TurnRole::User, instruction));
+        self.in_flight = self.in_flight.saturating_add(1);
         self.busy = true;
+        // A new instruction supersedes the failed one: the operator has moved
+        // on, and offering to retry something they have replaced would be
+        // offering to undo their own correction.
+        self.last_failed = None;
+    }
+
+    /// Hold an instruction typed while a turn was running.
+    ///
+    /// Shown in the transcript straight away, so the operator can see it
+    /// waiting rather than wondering whether it registered. Replaces anything
+    /// already queued — the newer instruction is the one they meant.
+    pub fn queue(&mut self, instruction: impl Into<String>) {
+        let instruction = instruction.into();
+        self.turns.push(CopilotTurn::new(
+            TurnRole::Status,
+            format!("queued: {instruction}"),
+        ));
+        self.queued = Some(instruction);
+    }
+
+    /// Take the queued instruction, if there is one.
+    pub fn take_queued(&mut self) -> Option<String> {
+        self.queued.take()
+    }
+
+    /// Take the last failed instruction, if there is one to retry.
+    pub fn take_failed(&mut self) -> Option<String> {
+        self.last_failed.take()
     }
 
     /// Record a progress line from the running turn.
@@ -168,7 +222,7 @@ impl CopilotState {
         if !text.trim().is_empty() {
             self.turns.push(CopilotTurn::new(TurnRole::Agent, text));
         }
-        self.busy = false;
+        self.finish_turn();
     }
 
     /// Record what the turn changed in the graph.
@@ -179,9 +233,25 @@ impl CopilotState {
     }
 
     /// Record a failure and end the turn.
+    ///
+    /// `instruction` is kept so the operator can send it again without retyping
+    /// it — a turn that times out after two minutes should not also cost them
+    /// the sentence they wrote.
+    pub fn failed_with(&mut self, text: impl Into<String>, instruction: Option<String>) {
+        self.last_failed = instruction;
+        self.failed(text);
+    }
+
+    /// Record a failure and end the turn.
     pub fn failed(&mut self, text: impl Into<String>) {
         self.turns.push(CopilotTurn::new(TurnRole::Error, text));
-        self.busy = false;
+        self.finish_turn();
+    }
+
+    /// Settle one concurrent turn without hiding any others still running.
+    fn finish_turn(&mut self) {
+        self.in_flight = self.in_flight.saturating_sub(1);
+        self.busy = self.in_flight > 0;
     }
 
     /// Drop the oldest status lines once there are too many of them.

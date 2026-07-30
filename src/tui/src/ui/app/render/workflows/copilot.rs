@@ -20,7 +20,7 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use medulla::ui::workflows::{CopilotTurn, TurnRole};
+use medulla::ui::workflows::CopilotTurn;
 
 use crate::ui::chat::{self, ComposerChrome};
 use crate::ui::util::{clip, wrap, SPINNER};
@@ -158,10 +158,10 @@ fn hint(busy: bool, below: usize) -> String {
         return format!("↓ {below} more line{plural} below");
     }
     if busy {
-        // Not "⌃X aborts": a busy turn runs on its own host, off the chat
-        // runtime Ctrl-X actually aborts, so promising cancellation here would
-        // be a lie the operator only discovers by waiting on it.
-        return "working…".to_string();
+        // ⌃X really does stop it now: on this tab the chord reaches the
+        // copilot's own host rather than the chat runtime. Enter still works —
+        // it queues, and the queued line shows in the transcript.
+        return "working… ⌃X stops it · ⏎ queues".to_string();
     }
     "⏎ send · Esc leave".to_string()
 }
@@ -172,13 +172,11 @@ fn turn_lines(turn: &CopilotTurn, width: usize) -> Vec<TLine<'static>> {
     if turn.role.dim() {
         style = style.add_modifier(Modifier::DIM);
     }
-    // A tool call is one line: its summary is already the short form, and
-    // wrapping a call across three rows buries the reply it happened before.
-    let text = if turn.role == TurnRole::Tool {
-        clip(&turn.text, width.saturating_sub(2))
-    } else {
-        turn.text.clone()
-    };
+    // Wrapped like everything else. Tool lines used to be clipped to one row on
+    // the grounds that their summary was already short — but they now carry
+    // gate refusals and dry-run diagnostics, which name a node, a binding, and
+    // the correction. Clipping those hides the half that says what to do.
+    let text = turn.text.clone();
     let glyph = turn.role.glyph();
     wrap(&text, width.saturating_sub(2))
         .into_iter()

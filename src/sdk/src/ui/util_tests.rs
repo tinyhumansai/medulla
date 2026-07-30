@@ -46,6 +46,17 @@ fn clip_left_keeps_the_tail_that_identifies_a_path() {
 }
 
 #[test]
+fn clip_middle_keeps_a_paths_root_and_project_name() {
+    assert_eq!(clip_middle("/work/repo", 20), "/work/repo");
+    assert_eq!(
+        clip_middle("/Users/me/work/tinyhumansai/medulla-public", 20),
+        "/Users/me/…la-public"
+    );
+    assert_eq!(clip_middle("/work/repo", 1), "…");
+    assert_eq!(clip_middle("/work/repo", 0), "…");
+}
+
+#[test]
 fn an_address_keeps_both_ends_so_two_peers_stay_distinguishable() {
     // A real 44-character base58 Solana public key.
     let key = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";

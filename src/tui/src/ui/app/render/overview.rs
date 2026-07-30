@@ -8,7 +8,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::ui::stream;
-use crate::ui::util::clip;
+use crate::ui::util::{clip, clip_middle, wrap};
 
 use super::super::types::App;
 
@@ -21,7 +21,10 @@ impl App {
                 // Exactly the art: no spare row above or below it. The panels
                 // below open with a border, which is separation enough.
                 Constraint::Length(3),
-                Constraint::Length(7),
+                // The device workspace may need two rows to keep both ends of
+                // a deep path visible. Its neighbour gets the same height so
+                // the top panels retain one clean baseline.
+                Constraint::Length(8),
                 Constraint::Min(0),
             ])
             .split(area);
@@ -167,17 +170,18 @@ impl App {
                 clip(&providers, width),
                 Style::default().fg(self.theme.primary),
             )),
-            // Clipped to the panel: a deep workspace path is common and wrapping
-            // it would push the counters out of a fixed-height panel.
-            TLine::from(Span::styled(
-                clip(host.workspace(), width),
-                Style::default().add_modifier(Modifier::DIM),
-            )),
-            TLine::from(format!(
-                "running {running} · done {} · failed {} · probes {}",
-                stats.tasks_completed, stats.tasks_failed, stats.probes_answered
-            )),
         ];
+        let workspace = clip_middle(host.workspace(), width.saturating_mul(2));
+        lines.extend(wrap(&workspace, width).into_iter().map(|line| {
+            TLine::from(Span::styled(
+                line,
+                Style::default().add_modifier(Modifier::DIM),
+            ))
+        }));
+        lines.push(TLine::from(format!(
+            "running {running} · done {} · failed {} · probes {}",
+            stats.tasks_completed, stats.tasks_failed, stats.probes_answered
+        )));
         if let Some(status) = &stats.last_status {
             lines.push(TLine::from(Span::styled(
                 clip(&format!("▸ {status}"), width),

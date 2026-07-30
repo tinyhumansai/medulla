@@ -47,6 +47,29 @@ pub fn clip_left(value: &str, width: usize) -> String {
     out
 }
 
+/// Ellipsize the middle while preserving both identifying ends.
+///
+/// This is the path-shaped counterpart to [`clip`]: a deep workspace usually
+/// shares its leading directories with its neighbours, while its final
+/// component names the project. Keeping both sides makes the shortened value
+/// recognisable without letting it widen the pane that contains it.
+pub fn clip_middle(value: &str, width: usize) -> String {
+    let single = collapse_ws(value);
+    let chars: Vec<char> = single.chars().collect();
+    if chars.len() <= width {
+        return single;
+    }
+    if width <= 1 {
+        return "…".to_string();
+    }
+    let available = width - 1;
+    let head_len = available.div_ceil(2);
+    let tail_len = available / 2;
+    let head: String = chars.iter().take(head_len).collect();
+    let tail: String = chars.iter().skip(chars.len() - tail_len).collect();
+    format!("{head}…{tail}")
+}
+
 fn collapse_ws(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }

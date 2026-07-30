@@ -50,6 +50,26 @@ fn the_page_lists_this_devices_directories_and_marks_where_work_runs() {
 
 #[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
+fn a_long_workspace_path_keeps_both_ends_inside_its_two_line_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = "/Users/example/work/tinyhumansai/very/deep/project/medulla-public";
+    let mut app = app_with_workspaces(&[path], &dir.path().join("config.toml"));
+    app.focus_routing_subpage("Workspaces");
+    let out = render(&mut app, 76, 32);
+
+    assert!(out.contains("/Users/"), "path root should survive: {out}");
+    assert!(
+        out.contains("medulla-public"),
+        "project tail should survive: {out}"
+    );
+    assert!(
+        out.contains('…'),
+        "the omitted middle should be explicit: {out}"
+    );
+    assert!(!out.contains(path), "the row should not overflow: {out}");
+}
+
+#[test]
 fn a_directory_that_is_not_on_disk_is_flagged_rather_than_hidden() {
     // Declaring a path on a mount that is not up yet is legitimate; silently
     // dropping it would leave the operator wondering why it never appeared.

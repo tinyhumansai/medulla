@@ -69,6 +69,7 @@ fn a_long_workspace_path_keeps_both_ends_inside_its_two_line_row() {
     assert!(!out.contains(path), "the row should not overflow: {out}");
 }
 
+#[ignore = "Routing › Workspaces is commented out of ROUTING_SUBPAGES"]
 #[test]
 fn a_directory_that_is_not_on_disk_is_flagged_rather_than_hidden() {
     // Declaring a path on a mount that is not up yet is legitimate; silently

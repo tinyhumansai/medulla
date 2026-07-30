@@ -169,21 +169,40 @@ impl PtyManager {
         });
     }
 
-    /// Write raw bytes to a session's PTY — the focused pane's keystrokes.
+    /// Queue raw bytes for a session's PTY — the focused pane's keystrokes, and
+    /// the prompts [`inject_prompt`](super::super::inject_prompt) pastes.
+    ///
+    /// Returns as soon as the bytes are queued; the session's writer thread
+    /// performs the write. That split is the whole point of this function. A pty
+    /// write parks in the kernel until the child drains its stdin, and a harness
+    /// that is still loading or sitting on a dialog never does — so this used to
+    /// block, with the manager's lock held, forever. The render pass takes that
+    /// same lock every frame, which made one unread paste a total TUI freeze: no
+    /// repaint, no keys, no navigation. Nothing here may block, for that reason.
+    ///
+    /// # Errors
+    ///
+    /// When `id` names no session, when that session has exited, or when its
+    /// writer thread is gone. A failure of the *write itself* has no caller left
+    /// to reach and is recorded on the row's `last_error` instead.
     pub fn write(&self, id: &str, bytes: &[u8]) -> Result<(), String> {
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) else {
-            return Err(format!("no session {id}"));
+        // The queue handle is cloned out and the guard dropped *before* the send,
+        // so the manager's lock is held for a lookup and nothing more.
+        let writes = {
+            let sessions = self.inner.sessions.lock().unwrap();
+            let Some(session) = sessions.iter().find(|s| s.row.id == id) else {
+                return Err(format!("no session {id}"));
+            };
+            if !session.row.state.is_running() {
+                return Err(format!("{id} has exited"));
+            }
+            session.writes.clone()
         };
-        if !session.row.state.is_running() {
-            return Err(format!("{id} has exited"));
-        }
-        use std::io::Write as _;
-        session
-            .writer
-            .write_all(bytes)
-            .and_then(|()| session.writer.flush())
-            .map_err(|err| format!("{id}: {err}"))
+        // Fails only if the writer thread has stopped, which means the pty stopped
+        // accepting bytes. Worth reporting: the caller's keystrokes went nowhere.
+        writes
+            .send(bytes.to_vec())
+            .map_err(|_| format!("{id}: the writer thread is gone"))
     }
 }
 

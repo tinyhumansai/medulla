@@ -8,10 +8,19 @@
 //! harness on a fresh pty and drains it, [`session`] is the bookkeeping every
 //! other caller reads, and [`screen`] is the emulator surface the UI renders.
 //!
-//! The reader runs on a **blocking thread**, not a tokio task: `portable-pty`'s
-//! reader is a synchronous `Read` with no async variant, and parking it on the
-//! async runtime would occupy a worker forever. It feeds the shared emulator and
-//! exits when the master closes.
+//! Both halves of the master run on **blocking threads**, not tokio tasks:
+//! `portable-pty` offers only synchronous `Read`/`Write`, and parking either on
+//! the async runtime would occupy a worker forever. The reader feeds the shared
+//! emulator and exits when the master closes; the writer drains a per-session
+//! queue.
+//!
+//! The writer's thread earns its keep beyond that. A pty write blocks until the
+//! child drains its stdin, and a harness that is still loading or sitting on a
+//! startup dialog does not — so writing inline, under the one lock every reader
+//! here takes, froze the whole TUI on a single unread paste. Every method on this
+//! type is therefore expected to hold the lock for bookkeeping only: see
+//! `mark_finished`, which drops it before reaping a child, and `write`, which
+//! drops it before queueing bytes.
 
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};

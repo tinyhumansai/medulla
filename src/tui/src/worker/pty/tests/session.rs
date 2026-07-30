@@ -294,6 +294,58 @@ fn closing_or_recording_against_an_unknown_session_is_harmless() {
 }
 
 #[test]
+fn writing_to_a_harness_that_never_reads_does_not_stall_the_render() {
+    // Regression: `write` used to perform the blocking pty write while holding
+    // the manager's lock. A child that has stopped draining its stdin — a harness
+    // still loading its MCP servers, or sitting on a startup dialog — fills the
+    // tty input buffer, the write parks in the kernel, and every render frame
+    // then blocked on that same lock. In the TUI it was a total freeze: no
+    // repaint, no keys, no navigation, with the process still alive.
+    let manager = PtyManager::new();
+    // `sleep` never reads its stdin, so nothing drains what we write, and it
+    // holds the pty slave open so the buffer stays full.
+    let id = manager.open(sh("sleep 30")).unwrap();
+    wait_for("the session to be recorded", || manager.row(&id).is_some());
+
+    // Comfortably past any tty input buffer (BSD caps at 8 KiB), so the
+    // underlying `write_all` cannot run to completion while we look.
+    let paste = vec![b'x'; 1024 * 1024];
+    let writing = {
+        let manager = manager.clone();
+        let id = id.clone();
+        std::thread::spawn(move || manager.write(&id, &paste))
+    };
+
+    // The render path must keep answering throughout. Checked on a deadline
+    // rather than by joining first: a regression makes the write never return, so
+    // joining up front would hang the suite instead of failing it.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !writing.is_finished() && Instant::now() < deadline {
+        let call = Instant::now();
+        let rows = manager.rows();
+        let _ = manager.screen_rows(&id);
+        assert!(
+            call.elapsed() < Duration::from_millis(500),
+            "reads blocked for {:?} — the writer is holding the manager's lock again",
+            call.elapsed()
+        );
+        assert_eq!(rows.len(), 1, "the session is still listed while writing");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        writing.is_finished(),
+        "write never returned — it is performing the pty write inline again"
+    );
+    writing
+        .join()
+        .expect("the writing thread did not panic")
+        .expect("the bytes are queued even though the child will not read them");
+
+    manager.close(&id);
+}
+
+#[test]
 fn many_sessions_exiting_at_once_are_all_reaped_without_stalling_reads() {
     // Regression: the reaper used to hold the manager's lock across a blocking
     // `child.wait()`. EOF on the pty master and the child's exit are not

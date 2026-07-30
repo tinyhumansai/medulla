@@ -7,6 +7,20 @@ use super::super::types::{HarnessControl, PtyState, SessionRow};
 use super::PtyManager;
 
 impl PtyManager {
+    /// Record why a queued write never reached the child.
+    ///
+    /// The write half is drained by a thread (see [`PtyManager`]'s
+    /// `spawn_writer`), so a failed write has no caller to return to — this row
+    /// field is where it is kept instead. Last-one-wins: the interesting failure
+    /// is the current one, and a session whose pty has stopped accepting bytes
+    /// will not recover to produce a different one.
+    pub(super) fn record_write_error(&self, id: &str, error: &str) {
+        let mut sessions = self.inner.sessions.lock().unwrap();
+        if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
+            session.row.last_error = Some(error.to_string());
+        }
+    }
+
     /// Record that a session produced output.
     pub(super) fn touch(&self, id: &str) {
         let now = self.now();

@@ -1,7 +1,8 @@
 //! Launching a harness on a fresh pty, and draining it into the emulator.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::sync::atomic::Ordering;
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -95,6 +96,10 @@ impl PtyManager {
             DEFAULT_COLS,
             SCROLLBACK,
         )));
+        // The write half moves onto its own thread below; the session holds only
+        // the queue, so no caller can block on the child while holding the
+        // manager's lock. See `PtySession::writes`.
+        let (writes, queued) = channel::<Vec<u8>>();
         let now = self.now();
         let id = format!("w_{}", self.inner.next_id.fetch_add(1, Ordering::SeqCst));
 
@@ -123,15 +128,18 @@ impl PtyManager {
             },
             screen: screen.clone(),
             master: pty.master,
-            writer,
+            writes,
             child: Some(child),
         });
 
         // Only now: the reader `touch`es the session on every read, and a child
         // that greets the pty immediately would otherwise have its first output
         // land before there is a session to record it against — losing the
-        // `last_output_at` that idle detection reads.
+        // `last_output_at` that idle detection reads. The writer records its
+        // failures against the row, so it needs the record to exist for the same
+        // reason.
         self.spawn_reader(id.clone(), reader, screen);
+        self.spawn_writer(id.clone(), writer, queued);
 
         Ok(id)
     }
@@ -158,6 +166,38 @@ impl PtyManager {
                 }
             }
             manager.mark_finished(&id);
+        });
+    }
+
+    /// Drain queued bytes onto the PTY master on a blocking thread.
+    ///
+    /// The mirror of [`spawn_reader`](Self::spawn_reader), and a thread for a
+    /// stronger reason than symmetry: a pty write parks in the kernel until the
+    /// child drains its stdin, so on the async runtime it would occupy a worker,
+    /// and on a caller holding the manager's lock it froze every render frame.
+    /// Here it may park as long as it likes with nobody waiting on it.
+    ///
+    /// Ends when the session's queue is dropped — which removing the session
+    /// record does. A thread parked mid-write instead unblocks when the child is
+    /// killed and the pty closes, which is what `close` and `shutdown` do.
+    fn spawn_writer(
+        &self,
+        id: String,
+        mut writer: Box<dyn Write + Send>,
+        queued: Receiver<Vec<u8>>,
+    ) {
+        let manager = self.clone();
+        std::thread::spawn(move || {
+            for bytes in queued {
+                if let Err(err) = writer.write_all(&bytes).and_then(|()| writer.flush()) {
+                    // Recorded rather than returned: the write is asynchronous
+                    // now, so there is no caller left to hand this to, and a
+                    // silently dropped paste is the failure hardest to diagnose
+                    // from the outside.
+                    manager.record_write_error(&id, &format!("{id}: {err}"));
+                    break;
+                }
+            }
         });
     }
 }

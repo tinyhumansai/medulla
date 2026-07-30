@@ -32,7 +32,7 @@ impl App {
     /// whichever row happened to share the offset.
     pub(super) fn selected_agent_task(&self) -> Option<TaskState> {
         let rows = self.rail_rows();
-        match rows.get(self.agent_index) {
+        match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
             Some(super::rail::RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
             _ => None,
         }

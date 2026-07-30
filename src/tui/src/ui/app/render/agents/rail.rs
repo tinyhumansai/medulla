@@ -20,6 +20,44 @@ use super::super::super::types::App;
 use super::super::color;
 use super::types::{AgentsPanes, Selection};
 
+/// The five lifecycle states shown by harness-backed rows in the Agents rail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HarnessVisualState {
+    Working,
+    NeedsInput,
+    Errored,
+    Completed,
+    Inactive,
+}
+
+impl HarnessVisualState {
+    /// Stable sidebar wording for this state.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::NeedsInput => "needs input",
+            Self::Errored => "errored",
+            Self::Completed => "completed",
+            Self::Inactive => "inactive",
+        }
+    }
+
+    /// The foreground colour promised for this lifecycle state.
+    fn color(self) -> Color {
+        match self {
+            Self::Working | Self::Completed => Color::Green,
+            Self::NeedsInput => Color::Yellow,
+            Self::Errored => Color::Red,
+            Self::Inactive => Color::DarkGray,
+        }
+    }
+
+    /// Only active work flashes; every terminal or waiting state stays solid.
+    fn flashes(self) -> bool {
+        self == Self::Working
+    }
+}
+
 impl App {
     /// Draw the threads strip and the rail list under it.
     pub(super) fn draw_agents_rail(
@@ -145,7 +183,7 @@ impl App {
     }
 
     /// Format one Agents-list row (separator, "more", sub-task, or lane).
-    pub(super) fn agent_row_line(
+    pub(in crate::ui::app::render) fn agent_row_line(
         &self,
         row: &AgentRow,
         lanes: &[AgentLane],
@@ -218,13 +256,7 @@ impl App {
                 } else {
                     String::new()
                 };
-                let mut style = Style::default().fg(color(item.role.color()));
-                if is_fn {
-                    style = style.add_modifier(Modifier::DIM);
-                }
-                if active {
-                    style = self.theme.selection();
-                }
+                let style = self.lane_style(item, is_fn, active);
                 let work_note = item
                     .work
                     .as_deref()
@@ -294,22 +326,80 @@ impl App {
     /// A short human-readable state suffix for a lane row.
     pub(in crate::ui::app::render) fn lane_state(&self, item: &AgentLane) -> String {
         if item.session_id.is_some() {
-            let s = self.session_state(item);
-            match s.as_deref() {
-                Some("ended") => " · inactive".into(),
-                Some(other) => format!(" · {other}"),
-                None => " · …".into(),
-            }
+            self.session_state(item)
+                .map(|_| format!(" · {}", self.harness_visual_state(item).label()))
+                .unwrap_or_else(|| " · …".into())
         } else if item.role == AgentRole::Agent {
-            if item.active_tasks > 0 {
-                " · busy".into()
-            } else if item.turns.is_empty() {
-                " · idle".into()
-            } else {
-                String::new()
-            }
+            format!(" · {}", self.harness_visual_state(item).label())
         } else {
             String::new()
         }
+    }
+
+    /// Style a lane while preserving both selection visibility and harness state.
+    fn lane_style(&self, item: &AgentLane, is_fn: bool, active: bool) -> Style {
+        let mut style = if active {
+            self.theme.selection()
+        } else {
+            Style::default()
+        };
+        if item.role == AgentRole::Agent {
+            let state = self.harness_visual_state(item);
+            style = style.fg(state.color());
+            if state.flashes() {
+                style = style.add_modifier(Modifier::SLOW_BLINK);
+            }
+        } else {
+            style = style.fg(color(item.role.color()));
+        }
+        if is_fn {
+            style = style.add_modifier(Modifier::DIM);
+        }
+        style
+    }
+
+    /// Resolve the current state instead of letting an older terminal task
+    /// override newer work. Pending input wins over active work, then the most
+    /// recent terminal task supplies completion or error.
+    fn harness_visual_state(&self, item: &AgentLane) -> HarnessVisualState {
+        if item.tasks.iter().any(|task| task.attention.is_some()) {
+            return HarnessVisualState::NeedsInput;
+        }
+        if item.active_tasks > 0
+            || item
+                .tasks
+                .iter()
+                .any(|task| task.status == TaskStatus::Running)
+        {
+            return HarnessVisualState::Working;
+        }
+        if let Some(task) = item.tasks.iter().max_by_key(|task| task.last_at) {
+            return match task.status {
+                TaskStatus::Running => HarnessVisualState::Working,
+                TaskStatus::Done => HarnessVisualState::Completed,
+                TaskStatus::Failed => HarnessVisualState::Errored,
+                TaskStatus::Cancelled => HarnessVisualState::Inactive,
+            };
+        }
+        self.session_state(item)
+            .as_deref()
+            .map(session_visual_state)
+            .unwrap_or(HarnessVisualState::Inactive)
+    }
+}
+
+/// Normalize the open-vocabulary peer-session state into the five sidebar
+/// states. Unknown states fail closed to inactive rather than claiming work.
+fn session_visual_state(state: &str) -> HarnessVisualState {
+    match state.trim().to_ascii_lowercase().as_str() {
+        "running" | "working" | "busy" | "active" => HarnessVisualState::Working,
+        "waiting" | "needs_input" | "needs-input" | "awaiting_input" | "awaiting-input" => {
+            HarnessVisualState::NeedsInput
+        }
+        "error" | "errored" | "failed" => HarnessVisualState::Errored,
+        "complete" | "completed" | "done" | "ended" | "success" | "succeeded" => {
+            HarnessVisualState::Completed
+        }
+        _ => HarnessVisualState::Inactive,
     }
 }

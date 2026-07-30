@@ -254,11 +254,11 @@ fn the_settings_nav_groups_its_subpages() {
 }
 
 #[test]
-fn trace_and_context_are_no_longer_top_level_tabs() {
-    for gone in ["Trace", "Context"] {
+fn secondary_and_paused_surfaces_are_not_top_level_tabs() {
+    for gone in ["Trace", "Context", "TokenMaxxxing"] {
         assert!(
             !TABS.contains(&gone),
-            "{gone} should live under Settings, not the tab bar"
+            "{gone} should not appear in the tab bar"
         );
     }
 }

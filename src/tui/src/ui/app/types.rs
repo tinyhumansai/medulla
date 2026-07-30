@@ -42,11 +42,10 @@ use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 /// putting one line back. Memory is out of the build entirely (its tab said
 /// "coming soon"); Tasks duplicates what the Agents tab already shows per lane.
 #[cfg(feature = "workflows")]
-pub const TABS: [&str; 7] = [
+pub const TABS: [&str; 6] = [
     "Overview",
     "Agents",
     "Workflows",
-    "TokenMaxxxing",
     "Hosts",
     "Feedback",
     "Settings",
@@ -55,14 +54,7 @@ pub const TABS: [&str; 7] = [
 /// Without the workflow engine. A slim build must not offer a tab that cannot
 /// draw anything.
 #[cfg(not(feature = "workflows"))]
-pub const TABS: [&str; 6] = [
-    "Overview",
-    "Agents",
-    "TokenMaxxxing",
-    "Hosts",
-    "Feedback",
-    "Settings",
-];
+pub const TABS: [&str; 5] = ["Overview", "Agents", "Hosts", "Feedback", "Settings"];
 
 /// The Routing tab's left-nav pages.
 ///

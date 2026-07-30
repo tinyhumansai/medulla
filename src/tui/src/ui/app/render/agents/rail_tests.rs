@@ -69,7 +69,7 @@ fn a_path_too_long_to_fit_keeps_its_tail() {
     // the machine shares, so dropping it loses nothing and dropping the tail
     // loses the only fact the row was drawn for.
     let out = wrap_path(
-        "~/work/tinyhumansai/workflow-medulla/worktrees/agents-ux/medulla-public",
+        "~/work/some-org/some-umbrella/worktrees/agents-ux/medulla-public",
         28,
         2,
     );

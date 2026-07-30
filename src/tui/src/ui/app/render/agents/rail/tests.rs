@@ -148,8 +148,37 @@ fn an_unbreakable_final_segment_keeps_its_own_tail() {
 
 #[test]
 fn the_home_directory_collapses_to_a_tilde() {
-    let home = std::env::var("HOME").expect("a home directory");
-    assert_eq!(short_home(&format!("{home}/work/repo")), "~/work/repo");
-    assert_eq!(short_home(&home), "~");
-    assert_eq!(short_home("/srv/repos/auth"), "/srv/repos/auth");
+    // A fixture, not the real environment. Reading `$HOME` here panicked the
+    // whole suite on Windows, which sets `USERPROFILE` and no `HOME` — and a
+    // presentation rule should not depend on the machine running it anyway.
+    let home = Some("/Users/dev");
+    assert_eq!(short_home("/Users/dev/work/repo", home), "~/work/repo");
+    assert_eq!(short_home("/Users/dev", home), "~");
+    assert_eq!(short_home("/Users/dev/", home), "~");
+    // A path outside home keeps its head; there is nothing to collapse.
+    assert_eq!(short_home("/srv/repos/auth", home), "/srv/repos/auth");
+    // A sibling that merely *starts* with the same characters is not inside
+    // home, so it must not be rewritten as though it were.
+    assert_eq!(short_home("/Users/developer/x", home), "/Users/developer/x");
+}
+
+#[test]
+fn a_windows_home_collapses_on_its_own_separator() {
+    // Windows hands us `C:\Users\dev` while the harness reports whichever
+    // separator it was started with, so both have to be recognised.
+    let home = Some("C:\\Users\\dev");
+    assert_eq!(
+        short_home("C:\\Users\\dev\\work\\repo", home),
+        "~\\work\\repo"
+    );
+    assert_eq!(short_home("C:\\Users\\dev", home), "~");
+    assert_eq!(short_home("D:\\src\\other", home), "D:\\src\\other");
+}
+
+#[test]
+fn an_unknown_home_leaves_the_path_alone() {
+    // `dirs::home_dir()` can fail. Showing the absolute path is right then —
+    // inventing a `~` for a directory we cannot place would be a lie.
+    assert_eq!(short_home("/srv/repos/auth", None), "/srv/repos/auth");
+    assert_eq!(short_home("/srv/repos/auth", Some("")), "/srv/repos/auth");
 }

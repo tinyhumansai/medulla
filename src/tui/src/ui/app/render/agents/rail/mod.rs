@@ -27,7 +27,7 @@ use super::types::{AgentsPanes, Selection};
 mod tests;
 mod wrap;
 
-use wrap::{short_home, wrap_line, wrap_path};
+use wrap::{home_dir, short_home, wrap_line, wrap_path};
 
 /// The most content columns the Agents rail ever takes.
 ///
@@ -276,7 +276,7 @@ impl App {
             style.add_modifier(Modifier::DIM)
         };
         let room = width.saturating_sub(PATH_INDENT.len()).max(6);
-        for part in wrap_path(&short_home(&row.cwd), room, 2) {
+        for part in wrap_path(&short_home(&row.cwd, home_dir().as_deref()), room, 2) {
             lines.push(TLine::from(Span::styled(
                 format!("{PATH_INDENT}{part}"),
                 path_style,

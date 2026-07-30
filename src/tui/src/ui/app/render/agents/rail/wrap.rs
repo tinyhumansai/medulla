@@ -100,24 +100,42 @@ fn styled_line(cells: &[(char, Style)], pad: usize) -> TLine<'static> {
     TLine::from(spans)
 }
 
-/// A working directory with the operator's home collapsed to `~`.
+/// The operator's home directory, however this platform names it.
+///
+/// [`dirs::home_dir`] rather than `$HOME`: Windows sets `USERPROFILE` and no
+/// `HOME` at all, so reading the variable directly meant the collapse below
+/// silently never fired there — and a test that read it panicked outright.
+pub(super) fn home_dir() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let home = home.to_string_lossy();
+    let trimmed = home.trim_end_matches(['/', '\\']);
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// A working directory with `home` collapsed to `~`.
 ///
 /// Every harness on a laptop starts under the same home directory, so spelling
 /// it out on every row spends columns on the one part of the path that
 /// distinguishes nothing.
-pub(super) fn short_home(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
+///
+/// Takes the home directory rather than reading the environment so the rule is
+/// a pure function of its inputs: this is presentation logic, and a renderer
+/// that consults the process environment cannot be tested on a machine that
+/// disagrees with the fixture.
+pub(super) fn short_home(path: &str, home: Option<&str>) -> String {
+    // Both separators, because the path being shortened comes from the harness
+    // and the home directory from the platform — on Windows those disagree.
+    let trimmed = path.trim_end_matches(['/', '\\']);
     let trimmed = if trimmed.is_empty() { "/" } else { trimmed };
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = home.map(|h| h.trim_end_matches(['/', '\\'])) else {
         return trimmed.to_string();
     };
-    let home = home.to_string_lossy().trim_end_matches('/').to_string();
     if home.is_empty() {
         return trimmed.to_string();
     }
-    match trimmed.strip_prefix(&home) {
+    match trimmed.strip_prefix(home) {
         Some("") => "~".to_string(),
-        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        Some(rest) if rest.starts_with(['/', '\\']) => format!("~{rest}"),
         _ => trimmed.to_string(),
     }
 }

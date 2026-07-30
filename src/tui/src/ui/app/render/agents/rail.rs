@@ -556,9 +556,21 @@ pub(super) fn wrap_path(path: &str, width: usize, max_lines: usize) -> Vec<Strin
         let head = text.trim_start_matches('…');
         match head.split_once('/') {
             Some((_, tail)) if !tail.is_empty() => text = format!("…{tail}"),
-            // A single unbreakable segment: keep its tail and cut the rest.
+            // A single unbreakable segment: it has no separator left to drop
+            // a head at, so cut characters directly. The tail is what
+            // distinguishes this checkout from a sibling sharing the same
+            // prefix, so keep the last characters that fit and mark the
+            // dropped head with a leading `…` rather than keeping the head
+            // and losing the tail.
             _ => {
-                let mut lines = flow_path(&text, width);
+                let budget = width.saturating_mul(max_lines).saturating_sub(1).max(1);
+                let chars: Vec<char> = head.chars().collect();
+                let tail: String = if chars.len() > budget {
+                    chars[chars.len() - budget..].iter().collect()
+                } else {
+                    head.to_string()
+                };
+                let mut lines = flow_path(&format!("…{tail}"), width);
                 lines.truncate(max_lines);
                 return lines;
             }

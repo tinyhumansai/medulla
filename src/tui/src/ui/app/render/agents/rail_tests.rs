@@ -90,6 +90,34 @@ fn a_path_too_long_to_fit_keeps_its_tail() {
 }
 
 #[test]
+fn an_unbreakable_final_segment_keeps_its_own_tail() {
+    // When the checkout name itself (the part after the last `/`) is longer
+    // than the whole line budget, there is no separator left to drop a head
+    // at. The name still has to keep its distinguishing suffix rather than
+    // silently losing it to a head-first hard cut, or two harnesses that
+    // share a long prefix would render identically.
+    let out = wrap_path(
+        "~/work/a/very-long-checkout-name-that-alone-overruns-the-budget-abcdefg",
+        12,
+        2,
+    );
+
+    assert!(
+        out.len() <= 2,
+        "the path is held to its line budget: {out:?}"
+    );
+    let joined = out.concat();
+    assert!(
+        joined.ends_with("abcdefg"),
+        "the tail of the unbreakable segment survives: {joined:?}"
+    );
+    assert!(
+        joined.starts_with('…'),
+        "and the row says it was shortened: {joined:?}"
+    );
+}
+
+#[test]
 fn the_home_directory_collapses_to_a_tilde() {
     let home = std::env::var("HOME").expect("a home directory");
     assert_eq!(short_home(&format!("{home}/work/repo")), "~/work/repo");

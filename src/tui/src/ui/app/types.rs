@@ -901,7 +901,10 @@ pub struct App {
     pub(super) area: Rect,
     pub(super) hit_tabs: Vec<(u16, u16)>,
     pub(super) hit_tabs_row: u16,
-    pub(super) hit_agents: Option<(Rect, usize)>,
+    /// Where the Agents rail drew, and which rail row each of its visible lines
+    /// belongs to. A row may wrap onto several lines, so a click resolves
+    /// through this map rather than by adding an offset to a first-row index.
+    pub(super) hit_agents: Option<(Rect, Vec<usize>)>,
     // Where the embedded harness screen landed, and whose it is. Recorded so a
     // wheel event can be routed to the terminal under the pointer and given
     // coordinates relative to *its* origin rather than the screen's.

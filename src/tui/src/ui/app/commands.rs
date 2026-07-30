@@ -26,10 +26,14 @@ impl App {
     }
 
     /// The task under the Agents-list cursor, when a `Sub` (task) row is selected.
+    ///
+    /// Indexes the rail's rows, which is what `agent_index` counts — the lane
+    /// list alone is shorter than the rail and reading it here would answer for
+    /// whichever row happened to share the offset.
     pub(super) fn selected_agent_task(&self) -> Option<TaskState> {
-        let rows = self.agent_rows();
+        let rows = self.rail_rows();
         match rows.get(self.agent_index) {
-            Some(AgentRow::Sub { task, .. }) => Some(task.clone()),
+            Some(super::rail::RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
             _ => None,
         }
     }

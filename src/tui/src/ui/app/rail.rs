@@ -11,8 +11,11 @@
 //! is selected, and answers what the detail pane should show.
 
 use super::types::App;
-use crate::ui::agents::AgentRow;
+use crate::ui::agents::{AgentRole, AgentRow};
 use crate::worker::pty::SessionRow;
+
+/// The label on the rail's "start a harness" row.
+pub(in crate::ui::app) const NEW_HARNESS_LABEL: &str = "+ New harness";
 
 /// One row of the Agents rail.
 #[derive(Debug, Clone)]
@@ -22,6 +25,13 @@ pub enum RailRow {
     /// The lane list's own `── functions ──` separator is an
     /// `AgentRow::Separator`; this variant is the group, not the row type.
     Agent(AgentRow),
+    /// The action row that starts a harness of the operator's own.
+    ///
+    /// Sits directly under the orchestrator lane because that is where the eye
+    /// already is — starting a terminal was otherwise a chord (`Ctrl-T`) with
+    /// nothing on screen to suggest it exists, which is the same as not having
+    /// it for anyone who has not read the bindings.
+    NewHarness,
     /// The `── your harnesses ──` divider above the operator's own sessions.
     HarnessSeparator,
     /// A harness the operator started, which no lane will ever describe.
@@ -37,6 +47,7 @@ impl RailRow {
     pub fn selectable(&self) -> bool {
         match self {
             RailRow::Agent(row) => row.selectable(),
+            RailRow::NewHarness => true,
             RailRow::HarnessSeparator => false,
             RailRow::Harness(_) => true,
         }
@@ -48,6 +59,11 @@ impl RailRow {
             RailRow::Harness(row) => Some(row.id.as_str()),
             _ => None,
         }
+    }
+
+    /// Whether this row is the "start a harness" action.
+    pub fn is_new_harness(&self) -> bool {
+        matches!(self, RailRow::NewHarness)
     }
 }
 
@@ -64,9 +80,30 @@ impl App {
     /// nothing else.
     /// Operator-started harnesses hang below the lanes under their own divider,
     /// because they are the one thing running on this device that the event fold
-    /// cannot see.
+    /// cannot see. The `+ New harness` action sits between the two, directly
+    /// under the orchestrator lane: it is what produces the group below it, and
+    /// a device that hosts nothing cannot start one, so it is absent there
+    /// rather than present and refusing.
     pub(super) fn rail_rows(&self) -> Vec<RailRow> {
-        let mut rows: Vec<RailRow> = self.agent_rows().into_iter().map(RailRow::Agent).collect();
+        let lanes = self.lanes();
+        let can_start = self.harnesses.is_some();
+        let mut rows: Vec<RailRow> = Vec::new();
+        let mut placed = !can_start;
+        for row in self.agent_rows() {
+            let orchestrator = matches!(&row, AgentRow::Lane { lane_index }
+                if lanes.get(*lane_index).map(|l| l.role) == Some(AgentRole::Orchestrator));
+            rows.push(RailRow::Agent(row));
+            if orchestrator && !placed {
+                rows.push(RailRow::NewHarness);
+                placed = true;
+            }
+        }
+        // No orchestrator lane yet — the very first frame, before any fold has
+        // run. The action still belongs on screen, and the top is where the
+        // orchestrator will appear above it.
+        if !placed {
+            rows.insert(0, RailRow::NewHarness);
+        }
         let own = self.own_harness_rows();
         if !own.is_empty() {
             rows.push(RailRow::HarnessSeparator);

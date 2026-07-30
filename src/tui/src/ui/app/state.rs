@@ -505,15 +505,28 @@ impl App {
     /// That lane is the conversation with the operator, so it scrolls the chat
     /// transcript and its composer submits an instruction; every other lane
     /// shows an agent's own turns and answers its questions.
+    ///
+    /// Reads the *rail's* rows, not the lane list's: `agent_index` walks the
+    /// rail, which carries the `+ New harness` action and the operator's own
+    /// harness rows as well as the lanes. Indexing the shorter list with it
+    /// reported a lane for rows that name none, and the composer's visibility
+    /// hangs off this answer — so a harness row claimed a text box that was
+    /// never drawn, and every keystroke went into it.
     pub fn on_orchestrator_lane(&self) -> bool {
         let lanes = self.lanes();
-        let rows = self.agent_rows();
-        rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
-            .and_then(|row| row.lane_index())
-            .and_then(|index| lanes.get(index))
-            .map(|lane| lane.role == AgentRole::Orchestrator)
-            // An empty lane list means the orchestrator lane is all there is.
-            .unwrap_or(true)
+        let rows = self.rail_rows();
+        match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
+            Some(super::rail::RailRow::Agent(row)) => row
+                .lane_index()
+                .and_then(|index| lanes.get(index))
+                .map(|lane| lane.role == AgentRole::Orchestrator)
+                // An empty lane list means the orchestrator lane is all there is.
+                .unwrap_or(true),
+            // The action row and the operator's own harnesses are not lanes and
+            // have no conversation of their own.
+            Some(_) => false,
+            None => true,
+        }
     }
 
     /// Scroll whichever transcript the Agents cursor is reading.

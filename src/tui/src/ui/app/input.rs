@@ -31,8 +31,11 @@ impl App {
 
     /// Handle scroll and left-click mouse events for the active tab.
     pub(super) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
-        if self.resume_picker.is_some() {
-            return None; // modal swallows mouse
+        // A modal swallows the mouse, the same way it swallows the keyboard.
+        // The harness picker is one: a click that navigated the rail behind it
+        // left an overlay on screen describing a row nobody was pointing at.
+        if self.resume_picker.is_some() || self.harness_picker.is_some() {
+            return None;
         }
         match m.kind {
             MouseEventKind::ScrollUp => self.scroll_at(m.column, m.row, true),
@@ -105,10 +108,17 @@ impl App {
         match self.tab() {
             // Over the rail, the wheel walks the cursor over the lanes and
             // their tasks; anywhere else on the tab it scrolls the transcript.
-            "Agents" => match self.hit_agents {
-                Some((rail, _)) if rail.contains((x, y).into()) => self.move_agent_index(up),
-                _ => self.scroll_transcript(up, 3),
-            },
+            "Agents" => {
+                let over_rail = self
+                    .hit_agents
+                    .as_ref()
+                    .is_some_and(|(rail, _)| rail.contains((x, y).into()));
+                if over_rail {
+                    self.move_agent_index(up);
+                } else {
+                    self.scroll_transcript(up, 3);
+                }
+            }
             // Trace and Context are Settings subpages, not tabs, so they are
             // matched on the subpage rather than on the tab — which is always
             // "Settings" for both.
@@ -216,30 +226,50 @@ impl App {
                     }
                 }
             }
-            if let Some((rect, window_start)) = self.hit_agents {
+            if let Some((rect, owners)) = self.hit_agents.clone() {
                 if rect.contains((x, y).into()) {
+                    // Each drawn line records the rail row it came from, so a
+                    // click on the second line of a wrapped harness row selects
+                    // that harness rather than whatever follows it. The map
+                    // covers the unselectable rows too — the `── functions ──`
+                    // separator and the `+N more` counter — because
+                    // `agent_index` indexes all of them.
                     let rel = (y - rect.y) as usize;
-                    // The *rail's* rows, which include the unselectable ones —
-                    // the `── functions ──` separator and the `+N more` counter
-                    // — because `agent_index` indexes all of them. Reading a
-                    // list that skipped those would shift every row below one
-                    // out of alignment, so a click would select its neighbour.
                     let rows = self.rail_rows();
-                    let idx = window_start + rel;
-                    if let Some(row) = rows.get(idx) {
+                    if let Some(row) = owners.get(rel).and_then(|idx| rows.get(*idx)) {
                         if row.selectable() {
+                            let idx = owners[rel];
                             self.agent_scroll = 0;
                             self.chat_scroll = 0;
                             self.agent_index = idx;
                             // A click is a focus gesture: the arrows should now
                             // continue from the row that was just picked.
                             self.focus_agents_rail();
+                            // The action row acts on the click that lands on it;
+                            // requiring a second keystroke to confirm what was
+                            // already aimed at is the friction it exists to
+                            // remove.
+                            if row.is_new_harness() {
+                                self.open_harness_picker();
+                                return None;
+                            }
                             // Clicking a task is the request to watch it.
                             if let Some(cmd) = self.retarget_watch() {
                                 return Some(cmd);
                             }
                         }
                     }
+                }
+            }
+            // A click inside the embedded terminal means "type here", the same
+            // as `Ctrl-]`. Checked after the rail so a click that changes rows
+            // is a navigation, not an attach to whatever the last frame showed.
+            if let Some((rect, session)) = self.hit_harness.clone() {
+                if rect.contains((x, y).into())
+                    && self.harness_pane_session.as_deref() == Some(session.as_str())
+                    && !self.harness_focus.is_attached_to(&session)
+                {
+                    self.attach_to_pane_harness();
                 }
             }
         } else if tab == "Settings" && self.settings_subpage() == "Context" {

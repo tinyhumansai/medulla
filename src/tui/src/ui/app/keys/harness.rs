@@ -49,6 +49,12 @@ impl App {
                 // longer see the state of.
                 if self.begin_harness_release(&session) {
                     self.release_harness();
+                    // The keyboard has to land somewhere it can be seen. The
+                    // cursor is on a harness row, which draws no composer, so
+                    // the rail is the only half of the tab that can answer a
+                    // keystroke — leaving focus on the composer is what made
+                    // every key after a release look like a dead terminal.
+                    self.focus_agents_rail();
                     self.set_status(format!(
                         "Released the harness · {FOCUS_CHORD_LABEL} to type again"
                     ));
@@ -74,7 +80,12 @@ impl App {
     /// Refuses, with a reason, rather than silently doing nothing: an operator
     /// who pressed the chord and saw no change has no way to tell "wrong row"
     /// from "the feature is broken".
-    fn attach_to_pane_harness(&mut self) {
+    ///
+    /// Reachable from the pointer as well as from the chord: clicking into a
+    /// terminal is what every other terminal on the machine means by "type
+    /// here", and requiring a chord to do it made the embedded pane the one
+    /// exception.
+    pub(in crate::ui::app) fn attach_to_pane_harness(&mut self) {
         let Some(session) = self.harness_pane_session.clone() else {
             self.set_status("No harness on this row — select a running task to type into one");
             return;

@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 /// dispatch gate one careless `#[serde(default)]` away from being decided by a
 /// remote peer.
 ///
-/// The wire spelling is `operator`, not `user`: medulla-v1 reasons about
-/// operators and orchestrators, and one word for one concept across the two
-/// repos is worth more than matching the local enum's variant name.
+/// The wire spelling is `operator`, not `user`: the orchestrator reasons about
+/// operators and orchestrators, and one word for one concept across the whole
+/// system is worth more than matching the local enum's variant name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HandoffControl {

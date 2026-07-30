@@ -162,8 +162,8 @@ fn the_joined_transcript_is_capped() {
 
 #[test]
 fn control_uses_the_shared_spelling() {
-    // medulla-v1 reasons about operators, not users. One word per concept
-    // across the two repos.
+    // The orchestrator reasons about operators, not users. One word per
+    // concept, wherever it is read.
     assert_eq!(HandoffControl::Operator.as_str(), "operator");
     assert_eq!(HandoffControl::Orchestrator.as_str(), "orchestrator");
     assert_eq!(

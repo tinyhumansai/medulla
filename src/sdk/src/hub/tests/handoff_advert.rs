@@ -68,9 +68,9 @@ fn an_operator_held_harness_advertises_the_hold_with_its_reason() {
         ..worker()
     });
 
-    // "operator", not "user": medulla-v1 reasons about operators, and one word
-    // per concept across the two repos is worth more than matching the local
-    // enum's variant name.
+    // "operator", not "user": the orchestrator reasons about operators, and one
+    // word per concept is worth more than matching the local enum's variant
+    // name.
     assert_eq!(meta["control"], "operator");
     assert_eq!(meta["controlReason"], "pairing on the auth migration");
     assert_eq!(meta["controlSince"], 1_753_420_000_000i64);

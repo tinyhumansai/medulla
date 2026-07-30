@@ -19,6 +19,7 @@ use super::types::{HarnessControl, LaunchSpec, PtyState};
 
 mod control;
 mod identity;
+mod scrollback;
 mod session;
 
 /// A spec that runs `sh -c <script>` on a pty.

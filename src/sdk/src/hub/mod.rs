@@ -11,6 +11,10 @@
 mod activity;
 mod boot;
 mod handle;
+/// The handoff brief an operator leaves when giving a harness back. Public as a
+/// module so its bounds keep their short names — `handoff::NOTE_MAX` reads, a
+/// `HANDOFF_NOTE_MAX` flattened into the crate root does not.
+pub mod handoff;
 mod pairing;
 mod probe;
 mod relay;
@@ -27,6 +31,7 @@ mod tests;
 pub use activity::{ActivityLog, WorkerActivity};
 pub use boot::{run_hub, start_hub, HubConfig, HubSession, WorkerSpec, DEFAULT_LOCAL_HUB_ADDRESS};
 pub use handle::HubHandle;
+pub use handoff::{HandoffControl, HarnessHandoff};
 pub use relay::Relay;
 pub use roster::HubWorker;
 pub use runner::TaskRunner;

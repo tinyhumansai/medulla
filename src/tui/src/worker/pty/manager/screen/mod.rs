@@ -100,6 +100,51 @@ impl PtyManager {
         session.screen.lock().unwrap().set_scrollback(0);
     }
 
+    /// The last `max` non-blank lines of `id`'s screen, oldest first.
+    ///
+    /// This is what a handoff brief carries: enough of what the operator was
+    /// doing for the orchestrator to continue the thread rather than restart it.
+    /// Plain text, not cells — nobody downstream renders it, they read it.
+    ///
+    /// Reads at scrollback offset 0 and puts the operator's offset back
+    /// afterwards. Capturing a brief must not move the pane they are looking at,
+    /// and the alternative — snapping them to the live screen as a side effect of
+    /// handing a harness over — is the kind of thing that reads as the TUI
+    /// glitching.
+    ///
+    /// **Bounded to one screenful.** `vt100` 0.15's `visible_rows` underflows for
+    /// any offset past the screen height (see [`scroll_history`](Self::scroll_history)),
+    /// so walking the full retained history would panic the TUI. One screen is
+    /// what a brief needs anyway; the harness's own transcript is where deep
+    /// history lives.
+    ///
+    /// Empty when the session is unknown.
+    pub fn tail_lines(&self, id: &str, max: usize) -> Vec<String> {
+        let sessions = self.inner.sessions.lock().unwrap();
+        let Some(session) = sessions.iter().find(|s| s.row.id == id) else {
+            return Vec::new();
+        };
+        let mut parser = session.screen.lock().unwrap();
+        let held = parser.screen().scrollback();
+        parser.set_scrollback(0);
+        let contents = parser.screen().contents();
+        parser.set_scrollback(held);
+
+        let mut lines: Vec<String> = contents
+            .lines()
+            .map(|line| line.trim_end().to_string())
+            .collect();
+        // A harness pane is mostly empty space below the prompt, so the tail is
+        // otherwise all blanks and the brief carries nothing.
+        while lines.last().is_some_and(|line| line.is_empty()) {
+            lines.pop();
+        }
+        if lines.len() > max {
+            lines.drain(..lines.len() - max);
+        }
+        lines
+    }
+
     /// Render `id`'s current screen as `(rows_of_cells, cursor)`.
     ///
     /// Returns owned rows rather than a borrow of the emulator: the render pass

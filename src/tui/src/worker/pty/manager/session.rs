@@ -95,6 +95,32 @@ impl PtyManager {
         Some(session.row.clone())
     }
 
+    /// The operator-held session covering `cwd`, if there is one.
+    ///
+    /// The half of exclusivity [`claim_idle`](Self::claim_idle) cannot express.
+    /// `claim_idle` answers "may I reuse *this* session", which a caller can walk
+    /// straight past by opening a second harness in the same folder — and did:
+    /// taking over the only harness in a workspace made the next task frame spawn
+    /// a rival process in the same working tree, two agents editing one repo with
+    /// no mutual exclusion at all. This answers the question that actually
+    /// governs: "may anything start here right now".
+    ///
+    /// A workspace with a person in it is not shared, however idle another
+    /// harness in it looks, so this is consulted *before* reuse rather than after.
+    pub fn operator_hold(&self, cwd: &str) -> Option<SessionRow> {
+        self.inner
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| {
+                s.row.control == HarnessControl::User
+                    && s.row.state.is_running()
+                    && same_workspace(&s.row.cwd, cwd)
+            })
+            .map(|s| s.row.clone())
+    }
+
     /// Who currently holds `id`, if it is a session we know about.
     pub fn control(&self, id: &str) -> Option<HarnessControl> {
         self.inner
@@ -223,4 +249,25 @@ impl PtyManager {
 /// Whether an operator-spawned session has not yet served a real conversation.
 fn is_unassigned_operator_session(row: &SessionRow) -> bool {
     row.user_spawned && row.label.starts_with("you:")
+}
+
+/// Whether two paths name the same working directory.
+///
+/// String equality is not enough here because the two sides arrive by different
+/// routes: a harness the operator started ran its path through `expand_home`,
+/// while a task frame's `cwd` is used verbatim as the orchestrator wrote it. So
+/// `~/work/repo` and `/Users/e/work/repo` are one workspace that compares as
+/// two — and exclusivity that can be defeated by how a path was spelled is not
+/// exclusivity.
+///
+/// Canonicalizes both sides, which also resolves symlinks (on macOS `/tmp` is a
+/// link to `/private/tmp`, so this is load-bearing in tests as well as in the
+/// field). Falls back to a trimmed textual compare when either path cannot be
+/// resolved — a directory that does not exist yet is still worth matching by
+/// name, and failing to canonicalize must not silently drop the hold.
+fn same_workspace(a: &str, b: &str) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a.trim_end_matches('/') == b.trim_end_matches('/'),
+    }
 }

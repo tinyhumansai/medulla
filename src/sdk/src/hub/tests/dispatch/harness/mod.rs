@@ -252,7 +252,7 @@ impl Relay for FakeWorker {
 
 /// A dispatch request the tests mutate per case. `abort_id` mirrors `task_id` so a
 /// test can abort by the same id it dispatched under.
-pub(super) fn req(instruction: &str) -> TaskRequest {
+pub(in crate::hub::tests) fn req(instruction: &str) -> TaskRequest {
     TaskRequest {
         task_id: "t1".to_string(),
         abort_id: "t1".to_string(),

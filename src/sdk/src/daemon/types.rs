@@ -51,6 +51,18 @@ pub(super) const MAX_HEARTBEAT_MS: i64 = 60_000;
 /// task failure — instead of being matched on a duplicated string literal.
 pub const CAPACITY_REJECTION_PREFIX: &str = "daemon at capacity";
 
+/// The leading text of every "an operator is working here" refusal.
+///
+/// Shared with the requesting side (`crate::hub`) for the same reason
+/// [`CAPACITY_REJECTION_PREFIX`] is: backpressure and human occupancy are both
+/// "I did not attempt this", and both have to survive the trip through a
+/// text-only error frame without being recognised by a duplicated literal.
+///
+/// Distinct from backpressure because the two clear on completely different
+/// timescales. A saturated daemon frees up in seconds; a workspace clears when a
+/// person is finished with it.
+pub const HARNESS_HELD_PREFIX: &str = "harness held by operator";
+
 /// A lock-serialized encrypted send: `(to, body) -> ()`. Errors are handled by
 /// the transport (logged), so the runtime never observes a send failure.
 pub type SendFn =

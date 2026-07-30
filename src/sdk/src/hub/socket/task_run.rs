@@ -31,12 +31,25 @@ use super::{first_obj, str_field, wire_task_id};
 /// later" is the one answer that is certainly wrong. medulla bounds the
 /// re-dispatch with its own attempt ceiling and exponential backoff, so this
 /// cannot become a hot loop against a saturated worker.
+/// A workspace an operator is sitting in counts too. Nothing was attempted, and
+/// the harness will be usable again the moment they hand it back — so the task
+/// is deferred, not failed. It carries a `reason` on the wire (see
+/// [`result_frame`]) precisely so the orchestrator can route elsewhere instead
+/// of waiting on a person.
 pub(in crate::hub) fn is_retryable(err: &RunError) -> bool {
     matches!(
         err,
-        RunError::Timeout | RunError::Transport(_) | RunError::Busy(_)
+        RunError::Timeout | RunError::Transport(_) | RunError::Busy(_) | RunError::Held(_)
     )
 }
+
+/// How long the backend is advised to wait before re-dispatching a task that was
+/// refused because a person holds the workspace.
+///
+/// Advisory only, and deliberately coarse: this is a human timescale, not a
+/// queue-depth one. It exists so a held workspace does not turn into a tight
+/// re-dispatch loop against someone who has stepped away from their desk.
+const HELD_RETRY_AFTER_MS: u64 = 60_000;
 
 /// The terminal `medulla:task_result` body for one settled dispatch.
 ///
@@ -61,6 +74,18 @@ pub(in crate::hub) fn result_frame(
                 "inputTokens": outcome.usage.input_tokens,
                 "outputTokens": outcome.usage.output_tokens,
             },
+        }),
+        // A held workspace is the one failure the orchestrator can act on
+        // *specifically*, so it is the one that names itself. `reason` and
+        // `retryAfterMs` are additive and ignorable: a backend that has never
+        // heard of either still reads this as an ordinary retryable failure.
+        Err(err @ RunError::Held(_)) => json!({
+            "taskId": task_id,
+            "ok": false,
+            "error": err.to_string(),
+            "retryable": true,
+            "reason": "harnessHeld",
+            "retryAfterMs": HELD_RETRY_AFTER_MS,
         }),
         Err(err) => json!({
             "taskId": task_id,

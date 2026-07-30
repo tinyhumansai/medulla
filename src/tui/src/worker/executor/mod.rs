@@ -261,6 +261,25 @@ impl PtySessionExecutor {
         options: &RunTaskOptions,
         class: SessionClass,
     ) -> Result<OpenedSession, String> {
+        // Exclusivity, and it comes first. A workspace an operator is working in
+        // is not available to the orchestrator at all — not "reuse nothing in
+        // it", but "start nothing in it". Checked ahead of the reuse branch
+        // below on purpose: a folder with a person in it is not shared, however
+        // idle some other harness sitting in it happens to look.
+        //
+        // Refused with the shared prefix rather than silently routed around, so
+        // the hub can settle it as `RunError::Held` and the orchestrator is told
+        // *why* it cannot work here — a task that vanishes into a retry with no
+        // reason is the failure this replaces.
+        if let Some(held) = self.sessions.operator_hold(&options.cwd) {
+            return Err(format!(
+                "{}: an operator is working in {} ({} session {})",
+                medulla::daemon::HARNESS_HELD_PREFIX,
+                options.cwd,
+                held.provider.as_str(),
+                held.id,
+            ));
+        }
         if class == SessionClass::Unbound {
             // Reuse this peer's session only when it is *idle*. A harness serves
             // one turn at a time: a fan-out that pastes three prompts into one

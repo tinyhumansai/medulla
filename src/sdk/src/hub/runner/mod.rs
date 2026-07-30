@@ -451,6 +451,9 @@ fn settle(
         Ok(Err(msg)) if msg.starts_with(crate::daemon::CAPACITY_REJECTION_PREFIX) => {
             Err(RunError::Busy(msg))
         }
+        Ok(Err(msg)) if msg.starts_with(crate::daemon::HARNESS_HELD_PREFIX) => {
+            Err(RunError::Held(msg))
+        }
         Ok(Err(msg)) => Err(RunError::Worker(msg)),
         Err(_) => Err(RunError::Transport("dispatch waiter dropped".into())),
     }

@@ -153,3 +153,116 @@ fn handover_leaves_a_running_turn_marked_busy() {
 
     manager.close(&id);
 }
+
+/// A session the operator holds, running in `cwd`.
+fn user_sh_in(script: &str, cwd: &std::path::Path) -> LaunchSpec {
+    LaunchSpec {
+        cwd: cwd.to_string_lossy().into_owned(),
+        ..user_sh(script)
+    }
+}
+
+#[test]
+fn operator_hold_reports_the_session_holding_a_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let manager = PtyManager::new();
+    let id = manager.open(user_sh_in("sleep 30", dir.path())).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+
+    let held = manager
+        .operator_hold(&dir.path().to_string_lossy())
+        .expect("a workspace the operator is working in must report its hold");
+    assert_eq!(held.id, id);
+
+    manager.close(&id);
+}
+
+#[test]
+fn operator_hold_ignores_a_session_the_orchestrator_holds() {
+    // The whole point of the check: it must gate on *who holds it*, not on
+    // "is there a harness here". An orchestrator session in a folder is not a
+    // reason to refuse the orchestrator work in that folder.
+    let dir = tempfile::tempdir().unwrap();
+    let manager = PtyManager::new();
+    let spec = LaunchSpec {
+        cwd: dir.path().to_string_lossy().into_owned(),
+        ..sh("sleep 30")
+    };
+    let id = manager.open(spec).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+
+    assert_eq!(manager.operator_hold(&dir.path().to_string_lossy()), None);
+
+    manager.close(&id);
+}
+
+#[test]
+fn operator_hold_ignores_a_workspace_nobody_is_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let manager = PtyManager::new();
+    let id = manager.open(user_sh_in("sleep 30", dir.path())).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+
+    assert_eq!(
+        manager.operator_hold(&other.path().to_string_lossy()),
+        None,
+        "a hold must not leak across workspaces"
+    );
+
+    manager.close(&id);
+}
+
+#[test]
+fn operator_hold_releases_when_the_session_exits() {
+    // A dead harness cannot be handed back, so a hold that outlived its process
+    // would wedge the workspace shut with no way to reopen it.
+    let dir = tempfile::tempdir().unwrap();
+    let manager = PtyManager::new();
+    let id = manager.open(user_sh_in("true", dir.path())).unwrap();
+    wait_for("session exited", || {
+        manager.row(&id).is_some_and(|r| !r.state.is_running())
+    });
+
+    assert_eq!(manager.operator_hold(&dir.path().to_string_lossy()), None);
+
+    manager.close(&id);
+}
+
+#[test]
+fn operator_hold_matches_the_same_directory_written_two_ways() {
+    // The two sides arrive by different routes — an operator-spawned harness had
+    // its path expanded, a task frame's cwd is verbatim — so the hold has to
+    // survive a trailing slash and a symlinked path. Exclusivity that can be
+    // defeated by spelling is not exclusivity.
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("workspace");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.path().join("link-to-workspace");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let manager = PtyManager::new();
+    let id = manager.open(user_sh_in("sleep 30", &real)).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+
+    for spelling in [
+        real.to_string_lossy().into_owned(),
+        format!("{}/", real.to_string_lossy()),
+        link.to_string_lossy().into_owned(),
+    ] {
+        assert!(
+            manager.operator_hold(&spelling).is_some(),
+            "the hold was lost when the path was written as {spelling}"
+        );
+    }
+
+    manager.close(&id);
+}

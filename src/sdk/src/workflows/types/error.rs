@@ -83,6 +83,10 @@ impl From<crate::hub::RunError> for WorkflowError {
             RunError::Aborted => Self::DispatchAborted,
             RunError::Worker(message) => Self::Harness(message),
             RunError::Busy(message) => Self::Unreachable(message),
+            // Same shape as backpressure from a workflow's point of view: the
+            // harness exists and is fine, it simply cannot be reached for this
+            // run. A workflow has no operator to hand anything back to.
+            RunError::Held(message) => Self::Unreachable(message),
             RunError::Transport(message) => Self::Unreachable(message),
         }
     }

@@ -45,7 +45,7 @@ use workflow::{advertise_workflows, handle_workflow_request};
 /// the tests: a second copy of this rule would be free to disagree with the one
 /// actually on the wire.
 #[cfg(test)]
-pub(in crate::hub) use task_run::is_retryable;
+pub(in crate::hub) use task_run::{is_retryable, result_frame};
 
 /// Monotonic suffix making each dispatch's worker-facing task id unique.
 static DISPATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

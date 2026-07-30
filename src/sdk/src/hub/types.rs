@@ -94,7 +94,12 @@ pub struct TaskOutcome {
 }
 
 /// Why a dispatch failed.
+///
+/// Non-exhaustive: this enum grows as the hub learns to tell more kinds of
+/// refusal apart, and each new variant is a fact a caller wants rather than a
+/// breaking change it should have to absorb. Match with a `_` arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RunError {
     /// A liveness bound reaped the dispatch: either the peer never showed any
     /// sign of life within the ack window across every reset+resend attempt, or
@@ -117,6 +122,16 @@ pub enum RunError {
     /// under its own attempt ceiling and backoff instead of turning a "come back
     /// later" into a permanently failed task.
     Busy(String),
+    /// The worker refused because a person is working in that workspace
+    /// (`harness held by operator …`).
+    ///
+    /// Like [`Busy`](Self::Busy) it says nothing about the *task* — nothing was
+    /// attempted — but it does not clear on the same timescale: a saturated
+    /// daemon frees up in seconds, a workspace frees up when a person is done
+    /// with it. Retryable so the orchestrator's own attempt ceiling and backoff
+    /// apply, and reported with a distinct `reason` on the wire so it can prefer
+    /// another host rather than waiting on this one.
+    Held(String),
     /// The send itself failed, or the waiter was dropped (transport-shaped).
     Transport(String),
 }
@@ -128,6 +143,7 @@ impl std::fmt::Display for RunError {
             RunError::Aborted => write!(f, "task aborted by orchestrator"),
             RunError::Worker(m) => write!(f, "worker error: {m}"),
             RunError::Busy(m) => write!(f, "worker busy: {m}"),
+            RunError::Held(m) => write!(f, "harness held by operator: {m}"),
             RunError::Transport(m) => write!(f, "transport error: {m}"),
         }
     }

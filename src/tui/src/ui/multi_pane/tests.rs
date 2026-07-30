@@ -13,7 +13,7 @@ use super::{draw_rows, navigate, sidebar_width, NavAction, NavHits, NavRow};
 #[test]
 fn sidebars_take_only_the_space_their_navigation_needs() {
     assert_eq!(sidebar_width(120, 10), 18);
-    assert_eq!(sidebar_width(120, 100), 30);
+    assert_eq!(sidebar_width(120, 100), 36);
 }
 
 #[test]

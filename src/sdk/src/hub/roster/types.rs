@@ -2,7 +2,13 @@
 #[allow(unused_imports)]
 use super::*;
 /// One worker in the live roster.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Default` exists so callers can spread (`..Default::default()`) rather than
+/// restating every field: this struct grows as the advert learns to carry more,
+/// and each addition should not break every construction site in the tree. The
+/// default worker is not a usable one — `id` and `address` are empty — so it is
+/// a starting point to fill in, never a worker to advertise.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HubWorker {
     /// The `agentId` the backend targets (defaults to the address).
     pub id: String,
@@ -37,6 +43,23 @@ pub struct HubWorker {
     /// `None` for a remote peer whose working directory this hub has no way to
     /// know; the backend then falls back to the worker's probed `capabilities.cwd`.
     pub workspace: Option<String>,
+    /// Who holds this worker's harness right now.
+    ///
+    /// Advertised as `metadata.control`, and **only** when a person holds it:
+    /// absent means the orchestrator has it. Omitting the common case keeps the
+    /// advert byte-stable, which matters because it is re-emitted on every
+    /// roster mutation.
+    pub control: super::super::HandoffControl,
+    /// Why a person holds it, when they said. Rendered as-is beside the hold.
+    pub control_reason: Option<String>,
+    /// Epoch ms the current hold began.
+    pub control_since: Option<i64>,
+    /// The brief from the most recent handback, until it is superseded.
+    ///
+    /// Cleared when the operator takes the harness back: a handoff on a harness
+    /// somebody has re-taken is a stale invitation, and advertising it would have
+    /// the orchestrator plan work into a workspace it cannot enter.
+    pub handoff: Option<super::super::HarnessHandoff>,
 }
 /// The roster shared between the socket layer and the [`HubHandle`].
 pub type SharedRoster = Arc<Mutex<Vec<HubWorker>>>;

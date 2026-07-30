@@ -53,6 +53,33 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
     {
         metadata["workspace"] = json!(workspace);
     }
+    // Who holds the harness, and only when that is a person. Absent means the
+    // orchestrator has it, which is both the common case and the one worth
+    // keeping byte-stable: this advert is re-emitted on every roster mutation,
+    // and a key that flips on each one is a diff nobody can read.
+    if w.control.is_operator() {
+        metadata["control"] = json!(w.control.as_str());
+        if let Some(reason) = w
+            .control_reason
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+        {
+            metadata["controlReason"] = json!(reason);
+        }
+        if let Some(since) = w.control_since {
+            metadata["controlSince"] = json!(since);
+        }
+    }
+    // The brief from the last handback. Carried only while the orchestrator
+    // actually holds the harness: an invitation to continue work in a workspace
+    // the operator has since re-taken is one the orchestrator cannot act on, and
+    // planning against it wastes a pass.
+    if let (false, Some(handoff)) = (w.control.is_operator(), w.handoff.as_ref()) {
+        if let Ok(value) = serde_json::to_value(handoff) {
+            metadata["handoff"] = value;
+        }
+    }
     json!({
         "id": w.id,
         // The name falls back to the id, not to a second constant. `agent_list`

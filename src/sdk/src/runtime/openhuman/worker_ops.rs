@@ -78,6 +78,7 @@ pub(super) async fn apply_worker_op(
                     // A peer added by address: this hub has no idea where it
                     // runs tasks. The backend falls back to its probed cwd.
                     workspace: None,
+                    ..Default::default()
                 })
                 .await
         }

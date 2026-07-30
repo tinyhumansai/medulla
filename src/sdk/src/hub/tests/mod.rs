@@ -7,6 +7,7 @@
 mod activity;
 mod capabilities;
 mod dispatch;
+mod handoff_advert;
 mod held;
 mod roster;
 mod system_info;

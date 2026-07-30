@@ -428,6 +428,7 @@ impl HubHandle {
     }
 }
 
+mod handoff;
 mod types;
 pub(super) use types::HandleWiring;
 pub use types::HubHandle;

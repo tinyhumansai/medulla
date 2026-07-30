@@ -90,6 +90,7 @@ fn worker(id: &str, address: &str, selected: bool) -> medulla::hub::HubWorker {
         label: Some("laptop".to_string()),
         selected,
         workspace: None,
+        ..Default::default()
     }
 }
 

@@ -120,6 +120,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
                 // an operator choice made later, on the Hosts page.
                 roles: Vec::new(),
                 workspace: w.workspace.clone(),
+                ..Default::default()
             })
             .collect(),
     ));

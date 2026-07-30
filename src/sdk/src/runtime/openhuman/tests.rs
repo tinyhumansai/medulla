@@ -401,6 +401,7 @@ fn the_roster_mapping_carries_a_workers_roles_to_the_ui() {
         selected: false,
         roles: vec!["code-reviewer".into(), "test-writer".into()],
         workspace: Some("/work".into()),
+        ..Default::default()
     };
 
     let info = super::worker_ops::hub_worker_to_info(worker, None);

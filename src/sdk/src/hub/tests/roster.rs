@@ -30,6 +30,7 @@ fn worker(id: &str, addr: &str) -> HubWorker {
         label: None,
         selected: false,
         workspace: None,
+        ..Default::default()
     }
 }
 
@@ -340,6 +341,7 @@ fn hw(id: &str, address: &str) -> HubWorker {
         label: None,
         selected: false,
         workspace: None,
+        ..Default::default()
     }
 }
 

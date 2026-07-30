@@ -155,6 +155,13 @@ pub struct MockRuntime {
     /// Scripted feedback board, mutated in place by votes and comments so the
     /// offline demo's controls behave like the real thing.
     pub(super) board: Arc<Mutex<super::feedback::MockBoard>>,
+    /// Handoff briefs this runtime was asked to send.
+    ///
+    /// The briefs themselves, not just that the method was called: what a
+    /// handoff is *for* is the note and the transcript, so a test that could
+    /// only assert "it happened" would pass while the operator's note was
+    /// dropped on the floor.
+    handoffs: Arc<Mutex<Vec<crate::hub::HarnessHandoff>>>,
 }
 
 impl MockRuntime {
@@ -166,6 +173,7 @@ impl MockRuntime {
             tx,
             calls: Arc::new(Mutex::new(Vec::new())),
             board: super::feedback::demo_board(),
+            handoffs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -177,6 +185,16 @@ impl MockRuntime {
     /// The ordered log of runtime methods invoked on this mock. Test seam.
     pub fn recorded_calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// Record a handoff brief this runtime was asked to send.
+    pub(super) fn record_handoff(&self, brief: crate::hub::HarnessHandoff) {
+        self.handoffs.lock().unwrap().push(brief);
+    }
+
+    /// The handoff briefs sent through this mock, in order. Test seam.
+    pub fn recorded_handoffs(&self) -> Vec<crate::hub::HarnessHandoff> {
+        self.handoffs.lock().unwrap().clone()
     }
 
     /// Emit an arbitrary event into the active thread and notify subscribers.

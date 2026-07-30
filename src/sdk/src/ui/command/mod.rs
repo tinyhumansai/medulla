@@ -49,7 +49,11 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
         "resume" => SlashCommand::Resume,
         "harness" => parse_harness(arg),
         "takecontrol" | "take" => SlashCommand::TakeControl,
-        "handoff" | "hand" => SlashCommand::HandOff,
+        // `arg`, not `flag`: a note is prose the orchestrator reads, so its
+        // capitalisation is the operator's to choose.
+        "handoff" | "hand" => SlashCommand::HandOff {
+            note: (!arg.is_empty()).then(|| arg.to_string()),
+        },
         "abort" => SlashCommand::Abort,
         "clear" => SlashCommand::ClearView,
         "help" => SlashCommand::Help,

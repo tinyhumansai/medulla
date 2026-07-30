@@ -131,6 +131,29 @@ impl Runtime for MockRuntime {
         })
     }
 
+    /// Record the brief instead of sending it, and succeed.
+    ///
+    /// The offline demo has no hub, but a handoff that reported failure here
+    /// would make every mocked end-to-end test assert the error path rather than
+    /// the feature.
+    fn hand_off_harness(
+        &self,
+        brief: crate::hub::HarnessHandoff,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        self.record("hand_off_harness");
+        self.record_handoff(brief);
+        Box::pin(async { Ok(()) })
+    }
+
+    fn hold_harness(
+        &self,
+        _workspace: String,
+        _reason: Option<String>,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        self.record("hold_harness");
+        Box::pin(async { Ok(()) })
+    }
+
     fn abort(&self) {
         self.record("abort");
         {

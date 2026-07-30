@@ -205,6 +205,42 @@ pub trait Runtime: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
+    /// Tell the orchestrator a harness has been handed back, with the brief.
+    ///
+    /// An **error** by default rather than a silent success, unlike
+    /// [`watch_task`](Self::watch_task). The whole point of a handoff is that
+    /// the orchestrator is *told*, so a runtime that cannot tell it has to say
+    /// so — an operator who typed a note and got a cheerful acknowledgement,
+    /// with the note going nowhere, is the exact failure this feature exists to
+    /// remove.
+    fn hand_off_harness(
+        &self,
+        _brief: crate::hub::HarnessHandoff,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async {
+            Err(anyhow::anyhow!(
+                "no hub is connected, so no handoff can be sent"
+            ))
+        })
+    }
+
+    /// Tell the orchestrator the operator has taken the harness in `workspace`.
+    ///
+    /// Errors for the same reason [`hand_off_harness`](Self::hand_off_harness)
+    /// does: a takeover the backend never hears about leaves it dispatching into
+    /// a workspace somebody is working in.
+    fn hold_harness(
+        &self,
+        _workspace: String,
+        _reason: Option<String>,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async {
+            Err(anyhow::anyhow!(
+                "no hub is connected, so no hold can be sent"
+            ))
+        })
+    }
+
     /// The managed worker-peer registry snapshot (`worker.list`). Empty when the
     /// runtime has no worker surface.
     fn workers(&self) -> Vec<WorkerInfo> {

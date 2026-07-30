@@ -37,8 +37,14 @@ pub enum SlashCommand {
     },
     /// `/takecontrol` — take the selected harness from the orchestrator.
     TakeControl,
-    /// `/handoff` — give the selected harness back to the orchestrator.
-    HandOff,
+    /// `/handoff [note]` — give the selected harness back to the orchestrator,
+    /// optionally saying what you were in the middle of.
+    HandOff {
+        /// What the operator wants continued, in their words. The single most
+        /// useful thing in a brief: the transcript shows what happened, this
+        /// says what it was *for*.
+        note: Option<String>,
+    },
     /// `/abort` — request cancellation of the running cycle.
     Abort,
     /// `/clear` — reset the view (runtime history is retained).

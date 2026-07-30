@@ -147,7 +147,7 @@ impl App {
         let Some(prompt) = &self.handback_prompt else {
             return;
         };
-        let area = centered(area, 66, 8);
+        let area = centered(area, 72, 12);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -170,12 +170,41 @@ impl App {
         } else {
             "You asked for this harness."
         };
+        // The note line shows a caret only while it is being edited, so the
+        // operator can tell at a glance whether `y` will answer or type.
+        let note = if prompt.editing_note {
+            TLine::from(vec![
+                Span::styled("Note: ", Style::default().fg(self.theme.accent)),
+                Span::raw(prompt.note.text.clone()),
+                Span::styled("█", Style::default().fg(self.theme.accent)),
+            ])
+        } else if prompt.note.text.is_empty() {
+            TLine::from(Span::styled(
+                "Note: (none — press E to say what you were doing)",
+                Style::default().fg(self.theme.dim_border),
+            ))
+        } else {
+            TLine::from(format!("Note: {}", prompt.note.text))
+        };
+        let hint = if prompt.editing_note {
+            "Type your note · [Enter] hand back · [Esc] back to the question"
+        } else {
+            "[Y] hand back · [E] add a note · [N] keep it · [Esc] stay here"
+        };
         let lines = vec![
             TLine::from(how),
             TLine::from("While you hold it, the orchestrator will not dispatch into it."),
             TLine::from(""),
+            // Said plainly, because it leaves the machine: the operator should
+            // know what they are sending before they send it.
             TLine::from(Span::styled(
-                "Hand it back?  [Y] hand back · [N] keep it · [Esc] stay here",
+                "Handing back sends the orchestrator this pane's recent output.",
+                Style::default().fg(self.theme.dim_border),
+            )),
+            note,
+            TLine::from(""),
+            TLine::from(Span::styled(
+                hint,
                 Style::default().add_modifier(Modifier::BOLD),
             )),
         ];

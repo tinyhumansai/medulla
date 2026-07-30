@@ -6,19 +6,25 @@
 //! holds. So spawning one, taking one over, and handing one back are three
 //! spellings of the same state change, and they live together here.
 //!
-//! Everything in this module is synchronous. Opening a PTY and setting a flag
-//! are both immediate, so none of it goes through [`Cmd`](super::types::Cmd) —
-//! the operator gets an answer on the status line in the same keystroke, which
-//! is the whole point of a control handover being *explicit*.
+//! The state changes here are synchronous. Opening a PTY and setting a flag are
+//! both immediate, so the operator gets an answer on the status line in the same
+//! keystroke — which is the whole point of a control handover being *explicit*.
+//!
+//! Telling the *orchestrator* is not immediate, so that part is queued as a
+//! [`Cmd`](super::types::Cmd) and travels off-thread. Control flips locally
+//! first and the brief follows: a handback gated on a socket round-trip would
+//! fail whenever the uplink is down, which is exactly when an operator most
+//! wants to let go of a harness.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use medulla::tinyplace::HarnessProvider;
 
+use crate::ui::composer::Draft;
 use crate::ui::harness_pane::HarnessChoice;
 use crate::worker::pty::HarnessControl;
 
 use super::types::{
-    tab_pos, App, HandbackPolicy, HandbackPrompt, HarnessPicker, HarnessPickerStep,
+    tab_pos, App, Cmd, HandbackPolicy, HandbackPrompt, HarnessPicker, HarnessPickerStep,
 };
 
 impl App {
@@ -118,20 +124,25 @@ impl App {
             return;
         }
         harnesses.set_control(&session, HarnessControl::User);
+        if let Some(cwd) = harnesses.sessions.row(&session).map(|row| row.cwd) {
+            self.pending_cmds.push_back(Cmd::HoldHarness {
+                workspace: cwd,
+                reason: None,
+            });
+        }
         self.set_status("You have this harness · the orchestrator will not dispatch into it");
     }
 
-    /// Give the selected harness back to the orchestrator.
-    pub(crate) fn hand_harness_back(&mut self) {
-        let Some((harnesses, session)) = self.selected_harness() else {
+    /// Give the selected harness back to the orchestrator, with an optional note.
+    pub(crate) fn hand_harness_back(&mut self, note: Option<String>) {
+        let Some((harnesses, session)) = self.handoff_target() else {
             return;
         };
         if harnesses.control(&session) == Some(HarnessControl::Orchestrator) {
             self.set_status("The orchestrator already has this harness");
             return;
         }
-        harnesses.set_control(&session, HarnessControl::Orchestrator);
-        self.set_status("Handed back · the orchestrator may dispatch into it again");
+        self.hand_back_session(&session, note);
     }
 
     /// Toggle who holds the selected harness — the `Ctrl-G` shortcut.
@@ -144,9 +155,55 @@ impl App {
             return;
         };
         match harnesses.control(&session) {
-            Some(HarnessControl::User) => self.hand_harness_back(),
+            Some(HarnessControl::User) => self.hand_back_session(&session, None),
             Some(HarnessControl::Orchestrator) => self.take_harness_control(),
             None => self.set_status("That harness is gone"),
+        }
+    }
+
+    /// The harness `/handoff` means, without depending on a render having run.
+    ///
+    /// [`selected_harness`](Self::selected_harness) reads `harness_pane_session`,
+    /// which is written inside the Agents pane's draw and cleared at the top of
+    /// every frame. So `/handoff` typed from any other tab reported "no harness
+    /// on this row" while the operator was demonstrably holding one — and with a
+    /// note argument that is worse, because they have just typed a sentence that
+    /// is then thrown away.
+    ///
+    /// In order: the attached session (unambiguous — the keyboard is in it), the
+    /// harness the last frame resolved, then the single running harness the
+    /// operator holds. Ambiguity is reported, never guessed: handing back the
+    /// wrong harness puts an agent into a workspace somebody is still using.
+    fn handoff_target(&mut self) -> Option<(crate::ui::harness_pane::LocalHarnesses, String)> {
+        let Some(harnesses) = self.harnesses.clone() else {
+            self.set_status("This device is not hosting, so it has no harnesses");
+            return None;
+        };
+        if let Some(session) = self.harness_focus.attached_to() {
+            return Some((harnesses, session.to_string()));
+        }
+        if let Some(session) = self.harness_pane_session.clone() {
+            return Some((harnesses, session));
+        }
+        let held: Vec<String> = harnesses
+            .sessions
+            .rows()
+            .into_iter()
+            .filter(|row| row.control == HarnessControl::User && row.state.is_running())
+            .map(|row| row.id)
+            .collect();
+        match held.len() {
+            0 => {
+                self.set_status("You are not holding any harness");
+                None
+            }
+            1 => Some((harnesses, held[0].clone())),
+            n => {
+                self.set_status(format!(
+                    "You hold {n} harnesses — select one in Agents and press Ctrl-G"
+                ));
+                None
+            }
         }
     }
 
@@ -184,7 +241,7 @@ impl App {
         }
         match self.handback_policy {
             HandbackPolicy::Always => {
-                self.hand_back_session(session);
+                self.hand_back_session(session, None);
                 true
             }
             HandbackPolicy::Never => {
@@ -197,19 +254,97 @@ impl App {
                 self.handback_prompt = Some(HandbackPrompt {
                     session: session.to_string(),
                     took_control: self.harness_took_control,
+                    note: Draft::default(),
+                    editing_note: false,
                 });
                 false
             }
         }
     }
 
-    /// Hand `session` back without touching the cursor, for the release path.
-    pub(super) fn hand_back_session(&mut self, session: &str) {
-        if let Some(harnesses) = self.harnesses.clone() {
-            harnesses.set_control(session, HarnessControl::Orchestrator);
+    /// The note typed into the handback prompt, when it is not blank.
+    fn handback_note(&self) -> Option<String> {
+        self.handback_prompt
+            .as_ref()
+            .map(|prompt| prompt.note.text.trim().to_string())
+            .filter(|note| !note.is_empty())
+    }
+
+    /// Apply one keystroke to the handback prompt's note.
+    ///
+    /// A single line, so it uses the shared draft primitives directly rather
+    /// than the full composer: there is nothing here to submit, wrap, or
+    /// history-scroll.
+    fn edit_handback_note(&mut self, code: KeyCode) {
+        let Some(prompt) = self.handback_prompt.as_mut() else {
+            return;
+        };
+        let draft = &mut prompt.note;
+        match code {
+            KeyCode::Char(c) => {
+                *draft = crate::ui::composer::insert_at(&draft.text, draft.cursor, &c.to_string());
+            }
+            KeyCode::Backspace => {
+                *draft = crate::ui::composer::delete_before(&draft.text, draft.cursor);
+            }
+            KeyCode::Left => draft.cursor = draft.cursor.saturating_sub(1),
+            KeyCode::Right => draft.cursor = (draft.cursor + 1).min(draft.text.chars().count()),
+            _ => {}
         }
+    }
+
+    /// Hand `session` back and queue its brief. Every handback path ends here.
+    ///
+    /// The order matters. The transcript is read while the harness is still
+    /// ours; control flips next, so the operator gets an answer on the same
+    /// keystroke; the brief is queued last and travels asynchronously.
+    ///
+    /// That ordering means the orchestrator can dispatch into the harness before
+    /// it has read the brief, and that is the right trade. The brief is
+    /// *context*, not permission — gating the flip on a socket round-trip would
+    /// make handing a harness back fail whenever the uplink is down, which is
+    /// exactly when an operator most wants to let go of one.
+    pub(super) fn hand_back_session(&mut self, session: &str, note: Option<String>) {
+        let Some(harnesses) = self.harnesses.clone() else {
+            return;
+        };
+        // Read the row first: a session that has already gone is not handed
+        // back, and flipping control on a corpse would advertise a harness that
+        // does not exist.
+        let Some(row) = harnesses.sessions.row(session) else {
+            self.set_status("That harness is gone");
+            return;
+        };
+        let lines = harnesses
+            .sessions
+            .tail_lines(session, medulla::hub::handoff::TRANSCRIPT_LINES);
+
+        harnesses.set_control(session, HarnessControl::Orchestrator);
         self.harness_took_control = false;
-        self.set_status("Handed back · the orchestrator may dispatch into it again");
+
+        let brief = medulla::hub::handoff::normalize(
+            medulla::hub::HarnessHandoff {
+                // Per handback *event*, not per session: a second handback of the
+                // same harness is new work, and reusing the id would have the
+                // orchestrator ignore it as something it already picked up.
+                id: format!("{}-{}", row.id, medulla::clock::now_millis()),
+                at: medulla::clock::now_millis(),
+                session_id: row.id.clone(),
+                harness_session_id: row.session_id.clone(),
+                provider: row.provider.as_str().to_string(),
+                workspace_path: row.cwd.clone(),
+                // Filled off-thread: reading them shells out to git.
+                branch: None,
+                project: None,
+                note,
+                transcript: String::new(),
+                transcript_truncated: false,
+            },
+            &lines,
+        );
+        self.pending_cmds
+            .push_back(Cmd::HandOffHarness(Box::new(brief)));
+        self.set_status("Handed back · sending the orchestrator your brief");
     }
 }
 
@@ -320,10 +455,38 @@ impl App {
             return;
         };
         let session = prompt.session.clone();
+        // While the note is being typed, every key is text. `y` and `n` have to
+        // keep meaning yes and no, so an operator whose note begins "no, the
+        // migration…" must not have the first letter answer for them.
+        if prompt.editing_note {
+            match code {
+                KeyCode::Enter => {
+                    let note = self.handback_note();
+                    self.handback_prompt = None;
+                    self.hand_back_session(&session, note);
+                    self.release_harness();
+                }
+                // Back to the question, keeping what was typed: an operator who
+                // pressed Escape meant "stop typing", not "discard my sentence".
+                KeyCode::Esc => {
+                    if let Some(prompt) = self.handback_prompt.as_mut() {
+                        prompt.editing_note = false;
+                    }
+                }
+                _ => self.edit_handback_note(code),
+            }
+            return;
+        }
         match code {
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                if let Some(prompt) = self.handback_prompt.as_mut() {
+                    prompt.editing_note = true;
+                }
+            }
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                let note = self.handback_note();
                 self.handback_prompt = None;
-                self.hand_back_session(&session);
+                self.hand_back_session(&session, note);
                 self.release_harness();
             }
             KeyCode::Char('n') | KeyCode::Char('N') => {

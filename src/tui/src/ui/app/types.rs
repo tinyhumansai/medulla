@@ -399,6 +399,19 @@ pub enum Cmd {
         /// The `(worker address, task id)` to start streaming, if any.
         start: Option<(String, String)>,
     },
+    /// Push a handoff brief for a harness the operator just gave back.
+    ///
+    /// Off the render thread because it does two things that must not block a
+    /// frame: shells out to `git` for the branch, and awaits a socket emit.
+    /// Arrives with `branch`/`project` unset — the dispatcher fills them.
+    HandOffHarness(Box<medulla::hub::HarnessHandoff>),
+    /// Tell the orchestrator the operator has taken the harness in a workspace.
+    HoldHarness {
+        /// The workspace being taken.
+        workspace: String,
+        /// Why, when the operator said.
+        reason: Option<String>,
+    },
     /// Fetch account-level usage from the backend for the Usage tab.
     LoadUsage,
     /// Load a page of the feedback board for the Feedback surface.
@@ -595,6 +608,19 @@ pub(super) struct HandbackPrompt {
     /// `/takecontrol`. An explicit take is a decision, so the prompt says so
     /// rather than implying the operator got here by accident.
     pub(super) took_control: bool,
+    /// What the operator wants continued, typed into the prompt.
+    ///
+    /// This is the moment they actually have the context — they are leaving the
+    /// harness *now* — so it is the one place worth asking. `/handoff <note>`
+    /// exists for the operator who already knows; this is for the one who is
+    /// only reminded by being asked.
+    pub(super) note: crate::ui::composer::Draft,
+    /// Whether keystrokes are going into the note rather than answering.
+    ///
+    /// Modal because `y`/`n` have to keep meaning yes and no: an operator who
+    /// starts typing a note that begins with "no, ..." must not have the first
+    /// letter answer the question for them.
+    pub(super) editing_note: bool,
 }
 
 /// What to do when the operator releases a harness they hold.
@@ -988,6 +1014,16 @@ pub struct App {
     /// second was a decision, and re-asking about it as though it were an
     /// accident is how a confirmation becomes noise.
     pub(super) harness_took_control: bool,
+    /// Commands raised by synchronous input handlers, drained by the event loop.
+    ///
+    /// The key and mouse handlers that move harness control cannot return a
+    /// [`Cmd`] — `handle_handback_key` returns `()`, `handle_harness_key`
+    /// returns `bool`, and the mouse path returns nothing — and threading an
+    /// `Option<Cmd>` back through all three would be a wide, test-breaking
+    /// change to say one thing. So they push here instead, and the loop drains
+    /// it right after the event that produced it. Commands run in submission
+    /// order.
+    pub(super) pending_cmds: std::collections::VecDeque<Cmd>,
     /// Whether operator-started harnesses launch with the permission-bypass
     /// flag, from `[harness].skipPermissions`.
     pub(super) harness_skip_permissions: bool,

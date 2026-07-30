@@ -346,7 +346,7 @@ impl App {
                 self.start_harness_command(provider.as_deref(), path.as_deref());
             }
             SlashCommand::TakeControl => self.take_harness_control(),
-            SlashCommand::HandOff => self.hand_harness_back(),
+            SlashCommand::HandOff { note } => self.hand_harness_back(note),
             SlashCommand::Abort => {
                 self.runtime.abort();
                 self.set_status("Abort requested");

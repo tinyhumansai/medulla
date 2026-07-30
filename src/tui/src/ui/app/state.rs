@@ -148,6 +148,7 @@ impl App {
             help_scroll: 0,
             handback_policy,
             harness_took_control: false,
+            pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,
         }
@@ -355,6 +356,15 @@ impl App {
     }
 
     /// Set the status-line text.
+    /// Take the next command raised by a synchronous handler, if any.
+    ///
+    /// The event loop drains this after each input event. See
+    /// [`pending_cmds`](super::types::App::pending_cmds) for why the queue
+    /// exists at all.
+    pub fn take_pending_cmd(&mut self) -> Option<Cmd> {
+        self.pending_cmds.pop_front()
+    }
+
     pub fn set_status(&mut self, s: impl Into<String>) {
         self.status = s.into();
     }

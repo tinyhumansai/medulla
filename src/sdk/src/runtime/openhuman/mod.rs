@@ -429,6 +429,38 @@ impl Runtime for OpenHumanRuntime {
             .unwrap_or_default()
     }
 
+    fn hand_off_harness(
+        &self,
+        brief: crate::hub::HarnessHandoff,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        let hub = self.hub();
+        Box::pin(async move {
+            let Some(hub) = hub else {
+                return Err(anyhow::anyhow!(
+                    "no hub is connected, so the orchestrator cannot be sent your brief"
+                ));
+            };
+            hub.hand_off_harness(brief).await
+        })
+    }
+
+    fn hold_harness(
+        &self,
+        workspace: String,
+        reason: Option<String>,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        let hub = self.hub();
+        Box::pin(async move {
+            let Some(hub) = hub else {
+                return Err(anyhow::anyhow!(
+                    "no hub is connected, so the orchestrator cannot be told you took this harness"
+                ));
+            };
+            hub.hold_harness(&workspace, reason, crate::clock::now_millis())
+                .await
+        })
+    }
+
     fn watch_task(
         &self,
         worker: String,

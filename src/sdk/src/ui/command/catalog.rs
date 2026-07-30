@@ -85,8 +85,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "handoff",
         aliases: &["hand"],
-        args: "",
-        description: "Give this harness back to the orchestrator",
+        args: "[note]",
+        description: "Give this harness back, with a note on what to continue",
     },
     CommandSpec {
         name: "abort",

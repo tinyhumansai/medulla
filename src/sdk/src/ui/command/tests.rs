@@ -189,6 +189,32 @@ fn an_unknown_harness_provider_is_a_usage_error_not_a_default() {
 fn control_handover_has_both_a_long_and_a_short_spelling() {
     assert_eq!(parse("/takecontrol"), Some(SlashCommand::TakeControl));
     assert_eq!(parse("/take"), Some(SlashCommand::TakeControl));
-    assert_eq!(parse("/handoff"), Some(SlashCommand::HandOff));
-    assert_eq!(parse("/hand"), Some(SlashCommand::HandOff));
+    assert_eq!(
+        parse("/handoff"),
+        Some(SlashCommand::HandOff { note: None })
+    );
+    assert_eq!(parse("/hand"), Some(SlashCommand::HandOff { note: None }));
+}
+
+#[test]
+fn handoff_takes_an_optional_note() {
+    // The note is prose the orchestrator reads, so it keeps the operator's own
+    // capitalisation — unlike every flag-shaped argument, which is lowercased.
+    assert_eq!(
+        parse("/handoff Migration is half applied, tests RED"),
+        Some(SlashCommand::HandOff {
+            note: Some("Migration is half applied, tests RED".to_string())
+        })
+    );
+    assert_eq!(
+        parse("/hand take it from here"),
+        Some(SlashCommand::HandOff {
+            note: Some("take it from here".to_string())
+        })
+    );
+    // Whitespace is not a note.
+    assert_eq!(
+        parse("/handoff    "),
+        Some(SlashCommand::HandOff { note: None })
+    );
 }

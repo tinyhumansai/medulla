@@ -120,3 +120,61 @@ async fn a_step_that_names_its_own_harness_overrides_the_workflow_s() {
     // The workflow's Codex model must not follow the step onto Claude Code.
     assert_eq!(seen[0].model, None);
 }
+
+#[tokio::test]
+async fn a_sub_workflow_s_own_defaults_reach_its_agent_step() {
+    // Workflow A names Claude; workflow B, which A invokes as a sub_workflow,
+    // names Codex for itself. B's own step must run on Codex — a model chosen
+    // for B is wrong handed to A's harness, and the reverse is just as wrong.
+    let harness = Harness::new();
+    harness.install(
+        &json!({
+            "id": "child",
+            "name": "Child",
+            "defaults": { "harness": "codex", "model": "gpt-5-codex" },
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "work", "kind": "agent", "name": "Work",
+                  "config": { "prompt": "child work" } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "work" }]
+        })
+        .to_string(),
+        "child",
+    );
+    harness.install(
+        &json!({
+            "id": "parent",
+            "name": "Parent",
+            "defaults": { "harness": "claude", "model": "claude-sonnet" },
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "sw", "kind": "sub_workflow", "name": "Invoke child",
+                  "config": { "workflow_id": "child" } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "sw" }]
+        })
+        .to_string(),
+        "parent",
+    );
+    let dispatch = Arc::new(StubDispatch::default());
+
+    run_workflow(
+        harness.context(dispatch.clone()),
+        "parent",
+        "run-parent",
+        json!({}),
+    )
+    .await
+    .expect("runs");
+
+    let seen = dispatch.seen.lock().unwrap();
+    assert_eq!(
+        seen[0].provider,
+        Some(crate::tinyplace::HarnessProvider::Codex),
+        "the child's own defaults, not the parent's, must reach its step"
+    );
+    assert_eq!(seen[0].model.as_deref(), Some("gpt-5-codex"));
+}

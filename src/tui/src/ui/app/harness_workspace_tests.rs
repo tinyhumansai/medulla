@@ -36,6 +36,14 @@ fn known_workspace_basename_prefixes_beat_filesystem_duplicates() {
 }
 
 #[test]
+fn loose_known_matches_do_not_beat_concrete_folder_matches() {
+    let random_parent = match_score("/tmp/.tmpbQM6Hg", "pb").unwrap();
+    let project_beta = fuzzy_subsequence_score("project-beta", "pb").unwrap() + 5;
+
+    assert!(project_beta < random_parent);
+}
+
+#[test]
 fn registered_relative_workspace_resolves_from_process_directory() {
     let root = tempfile::tempdir().unwrap();
     let process_dir = root.path().join("work");

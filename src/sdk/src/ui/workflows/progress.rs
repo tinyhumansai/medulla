@@ -17,7 +17,7 @@
 //! [`progress_tests`](mod@self) round-trips a real tool-call event through both
 //! so the two cannot drift apart silently.
 
-use crate::daemon::{TOOL_CALL_ID_SEPARATOR, TOOL_PREFIX};
+use crate::daemon::{THINKING_PREFIX, TOOL_CALL_ID_SEPARATOR, TOOL_PREFIX};
 
 /// What a progress frame turns out to be.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +38,8 @@ pub enum Progress {
         /// Stable provider call id, when the producer supplied one.
         call_id: Option<String>,
     },
+    /// A streamed fragment of provider-emitted reasoning.
+    Thinking(String),
     /// Anything else — thinking, writing, a provider's own wording.
     Status(String),
 }
@@ -68,6 +70,9 @@ pub fn classify(frame: &str) -> Progress {
             detail: detail.trim_start_matches(" · ").trim().to_string(),
             call_id,
         };
+    }
+    if let Some(fragment) = frame.strip_prefix(THINKING_PREFIX) {
+        return Progress::Thinking(fragment.to_string());
     }
     match frame.strip_prefix(TOOL_PREFIX) {
         // A bare prefix with nothing after it is not a tool call worth a line of

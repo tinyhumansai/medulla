@@ -334,8 +334,10 @@ fn redact_source(source: &str) -> String {
     source
         .lines()
         .map(|line| {
-            let (redacted, count) = medulla::history_upload::redact_text(line);
-            let visible = if count == 0 && credential_shaped_source(line) {
+            let (redacted, _) = medulla::history_upload::redact_text(line);
+            // Recheck what remains: one recognized secret must not mask a
+            // second credential form the structured scanner cannot edit.
+            let visible = if credential_shaped_source(&redacted) {
                 "[credential-bearing source redacted]".to_string()
             } else {
                 redacted
@@ -372,11 +374,7 @@ fn credential_shaped_source(line: &str) -> bool {
 fn redact_source_urls(source: &str) -> String {
     let mut output = String::with_capacity(source.len());
     let mut rest = source;
-    while let Some(start) = ["https://", "http://"]
-        .iter()
-        .filter_map(|scheme| rest.find(scheme))
-        .min()
-    {
+    while let Some(start) = next_url_start(rest) {
         output.push_str(&rest[..start]);
         let url = &rest[start..];
         let end = url
@@ -389,6 +387,33 @@ fn redact_source_urls(source: &str) -> String {
     }
     output.push_str(rest);
     output
+}
+
+/// Find a URI scheme without assuming lowercase HTTP spelling.
+fn next_url_start(source: &str) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut search_from = 0;
+    while let Some(relative) = source[search_from..].find("://") {
+        let marker = search_from + relative;
+        let mut start = marker;
+        while start > 0
+            && bytes[start - 1].is_ascii()
+            && (bytes[start - 1].is_ascii_alphanumeric()
+                || matches!(bytes[start - 1], b'+' | b'-' | b'.'))
+        {
+            start -= 1;
+        }
+        let scheme = &source[start..marker];
+        if scheme
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+        {
+            return Some(start);
+        }
+        search_from = marker + 3;
+    }
+    None
 }
 
 /// Copy an object except for keys already represented in its headline.

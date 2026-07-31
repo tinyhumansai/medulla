@@ -63,21 +63,33 @@ fn shell_tool_steps_redact_credentials_before_highlighting() {
             "slug": "medulla:shell",
             "args": {
                 "language": "shell",
-                "script": "curl -H 'Authorization: Basic dXNlcjpwYXNz' https://example.test\nPASSWORD=short\ncurl https://user:pass@example.test/hook?x=private\necho visible"
+                "script": "curl -H 'Authorization: Basic dXNlcjpwYXNz' https://example.test\nPASSWORD=short\nAPI_KEY=abcdefgh curl -H 'Authorization: Basic bWl4ZWQtc2VjcmV0' https://example.test\ncurl HTTPS://upper:private@example.test/upper?x=private\npsql postgres://dbuser:dbpass@db.example.test/app\necho visible"
             }
         }),
         100,
         &AgentDefaults::default(),
     ));
 
-    for secret in ["dXNlcjpwYXNz", "short", "user:pass", "x=private"] {
+    for secret in [
+        "dXNlcjpwYXNz",
+        "short",
+        "abcdefgh",
+        "bWl4ZWQtc2VjcmV0",
+        "upper:private",
+        "x=private",
+        "dbuser:dbpass",
+    ] {
         assert!(!preview.contains(secret), "{preview}");
     }
     assert!(
         preview.contains("credential-bearing source redacted"),
         "{preview}"
     );
-    assert!(preview.contains("https://example.test/hook"), "{preview}");
+    assert!(preview.contains("HTTPS://example.test/upper"), "{preview}");
+    assert!(
+        preview.contains("postgres://db.example.test/app"),
+        "{preview}"
+    );
     assert!(preview.contains("echo visible"), "{preview}");
 }
 

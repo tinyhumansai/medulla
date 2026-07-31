@@ -45,20 +45,19 @@ fn a_tool_call_frame_is_recognised_as_the_call_it_describes() {
 fn the_chatter_around_a_tool_call_stays_status() {
     // These are the frames that age out of the transcript. Misreading any of
     // them as a tool call would put permanent `⏺` lines in the scrollback.
-    for (kind, payload) in [
-        ("agent_thinking", json!({ "text": "hmm" })),
-        ("agent_message", json!({ "text": "done" })),
-    ] {
-        let event = HarnessEvent {
-            kind: kind.to_string(),
-            payload,
-            ..Default::default()
-        };
-        assert!(
-            matches!(round_trip(&event), Progress::Status(_)),
-            "{kind} should not read as a tool call"
-        );
-    }
+    let message = HarnessEvent {
+        kind: "agent_message".to_string(),
+        payload: json!({ "text": "done" }),
+        ..Default::default()
+    };
+    assert!(matches!(round_trip(&message), Progress::Status(_)));
+
+    let thinking = HarnessEvent {
+        kind: "agent_thinking".to_string(),
+        payload: json!({ "text": "hmm" }),
+        ..Default::default()
+    };
+    assert_eq!(round_trip(&thinking), Progress::Thinking("hmm".to_string()));
 }
 
 #[test]

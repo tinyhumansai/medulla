@@ -10,13 +10,14 @@ use crate::daemon::{status_detail, work_detail, DaemonRuntime, NowFn};
 use crate::tinyplace::{AgentCapabilities, HarnessEvent, TaskFrameKind};
 
 use super::{
-    base_config, capabilities_frame, counting_capability_runner, decoded_frames, quick_tool_runner,
-    recording_send, status_runner, task_frame, tool_call_event,
+    base_config, capabilities_frame, chatter_status_runner, counting_capability_runner,
+    decoded_frames, quick_thinking_runner, quick_tool_runner, recording_send, status_runner,
+    task_frame, tool_call_event,
 };
 
 #[tokio::test]
 async fn throttles_status_frames() {
-    let run_task = status_runner(3);
+    let run_task = chatter_status_runner(3);
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(base_config(), run_task, send);
 
@@ -52,6 +53,39 @@ async fn throttles_status_frames() {
 }
 
 #[tokio::test]
+async fn flushes_final_thinking_snapshot_after_throttling() {
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), quick_thinking_runner(), send);
+    let seq = Arc::new(vec![10_000i64, 11_000]);
+    let index = Arc::new(AtomicUsize::new(0));
+    let now: NowFn = Arc::new(move || {
+        let position = index.fetch_add(1, Ordering::SeqCst);
+        *seq.get(position).unwrap_or(seq.last().unwrap())
+    });
+
+    let runtime = runtime.with_now(now);
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
+    runtime.idle().await;
+
+    let statuses = decoded_frames(&recorded)
+        .into_iter()
+        .filter(|frame| frame.kind == TaskFrameKind::Status)
+        .map(|frame| frame.text)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        statuses,
+        [
+            "thinking · checking",
+            "thinking · checking the final result"
+        ]
+    );
+}
+
+#[tokio::test]
 async fn tool_settlements_bypass_status_throttling() {
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(base_config(), quick_tool_runner(), send);
@@ -80,6 +114,36 @@ async fn tool_settlements_bypass_status_throttling() {
     assert_eq!(statuses.len(), 2, "{statuses:?}");
     assert!(statuses[0].starts_with("running Bash"), "{statuses:?}");
     assert!(statuses[1].starts_with("tool completed"), "{statuses:?}");
+}
+
+#[tokio::test]
+async fn tool_call_details_bypass_status_throttling() {
+    let run_task = status_runner(2);
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+
+    // The second call represents ACP enriching the same call with raw input.
+    // Both must reach the copilot even though they land inside the 4s window.
+    let seq = Arc::new(vec![10_000i64, 11_000]);
+    let index = Arc::new(AtomicUsize::new(0));
+    let now: NowFn = Arc::new(move || {
+        let position = index.fetch_add(1, Ordering::SeqCst);
+        *seq.get(position).unwrap_or(seq.last().unwrap())
+    });
+
+    let runtime = runtime.with_now(now);
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
+    runtime.idle().await;
+
+    let statuses = decoded_frames(&recorded)
+        .into_iter()
+        .filter(|frame| frame.kind == TaskFrameKind::Status)
+        .collect::<Vec<_>>();
+    assert_eq!(statuses.len(), 2, "{statuses:?}");
 }
 
 #[tokio::test]
@@ -183,6 +247,20 @@ async fn status_detail_maps_event_kinds() {
         status_detail(&terminal).as_deref(),
         Some("running Terminal · $ cargo test --workspace cargo clippy\u{1f}c2")
     );
+    let terminal_without_input = HarnessEvent {
+        kind: "tool_call".to_string(),
+        payload: json!({
+            "call_id": "c2-pending",
+            "tool_name": "execute",
+            "tool_kind": "shell",
+            "display": "Terminal"
+        }),
+        ..Default::default()
+    };
+    assert_eq!(
+        status_detail(&terminal_without_input).as_deref(),
+        Some("running Terminal\u{1f}c2-pending")
+    );
     let secret_command = HarnessEvent {
         kind: "tool_call".to_string(),
         payload: json!({
@@ -246,7 +324,40 @@ async fn status_detail_maps_event_kinds() {
         payload: json!({ "text": "hmm" }),
         ..Default::default()
     };
-    assert_eq!(status_detail(&thinking).as_deref(), Some("thinking"));
+    assert_eq!(status_detail(&thinking).as_deref(), Some("thinking · hmm"));
+    let empty_thinking = HarnessEvent {
+        payload: json!({ "text": " \n\t" }),
+        ..thinking.clone()
+    };
+    assert_eq!(status_detail(&empty_thinking).as_deref(), Some("thinking"));
+    let secret_thinking = HarnessEvent {
+        payload: json!({ "text": "use sk-abcdefghijklmnop0123456789 now" }),
+        ..thinking.clone()
+    };
+    assert_eq!(
+        status_detail(&secret_thinking).as_deref(),
+        Some("thinking · use [REDACTED] now")
+    );
+    let basic_auth_thinking = HarnessEvent {
+        payload: serde_json::json!({
+            "text": "trying Authorization: Basic ZGJ1c2VyOmRicGFzcw=="
+        }),
+        ..thinking.clone()
+    };
+    assert_eq!(
+        status_detail(&basic_auth_thinking).as_deref(),
+        Some("thinking · [credential redacted]")
+    );
+    let userinfo_thinking = HarnessEvent {
+        payload: serde_json::json!({
+            "text": "connecting to postgres://dbuser:dbpass@host/db"
+        }),
+        ..thinking.clone()
+    };
+    assert_eq!(
+        status_detail(&userinfo_thinking).as_deref(),
+        Some("thinking · [credential redacted]")
+    );
 
     let message = HarnessEvent {
         kind: "agent_message".to_string(),

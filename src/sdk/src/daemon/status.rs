@@ -13,6 +13,8 @@ use crate::tinyplace::{HarnessEvent, HarnessEventKind, ToolCallPayload, ToolResu
 /// ([`crate::ui::workflows::progress`]), and a producer that reworded this
 /// without the reader following would silently stop rendering tool calls.
 pub const TOOL_PREFIX: &str = "running ";
+/// Prefix for provider-emitted reasoning text forwarded to the copilot.
+pub const THINKING_PREFIX: &str = "thinking · ";
 /// Internal separator carrying a tool call id through the legacy text channel.
 pub(crate) const TOOL_CALL_ID_SEPARATOR: char = '\u{1f}';
 
@@ -27,7 +29,17 @@ pub fn status_detail(event: &HarnessEvent) -> Option<String> {
         HarnessEventKind::ToolResult(payload) => {
             Some(tag_call_id(tool_result_detail(&payload), &payload.call_id))
         }
-        HarnessEventKind::AgentThinking(_) => Some("thinking".to_string()),
+        HarnessEventKind::AgentThinking(payload) => {
+            // Reasoning may echo material the harness just read. Status frames
+            // cross the daemon boundary and can be persisted, so scrub the
+            // complete text before making it compact.
+            let text = safe_reasoning(&payload.text);
+            Some(if text.is_empty() {
+                "thinking".to_string()
+            } else {
+                cap(&format!("{THINKING_PREFIX}{text}"), 800)
+            })
+        }
         HarnessEventKind::AgentMessage(_) => Some("writing response".to_string()),
         HarnessEventKind::Status(payload) => {
             let detail = if payload.detail.is_empty() {
@@ -77,7 +89,9 @@ fn tool_call_detail(payload: &ToolCallPayload) -> String {
         .or_else(|| scalar_at(input, &["url", "uri"]).map(safe_url));
     match detail {
         Some(detail) if !detail.is_empty() => cap(&format!("{title} · {detail}"), 180),
-        _ if !payload.display.trim().is_empty() => {
+        _ if !payload.display.trim().is_empty()
+            && !payload.display.trim().eq_ignore_ascii_case(&title) =>
+        {
             cap(&format!("{title}: {}", one_line(&payload.display)), 180)
         }
         _ => title,
@@ -103,6 +117,9 @@ fn tool_title(payload: &ToolCallPayload) -> String {
     let name = payload.tool_name.trim();
     match (name, payload.tool_kind.as_str()) {
         ("execute", _) | ("", "shell") => "Terminal".to_string(),
+        ("", _) if scalar_at(&payload.input, &["command", "cmd", "script"]).is_some() => {
+            "Terminal".to_string()
+        }
         ("read", _) | (_, "file_read") => "Read".to_string(),
         ("write", _) | (_, "file_write") => "Write".to_string(),
         ("edit", _) | (_, "edit") => "Edit".to_string(),
@@ -148,6 +165,32 @@ fn safe_command(command: &str) -> String {
         "[credential redacted]".to_string()
     } else {
         command
+    }
+}
+
+/// Scrub reasoning before it crosses the daemon boundary.
+///
+/// The history scrubber handles known token formats and assignments. This
+/// second pass covers credential-bearing URLs and authorization forms that are
+/// unsafe even when their secret does not match a known token shape.
+fn safe_reasoning(reasoning: &str) -> String {
+    one_line(&redact_reasoning(reasoning))
+}
+
+/// Redact reasoning while preserving its whitespace for streamed accumulation.
+///
+/// Providers must call this before bounding a cumulative snapshot: truncating
+/// raw text first can remove the prefix that makes a credential detectable.
+pub(crate) fn redact_reasoning(reasoning: &str) -> String {
+    let (redacted, _) = crate::history_upload::redact_text(reasoning);
+    if credential_shaped(&redacted)
+        || redacted.split_whitespace().any(|part| {
+            part.contains("://") && (has_url_userinfo(part) || part.contains(['?', '#']))
+        })
+    {
+        "[credential redacted]".to_string()
+    } else {
+        redacted
     }
 }
 

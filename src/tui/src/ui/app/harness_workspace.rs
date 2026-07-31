@@ -9,6 +9,7 @@ use super::types::{App, HarnessPickerStep, WorkspaceChoice};
 const MAX_WORKSPACE_CHOICES: usize = 10;
 const MAX_RECENT_WORKSPACES: usize = 12;
 const FOLDER_SCORE_OFFSET: usize = 5;
+const KNOWN_FUZZY_SCORE_OFFSET: usize = 20;
 
 impl App {
     /// Advance the launcher to its workspace step and populate the first list.
@@ -197,9 +198,12 @@ pub(super) fn match_score(path: &str, query: &str) -> Option<usize> {
     if name.starts_with(&query_lower) {
         return Some(1);
     }
+    // Exact and prefix matches still favour known workspaces. A loose fuzzy
+    // match does not: otherwise random parent names such as `.tmpbQM6Hg`
+    // outrank a concrete `project-beta` folder for the query `pb`.
     fuzzy_subsequence_score(&name, &query_lower)
         .or_else(|| fuzzy_subsequence_score(&path_lower, &query_lower))
-        .map(|score| score + 10)
+        .map(|score| score + KNOWN_FUZZY_SCORE_OFFSET)
 }
 
 /// Complete only immediate child directories, keeping filesystem work bounded.

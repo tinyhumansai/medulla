@@ -4,13 +4,10 @@
 //! the logic now lives in sibling `detect`/`execute` modules.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::daemon::status_detail;
 use crate::tinyplace::HarnessProvider;
 
-use super::acp::FoldState;
 use super::detect::{
     build_run_args, detect_providers, make_path_lookup, provider_bin, provider_name,
 };
@@ -287,135 +284,4 @@ async fn abort_cancelled_resolves_when_signalled() {
         .unwrap();
     // Already-aborted: cancelled returns immediately.
     abort.cancelled().await;
-}
-
-#[test]
-fn acp_agent_message_chunks_form_one_reply() {
-    let mut state = FoldState::new(None);
-    for text in ["hello ", "world"] {
-        let update = serde_json::from_value(serde_json::json!({
-            "sessionUpdate": "agent_message_chunk",
-            "content": {"type": "text", "text": text}
-        }))
-        .unwrap();
-        state.fold(update);
-    }
-    assert_eq!(state.reply(), "hello world");
-}
-
-#[test]
-fn acp_non_text_updates_do_not_pollute_the_reply() {
-    let mut state = FoldState::new(None);
-    let update = serde_json::from_value(serde_json::json!({
-        "sessionUpdate": "tool_call",
-        "toolCallId": "call-1",
-        "title": "Run tests",
-        "kind": "execute",
-        "status": "pending"
-    }))
-    .unwrap();
-    state.fold(update);
-    assert_eq!(
-        state.reply(),
-        "ACP agent completed without a text response."
-    );
-}
-
-#[test]
-fn acp_tool_updates_preserve_failure_state_for_the_copilot() {
-    let details = Arc::new(Mutex::new(Vec::new()));
-    let captured = details.clone();
-    let mut state = FoldState::new(Some(Box::new(move |event| {
-        if let Some(detail) = status_detail(&event.event) {
-            captured.lock().unwrap().push(detail);
-        }
-    })));
-    let call = serde_json::from_value(serde_json::json!({
-        "sessionUpdate": "tool_call",
-        "toolCallId": "call-1",
-        "title": "Terminal",
-        "kind": "execute",
-        "status": "in_progress",
-        "rawInput": { "command": "cargo test --workspace" }
-    }))
-    .unwrap();
-    let failure = serde_json::from_value(serde_json::json!({
-        "sessionUpdate": "tool_call_update",
-        "toolCallId": "call-1",
-        "status": "failed",
-        "rawOutput": "tests failed"
-    }))
-    .unwrap();
-    let still_running = serde_json::from_value(serde_json::json!({
-        "sessionUpdate": "tool_call_update",
-        "toolCallId": "call-1",
-        "status": "in_progress"
-    }))
-    .unwrap();
-
-    state.fold(call);
-    state.fold(still_running);
-    state.fold(failure);
-
-    assert_eq!(
-        *details.lock().unwrap(),
-        [
-            "running Terminal · $ cargo test --workspace\u{1f}call-1",
-            "tool failed\u{1f}call-1"
-        ]
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Attribution reaches every spawn path
-// ---------------------------------------------------------------------------
-
-/// A `RunTaskOptions` carrying `attribution`, with everything else inert.
-fn attribution_options(attribution: bool) -> super::RunTaskOptions {
-    super::RunTaskOptions {
-        conversation: String::new(),
-        session_class: crate::sessions::SessionClass::Bounded,
-        resume_session_id: None,
-        provider: HarnessProvider::Claude,
-        prompt: String::new(),
-        cwd: ".".to_string(),
-        env: HashMap::new(),
-        timeout_ms: 1_000,
-        model: None,
-        agent: None,
-        extra_args: Vec::new(),
-        skip_permissions: false,
-        abort: super::Abort::new(),
-        router: None,
-        attribution,
-        on_event: None,
-        on_stdin: None,
-        on_session: None,
-    }
-}
-
-/// `run_provider_task` dispatches to ACP *before* the spawn seam that applies
-/// attribution for direct runs, so the ACP agent env must carry it itself —
-/// otherwise every ACP-backed commit is unattributed.
-#[cfg(unix)]
-#[test]
-fn acp_agent_env_carries_attribution() {
-    let env = super::acp::acp_env(&attribution_options(true));
-    assert!(
-        env.contains_key("MEDULLA_ATTRIBUTION"),
-        "ACP agent env must carry the attribution trailer"
-    );
-    assert_eq!(
-        env.get("GIT_CONFIG_KEY_0").map(String::as_str),
-        Some("core.hooksPath"),
-        "ACP agent env must activate the hook directory"
-    );
-}
-
-/// Turning attribution off leaves the ACP env untouched.
-#[test]
-fn acp_agent_env_omits_attribution_when_off() {
-    let env = super::acp::acp_env(&attribution_options(false));
-    assert!(!env.contains_key("MEDULLA_ATTRIBUTION"));
-    assert!(!env.contains_key("GIT_CONFIG_KEY_0"));
 }

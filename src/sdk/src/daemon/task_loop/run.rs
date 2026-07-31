@@ -383,20 +383,25 @@ impl DaemonRuntime {
             timeout_ms: self.inner.config.task_timeout_ms,
             // Per-task model hint (parallels the per-task `provider`): honor the
             // orchestrator's requested model, falling back to the daemon default
-            // — but only when the daemon's own default harness is what actually
-            // runs. `frame.model` is deliberately `None` (not merely absent) when
-            // a caller's paired harness/model resolution named a harness without
+            // — but only when the frame named no harness of its own at all.
+            // `frame.model` is deliberately `None` (not merely absent) when a
+            // caller's paired harness/model resolution named a harness without
             // a model of its own (see `flow_engine::harness_choice`): the model
-            // this daemon has pinned was chosen for its *default* harness, and
-            // handing it to a different one the frame explicitly selected would
-            // be exactly the cross-harness model mismatch that resolution exists
-            // to prevent.
+            // this daemon has pinned is scoped to whatever runs when a frame
+            // states no preference, not to whichever harness a frame happened to
+            // land on. An explicit `provider`/`custom_harness` — even one that
+            // resolves to this daemon's own default harness — must still get
+            // that harness's own tool default, not the daemon's pin: pinning
+            // `self.inner.config.model` to the default is itself a "no
+            // preference stated" default, and a frame that stated one, even the
+            // same one, is not that case.
             model: frame
                 .model
                 .clone()
                 .or_else(|| custom_harness.as_ref().map(|harness| harness.model.clone()))
                 .or_else(|| {
-                    (provider == self.inner.config.default_provider)
+                    requested_provider
+                        .is_none()
                         .then(|| self.inner.config.model.clone())
                         .flatten()
                 }),

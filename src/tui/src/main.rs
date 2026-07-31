@@ -23,6 +23,8 @@ mod hub_relay;
 mod local_host;
 mod run;
 mod sign_in;
+#[cfg(test)]
+mod sign_in_tests;
 mod terminal;
 mod worker_loop;
 

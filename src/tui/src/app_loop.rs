@@ -119,6 +119,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             // home to open and nothing to show, so this is a clean exit.
             None => return Ok(()),
             Some(jwt) => {
+                // Carry the deployment this token was minted against into the
+                // new account's own config, before reloading against it.
+                //
+                // Without this the reload is a downgrade: the bootstrap
+                // `backend.baseUrl` lived in the *pre-login* home, the account
+                // home that just became current is empty, so the reload falls
+                // back to the production default. The core would then be bound
+                // to production and reject the JWT that staging (or a
+                // self-hosted deployment) had just issued — and every later
+                // launch would do the same, since nothing else records which
+                // deployment the account belongs to.
+                let base_url = loaded.config.backend.base_url.clone();
+                crate::sign_in::seed_account_backend(&env, &base_url);
                 // The account's own config file is a different file from the one
                 // loaded a moment ago, and it is the one that wins from here on.
                 loaded = load_config(args.config.as_deref(), &env, &cwd)?;

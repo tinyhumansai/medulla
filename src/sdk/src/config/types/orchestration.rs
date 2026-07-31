@@ -186,8 +186,8 @@ pub struct OpencodeConfig {
 /// and the GitHub contribution graph are unaffected.
 ///
 /// On by default: a harness commit that does not name the tool that wrote it is
-/// the surprising case, not the other way round. Set `commit` to `false` to turn
-/// it off.
+/// the surprising case, not the other way round. Turn it off with
+/// `[attribution] commit = false`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AttributionConfig {

@@ -4,10 +4,12 @@ Git commit attribution for Medulla-launched harnesses.
 
 ## Configuration
 
-Config-driven, on by default. Turn it off in `medulla.tui.json`:
+Config-driven, on by default. Turn it off in `<medulla home>/config.toml`
+(or a project's `./medulla.toml` / `./.medulla/config.toml`):
 
-```json
-{ "attribution": { "commit": false } }
+```toml
+[attribution]
+commit = false
 ```
 
 Callers resolve the value from the loaded config and pass it to

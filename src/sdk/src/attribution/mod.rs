@@ -7,8 +7,8 @@
 //!
 //! # Configuration
 //!
-//! Attribution is config-driven: the `attribution.commit` key of
-//! `medulla.tui.json` ([`crate::config::AttributionConfig`]), on by default.
+//! Attribution is config-driven: the `[attribution] commit` config key
+//! ([`crate::config::AttributionConfig`]), on by default.
 //! Callers resolve it from the loaded config and pass it in — this module never
 //! reads the environment or the filesystem to decide.
 //!

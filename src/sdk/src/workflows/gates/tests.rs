@@ -264,3 +264,92 @@ fn a_code_node_that_names_no_language_is_left_alone() {
     // already says — refusing it would be a false positive.
     assert!(failures(&graph).is_empty(), "{:?}", failures(&graph));
 }
+
+// ---- harness and model selection ----
+
+#[test]
+fn a_misspelled_builtin_harness_is_refused() {
+    let graph = graph(json!([
+        { "id": "work", "kind": "agent", "name": "Work",
+          "config": { "prompt": "go", "harness": "claude code" } },
+    ]));
+
+    let failures = failures(&graph);
+
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("work"), "{failures:?}");
+    assert!(failures[0].contains("custom harness id"), "{failures:?}");
+}
+
+#[test]
+fn a_harness_written_as_an_expression_is_refused() {
+    // The injection case: whichever value flowed down the graph would choose
+    // which binary and which credentials run the next instruction.
+    let graph = graph(json!([
+        { "id": "work", "kind": "agent", "name": "Work",
+          "config": { "prompt": "go", "harness": "=nodes.pick.item.json.harness" } },
+    ]));
+
+    let failures = failures(&graph);
+
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(
+        failures[0].contains("decision the graph makes"),
+        "{failures:?}"
+    );
+}
+
+#[test]
+fn a_non_string_harness_is_refused_by_type() {
+    let graph = graph(json!([
+        { "id": "work", "kind": "agent", "name": "Work",
+          "config": { "prompt": "go", "harness": true } },
+    ]));
+
+    let failures = failures(&graph);
+
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("must be a string"), "{failures:?}");
+}
+
+#[test]
+fn the_provider_alias_is_checked_too() {
+    let graph = graph(json!([
+        { "id": "work", "kind": "agent", "name": "Work",
+          "config": { "prompt": "go", "provider": "claude code" } },
+    ]));
+
+    assert_eq!(failures(&graph).len(), 1);
+}
+
+#[test]
+fn a_legitimate_harness_choice_passes() {
+    // Built-in names, custom preset ids, a model on its own, and an omitted
+    // choice are all ordinary authoring — a gate that fired on any of them
+    // would cost an author their edit for nothing.
+    let graph = graph(json!([
+        { "id": "a", "kind": "agent", "name": "A",
+          "config": { "prompt": "go", "harness": "codex", "model": "gpt-5-codex" } },
+        { "id": "b", "kind": "agent", "name": "B",
+          "config": { "prompt": "go", "harness": "deepseek-claude" } },
+        { "id": "c", "kind": "agent", "name": "C",
+          "config": { "prompt": "go", "model": "=nodes.pick.item.json.model" } },
+        { "id": "d", "kind": "agent", "name": "D", "config": { "prompt": "go" } },
+        { "id": "e", "kind": "agent", "name": "E",
+          "config": { "prompt": "go", "harness": "" } },
+    ]));
+
+    assert!(failures(&graph).is_empty(), "{:?}", failures(&graph));
+}
+
+#[test]
+fn a_harness_on_a_node_that_is_not_an_agent_is_not_this_gate_s_business() {
+    // Other node kinds do not dispatch to a harness, so the key is inert there
+    // — refusing it would be a gate firing on a graph that works.
+    let graph = graph(json!([
+        { "id": "t", "kind": "transform", "name": "T",
+          "config": { "harness": "not a harness" } },
+    ]));
+
+    assert!(failures(&graph).is_empty());
+}

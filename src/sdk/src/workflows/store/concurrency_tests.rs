@@ -41,6 +41,7 @@ fn document(id: &str, name: &str) -> WorkflowRecord {
         name: name.to_string(),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph,
         source_path: None,
     }

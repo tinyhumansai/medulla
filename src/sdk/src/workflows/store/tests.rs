@@ -164,6 +164,47 @@ fn parsing_migrates_a_document_saved_without_a_schema_version() {
 }
 
 #[test]
+fn parsing_reads_the_defaults_block() {
+    let document = json!({
+        "id": "nightly",
+        "defaults": { "harness": "codex", "model": "gpt-5-codex" },
+        "nodes": [{ "id": "t", "kind": "trigger", "name": "start" }],
+        "edges": []
+    })
+    .to_string();
+
+    let record = parse_workflow(&document, "nightly").expect("parses");
+
+    assert_eq!(record.defaults.harness.as_deref(), Some("codex"));
+    assert_eq!(record.defaults.model.as_deref(), Some("gpt-5-codex"));
+}
+
+#[test]
+fn parsing_refuses_a_defaults_block_naming_something_that_cannot_be_a_harness() {
+    // Refused on the way in rather than at run time: a workflow that meant to
+    // change where its work runs and quietly ran it on the host default is the
+    // failure this check exists to prevent.
+    let document = json!({
+        "id": "nightly",
+        "defaults": { "harness": "claude code" },
+        "nodes": [{ "id": "t", "kind": "trigger", "name": "start" }],
+        "edges": []
+    })
+    .to_string();
+
+    let err = parse_workflow(&document, "nightly").expect_err("refused");
+
+    assert!(err.contains("defaults"), "{err}");
+    assert!(err.contains("custom harness id"), "{err}");
+}
+
+#[test]
+fn a_document_without_defaults_stays_without_them() {
+    let record = parse_workflow(&valid_document("plain"), "plain").expect("parses");
+    assert!(record.defaults.is_empty());
+}
+
+#[test]
 fn parsing_rejects_a_document_that_is_not_an_object() {
     let err = parse_workflow("[]", "list").expect_err("an array is not a workflow");
     assert!(err.contains("object"), "unhelpful message: {err}");
@@ -270,6 +311,39 @@ fn saving_then_loading_round_trips_the_host_fields_and_the_graph() {
 }
 
 #[test]
+fn saving_round_trips_the_defaults_block() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let mut record = parse_workflow(&valid_document("pinned"), "pinned").unwrap();
+    record.defaults.harness = Some("codex".into());
+    record.defaults.model = Some("gpt-5-codex".into());
+
+    store.save(&record).expect("saves");
+    let loaded = require(&store, "pinned").expect("found");
+
+    assert_eq!(loaded.defaults, record.defaults);
+}
+
+#[test]
+fn a_workflow_stating_no_preference_writes_no_defaults_block() {
+    // A document an operator opens should not grow a block of nulls to say
+    // nothing.
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let record = parse_workflow(&valid_document("plain"), "plain").unwrap();
+
+    store.save(&record).expect("saves");
+    let path = require(&store, "plain")
+        .unwrap()
+        .source_path
+        .expect("on disk");
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+
+    assert!(written.get("defaults").is_none(), "{written}");
+}
+
+#[test]
 fn saving_refuses_a_graph_the_engine_would_not_compile() {
     let root = tempfile::tempdir().unwrap();
     let store = store_in(root.path());
@@ -278,6 +352,7 @@ fn saving_refuses_a_graph_the_engine_would_not_compile() {
         name: "no trigger".into(),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph: serde_json::from_value(json!({ "nodes": [], "edges": [] })).unwrap(),
         source_path: None,
     };

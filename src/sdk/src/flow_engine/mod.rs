@@ -33,6 +33,10 @@ mod tests;
 #[cfg(test)]
 mod shell_tests;
 
+// Likewise: harness and model selection, asserted on the dispatched task frame.
+#[cfg(test)]
+mod harness_selection_tests;
+
 pub(crate) use caps::build_capabilities_with_agent_evidence;
 pub use caps::{build_capabilities, build_dry_run_capabilities, open_checkpointer, HostServices};
 pub use execute::{Compiled, Outcome};

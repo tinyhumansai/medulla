@@ -13,6 +13,7 @@ fn record(id: &str, description: &str) -> WorkflowRecord {
         name: "Greet".into(),
         description: description.to_string(),
         enabled: true,
+        defaults: Default::default(),
         graph: serde_json::from_value(json!({
             "name": "Greet",
             "nodes": [

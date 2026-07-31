@@ -35,6 +35,7 @@ fn record(nodes: usize) -> WorkflowRecord {
         name: "Nightly sweep".into(),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph: graph(nodes),
         source_path: None,
     }

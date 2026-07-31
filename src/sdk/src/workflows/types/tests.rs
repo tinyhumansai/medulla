@@ -29,6 +29,7 @@ fn record() -> WorkflowRecord {
         name: "Demo".into(),
         description: "A demo workflow".into(),
         enabled: true,
+        defaults: Default::default(),
         graph: graph(),
         source_path: None,
     }

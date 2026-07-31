@@ -23,6 +23,7 @@ fn solo(id: &str) -> WorkflowRecord {
         name: format!("{id} workflow"),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph: serde_json::from_value(json!({
             "name": id,
             "nodes": [
@@ -44,6 +45,7 @@ fn diamond(id: &str) -> WorkflowRecord {
         name: format!("{id} workflow"),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph: serde_json::from_value(json!({
             "name": id,
             "nodes": [

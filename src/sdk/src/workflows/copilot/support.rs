@@ -25,6 +25,7 @@ pub(super) fn document(id: &str) -> WorkflowRecord {
         name: "Nightly sweep".into(),
         description: "sweeps".into(),
         enabled: true,
+        defaults: Default::default(),
         graph: serde_json::from_value(json!({
             "name": "Nightly sweep",
             "nodes": [

@@ -1,8 +1,8 @@
 //! The on-disk workflow document: reading it, writing it, checking it.
 //!
 //! A document is the engine's `WorkflowGraph` JSON with this host's own fields
-//! (`id`, `name`, `description`, `enabled`) merged in beside it, rather than
-//! nested under a wrapper. That shape is deliberate: a file an operator opens
+//! (`id`, `name`, `description`, `enabled`, `defaults`) merged in beside it,
+//! rather than nested under a wrapper. That shape is deliberate: a file an operator opens
 //! reads as a graph, and a graph exported from anywhere else loads here without
 //! being re-wrapped.
 
@@ -11,7 +11,9 @@ use std::path::Path;
 use serde_json::Value;
 use tinyflows::model::WorkflowGraph;
 
-use crate::workflows::types::{RunRecord, RunStatus, WorkflowError, WorkflowRecord};
+use crate::workflows::types::{
+    RunRecord, RunStatus, WorkflowDefaults, WorkflowError, WorkflowRecord,
+};
 
 /// Read and parse one workflow document, naming errors by path.
 pub fn read_workflow(path: &Path) -> Result<WorkflowRecord, String> {
@@ -35,9 +37,9 @@ pub fn read_workflow(path: &Path) -> Result<WorkflowRecord, String> {
 /// Parse one workflow document.
 ///
 /// The document is the engine's `WorkflowGraph` JSON with optional host fields
-/// (`description`, `enabled`) alongside it. `id` defaults to `id_fallback` — the
-/// filename, for a file — and `name` to the id, so the smallest useful document
-/// is a set of nodes and edges.
+/// (`description`, `enabled`, `defaults`) alongside it. `id` defaults to
+/// `id_fallback` — the filename, for a file — and `name` to the id, so the
+/// smallest useful document is a set of nodes and edges.
 ///
 /// The pipeline is the engine's documented one: migrate the persisted JSON to
 /// the current schema *before* deserializing, so a definition saved by an older
@@ -66,6 +68,19 @@ pub fn parse_workflow(text: &str, id_fallback: &str) -> Result<WorkflowRecord, S
         .and_then(Value::as_bool)
         .unwrap_or(true);
 
+    // Parsed before the graph, because parsing consumes `migrated`. An
+    // unreadable `defaults` block is a hard error rather than an ignored one: a
+    // workflow that meant to run on Codex and silently ran on the host default
+    // is exactly the kind of quiet wrongness this store exists to refuse.
+    let defaults: WorkflowDefaults = match object.get("defaults") {
+        Some(Value::Null) | None => WorkflowDefaults::default(),
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|err| format!("invalid `defaults`: {err}"))?,
+    };
+    defaults
+        .preference()
+        .map_err(|err| format!("invalid `defaults`: {err}"))?;
+
     let graph: WorkflowGraph =
         serde_json::from_value(migrated).map_err(|err| format!("invalid workflow: {err}"))?;
     let name = if graph.name.is_empty() {
@@ -79,6 +94,7 @@ pub fn parse_workflow(text: &str, id_fallback: &str) -> Result<WorkflowRecord, S
         name,
         description,
         enabled,
+        defaults,
         graph,
         source_path: None,
     })
@@ -118,6 +134,15 @@ pub fn to_document(record: &WorkflowRecord) -> Result<Vec<u8>, WorkflowError> {
             Value::String(record.description.clone()),
         );
         object.insert("enabled".into(), Value::Bool(record.enabled));
+        // Omitted entirely when the workflow states no preference, so an
+        // untouched document does not grow a block of nulls.
+        if !record.defaults.is_empty() {
+            let defaults = serde_json::to_value(&record.defaults)
+                .map_err(|err| WorkflowError::Malformed(err.to_string()))?;
+            object.insert("defaults".into(), defaults);
+        } else {
+            object.remove("defaults");
+        }
     }
     serde_json::to_vec_pretty(&value).map_err(|err| WorkflowError::Malformed(err.to_string()))
 }

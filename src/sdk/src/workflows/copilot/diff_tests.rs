@@ -45,6 +45,7 @@ fn record(graph: WorkflowGraph) -> WorkflowRecord {
         name: graph.name.clone(),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph,
         source_path: None,
     }

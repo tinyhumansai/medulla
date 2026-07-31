@@ -27,6 +27,10 @@ pub struct WorkflowRecord {
     /// validates, so an operator can repair one without it firing.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// What every `agent` node in this workflow runs on unless it says
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "WorkflowDefaults::is_empty")]
+    pub defaults: WorkflowDefaults,
     /// The engine graph.
     pub graph: WorkflowGraph,
     /// The file this record was read from, when it came from disk. `None` for a
@@ -38,6 +42,64 @@ pub struct WorkflowRecord {
 /// Workflows are enabled unless a document says otherwise.
 fn default_enabled() -> bool {
     true
+}
+
+/// A workflow's standing choice of harness and model.
+///
+/// The middle layer between an `agent` node's own `config` and the host's
+/// `workflows` config, and the one an author reaches for most: "this whole plan
+/// runs on Codex" is a property of the plan, not of every node in it and not of
+/// the machine that happens to run it.
+///
+/// Stored as free-form strings rather than parsed types because a workflow may
+/// legitimately name a custom harness preset only some hosts expose. The
+/// meaning of these strings — and the refusal of one that cannot be a harness —
+/// lives in [`crate::flow_engine::harness_choice`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDefaults {
+    /// The harness every `agent` node runs on unless it names its own: a
+    /// built-in CLI (`claude`, `codex`, `opencode`) or a custom preset id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    /// The model hint sent with every dispatch this workflow makes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+impl WorkflowDefaults {
+    /// Whether this workflow states no preference at all.
+    ///
+    /// Kept so an unset block is omitted from the document entirely: a file an
+    /// operator opens should not grow two null fields per workflow to say
+    /// nothing.
+    pub fn is_empty(&self) -> bool {
+        self.harness.is_none() && self.model.is_none()
+    }
+
+    /// This block as a preference layer the dispatch path understands.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sentence when `harness` names something that cannot be a
+    /// harness.
+    pub fn preference(&self) -> Result<crate::flow_engine::HarnessPreference, String> {
+        let harness = match self.harness.as_deref().map(str::trim) {
+            Some(name) if !name.is_empty() => {
+                Some(crate::flow_engine::HarnessSelector::parse(name)?)
+            }
+            _ => None,
+        };
+        Ok(crate::flow_engine::HarnessPreference {
+            harness,
+            model: self
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(str::to_string),
+        })
+    }
 }
 
 impl WorkflowRecord {

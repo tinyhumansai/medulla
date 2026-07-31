@@ -25,6 +25,7 @@ fn diamond(id: &str) -> WorkflowRecord {
         name: format!("{id} sweep"),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph: serde_json::from_value(json!({
             "name": id,
             "nodes": [
@@ -72,6 +73,7 @@ fn fanout(id: &str) -> WorkflowRecord {
         name: format!("{id} fanout"),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph: serde_json::from_value(json!({
             "name": id,
             "nodes": nodes,

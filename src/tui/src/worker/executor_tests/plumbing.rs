@@ -359,3 +359,72 @@ async fn a_timed_out_turn_stops_its_harness_instead_of_leaving_it_running() {
     );
     sessions.shutdown();
 }
+
+/// The watchable PTY path spawns the harness itself rather than going through
+/// the headless seam, so it has to apply attribution on its own — without this
+/// the default visible execution path produced unattributed commits even with
+/// `attribution.commit = true`.
+#[tokio::test]
+async fn the_pty_spawn_env_carries_commit_attribution() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let rollout = dir.path().join("rollout-attribution.jsonl");
+    let bin = recording_fake_harness(dir.path(), &rollout.to_string_lossy(), &cwd, "ok");
+
+    let (executor, env) = harness_with_env(
+        dir.path(),
+        &cwd,
+        &[("TINYPLACE_CODEX_BIN", &bin.to_string_lossy())],
+    );
+
+    let mut opts = options(&env, "peer-attribution", "unused", &cwd);
+    opts.extra_args = Vec::new();
+    opts.attribution = true;
+
+    tokio::time::timeout(Duration::from_secs(30), executor.clone().run_for_test(opts))
+        .await
+        .expect("must settle")
+        .expect("must succeed");
+
+    let spawned_env = read_captured(&dir.path().join("env.txt"));
+    assert!(
+        spawned_env.contains("MEDULLA_ATTRIBUTION=Co-authored-by: Medulla"),
+        "the PTY child must carry the attribution trailer: {spawned_env}"
+    );
+    assert!(
+        spawned_env.contains("GIT_CONFIG_KEY_0=core.hooksPath"),
+        "the PTY child must have the hook directory activated: {spawned_env}"
+    );
+    executor.sessions_for_test().shutdown();
+}
+
+/// And it must stay off when config says so.
+#[tokio::test]
+async fn the_pty_spawn_env_omits_attribution_when_configured_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let rollout = dir.path().join("rollout-no-attribution.jsonl");
+    let bin = recording_fake_harness(dir.path(), &rollout.to_string_lossy(), &cwd, "ok");
+
+    let (executor, env) = harness_with_env(
+        dir.path(),
+        &cwd,
+        &[("TINYPLACE_CODEX_BIN", &bin.to_string_lossy())],
+    );
+
+    let mut opts = options(&env, "peer-no-attribution", "unused", &cwd);
+    opts.extra_args = Vec::new();
+    opts.attribution = false;
+
+    tokio::time::timeout(Duration::from_secs(30), executor.clone().run_for_test(opts))
+        .await
+        .expect("must settle")
+        .expect("must succeed");
+
+    let spawned_env = read_captured(&dir.path().join("env.txt"));
+    assert!(
+        !spawned_env.contains("MEDULLA_ATTRIBUTION"),
+        "attribution must be absent when turned off: {spawned_env}"
+    );
+    executor.sessions_for_test().shutdown();
+}

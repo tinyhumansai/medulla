@@ -49,17 +49,15 @@
 //! addIfDifferent`, so the two mechanisms agreeing produces one trailer, not two.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Mutex;
 
 use crate::tinyplace::HarnessProvider;
 
 #[cfg(test)]
 mod tests;
 
-/// Generator for `prepare-commit-msg` git hooks that inject the Medulla
-/// `Co-authored-by` trailer via environment variables. Used for providers
-/// (Codex, Opencode) whose CLI has no built-in attribution knob.
+/// Generator for the git hook shims that inject the Medulla `Co-authored-by`
+/// trailer via environment variables. The mechanism of record for every
+/// provider.
 pub mod prepare_commit_msg;
 
 /// Display name used in the `Co-authored-by` trailer.
@@ -108,13 +106,8 @@ fn claude_settings_json() -> String {
     value.to_string()
 }
 
-/// Module-level storage for the temporary hook directory, so
-/// [`cleanup_hook_tmpdir`] can remove it after the harness exits without the
-/// caller needing to carry a [`PathBuf`] through every spawn path.
-static HOOK_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
-
 /// Environment variables that make a harness attribute its commits to Medulla
-/// via the `prepare-commit-msg` git hook.
+/// via the git hook shims.
 ///
 /// Every provider takes this path, including Claude Code — see the module docs
 /// for why its own `attribution.commit` setting is not sufficient on its own.
@@ -123,10 +116,9 @@ static HOOK_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// `enabled` is the resolved `attribution.commit` config value — see
 /// [`crate::config::AttributionConfig`].
 ///
-/// The hook directory is stored in module-level state and must be cleaned up
-/// after the harness exits by calling [`cleanup_hook_tmpdir`]. A previously
-/// generated directory is cleaned up here rather than leaked, so repeated
-/// spawns in one process do not accumulate temp directories.
+/// The hook directory is shared process-wide and outlives every child, so this
+/// is safe to call for concurrent spawns and needs no cleanup from the caller
+/// (see [`prepare_commit_msg`]).
 ///
 /// Returns an empty map when attribution is off, and on non-Unix platforms
 /// (git hooks are not supported there).
@@ -134,20 +126,5 @@ pub fn attribution_env(enabled: bool) -> HashMap<String, String> {
     if !enabled {
         return HashMap::new();
     }
-    let (hook_env, hook_dir) = prepare_commit_msg::generate_hook(&attribution_trailer());
-    if let Some(stale) = HOOK_DIR.lock().unwrap().replace(hook_dir) {
-        prepare_commit_msg::cleanup_hook_dir(&stale);
-    }
-    hook_env
-}
-
-/// Remove the temporary hook directory that [`attribution_env`] created.
-///
-/// Safe to call even when no hook was generated — this is a no-op in that
-/// case. Idempotent: a second call after cleanup does nothing.
-pub fn cleanup_hook_tmpdir() {
-    let mut guard = HOOK_DIR.lock().unwrap();
-    if let Some(path) = guard.take() {
-        prepare_commit_msg::cleanup_hook_dir(&path);
-    }
+    prepare_commit_msg::hook_env(&attribution_trailer())
 }

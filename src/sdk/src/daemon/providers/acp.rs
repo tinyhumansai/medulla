@@ -5,6 +5,7 @@
 //! exposes ACP directly. Everything above this module continues to consume the
 //! stable Medulla semantic-event surface.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -258,7 +259,18 @@ fn agent_for(options: &RunTaskOptions) -> AcpAgent {
         ))
         .arg("acp"),
     };
-    AcpAgent::new(config.envs(options.env.clone()))
+    AcpAgent::new(config.envs(acp_env(options)))
+}
+
+/// The environment handed to the ACP agent process.
+///
+/// The agent process is the one that ends up running `git commit`, so the
+/// attribution hook env has to land here too: `run_provider_task` dispatches to
+/// ACP *before* the spawn seam in `execute` that handles it for direct runs.
+pub(super) fn acp_env(options: &RunTaskOptions) -> HashMap<String, String> {
+    let mut env = options.env.clone();
+    env.extend(crate::attribution::attribution_env(options.attribution));
+    env
 }
 
 pub(super) struct FoldState {

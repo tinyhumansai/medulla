@@ -340,8 +340,6 @@ async fn run_provider_attempt(
     // child the pipe may not be drained yet, and a lost stderr tail hides the
     // transient-lock marker the retry loop keys on.
     let _ = tokio::time::timeout(Duration::from_millis(500), stderr_task).await;
-    // Clean up any git hook temp directory created by attribution_env.
-    crate::attribution::cleanup_hook_tmpdir();
     if spec.abort.is_aborted() {
         return Err(format!("{} task aborted", provider_name(spec.provider)));
     }

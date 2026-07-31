@@ -203,10 +203,6 @@ fn attribution_env_is_merged_for_every_provider() {
             config.env.contains_key("GIT_CONFIG_VALUE_0"),
             "{provider:?} should have hooksPath in env"
         );
-
-        // Clean up the temp dir so it doesn't race with the attribution
-        // module's own cleanup test that shares the global HOOK_DIR.
-        crate::attribution::cleanup_hook_tmpdir();
     }
 }
 

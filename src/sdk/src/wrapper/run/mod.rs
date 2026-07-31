@@ -188,9 +188,6 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
         bridge.lifecycle("session_end").await;
     }
 
-    // Clean up any git hook temp directory created by attribution_env.
-    crate::attribution::cleanup_hook_tmpdir();
-
     Ok(code)
 }
 

@@ -365,3 +365,57 @@ fn acp_tool_updates_preserve_failure_state_for_the_copilot() {
         ]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Attribution reaches every spawn path
+// ---------------------------------------------------------------------------
+
+/// A `RunTaskOptions` carrying `attribution`, with everything else inert.
+fn attribution_options(attribution: bool) -> super::RunTaskOptions {
+    super::RunTaskOptions {
+        conversation: String::new(),
+        session_class: crate::sessions::SessionClass::Bounded,
+        resume_session_id: None,
+        provider: HarnessProvider::Claude,
+        prompt: String::new(),
+        cwd: ".".to_string(),
+        env: HashMap::new(),
+        timeout_ms: 1_000,
+        model: None,
+        agent: None,
+        extra_args: Vec::new(),
+        skip_permissions: false,
+        abort: super::Abort::new(),
+        router: None,
+        attribution,
+        on_event: None,
+        on_stdin: None,
+        on_session: None,
+    }
+}
+
+/// `run_provider_task` dispatches to ACP *before* the spawn seam that applies
+/// attribution for direct runs, so the ACP agent env must carry it itself —
+/// otherwise every ACP-backed commit is unattributed.
+#[cfg(unix)]
+#[test]
+fn acp_agent_env_carries_attribution() {
+    let env = super::acp::acp_env(&attribution_options(true));
+    assert!(
+        env.contains_key("MEDULLA_ATTRIBUTION"),
+        "ACP agent env must carry the attribution trailer"
+    );
+    assert_eq!(
+        env.get("GIT_CONFIG_KEY_0").map(String::as_str),
+        Some("core.hooksPath"),
+        "ACP agent env must activate the hook directory"
+    );
+}
+
+/// Turning attribution off leaves the ACP env untouched.
+#[test]
+fn acp_agent_env_omits_attribution_when_off() {
+    let env = super::acp::acp_env(&attribution_options(false));
+    assert!(!env.contains_key("MEDULLA_ATTRIBUTION"));
+    assert!(!env.contains_key("GIT_CONFIG_KEY_0"));
+}

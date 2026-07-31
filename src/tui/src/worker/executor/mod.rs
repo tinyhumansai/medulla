@@ -355,6 +355,13 @@ impl PtySessionExecutor {
     ) -> Result<(HashMap<String, String>, Vec<String>), String> {
         let mut env = options.env.clone();
         let mut extra_args = options.extra_args.clone();
+        // Commits made in a watched PTY session are just as much Medulla's work
+        // as headless ones, so this path carries the same attribution.
+        env.extend(medulla::attribution::attribution_env(options.attribution));
+        extra_args.extend(medulla::attribution::attribution_args(
+            options.provider,
+            options.attribution,
+        ));
         if let Some(router) = &options.router {
             let injection = medulla::tinyplace::env::router_env(options.provider, router);
             for (key, value) in injection.env {

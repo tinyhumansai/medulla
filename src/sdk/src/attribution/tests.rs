@@ -100,13 +100,13 @@ fn disabling_suppresses_args_for_every_provider() {
 // prepare_commit_msg hook generator tests
 // ---------------------------------------------------------------------------
 
-/// On Unix, `generate_hook` returns env vars carrying the attribution trailer
+/// On Unix, `hook_env` returns env vars carrying the attribution trailer
 /// and the `core.hooksPath` git-config overrides.
 #[cfg(unix)]
 #[test]
 fn generate_hook_returns_env_vars() {
-    let (env, _hook_dir) =
-        super::prepare_commit_msg::generate_hook("Co-authored-by: Medulla <medulla@tinyhumans.ai>");
+    let env =
+        super::prepare_commit_msg::hook_env("Co-authored-by: Medulla <medulla@tinyhumans.ai>");
     assert_eq!(
         env.get("MEDULLA_ATTRIBUTION"),
         Some(&"Co-authored-by: Medulla <medulla@tinyhumans.ai>".to_string()),
@@ -122,19 +122,29 @@ fn generate_hook_returns_env_vars() {
     );
 }
 
-/// The hook script must be an executable file at the expected path.
+/// Every client-side hook name must exist and be executable, so redirecting
+/// `core.hooksPath` cannot disable the repository's own hooks.
 #[cfg(unix)]
 #[test]
-fn hook_script_is_executable() {
+fn every_client_hook_is_shimmed_and_executable() {
     use std::os::unix::fs::PermissionsExt;
 
-    let (_env, hook_dir) = super::prepare_commit_msg::generate_hook("test");
-    let hook_path = hook_dir.join("prepare-commit-msg");
-    assert!(hook_path.exists(), "hook script must exist: {hook_path:?}");
-
-    let metadata = std::fs::metadata(&hook_path).expect("hook metadata");
-    let perms = metadata.permissions();
-    assert_eq!(perms.mode() & 0o111, 0o111, "hook must be executable");
+    let hook_dir = super::prepare_commit_msg::generate_hook_dir();
+    for name in [
+        "prepare-commit-msg",
+        "pre-commit",
+        "commit-msg",
+        "pre-push",
+        "post-checkout",
+        "pre-rebase",
+    ] {
+        let hook_path = hook_dir.join(name);
+        assert!(hook_path.exists(), "{name} shim must exist: {hook_path:?}");
+        let perms = std::fs::metadata(&hook_path)
+            .expect("hook metadata")
+            .permissions();
+        assert_eq!(perms.mode() & 0o111, 0o111, "{name} must be executable");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +171,7 @@ impl HookRepo {
         let tmp = tempfile::tempdir().expect("tempdir for repo");
         let repo = tmp.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
-        let (_env, hook_dir) = super::prepare_commit_msg::generate_hook(trailer);
+        let hook_dir = super::prepare_commit_msg::generate_hook_dir();
 
         let this = Self {
             _tmp: tmp,
@@ -296,6 +306,66 @@ fn repository_own_hook_still_runs() {
     );
 }
 
+/// A repository hook that is *not* `prepare-commit-msg` must still run.
+/// `core.hooksPath` redirects every hook, so shimming only the one we care
+/// about would silently disable a repo's lint and validation gates.
+#[cfg(unix)]
+#[test]
+fn other_repository_hooks_still_run() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let repo = HookRepo::new(trailer);
+    let marker = repo.repo.join("pre-commit-ran");
+
+    let own = repo.repo.join(".git/hooks/pre-commit");
+    std::fs::write(
+        &own,
+        format!("#!/bin/sh\ntouch {}\n", marker.to_string_lossy()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    repo.commit("a.txt", "subject");
+
+    assert!(
+        marker.exists(),
+        "the repository's own pre-commit hook must still run"
+    );
+}
+
+/// A failing repository hook must still block the commit — the shim propagates
+/// its exit code rather than swallowing it.
+#[cfg(unix)]
+#[test]
+fn a_failing_repository_hook_still_blocks_the_commit() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let repo = HookRepo::new(trailer);
+
+    let own = repo.repo.join(".git/hooks/pre-commit");
+    std::fs::write(&own, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    std::fs::write(repo.repo.join("a.txt"), "x").unwrap();
+    repo.git(&["add", "a.txt"]);
+    let output = std::process::Command::new("git")
+        .args(["commit", "-m", "should be rejected"])
+        .current_dir(&repo.repo)
+        .env("MEDULLA_ATTRIBUTION", trailer)
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+        .env("GIT_CONFIG_VALUE_0", &repo.hook_dir)
+        .output()
+        .expect("git commit");
+
+    assert!(
+        !output.status.success(),
+        "a failing pre-commit must reject the commit"
+    );
+}
+
 /// A merge message is composed by git over commits the harness did not author,
 /// so it must not be attributed to Medulla.
 #[cfg(unix)]
@@ -362,27 +432,22 @@ fn hook_is_noop_when_attribution_env_is_empty() {
 #[cfg(unix)]
 #[test]
 fn cleanup_removes_hook_dir() {
-    let (_env, hook_dir) = super::prepare_commit_msg::generate_hook("test");
+    let hook_dir = super::prepare_commit_msg::generate_hook_dir();
     assert!(hook_dir.exists(), "hook dir exists before cleanup");
 
     super::prepare_commit_msg::cleanup_hook_dir(&hook_dir);
     assert!(!hook_dir.exists(), "hook dir removed after cleanup");
 }
 
-/// On non-Unix, the generator returns an empty env map and no cleanup path.
+/// Git hooks are not supported on non-Unix, so the hook env is empty there.
 #[cfg(not(unix))]
 #[test]
 fn non_unix_returns_empty() {
-    let (env, hook_dir) = super::prepare_commit_msg::generate_hook("test");
-    assert!(env.is_empty(), "non-Unix returns empty env");
-    assert!(
-        hook_dir.as_os_str().is_empty(),
-        "non-Unix returns empty path"
-    );
+    assert!(super::prepare_commit_msg::hook_env("test").is_empty());
 }
 
 // ---------------------------------------------------------------------------
-// attribution_env / cleanup_hook_tmpdir tests
+// attribution_env tests
 // ---------------------------------------------------------------------------
 
 /// The hook env is provider-independent — it is the mechanism of record for
@@ -397,7 +462,6 @@ fn enabled_attribution_yields_hook_env() {
         "missing MEDULLA_ATTRIBUTION"
     );
     assert!(env.contains_key("GIT_CONFIG_VALUE_0"), "missing hooksPath");
-    super::cleanup_hook_tmpdir();
 }
 
 /// Turning attribution off in config suppresses the hook env entirely.
@@ -406,20 +470,40 @@ fn disabled_attribution_yields_no_hook_env() {
     assert!(super::attribution_env(false).is_empty());
 }
 
-/// `cleanup_hook_dir` must remove the temp dir that `generate_hook` created.
+/// `cleanup_hook_dir` must remove a directory the caller owns.
 #[cfg(unix)]
 #[test]
-fn cleanup_hook_tmpdir_removes_temp_dir() {
-    let (_env, hook_dir) =
-        super::prepare_commit_msg::generate_hook("Co-authored-by: Test <test@e.g>");
+fn cleanup_hook_dir_removes_the_directory() {
+    let hook_dir = super::prepare_commit_msg::generate_hook_dir();
     assert!(hook_dir.exists(), "hook dir must exist before cleanup");
 
     super::prepare_commit_msg::cleanup_hook_dir(&hook_dir);
     assert!(!hook_dir.exists(), "hook dir must be removed after cleanup");
 }
 
-/// Calling cleanup when no hook was generated is a no-op, not a panic.
+/// Cleanup of an empty path is a no-op, not a panic.
 #[test]
-fn cleanup_is_noop_before_any_call() {
-    super::cleanup_hook_tmpdir(); // must not panic
+fn cleanup_of_an_empty_path_is_a_noop() {
+    super::prepare_commit_msg::cleanup_hook_dir(std::path::Path::new(""));
+}
+
+/// The process-wide hook directory is shared, not regenerated per call — this
+/// is what makes concurrent spawns safe, since no caller can pull the directory
+/// out from under another's still-running child.
+#[cfg(unix)]
+#[test]
+fn hook_env_shares_one_directory_across_calls() {
+    let first = super::prepare_commit_msg::hook_env("Co-authored-by: A <a@e.g>");
+    let second = super::prepare_commit_msg::hook_env("Co-authored-by: B <b@e.g>");
+    assert_eq!(
+        first.get("GIT_CONFIG_VALUE_0"),
+        second.get("GIT_CONFIG_VALUE_0"),
+        "hook dir must be shared"
+    );
+    // The trailer is per-call even though the directory is not.
+    assert_ne!(
+        first.get("MEDULLA_ATTRIBUTION"),
+        second.get("MEDULLA_ATTRIBUTION")
+    );
+    assert!(std::path::Path::new(first["GIT_CONFIG_VALUE_0"].as_str()).exists());
 }

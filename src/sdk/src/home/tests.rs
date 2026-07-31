@@ -80,10 +80,17 @@ fn the_marker_scopes_the_home_to_that_account() {
         tmp.path().join("69d9cb73e61f755583c3671f")
     );
 
-    // Clearing it sends the next launch back to the pre-login home, which is
-    // what logout relies on.
-    user::clear_active_user(tmp.path()).expect("clear marker");
-    assert_eq!(medulla_home(&e), tmp.path().join(user::PRE_LOGIN_USER_ID));
+    // The pre-login home is reachable again without signing in, which is what
+    // `MEDULLA_USER=local` is for — nothing removes the marker, because logout
+    // must leave the account findable.
+    let back = env(&[
+        ("MEDULLA_HOME", &tmp.path().to_string_lossy()),
+        (user::MEDULLA_USER_ENV, user::PRE_LOGIN_USER_ID),
+    ]);
+    assert_eq!(
+        medulla_home(&back),
+        tmp.path().join(user::PRE_LOGIN_USER_ID)
+    );
 }
 
 #[test]
@@ -191,12 +198,6 @@ fn an_unreadable_marker_reads_as_signed_out() {
 
     std::fs::write(user::active_user_path(tmp.path()), "user_id = \"\"\n").expect("write");
     assert_eq!(user::read_active_user_id(tmp.path()), None);
-}
-
-#[test]
-fn clearing_an_absent_marker_succeeds() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    user::clear_active_user(tmp.path()).expect("clear is idempotent");
 }
 
 #[test]

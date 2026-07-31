@@ -21,7 +21,11 @@ pub const ACTIVE_USER_FILE: &str = "active_user.toml";
 /// Environment override for the active account id, ahead of the marker file.
 ///
 /// A test harness or an operator juggling two accounts sets this to pick a
-/// directory without writing to the shared marker other processes read.
+/// directory without writing to the shared marker other processes read. It is
+/// also how an install is returned to the pre-login home without signing in
+/// (`MEDULLA_USER=local`), since nothing removes the marker: logout clears the
+/// session and leaves the selection, so signing back in still finds the
+/// account'"'"'s own config and its backend.
 pub const MEDULLA_USER_ENV: &str = "MEDULLA_USER";
 
 /// The id used before anyone has signed in.
@@ -151,27 +155,6 @@ pub fn write_active_user_id(root: &Path, user_id: &str) -> std::io::Result<()> {
     with_pins(|pins| pins.insert(root.to_path_buf(), user_id.clone()));
     tracing::debug!("[home] active user recorded as {user_id}");
     Ok(())
-}
-
-/// Forget the active account, sending the next launch back to the pre-login
-/// home. Idempotent: clearing when nothing is recorded succeeds.
-///
-/// # Errors
-///
-/// The marker exists but cannot be removed.
-pub fn clear_active_user(root: &Path) -> std::io::Result<()> {
-    let path = active_user_path(root);
-    match std::fs::remove_file(&path) {
-        Ok(()) => {
-            // Drop the pin with the marker, for the same reason the write moves
-            // it: this process made the change, so it should see it.
-            with_pins(|pins| pins.remove(root));
-            tracing::debug!("[home] active user cleared");
-            Ok(())
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
 }
 
 /// Accept an id only if it is safe to use as a single directory name.

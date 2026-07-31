@@ -140,8 +140,20 @@ pub(crate) fn adopt_account(
         ));
     };
 
-    medulla::home::user::write_active_user_id(&root, &user_id)
-        .map_err(|err| format!("this account could not be recorded ({err})"))?;
+    // `MEDULLA_USER` selects an account for *this process* without touching the
+    // selection every other process reads, so honouring it means not writing the
+    // marker at all — not even when the authenticated account matches, which
+    // would still overwrite a marker naming somebody else. The verification
+    // below is what makes that safe: an override pointing somewhere other than
+    // the account that just authenticated fails instead of writing.
+    let overridden = env
+        .get(medulla::home::user::MEDULLA_USER_ENV)
+        .map(|v| v.trim())
+        .is_some_and(|v| !v.is_empty());
+    if !overridden {
+        medulla::home::user::write_active_user_id(&root, &user_id)
+            .map_err(|err| format!("this account could not be recorded ({err})"))?;
+    }
 
     let expected = root.join(&user_id);
     let effective = medulla::home::medulla_home(env);
@@ -212,26 +224,21 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("failed to clear the session: {e}"))?;
     sweep_retired_credentials(&env);
-    // Both halves, in this order: the session is cleared inside the account's
-    // own home, and only then does the install stop pointing at it. Clearing the
-    // marker first would clear the session of whichever account the *pre-login*
-    // home holds and leave this one signed in.
+    // The session is cleared; the account selection is deliberately not.
     //
-    // The account's directory is left on disk — signing back in returns to the
-    // same config, logs, and workflow store. Only the pointer moves.
+    // "Signed out" means "no session", not "no account". The account's directory
+    // stays on disk either way, and the marker is what lets the next launch
+    // *find* it — including its `config.toml`. Clearing the marker would send
+    // that launch to the pre-login home and its default backend, so an operator
+    // on staging or a self-hosted deployment would be offered a login against
+    // production, with no way back to their own endpoint short of an environment
+    // variable. The one thing logout must not do is make signing back in
+    // impossible.
     //
-    // Except under `MEDULLA_USER`, which selects an account for this process
-    // without touching the shared selection. The session just cleared is the
-    // overridden account's; the marker names somebody else, and clearing it
-    // would sign *them* out as a side effect of a command that never mentioned
-    // them.
-    if env.contains_key(medulla::home::user::MEDULLA_USER_ENV) {
-        println!("Logged out. The active profile marker is unchanged.");
-        return Ok(());
-    }
-    if let Err(err) = medulla::home::user::clear_active_user(&medulla::home::medulla_root(&env)) {
-        eprintln!("Signed out, but the active profile marker could not be cleared ({err}).");
-    }
+    // So logging back in as the same account lands in the same home, with the
+    // same config, logs, and workflow store. Signing in as somebody else moves
+    // the marker through the account-switch path, which is the only thing that
+    // should move it.
     println!("Logged out.");
     Ok(())
 }

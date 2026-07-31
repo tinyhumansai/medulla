@@ -380,6 +380,7 @@ fn empty_router() -> ScreenRouter {
             router: None,
             custom_harnesses: Vec::new(),
             budget: None,
+            attribution: true,
         },
         std::sync::Arc::new(|_| Box::pin(async { Err("unused".to_string()) })),
         std::sync::Arc::new(|_, _| Box::pin(async {})),

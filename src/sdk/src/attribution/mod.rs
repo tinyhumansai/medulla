@@ -1,10 +1,16 @@
 //! Git commit attribution for Medulla-launched harnesses.
 //!
 //! When Medulla spawns a coding-agent CLI, commits that agent makes should say
-//! so. This module resolves the CLI flags that carry that attribution, as pure
-//! functions over an injected environment map — the same contract as
-//! [`crate::tinyplace::env`], so precedence is unit-testable and identical across the
-//! wrapper and the headless daemon.
+//! so. This module builds the flags and environment that carry that
+//! attribution, as pure functions over a resolved on/off value, so the wrapper
+//! and the headless daemon behave identically and both are unit-testable.
+//!
+//! # Configuration
+//!
+//! Attribution is config-driven: the `attribution.commit` key of
+//! `medulla.tui.json` ([`crate::config::AttributionConfig`]), on by default.
+//! Callers resolve it from the loaded config and pass it in — this module never
+//! reads the environment or the filesystem to decide.
 //!
 //! # Mechanism
 //!
@@ -56,10 +62,6 @@ mod tests;
 /// (Codex, Opencode) whose CLI has no built-in attribution knob.
 pub mod prepare_commit_msg;
 
-/// Kill-switch env var. Any value other than `1` / `true` / `yes` / `on`
-/// disables attribution.
-pub const ATTRIBUTION_ENV_KEY: &str = "TINYPLACE_GIT_ATTRIBUTION";
-
 /// Display name used in the `Co-authored-by` trailer.
 pub const ATTRIBUTION_NAME: &str = "Medulla";
 
@@ -76,27 +78,15 @@ pub fn attribution_trailer() -> String {
     format!("Co-authored-by: {ATTRIBUTION_NAME} <{ATTRIBUTION_EMAIL}>")
 }
 
-/// Whether attribution is enabled. Defaults to `true`; set
-/// `TINYPLACE_GIT_ATTRIBUTION` to `0` / `false` / `no` / `off` (or empty) to
-/// disable. Unrecognised values are treated as disabled, so a typo fails closed
-/// rather than silently attributing.
-pub fn attribution_enabled(env: &HashMap<String, String>) -> bool {
-    match env.get(ATTRIBUTION_ENV_KEY) {
-        None => true,
-        Some(raw) => matches!(
-            raw.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        ),
-    }
-}
-
 /// Extra CLI arguments that make `provider` attribute its commits to Medulla.
 ///
-/// Returns an empty vector when attribution is disabled, or when the provider
-/// has no mechanism to retarget its trailer (Codex, Opencode). Callers prepend
-/// these to the child argv alongside `TINYPLACE_<P>_ARGS`.
-pub fn attribution_args(provider: HarnessProvider, env: &HashMap<String, String>) -> Vec<String> {
-    if !attribution_enabled(env) {
+/// `enabled` is the resolved `attribution.commit` config value — see
+/// [`crate::config::AttributionConfig`]. Returns an empty vector when
+/// attribution is off, or when the provider has no mechanism to retarget its
+/// trailer (Codex, Opencode). Callers prepend these to the child argv alongside
+/// `TINYPLACE_<P>_ARGS`.
+pub fn attribution_args(provider: HarnessProvider, enabled: bool) -> Vec<String> {
+    if !enabled {
         return Vec::new();
     }
     match provider {
@@ -130,18 +120,18 @@ static HOOK_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// for why its own `attribution.commit` setting is not sufficient on its own.
 /// The hook is gated at runtime by `MEDULLA_ATTRIBUTION`.
 ///
+/// `enabled` is the resolved `attribution.commit` config value — see
+/// [`crate::config::AttributionConfig`].
+///
 /// The hook directory is stored in module-level state and must be cleaned up
 /// after the harness exits by calling [`cleanup_hook_tmpdir`]. A previously
 /// generated directory is cleaned up here rather than leaked, so repeated
 /// spawns in one process do not accumulate temp directories.
 ///
-/// Returns an empty map when attribution is disabled, and on non-Unix platforms
+/// Returns an empty map when attribution is off, and on non-Unix platforms
 /// (git hooks are not supported there).
-pub fn attribution_env(
-    _provider: HarnessProvider,
-    env: &HashMap<String, String>,
-) -> HashMap<String, String> {
-    if !attribution_enabled(env) {
+pub fn attribution_env(enabled: bool) -> HashMap<String, String> {
+    if !enabled {
         return HashMap::new();
     }
     let (hook_env, hook_dir) = prepare_commit_msg::generate_hook(&attribution_trailer());

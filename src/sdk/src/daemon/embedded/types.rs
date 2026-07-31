@@ -61,6 +61,10 @@ pub struct EmbeddedDaemonOptions {
     pub env: HashMap<String, String>,
     /// Optional custom OpenAI-compatible router layered into every spawn.
     pub router: Option<RouterConfig>,
+    /// Whether commits made by harnesses this daemon launches are attributed to
+    /// Medulla — the resolved `attribution.commit` config value (on by default;
+    /// see [`crate::config::AttributionConfig`]).
+    pub attribution: bool,
     /// Named OpenRouter presets exposed by this host.
     pub custom_harnesses: Vec<crate::config::CustomHarnessConfig>,
     /// Operator-declared per-provider token budgets.
@@ -85,6 +89,7 @@ impl Default for EmbeddedDaemonOptions {
             skip_permissions: true,
             env: HashMap::new(),
             router: None,
+            attribution: true,
             custom_harnesses: Vec::new(),
             budget: None,
             log: None,

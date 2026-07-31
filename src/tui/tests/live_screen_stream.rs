@@ -112,6 +112,7 @@ fn worker_runtime(session_id: String) -> DaemonRuntime {
         router: None,
         custom_harnesses: Vec::new(),
         budget: None,
+        attribution: true,
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
         let session_id = session_id.clone();

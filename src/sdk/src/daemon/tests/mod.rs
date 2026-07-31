@@ -76,6 +76,7 @@ pub(super) fn base_config() -> DaemonConfig {
         skip_permissions: false,
         budget: None,
         router: None,
+        attribution: true,
         custom_harnesses: Vec::new(),
     }
 }

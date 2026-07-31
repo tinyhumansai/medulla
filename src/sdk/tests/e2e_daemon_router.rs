@@ -56,6 +56,7 @@ fn router_options(
         skip_permissions: false,
         abort: Abort::new(),
         router,
+        attribution: true,
         on_event: None,
         on_stdin: None,
         on_session: None,

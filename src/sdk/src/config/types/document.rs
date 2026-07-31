@@ -62,6 +62,10 @@ pub struct TuiConfig {
     /// How operator-started harnesses behave.
     #[serde(default)]
     pub harness: HarnessSection,
+    /// Whether commits made by a Medulla-launched harness are attributed to
+    /// Medulla. On by default.
+    #[serde(default)]
+    pub attribution: AttributionConfig,
     /// Custom OpenAI-compatible router. Absent means routing is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub router: Option<RouterConfig>,
@@ -102,6 +106,7 @@ impl Default for TuiConfig {
             host: HostSection::default(),
             hosts: Vec::new(),
             harness: HarnessSection::default(),
+            attribution: AttributionConfig::default(),
             router: None,
             budget: None,
             routing_strategy: None,

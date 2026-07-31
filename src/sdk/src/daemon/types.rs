@@ -114,6 +114,10 @@ pub struct DaemonConfig {
     /// resolved from [`env`](Self::env) by name) layered into the spawn
     /// environment. `None` means routing is off.
     pub router: Option<crate::config::RouterConfig>,
+    /// Whether commits made by harnesses this daemon launches are attributed to
+    /// Medulla — the resolved `attribution.commit` config value (on by default;
+    /// see [`crate::config::AttributionConfig`]).
+    pub attribution: bool,
     /// Named OpenRouter presets this host exposes.
     pub custom_harnesses: Vec<crate::config::CustomHarnessConfig>,
     /// Operator-declared per-provider token budgets from the `[budget]` config.

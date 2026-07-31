@@ -41,6 +41,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
         extra_args: Vec::new(),
         skip_permissions: false,
         router: None,
+        attribution: true,
         budget: None,
         custom_harnesses: Vec::new(),
     };

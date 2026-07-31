@@ -342,6 +342,7 @@ fn dispatch_options(provider: HarnessProvider, bin_env_key: &str) -> RunTaskOpti
         on_event: None,
         on_stdin: None,
         on_session: None,
+        attribution: true,
     }
 }
 

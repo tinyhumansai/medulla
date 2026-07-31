@@ -132,6 +132,7 @@ pub fn daemon_config(
         extra_args: Vec::new(),
         skip_permissions: false,
         router: None,
+        attribution: true,
         custom_harnesses: Vec::new(),
         budget: None,
     }

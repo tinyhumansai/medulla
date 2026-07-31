@@ -61,6 +61,17 @@ pub async fn run_wrapper(
         return Ok(0);
     }
 
+    // Commit attribution is config-driven (`attribution.commit`, on by default).
+    // A config that fails to load must not silently drop attribution, so fall
+    // back to the same default the config type carries.
+    let attribution = crate::config::load_config(
+        crate::config::explicit_config_from_env(&env),
+        &env,
+        std::path::Path::new(&cwd),
+    )
+    .map(|loaded| loaded.config.attribution.commit)
+    .unwrap_or(true);
+
     run_wrapper_with(WrapperConfig {
         provider,
         child_args,
@@ -69,6 +80,7 @@ pub async fn run_wrapper(
         no_bridge,
         session_id: None,
         pty_spawner,
+        attribution,
     })
     .await
 }
@@ -102,10 +114,10 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     // so the operator's own `settings.json` is never touched.
     child_args.extend(crate::attribution::attribution_args(
         config.provider,
-        &config.env,
+        config.attribution,
     ));
-    // For providers that need git-hook-based attribution (Codex, Opencode),
-    // inject the prepare-commit-msg hook env vars; Claude Code gets empty.
+    // Every provider gets the prepare-commit-msg hook env vars; see the
+    // attribution module docs for why the CLI flag alone is not enough.
     merge_attribution_env_into_config(&mut config);
     child_args.extend(config.child_args.iter().cloned());
 
@@ -185,10 +197,9 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
 /// Merge the git-hook attribution env vars (for Codex / Opencode) into
 /// `config.env`. Claude Code gets no additional env vars.
 fn merge_attribution_env_into_config(config: &mut WrapperConfig) {
-    config.env.extend(crate::attribution::attribution_env(
-        config.provider,
-        &config.env,
-    ));
+    config
+        .env
+        .extend(crate::attribution::attribution_env(config.attribution));
 }
 
 /// A future that resolves on SIGINT/SIGTERM (Unix) or Ctrl-C (elsewhere).

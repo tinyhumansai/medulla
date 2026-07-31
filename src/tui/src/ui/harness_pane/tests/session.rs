@@ -69,6 +69,7 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         router: None,
         custom_harnesses: Vec::new(),
         budget: None,
+        attribution: true,
     };
     let run_task: medulla::daemon::providers::RunTaskFn =
         std::sync::Arc::new(|_| Box::pin(async { Err("not used in these tests".to_string()) }));

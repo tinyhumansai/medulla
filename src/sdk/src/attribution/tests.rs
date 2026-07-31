@@ -1,18 +1,9 @@
-//! Unit tests for [`super::attribution`]: trailer shape, the kill-switch
-//! precedence matrix, and per-provider coverage.
+//! Unit tests for [`super::attribution`]: trailer shape, the config-driven
+//! on/off switch, and per-provider coverage.
 
-use std::collections::HashMap;
-
-use super::{
-    attribution_args, attribution_enabled, attribution_trailer, ATTRIBUTION_EMAIL,
-    ATTRIBUTION_ENV_KEY, ATTRIBUTION_NAME,
-};
+use super::{attribution_args, attribution_trailer, ATTRIBUTION_EMAIL, ATTRIBUTION_NAME};
+use crate::config::AttributionConfig;
 use crate::tinyplace::HarnessProvider;
-
-/// An env map with `TINYPLACE_GIT_ATTRIBUTION` set to `value`.
-fn env_with(value: &str) -> HashMap<String, String> {
-    HashMap::from([(ATTRIBUTION_ENV_KEY.to_string(), value.to_string())])
-}
 
 #[test]
 fn trailer_uses_the_medulla_identity() {
@@ -24,40 +15,35 @@ fn trailer_uses_the_medulla_identity() {
     assert_eq!(ATTRIBUTION_EMAIL, "medulla@tinyhumans.ai");
 }
 
+/// Attribution is on unless the operator turns it off — a harness commit that
+/// does not name the tool that wrote it is the surprising case.
 #[test]
-fn attribution_is_enabled_by_default() {
-    assert!(attribution_enabled(&HashMap::new()));
+fn attribution_config_defaults_to_on() {
+    assert!(AttributionConfig::default().commit);
 }
 
+/// An absent `attribution` section, and an empty one, both mean "on".
 #[test]
-fn kill_switch_disables_attribution() {
-    for raw in ["0", "false", "no", "off", "", "  "] {
-        assert!(
-            !attribution_enabled(&env_with(raw)),
-            "expected {raw:?} to disable attribution"
-        );
-    }
+fn absent_or_empty_config_section_means_on() {
+    let from_absent: crate::config::TuiConfig =
+        serde_json::from_str("{}").expect("empty config parses");
+    assert!(from_absent.attribution.commit);
+
+    let from_empty: AttributionConfig = serde_json::from_str("{}").expect("empty section parses");
+    assert!(from_empty.commit);
 }
 
+/// The operator turns attribution off with `attribution.commit: false`.
 #[test]
-fn affirmative_values_keep_attribution_on() {
-    for raw in ["1", "true", "yes", "on", "TRUE", " On "] {
-        assert!(
-            attribution_enabled(&env_with(raw)),
-            "expected {raw:?} to enable attribution"
-        );
-    }
-}
-
-/// An unrecognised value should fail closed rather than silently attributing.
-#[test]
-fn unrecognised_values_fail_closed() {
-    assert!(!attribution_enabled(&env_with("maybe")));
+fn config_can_turn_attribution_off() {
+    let parsed: crate::config::TuiConfig =
+        serde_json::from_str(r#"{"attribution":{"commit":false}}"#).expect("config parses");
+    assert!(!parsed.attribution.commit);
 }
 
 #[test]
 fn claude_receives_inline_settings_carrying_the_trailer() {
-    let args = attribution_args(HarnessProvider::Claude, &HashMap::new());
+    let args = attribution_args(HarnessProvider::Claude, true);
     assert_eq!(args.len(), 2, "expected a flag/value pair, got {args:?}");
     assert_eq!(args[0], "--settings");
 
@@ -73,7 +59,7 @@ fn claude_receives_inline_settings_carrying_the_trailer() {
 /// operator's own settings without clobbering unrelated keys.
 #[test]
 fn claude_settings_payload_is_minimal() {
-    let args = attribution_args(HarnessProvider::Claude, &HashMap::new());
+    let args = attribution_args(HarnessProvider::Claude, true);
     let parsed: serde_json::Value = serde_json::from_str(&args[1]).unwrap();
 
     let top = parsed.as_object().expect("payload is a JSON object");
@@ -84,29 +70,28 @@ fn claude_settings_payload_is_minimal() {
     assert_eq!(attribution.len(), 1, "unexpected keys: {attribution:?}");
 }
 
-/// Codex hardcodes its own trailer and Opencode has no knob at all, so Medulla
-/// leaves both alone rather than misattributing them.
+/// Codex hardcodes its own trailer and Opencode has no knob at all, so neither
+/// receives CLI args — they are attributed by the hook instead.
 #[test]
 fn providers_without_a_knob_receive_no_args() {
     for provider in [HarnessProvider::Codex, HarnessProvider::Opencode] {
         assert!(
-            attribution_args(provider, &HashMap::new()).is_empty(),
+            attribution_args(provider, true).is_empty(),
             "{provider:?} should receive no attribution args"
         );
     }
 }
 
 #[test]
-fn kill_switch_suppresses_args_for_every_provider() {
-    let env = env_with("0");
+fn disabling_suppresses_args_for_every_provider() {
     for provider in [
         HarnessProvider::Claude,
         HarnessProvider::Codex,
         HarnessProvider::Opencode,
     ] {
         assert!(
-            attribution_args(provider, &env).is_empty(),
-            "{provider:?} should receive no args when disabled"
+            attribution_args(provider, false).is_empty(),
+            "{provider:?} should receive no args when off"
         );
     }
 }
@@ -400,46 +385,25 @@ fn non_unix_returns_empty() {
 // attribution_env / cleanup_hook_tmpdir tests
 // ---------------------------------------------------------------------------
 
-/// Every provider gets the git-hook env vars — Claude's own `attribution.commit`
-/// setting is advisory (the model can ignore it), so the hook is the mechanism
-/// of record for all three.
+/// The hook env is provider-independent — it is the mechanism of record for
+/// every provider, including Claude, whose own `attribution.commit` setting is
+/// advisory (the model can ignore it).
 #[cfg(unix)]
 #[test]
-fn every_provider_gets_env_attribution() {
-    for provider in [
-        HarnessProvider::Claude,
-        HarnessProvider::Codex,
-        HarnessProvider::Opencode,
-    ] {
-        let env = super::attribution_env(provider, &HashMap::new());
-        assert!(!env.is_empty(), "{provider:?} should receive env vars");
-        assert!(
-            env.contains_key("MEDULLA_ATTRIBUTION"),
-            "{provider:?} missing MEDULLA_ATTRIBUTION"
-        );
-        assert!(
-            env.contains_key("GIT_CONFIG_VALUE_0"),
-            "{provider:?} missing hooksPath"
-        );
-        // Clean up the temp dir created by this test.
-        super::cleanup_hook_tmpdir();
-    }
+fn enabled_attribution_yields_hook_env() {
+    let env = super::attribution_env(true);
+    assert!(
+        env.contains_key("MEDULLA_ATTRIBUTION"),
+        "missing MEDULLA_ATTRIBUTION"
+    );
+    assert!(env.contains_key("GIT_CONFIG_VALUE_0"), "missing hooksPath");
+    super::cleanup_hook_tmpdir();
 }
 
-/// The kill-switch suppresses env vars for every provider.
+/// Turning attribution off in config suppresses the hook env entirely.
 #[test]
-fn kill_switch_suppresses_env_for_all_providers() {
-    let env = env_with("0");
-    for provider in [
-        HarnessProvider::Claude,
-        HarnessProvider::Codex,
-        HarnessProvider::Opencode,
-    ] {
-        assert!(
-            super::attribution_env(provider, &env).is_empty(),
-            "{provider:?} should receive no env when disabled"
-        );
-    }
+fn disabled_attribution_yields_no_hook_env() {
+    assert!(super::attribution_env(false).is_empty());
 }
 
 /// `cleanup_hook_dir` must remove the temp dir that `generate_hook` created.

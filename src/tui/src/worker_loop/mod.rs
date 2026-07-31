@@ -64,6 +64,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         skip_permissions,
         router,
         budget,
+        attribution,
     } = config;
     let providers = medulla::daemon::providers::detect_providers(&env, None, None);
     let sessions = PtyManager::new();
@@ -159,6 +160,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         skip_permissions,
         router,
         budget,
+        attribution,
     };
     let result = drive(&mut terminal, &mut app, &start, &mut inbox, &mut runtime).await;
 
@@ -190,6 +192,7 @@ pub(super) fn worker_runtime(
         logs,
         router,
         budget,
+        attribution,
         ..
     } = start;
     let config = DaemonConfig {
@@ -219,6 +222,7 @@ pub(super) fn worker_runtime(
         // Layered into every peer task's spawn env by the same executor the
         // headless daemon uses, so `--tui` and headless route identically.
         router: router.clone(),
+        attribution: *attribution,
         // The standalone worker TUI does not yet expose a config editor; named
         // presets are loaded by the orchestrator's embedded host.
         custom_harnesses: Vec::new(),

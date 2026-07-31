@@ -39,6 +39,7 @@ fn config(spawner: Option<crate::wrapper::PtySpawner>) -> WrapperConfig {
         no_bridge: true,
         session_id: None,
         pty_spawner: spawner,
+        attribution: true,
     }
 }
 
@@ -209,9 +210,10 @@ fn attribution_env_is_merged_for_every_provider() {
     }
 }
 
-/// The kill-switch must leave the env map untouched for every provider.
+/// Attribution turned off in config must leave the env map untouched for every
+/// provider.
 #[test]
-fn attribution_env_not_merged_when_disabled() {
+fn attribution_env_not_merged_when_config_disables_it() {
     for provider in [
         HarnessProvider::Claude,
         HarnessProvider::Codex,
@@ -219,10 +221,7 @@ fn attribution_env_not_merged_when_disabled() {
     ] {
         let mut config = config(None);
         config.provider = provider;
-        config.env.insert(
-            crate::attribution::ATTRIBUTION_ENV_KEY.to_string(),
-            "0".to_string(),
-        );
+        config.attribution = false;
         let env_before = config.env.clone();
         super::merge_attribution_env_into_config(&mut config);
         assert_eq!(config.env, env_before, "{provider:?} env must be unchanged");

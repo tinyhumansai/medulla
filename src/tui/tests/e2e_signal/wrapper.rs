@@ -137,6 +137,7 @@ async fn wrapper_leg_bridges_session_and_injects_control() {
         no_bridge: false,
         session_id: Some("tp-codex-signal".to_string()),
         pty_spawner: None,
+        attribution: true,
     }));
 
     // The session_start lifecycle + first transcript message arrive, decrypted.

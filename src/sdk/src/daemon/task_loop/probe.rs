@@ -76,6 +76,7 @@ impl DaemonRuntime {
             workspace: self.inner.config.workspace.clone(),
             accessible_dirs,
             env: self.inner.config.env.clone(),
+            attribution: self.inner.config.attribution,
             providers: self.inner.config.providers.clone(),
             timeout_ms: self
                 .inner

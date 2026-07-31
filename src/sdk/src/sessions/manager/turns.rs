@@ -345,6 +345,7 @@ impl SessionManager {
             resume_session_id: resume.map(str::to_string),
             abort: abort.clone(),
             router: self.inner.config.router.clone(),
+            attribution: self.inner.config.attribution,
             on_event: None,
             on_stdin: None,
             on_session: None,

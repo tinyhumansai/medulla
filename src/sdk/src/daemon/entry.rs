@@ -294,6 +294,12 @@ pub async fn run_daemon(
     let budget = loaded_config
         .as_ref()
         .and_then(|loaded| loaded.config.budget.clone());
+    // A config that failed to load must not silently drop attribution, so fall
+    // back to the config type's own default (on).
+    let attribution = loaded_config
+        .as_ref()
+        .map(|loaded| loaded.config.attribution.commit)
+        .unwrap_or(true);
     let custom_harnesses = loaded_config
         .as_ref()
         .map(|loaded| {
@@ -321,6 +327,7 @@ pub async fn run_daemon(
         // The custom OpenAI-compatible router from the layered `[router]` config,
         // layered into every task's spawn environment by the executor.
         router,
+        attribution,
         custom_harnesses,
         // Operator-declared per-provider budgets from the `[budget]` config,
         // advertised on the capability probe as `source: configured`.

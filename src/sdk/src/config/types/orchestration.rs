@@ -178,6 +178,30 @@ pub struct OpencodeConfig {
     pub max_concurrency: u32,
 }
 
+/// The `attribution` section: whether commits made by a Medulla-launched
+/// harness say so.
+///
+/// Attribution is a `Co-authored-by` trailer on the commit *message*, not a
+/// change of git author or committer identity, so blame, `git log --author`,
+/// and the GitHub contribution graph are unaffected.
+///
+/// On by default: a harness commit that does not name the tool that wrote it is
+/// the surprising case, not the other way round. Set `commit` to `false` to turn
+/// it off.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AttributionConfig {
+    /// Whether commits carry the `Co-authored-by: Medulla` trailer.
+    #[serde(default = "d_true")]
+    pub commit: bool,
+}
+
+impl Default for AttributionConfig {
+    fn default() -> Self {
+        AttributionConfig { commit: true }
+    }
+}
+
 /// The `harness` section: how harnesses the operator starts themselves behave.
 ///
 /// Distinct from [`HostSection`], which is about the harnesses the *orchestrator*

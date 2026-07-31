@@ -59,10 +59,7 @@ pub(crate) fn host_enabled(config: &HostSection, env: &HashMap<String, String>) 
 /// empty address cannot be bound and silently not hosting is worse than hosting
 /// under the documented name.
 pub(crate) fn host_address(config: &HostSection) -> String {
-    match config.address.trim() {
-        "" => HostSection::default().address,
-        value => value.to_string(),
-    }
+    config.effective_address()
 }
 
 /// Every device-local address a host could bind, running or not.

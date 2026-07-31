@@ -316,6 +316,22 @@ impl Default for HostSection {
     }
 }
 
+impl HostSection {
+    /// The address this host effectively binds on the local bus.
+    ///
+    /// Falls back to the section default when the operator left `address`
+    /// blank, because an empty address cannot be bound — and, for a caller
+    /// matching a custom-harness preset's `hostId` against this device,
+    /// filtering on a blank string would either match nothing or (worse)
+    /// match every preset that also left `hostId` blank.
+    pub fn effective_address(&self) -> String {
+        match self.address.trim() {
+            "" => d_host_address(),
+            value => value.to_string(),
+        }
+    }
+}
+
 fn d_host_address() -> String {
     "this-device".into()
 }

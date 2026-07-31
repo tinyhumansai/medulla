@@ -194,19 +194,7 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // author choosing a harness needs to know which presets this machine has,
     // and they live in their own config section rather than that one.
     let policy = crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
-        .map(|loaded| {
-            let custom_harness_configs =
-                crate::config::load_layered_custom_harnesses(&loaded.sources).unwrap_or_default();
-            let custom_harnesses = custom_harness_configs
-                .iter()
-                .map(|preset| preset.id.clone())
-                .collect();
-            crate::workflows::ops::HostPolicy {
-                workflows: loaded.config.workflows,
-                custom_harnesses,
-                custom_harness_configs,
-            }
-        })
+        .map(policy_from_loaded)
         .unwrap_or_default();
     // The mode the parent asked for. Read once at startup for the same reason
     // config is: this process serves exactly one harness session, and which
@@ -233,4 +221,123 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
         }
     }
     Ok(())
+}
+
+/// Build the tool-call policy from a loaded config.
+///
+/// A custom-harness preset attaches to a fleet `hostId`; one for another
+/// machine is not this device's to advertise (`workflow_host`) or execute
+/// (`workflow_run`, which reaches [`crate::workflows::local::run_here`] and
+/// starts an embedded daemon *on this device*). This is the third local
+/// execution path that starts one — the CLI
+/// (`commands::workflow::local_custom_harnesses` in the `medulla-tui` crate)
+/// and the interactive TUI host (`local_host::options_from_config_with_custom`,
+/// also `medulla-tui`) both filter to the effective local `[host]` address the
+/// same way; this filters to the same address using
+/// [`HostSection::effective_address`](crate::config::HostSection::effective_address),
+/// the shared logic both of those now call through.
+fn policy_from_loaded(loaded: crate::config::LoadedConfig) -> crate::workflows::ops::HostPolicy {
+    let local_host_id = loaded.config.host.effective_address();
+    let custom_harness_configs = crate::config::load_layered_custom_harnesses(&loaded.sources)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|preset| preset.host_id == local_host_id)
+        .collect::<Vec<_>>();
+    let custom_harnesses = custom_harness_configs
+        .iter()
+        .map(|preset| preset.id.clone())
+        .collect();
+    crate::workflows::ops::HostPolicy {
+        workflows: loaded.config.workflows,
+        custom_harnesses,
+        custom_harness_configs,
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::policy_from_loaded;
+    use crate::config::{CustomHarnessConfig, HostSection, LoadedConfig, TuiConfig};
+    use crate::tinyplace::HarnessProvider;
+
+    /// A minimal, valid custom-harness preset for `host_id`.
+    fn preset(id: &str, host_id: &str) -> CustomHarnessConfig {
+        CustomHarnessConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            base_harness: HarnessProvider::Claude,
+            model: "deepseek/deepseek-chat".to_string(),
+            fast_model: None,
+            context_window: None,
+            host_id: host_id.to_string(),
+            default: false,
+            api_key_env: "OPENROUTER_API_KEY".to_string(),
+            base_url: String::new(),
+        }
+    }
+
+    /// Writes `presets` as this file's `[[workflows.customHarnesses]]` table
+    /// and returns a [`LoadedConfig`] whose `sources` names it, matching what
+    /// `crate::config::load_config` would have produced from a real file.
+    fn loaded_with_presets(
+        root: &std::path::Path,
+        host_address: &str,
+        presets: &[CustomHarnessConfig],
+    ) -> LoadedConfig {
+        let path = root.join("medulla.tui.json");
+        let rows: Vec<serde_json::Value> = presets
+            .iter()
+            .map(|preset| serde_json::to_value(preset).unwrap())
+            .collect();
+        std::fs::write(
+            &path,
+            serde_json::json!({ "customHarnesses": rows }).to_string(),
+        )
+        .unwrap();
+
+        let mut config = TuiConfig::default();
+        config.host.address = host_address.to_string();
+
+        LoadedConfig {
+            config,
+            path: path.to_string_lossy().to_string(),
+            sources: vec![path.to_string_lossy().to_string()],
+        }
+    }
+
+    #[test]
+    fn presets_for_another_fleet_host_are_not_advertised_or_carried_for_execution() {
+        let root = tempfile::tempdir().unwrap();
+        let loaded = loaded_with_presets(
+            root.path(),
+            "this-machine",
+            &[
+                preset("mine", "this-machine"),
+                preset("someone-elses", "other-machine"),
+            ],
+        );
+
+        let policy = policy_from_loaded(loaded);
+
+        assert_eq!(policy.custom_harnesses, vec!["mine".to_string()]);
+        assert_eq!(policy.custom_harness_configs.len(), 1);
+        assert_eq!(policy.custom_harness_configs[0].id, "mine");
+    }
+
+    #[test]
+    fn a_blank_host_address_matches_the_section_default_not_every_preset() {
+        let root = tempfile::tempdir().unwrap();
+        // The operator never set `[host].address`, so the effective id is the
+        // section default — not the blank string a preset might (incorrectly)
+        // carry.
+        let loaded = loaded_with_presets(
+            root.path(),
+            "",
+            &[preset("mine", &HostSection::default().address)],
+        );
+
+        let policy = policy_from_loaded(loaded);
+
+        assert_eq!(policy.custom_harnesses, vec!["mine".to_string()]);
+    }
 }

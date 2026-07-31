@@ -14,10 +14,17 @@
 //! - **Default** — no `agent_ref`, so the node runs on the host's default
 //!   worker.
 //!
-//! `agent_ref` is read from the node's *config*, never from model output. That
-//! is the engine's own guard and it matters more here than upstream: a prompt
-//! injection that could choose the `agent_ref` would be choosing which machine
-//! runs the next instruction.
+//! *Which* harness and model, as distinct from which machine, is a separate
+//! choice: `config.harness` and `config.model` on the node, falling back to the
+//! workflow's `defaults` and then to the host's config. See
+//! [`crate::flow_engine::harness_choice`] for how those layers combine.
+//!
+//! `agent_ref` — and, for the same reason, `harness` — is read from the node's
+//! *config*, never from model output. That is the engine's own guard and it
+//! matters more here than upstream: a prompt injection that could choose the
+//! `agent_ref` would be choosing which machine runs the next instruction, and
+//! one that could choose the harness would be choosing which binary and which
+//! credentials run it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -28,6 +35,7 @@ use tinyflows::caps::{AgentRunner, LlmProvider};
 use tinyflows::error::{EngineError, Result};
 
 use crate::flow_engine::agent_evidence::AgentEvidence;
+use crate::flow_engine::harness_choice::{HarnessChoice, HarnessPreference};
 use crate::flow_engine::settings::CapabilitySettings;
 use crate::hub::{RunError, TaskRequest};
 
@@ -157,7 +165,15 @@ impl HarnessAgentRunner {
     ///
     /// The task id carries the run and the route so a worker-side log, and an
     /// operator reading it, can tell which workflow step a session belongs to.
-    fn request(&self, route: &AgentRoute, instruction: String) -> TaskRequest {
+    ///
+    /// `choice` is the harness and model this node resolved to; see
+    /// [`crate::flow_engine::harness_choice`] for how the layers combine.
+    fn request(
+        &self,
+        route: &AgentRoute,
+        instruction: String,
+        choice: HarnessChoice,
+    ) -> TaskRequest {
         let worker_address = match route {
             AgentRoute::Template(name) => name.clone(),
             AgentRoute::Default => self.settings.default_worker_address.clone(),
@@ -180,9 +196,9 @@ impl HarnessAgentRunner {
             cycle_id: Some(self.run_id.clone()),
             instruction,
             worker_address,
-            provider: self.settings.default_provider,
-            custom_harness: None,
-            model: self.settings.default_model.clone(),
+            provider: choice.provider,
+            custom_harness: choice.custom_harness,
+            model: choice.model,
             // No conversation, deliberately. Each node is its own unit of work,
             // and letting two share a harness session would make a graph's
             // behaviour depend on the order its branches happened to run in —
@@ -196,9 +212,34 @@ impl HarnessAgentRunner {
         }
     }
 
+    /// Resolve which harness and model this node's config asks for.
+    ///
+    /// The node's own preference sits over the run's standing one. A config that
+    /// names a harness this host cannot make sense of fails the node rather than
+    /// falling back to the default: an author who wrote `harness: cluade` meant
+    /// to change where the work runs, and silently running it somewhere else is
+    /// the one outcome that helps nobody.
+    ///
+    /// # Errors
+    ///
+    /// Returns a capability error naming the node kind and the correction.
+    fn choice_for(&self, node_kind: &str, config: &Value) -> Result<HarnessChoice> {
+        let node = HarnessPreference::from_config(config)
+            .map_err(|err| EngineError::Capability(format!("{node_kind}: {err}")))?;
+        Ok(HarnessChoice::resolve(&[
+            node,
+            self.settings.harness_preference(),
+        ]))
+    }
+
     /// Dispatch `instruction` along `route` and shape the reply.
-    async fn run_on_harness(&self, route: AgentRoute, instruction: String) -> Result<Value> {
-        let request = self.request(&route, instruction);
+    async fn run_on_harness(
+        &self,
+        route: AgentRoute,
+        instruction: String,
+        choice: HarnessChoice,
+    ) -> Result<Value> {
+        let request = self.request(&route, instruction, choice);
         if request.worker_address.trim().is_empty() {
             return Err(EngineError::Capability(
                 "agent node: no worker to dispatch to — set an `agent_ref` on the node or a \
@@ -226,7 +267,8 @@ impl AgentRunner for HarnessAgentRunner {
     ) -> Result<Value> {
         let instruction = instruction_of(&request)?;
         self.record_prompt(&request, &instruction);
-        self.run_on_harness(route_for_agent_ref(Some(agent_ref)), instruction)
+        let choice = self.choice_for("agent node", &request)?;
+        self.run_on_harness(route_for_agent_ref(Some(agent_ref)), instruction, choice)
             .await
     }
 }
@@ -272,8 +314,9 @@ impl LlmProvider for HarnessLlm {
     async fn complete(&self, request: Value, _conn: Option<&str>) -> Result<Value> {
         let instruction = instruction_of(&request)?;
         self.inner.record_prompt(&request, &instruction);
+        let choice = self.inner.choice_for("agent node", &request)?;
         self.inner
-            .run_on_harness(AgentRoute::Default, instruction)
+            .run_on_harness(AgentRoute::Default, instruction, choice)
             .await
     }
 }

@@ -21,6 +21,7 @@
 pub(crate) mod agent_evidence;
 pub mod caps;
 pub mod execute;
+pub mod harness_choice;
 pub mod observability;
 pub mod settings;
 
@@ -35,5 +36,6 @@ mod shell_tests;
 pub(crate) use caps::build_capabilities_with_agent_evidence;
 pub use caps::{build_capabilities, build_dry_run_capabilities, open_checkpointer, HostServices};
 pub use execute::{Compiled, Outcome};
+pub use harness_choice::{HarnessChoice, HarnessPreference, HarnessSelector};
 pub use observability::{folding_sink, null_sink, WorkEventSink, WorkflowRunObserver};
 pub use settings::{CapabilitySettings, DEFAULT_RUN_TIMEOUT_SECS};

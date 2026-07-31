@@ -27,8 +27,17 @@ pub struct CapabilitySettings {
     /// The bridge address of the worker an `agent` node dispatches to when its
     /// `agent_ref` names no more specific one.
     pub default_worker_address: String,
-    /// The harness an `agent` node runs on when the node names none.
+    /// The harness an `agent` node runs on when neither the node nor the
+    /// workflow names one.
     pub default_provider: Option<HarnessProvider>,
+    /// The custom harness preset an `agent` node runs on when neither the node
+    /// nor the workflow names a harness.
+    ///
+    /// Never set from operator config — `workflows.defaultProvider` only names
+    /// built-in harnesses. It exists so a workflow's own `defaults` block can
+    /// pin a preset for every node in the graph, which is written into a run's
+    /// settings by [`crate::workflows::run_workflow`].
+    pub default_custom_harness: Option<String>,
     /// The model hint passed with each dispatch, when the host pins one.
     pub default_model: Option<String>,
     /// Whether `code` nodes may execute. On by default for local workflows,
@@ -71,6 +80,7 @@ impl CapabilitySettings {
             checkpoint_dir: base.join("checkpoints"),
             default_worker_address: String::new(),
             default_provider: None,
+            default_custom_harness: None,
             default_model: None,
             allow_code: true,
             tool_allowlist: Vec::new(),
@@ -105,6 +115,26 @@ impl CapabilitySettings {
         const FLOOR_SECS: u64 = 30;
         let share = (self.run_timeout_secs / SHARE).max(FLOOR_SECS);
         std::time::Duration::from_secs(share.min(self.run_timeout_secs.max(1)))
+    }
+
+    /// This run's standing harness preference — the layer under every node.
+    ///
+    /// Built from the host's config, then overwritten in place by a workflow's
+    /// own `defaults` block when it has one, so an `agent` node only ever has
+    /// two layers to consider: its own config and this.
+    pub fn harness_preference(&self) -> crate::flow_engine::HarnessPreference {
+        crate::flow_engine::HarnessPreference {
+            harness: match (&self.default_custom_harness, self.default_provider) {
+                // A named preset wins: only a workflow's own defaults can set
+                // it, which is more specific than anything host config says.
+                (Some(id), _) => Some(crate::flow_engine::HarnessSelector::Custom(id.clone())),
+                (None, Some(provider)) => {
+                    Some(crate::flow_engine::HarnessSelector::Builtin(provider))
+                }
+                (None, None) => None,
+            },
+            model: self.default_model.clone(),
+        }
     }
 
     /// Whether `host` is permitted for outbound HTTP.

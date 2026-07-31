@@ -103,7 +103,7 @@ impl App {
         }
 
         lines.push(connection_line(&selected.id, &self.workflow_layout().edges));
-        let agent_defaults = AgentDefaults::from_config(&self.loaded.config.workflows);
+        let agent_defaults = AgentDefaults::new(&self.loaded.config.workflows, &self.wf.defaults);
         lines.extend(kind_lines(
             &selected.kind,
             &config,

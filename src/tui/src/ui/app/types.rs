@@ -339,6 +339,11 @@ pub struct WorkflowsState {
     /// because a render pass must not touch the disk, and re-laying it out every
     /// frame would move boxes under the cursor.
     pub(super) graph: Option<Box<medulla::workflows::WorkflowGraph>>,
+    /// The selected workflow's own choice of harness and model, cached with the
+    /// graph and for the same reason. Not part of the graph, so a preview
+    /// reading only [`graph`](Self::graph) would report the host's harness for a
+    /// workflow that pinned its own.
+    pub(super) defaults: medulla::workflows::WorkflowDefaults,
     /// The laid-out form of [`graph`](Self::graph).
     pub(super) layout: medulla::ui::workflows::GraphLayout,
     /// Selected node in the canvas, in the layout's reading order.

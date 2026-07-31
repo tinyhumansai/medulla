@@ -22,16 +22,19 @@ impl App {
     pub(in crate::ui::app) fn reload_workflow_graph(&mut self) {
         let Some(id) = self.selected_workflow().map(|workflow| workflow.id.clone()) else {
             self.wf.graph = None;
+            self.wf.defaults = Default::default();
             self.wf.layout = GraphLayout::default();
             return;
         };
         match self.workflow_store().get(&id) {
             Ok(Some(record)) => {
                 self.wf.layout = GraphLayout::build(&record.graph);
+                self.wf.defaults = record.defaults;
                 self.wf.graph = Some(Box::new(record.graph));
             }
             _ => {
                 self.wf.graph = None;
+                self.wf.defaults = Default::default();
                 self.wf.layout = GraphLayout::default();
             }
         }

@@ -126,6 +126,7 @@ fn agent_lines(config: &Value, defaults: &AgentDefaults) -> Vec<Line<'static>> {
             true,
         ),
     };
+    let effective = defaults.resolve(config);
     let worker_style = if missing {
         Style::default().fg(Color::Red)
     } else {
@@ -145,13 +146,13 @@ fn agent_lines(config: &Value, defaults: &AgentDefaults) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled("harness  ", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(
-                defaults.harness.clone(),
+                effective.harness.clone(),
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("  · model {}", defaults.model),
+                format!("  · model {}  · {}", effective.model, effective.source),
                 Style::default().add_modifier(Modifier::DIM),
             ),
         ]),
@@ -160,6 +161,12 @@ fn agent_lines(config: &Value, defaults: &AgentDefaults) -> Vec<Line<'static>> {
             Style::default().add_modifier(Modifier::DIM),
         )),
     ];
+    if let Some(message) = &effective.unreadable {
+        lines.push(Line::from(Span::styled(
+            format!("harness   {message}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
     if config
         .get("requires_approval")
         .and_then(Value::as_bool)

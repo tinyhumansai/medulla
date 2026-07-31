@@ -178,6 +178,35 @@ fn http_preview_strips_url_credentials_query_and_fragment() {
     }
 }
 
+/// Host config pinning `harness` and `model`, with no workflow-level block —
+/// the layers beneath a node before this feature existed.
+fn host_defaults(harness: &str, model: &str) -> AgentDefaults {
+    let config = medulla::config::WorkflowsConfig {
+        default_worker: "fallback".into(),
+        default_provider: medulla::tinyplace::HarnessProvider::from_wire(harness),
+        default_model: model.into(),
+        ..Default::default()
+    };
+    AgentDefaults::new(&config, &Default::default())
+}
+
+/// Host config as above, with a workflow that pins its own harness over it.
+fn workflow_defaults(harness: &str, model: &str) -> AgentDefaults {
+    let config = medulla::config::WorkflowsConfig {
+        default_worker: "fallback".into(),
+        default_provider: Some(medulla::tinyplace::HarnessProvider::Claude),
+        default_model: "claude-opus-4".into(),
+        ..Default::default()
+    };
+    AgentDefaults::new(
+        &config,
+        &medulla::workflows::WorkflowDefaults {
+            harness: Some(harness.into()),
+            model: Some(model.into()),
+        },
+    )
+}
+
 #[test]
 fn agent_steps_explain_the_effective_worker_harness_and_dynamic_task() {
     let preview = text(kind_lines(
@@ -187,17 +216,14 @@ fn agent_steps_explain_the_effective_worker_harness_and_dynamic_task() {
             "prompt": "=item.pull_request"
         }),
         100,
-        &AgentDefaults {
-            worker: "fallback".into(),
-            harness: "Codex".into(),
-            model: "gpt-5.6".into(),
-        },
+        &host_defaults("codex", "gpt-5.6"),
     ));
 
     assert!(preview.contains("agent    reviewer"), "{preview}");
     assert!(preview.contains("named workflow agent"), "{preview}");
     assert!(preview.contains("harness  Codex"), "{preview}");
     assert!(preview.contains("model gpt-5.6"), "{preview}");
+    assert!(preview.contains("host default"), "{preview}");
     assert!(
         preview.contains("Uses “pull_request” from the previous step"),
         "{preview}"
@@ -299,4 +325,71 @@ fn older_agent_run_labels_missing_evidence_as_output() {
     let preview = text(run_lines(&run, "agent", true));
     assert!(preview.contains("output  unavailable"), "{preview}");
     assert!(!preview.contains("result  unavailable"), "{preview}");
+}
+
+#[test]
+fn a_step_that_names_its_own_harness_shows_that_one_and_says_so() {
+    let preview = text(kind_lines(
+        "agent",
+        &json!({ "prompt": "fix it", "harness": "codex", "model": "gpt-5-codex" }),
+        100,
+        &workflow_defaults("claude", "claude-opus-4"),
+    ));
+
+    assert!(preview.contains("harness  Codex"), "{preview}");
+    assert!(preview.contains("model gpt-5-codex"), "{preview}");
+    assert!(preview.contains("this step"), "{preview}");
+}
+
+#[test]
+fn a_step_that_names_nothing_shows_the_workflow_s_own_choice() {
+    let preview = text(kind_lines(
+        "agent",
+        &json!({ "prompt": "fix it" }),
+        100,
+        &workflow_defaults("codex", "gpt-5-codex"),
+    ));
+
+    assert!(preview.contains("harness  Codex"), "{preview}");
+    assert!(preview.contains("workflow default"), "{preview}");
+}
+
+#[test]
+fn a_step_switching_harness_does_not_show_the_inherited_model() {
+    // The pane must not claim a Claude model id will be sent to Codex — that is
+    // precisely what the dispatch refuses to do.
+    let preview = text(kind_lines(
+        "agent",
+        &json!({ "prompt": "fix it", "harness": "codex" }),
+        100,
+        &workflow_defaults("claude", "claude-opus-4"),
+    ));
+
+    assert!(preview.contains("harness  Codex"), "{preview}");
+    assert!(!preview.contains("claude-opus-4"), "{preview}");
+    assert!(preview.contains("model worker default"), "{preview}");
+}
+
+#[test]
+fn a_custom_preset_is_shown_by_its_id() {
+    let preview = text(kind_lines(
+        "agent",
+        &json!({ "prompt": "fix it", "harness": "deepseek-claude" }),
+        100,
+        &host_defaults("claude", "claude-opus-4"),
+    ));
+
+    assert!(preview.contains("harness  deepseek-claude"), "{preview}");
+}
+
+#[test]
+fn a_hand_edited_harness_that_cannot_be_read_says_so_rather_than_showing_a_fallback() {
+    let preview = text(kind_lines(
+        "agent",
+        &json!({ "prompt": "fix it", "harness": "claude code" }),
+        100,
+        &host_defaults("claude", "claude-opus-4"),
+    ));
+
+    assert!(preview.contains("custom harness id"), "{preview}");
 }

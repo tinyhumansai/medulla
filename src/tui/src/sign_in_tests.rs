@@ -229,3 +229,62 @@ fn a_login_that_cannot_describe_the_account_never_selects_it() {
         "the selection must not have moved to an account that cannot be written"
     );
 }
+
+#[test]
+fn an_id_that_could_escape_the_root_is_refused_before_it_becomes_a_path() {
+    // The switch path joins this id to the root and writes a config file there.
+    // `..` or a separator must never reach that join — a hostile or broken
+    // /auth/me response would otherwise touch files outside any account.
+    for hostile in ["..", "../../etc", "a/b", "/absolute", ".hidden"] {
+        let Disposition::Refuse(why) = disposition("acct-a", false, Some(hostile)) else {
+            panic!("{hostile:?} must not be joined to the root");
+        };
+        assert!(why.contains("cannot be a directory name"), "{why}");
+    }
+}
+
+#[test]
+fn a_hostile_id_writes_nothing_anywhere() {
+    // End to end through adoption: no directory created, no config written, and
+    // the selection untouched.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&outside).expect("outside");
+    let root = tmp.path().join("root");
+    let env = env_at(&root);
+    let me = serde_json::json!({ "id": "../outside" });
+
+    let err = crate::commands::adopt_account(&env, &me, "https://staging-api.tinyhumans.ai")
+        .expect_err("a traversing id must be refused");
+    assert!(err.contains("cannot be a directory name"), "{err}");
+
+    assert!(
+        !outside.join("config.toml").exists(),
+        "nothing may be written outside the account root"
+    );
+    assert_eq!(medulla::home::user::read_active_user_id(&root), None);
+}
+
+#[test]
+fn a_refused_override_writes_no_config_for_the_other_account() {
+    // The mismatch is refused before anything is persisted: a login that ends in
+    // an error must not leave the authenticated account's config behind in a
+    // home this process was never going to use.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let mut env = env_at(tmp.path());
+    env.insert(
+        medulla::home::user::MEDULLA_USER_ENV.to_string(),
+        "acct-pinned".to_string(),
+    );
+    let me = serde_json::json!({ "id": "acct-other" });
+
+    let err = crate::commands::adopt_account(&env, &me, "https://staging-api.tinyhumans.ai")
+        .expect_err("a pinned process must not adopt another account");
+    assert!(err.contains("MEDULLA_USER"), "{err}");
+
+    assert!(
+        !tmp.path().join("acct-other").exists(),
+        "the refused account's home must not have been created"
+    );
+    assert_eq!(medulla::home::user::read_active_user_id(tmp.path()), None);
+}

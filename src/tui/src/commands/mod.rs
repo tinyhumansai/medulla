@@ -146,17 +146,37 @@ pub(crate) fn adopt_account(
         );
     };
 
+    // Before the id is joined to anything. It comes from a backend response and
+    // becomes a directory name, so `..`, a separator, or an absolute path would
+    // otherwise reach `seed_account_backend` — which creates directories and
+    // merges a config file — at a path outside the root, on a login that may
+    // then be refused anyway.
+    let user_id = medulla::home::user::sanitize_account_id(&user_id).ok_or_else(|| {
+        format!("the backend named an account id that cannot be a directory name ({user_id:?})")
+    })?;
+
     // `MEDULLA_USER` selects an account for *this process* without touching the
     // selection every other process reads, so honouring it means not writing the
     // marker at all — not even when the authenticated account matches, which
-    // would still overwrite a marker naming somebody else. The verification
-    // below is what makes that safe: an override pointing somewhere other than
-    // the account that just authenticated fails instead of writing.
+    // would still overwrite a marker naming somebody else.
     let overridden = env
         .get(medulla::home::user::MEDULLA_USER_ENV)
         .map(|v| v.trim())
         .is_some_and(|v| !v.is_empty());
+
     let expected = root.join(&user_id);
+
+    // The override is checked before anything is written. A refused login must
+    // leave no trace: seeding first would create the authenticated account's
+    // config in a home this process is not going to use, on a login that ends
+    // in an error.
+    if overridden && medulla::home::medulla_home(env) != expected {
+        return Err(format!(
+            "signed in as {user_id}, but {} pins this process to another account — unset it to \
+             use that account's own directory",
+            medulla::home::user::MEDULLA_USER_ENV,
+        ));
+    }
 
     // Describe the account before selecting it. The other order leaves a failed
     // login with the marker already moved: the command reports failure, stores
@@ -173,6 +193,8 @@ pub(crate) fn adopt_account(
             .map_err(|err| format!("this account could not be recorded ({err})"))?;
     }
 
+    // Final check that the resolver agrees, which is what every later launch
+    // will ask it.
     let effective = medulla::home::medulla_home(env);
     if effective != expected {
         return Err(format!(

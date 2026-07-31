@@ -92,7 +92,7 @@ pub fn active_user_id(env: &HashMap<String, String>, root: &Path) -> String {
         .get(MEDULLA_USER_ENV)
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
-        .and_then(sanitize)
+        .and_then(sanitize_account_id)
     {
         return explicit;
     }
@@ -110,7 +110,7 @@ pub fn active_user_id(env: &HashMap<String, String>, root: &Path) -> String {
 pub fn read_active_user_id(root: &Path) -> Option<String> {
     let contents = std::fs::read_to_string(active_user_path(root)).ok()?;
     let parsed: ActiveUser = toml::from_str(&contents).ok()?;
-    sanitize(parsed.user_id.trim())
+    sanitize_account_id(parsed.user_id.trim())
 }
 
 /// Record `user_id` as the active account for `root`.
@@ -124,7 +124,7 @@ pub fn read_active_user_id(root: &Path) -> Option<String> {
 /// The id is not a usable directory name, the root cannot be created, or the
 /// write/rename fails.
 pub fn write_active_user_id(root: &Path, user_id: &str) -> std::io::Result<()> {
-    let user_id = sanitize(user_id.trim()).ok_or_else(|| {
+    let user_id = sanitize_account_id(user_id.trim()).ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("refusing to record {user_id:?} as the active user id"),
@@ -163,7 +163,13 @@ pub fn write_active_user_id(root: &Path, user_id: &str) -> std::io::Result<()> {
 /// so anything that could escape the root — a separator, a `..`, a leading dot
 /// (which would collide with the marker's own dotfiles) — is rejected rather
 /// than sanitized into something that silently addresses a different account.
-fn sanitize(id: &str) -> Option<String> {
+///
+/// Public because writing the marker is no longer the first thing done with an
+/// id: a caller that builds `<root>/<id>` to write into must reject it here
+/// *before* the join, or a hostile or broken `/auth/me` response reaches paths
+/// outside the root. One definition, so the check cannot drift between the
+/// callers that join and the write that records.
+pub fn sanitize_account_id(id: &str) -> Option<String> {
     let id = id.trim();
     if id.is_empty() || id.starts_with('.') {
         return None;

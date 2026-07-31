@@ -317,6 +317,15 @@ pub(crate) fn disposition(
     if user_id == active {
         return Disposition::Store;
     }
+    // A switch joins this id to the root and writes there, so it is checked
+    // before it can become a path — `..` or a separator would otherwise reach a
+    // directory outside the account root. Not needed for the store case, which
+    // joins nothing new: it is already running as that account.
+    if medulla::home::user::sanitize_account_id(user_id).is_none() {
+        return Disposition::Refuse(format!(
+            "the backend named an account id that cannot be a directory name ({user_id:?})"
+        ));
+    }
     // The override is this process's own choice of account. Moving the shared
     // selection to satisfy it would change which account *every other* launch
     // opens, which is the opposite of what asking for one process was.

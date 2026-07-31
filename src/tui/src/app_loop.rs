@@ -119,19 +119,6 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             // home to open and nothing to show, so this is a clean exit.
             None => return Ok(()),
             Some(jwt) => {
-                // Carry the deployment this token was minted against into the
-                // new account's own config, before reloading against it.
-                //
-                // Without this the reload is a downgrade: the bootstrap
-                // `backend.baseUrl` lived in the *pre-login* home, the account
-                // home that just became current is empty, so the reload falls
-                // back to the production default. The core would then be bound
-                // to production and reject the JWT that staging (or a
-                // self-hosted deployment) had just issued — and every later
-                // launch would do the same, since nothing else records which
-                // deployment the account belongs to.
-                let base_url = loaded.config.backend.base_url.clone();
-                crate::sign_in::seed_account_backend(&env, &base_url)?;
                 // The account's own config file is a different file from the one
                 // loaded a moment ago, and it is the one that wins from here on.
                 loaded = load_config(args.config.as_deref(), &env, &cwd)?;
@@ -314,8 +301,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 drop(guard);
                 return Ok(());
             }
-            Ok(SignIn::SwitchedAccount) => {
+            Ok(SignIn::SwitchedAccount(notice)) => {
                 drop(guard);
+                if let Some(notice) = notice {
+                    eprintln!("{notice}");
+                }
                 println!("{SWITCHED_ACCOUNT_NOTICE}");
                 return Ok(());
             }
@@ -351,7 +341,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let mut runtime = runtime.expect("a runtime is always selected");
     // Set when a relogin lands on a different account than this process runs as.
     // Reported after the terminal is restored, not while the app owns the screen.
-    let mut account_switched = false;
+    let mut account_switched: Option<Option<String>> = None;
 
     // First-run welcome: offer promotional credit for sharing coding-agent
     // history. Gated locally by `[onboarding] welcomeCompleted` so a returning
@@ -638,8 +628,8 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         // belong to the account it started as. Their session was
                         // not stored in it — the next launch signs them in
                         // against their own home.
-                        Ok(SignIn::SwitchedAccount) => {
-                            account_switched = true;
+                        Ok(SignIn::SwitchedAccount(notice)) => {
+                            account_switched = Some(notice);
                             break Ok(());
                         }
                         Ok(SignIn::SameAccount) => {
@@ -672,7 +662,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                              // Printed after the screen is back: the operator signed in as somebody else
                              // mid-session, the marker now names them, and the next launch opens their
                              // home. Nothing is lost — the previous account's directory stays put.
-    if account_switched {
+    if let Some(notice) = account_switched {
+        // Both after the restore: the alt screen swallows anything written to
+        // the terminal while the app still owns it.
+        if let Some(notice) = notice {
+            eprintln!("{notice}");
+        }
         println!("{SWITCHED_ACCOUNT_NOTICE}");
     }
     result

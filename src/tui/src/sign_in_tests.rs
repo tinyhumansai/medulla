@@ -12,6 +12,12 @@ fn env_at(root: &std::path::Path) -> HashMap<String, String> {
     )])
 }
 
+/// The account home the seed targets — passed explicitly, because seeding runs
+/// *before* the marker selects that account.
+fn home_of(root: &std::path::Path, id: &str) -> std::path::PathBuf {
+    root.join(id)
+}
+
 #[test]
 fn a_new_account_records_the_deployment_it_signed_in_to() {
     // Without this the account home is empty, the layered load falls back to the
@@ -21,7 +27,11 @@ fn a_new_account_records_the_deployment_it_signed_in_to() {
     let env = env_at(tmp.path());
     medulla::home::user::write_active_user_id(tmp.path(), "acct-1").expect("adopt");
 
-    seed_account_backend(&env, "https://staging-api.tinyhumans.ai").expect("seeds");
+    seed_account_backend(
+        &home_of(tmp.path(), "acct-1"),
+        "https://staging-api.tinyhumans.ai",
+    )
+    .expect("seeds");
 
     let cwd = tmp.path().join("elsewhere");
     std::fs::create_dir_all(&cwd).expect("cwd");
@@ -45,7 +55,10 @@ fn an_existing_accounts_config_is_never_overwritten() {
     )
     .expect("write");
 
-    seed_account_backend(&env, "https://api.tinyhumans.ai").expect("reports, does not fail");
+    let notice = seed_account_backend(&home, "https://api.tinyhumans.ai")
+        .expect("reports, does not fail")
+        .expect("a differing endpoint is named");
+    assert!(notice.contains("self.hosted"), "{notice}");
 
     let body = std::fs::read_to_string(home.join("config.toml")).expect("read");
     assert!(
@@ -73,7 +86,7 @@ fn a_config_without_a_backend_still_gets_one() {
     std::fs::create_dir_all(&home).expect("home");
     std::fs::write(home.join("config.toml"), "[theme]\naccent = \"green\"\n").expect("write");
 
-    seed_account_backend(&env, "https://staging-api.tinyhumans.ai").expect("seeds");
+    seed_account_backend(&home, "https://staging-api.tinyhumans.ai").expect("seeds");
 
     let body = std::fs::read_to_string(home.join("config.toml")).expect("read");
     assert!(body.contains("staging-api.tinyhumans.ai"), "{body}");
@@ -86,7 +99,7 @@ fn a_blank_deployment_writes_nothing() {
     let env = env_at(tmp.path());
     medulla::home::user::write_active_user_id(tmp.path(), "acct-3").expect("adopt");
 
-    seed_account_backend(&env, "   ").expect("nothing to record");
+    seed_account_backend(&home_of(tmp.path(), "acct-3"), "   ").expect("nothing to record");
 
     assert!(
         !medulla::home::medulla_home(&env)
@@ -163,7 +176,11 @@ fn a_trailing_slash_is_not_a_different_deployment() {
     )
     .expect("write");
 
-    seed_account_backend(&env, "https://self.hosted").expect("same deployment");
+    assert_eq!(
+        seed_account_backend(&home, "https://self.hosted").expect("same deployment"),
+        None,
+        "a trailing slash is not a different endpoint"
+    );
 
     let body = std::fs::read_to_string(home.join("config.toml")).expect("read");
     assert!(body.contains("https://self.hosted/"), "{body}");
@@ -181,7 +198,34 @@ fn a_home_that_cannot_be_written_fails_the_login() {
     std::fs::write(medulla::home::medulla_home(&env), "not a directory").expect("write");
 
     assert!(
-        seed_account_backend(&env, "https://staging-api.tinyhumans.ai").is_err(),
+        seed_account_backend(
+            &medulla::home::medulla_home(&env),
+            "https://staging-api.tinyhumans.ai"
+        )
+        .is_err(),
         "an unwritable account must not report a completed login"
+    );
+}
+
+#[test]
+fn a_login_that_cannot_describe_the_account_never_selects_it() {
+    // Ordering: describe, then select. The other way round leaves a *failed*
+    // login with the marker already moved, so every later launch resolves to the
+    // home that could not be written and skips the first-account flow that
+    // would fix it.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let env = env_at(tmp.path());
+    // A file where the account directory needs to be.
+    std::fs::write(tmp.path().join("acct-7"), "not a directory").expect("write");
+    let me = serde_json::json!({ "id": "acct-7" });
+
+    let err = crate::commands::adopt_account(&env, &me, "https://staging-api.tinyhumans.ai")
+        .expect_err("an unwritable account must not be adopted");
+    assert!(err.contains("config could not be written"), "{err}");
+
+    assert_eq!(
+        medulla::home::user::read_active_user_id(tmp.path()),
+        None,
+        "the selection must not have moved to an account that cannot be written"
     );
 }

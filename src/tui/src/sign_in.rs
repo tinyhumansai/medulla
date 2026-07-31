@@ -36,7 +36,9 @@ pub(crate) enum SignIn {
     /// The same account this process is running as, and its session is stored.
     SameAccount,
     /// A different account. Nothing was stored — see [`store_if_same_account`].
-    SwitchedAccount,
+    /// Carries the deployment-mismatch notice, when there is one to report once
+    /// the terminal belongs to the caller again.
+    SwitchedAccount(Option<String>),
 }
 
 /// Run the login screen again for an already-booted core, and store the session
@@ -102,6 +104,10 @@ async fn store_if_same_account(
     ) {
         Disposition::Refuse(why) => anyhow::bail!("signed in, but {why}"),
         Disposition::Switch(user_id) => {
+            // Describe the account before selecting it. Seeding after the marker
+            // moved would report a failed switch while the install already
+            // pointed at the home that could not be written.
+            let notice = seed_account_backend(&root.join(&user_id), base_url)?;
             // Only claim a switch the marker actually records. Swallowing this
             // would stop the app with "restart to finish signing in" while the
             // marker still names the previous account — the restart would return
@@ -117,8 +123,7 @@ async fn store_if_same_account(
             // record the deployment that just identified them there, or their
             // first launch loads an empty home, falls back to production, and
             // cannot finish the login the restart was asked to complete.
-            seed_account_backend(env, base_url)?;
-            return Ok(SignIn::SwitchedAccount);
+            return Ok(SignIn::SwitchedAccount(notice));
         }
         Disposition::Store => {}
     }
@@ -178,7 +183,7 @@ pub(crate) async fn sign_in_first_account(
         .map_err(|e| anyhow::anyhow!("signed in, but the account could not be read: {e}"))?;
     // A refusal stops startup before the core is booted against a home that is
     // not this account's — the caller stores the token into it a moment later.
-    crate::commands::adopt_account(env, &me)
+    crate::commands::adopt_account(env, &me, base_url)
         .map_err(|why| anyhow::anyhow!("signed in, but {why}"))?;
     Ok(Some(jwt))
 }
@@ -206,6 +211,15 @@ pub(crate) async fn sign_in_first_account(
 /// persistent one. The mismatch does break the next launch, so it is named
 /// loudly, with the file to edit, rather than either hidden or acted on.
 ///
+/// Returns the mismatch notice for the caller to print, when the account names
+/// a different deployment — rather than printing it here, because one caller
+/// runs with the alt screen up and anything written there is discarded by the
+/// restore that follows.
+///
+/// Takes the home explicitly rather than resolving it, so it can run *before*
+/// the marker selects that account: a failure here must not leave the install
+/// pointing at a home it could not write.
+///
 /// # Errors
 ///
 /// The account's config cannot be created or written. The caller must not
@@ -213,36 +227,38 @@ pub(crate) async fn sign_in_first_account(
 /// that never issued its session, which fails on the next launch with nothing to
 /// explain it.
 pub(crate) fn seed_account_backend(
-    env: &std::collections::HashMap<String, String>,
+    home: &std::path::Path,
     base_url: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<String>> {
     let base_url = base_url.trim();
     if base_url.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
-    let path = medulla::home::medulla_home(env).join("config.toml");
+    let path = home.join("config.toml");
 
     if let Some(existing) = declared_backend_base_url(&path) {
-        if existing.trim_end_matches('/') != base_url.trim_end_matches('/') {
-            eprintln!(
-                "Signed in to {base_url}, but this account's config names {existing}.\n\
-                 The next launch will use {existing} and this session will not work there — \
-                 edit {} or pass the same --config again.",
-                path.display()
-            );
+        if existing.trim_end_matches('/') == base_url.trim_end_matches('/') {
+            return Ok(None);
         }
-        return Ok(());
+        // Returned, not printed. The account-switch path runs with the alt
+        // screen up, so anything written to the terminal here is wiped by the
+        // restore that follows — the caller knows when the screen is its own.
+        return Ok(Some(format!(
+            "Signed in to {base_url}, but this account's config names {existing}.\n\
+             The next launch will use {existing} and this session will not work there — edit {} \
+             or pass the same --config again.",
+            path.display()
+        )));
     }
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    std::fs::create_dir_all(home)?;
     medulla::config::persist_setting(
         &path,
         "backend",
         "baseUrl",
         toml::Value::String(base_url.to_string()),
-    )
+    )?;
+    Ok(None)
 }
 
 /// The non-empty `backend.baseUrl` `path` already pins, if it pins one.

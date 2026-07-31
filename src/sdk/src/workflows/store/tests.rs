@@ -137,7 +137,9 @@ fn the_directories_are_project_then_home_with_home_as_the_write_layer() {
         dirs,
         vec![
             PathBuf::from("/repo/.medulla/workflows"),
-            PathBuf::from("/somewhere/home/workflows"),
+            // The account's home, not the root: `MEDULLA_HOME` names the
+            // directory that holds accounts, and a signed-out run is `local`.
+            PathBuf::from("/somewhere/home/local/workflows"),
         ]
     );
 }
@@ -145,12 +147,13 @@ fn the_directories_are_project_then_home_with_home_as_the_write_layer() {
 #[test]
 fn a_discovered_store_saves_new_definitions_under_medulla_home() {
     let root = tempfile::tempdir().unwrap();
-    let home = root.path().join("home");
+    let medulla_root = root.path().join("home");
     let project = root.path().join("project");
     let env = HashMap::from([(
         "MEDULLA_HOME".to_string(),
-        home.to_string_lossy().into_owned(),
+        medulla_root.to_string_lossy().into_owned(),
     )]);
+    let home = crate::home::medulla_home(&env);
     let store = FileWorkflowStore::discover(&env, &project);
     let record = parse_workflow(&valid_document("home-save"), "home-save").unwrap();
 
@@ -161,14 +164,20 @@ fn a_discovered_store_saves_new_definitions_under_medulla_home() {
 }
 
 #[test]
-fn a_dev_home_that_is_the_project_directory_is_listed_once() {
-    // Under MEDULLA_DEV the home *is* ./.medulla, so the two candidates name one
-    // directory that no filesystem call will confirm — reading it twice would
-    // make every workflow shadow itself.
+fn a_dev_home_sits_below_the_projects_own_workflow_directory() {
+    // Under MEDULLA_DEV the root is ./.medulla, but the home is the account
+    // directory inside it — so the repository's checked-in `.medulla/workflows`
+    // and the dev write layer are two real directories, not one seen twice.
     let env = HashMap::from([("MEDULLA_DEV".to_string(), "1".to_string())]);
     let dirs = workflow_dirs(&env, Path::new("."));
 
-    assert_eq!(dirs.len(), 1, "expected one directory, got {dirs:?}");
+    assert_eq!(
+        dirs,
+        vec![
+            PathBuf::from("./.medulla/workflows"),
+            PathBuf::from(".medulla/local/workflows"),
+        ]
+    );
 }
 
 #[test]

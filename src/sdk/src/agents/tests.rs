@@ -287,7 +287,7 @@ fn install_writes_editable_files_and_never_overwrites_them() {
 }
 
 #[test]
-fn the_dirs_are_home_then_project_and_collapse_when_they_are_one() {
+fn the_dirs_are_home_then_project() {
     let env: HashMap<String, String> = [("MEDULLA_HOME".to_string(), "/tmp/mh".to_string())]
         .into_iter()
         .collect();
@@ -295,18 +295,22 @@ fn the_dirs_are_home_then_project_and_collapse_when_they_are_one() {
     assert_eq!(
         dirs,
         vec![
-            PathBuf::from("/tmp/mh/agents"),
+            PathBuf::from("/tmp/mh/local/agents"),
             PathBuf::from("/work/repo/.medulla/agents"),
         ]
     );
 
-    // `MEDULLA_DEV` puts the home at `./.medulla`, which *is* the project store.
+    // `MEDULLA_DEV` puts the *root* at `./.medulla`; the home is the account
+    // directory inside it, so the project store is a second, real directory.
     let dev: HashMap<String, String> = [("MEDULLA_DEV".to_string(), "1".to_string())]
         .into_iter()
         .collect();
     assert_eq!(
         template_dirs(&dev, Path::new(".")),
-        vec![PathBuf::from(".medulla/agents")]
+        vec![
+            PathBuf::from(".medulla/local/agents"),
+            PathBuf::from("./.medulla/agents"),
+        ]
     );
 }
 

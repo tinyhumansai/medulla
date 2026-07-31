@@ -1,4 +1,4 @@
-//! Which directories hold workflows, and when two of them are really one.
+//! Which directories hold workflows.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -12,40 +12,14 @@ use crate::home::medulla_home;
 /// authored and edited definitions are written to the final, user-global layer
 /// beside the rest of Medulla's persistent data.
 ///
-/// The two collapse to one entry when they resolve to the same directory, the
-/// normal case under `MEDULLA_DEV=1` (whose home *is* `./.medulla`) — reading it
-/// twice would make every workflow shadow itself.
+/// The two are always distinct directories. They used to be able to collapse
+/// into one — under `MEDULLA_DEV=1` the home *was* `./.medulla`, and reading it
+/// twice made every workflow shadow itself — but the home is now the account
+/// directory one level inside the root (`./.medulla/<account>`), which no
+/// project store can name.
 pub fn workflow_dirs(env: &HashMap<String, String>, cwd: &Path) -> Vec<PathBuf> {
-    let home = medulla_home(env).join("workflows");
-    let project = cwd.join(".medulla").join("workflows");
-    let mut dirs = Vec::new();
-    if !same_dir(&home, &project) {
-        dirs.push(project);
-    }
-    dirs.push(home);
-    dirs
-}
-
-/// Whether two paths name the same directory, comparing canonical forms when
-/// both exist and `.`-insensitive components otherwise.
-///
-/// The textual comparison matters precisely where canonicalization cannot help:
-/// under `MEDULLA_DEV=1` the home is the relative `./.medulla` and the directory
-/// may not exist yet, so `.medulla/workflows` and `./.medulla/workflows` are one
-/// directory that no filesystem call will confirm.
-fn same_dir(a: &Path, b: &Path) -> bool {
-    if a == b || normalized(a) == normalized(b) {
-        return true;
-    }
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
-}
-
-/// A path's components with no-op `.` segments dropped.
-fn normalized(path: &Path) -> Vec<std::path::Component<'_>> {
-    path.components()
-        .filter(|c| !matches!(c, std::path::Component::CurDir))
-        .collect()
+    vec![
+        cwd.join(".medulla").join("workflows"),
+        medulla_home(env).join("workflows"),
+    ]
 }

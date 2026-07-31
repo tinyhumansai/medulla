@@ -3,13 +3,20 @@
 use super::load::merge_value;
 use super::*;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
+}
+
+/// The account home inside a `MEDULLA_HOME` root: `MEDULLA_HOME` names the
+/// directory that holds accounts, and a test signs nobody in, so every path the
+/// loader derives lands under the pre-login account.
+fn home_of(root: &Path) -> PathBuf {
+    root.join(crate::home::user::PRE_LOGIN_USER_ID)
 }
 
 /// A unique temp dir for a test, used as an injected `MEDULLA_HOME` and/or cwd.
@@ -98,7 +105,7 @@ fn load_config_missing_file_yields_home_derived_defaults() {
     .unwrap();
     assert_eq!(
         loaded.config.state_dir,
-        home.join("state").to_string_lossy()
+        home_of(&home).join("state").to_string_lossy()
     );
     assert_eq!(loaded.path, "(built-in defaults)");
     assert!(loaded.sources.is_empty());
@@ -150,11 +157,11 @@ fn load_config_state_and_identity_derive_from_home() {
     .unwrap();
     assert_eq!(
         loaded.config.state_dir,
-        home.join("state").to_string_lossy()
+        home_of(&home).join("state").to_string_lossy()
     );
     assert_eq!(
         loaded.config.tinyplace.unwrap().identity_dir,
-        home.join("tinyplace").to_string_lossy()
+        home_of(&home).join("tinyplace").to_string_lossy()
     );
     let _ = std::fs::remove_dir_all(&home);
     let _ = std::fs::remove_dir_all(&cwd);
@@ -183,8 +190,9 @@ fn load_config_layers_global_project_env_flag() {
     let home = temp_dir("layer-home");
     let cwd = temp_dir("layer-cwd");
     // Global config sets a base URL and a token env name.
+    std::fs::create_dir_all(home_of(&home)).unwrap();
     std::fs::write(
-        home.join("config.toml"),
+        home_of(&home).join("config.toml"),
         "[backend]\nbaseUrl = \"http://global:1\"\ntokenEnv = \"GLOBAL_TOK\"\n",
     )
     .unwrap();
@@ -271,8 +279,9 @@ fn load_config_layers_router_section_from_toml() {
     // claude uses its override while codex inherits the top-level endpoint.
     let home = temp_dir("router-home");
     let cwd = temp_dir("router-cwd");
+    std::fs::create_dir_all(home_of(&home)).unwrap();
     std::fs::write(
-        home.join("config.toml"),
+        home_of(&home).join("config.toml"),
         "[router]\nbaseUrl = \"https://gateway.internal/v1\"\napiKeyEnv = \"MEDULLA_ROUTER_KEY\"\n\n[router.models]\nreasoning = \"gpt-tier-a\"\n",
     )
     .unwrap();
@@ -349,6 +358,7 @@ fn a_synthesized_tinyplace_section_honours_the_staging_switch() {
     // Built with `join` rather than written out: the value is a real path, so
     // on Windows it comes back separated with a backslash.
     let expected = std::path::Path::new("/tmp/mh")
+        .join(crate::home::user::PRE_LOGIN_USER_ID)
         .join("tinyplace")
         .to_string_lossy()
         .into_owned();

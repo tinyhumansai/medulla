@@ -58,7 +58,11 @@ fn logout_sweeps_a_retired_credential_file() {
     // a pre-cutover install is read by nothing, so logging out is the last
     // chance anything has to remove it.
     let dir = TempDir::new().unwrap();
-    let credentials = dir.path().join("credentials.json");
+    // Inside the account directory, where a pre-cutover install's file would be
+    // read from: `MEDULLA_HOME` names the root that holds accounts.
+    let account_home = dir.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    let credentials = account_home.join("credentials.json");
     std::fs::write(
         &credentials,
         r#"{"baseUrl":"http://example","jwt":"secret"}"#,

@@ -2,26 +2,60 @@
 //!
 //! Everything Medulla persists — credentials, TUI state, the tiny.place
 //! identity, and the layered config file — lives under a single home directory
-//! resolved by [`medulla_home`]. The resolver is pure over an injected env map
-//! so it can be unit-tested without touching the real process environment;
-//! `main` wires the real environment in.
+//! resolved by [`medulla_home`].
+//!
+//! # Two levels, not one
+//!
+//! [`medulla_root`] is the install-wide directory (`~/.medulla`). It holds
+//! nothing but one directory per account and the [`user`] marker that names the
+//! active one. [`medulla_home`] is that account's directory — `<root>/<user
+//! id>` — and is what every other module means by "the Medulla home". Two
+//! accounts on one machine therefore share no config, no logs, no workflow
+//! store, and no core state; nothing needs to be account-aware to get that,
+//! because the scoping happens once, here.
+//!
+//! Before anyone signs in the id is [`user::PRE_LOGIN_USER_ID`], so a
+//! signed-out install still has a complete, real home.
+//!
+//! [`medulla_root`] is pure over an injected env map so it can be unit-tested
+//! without touching the real process environment; `main` wires the real
+//! environment in. [`medulla_home`] additionally reads the marker file, which
+//! is the one thing that cannot be derived from the environment alone.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+pub mod user;
 
 /// Whether an env value is truthy: `"1"` or `"true"` (case-insensitive, trimmed).
 pub fn is_truthy(value: &str) -> bool {
     matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true")
 }
 
-/// Resolve the Medulla home directory (where all config/data lives).
+/// Resolve the account-scoped Medulla home — `<root>/<user id>`.
+///
+/// This is what every caller that persists something wants. The account id
+/// comes from [`user::active_user_id`]: the `MEDULLA_USER` override, else the
+/// root's `active_user.toml` marker, else the pre-login id. A signed-out
+/// install resolves to `<root>/local` rather than to nothing.
+pub fn medulla_home(env: &HashMap<String, String>) -> PathBuf {
+    let root = medulla_root(env);
+    let user = user::active_user_id(env, &root);
+    root.join(user)
+}
+
+/// Resolve the install-wide Medulla root (the directory holding every account).
 ///
 /// Precedence:
 /// 1. `MEDULLA_HOME` — an explicit path wins over everything.
-/// 2. `MEDULLA_DEV` truthy — a local-dev home at `./.medulla` (relative to cwd).
+/// 2. `MEDULLA_DEV` truthy — a local-dev root at `./.medulla` (relative to cwd).
 /// 3. otherwise `<home>/.medulla`, where `<home>` comes from `HOME` /
 ///    `USERPROFILE` (or [`dirs::home_dir`] as a last resort).
-pub fn medulla_home(env: &HashMap<String, String>) -> PathBuf {
+///
+/// Note that `MEDULLA_HOME` names the *root*, not one account's home: a scratch
+/// run (`MEDULLA_HOME=$(mktemp -d)`) still gets its own account directory
+/// underneath, and stays as isolated as it was before scoping existed.
+pub fn medulla_root(env: &HashMap<String, String>) -> PathBuf {
     if let Some(explicit) = env
         .get("MEDULLA_HOME")
         .map(|v| v.trim())
@@ -117,5 +151,4 @@ pub fn load_dotenv_from_cwd() {
 }
 
 #[cfg(test)]
-#[path = "home_tests.rs"]
 mod tests;

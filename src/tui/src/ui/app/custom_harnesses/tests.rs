@@ -62,7 +62,11 @@ fn duplicate_ids_are_rejected_without_overwriting_the_existing_preset() {
 fn editor_preserves_inherited_presets_when_writing_the_project_layer() {
     let home = tempfile::tempdir().expect("home");
     let project = tempfile::tempdir().expect("project");
-    let global = home.path().join("config.toml");
+    // The global config lives in the account's home, one level inside the root
+    // `MEDULLA_HOME` names.
+    let account_home = home.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    let global = account_home.join("config.toml");
     let project_config = project.path().join("medulla.toml");
     std::fs::write(
         &global,

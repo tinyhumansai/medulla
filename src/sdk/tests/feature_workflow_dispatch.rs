@@ -72,6 +72,9 @@ fn recording_executor(seen: Arc<Mutex<Vec<String>>>) -> RunTaskFn {
 /// The trigger fans out to two agent nodes, so a single dispatched frame has to
 /// produce two harness runs for the test to pass.
 fn install_workflow(home: &std::path::Path, id: &str) {
+    // `MEDULLA_HOME` names the root that holds accounts; the worker resolves its
+    // store from the account directory inside it, and nobody signs in here.
+    let home = home.join("local");
     let store = FileWorkflowStore::new(
         vec![home.join("workflows")],
         home.join("state").join("workflows").join("runs"),

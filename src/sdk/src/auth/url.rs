@@ -60,6 +60,23 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
+/// The account id in an `/auth/me` response, when it carries one.
+///
+/// This is what scopes the Medulla home to an account (see
+/// [`crate::home::user`]), so it is read here — before the core boots — rather
+/// than from the core's auth state, which lives inside the directory the id
+/// selects. Both the flat and `{"user": …}` shapes are accepted, and both id
+/// spellings, because which one a deployment returns has changed before.
+pub fn user_id_from_me(me: &serde_json::Value) -> Option<String> {
+    let obj = me.get("user").unwrap_or(me);
+    obj.get("id")
+        .and_then(|v| v.as_str())
+        .or_else(|| obj.get("userId").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+}
+
 /// Summarize an `/auth/me` response for the "who am I" line.
 pub fn describe_me(me: &serde_json::Value) -> String {
     let obj = me.get("user").unwrap_or(me);

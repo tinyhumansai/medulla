@@ -66,10 +66,19 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
 
     // Verify the token and greet the user.
     let client = MedullaClient::new(base_url.clone(), jwt.clone());
-    match client.me().await {
-        Ok(me) => println!("{}", medulla::auth::describe_me(&me)),
+    let me = match client.me().await {
+        Ok(me) => {
+            println!("{}", medulla::auth::describe_me(&me));
+            me
+        }
         Err(e) => return Err(anyhow::anyhow!("token verification failed: {e}")),
-    }
+    };
+
+    // Record who this is *before* booting, because the id chooses the home the
+    // core is about to be pointed at. Taken from `/auth/me` rather than from the
+    // core's own auth state for the same reason: the core's state lives inside
+    // the directory this id selects.
+    adopt_account(&env, &me);
 
     // Boot last: the flow above can take minutes of browser round-trip, and a
     // core sitting open across it buys nothing.
@@ -80,6 +89,31 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
     sweep_retired_credentials(&env);
     println!("Signed in to {base_url}.");
     Ok(())
+}
+
+/// Scope this install to the account named by an `/auth/me` response.
+///
+/// Writes the root-level active-user marker, which is what every later launch
+/// reads to resolve its home — so this must happen before anything derives a
+/// path from [`medulla::home::medulla_home`], and certainly before the core is
+/// booted against one.
+///
+/// A response with no id, or a marker that cannot be written, is reported and
+/// otherwise tolerated: the session still stores, and the install keeps using
+/// the home it already had. Failing the login outright over it would leave the
+/// operator signed out with no way forward.
+pub(crate) fn adopt_account(
+    env: &std::collections::HashMap<String, String>,
+    me: &serde_json::Value,
+) {
+    let root = medulla::home::medulla_root(env);
+    let Some(user_id) = medulla::auth::user_id_from_me(me) else {
+        eprintln!("Signed in, but the backend named no account id — keeping the current profile.");
+        return;
+    };
+    if let Err(err) = medulla::home::user::write_active_user_id(&root, &user_id) {
+        eprintln!("Signed in, but this profile could not be recorded ({err}).");
+    }
 }
 
 /// Boot the minimal core the auth verbs need, with its workspace bound.
@@ -138,6 +172,16 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("failed to clear the session: {e}"))?;
     sweep_retired_credentials(&env);
+    // Both halves, in this order: the session is cleared inside the account's
+    // own home, and only then does the install stop pointing at it. Clearing the
+    // marker first would clear the session of whichever account the *pre-login*
+    // home holds and leave this one signed in.
+    //
+    // The account's directory is left on disk — signing back in returns to the
+    // same config, logs, and workflow store. Only the pointer moves.
+    if let Err(err) = medulla::home::user::clear_active_user(&medulla::home::medulla_root(&env)) {
+        eprintln!("Signed out, but the active profile marker could not be cleared ({err}).");
+    }
     println!("Logged out.");
     Ok(())
 }

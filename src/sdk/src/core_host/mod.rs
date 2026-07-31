@@ -72,8 +72,15 @@ pub const OPENHUMAN_BACKEND_URL_ALT_ENV: &str = "VITE_BACKEND_URL";
 /// scratch `MEDULLA_HOME` removes the core's state with it — a half-deleted
 /// scratch run that leaves an OpenHuman workspace behind is worse than none,
 /// because the next run silently inherits it.
+///
+/// Directly under the home, not under an `openhuman/` level of its own: the
+/// home is already scoped to one account (see [`crate::home`]), so the core's
+/// state is that account's state and has nothing to be separated from. The name
+/// `workspace` is load-bearing — OpenHuman derives its *config* directory from
+/// the workspace path, and a directory called `workspace` puts that config at
+/// `<medulla_home>/.openhuman` beside it rather than inside the state tree.
 pub fn workspace_dir(medulla_home: &Path) -> PathBuf {
-    medulla_home.join("openhuman").join("workspace")
+    medulla_home.join("workspace")
 }
 
 /// Point OpenHuman at a workspace derived from this process's Medulla home.

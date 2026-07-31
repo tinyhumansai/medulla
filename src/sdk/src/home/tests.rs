@@ -119,6 +119,42 @@ fn switching_accounts_replaces_an_existing_marker() {
 }
 
 #[test]
+fn another_processs_login_does_not_re_home_a_running_one() {
+    // The marker is shared mutable state. A daemon that re-read it mid-run would
+    // start resolving account B's workflow store and log directory while the
+    // core it booted — and the session it holds — stay account A's.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let e = env(&[("MEDULLA_HOME", &tmp.path().to_string_lossy())]);
+
+    user::write_active_user_id(tmp.path(), "account-a").expect("write marker");
+    assert_eq!(medulla_home(&e), tmp.path().join("account-a"));
+
+    // Stand in for another process signing in: the file changes underneath us,
+    // without going through this process's write path.
+    std::fs::write(
+        user::active_user_path(tmp.path()),
+        "user_id = \"account-b\"\n",
+    )
+    .expect("rewrite the marker behind our back");
+
+    assert_eq!(
+        user::read_active_user_id(tmp.path()).as_deref(),
+        Some("account-b"),
+        "the file really did change"
+    );
+    assert_eq!(
+        medulla_home(&e),
+        tmp.path().join("account-a"),
+        "a running process keeps the account it started as"
+    );
+
+    // This process changing it is the one thing that does move the pin — that is
+    // what lets `medulla login` boot a core against the account it just wrote.
+    user::write_active_user_id(tmp.path(), "account-c").expect("write marker");
+    assert_eq!(medulla_home(&e), tmp.path().join("account-c"));
+}
+
+#[test]
 fn the_env_override_beats_the_marker() {
     let tmp = tempfile::tempdir().expect("tempdir");
     user::write_active_user_id(tmp.path(), "written").expect("write marker");

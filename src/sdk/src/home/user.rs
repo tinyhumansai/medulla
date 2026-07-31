@@ -43,12 +43,46 @@ pub fn active_user_path(root: &Path) -> PathBuf {
     root.join(ACTIVE_USER_FILE)
 }
 
+/// The account each root has been pinned to for the life of this process.
+///
+/// The marker is shared mutable state: another process running `medulla login`
+/// or `logout` rewrites it at any moment. Re-reading it on every call would let
+/// that rewrite re-home a *running* process — the workflow store, the log
+/// directory, and the identity would start resolving to account B while the core
+/// this process booted, and the session it holds, stay account A's. A daemon
+/// would then run B's workflows out of A's core.
+///
+/// So the first resolution for a root wins and is remembered. A process runs as
+/// one account from start to finish; only this process changing the marker
+/// itself (login, logout) moves it, and those update the pin deliberately.
+///
+/// Keyed by root rather than global because one process legitimately resolves
+/// several: the test suite drives many scratch roots, and `MEDULLA_HOME`-pinned
+/// tooling can address another install.
+static PINNED: std::sync::Mutex<Option<HashMap<std::path::PathBuf, String>>> =
+    std::sync::Mutex::new(None);
+
+/// Run `f` against the pin table, recovering a poisoned lock.
+///
+/// A panic while the table is held says nothing about the table's contents — the
+/// alternative is turning an unrelated panic in one thread into a permanently
+/// unresolvable home in every other.
+fn with_pins<T>(f: impl FnOnce(&mut HashMap<std::path::PathBuf, String>) -> T) -> T {
+    let mut guard = PINNED.lock().unwrap_or_else(|e| e.into_inner());
+    f(guard.get_or_insert_with(HashMap::new))
+}
+
 /// The account id this process should scope to.
 ///
-/// Precedence: `MEDULLA_USER` (env) → the marker file under `root` →
-/// [`PRE_LOGIN_USER_ID`]. A blank, unreadable, unparseable, or unsafe id reads
-/// as absent rather than failing: the fallback is a usable signed-out home, and
-/// there is no caller in a position to handle an error here.
+/// Precedence: `MEDULLA_USER` (env) → this process's pin for `root` → the marker
+/// file under `root` → [`PRE_LOGIN_USER_ID`]. A blank, unreadable, unparseable,
+/// or unsafe id reads as absent rather than failing: the fallback is a usable
+/// signed-out home, and there is no caller in a position to handle an error
+/// here.
+///
+/// The first call for a root fixes the answer for this process — see [`PINNED`].
+/// `MEDULLA_USER` sits ahead of the pin because it is this process's own
+/// environment, not shared state another process can change underneath it.
 pub fn active_user_id(env: &HashMap<String, String>, root: &Path) -> String {
     if let Some(explicit) = env
         .get(MEDULLA_USER_ENV)
@@ -58,7 +92,14 @@ pub fn active_user_id(env: &HashMap<String, String>, root: &Path) -> String {
     {
         return explicit;
     }
-    read_active_user_id(root).unwrap_or_else(|| PRE_LOGIN_USER_ID.to_string())
+    with_pins(|pins| {
+        if let Some(pinned) = pins.get(root) {
+            return pinned.clone();
+        }
+        let resolved = read_active_user_id(root).unwrap_or_else(|| PRE_LOGIN_USER_ID.to_string());
+        pins.insert(root.to_path_buf(), resolved.clone());
+        resolved
+    })
 }
 
 /// The account id recorded in `root`'s marker, if there is a usable one.
@@ -102,6 +143,12 @@ pub fn write_active_user_id(root: &Path, user_id: &str) -> std::io::Result<()> {
         let _ = std::fs::remove_file(&temp);
         return Err(err);
     }
+    // This process changed the marker, so its pin moves with it — that is the
+    // difference between our own login and another process's, which must not
+    // re-home us. `medulla login` resolves the home again straight after this to
+    // boot the core against it, and would otherwise get the pre-login pin it
+    // took while loading config.
+    with_pins(|pins| pins.insert(root.to_path_buf(), user_id.clone()));
     tracing::debug!("[home] active user recorded as {user_id}");
     Ok(())
 }
@@ -116,6 +163,9 @@ pub fn clear_active_user(root: &Path) -> std::io::Result<()> {
     let path = active_user_path(root);
     match std::fs::remove_file(&path) {
         Ok(()) => {
+            // Drop the pin with the marker, for the same reason the write moves
+            // it: this process made the change, so it should see it.
+            with_pins(|pins| pins.remove(root));
             tracing::debug!("[home] active user cleared");
             Ok(())
         }

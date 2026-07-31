@@ -87,6 +87,38 @@ fn the_marker_scopes_the_home_to_that_account() {
 }
 
 #[test]
+fn switching_accounts_replaces_an_existing_marker() {
+    // The write is a temp file plus a rename over a destination that already
+    // exists. That is the shape a switch always takes, and it is the one
+    // platforms disagree about — Windows `rename` replaces a file (std uses
+    // `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`) but not a directory. This
+    // runs on every platform CI covers, so the claim is checked rather than
+    // assumed: a switch that silently kept naming the previous account would
+    // leave the new one unreachable on the next launch.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let e = env(&[("MEDULLA_HOME", &tmp.path().to_string_lossy())]);
+
+    user::write_active_user_id(tmp.path(), "first-account").expect("write the first marker");
+    user::write_active_user_id(tmp.path(), "second-account").expect("replace it in place");
+
+    assert_eq!(
+        user::read_active_user_id(tmp.path()).as_deref(),
+        Some("second-account")
+    );
+    assert_eq!(medulla_home(&e), tmp.path().join("second-account"));
+
+    // And no temp file is left beside it — a rename that failed and fell back to
+    // a copy would show up here.
+    let strays: Vec<_> = std::fs::read_dir(tmp.path())
+        .expect("read root")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .filter(|name| name != user::ACTIVE_USER_FILE)
+        .collect();
+    assert!(strays.is_empty(), "left behind: {strays:?}");
+}
+
+#[test]
 fn the_env_override_beats_the_marker() {
     let tmp = tempfile::tempdir().expect("tempdir");
     user::write_active_user_id(tmp.path(), "written").expect("write marker");

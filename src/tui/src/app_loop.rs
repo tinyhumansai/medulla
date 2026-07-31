@@ -137,13 +137,24 @@ async fn store_if_same_account(
     let root = medulla::home::medulla_root(env);
     let active = medulla::home::user::active_user_id(env, &root);
 
-    if let Some(user_id) = medulla::auth::user_id_from_me(&me) {
-        if user_id != active {
+    match medulla::auth::user_id_from_me(&me) {
+        Some(user_id) if user_id != active => {
             // A marker that cannot be written still means this token belongs to
             // somebody the home does not: stop either way, and store nothing.
             let _ = medulla::home::user::write_active_user_id(&root, &user_id);
             return Ok(SignIn::SwitchedAccount);
         }
+        Some(_) => {}
+        // No id to compare. Storing anyway would defeat the check entirely — an
+        // unverifiable token would be written into whatever account this process
+        // happens to be. Safe only where there is no other account to cross: the
+        // pre-login home, which is nobody's in particular.
+        None if active == medulla::home::user::PRE_LOGIN_USER_ID => {}
+        None => anyhow::bail!(
+            "signed in, but the backend did not say which account this token belongs to, and \
+             this process is running as {active} — refusing to store a session that may not be \
+             theirs"
+        ),
     }
 
     medulla::core_host::auth::store_session(core, jwt)
@@ -199,7 +210,10 @@ async fn sign_in_first_account(
         .me()
         .await
         .map_err(|e| anyhow::anyhow!("signed in, but the account could not be read: {e}"))?;
-    crate::commands::adopt_account(env, &me);
+    // A refusal stops startup before the core is booted against a home that is
+    // not this account's — the caller stores the token into it a moment later.
+    crate::commands::adopt_account(env, &me)
+        .map_err(|why| anyhow::anyhow!("signed in, but {why}"))?;
     Ok(Some(jwt))
 }
 

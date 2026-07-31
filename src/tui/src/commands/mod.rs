@@ -78,7 +78,11 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
     // core is about to be pointed at. Taken from `/auth/me` rather than from the
     // core's own auth state for the same reason: the core's state lives inside
     // the directory this id selects.
-    adopt_account(&env, &me);
+    //
+    // A refusal stops the login here, before a core is booted or a token
+    // written: the alternative is storing this account's bearer in a directory
+    // that belongs to somebody else.
+    adopt_account(&env, &me).map_err(|why| anyhow::anyhow!("signed in, but {why}"))?;
 
     // Boot last: the flow above can take minutes of browser round-trip, and a
     // core sitting open across it buys nothing.
@@ -91,29 +95,65 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Scope this install to the account named by an `/auth/me` response.
+/// Scope this install to the account named by an `/auth/me` response, and prove
+/// that the home now in effect is that account's.
 ///
 /// Writes the root-level active-user marker, which is what every later launch
 /// reads to resolve its home — so this must happen before anything derives a
 /// path from [`medulla::home::medulla_home`], and certainly before the core is
 /// booted against one.
 ///
-/// A response with no id, or a marker that cannot be written, is reported and
-/// otherwise tolerated: the session still stores, and the install keeps using
-/// the home it already had. Failing the login outright over it would leave the
-/// operator signed out with no way forward.
+/// # Why this refuses rather than warns
+///
+/// A caller stores the session immediately after, into whichever home is in
+/// effect. So "recorded the account" is not the question — "does the home this
+/// process will use belong to the account that just authenticated" is, and three
+/// things make those differ: a response with no id, a marker that cannot be
+/// written, and `MEDULLA_USER`, which outranks the marker and therefore survives
+/// a successful write. Any of them would put one account's bearer token in
+/// another account's credential store. The comparison against
+/// [`medulla::home::medulla_home`] covers all three at once, because it asks the
+/// resolver the same question every later launch will ask it.
+///
+/// The one safe exception is an id-less response on an install nobody is signed
+/// in to: the home is the pre-login account, so there is no other account to
+/// cross.
+///
+/// # Errors
+///
+/// Returns an operator-facing sentence when the effective home is not the
+/// authenticated account's. The caller must not store a session after one.
 pub(crate) fn adopt_account(
     env: &std::collections::HashMap<String, String>,
     me: &serde_json::Value,
-) {
+) -> Result<(), String> {
     let root = medulla::home::medulla_root(env);
+
     let Some(user_id) = medulla::auth::user_id_from_me(me) else {
-        eprintln!("Signed in, but the backend named no account id — keeping the current profile.");
-        return;
+        let active = medulla::home::user::active_user_id(env, &root);
+        if active == medulla::home::user::PRE_LOGIN_USER_ID {
+            return Ok(());
+        }
+        return Err(format!(
+            "the backend did not say which account this token belongs to, and this install is \
+             signed in as {active} — refusing to store a session that may not be theirs"
+        ));
     };
-    if let Err(err) = medulla::home::user::write_active_user_id(&root, &user_id) {
-        eprintln!("Signed in, but this profile could not be recorded ({err}).");
+
+    medulla::home::user::write_active_user_id(&root, &user_id)
+        .map_err(|err| format!("this account could not be recorded ({err})"))?;
+
+    let expected = root.join(&user_id);
+    let effective = medulla::home::medulla_home(env);
+    if effective != expected {
+        return Err(format!(
+            "signed in as {user_id}, but this process resolves its home to {} — unset \
+             {} to use that account's own directory",
+            effective.display(),
+            medulla::home::user::MEDULLA_USER_ENV,
+        ));
     }
+    Ok(())
 }
 
 /// Boot the minimal core the auth verbs need, with its workspace bound.
@@ -179,6 +219,16 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
     //
     // The account's directory is left on disk — signing back in returns to the
     // same config, logs, and workflow store. Only the pointer moves.
+    //
+    // Except under `MEDULLA_USER`, which selects an account for this process
+    // without touching the shared selection. The session just cleared is the
+    // overridden account's; the marker names somebody else, and clearing it
+    // would sign *them* out as a side effect of a command that never mentioned
+    // them.
+    if env.contains_key(medulla::home::user::MEDULLA_USER_ENV) {
+        println!("Logged out. The active profile marker is unchanged.");
+        return Ok(());
+    }
     if let Err(err) = medulla::home::user::clear_active_user(&medulla::home::medulla_root(&env)) {
         eprintln!("Signed out, but the active profile marker could not be cleared ({err}).");
     }

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::sign_in::seed_account_backend;
+use crate::sign_in::{disposition, seed_account_backend, Disposition};
 
 fn env_at(root: &std::path::Path) -> HashMap<String, String> {
     HashMap::from([(
@@ -87,4 +87,56 @@ fn a_blank_deployment_writes_nothing() {
             .exists(),
         "an empty base url would pin the account to nothing"
     );
+}
+
+#[test]
+fn a_token_for_this_account_is_stored() {
+    assert_eq!(
+        disposition("acct-a", false, Some("acct-a")),
+        Disposition::Store
+    );
+    // The override changes nothing when the ids agree — it only ever restrains
+    // the marker, never the store.
+    assert_eq!(
+        disposition("acct-a", true, Some("acct-a")),
+        Disposition::Store
+    );
+}
+
+#[test]
+fn a_token_for_another_account_switches_rather_than_stores() {
+    assert_eq!(
+        disposition("acct-a", false, Some("acct-b")),
+        Disposition::Switch("acct-b".to_string()),
+        "storing here would put account B's bearer in account A's credential store"
+    );
+    // The pre-login account is not special: a real account never inherits it.
+    assert_eq!(
+        disposition("local", false, Some("acct-b")),
+        Disposition::Switch("acct-b".to_string())
+    );
+}
+
+#[test]
+fn an_override_refuses_instead_of_moving_the_shared_selection() {
+    // MEDULLA_USER picks an account for one process. Adopting B here would
+    // change which account every *other* launch opens.
+    let Disposition::Refuse(why) = disposition("acct-a", true, Some("acct-b")) else {
+        panic!("an override must not switch the shared selection");
+    };
+    assert!(why.contains("MEDULLA_USER"), "{why}");
+    assert!(why.contains("acct-b") && why.contains("acct-a"), "{why}");
+}
+
+#[test]
+fn a_token_of_unknown_ownership_is_never_stored() {
+    // Including on a signed-out install: `local` would accept it, but nothing
+    // would ever make it an account, so every launch would sign in again and
+    // every such login would share one credential store.
+    for active in ["acct-a", "local"] {
+        let Disposition::Refuse(why) = disposition(active, false, None) else {
+            panic!("an unverifiable token must not be stored as {active}");
+        };
+        assert!(why.contains("did not say which account"), "{why}");
+    }
 }

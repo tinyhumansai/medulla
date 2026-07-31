@@ -87,7 +87,6 @@ async fn store_if_same_account(
         .map_err(|e| anyhow::anyhow!("signed in, but the account could not be read: {e}"))?;
     let root = medulla::home::medulla_root(env);
     let active = medulla::home::user::active_user_id(env, &root);
-
     // `MEDULLA_USER` selects an account for this process only, so a login under
     // it must never move the selection every other process reads — the same rule
     // the CLI adoption path follows.
@@ -96,13 +95,13 @@ async fn store_if_same_account(
         .map(|v| v.trim())
         .is_some_and(|v| !v.is_empty());
 
-    match medulla::auth::user_id_from_me(&me) {
-        Some(user_id) if user_id != active && overridden => anyhow::bail!(
-            "signed in as {user_id}, but {} pins this process to {active} — nothing was stored, \
-             and the shared account selection is unchanged",
-            medulla::home::user::MEDULLA_USER_ENV,
-        ),
-        Some(user_id) if user_id != active => {
+    match disposition(
+        &active,
+        overridden,
+        medulla::auth::user_id_from_me(&me).as_deref(),
+    ) {
+        Disposition::Refuse(why) => anyhow::bail!("signed in, but {why}"),
+        Disposition::Switch(user_id) => {
             // Only claim a switch the marker actually records. Swallowing this
             // would stop the app with "restart to finish signing in" while the
             // marker still names the previous account — the restart would return
@@ -114,16 +113,14 @@ async fn store_if_same_account(
                      it ({e}) — the session was not stored"
                 )
             })?;
+            // The marker moved, so this now resolves the *new* account's home:
+            // record the deployment that just identified them there, or their
+            // first launch loads an empty home, falls back to production, and
+            // cannot finish the login the restart was asked to complete.
+            seed_account_backend(env, base_url);
             return Ok(SignIn::SwitchedAccount);
         }
-        Some(_) => {}
-        // No id to compare. Storing anyway would defeat the check entirely: an
-        // unverifiable token would be written into whatever account this process
-        // happens to be running as.
-        None => anyhow::bail!(
-            "signed in, but the backend did not say which account this token belongs to — \
-             refusing to store a session that may not be this account's"
-        ),
+        Disposition::Store => {}
     }
 
     medulla::core_host::auth::store_session(core, jwt)
@@ -246,4 +243,55 @@ fn declares_backend_base_url(path: &std::path::Path) -> bool {
         .and_then(|backend| backend.get("baseUrl"))
         .and_then(toml::Value::as_str)
         .is_some_and(|url| !url.trim().is_empty())
+}
+
+/// What to do with a freshly verified token, given who it belongs to.
+///
+/// Split out as a pure function because these are the rules that decide whether
+/// one account's bearer token can land in another account's credential store,
+/// and every bug in this PR's review has been in them. Deciding without a
+/// network call or a booted core means each rule is covered by a test rather
+/// than by an integration path that is awkward to provoke.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Disposition {
+    /// The token belongs to the account this process is running as: store it.
+    Store,
+    /// It belongs to somebody else, and this install may adopt them.
+    Switch(String),
+    /// It must not be stored here. Carries an operator-facing reason.
+    Refuse(String),
+}
+
+/// Decide what may be done with a token authenticated as `authenticated`, by a
+/// process running as `active`, with `overridden` telling whether that came from
+/// `MEDULLA_USER` rather than the shared marker.
+pub(crate) fn disposition(
+    active: &str,
+    overridden: bool,
+    authenticated: Option<&str>,
+) -> Disposition {
+    // No id to compare. Storing anyway would defeat the check entirely: an
+    // unverifiable token would be written into whatever account this process
+    // happens to be running as.
+    let Some(user_id) = authenticated else {
+        return Disposition::Refuse(
+            "the backend did not say which account this token belongs to — refusing to store a \
+             session that may not be this account's"
+                .to_string(),
+        );
+    };
+    if user_id == active {
+        return Disposition::Store;
+    }
+    // The override is this process's own choice of account. Moving the shared
+    // selection to satisfy it would change which account *every other* launch
+    // opens, which is the opposite of what asking for one process was.
+    if overridden {
+        return Disposition::Refuse(format!(
+            "signed in as {user_id}, but {} pins this process to {active} — nothing was stored, \
+             and the shared account selection is unchanged",
+            medulla::home::user::MEDULLA_USER_ENV,
+        ));
+    }
+    Disposition::Switch(user_id.to_string())
 }

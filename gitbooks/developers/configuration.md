@@ -4,15 +4,28 @@ Medulla reads a layered configuration, persists everything under a single home d
 
 ## Medulla home
 
-Everything Medulla persists lives under one home directory:
+Everything Medulla persists lives under one home directory, and that directory
+belongs to one account. There are two levels:
 
-* Default: `~/.medulla`.
-* Local dev: set `MEDULLA_DEV=1` (truthy is `1`/`true`, case-insensitive) and the home becomes `./.medulla` (relative to the cwd; gitignored).
-* Explicit: `MEDULLA_HOME=<path>` overrides both.
+* The **root** holds one directory per account and nothing else.
+  * Default: `~/.medulla`.
+  * Local dev: set `MEDULLA_DEV=1` (truthy is `1`/`true`, case-insensitive) and the root becomes `./.medulla` (relative to the cwd; gitignored).
+  * Explicit: `MEDULLA_HOME=<path>` overrides both.
+* The **home** is `<root>/<account id>` — where config, state, logs, workflows, and the core's own workspace live.
+
+The active account is recorded in `<root>/active_user.toml`, written by
+[`medulla login`](authentication.md) and cleared by `medulla logout`. Before
+anyone signs in the account is `local`, so a signed-out install still has a
+complete home at `<root>/local`. `MEDULLA_USER=<id>` selects a different account
+directly, ahead of the marker.
+
+Signing in as a different account moves the marker, never the data: the previous
+account's directory stays where it is, and signing back in returns to it. A
+running app cannot follow the move — it says so and asks for a restart.
 
 Under the home:
 
-* `openhuman/` — the embedded core's workspace, including the app session [`medulla login`](authentication.md) stores.
+* `workspace/` and `.openhuman/` — the embedded core's state and its config, including the app session `medulla login` stores.
 * `config.toml` — the user-global config file.
 * `state/` — the default `stateDir`, holding chat history under `chats/`, and workflow run records and engine checkpoints under `state/workflows/runs/` and `state/workflows/checkpoints/`.
 * `workflows/*.json` — your [workflow](../features/workflows.md) definitions. A repository's own `<cwd>/.medulla/workflows/*.json` layers on top and shadows a personal one of the same id.

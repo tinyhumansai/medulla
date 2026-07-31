@@ -60,18 +60,43 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
+/// Id keys an `/auth/me` response has been observed to use, most specific
+/// first.
+///
+/// `_id` is what the live backend actually sends: `/auth/me` returns a Mongoose
+/// document's `toJSON()`, and with no `virtuals: true` transform configured that
+/// document carries `_id` and no `id` at all. It is listed last only because a
+/// deployment that sends both an explicit `id` and the raw `_id` means the
+/// former as the public identifier.
+const ID_KEYS: [&str; 3] = ["id", "userId", "_id"];
+
+/// The id under `obj`, whichever spelling this deployment uses.
+///
+/// A Mongo `_id` is usually a plain hex string once serialized, but drivers and
+/// proxies that emit MongoDB Extended JSON send `{"$oid": "…"}` instead — so a
+/// one-key object wrapping the id is unwrapped rather than read as absent, which
+/// is the difference between signing in and being told there is nowhere to store
+/// the session.
+fn id_field(obj: &serde_json::Value) -> Option<&str> {
+    ID_KEYS.iter().find_map(|key| {
+        let value = obj.get(key)?;
+        value
+            .as_str()
+            .or_else(|| value.get("$oid").and_then(|v| v.as_str()))
+    })
+}
+
 /// The account id in an `/auth/me` response, when it carries one.
 ///
 /// This is what scopes the Medulla home to an account (see
 /// [`crate::home::user`]), so it is read here — before the core boots — rather
 /// than from the core's auth state, which lives inside the directory the id
-/// selects. Both the flat and `{"user": …}` shapes are accepted, and both id
-/// spellings, because which one a deployment returns has changed before.
+/// selects. Both the flat and `{"user": …}` shapes are accepted, and every id
+/// spelling in [`ID_KEYS`], because which one a deployment returns has changed
+/// before.
 pub fn user_id_from_me(me: &serde_json::Value) -> Option<String> {
     let obj = me.get("user").unwrap_or(me);
-    obj.get("id")
-        .and_then(|v| v.as_str())
-        .or_else(|| obj.get("userId").and_then(|v| v.as_str()))
+    id_field(obj)
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string)
@@ -81,10 +106,7 @@ pub fn user_id_from_me(me: &serde_json::Value) -> Option<String> {
 pub fn describe_me(me: &serde_json::Value) -> String {
     let obj = me.get("user").unwrap_or(me);
     let email = obj.get("email").and_then(|v| v.as_str());
-    let id = obj
-        .get("id")
-        .and_then(|v| v.as_str())
-        .or_else(|| obj.get("userId").and_then(|v| v.as_str()));
+    let id = id_field(obj);
     match (email, id) {
         (Some(e), Some(i)) => format!("Logged in as {e} ({i})"),
         (Some(e), None) => format!("Logged in as {e}"),

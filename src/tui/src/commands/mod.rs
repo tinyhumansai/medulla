@@ -84,6 +84,13 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
     // that belongs to somebody else.
     adopt_account(&env, &me).map_err(|why| anyhow::anyhow!("signed in, but {why}"))?;
 
+    // Carry the deployment this token was minted against into the account that
+    // just became current, exactly as the TUI's first-run path does. `auth_core`
+    // below reloads config from the *new* home; without this an account with no
+    // config of its own falls back to the production default, and the core
+    // rejects the JWT the configured deployment issued a moment ago.
+    crate::sign_in::seed_account_backend(&env, &base_url);
+
     // Boot last: the flow above can take minutes of browser round-trip, and a
     // core sitting open across it buys nothing.
     let core = auth_core(&env).await?;

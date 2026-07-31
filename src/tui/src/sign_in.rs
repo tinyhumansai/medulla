@@ -209,7 +209,10 @@ pub(crate) fn seed_account_backend(
         return;
     }
     let path = medulla::home::medulla_home(env).join("config.toml");
-    if path.exists() {
+    // Keyed on the setting, not the file. An account whose config holds a theme
+    // and nothing else still has no deployment recorded, and skipping it there
+    // would leave exactly the gap this closes.
+    if declares_backend_base_url(&path) {
         return;
     }
     if let Some(parent) = path.parent() {
@@ -223,4 +226,24 @@ pub(crate) fn seed_account_backend(
         "baseUrl",
         toml::Value::String(base_url.to_string()),
     );
+}
+
+/// Whether `path` already pins `backend.baseUrl` to a non-empty value.
+///
+/// A file that cannot be read or parsed counts as not declaring one: the seed is
+/// a merge that preserves every other key, so writing over an unreadable file is
+/// no worse than the state it is already in, and refusing to write would leave
+/// the account undescribed.
+fn declares_backend_base_url(path: &std::path::Path) -> bool {
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(doc) = body.parse::<toml::Table>() else {
+        return false;
+    };
+    doc.get("backend")
+        .and_then(toml::Value::as_table)
+        .and_then(|backend| backend.get("baseUrl"))
+        .and_then(toml::Value::as_str)
+        .is_some_and(|url| !url.trim().is_empty())
 }

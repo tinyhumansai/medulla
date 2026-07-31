@@ -56,6 +56,24 @@ fn an_existing_accounts_config_is_never_overwritten() {
 }
 
 #[test]
+fn a_config_without_a_backend_still_gets_one() {
+    // The guard is on the setting, not the file: an account that has a theme and
+    // no deployment is exactly the case this exists for.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let env = env_at(tmp.path());
+    medulla::home::user::write_active_user_id(tmp.path(), "acct-4").expect("adopt");
+    let home = medulla::home::medulla_home(&env);
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::write(home.join("config.toml"), "[theme]\naccent = \"green\"\n").expect("write");
+
+    seed_account_backend(&env, "https://staging-api.tinyhumans.ai");
+
+    let body = std::fs::read_to_string(home.join("config.toml")).expect("read");
+    assert!(body.contains("staging-api.tinyhumans.ai"), "{body}");
+    assert!(body.contains("accent"), "the theme must survive: {body}");
+}
+
+#[test]
 fn a_blank_deployment_writes_nothing() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let env = env_at(tmp.path());

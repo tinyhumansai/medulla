@@ -357,7 +357,8 @@ impl PtySessionExecutor {
         let mut extra_args = options.extra_args.clone();
         // Commits made in a watched PTY session are just as much Medulla's work
         // as headless ones, so this path carries the same attribution.
-        env.extend(medulla::attribution::attribution_env(options.attribution));
+        let attribution_env = medulla::attribution::attribution_env(options.attribution, &env);
+        env.extend(attribution_env);
         extra_args.extend(medulla::attribution::attribution_args(
             options.provider,
             options.attribution,

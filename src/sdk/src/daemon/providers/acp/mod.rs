@@ -275,7 +275,8 @@ fn agent_for(options: &RunTaskOptions) -> AcpAgent {
 /// ACP *before* the spawn seam in `execute` that handles it for direct runs.
 pub(super) fn acp_env(options: &RunTaskOptions) -> HashMap<String, String> {
     let mut env = options.env.clone();
-    env.extend(crate::attribution::attribution_env(options.attribution));
+    let attribution_env = crate::attribution::attribution_env(options.attribution, &env);
+    env.extend(attribution_env);
     env
 }
 

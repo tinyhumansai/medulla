@@ -1,6 +1,8 @@
 //! Unit tests for [`super::attribution`]: trailer shape, the config-driven
 //! on/off switch, and per-provider coverage.
 
+use std::collections::HashMap;
+
 use super::{attribution_args, attribution_trailer, ATTRIBUTION_EMAIL, ATTRIBUTION_NAME};
 use crate::config::AttributionConfig;
 use crate::tinyplace::HarnessProvider;
@@ -105,8 +107,10 @@ fn disabling_suppresses_args_for_every_provider() {
 #[cfg(unix)]
 #[test]
 fn generate_hook_returns_env_vars() {
-    let env =
-        super::prepare_commit_msg::hook_env("Co-authored-by: Medulla <medulla@tinyhumans.ai>");
+    let env = super::prepare_commit_msg::hook_env(
+        "Co-authored-by: Medulla <medulla@tinyhumans.ai>",
+        &HashMap::new(),
+    );
     assert_eq!(
         env.get("MEDULLA_ATTRIBUTION"),
         Some(&"Co-authored-by: Medulla <medulla@tinyhumans.ai>".to_string()),
@@ -366,6 +370,132 @@ fn a_failing_repository_hook_still_blocks_the_commit() {
     );
 }
 
+/// A repository whose `core.hooksPath` is written with a tilde must still have
+/// its hooks run. Git expands `~/` natively, but `git config --get` returns the
+/// literal string — so the shim has to ask for the *path* form.
+#[cfg(unix)]
+#[test]
+fn a_tilde_in_the_repository_hooks_path_is_expanded() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let repo = HookRepo::new(trailer);
+
+    // Point the repo at a hooks dir under a HOME we control, spelled with `~`.
+    let home = repo._tmp.path().join("home");
+    let hooks = home.join("tilde-hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    let marker = repo.repo.join("tilde-hook-ran");
+    let hook = hooks.join("pre-commit");
+    std::fs::write(
+        &hook,
+        format!("#!/bin/sh\ntouch {}\n", marker.to_string_lossy()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    repo.git(&["config", "core.hooksPath", "~/tilde-hooks"]);
+
+    std::fs::write(repo.repo.join("a.txt"), "x").unwrap();
+    let output = std::process::Command::new("git")
+        .args(["add", "a.txt"])
+        .current_dir(&repo.repo)
+        .env("HOME", &home)
+        .output()
+        .expect("git add");
+    assert!(output.status.success());
+
+    let output = std::process::Command::new("git")
+        .args(["commit", "-q", "-m", "subject"])
+        .current_dir(&repo.repo)
+        .env("HOME", &home)
+        .env("MEDULLA_ATTRIBUTION", trailer)
+        .env("MEDULLA_GIT_CONFIG_BASE_COUNT", "0")
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+        .env("GIT_CONFIG_VALUE_0", &repo.hook_dir)
+        .output()
+        .expect("git commit");
+    assert!(
+        output.status.success(),
+        "commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(
+        marker.exists(),
+        "a `~/`-spelled core.hooksPath must still have its hooks run"
+    );
+}
+
+/// `GIT_CONFIG_COUNT` is the number of pairs git reads, so our entry must be
+/// *appended* to whatever the parent set. Resetting it to 1 would silently drop
+/// a CI-supplied `user.email` or `safe.directory`.
+#[cfg(unix)]
+#[test]
+fn inherited_git_config_entries_are_preserved() {
+    let base = HashMap::from([
+        ("GIT_CONFIG_COUNT".to_string(), "2".to_string()),
+        ("GIT_CONFIG_KEY_0".to_string(), "user.email".to_string()),
+        (
+            "GIT_CONFIG_VALUE_0".to_string(),
+            "ci@example.com".to_string(),
+        ),
+        ("GIT_CONFIG_KEY_1".to_string(), "safe.directory".to_string()),
+        ("GIT_CONFIG_VALUE_1".to_string(), "*".to_string()),
+    ]);
+    let env = super::attribution_env(true, &base);
+
+    assert_eq!(
+        env.get("GIT_CONFIG_COUNT"),
+        Some(&"3".to_string()),
+        "our pair must be appended, not replace the inherited ones"
+    );
+    assert_eq!(
+        env.get("GIT_CONFIG_KEY_2"),
+        Some(&"core.hooksPath".to_string()),
+        "our key belongs at the next free index"
+    );
+    assert!(
+        !env.contains_key("GIT_CONFIG_KEY_0") && !env.contains_key("GIT_CONFIG_KEY_1"),
+        "inherited slots must be left alone: {env:?}"
+    );
+    // The shim needs the pre-existing count so it can drop only our entry.
+    assert_eq!(
+        env.get("MEDULLA_GIT_CONFIG_BASE_COUNT"),
+        Some(&"2".to_string())
+    );
+}
+
+/// With no inherited git config, our pair lands at slot zero.
+#[cfg(unix)]
+#[test]
+fn a_clean_environment_puts_our_pair_at_slot_zero() {
+    let env = super::attribution_env(true, &HashMap::new());
+    assert_eq!(env.get("GIT_CONFIG_COUNT"), Some(&"1".to_string()));
+    assert_eq!(
+        env.get("GIT_CONFIG_KEY_0"),
+        Some(&"core.hooksPath".to_string())
+    );
+    assert_eq!(
+        env.get("MEDULLA_GIT_CONFIG_BASE_COUNT"),
+        Some(&"0".to_string())
+    );
+}
+
+/// A malformed inherited count is treated as absent rather than appended after —
+/// git would reject the value anyway, and guessing helps nobody.
+#[cfg(unix)]
+#[test]
+fn a_malformed_inherited_count_falls_back_to_slot_zero() {
+    let base = HashMap::from([("GIT_CONFIG_COUNT".to_string(), "not-a-number".to_string())]);
+    let env = super::attribution_env(true, &base);
+    assert_eq!(env.get("GIT_CONFIG_COUNT"), Some(&"1".to_string()));
+    assert_eq!(
+        env.get("GIT_CONFIG_KEY_0"),
+        Some(&"core.hooksPath".to_string())
+    );
+}
+
 /// A merge message is composed by git over commits the harness did not author,
 /// so it must not be attributed to Medulla.
 #[cfg(unix)]
@@ -443,7 +573,7 @@ fn cleanup_removes_hook_dir() {
 #[cfg(not(unix))]
 #[test]
 fn non_unix_returns_empty() {
-    assert!(super::prepare_commit_msg::hook_env("test").is_empty());
+    assert!(super::prepare_commit_msg::hook_env("test", &HashMap::new()).is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -456,7 +586,7 @@ fn non_unix_returns_empty() {
 #[cfg(unix)]
 #[test]
 fn enabled_attribution_yields_hook_env() {
-    let env = super::attribution_env(true);
+    let env = super::attribution_env(true, &HashMap::new());
     assert!(
         env.contains_key("MEDULLA_ATTRIBUTION"),
         "missing MEDULLA_ATTRIBUTION"
@@ -467,7 +597,7 @@ fn enabled_attribution_yields_hook_env() {
 /// Turning attribution off in config suppresses the hook env entirely.
 #[test]
 fn disabled_attribution_yields_no_hook_env() {
-    assert!(super::attribution_env(false).is_empty());
+    assert!(super::attribution_env(false, &HashMap::new()).is_empty());
 }
 
 /// `cleanup_hook_dir` must remove a directory the caller owns.
@@ -493,8 +623,8 @@ fn cleanup_of_an_empty_path_is_a_noop() {
 #[cfg(unix)]
 #[test]
 fn hook_env_shares_one_directory_across_calls() {
-    let first = super::prepare_commit_msg::hook_env("Co-authored-by: A <a@e.g>");
-    let second = super::prepare_commit_msg::hook_env("Co-authored-by: B <b@e.g>");
+    let first = super::prepare_commit_msg::hook_env("Co-authored-by: A <a@e.g>", &HashMap::new());
+    let second = super::prepare_commit_msg::hook_env("Co-authored-by: B <b@e.g>", &HashMap::new());
     assert_eq!(
         first.get("GIT_CONFIG_VALUE_0"),
         second.get("GIT_CONFIG_VALUE_0"),

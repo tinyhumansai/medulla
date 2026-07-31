@@ -194,9 +194,8 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
 /// Merge the git-hook attribution env vars (for Codex / Opencode) into
 /// `config.env`. Claude Code gets no additional env vars.
 fn merge_attribution_env_into_config(config: &mut WrapperConfig) {
-    config
-        .env
-        .extend(crate::attribution::attribution_env(config.attribution));
+    let attribution_env = crate::attribution::attribution_env(config.attribution, &config.env);
+    config.env.extend(attribution_env);
 }
 
 /// A future that resolves on SIGINT/SIGTERM (Unix) or Ctrl-C (elsewhere).

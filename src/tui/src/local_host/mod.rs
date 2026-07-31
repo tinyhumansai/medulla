@@ -163,8 +163,9 @@ pub(crate) fn options_from_config(
     router: Option<medulla::config::RouterConfig>,
     budget: Option<medulla::config::BudgetConfig>,
     log: Option<medulla::hub::HubLog>,
+    attribution: bool,
 ) -> Result<EmbeddedDaemonOptions, String> {
-    options_from_config_with_custom(config, env, router, budget, log, &[])
+    options_from_config_with_custom(config, env, router, budget, log, &[], attribution)
 }
 
 /// Translate host config and named custom-harness presets into start-up options.
@@ -180,6 +181,7 @@ pub(crate) fn options_from_config_with_custom(
     budget: Option<medulla::config::BudgetConfig>,
     log: Option<medulla::hub::HubLog>,
     custom_harnesses: &[medulla::config::CustomHarnessConfig],
+    attribution: bool,
 ) -> Result<EmbeddedDaemonOptions, String> {
     let address = host_address(config);
     let mut providers = config
@@ -219,6 +221,7 @@ pub(crate) fn options_from_config_with_custom(
         custom_harnesses,
         budget,
         log,
+        attribution,
         ..Default::default()
     })
 }

@@ -120,11 +120,18 @@ fn claude_settings_json() -> String {
 /// is safe to call for concurrent spawns and needs no cleanup from the caller
 /// (see [`prepare_commit_msg`]).
 ///
+/// `base_env` is the environment the result will be merged into: the returned
+/// `GIT_CONFIG_*` entries are appended after whatever it already carries rather
+/// than replacing them.
+///
 /// Returns an empty map when attribution is off, and on non-Unix platforms
 /// (git hooks are not supported there).
-pub fn attribution_env(enabled: bool) -> HashMap<String, String> {
+pub fn attribution_env(
+    enabled: bool,
+    base_env: &HashMap<String, String>,
+) -> HashMap<String, String> {
     if !enabled {
         return HashMap::new();
     }
-    prepare_commit_msg::hook_env(&attribution_trailer())
+    prepare_commit_msg::hook_env(&attribution_trailer(), base_env)
 }

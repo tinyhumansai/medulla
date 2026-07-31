@@ -47,6 +47,11 @@ use std::sync::OnceLock;
 /// read at runtime.
 const MEDULLA_ATTRIBUTION_KEY: &str = "MEDULLA_ATTRIBUTION";
 
+/// Environment key telling the shim how many `GIT_CONFIG_*` pairs came from the
+/// parent, so it can drop only the one we appended when it resolves the
+/// repository's real hooks directory.
+const BASE_COUNT_KEY: &str = "MEDULLA_GIT_CONFIG_BASE_COUNT";
+
 /// Client-side hooks git may invoke. Every one gets a shim so that redirecting
 /// `core.hooksPath` does not disable the repository's own copy.
 ///
@@ -89,9 +94,13 @@ self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # the injected git config suppressed, and run its hook first — it must see the
 # arguments git handed us, not ones we have already edited. Its exit code is
 # ours: a failing pre-commit or commit-msg must still block the commit.
-orig_dir=$(GIT_CONFIG_COUNT=0 git config --get core.hooksPath 2>/dev/null)
+# Drop only the entry we appended, keeping any GIT_CONFIG_* the parent set --
+# a CI-supplied core.hooksPath is one we must still delegate to. --path expands
+# `~/...`, which git does natively but `git config --get` does not.
+base_count=${MEDULLA_GIT_CONFIG_BASE_COUNT:-0}
+orig_dir=$(GIT_CONFIG_COUNT=$base_count git config --path --get core.hooksPath 2>/dev/null)
 if [ -z "$orig_dir" ]; then
-    orig_dir=$(GIT_CONFIG_COUNT=0 git rev-parse --git-path hooks 2>/dev/null)
+    orig_dir=$(GIT_CONFIG_COUNT=$base_count git rev-parse --git-path hooks 2>/dev/null)
 fi
 if [ -n "$orig_dir" ] && [ "$orig_dir" != "$self_dir" ] && [ -x "$orig_dir/$hook_name" ]; then
     "$orig_dir/$hook_name" "$@" || exit $?
@@ -135,28 +144,45 @@ static HOOK_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 /// Safe to call concurrently: every caller receives the same directory, whose
 /// contents do not vary per run.
 ///
+/// `base_env` is the environment these entries will be merged into. Any
+/// `GIT_CONFIG_*` pairs already there are preserved and ours is *appended* at
+/// the next index: `GIT_CONFIG_COUNT` is the number of pairs git will read, so
+/// resetting it to `1` would silently discard whatever the parent set — a CI
+/// supplying `user.email`, `safe.directory`, or its own `core.hooksPath`.
+///
 /// Returns an empty map if the hook directory could not be created — attribution
 /// is a nicety, and failing to write a temp file must never stop a harness from
 /// running.
 #[cfg(unix)]
-pub fn hook_env(trailer: &str) -> HashMap<String, String> {
+pub fn hook_env(trailer: &str, base_env: &HashMap<String, String>) -> HashMap<String, String> {
     let Some(hook_dir) = HOOK_DIR.get_or_init(|| build_hook_dir().ok()).as_ref() else {
         return HashMap::new();
     };
 
+    // A malformed inherited count is treated as absent: appending after a value
+    // git itself would reject helps nobody.
+    let base_count: usize = base_env
+        .get("GIT_CONFIG_COUNT")
+        .and_then(|raw| raw.trim().parse().ok())
+        .unwrap_or(0);
+
     let mut env = HashMap::new();
     env.insert(MEDULLA_ATTRIBUTION_KEY.to_string(), trailer.to_string());
-    env.insert("GIT_CONFIG_COUNT".to_string(), "1".to_string());
-    env.insert("GIT_CONFIG_KEY_0".to_string(), "core.hooksPath".to_string());
+    env.insert(BASE_COUNT_KEY.to_string(), base_count.to_string());
+    env.insert("GIT_CONFIG_COUNT".to_string(), (base_count + 1).to_string());
     env.insert(
-        "GIT_CONFIG_VALUE_0".to_string(),
+        format!("GIT_CONFIG_KEY_{base_count}"),
+        "core.hooksPath".to_string(),
+    );
+    env.insert(
+        format!("GIT_CONFIG_VALUE_{base_count}"),
         hook_dir.to_string_lossy().into_owned(),
     );
     env
 }
 
 #[cfg(not(unix))]
-pub fn hook_env(_trailer: &str) -> HashMap<String, String> {
+pub fn hook_env(_trailer: &str, _base_env: &HashMap<String, String>) -> HashMap<String, String> {
     HashMap::new()
 }
 

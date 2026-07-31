@@ -137,7 +137,8 @@ async fn run_provider_attempt(
     // For providers that use the git-hook path (Codex, Opencode), merge the
     // prepare-commit-msg hook env vars into the child's environment.
     let mut merged_env = spec.env.clone();
-    merged_env.extend(crate::attribution::attribution_env(spec.attribution));
+    let attribution_env = crate::attribution::attribution_env(spec.attribution, &merged_env);
+    merged_env.extend(attribution_env);
     // Custom OpenAI-compatible router: layer the provider's endpoint env (and,
     // when configured, its API key) into the child at the spawn seam, so headless
     // daemon, operator-TUI daemon, and interactive wrappers all route identically.

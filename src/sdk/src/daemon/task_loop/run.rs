@@ -382,12 +382,24 @@ impl DaemonRuntime {
             env: super::with_tool_mode(run_env, frame.tool_mode.as_deref()),
             timeout_ms: self.inner.config.task_timeout_ms,
             // Per-task model hint (parallels the per-task `provider`): honor the
-            // orchestrator's requested model, falling back to the daemon default.
+            // orchestrator's requested model, falling back to the daemon default
+            // — but only when the daemon's own default harness is what actually
+            // runs. `frame.model` is deliberately `None` (not merely absent) when
+            // a caller's paired harness/model resolution named a harness without
+            // a model of its own (see `flow_engine::harness_choice`): the model
+            // this daemon has pinned was chosen for its *default* harness, and
+            // handing it to a different one the frame explicitly selected would
+            // be exactly the cross-harness model mismatch that resolution exists
+            // to prevent.
             model: frame
                 .model
                 .clone()
                 .or_else(|| custom_harness.as_ref().map(|harness| harness.model.clone()))
-                .or_else(|| self.inner.config.model.clone()),
+                .or_else(|| {
+                    (provider == self.inner.config.default_provider)
+                        .then(|| self.inner.config.model.clone())
+                        .flatten()
+                }),
             agent: self.inner.config.agent.clone(),
             extra_args: self.inner.config.extra_args.clone(),
             skip_permissions: self.inner.config.skip_permissions,

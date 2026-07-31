@@ -215,6 +215,28 @@ fn describe_me_variants() {
     assert_eq!(describe_me(&empty), "Logged in.");
 }
 
+#[test]
+fn the_account_id_is_read_from_either_shape_and_either_spelling() {
+    // This id becomes a directory name — the account's whole home hangs off it —
+    // so every shape a deployment has returned has to resolve to the same value.
+    let flat = serde_json::json!({"email":"a@b.c","id":"u1"});
+    assert_eq!(super::user_id_from_me(&flat).as_deref(), Some("u1"));
+    let nested = serde_json::json!({"user":{"userId":"u9"}});
+    assert_eq!(super::user_id_from_me(&nested).as_deref(), Some("u9"));
+    // `id` wins over `userId` when a response carries both, matching the line
+    // the operator is shown.
+    let both = serde_json::json!({"id":"u1","userId":"u2"});
+    assert_eq!(super::user_id_from_me(&both).as_deref(), Some("u1"));
+
+    // Nothing usable reads as absent rather than as an empty directory name.
+    assert_eq!(super::user_id_from_me(&serde_json::json!({})), None);
+    assert_eq!(
+        super::user_id_from_me(&serde_json::json!({"id":"  "})),
+        None
+    );
+    assert_eq!(super::user_id_from_me(&serde_json::json!({"id":7})), None);
+}
+
 async fn send_request(port: u16, request: &str) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", port))

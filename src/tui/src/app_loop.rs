@@ -178,11 +178,11 @@ async fn adopt_core_account(
     if medulla::home::user::active_user_id(env, &root) == user_id {
         return false;
     }
-    if let Err(err) = medulla::home::user::write_active_user_id(&root, &user_id) {
-        // No terminal to print to — the app owns the screen here.
-        let _ = err;
-        return false;
-    }
+    // A marker that cannot be written still means this process is signed in as
+    // somebody the home does not belong to, so it stops either way. Continuing
+    // is the one outcome that would write the new account's work into the old
+    // account's directory.
+    let _ = medulla::home::user::write_active_user_id(&root, &user_id);
     true
 }
 

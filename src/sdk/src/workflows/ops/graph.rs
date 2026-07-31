@@ -163,17 +163,6 @@ pub struct HostPolicy {
     pub custom_harnesses: Vec<String>,
 }
 
-impl HostPolicy {
-    /// A policy over `workflows` with no custom presets — every surface that
-    /// has the config but not the preset list.
-    pub fn from_workflows(workflows: crate::config::WorkflowsConfig) -> Self {
-        Self {
-            workflows,
-            custom_harnesses: Vec::new(),
-        }
-    }
-}
-
 /// What this host will actually permit a workflow to do.
 ///
 /// The grounding an author most needs and had no way to get. Every one of these

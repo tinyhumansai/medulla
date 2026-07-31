@@ -40,3 +40,83 @@ async fn an_agent_step_records_the_prompt_after_expression_resolution() {
         Some(json!("Review the complete patch\nand report every risk."))
     );
 }
+
+#[tokio::test]
+async fn a_workflow_s_defaults_block_reaches_the_dispatch() {
+    // The layer between a node and the host: nothing in the graph says which
+    // harness to use, so the document's own block is what a step must run on.
+    let harness = Harness::new();
+    harness.install(
+        &json!({
+            "id": "pinned",
+            "name": "Pinned",
+            "defaults": { "harness": "codex", "model": "gpt-5-codex" },
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "work", "kind": "agent", "name": "Work",
+                  "config": { "prompt": "go", "agent_ref": "builder" } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "work" }]
+        })
+        .to_string(),
+        "pinned",
+    );
+    let dispatch = Arc::new(StubDispatch::default());
+
+    run_workflow(
+        harness.context(dispatch.clone()),
+        "pinned",
+        "run-pinned",
+        json!({}),
+    )
+    .await
+    .expect("runs");
+
+    let seen = dispatch.seen.lock().unwrap();
+    assert_eq!(
+        seen[0].provider,
+        Some(crate::tinyplace::HarnessProvider::Codex)
+    );
+    assert_eq!(seen[0].model.as_deref(), Some("gpt-5-codex"));
+}
+
+#[tokio::test]
+async fn a_step_that_names_its_own_harness_overrides_the_workflow_s() {
+    let harness = Harness::new();
+    harness.install(
+        &json!({
+            "id": "mixed",
+            "name": "Mixed",
+            "defaults": { "harness": "codex", "model": "gpt-5-codex" },
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "work", "kind": "agent", "name": "Work",
+                  "config": { "prompt": "go", "agent_ref": "builder",
+                              "harness": "claude" } }
+            ],
+            "edges": [{ "from_node": "t", "to_node": "work" }]
+        })
+        .to_string(),
+        "mixed",
+    );
+    let dispatch = Arc::new(StubDispatch::default());
+
+    run_workflow(
+        harness.context(dispatch.clone()),
+        "mixed",
+        "run-mixed",
+        json!({}),
+    )
+    .await
+    .expect("runs");
+
+    let seen = dispatch.seen.lock().unwrap();
+    assert_eq!(
+        seen[0].provider,
+        Some(crate::tinyplace::HarnessProvider::Claude)
+    );
+    // The workflow's Codex model must not follow the step onto Claude Code.
+    assert_eq!(seen[0].model, None);
+}

@@ -14,14 +14,24 @@ belongs to one account. There are two levels:
 * The **home** is `<root>/<account id>` — where config, state, logs, workflows, and the core's own workspace live.
 
 The active account is recorded in `<root>/active_user.toml`, written by
-[`medulla login`](authentication.md) and cleared by `medulla logout`. Before
-anyone signs in the account is `local`, so a signed-out install still has a
-complete home at `<root>/local`. `MEDULLA_USER=<id>` selects a different account
-directly, ahead of the marker.
+[`medulla login`](authentication.md). Before anyone signs in the account is
+`local`, so a signed-out install still has a complete home at `<root>/local`.
+`MEDULLA_USER=<id>` selects a different account for one process, ahead of the
+marker and without changing it — which is also how you reach the pre-login home
+again (`MEDULLA_USER=local`).
+
+`medulla logout` clears the *session* and leaves the marker alone, so subsequent
+commands still resolve that account's home. That is deliberate: the account's
+`config.toml` is where a staging or self-hosted `backend.baseUrl` lives, and
+forgetting which account was active would offer the next login a production
+endpoint the operator never configured.
 
 Signing in as a different account moves the marker, never the data: the previous
 account's directory stays where it is, and signing back in returns to it. A
 running app cannot follow the move — it says so and asks for a restart.
+
+An account records the deployment it signed in to in its own `config.toml`, so a
+session minted on staging is never later verified against production.
 
 Under the home:
 

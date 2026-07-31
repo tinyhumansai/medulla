@@ -8,7 +8,7 @@ for headless operation, bridging coding-agent harnesses to
 | --- | --- |
 | `medulla` | Bare invocation starts the [TUI](#the-tui). |
 | `medulla run <instruction>` | [Headless one-shot](#medulla-run): submit one instruction and stream the cycle's events as JSON lines. |
-| `medulla login` / `logout` | [Browser OAuth login](authentication.md); clears credentials. |
+| `medulla login` / `logout` | [Browser OAuth login](authentication.md); logout clears the session and keeps the account selected. |
 | `medulla daemon` | [Coding-agent worker daemon](#medulla-daemon) over tiny.place (`--headless` for a service process). |
 | `medulla codex` / `claude` / `opencode` | [Harness wrappers](#harness-wrappers): run a CLI, bridged to tiny.place. |
 | `medulla sessions` | List recent claude/codex sessions as JSON. |

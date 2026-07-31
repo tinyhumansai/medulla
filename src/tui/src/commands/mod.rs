@@ -93,7 +93,7 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
 
     // Boot last: the flow above can take minutes of browser round-trip, and a
     // core sitting open across it buys nothing.
-    let core = auth_core(&env).await?;
+    let core = auth_core(&env, parsed.config.as_deref()).await?;
     medulla::core_host::auth::store_session(&core, &jwt)
         .await
         .map_err(|e| anyhow::anyhow!("the core rejected the session: {e}"))?;
@@ -187,15 +187,22 @@ pub(crate) fn adopt_account(
 /// developer's real `~/.openhuman` instead of the one this process's
 /// `MEDULLA_HOME` implies — so `medulla login` would sign in a workspace the TUI
 /// never reads.
+/// `config` is the operator's explicit `--config`, which stays authoritative
+/// here. Rediscovering config from the account home instead would defeat the
+/// flag exactly where it matters most: `medulla login --config staging.toml`
+/// verifies a token against the file's endpoint, and an account that already
+/// declares a different `backend.baseUrl` would then have the core validate that
+/// token against *its* endpoint and reject the login.
 async fn auth_core(
     env: &std::collections::HashMap<String, String>,
+    config: Option<&str>,
 ) -> anyhow::Result<medulla::core_host::EmbeddedCore> {
     let home = medulla::home::medulla_home(env);
     medulla::core_host::bind_workspace(env, &home);
     // The session must be stored against the backend this host is configured
     // for, or `medulla login` signs into one deployment and the TUI probes
     // another.
-    let loaded = load_config(None, env, &home)?;
+    let loaded = load_config(config, env, &home)?;
     medulla::core_host::bind_medulla_base_url(env, &loaded.config.backend.base_url);
     // And the core's own backend client with it: storing a session validates it
     // against `/auth/me` there, not on the Medulla base above.
@@ -215,7 +222,7 @@ async fn session_credentials(
     env: &std::collections::HashMap<String, String>,
     base_url: &str,
 ) -> Option<Credentials> {
-    let core = auth_core(env).await.ok()?;
+    let core = auth_core(env, None).await.ok()?;
     let jwt = medulla::core_host::auth::session_token(&core)
         .await
         .ok()??;
@@ -231,7 +238,7 @@ async fn session_credentials(
 /// unsure of their state can always run it.
 pub(crate) async fn run_logout() -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let core = auth_core(&env).await?;
+    let core = auth_core(&env, None).await?;
     medulla::core_host::auth::clear_session(&core)
         .await
         .map_err(|e| anyhow::anyhow!("failed to clear the session: {e}"))?;

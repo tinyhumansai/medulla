@@ -57,6 +57,23 @@ impl WorkflowResolver for StoreWorkflowResolver {
             ))),
             Ok(Some(mut record)) => {
                 apply_defaults(&mut record.graph, &record.defaults);
+                // The same reason `run_workflow` re-checks this for the root
+                // graph (see `workflows::run::refuse_unresolved_harness`): a
+                // graph can reach the store without ever passing through an
+                // authoring write, and the engine resolves `=`-expressions
+                // before a node dispatches — indistinguishable, by then, from
+                // a name typed by hand. A `sub_workflow` node's child is
+                // resolved here, entirely outside `run_workflow`'s own check
+                // on the root, so it needs the same gate applied to it before
+                // it is handed back to be compiled and run.
+                let failures = crate::workflows::gates::harness_failures(&record.graph);
+                if !failures.is_empty() {
+                    return Err(EngineError::Capability(format!(
+                        "sub_workflow: workflow '{workflow_id}' has an unresolved harness \
+                         expression: {}",
+                        failures.join("; ")
+                    )));
+                }
                 Ok(record.graph)
             }
             Ok(None) => Err(EngineError::Capability(format!(

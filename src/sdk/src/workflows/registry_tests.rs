@@ -93,6 +93,45 @@ async fn a_node_that_names_its_own_harness_is_not_overridden_by_the_child_s_defa
 }
 
 #[tokio::test]
+async fn a_child_with_an_unresolved_harness_expression_is_refused() {
+    // `run_workflow` re-checks only the root graph before it runs; a
+    // `sub_workflow` node's child is resolved here, entirely outside that
+    // check, so a hand-edited child carrying `harness: "=..."` must be caught
+    // at this seam instead — the engine resolves the expression before the
+    // node ever dispatches, so by then it is too late to tell from a name
+    // typed by hand.
+    let (_root, store) = store();
+    install(
+        &store,
+        json!({
+            "id": "child",
+            "name": "Child",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "pick", "kind": "transform", "name": "pick",
+                  "config": { "set": { "harness": "=item.harness" } } },
+                { "id": "work", "kind": "agent", "name": "Work",
+                  "config": { "prompt": "go",
+                              "harness": "=nodes.pick.item.json.harness" } }
+            ],
+            "edges": [
+                { "from_node": "t", "to_node": "pick" },
+                { "from_node": "pick", "to_node": "work" }
+            ]
+        }),
+    );
+
+    let resolver = StoreWorkflowResolver::new(store);
+    let err = resolver
+        .resolve("child")
+        .await
+        .expect_err("an unresolved harness expression must refuse resolution");
+
+    assert!(err.to_string().contains("expression"), "{err}");
+}
+
+#[tokio::test]
 async fn a_child_with_no_defaults_is_returned_unmodified() {
     let (_root, store) = store();
     install(

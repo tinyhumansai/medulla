@@ -7,7 +7,7 @@ Medulla reads a layered configuration, persists everything under a single home d
 Everything Medulla persists lives under one home directory, and that directory
 belongs to one account. There are two levels:
 
-* The **root** holds one directory per account and nothing else.
+* The **root** holds one directory per account, plus the `active_user.toml` marker naming the active one. Nothing else lives there.
   * Default: `~/.medulla`.
   * Local dev: set `MEDULLA_DEV=1` (truthy is `1`/`true`, case-insensitive) and the root becomes `./.medulla` (relative to the cwd; gitignored).
   * Explicit: `MEDULLA_HOME=<path>` overrides both.

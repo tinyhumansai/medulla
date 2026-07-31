@@ -179,11 +179,7 @@ impl PtySessionExecutor {
         // return sent in the same burst is absorbed by the paste, which leaves
         // the prompt sitting in the composer, complete and unsent.
         if let Err(err) = super::pty::inject_prompt(&self.sessions, &id, &options.prompt).await {
-            if class == SessionClass::Bounded {
-                self.sessions.close(&id);
-            } else {
-                self.sessions.release(&id);
-            }
+            self.finish_turn(&id, class);
             return Err(err);
         }
 
@@ -223,16 +219,24 @@ impl PtySessionExecutor {
         let outcome = self
             .await_turn(&id, provider, tailer, abort, on_event, timeout_ms)
             .await;
-        if class == SessionClass::Bounded {
-            // Bounded means bounded: the session dies with its reply.
-            self.sessions.close(&id);
-        } else {
-            // Free it for this peer's next turn. Released on the error path too:
-            // a session left claimed by a failed turn is never reusable again,
-            // and every later task would open a new harness.
-            self.sessions.release(&id);
-        }
+        self.finish_turn(&id, class);
         outcome
+    }
+
+    /// Settle executor ownership without destroying a session the operator took.
+    ///
+    /// Bounded task sessions normally die with their reply. Operator takeover
+    /// changes that lifetime: the PTY is now an interactive workspace, so the
+    /// executor may release its busy claim but must not close the process.
+    fn finish_turn(&self, id: &str, class: SessionClass) {
+        if class == SessionClass::Bounded && self.sessions.control(id) != Some(HarnessControl::User)
+        {
+            self.sessions.close(id);
+        } else {
+            // Free it for the operator or this peer's next turn. Released on
+            // error too: a failed turn left busy can never be reused again.
+            self.sessions.release(id);
+        }
     }
 
     /// Interrupt a running turn and take its session out of service.
@@ -411,6 +415,17 @@ impl PtySessionExecutor {
         let mut last_line_at = medulla::clock::now_millis();
 
         loop {
+            // Taking control is an ownership transfer, not merely a display
+            // preference. Yield before processing aborts or transcript output
+            // so the executor cannot send Ctrl-C, report a stale completion, or
+            // later close the PTY underneath the operator.
+            if self.sessions.control(id) == Some(HarnessControl::User) {
+                return Err(format!(
+                    "{}: operator took control of the {} session",
+                    medulla::daemon::HARNESS_HELD_PREFIX,
+                    provider.as_str()
+                ));
+            }
             if abort.is_aborted() {
                 // A real interrupt, not a kill: Ctrl-C reaches the harness the
                 // same way the operator's would, and the session survives it.

@@ -88,7 +88,20 @@ async fn store_if_same_account(
     let root = medulla::home::medulla_root(env);
     let active = medulla::home::user::active_user_id(env, &root);
 
+    // `MEDULLA_USER` selects an account for this process only, so a login under
+    // it must never move the selection every other process reads — the same rule
+    // the CLI adoption path follows.
+    let overridden = env
+        .get(medulla::home::user::MEDULLA_USER_ENV)
+        .map(|v| v.trim())
+        .is_some_and(|v| !v.is_empty());
+
     match medulla::auth::user_id_from_me(&me) {
+        Some(user_id) if user_id != active && overridden => anyhow::bail!(
+            "signed in as {user_id}, but {} pins this process to {active} — nothing was stored, \
+             and the shared account selection is unchanged",
+            medulla::home::user::MEDULLA_USER_ENV,
+        ),
         Some(user_id) if user_id != active => {
             // Only claim a switch the marker actually records. Swallowing this
             // would stop the app with "restart to finish signing in" while the
@@ -104,15 +117,12 @@ async fn store_if_same_account(
             return Ok(SignIn::SwitchedAccount);
         }
         Some(_) => {}
-        // No id to compare. Storing anyway would defeat the check entirely — an
+        // No id to compare. Storing anyway would defeat the check entirely: an
         // unverifiable token would be written into whatever account this process
-        // happens to be. Safe only where there is no other account to cross: the
-        // pre-login home, which is nobody's in particular.
-        None if active == medulla::home::user::PRE_LOGIN_USER_ID => {}
+        // happens to be running as.
         None => anyhow::bail!(
-            "signed in, but the backend did not say which account this token belongs to, and \
-             this process is running as {active} — refusing to store a session that may not be \
-             theirs"
+            "signed in, but the backend did not say which account this token belongs to — \
+             refusing to store a session that may not be this account's"
         ),
     }
 
@@ -174,4 +184,43 @@ pub(crate) async fn sign_in_first_account(
     crate::commands::adopt_account(env, &me)
         .map_err(|why| anyhow::anyhow!("signed in, but {why}"))?;
     Ok(Some(jwt))
+}
+
+/// Record, in a newly adopted account's own config, the deployment its session
+/// was issued by.
+///
+/// Sessions are per-deployment, and until now nothing inside an account's home
+/// said which one it belongs to — the `backend.baseUrl` that drove the login
+/// came from the *pre-login* home, which the account home does not inherit. So a
+/// staging or self-hosted operator signed in successfully and then had the core
+/// bound to the production default, which rejects the token they just minted.
+///
+/// Only ever writes a `baseUrl` the account does not already have, so an
+/// existing account keeps whatever it was configured with, and re-running this
+/// changes nothing. Best-effort: a config that cannot be written leaves the
+/// account undescribed rather than failing a login that otherwise succeeded, and
+/// the operator still has the environment and `--config` to point it.
+pub(crate) fn seed_account_backend(
+    env: &std::collections::HashMap<String, String>,
+    base_url: &str,
+) {
+    let base_url = base_url.trim();
+    if base_url.is_empty() {
+        return;
+    }
+    let path = medulla::home::medulla_home(env).join("config.toml");
+    if path.exists() {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let _ = medulla::config::persist_setting(
+        &path,
+        "backend",
+        "baseUrl",
+        toml::Value::String(base_url.to_string()),
+    );
 }

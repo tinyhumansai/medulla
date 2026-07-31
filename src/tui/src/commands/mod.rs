@@ -115,9 +115,10 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
 /// [`medulla::home::medulla_home`] covers all three at once, because it asks the
 /// resolver the same question every later launch will ask it.
 ///
-/// The one safe exception is an id-less response on an install nobody is signed
-/// in to: the home is the pre-login account, so there is no other account to
-/// cross.
+/// An id-less response is refused outright, including on a fresh install: the
+/// pre-login home would accept it, but nothing would ever make it an *account*,
+/// so every launch would sign in again and every such login would share one
+/// credential store.
 ///
 /// # Errors
 ///
@@ -130,14 +131,18 @@ pub(crate) fn adopt_account(
     let root = medulla::home::medulla_root(env);
 
     let Some(user_id) = medulla::auth::user_id_from_me(me) else {
-        let active = medulla::home::user::active_user_id(env, &root);
-        if active == medulla::home::user::PRE_LOGIN_USER_ID {
-            return Ok(());
-        }
-        return Err(format!(
-            "the backend did not say which account this token belongs to, and this install is \
-             signed in as {active} — refusing to store a session that may not be theirs"
-        ));
+        // No carve-out for a fresh install. Letting an id-less login settle into
+        // the pre-login home looks harmless — nothing to cross yet — but it
+        // never becomes an account: `sign_in::account_is_active` keeps reading
+        // `local` as signed out, so every launch runs the login flow again, and
+        // every id-less account on the machine shares that one credential store.
+        // The whole layout is keyed on this id, so a login without one has
+        // nowhere correct to go and should say so.
+        return Err(
+            "the backend did not say which account this token belongs to, and every account's \
+             directory is named by that id — there is nowhere correct to store this session"
+                .to_string(),
+        );
     };
 
     // `MEDULLA_USER` selects an account for *this process* without touching the

@@ -20,15 +20,27 @@
 //!
 //! # Coverage
 //!
-//! Only Claude Code exposes a knob for this today. Its `attribution.commit`
-//! setting *replaces* the built-in `Co-Authored-By: Claude <noreply@anthropic.com>`
-//! line verbatim, and `--settings` accepts inline JSON that layers over the
-//! user's `settings.json`.
+//! Every provider is attributed the same way: a temporary `prepare-commit-msg`
+//! git hook ([`prepare_commit_msg`]) that runs inside `git commit` itself.
+//!
+//! This is deliberate. Claude Code does expose an `attribution.commit` setting,
+//! and `--settings` layers inline JSON over the user's `settings.json`, but the
+//! setting is only *advisory*: its value is interpolated into the Bash tool
+//! description as "End git commit messages with: …", so it depends on the model
+//! choosing to follow it. Verified against Claude Code 2.1.220 — when the task
+//! brief dictates the commit message ("commit with message 'x'"), the model
+//! writes that message verbatim and the trailer never appears. Since a Medulla
+//! task brief routinely dictates commit messages, that path dropped attribution
+//! exactly when it mattered.
 //!
 //! Codex (as of 0.144.6) hardcodes `Co-authored-by: Codex <noreply@openai.com>`
-//! with no config key to override it, and Opencode exposes no equivalent. Both
-//! therefore resolve to no arguments — they are left to their own defaults
-//! rather than silently misattributed.
+//! with no config key to override it, and Opencode exposes no equivalent knob
+//! at all.
+//!
+//! So the hook is the mechanism of record. Claude additionally still receives
+//! the `--settings` flag ([`attribution_args`]) as a belt-and-braces hint; the
+//! hook applies the trailer with `git interpret-trailers --if-exists
+//! addIfDifferent`, so the two mechanisms agreeing produces one trailer, not two.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -114,29 +126,29 @@ static HOOK_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// Environment variables that make a harness attribute its commits to Medulla
 /// via the `prepare-commit-msg` git hook.
 ///
-/// Claude Code receives CLI flags instead ([`attribution_args`]), so this
-/// returns empty for it. Codex and Opencode get their attribution through a
-/// temporary `prepare-commit-msg` hook gated by `MEDULLA_ATTRIBUTION`.
+/// Every provider takes this path, including Claude Code — see the module docs
+/// for why its own `attribution.commit` setting is not sufficient on its own.
+/// The hook is gated at runtime by `MEDULLA_ATTRIBUTION`.
 ///
 /// The hook directory is stored in module-level state and must be cleaned up
-/// after the harness exits by calling [`cleanup_hook_tmpdir`].
+/// after the harness exits by calling [`cleanup_hook_tmpdir`]. A previously
+/// generated directory is cleaned up here rather than leaked, so repeated
+/// spawns in one process do not accumulate temp directories.
 ///
-/// Returns an empty map when attribution is disabled for *any* provider.
+/// Returns an empty map when attribution is disabled, and on non-Unix platforms
+/// (git hooks are not supported there).
 pub fn attribution_env(
-    provider: HarnessProvider,
+    _provider: HarnessProvider,
     env: &HashMap<String, String>,
 ) -> HashMap<String, String> {
     if !attribution_enabled(env) {
         return HashMap::new();
     }
-    match provider {
-        HarnessProvider::Claude => HashMap::new(),
-        HarnessProvider::Codex | HarnessProvider::Opencode => {
-            let (hook_env, hook_dir) = prepare_commit_msg::generate_hook(&attribution_trailer());
-            *HOOK_DIR.lock().unwrap() = Some(hook_dir);
-            hook_env
-        }
+    let (hook_env, hook_dir) = prepare_commit_msg::generate_hook(&attribution_trailer());
+    if let Some(stale) = HOOK_DIR.lock().unwrap().replace(hook_dir) {
+        prepare_commit_msg::cleanup_hook_dir(&stale);
     }
+    hook_env
 }
 
 /// Remove the temporary hook directory that [`attribution_env`] created.

@@ -152,65 +152,225 @@ fn hook_script_is_executable() {
     assert_eq!(perms.mode() & 0o111, 0o111, "hook must be executable");
 }
 
-/// The hook script appends a blank line followed by the trailer to the commit
-/// message file when `MEDULLA_ATTRIBUTION` is set.
+// ---------------------------------------------------------------------------
+// End-to-end hook behaviour, driven through a real `git commit`
+//
+// These run git itself rather than invoking the script directly: the hook
+// resolves the repository's own hooks directory and calls
+// `git interpret-trailers`, so only a real repository exercises it honestly.
+// ---------------------------------------------------------------------------
+
+/// A throwaway git repository plus the generated hook directory, wired together
+/// the way a Medulla-launched harness sees them.
+#[cfg(unix)]
+struct HookRepo {
+    _tmp: tempfile::TempDir,
+    repo: std::path::PathBuf,
+    hook_dir: std::path::PathBuf,
+    trailer: String,
+}
+
+#[cfg(unix)]
+impl HookRepo {
+    fn new(trailer: &str) -> Self {
+        let tmp = tempfile::tempdir().expect("tempdir for repo");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        let (_env, hook_dir) = super::prepare_commit_msg::generate_hook(trailer);
+
+        let this = Self {
+            _tmp: tmp,
+            repo,
+            hook_dir,
+            trailer: trailer.to_string(),
+        };
+        this.git(&["init", "-q", "."]);
+        this.git(&["config", "user.email", "t@example.com"]);
+        this.git(&["config", "user.name", "T"]);
+        this
+    }
+
+    /// Run git in the repo with the attribution env wired in, as the harness
+    /// child would see it. Returns stdout.
+    fn git(&self, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&self.repo)
+            .env("MEDULLA_ATTRIBUTION", &self.trailer)
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+            .env("GIT_CONFIG_VALUE_0", &self.hook_dir)
+            .output()
+            .expect("git invocation");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    /// Stage a new file and commit it with `message`.
+    fn commit(&self, name: &str, message: &str) {
+        std::fs::write(self.repo.join(name), name).unwrap();
+        self.git(&["add", name]);
+        self.git(&["commit", "-q", "-m", message]);
+    }
+
+    /// The full message of `HEAD`.
+    fn head_message(&self) -> String {
+        self.git(&["log", "-1", "--format=%B"])
+    }
+}
+
+/// The regression this module exists for: a commit made with an explicit
+/// message still carries the trailer, because the hook adds it rather than
+/// asking the model to.
 #[cfg(unix)]
 #[test]
-fn hook_script_appends_trailer() {
+fn commit_with_an_explicit_message_carries_the_trailer() {
     let trailer = "Co-authored-by: Test <test@example.com>";
-    let (_env, hook_dir) = super::prepare_commit_msg::generate_hook(trailer);
+    let repo = HookRepo::new(trailer);
+    repo.commit("a.txt", "an explicit subject");
 
-    // Simulate what git does: create a temp commit message file with some
-    // content, then run the hook against it with MEDULLA_ATTRIBUTION set.
-    let msg_file = hook_dir.join("COMMIT_EDITMSG");
-    let original = "summary line\n\nbody text\n";
-    std::fs::write(&msg_file, original).unwrap();
-
-    let hook_path = hook_dir.join("prepare-commit-msg");
-    let output = std::process::Command::new("sh")
-        .arg(&hook_path)
-        .arg(&msg_file)
-        .env("MEDULLA_ATTRIBUTION", trailer)
-        .output()
-        .expect("hook execution");
-
+    let message = repo.head_message();
     assert!(
-        output.status.success(),
-        "hook exited non-zero: {:?}",
-        output
+        message.starts_with("an explicit subject"),
+        "author's message preserved: {message:?}"
     );
+    assert!(message.contains(trailer), "trailer added: {message:?}");
+}
 
-    let result = String::from_utf8_lossy(&std::fs::read(&msg_file).unwrap()).into_owned();
-    assert!(result.contains(original), "original content preserved");
-    assert!(
-        result.ends_with(&format!("\n{trailer}\n")) || result.ends_with(&format!("\n{trailer}")),
-        "trailer appended: {result:?}"
+/// Amending replays a message that already carries the trailer. It must not
+/// gain a second copy — one co-author, not two.
+#[cfg(unix)]
+#[test]
+fn amend_does_not_duplicate_the_trailer() {
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let repo = HookRepo::new(trailer);
+    repo.commit("a.txt", "subject");
+    repo.git(&["commit", "-q", "--amend", "--no-edit"]);
+
+    let message = repo.head_message();
+    assert_eq!(
+        message.matches(trailer).count(),
+        1,
+        "exactly one trailer after amend: {message:?}"
     );
 }
 
-/// When `MEDULLA_ATTRIBUTION` is empty, the hook must not modify the commit
-/// message.
+/// The trailer must join the existing trailer block rather than starting a new
+/// one — a blank line between blocks hides the earlier trailers from GitHub,
+/// which would drop a provider's own co-author line (Codex hardcodes one).
+#[cfg(unix)]
+#[test]
+fn trailer_joins_an_existing_trailer_block() {
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let repo = HookRepo::new(trailer);
+    let existing = "Co-authored-by: Codex <noreply@openai.com>";
+    repo.commit("a.txt", &format!("subject\n\nbody\n\n{existing}"));
+
+    let message = repo.head_message();
+    assert!(message.contains(existing), "existing trailer kept");
+    assert!(message.contains(trailer), "medulla trailer added");
+
+    let existing_line = message.lines().position(|l| l == existing).unwrap();
+    let medulla_line = message.lines().position(|l| l == trailer).unwrap();
+    assert_eq!(
+        medulla_line,
+        existing_line + 1,
+        "trailers must be adjacent, no blank line between: {message:?}"
+    );
+}
+
+/// `core.hooksPath` redirects every hook, so the generated hook must chain to
+/// whatever `prepare-commit-msg` the repository already had rather than
+/// silently disabling it.
+#[cfg(unix)]
+#[test]
+fn repository_own_hook_still_runs() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let repo = HookRepo::new(trailer);
+
+    let own = repo.repo.join(".git/hooks/prepare-commit-msg");
+    std::fs::write(&own, "#!/bin/sh\nprintf 'repo-hook-ran\\n' >> \"$1\"\n").unwrap();
+    std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    repo.commit("a.txt", "subject");
+
+    let message = repo.head_message();
+    assert!(
+        message.contains("repo-hook-ran"),
+        "repo's own hook must still run: {message:?}"
+    );
+    assert!(
+        message.contains(trailer),
+        "trailer still added: {message:?}"
+    );
+}
+
+/// A merge message is composed by git over commits the harness did not author,
+/// so it must not be attributed to Medulla.
+#[cfg(unix)]
+#[test]
+fn merge_commits_are_not_attributed() {
+    let trailer = "Co-authored-by: Test <test@example.com>";
+    let repo = HookRepo::new(trailer);
+    repo.commit("base.txt", "base");
+    let main = repo
+        .git(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .trim()
+        .to_string();
+
+    repo.git(&["checkout", "-q", "-b", "side"]);
+    repo.commit("side.txt", "side change");
+    repo.git(&["checkout", "-q", &main]);
+    repo.commit("main.txt", "main change");
+    repo.git(&["merge", "--no-ff", "-q", "-m", "merge side", "side"]);
+
+    let message = repo.head_message();
+    assert!(
+        message.contains("merge side"),
+        "merge happened: {message:?}"
+    );
+    assert!(
+        !message.contains(trailer),
+        "merge commit must not be attributed: {message:?}"
+    );
+}
+
+/// When `MEDULLA_ATTRIBUTION` is unset the hook is inert, so clearing that one
+/// variable disables attribution without unwinding the git-config injection.
 #[cfg(unix)]
 #[test]
 fn hook_is_noop_when_attribution_env_is_empty() {
     let trailer = "Co-authored-by: Test <test@example.com>";
-    let (_env, hook_dir) = super::prepare_commit_msg::generate_hook(trailer);
+    let repo = HookRepo::new(trailer);
 
-    let msg_file = hook_dir.join("COMMIT_EDITMSG");
-    let original = "just a message\n";
-    std::fs::write(&msg_file, original).unwrap();
-
-    let hook_path = hook_dir.join("prepare-commit-msg");
-    let output = std::process::Command::new("sh")
-        .arg(&hook_path)
-        .arg(&msg_file)
+    std::fs::write(repo.repo.join("a.txt"), "x").unwrap();
+    repo.git(&["add", "a.txt"]);
+    let output = std::process::Command::new("git")
+        .args(["commit", "-q", "-m", "unattributed"])
+        .current_dir(&repo.repo)
         .env_remove("MEDULLA_ATTRIBUTION")
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+        .env("GIT_CONFIG_VALUE_0", &repo.hook_dir)
         .output()
-        .expect("hook execution");
+        .expect("git commit");
+    assert!(
+        output.status.success(),
+        "commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    assert!(output.status.success());
-    let result = String::from_utf8_lossy(&std::fs::read(&msg_file).unwrap()).into_owned();
-    assert_eq!(result, original, "message unchanged");
+    let message = repo.head_message();
+    assert!(
+        !message.contains(trailer),
+        "no trailer without MEDULLA_ATTRIBUTION: {message:?}"
+    );
 }
 
 /// Cleanup must remove the hook directory and its contents.
@@ -240,18 +400,17 @@ fn non_unix_returns_empty() {
 // attribution_env / cleanup_hook_tmpdir tests
 // ---------------------------------------------------------------------------
 
-/// Claude uses CLI args, so `attribution_env` must return empty — never both
-/// env vars and CLI args for the same session.
-#[test]
-fn claude_attribution_env_is_empty() {
-    assert!(super::attribution_env(HarnessProvider::Claude, &HashMap::new()).is_empty());
-}
-
-/// Codex and Opencode get their attribution through the git-hook env vars.
+/// Every provider gets the git-hook env vars — Claude's own `attribution.commit`
+/// setting is advisory (the model can ignore it), so the hook is the mechanism
+/// of record for all three.
 #[cfg(unix)]
 #[test]
-fn codex_and_opencode_get_env_attribution() {
-    for provider in [HarnessProvider::Codex, HarnessProvider::Opencode] {
+fn every_provider_gets_env_attribution() {
+    for provider in [
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+    ] {
         let env = super::attribution_env(provider, &HashMap::new());
         assert!(!env.is_empty(), "{provider:?} should receive env vars");
         assert!(

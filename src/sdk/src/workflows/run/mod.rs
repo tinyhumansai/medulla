@@ -39,7 +39,7 @@ pub use summary::summarize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::flow_engine::execute;
 use crate::flow_engine::observability::{WorkEventSink, WorkflowRunObserver};
@@ -109,11 +109,19 @@ impl Drop for RunFinalizer {
 /// `run_id` doubles as the engine checkpointer's thread id and as the
 /// `abort_id` on every task the run dispatches, which is what makes one abort
 /// stop both the run and the harness session it is waiting on.
+///
+/// `input` is the free-form trigger payload; `inputs` supplies values for the
+/// workflow's *declared* inputs by name. The declared values are resolved
+/// before the run is claimed or recorded, so a caller that supplies a bad set
+/// gets an error and leaves no run record — the same contract the engine
+/// offers, enforced one layer earlier so the operator-visible history stays
+/// clean.
 pub async fn run_workflow(
     context: RunContext,
     workflow_id: &str,
     run_id: &str,
     input: Value,
+    inputs: Map<String, Value>,
 ) -> Result<RunRecord, WorkflowError> {
     if !context.settings.enabled {
         return Err(WorkflowError::Engine(
@@ -129,6 +137,12 @@ pub async fn run_workflow(
     refuse_unresolved_harness(&workflow)?;
 
     let settings = settings_for(&context.settings, &workflow)?;
+
+    // Resolved here, before the run is claimed or a record written, so a bad
+    // call leaves no trace in the operator's run history. The engine re-checks
+    // the same values — it owns the contract — but by then a record exists.
+    let resolved_inputs = tinyflows::model::resolve_inputs(&workflow.graph.inputs, &inputs)
+        .map_err(|err| WorkflowError::Engine(err.to_string()))?;
 
     let execution_graph = agent_evidence::instrumented(&workflow.graph);
     let compiled = execute::compile(&execution_graph).map_err(WorkflowError::Engine)?;
@@ -164,7 +178,7 @@ pub async fn run_workflow(
 
     let engine_run = execute::run(
         &compiled,
-        input,
+        tinyflows::engine::RunInput::new(input).with_inputs(resolved_inputs),
         &capabilities,
         open_checkpointer(&settings),
         run_id,
@@ -563,9 +577,10 @@ pub async fn dry_run(
     resolver: Arc<dyn tinyflows::caps::WorkflowResolver>,
     workflow_id: &str,
     input: Value,
+    inputs: Map<String, Value>,
 ) -> Result<DryRun, WorkflowError> {
     let workflow = require(store.as_ref(), workflow_id)?;
-    dry_run_graph(&workflow.graph, resolver, input).await
+    dry_run_graph(&workflow.graph, resolver, input, inputs).await
 }
 
 /// Simulate a graph that is not necessarily saved anywhere.
@@ -582,6 +597,7 @@ pub async fn dry_run_graph(
     graph: &tinyflows::model::WorkflowGraph,
     resolver: Arc<dyn tinyflows::caps::WorkflowResolver>,
     input: Value,
+    inputs: Map<String, Value>,
 ) -> Result<DryRun, WorkflowError> {
     let compiled = execute::compile(graph).map_err(WorkflowError::Engine)?;
     let capabilities = crate::flow_engine::build_dry_run_capabilities(resolver);
@@ -590,9 +606,14 @@ pub async fn dry_run_graph(
     // time. The outcome only says the graph completed; a binding that resolved
     // to null on the way completes too.
     let (capture, observer) = diagnose::capturing();
-    let outcome = execute::simulate_observed(&compiled, input, &capabilities, &observer)
-        .await
-        .map_err(WorkflowError::Engine)?;
+    let outcome = execute::simulate_observed(
+        &compiled,
+        tinyflows::engine::RunInput::new(input).with_inputs(inputs),
+        &capabilities,
+        &observer,
+    )
+    .await
+    .map_err(WorkflowError::Engine)?;
 
     Ok(DryRun {
         output: outcome.output,

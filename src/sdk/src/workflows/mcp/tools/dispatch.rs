@@ -64,6 +64,28 @@ fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
         .ok_or_else(|| RpcError::invalid_params(format!("missing required argument '{name}'")))
 }
 
+/// Read the optional `inputs` argument: values for the workflow's declared
+/// inputs, keyed by name.
+///
+/// Absent or `null` means "supplied none", which is correct for a workflow
+/// whose inputs are all optional or defaulted. A present-but-non-object value
+/// is the caller mis-shaping the call, and is rejected naming the argument —
+/// left to fall through it would read as "you supplied nothing" and surface as
+/// a confusing complaint about a required input the caller believes it sent.
+fn declared_inputs(
+    arguments: &Value,
+    tool: &str,
+) -> Result<serde_json::Map<String, Value>, RpcError> {
+    match arguments.get("inputs") {
+        None | Some(Value::Null) => Ok(serde_json::Map::new()),
+        Some(Value::Object(map)) => Ok(map.clone()),
+        Some(_) => Err(RpcError::invalid_params(format!(
+            "{tool}: 'inputs' must be an object keyed by the workflow's declared input names, \
+             e.g. {{\"repo\": \"acme/api\"}}"
+        ))),
+    }
+}
+
 /// Run a `tools/call`.
 pub(crate) async fn call(
     store: &Arc<dyn WorkflowStore>,
@@ -131,11 +153,13 @@ pub(crate) async fn call(
         "workflow_dry_run" => {
             let id = arg(&arguments, "id")?;
             let input = arguments.get("input").cloned().unwrap_or(json!({}));
-            ops::dry_run(store, id, input).await.map_err(to_rpc)
+            let inputs = declared_inputs(&arguments, "workflow_dry_run")?;
+            ops::dry_run(store, id, input, inputs).await.map_err(to_rpc)
         }
         "workflow_run" => {
             let id = arg(&arguments, "id")?;
             let input = arguments.get("input").cloned().unwrap_or(json!({}));
+            let inputs = declared_inputs(&arguments, "workflow_run")?;
             let env: std::collections::HashMap<String, String> = std::env::vars().collect();
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             ops::run(
@@ -145,7 +169,7 @@ pub(crate) async fn call(
                 &env,
                 &cwd,
                 id,
-                input,
+                tinyflows::engine::RunInput::new(input).with_inputs(inputs),
             )
             .await
             .map_err(to_rpc)

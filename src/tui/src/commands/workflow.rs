@@ -24,7 +24,7 @@ use medulla::workflows::{
     WorkflowStore, LOCAL_WORKER_ADDRESS,
 };
 use medulla_tui::cli::{parse_workflow_args, WorkflowAction, WorkflowArgs};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 /// Run `medulla workflow <action>`.
 ///
@@ -62,7 +62,10 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
                 ops::validate(&store, &GraphHandle::Inline(&document))
             }
         },
-        WorkflowAction::DryRun(id) => ops::dry_run(&store, id, trigger_input(&parsed)?).await?,
+        WorkflowAction::DryRun(id) => {
+            let inputs = declared_inputs(&parsed, &declarations(&store, id))?;
+            ops::dry_run(&store, id, trigger_input(&parsed)?, inputs).await?
+        }
         WorkflowAction::ListRuns(id) => ops::list_runs(&store, id)?,
         WorkflowAction::GetRun(run_id) => ops::get_run(&store, run_id)?,
         WorkflowAction::Cancel(run_id) => ops::cancel_run(run_id),
@@ -125,7 +128,8 @@ async fn execute(
     id: &str,
 ) -> anyhow::Result<Value> {
     let (context, run_id) = local_context(parsed, store, env, cwd)?;
-    let record = run_workflow(context, id, &run_id, trigger_input(parsed)?).await?;
+    let inputs = declared_inputs(parsed, &declarations(store, id))?;
+    let record = run_workflow(context, id, &run_id, trigger_input(parsed)?, inputs).await?;
     Ok(serde_json::to_value(record)?)
 }
 
@@ -233,6 +237,76 @@ fn trigger_input(parsed: &WorkflowArgs) -> anyhow::Result<Value> {
             .map_err(|err| anyhow::anyhow!("--input is not valid JSON: {err}")),
         None => Ok(json!({})),
     }
+}
+
+/// The values supplied for a workflow's declared inputs, from `--inputs` and
+/// `--set`.
+///
+/// `--set name=value` is merged over `--inputs`, so the two compose: a base
+/// object plus a one-off override reads the way an operator expects.
+///
+/// A `--set` value arrives as a string, because a shell argument is one. It is
+/// coerced to the input's *declared* type — the declaration is the only thing
+/// that can say whether `3` means the number three or the string "3", and
+/// guessing from the text would make `--set version=1.0` silently become a
+/// float. An input the workflow does not declare is left as a string and
+/// resolution rejects it by name, which is the more useful error than a
+/// complaint about its type.
+fn declared_inputs(
+    parsed: &WorkflowArgs,
+    declared: &[medulla::workflows::WorkflowInput],
+) -> anyhow::Result<Map<String, Value>> {
+    use medulla::workflows::InputType;
+
+    let mut values = match &parsed.inputs {
+        Some(raw) => match serde_json::from_str::<Value>(raw) {
+            Ok(Value::Object(map)) => map,
+            Ok(_) => anyhow::bail!("--inputs must be a JSON object keyed by declared input name"),
+            Err(err) => anyhow::bail!("--inputs is not valid JSON: {err}"),
+        },
+        None => Map::new(),
+    };
+
+    for pair in &parsed.set {
+        let Some((name, raw)) = pair.split_once('=') else {
+            anyhow::bail!("--set expects <name>=<value>, got {pair:?}");
+        };
+        let ty = declared
+            .iter()
+            .find(|input| input.name == name)
+            .map(|input| input.ty);
+        let value = match ty {
+            Some(InputType::Number) => Value::Number(
+                raw.parse::<serde_json::Number>()
+                    .map_err(|_| anyhow::anyhow!("--set {name}: {raw:?} is not a number"))?,
+            ),
+            Some(InputType::Boolean) => Value::Bool(
+                raw.parse::<bool>()
+                    .map_err(|_| anyhow::anyhow!("--set {name}: {raw:?} is not true or false"))?,
+            ),
+            Some(InputType::Json) => serde_json::from_str(raw)
+                .map_err(|err| anyhow::anyhow!("--set {name}: not valid JSON: {err}"))?,
+            // Declared `string`, or undeclared — see the doc above.
+            Some(InputType::String) | None => Value::String(raw.to_string()),
+        };
+        values.insert(name.to_string(), value);
+    }
+
+    Ok(values)
+}
+
+/// The declared inputs of a saved workflow, or an empty list when it is unknown
+/// — the operation itself reports a missing workflow far better than this would.
+fn declarations(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+) -> Vec<medulla::workflows::WorkflowInput> {
+    store
+        .get(id)
+        .ok()
+        .flatten()
+        .map(|record| record.graph.inputs)
+        .unwrap_or_default()
 }
 
 /// Read stdin whole, failing with a message naming what was expected.

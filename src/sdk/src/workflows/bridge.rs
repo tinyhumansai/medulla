@@ -31,7 +31,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use openhuman_core::openhuman::socket::medulla::payloads::{
-    CopilotOutcome as WireCopilotOutcome, WorkflowDescriptor,
+    CopilotOutcome as WireCopilotOutcome, WorkflowDescriptor, WorkflowInputDescriptor,
 };
 use openhuman_core::openhuman::socket::medulla::workflows::WorkflowBridge;
 
@@ -269,6 +269,20 @@ fn descriptor(summary: &WorkflowSummary) -> WorkflowDescriptor {
         // `agentId` on the whole registration and the backend fans it out.
         agent_id: None,
         workspace_id: None,
+        // The declared inputs travel with the advert so the orchestrator knows
+        // what running this costs it in arguments before it picks the workflow,
+        // rather than discovering it by being refused.
+        inputs: summary
+            .inputs
+            .iter()
+            .map(|input| WorkflowInputDescriptor {
+                name: input.name.clone(),
+                ty: input.ty.as_str().to_string(),
+                description: input.description.clone().unwrap_or_default(),
+                required: input.required,
+                default: input.default.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -301,7 +315,18 @@ pub async fn run_task_workflow(
     task_id: &str,
     instruction: &str,
 ) -> Result<RunRecord, WorkflowError> {
-    run_workflow(context, workflow_id, task_id, trigger_input(instruction)).await
+    // No declared inputs: an orchestrator frame carries one instruction, not a
+    // named argument set. A workflow that declares a required input therefore
+    // refuses a task frame, with an error naming the input — which is the
+    // honest answer until the frame protocol carries them.
+    run_workflow(
+        context,
+        workflow_id,
+        task_id,
+        trigger_input(instruction),
+        serde_json::Map::new(),
+    )
+    .await
 }
 
 /// Cancel the run started for `task_id`, reporting whether one was cancelled.

@@ -56,8 +56,11 @@ pub use store::{
 // The engine's own graph model, re-exported so hosts above this crate (the TUI)
 // can name a workflow's graph without taking a direct dependency on the engine.
 // The type is the shared contract, not a Medulla type, so re-exporting it is the
-// alternative to a parallel copy that would drift.
-pub use tinyflows::model::WorkflowGraph;
+// alternative to a parallel copy that would drift. `InputType`/`WorkflowInput`
+// come along for the same reason: the TUI has to render and coerce a declared
+// input, and a second declaration of that shape would be free to disagree with
+// the engine's about what a `number` accepts.
+pub use tinyflows::model::{InputType, WorkflowGraph, WorkflowInput};
 pub(crate) use types::bounded_evidence;
 pub use types::{
     fingerprint, NoteId, NoteKind, NoteSource, ProposalId, ProposalStatus, ProposalVerification,

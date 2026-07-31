@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tinyflows::model::WorkflowGraph;
+use tinyflows::model::{WorkflowGraph, WorkflowInput};
 
 /// A workflow's stable identifier: the `id` in its document, defaulting to the
 /// filename stem when the document omits one.
@@ -112,7 +112,16 @@ impl WorkflowRecord {
             enabled: self.enabled,
             node_count: self.graph.nodes.len(),
             trigger_kind: self.trigger_kind(),
+            inputs: self.inputs().to_vec(),
         }
+    }
+
+    /// The workflow's declared inputs — what a caller must supply to run it.
+    ///
+    /// Lives on the engine graph, so this is a shorthand rather than a second
+    /// copy. Empty for a workflow that takes none.
+    pub fn inputs(&self) -> &[WorkflowInput] {
+        &self.graph.inputs
     }
 
     /// The graph's trigger kind, as a lowercase string.
@@ -149,6 +158,15 @@ pub struct WorkflowSummary {
     /// The trigger kind, when the graph declares exactly one trigger.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger_kind: Option<String>,
+    /// The workflow's declared inputs — what a caller must supply to run it.
+    ///
+    /// Carried on the *listing* view deliberately: the TUI has to know whether
+    /// to prompt before it runs the selected workflow, and the orchestrator has
+    /// to know what to collect before it asks. Both would otherwise need a
+    /// second fetch of the whole graph just to answer "does this take
+    /// arguments?". Omitted from the wire for a workflow that takes none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<WorkflowInput>,
 }
 
 /// A copy of a workflow from before it was last written over.

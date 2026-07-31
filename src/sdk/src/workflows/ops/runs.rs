@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use super::record_value;
 use crate::workflows::{StoreWorkflowResolver, WorkflowError, WorkflowId, WorkflowStore};
@@ -20,9 +20,10 @@ pub async fn dry_run(
     store: &Arc<dyn WorkflowStore>,
     id: &str,
     input: Value,
+    inputs: Map<String, Value>,
 ) -> Result<Value, WorkflowError> {
     let resolver = Arc::new(StoreWorkflowResolver::new(store.clone()));
-    let result = crate::workflows::run::dry_run(store.clone(), resolver, id, input).await?;
+    let result = crate::workflows::run::dry_run(store.clone(), resolver, id, input, inputs).await?;
 
     // `ok` is about the *diagnosis*, not about whether the engine returned. A
     // graph whose only binding resolved to null completes perfectly and does
@@ -49,6 +50,9 @@ pub fn list_runs(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, Work
 /// Returns the whole run record rather than a summary: the caller is usually a
 /// model deciding what to fix next, and every step's status and diagnostics are
 /// what that decision needs.
+///
+/// `run_input` carries the trigger payload and the declared-input values
+/// together — see [`crate::workflows::local::run_here`].
 pub async fn run(
     store: &Arc<dyn WorkflowStore>,
     config: &crate::config::WorkflowsConfig,
@@ -56,7 +60,7 @@ pub async fn run(
     env: &HashMap<String, String>,
     cwd: &Path,
     id: &str,
-    input: Value,
+    run_input: tinyflows::engine::RunInput,
 ) -> Result<Value, WorkflowError> {
     let record = crate::workflows::local::run_here(
         store.clone(),
@@ -65,7 +69,7 @@ pub async fn run(
         env,
         cwd,
         id,
-        input,
+        run_input,
     )
     .await?;
     Ok(json!({

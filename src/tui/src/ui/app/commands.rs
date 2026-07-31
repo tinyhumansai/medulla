@@ -233,7 +233,91 @@ impl App {
                     body: text,
                 })
             }
+            #[cfg(feature = "workflows")]
+            PromptKind::WorkflowInput {
+                workflow_id,
+                dry_run,
+                mut remaining,
+                mut collected,
+            } => {
+                // `remaining` is never empty: a prompt is only opened with a
+                // field to ask about, and the last submission dispatches rather
+                // than opening another.
+                let field = remaining.remove(0);
+                let value = match coerce_workflow_input(&field, &text) {
+                    Ok(value) => value,
+                    Err(message) => {
+                        // Re-ask the same field rather than dropping the whole
+                        // set: a mistyped number should cost one retype, not
+                        // every value collected so far.
+                        self.set_status(message);
+                        remaining.insert(0, field);
+                        self.open_workflow_input_prompt(workflow_id, dry_run, remaining, collected);
+                        return None;
+                    }
+                };
+                collected.insert(field.name.clone(), value);
+
+                if !remaining.is_empty() {
+                    self.open_workflow_input_prompt(workflow_id, dry_run, remaining, collected);
+                    return None;
+                }
+                if dry_run {
+                    self.set_status("Simulating…");
+                    Some(Cmd::DryRunWorkflow {
+                        id: workflow_id,
+                        inputs: collected,
+                    })
+                } else {
+                    self.set_status("Running…");
+                    Some(Cmd::RunWorkflow {
+                        id: workflow_id,
+                        inputs: collected,
+                    })
+                }
+            }
         }
+    }
+
+    /// Open the prompt for `remaining`'s first field, carrying the rest and
+    /// what has been collected so far.
+    ///
+    /// Pre-filled with the field's declared default so the common answer is one
+    /// keypress, and titled with the field name so a chain of several prompts
+    /// says which one is on screen.
+    #[cfg(feature = "workflows")]
+    pub(super) fn open_workflow_input_prompt(
+        &mut self,
+        workflow_id: String,
+        dry_run: bool,
+        remaining: Vec<medulla::workflows::WorkflowInput>,
+        collected: serde_json::Map<String, serde_json::Value>,
+    ) {
+        let Some(field) = remaining.first() else {
+            return;
+        };
+        let title = match (&field.description, field.required) {
+            (Some(description), _) if !description.is_empty() => {
+                format!("{}: {description}", field.name)
+            }
+            (_, true) => format!("{} (required)", field.name),
+            (_, false) => field.name.clone(),
+        };
+        let prefill = field
+            .default
+            .as_ref()
+            .map(render_workflow_input_default)
+            .unwrap_or_default();
+        self.prompt = Some(Prompt::with_text(
+            PromptKind::WorkflowInput {
+                workflow_id,
+                dry_run,
+                remaining,
+                collected,
+            },
+            title,
+            prefill,
+        ));
     }
 
     /// Copy the requested chat scope to the clipboard (or the test capture sink),
@@ -449,5 +533,61 @@ impl App {
                 "Applying {strategy:?} subscription strategy… (not persisted)"
             )),
         }
+    }
+}
+
+/// Turn what an operator typed into a value of the input's declared type.
+///
+/// A prompt yields a string because a terminal line is one. The declaration is
+/// what says whether `3` means the number three or the string `"3"`, so the
+/// coercion is driven by it rather than by guessing from the text — otherwise a
+/// version input typed as `1.0` would silently become a float.
+///
+/// An empty line means "leave it unset": the declared default applies, or the
+/// input resolves null if it is optional. A *required* input with no default
+/// cannot be left unset, and says so rather than sending an empty string that
+/// would pass the type check and fail the operator's intent.
+#[cfg(feature = "workflows")]
+fn coerce_workflow_input(
+    field: &medulla::workflows::WorkflowInput,
+    text: &str,
+) -> Result<serde_json::Value, String> {
+    use medulla::workflows::InputType;
+
+    if text.is_empty() {
+        return match (&field.default, field.required) {
+            (Some(default), _) => Ok(default.clone()),
+            (None, false) => Ok(serde_json::Value::Null),
+            (None, true) => Err(format!("{} is required", field.name)),
+        };
+    }
+
+    match field.ty {
+        InputType::String => Ok(serde_json::Value::String(text.to_string())),
+        InputType::Number => text
+            .parse::<serde_json::Number>()
+            .map(serde_json::Value::Number)
+            .map_err(|_| format!("{} expects a number, got {text:?}", field.name)),
+        InputType::Boolean => text
+            .parse::<bool>()
+            .map(serde_json::Value::Bool)
+            .map_err(|_| format!("{} expects true or false, got {text:?}", field.name)),
+        InputType::Json => {
+            serde_json::from_str(text).map_err(|err| format!("{} expects JSON: {err}", field.name))
+        }
+    }
+}
+
+/// Render a declared default as the text to pre-fill its prompt with.
+///
+/// A string default is shown unquoted — the operator is editing the value, not
+/// its JSON encoding, and leaving the quotes in would make accepting the
+/// default produce a differently-quoted string.
+#[cfg(feature = "workflows")]
+fn render_workflow_input_default(default: &serde_json::Value) -> String {
+    match default {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
     }
 }

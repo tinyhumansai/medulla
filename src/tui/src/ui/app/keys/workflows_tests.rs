@@ -157,14 +157,14 @@ fn d_simulates_and_x_runs_the_selected_workflow_from_the_sidebar() {
     let dry = key(&mut app, KeyCode::Char('d'));
     assert!(matches!(
         dry,
-        WorkflowsKey::Handled(Some(Cmd::DryRunWorkflow { ref id })) if id == "sweep"
+        WorkflowsKey::Handled(Some(Cmd::DryRunWorkflow { ref id, .. })) if id == "sweep"
     ));
     assert!(app.status().contains("Simulating"), "{}", app.status());
 
     let run = key(&mut app, KeyCode::Char('x'));
     assert!(matches!(
         run,
-        WorkflowsKey::Handled(Some(Cmd::RunWorkflow { ref id })) if id == "sweep"
+        WorkflowsKey::Handled(Some(Cmd::RunWorkflow { ref id, .. })) if id == "sweep"
     ));
     assert!(app.status().contains("Running"), "{}", app.status());
 }
@@ -217,7 +217,7 @@ fn x_refuses_a_disabled_workflow_from_the_sidebar_but_d_still_simulates_it() {
     let dry = key(&mut app, KeyCode::Char('d'));
     assert!(matches!(
         dry,
-        WorkflowsKey::Handled(Some(Cmd::DryRunWorkflow { ref id })) if id == "paused"
+        WorkflowsKey::Handled(Some(Cmd::DryRunWorkflow { ref id, .. })) if id == "paused"
     ));
 
     let run = key(&mut app, KeyCode::Char('x'));
@@ -343,13 +343,13 @@ fn d_simulates_and_x_runs_from_the_canvas() {
     let dry = key(&mut app, KeyCode::Char('d'));
     assert!(matches!(
         dry,
-        WorkflowsKey::Handled(Some(Cmd::DryRunWorkflow { ref id })) if id == "sweep"
+        WorkflowsKey::Handled(Some(Cmd::DryRunWorkflow { ref id, .. })) if id == "sweep"
     ));
 
     let run = key(&mut app, KeyCode::Char('x'));
     assert!(matches!(
         run,
-        WorkflowsKey::Handled(Some(Cmd::RunWorkflow { ref id })) if id == "sweep"
+        WorkflowsKey::Handled(Some(Cmd::RunWorkflow { ref id, .. })) if id == "sweep"
     ));
 }
 

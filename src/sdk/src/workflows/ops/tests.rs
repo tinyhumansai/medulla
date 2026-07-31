@@ -141,7 +141,7 @@ async fn a_dry_run_returns_the_output_of_every_node() {
     let (_root, store) = store();
     create(&store, &document("sweep"), "sweep").unwrap();
 
-    let result = dry_run(&store, "sweep", json!({}))
+    let result = dry_run(&store, "sweep", json!({}), Default::default())
         .await
         .expect("simulates");
 
@@ -362,7 +362,9 @@ async fn a_dry_run_reports_a_failure_the_error_policy_swallowed() {
     )
     .unwrap();
 
-    let result = dry_run(&store, "quiet", json!({})).await.unwrap();
+    let result = dry_run(&store, "quiet", json!({}), Default::default())
+        .await
+        .unwrap();
 
     // The single most misleading thing this surface could say is `ok: true` for
     // a graph whose work did not happen.
@@ -395,7 +397,9 @@ async fn a_dry_run_of_a_soundly_wired_graph_reports_ok() {
     )
     .unwrap();
 
-    let result = dry_run(&store, "loud", json!({})).await.unwrap();
+    let result = dry_run(&store, "loud", json!({}), Default::default())
+        .await
+        .unwrap();
 
     assert_eq!(result["ok"], json!(true), "{result}");
 }
@@ -450,7 +454,9 @@ async fn a_dry_run_cannot_tell_you_a_script_is_broken() {
     )
     .unwrap();
 
-    let result = dry_run(&store, "broken", json!({})).await.unwrap();
+    let result = dry_run(&store, "broken", json!({}), Default::default())
+        .await
+        .unwrap();
 
     // The simulation swaps in a mock runner, so the script is never executed.
     // This is the gap `workflow_run` exists to close, and the reason the

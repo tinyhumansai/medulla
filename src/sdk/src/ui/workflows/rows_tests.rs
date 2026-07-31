@@ -11,6 +11,7 @@ fn summary(id: &str, enabled: bool) -> WorkflowSummary {
         enabled,
         node_count: 3,
         trigger_kind: Some("manual".into()),
+        inputs: Vec::new(),
     }
 }
 

@@ -12,6 +12,7 @@ async fn an_approval_gate_pauses_the_run_and_names_what_it_is_waiting_on() {
         "gated",
         "run-3",
         json!({}),
+        Default::default(),
     )
     .await
     .expect("runs");
@@ -38,6 +39,7 @@ async fn approving_the_gate_resumes_the_run_to_completion() {
         "gated",
         "run-4",
         json!({}),
+        Default::default(),
     )
     .await
     .unwrap();
@@ -71,6 +73,7 @@ async fn a_resume_naming_no_pending_gate_is_refused() {
         "gated",
         "run-5",
         json!({}),
+        Default::default(),
     )
     .await
     .unwrap();
@@ -104,6 +107,7 @@ async fn resuming_a_run_that_is_not_waiting_is_refused() {
         "diamond",
         "run-6",
         json!({}),
+        Default::default(),
     )
     .await
     .unwrap();
@@ -132,6 +136,7 @@ async fn a_resume_may_reject_the_only_gate_without_approving_anything() {
         "gated",
         "run-reject",
         json!({}),
+        Default::default(),
     )
     .await
     .unwrap();
@@ -159,6 +164,7 @@ async fn a_resumed_timeout_keeps_errors_swallowed_before_the_timeout() {
         "gated-error-then-hang",
         "run-resume-timeout",
         json!({}),
+        Default::default(),
     )
     .await
     .expect("pauses");

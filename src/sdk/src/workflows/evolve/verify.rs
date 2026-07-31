@@ -76,9 +76,16 @@ pub async fn verify(
     };
     let resolver = Arc::new(StoreWorkflowResolver::new(store.clone()));
     let input = serde_json::json!({});
-    let baseline =
-        crate::workflows::run::dry_run_graph(&current.graph, resolver.clone(), input.clone()).await;
-    match crate::workflows::run::dry_run_graph(&candidate, resolver, input).await {
+    let baseline = crate::workflows::run::dry_run_graph(
+        &current.graph,
+        resolver.clone(),
+        input.clone(),
+        sample_inputs(&current.graph),
+    )
+    .await;
+    let candidate_inputs = sample_inputs(&candidate);
+    match crate::workflows::run::dry_run_graph(&candidate, resolver, input, candidate_inputs).await
+    {
         Ok(result) => ProposalVerification {
             // Empty input is not representative for every workflow. Accept a
             // candidate that retains only findings already present in the
@@ -102,6 +109,46 @@ pub async fn verify(
             diagnosis: None,
         },
     }
+}
+
+/// A representative value for every input `graph` declares, so a verification
+/// dry run can start at all.
+///
+/// A workflow with a required input cannot be simulated with nothing supplied —
+/// resolution rejects the run before any node executes, and verification would
+/// report that refusal as if the *proposal* were broken. Declared defaults are
+/// used where they exist; a required input without one gets a typed placeholder.
+///
+/// Synthesizing is sound here specifically because verification is a
+/// *comparison*: the baseline and the candidate are simulated under samples
+/// derived the same way, and the question asked is only whether the candidate
+/// introduced a finding the baseline did not have. A placeholder that makes a
+/// binding resolve is exactly as representative on both sides.
+fn sample_inputs(
+    graph: &tinyflows::model::WorkflowGraph,
+) -> serde_json::Map<String, serde_json::Value> {
+    use tinyflows::model::InputType;
+
+    graph
+        .inputs
+        .iter()
+        .filter_map(|input| {
+            let value = match (&input.default, input.required) {
+                (Some(default), _) => default.clone(),
+                // Optional and undefaulted: leave it out and let resolution
+                // apply its own null, rather than inventing a value the real
+                // run would not have.
+                (None, false) => return None,
+                (None, true) => match input.ty {
+                    InputType::String => serde_json::Value::String("sample".to_string()),
+                    InputType::Number => serde_json::json!(1),
+                    InputType::Boolean => serde_json::Value::Bool(false),
+                    InputType::Json => serde_json::json!({}),
+                },
+            };
+            Some((input.name.clone(), value))
+        })
+        .collect()
 }
 
 /// Whether every blocking candidate finding already existed in the baseline.

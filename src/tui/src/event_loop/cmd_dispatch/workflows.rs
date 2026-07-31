@@ -31,13 +31,14 @@ use super::AppMsg;
 /// file is honored here too rather than silently falling back to defaults.
 pub(super) fn spawn_run(
     id: String,
+    inputs: serde_json::Map<String, serde_json::Value>,
     workflows_config: medulla::config::WorkflowsConfig,
     custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let outcome = run(&id, &workflows_config, &custom_harnesses).await;
+        let outcome = run(&id, inputs, &workflows_config, &custom_harnesses).await;
         let (status, failed) = match outcome {
             Ok((summary, failed)) => (summary, failed),
             Err(err) => (format!("workflow '{id}' failed: {err}"), None),
@@ -64,6 +65,7 @@ pub(super) fn spawn_run(
 /// Run the workflow to completion and describe how it ended.
 async fn run(
     id: &str,
+    inputs: serde_json::Map<String, serde_json::Value>,
     workflows_config: &medulla::config::WorkflowsConfig,
     custom_harnesses: &[medulla::config::CustomHarnessConfig],
 ) -> anyhow::Result<(String, Option<String>)> {
@@ -109,7 +111,7 @@ async fn run(
         sink,
     };
 
-    let record = run_workflow(context, id, &run_id, serde_json::json!({})).await?;
+    let record = run_workflow(context, id, &run_id, serde_json::json!({}), inputs).await?;
     let summary = format!(
         "{id}: {} · {} step{}",
         medulla::ui::workflows::status_label(record.status),
@@ -393,17 +395,27 @@ pub(super) fn spawn_undo(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSender
 /// A simulation resolves every expression and satisfies every declared output
 /// shape without starting a harness session, so unlike a run it is safe to
 /// press after an edit just to see whether the wiring holds.
-pub(super) fn spawn_dry_run(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>) {
+pub(super) fn spawn_dry_run(
+    id: String,
+    inputs: serde_json::Map<String, serde_json::Value>,
+    msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
         let env: HashMap<String, String> = std::env::vars().collect();
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let store = medulla::workflows::discover_store(&env, &cwd);
-        let status =
-            match medulla::workflows::ops::dry_run(&store, &id, serde_json::json!({})).await {
-                Ok(_) => format!("{id}: simulation passed — every expression resolved"),
-                Err(err) => format!("{id}: simulation failed — {err}"),
-            };
+        let status = match medulla::workflows::ops::dry_run(
+            &store,
+            &id,
+            serde_json::json!({}),
+            inputs,
+        )
+        .await
+        {
+            Ok(_) => format!("{id}: simulation passed — every expression resolved"),
+            Err(err) => format!("{id}: simulation failed — {err}"),
+        };
         let _ = tx.send(AppMsg::Status(status));
     });
 }

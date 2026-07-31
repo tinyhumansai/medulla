@@ -464,6 +464,10 @@ pub enum Cmd {
     RunWorkflow {
         /// The workflow to run.
         id: String,
+        /// Values for the workflow's declared inputs, collected from the
+        /// operator before this command was emitted. Empty when the workflow
+        /// declares none.
+        inputs: serde_json::Map<String, serde_json::Value>,
     },
     /// Ask the copilot to change or explain a workflow.
     ///
@@ -498,6 +502,9 @@ pub enum Cmd {
     DryRunWorkflow {
         /// The workflow to simulate.
         id: String,
+        /// Values for the workflow's declared inputs — a simulation resolves
+        /// `=inputs.<name>` bindings like a real run, so it needs them too.
+        inputs: serde_json::Map<String, serde_json::Value>,
     },
     /// Take back a workflow's most recent edit.
     ///
@@ -715,6 +722,23 @@ pub(super) enum PromptKind {
         kind: FeedbackType,
         /// The title captured in step one.
         title: String,
+    },
+    /// One field of a workflow's declared inputs, collected before the run
+    /// starts. Submitting either opens the prompt for the next field or, when
+    /// this was the last, dispatches the run.
+    ///
+    /// The whole set is carried on the prompt rather than parked in `App`
+    /// state, so cancelling with `Esc` abandons the collected values with it —
+    /// a half-filled set cannot leak into the next run.
+    WorkflowInput {
+        /// The workflow the values are being collected for.
+        workflow_id: String,
+        /// Whether to dispatch a dry run rather than a real one.
+        dry_run: bool,
+        /// The fields still to ask about; the head is the one on screen.
+        remaining: Vec<medulla::workflows::WorkflowInput>,
+        /// What has been collected so far, keyed by input name.
+        collected: serde_json::Map<String, serde_json::Value>,
     },
 }
 

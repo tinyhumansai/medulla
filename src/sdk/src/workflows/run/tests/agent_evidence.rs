@@ -27,6 +27,7 @@ async fn an_agent_step_records_the_prompt_after_expression_resolution() {
         "resolved-prompt",
         "run-resolved",
         json!({ "task": "Review the complete patch\nand report every risk." }),
+        Default::default(),
     )
     .await
     .expect("runs");
@@ -69,6 +70,7 @@ async fn a_workflow_s_defaults_block_reaches_the_dispatch() {
         "pinned",
         "run-pinned",
         json!({}),
+        Default::default(),
     )
     .await
     .expect("runs");
@@ -108,6 +110,7 @@ async fn a_step_that_names_its_own_harness_overrides_the_workflow_s() {
         "mixed",
         "run-mixed",
         json!({}),
+        Default::default(),
     )
     .await
     .expect("runs");
@@ -161,6 +164,7 @@ async fn a_persisted_harness_expression_is_refused_at_run_time() {
         "sneaky",
         "run-sneaky",
         json!({ "harness": "codex" }),
+        Default::default(),
     )
     .await
     .expect_err("an unresolved harness expression must refuse the run");
@@ -217,6 +221,7 @@ async fn a_sub_workflow_s_own_defaults_reach_its_agent_step() {
         "parent",
         "run-parent",
         json!({}),
+        Default::default(),
     )
     .await
     .expect("runs");

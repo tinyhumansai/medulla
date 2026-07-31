@@ -280,3 +280,132 @@ fn the_workflows_tab_is_reachable_from_the_tab_bar() {
     // The bar lists it, so an operator finds the feature without being told.
     assert!(rendered(&mut app).contains("Workflows"));
 }
+
+/// Install a workflow that declares inputs, so pressing run has something to
+/// prompt for.
+fn install_parameterized(home: &std::path::Path, id: &str) {
+    let document = json!({
+        "id": id,
+        "name": "Review a repo",
+        "description": "reviews the named repo",
+        "enabled": true,
+        "inputs": [
+            { "name": "repo", "type": "string", "required": true,
+              "description": "Repo to review" },
+            { "name": "depth", "type": "number", "default": 3 }
+        ],
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "work", "kind": "agent", "name": "Work",
+              "config": { "prompt": "review =inputs.repo" } }
+        ],
+        "edges": [{ "from_node": "t", "to_node": "work" }]
+    })
+    .to_string();
+    let record = medulla::workflows::store::parse_workflow(&document, id).expect("valid fixture");
+    store(home).save(&record).expect("installs");
+}
+
+/// Type each character of `text` into the open prompt.
+fn type_text(app: &mut App, text: &str) {
+    for ch in text.chars() {
+        press(app, KeyCode::Char(ch));
+    }
+}
+
+#[test]
+fn running_a_workflow_with_declared_inputs_prompts_for_each_field() {
+    let home = tempfile::tempdir().unwrap();
+    install_parameterized(home.path(), "review");
+    let mut app = workflows_app(home.path());
+    app.reload_workflows();
+
+    press(&mut app, KeyCode::Char('x'));
+
+    // The first field, named and described, rather than the run starting blind.
+    let screen = rendered(&mut app);
+    assert!(screen.contains("repo"), "{screen}");
+    assert!(screen.contains("Repo to review"), "{screen}");
+
+    type_text(&mut app, "acme/api");
+    press(&mut app, KeyCode::Enter);
+
+    // The second field, pre-filled with its declared default so accepting it is
+    // one keypress.
+    let screen = rendered(&mut app);
+    assert!(screen.contains("depth"), "{screen}");
+    assert!(
+        screen.contains('3'),
+        "the default should be pre-filled: {screen}"
+    );
+}
+
+#[test]
+fn a_workflow_with_no_declared_inputs_runs_without_prompting() {
+    let home = tempfile::tempdir().unwrap();
+    install(home.path(), "sweep", "Nightly sweep", true);
+    let mut app = workflows_app(home.path());
+    app.reload_workflows();
+
+    press(&mut app, KeyCode::Char('x'));
+
+    let screen = rendered(&mut app);
+    assert!(
+        screen.contains("Running"),
+        "an unparameterized workflow should dispatch straight away: {screen}"
+    );
+}
+
+#[test]
+fn escaping_an_input_prompt_abandons_the_whole_run() {
+    let home = tempfile::tempdir().unwrap();
+    install_parameterized(home.path(), "review");
+    let mut app = workflows_app(home.path());
+    app.reload_workflows();
+
+    press(&mut app, KeyCode::Char('x'));
+    type_text(&mut app, "acme/api");
+    press(&mut app, KeyCode::Enter);
+    // Now on the second field; back out.
+    press(&mut app, KeyCode::Esc);
+
+    let screen = rendered(&mut app);
+    assert!(
+        !screen.contains("depth"),
+        "the prompt chain should be gone: {screen}"
+    );
+    assert!(
+        !screen.contains("Running"),
+        "cancelling a field must not start the run anyway: {screen}"
+    );
+}
+
+#[test]
+fn a_value_of_the_wrong_type_re_asks_the_same_field() {
+    let home = tempfile::tempdir().unwrap();
+    install_parameterized(home.path(), "review");
+    let mut app = workflows_app(home.path());
+    app.reload_workflows();
+
+    press(&mut app, KeyCode::Char('x'));
+    type_text(&mut app, "acme/api");
+    press(&mut app, KeyCode::Enter);
+
+    // `depth` is declared a number; clear the pre-filled default and type text.
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "deep");
+    press(&mut app, KeyCode::Enter);
+
+    let screen = rendered(&mut app);
+    assert!(
+        screen.contains("depth"),
+        "the same field should be asked again rather than the set being dropped: {screen}"
+    );
+    assert!(
+        screen.contains("expects a number"),
+        "the reason should say what was wrong: {screen}"
+    );
+}

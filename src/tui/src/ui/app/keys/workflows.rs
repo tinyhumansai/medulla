@@ -270,8 +270,31 @@ impl App {
             return None;
         }
         let (id, name) = (workflow.id.clone(), workflow.name.clone());
+        let declared = workflow.inputs.clone();
+        if !declared.is_empty() {
+            return self.begin_workflow_inputs(id, false, declared);
+        }
         self.set_status(format!("Running {name}…"));
-        Some(Cmd::RunWorkflow { id })
+        Some(Cmd::RunWorkflow {
+            id,
+            inputs: Default::default(),
+        })
+    }
+
+    /// Open the first of one prompt per declared input, ahead of a run.
+    ///
+    /// Returns `None` because the run is not dispatched yet: the command is
+    /// emitted by [`super::super::commands`] when the last field is submitted.
+    /// Cancelling any prompt abandons the whole set — the collected values live
+    /// on the prompt, so there is nothing left behind to leak into a later run.
+    fn begin_workflow_inputs(
+        &mut self,
+        workflow_id: String,
+        dry_run: bool,
+        remaining: Vec<medulla::workflows::WorkflowInput>,
+    ) -> Option<Cmd> {
+        self.open_workflow_input_prompt(workflow_id, dry_run, remaining, Default::default());
+        None
     }
 
     /// Simulate the selected workflow.
@@ -286,8 +309,15 @@ impl App {
         }
         let workflow = self.selected_workflow()?;
         let (id, name) = (workflow.id.clone(), workflow.name.clone());
+        let declared = workflow.inputs.clone();
+        if !declared.is_empty() {
+            return self.begin_workflow_inputs(id, true, declared);
+        }
         self.set_status(format!("Simulating {name}…"));
-        Some(Cmd::DryRunWorkflow { id })
+        Some(Cmd::DryRunWorkflow {
+            id,
+            inputs: Default::default(),
+        })
     }
 }
 

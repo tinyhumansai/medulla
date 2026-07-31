@@ -93,6 +93,7 @@ fn a_blank_name_or_description_never_reaches_the_wire_as_an_empty_string() {
         enabled: false,
         node_count: 0,
         trigger_kind: None,
+        inputs: Vec::new(),
     };
     let wire = serde_json::to_value(descriptor(&summary)).unwrap();
 
@@ -153,6 +154,7 @@ fn node_count_saturates_instead_of_wrapping() {
         enabled: true,
         node_count: usize::MAX,
         trigger_kind: None,
+        inputs: Vec::new(),
     };
     assert_eq!(descriptor(&summary).node_count, u32::MAX);
 }

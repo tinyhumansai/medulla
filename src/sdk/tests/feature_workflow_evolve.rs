@@ -67,7 +67,7 @@ async fn run_once(store: &Arc<dyn WorkflowStore>, home: &std::path::Path, id: &s
         sink: null_sink(),
     };
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
-    run_workflow(context, id, &run_id, json!({}))
+    run_workflow(context, id, &run_id, json!({}), Default::default())
         .await
         .expect("the run itself completes, however the graph fares")
         .status

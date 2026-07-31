@@ -89,6 +89,14 @@ impl LocalWorkflowHost {
 ///
 /// # Errors
 ///
+/// `run_input` carries both halves of what a caller supplies for this run — the
+/// free-form trigger payload and the values for the workflow's declared inputs.
+/// They travel as the engine's own [`RunInput`](tinyflows::engine::RunInput)
+/// rather than two parameters because they are one idea, and because this
+/// function already takes as many distinct arguments as it usefully can.
+///
+/// # Errors
+///
 /// Fails when no coding-agent CLI is installed, when the workflow or the host
 /// is disabled, or when the run itself does.
 pub async fn run_here(
@@ -98,7 +106,7 @@ pub async fn run_here(
     env: &std::collections::HashMap<String, String>,
     cwd: &std::path::Path,
     id: &str,
-    input: serde_json::Value,
+    run_input: tinyflows::engine::RunInput,
 ) -> Result<crate::workflows::RunRecord, crate::workflows::WorkflowError> {
     use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
     use crate::workflows::{RunContext, StoreWorkflowResolver};
@@ -153,7 +161,7 @@ pub async fn run_here(
     };
 
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
-    crate::workflows::run_workflow(context, id, &run_id, input).await
+    crate::workflows::run_workflow(context, id, &run_id, run_input.trigger, run_input.inputs).await
 }
 
 /// Review a workflow against its own history, on this machine.

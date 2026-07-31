@@ -175,6 +175,16 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
                     out.input = Some(v.clone());
                 }
             }
+            "--inputs" => {
+                if let Some(v) = it.next() {
+                    out.inputs = Some(v.clone());
+                }
+            }
+            "--set" => {
+                if let Some(v) = it.next() {
+                    out.set.push(v.clone());
+                }
+            }
             "--run-id" => {
                 if let Some(v) = it.next() {
                     out.run_id = Some(v.clone());
@@ -367,6 +377,8 @@ Wrapper flags:\n  \
 --                      Pass all following arguments to the CLI verbatim\n\n\
 Workflow flags:\n  \
 --input <json>          Trigger payload for run / dry-run\n  \
+--inputs <json>         Declared workflow inputs, as an object keyed by name\n  \
+--set <name>=<value>    One declared input (repeatable; wins over --inputs)\n  \
 --run-id <id>           Id to give the run (default: a fresh one)\n  \
 --approve <node-id>     Gate to release on resume (repeatable)\n  \
 --reject <node-id>      Gate to refuse on resume (repeatable)\n\n\

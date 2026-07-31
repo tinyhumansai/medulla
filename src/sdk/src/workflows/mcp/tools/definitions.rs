@@ -181,7 +181,8 @@ fn all_definitions() -> Vec<Value> {
             "inputSchema": schema(
                 json!({
                     "id": { "type": "string", "description": "The workflow to simulate." },
-                    "input": { "description": "Optional trigger payload; defaults to {}." }
+                    "input": { "description": "Optional trigger payload; defaults to {}." },
+                    "inputs": { "type": "object", "description": "Values for the workflow's declared inputs, keyed by name. Read the declarations from workflow_get / workflow_list; a missing required value, a wrong type, or a name the workflow does not declare is rejected and nothing runs." }
                 }),
                 &["id"],
             ),
@@ -199,7 +200,8 @@ fn all_definitions() -> Vec<Value> {
             "inputSchema": schema(
                 json!({
                     "id": { "type": "string", "description": "The workflow to run." },
-                    "input": { "description": "Optional trigger payload; defaults to {}." }
+                    "input": { "description": "Optional trigger payload; defaults to {}." },
+                    "inputs": { "type": "object", "description": "Values for the workflow's declared inputs, keyed by name. Read the declarations from workflow_get / workflow_list; a missing required value, a wrong type, or a name the workflow does not declare is rejected and nothing runs." }
                 }),
                 &["id"],
             ),

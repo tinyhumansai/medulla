@@ -211,6 +211,7 @@ async fn a_diamond_runs_both_branches_and_waits_for_them_at_the_merge() {
         "diamond",
         "run-1",
         json!({}),
+        Default::default(),
     )
     .await
     .expect("runs");
@@ -268,6 +269,7 @@ async fn a_run_is_recorded_and_can_be_read_back_by_id() {
         "diamond",
         "run-2",
         json!({}),
+        Default::default(),
     )
     .await
     .unwrap();
@@ -291,6 +293,7 @@ async fn cancelling_an_in_flight_run_settles_it_as_cancelled() {
             "gated",
             "run-7",
             json!({ "approvals": ["review"] }),
+            Default::default(),
         )
         .await
     });
@@ -325,6 +328,7 @@ async fn a_disabled_workflow_refuses_to_run() {
         "diamond",
         "run-8",
         json!({}),
+        Default::default(),
     )
     .await
     .expect_err("disabled");
@@ -341,6 +345,7 @@ async fn running_an_unknown_workflow_names_the_id() {
         "ghost",
         "run-9",
         json!({}),
+        Default::default(),
     )
     .await
     .expect_err("no such workflow");
@@ -362,6 +367,7 @@ async fn a_run_that_exceeds_its_limit_fails_rather_than_hanging() {
         "gated",
         "run-10",
         json!({ "approvals": ["review"] }),
+        Default::default(),
     )
     .await
     .expect("settles");
@@ -391,6 +397,7 @@ async fn a_dry_run_exercises_the_graph_without_dispatching_anything() {
         Arc::new(StoreWorkflowResolver::new(harness.store.clone())),
         "diamond",
         json!({}),
+        Default::default(),
     )
     .await
     .expect("simulates");
@@ -423,6 +430,7 @@ async fn a_run_dropped_mid_flight_is_reconciled_to_interrupted() {
             "gated",
             "run-11",
             json!({ "approvals": ["review"] }),
+            Default::default(),
         )
         .await
     });
@@ -454,6 +462,7 @@ async fn two_runs_of_one_workflow_cancel_independently() {
             "gated",
             "run-a",
             json!({ "approvals": ["review"] }),
+            Default::default(),
         )
         .await
     });
@@ -463,6 +472,7 @@ async fn two_runs_of_one_workflow_cancel_independently() {
             "gated",
             "run-b",
             json!({ "approvals": ["review"] }),
+            Default::default(),
         )
         .await
     });
@@ -489,7 +499,7 @@ async fn a_host_with_workflows_disabled_runs_nothing() {
     off.enabled = false;
     context.settings = Arc::new(off);
 
-    let err = run_workflow(context, "diamond", "run-off", json!({}))
+    let err = run_workflow(context, "diamond", "run-off", json!({}), Default::default())
         .await
         .expect_err("the operator turned it off");
 
@@ -511,14 +521,21 @@ async fn the_same_run_id_cannot_start_twice_concurrently() {
             "gated",
             "dup",
             json!({ "approvals": ["review"] }),
+            Default::default(),
         )
         .await
     });
     wait_until_running("dup").await;
 
-    let second = run_workflow(second_context, "gated", "dup", json!({}))
-        .await
-        .expect_err("the id is taken");
+    let second = run_workflow(
+        second_context,
+        "gated",
+        "dup",
+        json!({}),
+        Default::default(),
+    )
+    .await
+    .expect_err("the id is taken");
     assert!(
         second.to_string().contains("already executing"),
         "got {second}"
@@ -660,6 +677,7 @@ async fn a_per_item_agent_node_dispatches_one_harness_task_per_item_concurrently
         "fanout",
         "run-fanout",
         five_topics(),
+        Default::default(),
     )
     .await
     .expect("runs");
@@ -694,9 +712,15 @@ async fn the_run_ceiling_bounds_a_fan_out_wider_than_the_worker_pool() {
     let mut context = harness.context(dispatch.clone());
     context.settings = Arc::new(settings);
 
-    let record = run_workflow(context, "fanout", "run-capped", five_topics())
-        .await
-        .expect("an over-wide fan-out is throttled, never rejected");
+    let record = run_workflow(
+        context,
+        "fanout",
+        "run-capped",
+        five_topics(),
+        Default::default(),
+    )
+    .await
+    .expect("an over-wide fan-out is throttled, never rejected");
 
     assert_eq!(record.status, RunStatus::Succeeded);
     assert_eq!(dispatch.calls(), 5, "every item still ran");
@@ -727,10 +751,146 @@ async fn without_concurrency_a_per_item_node_stays_sequential() {
         "fanout",
         "run-seq",
         five_topics(),
+        Default::default(),
     )
     .await
     .expect("runs");
 
     assert_eq!(dispatch.calls(), 5);
     assert_eq!(dispatch.peak(), 1, "unset concurrency stays sequential");
+}
+
+/// A workflow declaring a required `repo` and a defaulted `depth`, whose agent
+/// prompt binds to both.
+pub(super) fn parameterized() -> String {
+    json!({
+        "id": "parameterized",
+        "name": "Parameterized",
+        "inputs": [
+            { "name": "repo", "type": "string", "required": true },
+            { "name": "depth", "type": "number", "default": 3 }
+        ],
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "work", "kind": "agent", "name": "Work",
+              "config": { "prompt": "=inputs.repo" } }
+        ],
+        "edges": [{ "from_node": "t", "to_node": "work" }]
+    })
+    .to_string()
+}
+
+/// Collect `pairs` into the supplied-values map a run takes.
+fn values(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
+    pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), v.clone()))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_declared_input_reaches_the_node_that_binds_to_it() {
+    let harness = Harness::new();
+    harness.install(&parameterized(), "parameterized");
+    let dispatch = Arc::new(StubDispatch::default());
+
+    let record = run_workflow(
+        harness.context(dispatch.clone()),
+        "parameterized",
+        "run-inputs-1",
+        json!({}),
+        values(&[("repo", json!("acme/api"))]),
+    )
+    .await
+    .expect("runs");
+
+    assert_eq!(record.status, RunStatus::Succeeded);
+    let instructions: Vec<String> = dispatch
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|r| r.instruction.clone())
+        .collect();
+    assert_eq!(
+        instructions,
+        vec!["acme/api".to_string()],
+        "the agent's `=inputs.repo` prompt should have resolved to the supplied value"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_required_input_records_no_run_at_all() {
+    // The reason resolution happens before `RunGuard::claim` and `record_run`:
+    // a rejected call must not leave a run in the operator's history.
+    let harness = Harness::new();
+    harness.install(&parameterized(), "parameterized");
+
+    let err = run_workflow(
+        harness.context(Arc::new(StubDispatch::default())),
+        "parameterized",
+        "run-inputs-2",
+        json!({}),
+        Default::default(),
+    )
+    .await
+    .expect_err("a missing required input must fail the call");
+    assert!(
+        err.to_string().contains("repo"),
+        "the error should name the input: {err}"
+    );
+
+    assert!(
+        harness.store.list_runs("parameterized").unwrap().is_empty(),
+        "a rejected call must leave no run record behind"
+    );
+    assert!(!is_running("run-inputs-2"), "and must claim no run id");
+}
+
+#[tokio::test]
+async fn a_wrongly_typed_input_is_refused_before_anything_dispatches() {
+    let harness = Harness::new();
+    harness.install(&parameterized(), "parameterized");
+    let dispatch = Arc::new(StubDispatch::default());
+
+    let err = run_workflow(
+        harness.context(dispatch.clone()),
+        "parameterized",
+        "run-inputs-3",
+        json!({}),
+        values(&[("repo", json!("acme/api")), ("depth", json!("deep"))]),
+    )
+    .await
+    .expect_err("a string for a number input must be refused");
+    assert!(err.to_string().contains("depth"), "{err}");
+    assert!(
+        dispatch.seen.lock().unwrap().is_empty(),
+        "nothing should have dispatched"
+    );
+}
+
+#[tokio::test]
+async fn a_dry_run_resolves_declared_inputs_too() {
+    // A simulation exists to catch bindings that resolve to null, so it has to
+    // see the same values a real run would.
+    let harness = Harness::new();
+    harness.install(&parameterized(), "parameterized");
+
+    let result = dry_run(
+        harness.store.clone(),
+        Arc::new(StoreWorkflowResolver::new(harness.store.clone())),
+        "parameterized",
+        json!({}),
+        values(&[("repo", json!("acme/api"))]),
+    )
+    .await
+    .expect("simulates");
+
+    assert_eq!(result.output["run"]["inputs"]["repo"], json!("acme/api"));
+    assert_eq!(
+        result.output["run"]["inputs"]["depth"],
+        json!(3),
+        "the declared default should have been applied"
+    );
 }

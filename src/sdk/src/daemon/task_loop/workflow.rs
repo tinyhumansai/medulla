@@ -256,7 +256,15 @@ impl DaemonRuntime {
 
         // The frame's task id becomes the run id, so the orchestrator's existing
         // `abort` for that task is exactly what cancels the run.
-        let outcome = run_workflow(context, &id, &frame.task_id, trigger_input(&frame.text)).await;
+        // Empty declared inputs — see `workflows::bridge::run_task_workflow`.
+        let outcome = run_workflow(
+            context,
+            &id,
+            &frame.task_id,
+            trigger_input(&frame.text),
+            serde_json::Map::new(),
+        )
+        .await;
 
         let work = fold.lock().ok().map(|fold| fold.snapshot().clone());
         let attachments = FrameAttachments { usage: None, work };

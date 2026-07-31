@@ -166,6 +166,14 @@ pub struct WorkflowArgs {
     pub config: Option<String>,
     /// `--input <json>`: the trigger payload for `run`/`dry-run`.
     pub input: Option<String>,
+    /// `--inputs <json object>`: values for the workflow's declared inputs,
+    /// keyed by name. Distinct from `--input`, which is the free-form trigger
+    /// payload.
+    pub inputs: Option<String>,
+    /// `--set <name>=<value>`, repeatable: one declared input at a time, for
+    /// the common case where hand-writing a JSON object at a shell prompt is
+    /// more quoting than the value is worth. Merged over `--inputs`.
+    pub set: Vec<String>,
     /// `--approve <node-id>`, repeatable: gates to release on `resume`.
     pub approve: Vec<String>,
     /// `--reject <node-id>`, repeatable: gates to refuse on `resume`.
@@ -197,6 +205,8 @@ impl Default for WorkflowArgs {
         WorkflowArgs {
             config: None,
             input: None,
+            inputs: None,
+            set: Vec::new(),
             approve: Vec::new(),
             reject: Vec::new(),
             run_id: None,

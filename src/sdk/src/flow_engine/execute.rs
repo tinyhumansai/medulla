@@ -63,9 +63,14 @@ pub fn compile(graph: &WorkflowGraph) -> Result<Compiled, String> {
 /// outlive the process, and the observer is what reports progress. The journal
 /// is in-memory because this host reads progress from the observer rather than
 /// replaying events afterwards.
+///
+/// `input` is `impl Into<RunInput>`, so a caller passes either a bare [`Value`]
+/// (the trigger payload alone) or a `RunInput` carrying values for the graph's
+/// declared inputs as well. The engine validates those against the graph before
+/// anything executes and fails the call if they do not satisfy it.
 pub async fn run(
     compiled: &Compiled,
-    input: Value,
+    input: impl Into<tinyflows::engine::RunInput>,
     capabilities: &tinyflows::caps::Capabilities,
     checkpointer: Arc<dyn Checkpointer<Value>>,
     thread_id: &str,
@@ -115,7 +120,7 @@ pub async fn resume(
 /// Not checkpointed: a simulation has no state worth keeping.
 pub async fn simulate(
     compiled: &Compiled,
-    input: Value,
+    input: impl Into<tinyflows::engine::RunInput>,
     capabilities: &tinyflows::caps::Capabilities,
 ) -> Result<Outcome, String> {
     tinyflows::engine::run(&compiled.0, input, capabilities)
@@ -132,7 +137,7 @@ pub async fn simulate(
 /// and a binding that silently resolved null is the failure a dry run is for.
 pub async fn simulate_observed(
     compiled: &Compiled,
-    input: Value,
+    input: impl Into<tinyflows::engine::RunInput>,
     capabilities: &tinyflows::caps::Capabilities,
     observer: &Arc<dyn RunObserver>,
 ) -> Result<Outcome, String> {

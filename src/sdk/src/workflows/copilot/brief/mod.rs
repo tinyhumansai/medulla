@@ -157,6 +157,21 @@ impl CopilotRequest<'_> {
                     "This workflow is disabled, so it will not run until an operator enables it.\n",
                 );
             }
+            // Not part of the graph, so pasting the graph does not reveal it —
+            // and a turn that cannot see the pinned harness would answer "which
+            // model runs this" from the host config, which is the wrong layer.
+            if let Some(harness) = record.defaults.harness.as_deref() {
+                prompt.push_str(&format!(
+                    "Every step runs on the `{harness}` harness unless it names its own \
+                     `config.harness`.\n"
+                ));
+            }
+            if let Some(model) = record.defaults.model.as_deref() {
+                prompt.push_str(&format!(
+                    "Every step defaults to the `{model}` model unless it names its own \
+                     `config.model`.\n"
+                ));
+            }
             prompt.push_str(&format!(
                 "{} node{}, {} edge{}\n\n",
                 record.graph.nodes.len(),

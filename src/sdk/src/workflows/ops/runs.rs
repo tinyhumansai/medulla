@@ -52,13 +52,22 @@ pub fn list_runs(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, Work
 pub async fn run(
     store: &Arc<dyn WorkflowStore>,
     config: &crate::config::WorkflowsConfig,
+    custom_harnesses: &[crate::config::CustomHarnessConfig],
     env: &HashMap<String, String>,
     cwd: &Path,
     id: &str,
     input: Value,
 ) -> Result<Value, WorkflowError> {
-    let record =
-        crate::workflows::local::run_here(store.clone(), config, env, cwd, id, input).await?;
+    let record = crate::workflows::local::run_here(
+        store.clone(),
+        config,
+        custom_harnesses,
+        env,
+        cwd,
+        id,
+        input,
+    )
+    .await?;
     Ok(json!({
         "ok": record.status == crate::workflows::RunStatus::Succeeded,
         "run": record,

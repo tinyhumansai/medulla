@@ -138,9 +138,17 @@ pub(crate) async fn call(
             let input = arguments.get("input").cloned().unwrap_or(json!({}));
             let env: std::collections::HashMap<String, String> = std::env::vars().collect();
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            ops::run(store, &policy.workflows, &env, &cwd, id, input)
-                .await
-                .map_err(to_rpc)
+            ops::run(
+                store,
+                &policy.workflows,
+                &policy.custom_harness_configs,
+                &env,
+                &cwd,
+                id,
+                input,
+            )
+            .await
+            .map_err(to_rpc)
         }
         "workflow_runs" => ops::list_runs(store, arg(&arguments, "id")?).map_err(to_rpc),
         "workflow_run_get" => ops::get_run(store, arg(&arguments, "runId")?).map_err(to_rpc),

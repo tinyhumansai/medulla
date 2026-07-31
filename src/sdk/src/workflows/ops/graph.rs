@@ -161,6 +161,14 @@ pub struct HostPolicy {
     /// The ids of the custom harness presets configured on this machine, in
     /// config order. An author may name any of these as a node's `harness`.
     pub custom_harnesses: Vec<String>,
+    /// The same presets, in full, for handing to the embedded daemon
+    /// [`ops::run`](super::run) starts to actually execute a workflow.
+    ///
+    /// Kept separate from [`custom_harnesses`](Self::custom_harnesses):
+    /// that field is an id-only report `workflow_host` shows an author, and a
+    /// preset's credentials and routing have no business riding along with
+    /// it just to answer "what can I name".
+    pub custom_harness_configs: Vec<crate::config::CustomHarnessConfig>,
 }
 
 /// What this host will actually permit a workflow to do.

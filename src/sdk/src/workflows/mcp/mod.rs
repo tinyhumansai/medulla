@@ -195,14 +195,16 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // and they live in their own config section rather than that one.
     let policy = crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
         .map(|loaded| {
-            let custom_harnesses = crate::config::load_layered_custom_harnesses(&loaded.sources)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|preset| preset.id)
+            let custom_harness_configs =
+                crate::config::load_layered_custom_harnesses(&loaded.sources).unwrap_or_default();
+            let custom_harnesses = custom_harness_configs
+                .iter()
+                .map(|preset| preset.id.clone())
                 .collect();
             crate::workflows::ops::HostPolicy {
                 workflows: loaded.config.workflows,
                 custom_harnesses,
+                custom_harness_configs,
             }
         })
         .unwrap_or_default();

@@ -94,6 +94,7 @@ impl LocalWorkflowHost {
 pub async fn run_here(
     store: Arc<dyn crate::workflows::WorkflowStore>,
     config: &crate::config::WorkflowsConfig,
+    custom_harnesses: &[crate::config::CustomHarnessConfig],
     env: &std::collections::HashMap<String, String>,
     cwd: &std::path::Path,
     id: &str,
@@ -130,6 +131,11 @@ pub async fn run_here(
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: config.default_provider,
         model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+        // Without these, a workflow whose `agent` node selects a custom
+        // harness preset would run onto an embedded daemon with an empty
+        // preset list and be refused as "not configured on this host" even
+        // though the operator has it configured right here.
+        custom_harnesses: custom_harnesses.to_vec(),
         ..Default::default()
     })
     .map_err(crate::workflows::WorkflowError::Engine)?;

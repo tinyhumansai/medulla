@@ -89,7 +89,7 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
     // below reloads config from the *new* home; without this an account with no
     // config of its own falls back to the production default, and the core
     // rejects the JWT the configured deployment issued a moment ago.
-    crate::sign_in::seed_account_backend(&env, &base_url);
+    crate::sign_in::seed_account_backend(&env, &base_url)?;
 
     // Boot last: the flow above can take minutes of browser round-trip, and a
     // core sitting open across it buys nothing.

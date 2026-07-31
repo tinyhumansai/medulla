@@ -117,7 +117,7 @@ async fn store_if_same_account(
             // record the deployment that just identified them there, or their
             // first launch loads an empty home, falls back to production, and
             // cannot finish the login the restart was asked to complete.
-            seed_account_backend(env, base_url);
+            seed_account_backend(env, base_url)?;
             return Ok(SignIn::SwitchedAccount);
         }
         Disposition::Store => {}
@@ -183,66 +183,84 @@ pub(crate) async fn sign_in_first_account(
     Ok(Some(jwt))
 }
 
-/// Record, in a newly adopted account's own config, the deployment its session
-/// was issued by.
+/// Record, in the adopted account's own config, the deployment its session was
+/// issued by — or say so when the account already names a different one.
 ///
-/// Sessions are per-deployment, and until now nothing inside an account's home
-/// said which one it belongs to — the `backend.baseUrl` that drove the login
-/// came from the *pre-login* home, which the account home does not inherit. So a
-/// staging or self-hosted operator signed in successfully and then had the core
-/// bound to the production default, which rejects the token they just minted.
+/// Sessions are per-deployment, and until this ran nothing inside an account's
+/// home said which one it belongs to: the `backend.baseUrl` that drove the login
+/// came from the *pre-login* home, which the account home does not inherit. A
+/// staging or self-hosted operator would sign in successfully and then have the
+/// core bound to the production default, which rejects the token they just
+/// minted.
 ///
-/// Only ever writes a `baseUrl` the account does not already have, so an
-/// existing account keeps whatever it was configured with, and re-running this
-/// changes nothing. Best-effort: a config that cannot be written leaves the
-/// account undescribed rather than failing a login that otherwise succeeded, and
-/// the operator still has the environment and `--config` to point it.
+/// Keyed on the setting, not the file: an account whose config holds a theme and
+/// nothing else still has no deployment recorded.
+///
+/// # Why a differing value is reported rather than overwritten
+///
+/// `backend.baseUrl` decides which deployment the operator's agent talks to, and
+/// the URL a login used can come from a deliberately transient source — an
+/// `MEDULLA_API_URL` in one shell, a `--config` passed for one command. Silently
+/// rewriting a configured endpoint from one of those repeats the mistake
+/// `MEDULLA_USER` taught: a process-scoped choice must not quietly become the
+/// persistent one. The mismatch does break the next launch, so it is named
+/// loudly, with the file to edit, rather than either hidden or acted on.
+///
+/// # Errors
+///
+/// The account's config cannot be created or written. The caller must not
+/// complete a login on one: the account would be left pointing at a deployment
+/// that never issued its session, which fails on the next launch with nothing to
+/// explain it.
 pub(crate) fn seed_account_backend(
     env: &std::collections::HashMap<String, String>,
     base_url: &str,
-) {
+) -> anyhow::Result<()> {
     let base_url = base_url.trim();
     if base_url.is_empty() {
-        return;
+        return Ok(());
     }
     let path = medulla::home::medulla_home(env).join("config.toml");
-    // Keyed on the setting, not the file. An account whose config holds a theme
-    // and nothing else still has no deployment recorded, and skipping it there
-    // would leave exactly the gap this closes.
-    if declares_backend_base_url(&path) {
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        if std::fs::create_dir_all(parent).is_err() {
-            return;
+
+    if let Some(existing) = declared_backend_base_url(&path) {
+        if existing.trim_end_matches('/') != base_url.trim_end_matches('/') {
+            eprintln!(
+                "Signed in to {base_url}, but this account's config names {existing}.\n\
+                 The next launch will use {existing} and this session will not work there — \
+                 edit {} or pass the same --config again.",
+                path.display()
+            );
         }
+        return Ok(());
     }
-    let _ = medulla::config::persist_setting(
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    medulla::config::persist_setting(
         &path,
         "backend",
         "baseUrl",
         toml::Value::String(base_url.to_string()),
-    );
+    )
 }
 
-/// Whether `path` already pins `backend.baseUrl` to a non-empty value.
+/// The non-empty `backend.baseUrl` `path` already pins, if it pins one.
 ///
-/// A file that cannot be read or parsed counts as not declaring one: the seed is
-/// a merge that preserves every other key, so writing over an unreadable file is
-/// no worse than the state it is already in, and refusing to write would leave
-/// the account undescribed.
-fn declares_backend_base_url(path: &std::path::Path) -> bool {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    let Ok(doc) = body.parse::<toml::Table>() else {
-        return false;
-    };
+/// A file that cannot be read or parsed counts as pinning nothing: the write is
+/// a merge that preserves every other key, so seeding over an unreadable file is
+/// no worse than the state it is already in, and refusing would leave the
+/// account undescribed.
+fn declared_backend_base_url(path: &std::path::Path) -> Option<String> {
+    let body = std::fs::read_to_string(path).ok()?;
+    let doc = body.parse::<toml::Table>().ok()?;
     doc.get("backend")
         .and_then(toml::Value::as_table)
         .and_then(|backend| backend.get("baseUrl"))
         .and_then(toml::Value::as_str)
-        .is_some_and(|url| !url.trim().is_empty())
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .map(str::to_string)
 }
 
 /// What to do with a freshly verified token, given who it belongs to.

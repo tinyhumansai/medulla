@@ -131,7 +131,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // launch would do the same, since nothing else records which
                 // deployment the account belongs to.
                 let base_url = loaded.config.backend.base_url.clone();
-                crate::sign_in::seed_account_backend(&env, &base_url);
+                crate::sign_in::seed_account_backend(&env, &base_url)?;
                 // The account's own config file is a different file from the one
                 // loaded a moment ago, and it is the one that wins from here on.
                 loaded = load_config(args.config.as_deref(), &env, &cwd)?;

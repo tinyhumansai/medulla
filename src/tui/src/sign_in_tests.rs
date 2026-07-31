@@ -21,7 +21,7 @@ fn a_new_account_records_the_deployment_it_signed_in_to() {
     let env = env_at(tmp.path());
     medulla::home::user::write_active_user_id(tmp.path(), "acct-1").expect("adopt");
 
-    seed_account_backend(&env, "https://staging-api.tinyhumans.ai");
+    seed_account_backend(&env, "https://staging-api.tinyhumans.ai").expect("seeds");
 
     let cwd = tmp.path().join("elsewhere");
     std::fs::create_dir_all(&cwd).expect("cwd");
@@ -45,10 +45,17 @@ fn an_existing_accounts_config_is_never_overwritten() {
     )
     .expect("write");
 
-    seed_account_backend(&env, "https://api.tinyhumans.ai");
+    seed_account_backend(&env, "https://api.tinyhumans.ai").expect("reports, does not fail");
 
     let body = std::fs::read_to_string(home.join("config.toml")).expect("read");
-    assert!(body.contains("https://self.hosted"), "{body}");
+    assert!(
+        body.contains("https://self.hosted"),
+        "a configured endpoint is never silently rewritten: {body}"
+    );
+    assert!(
+        !body.contains("api.tinyhumans.ai\""),
+        "and the login's endpoint is not merged in beside it: {body}"
+    );
     assert!(
         body.contains("accent"),
         "an unrelated section must survive: {body}"
@@ -66,7 +73,7 @@ fn a_config_without_a_backend_still_gets_one() {
     std::fs::create_dir_all(&home).expect("home");
     std::fs::write(home.join("config.toml"), "[theme]\naccent = \"green\"\n").expect("write");
 
-    seed_account_backend(&env, "https://staging-api.tinyhumans.ai");
+    seed_account_backend(&env, "https://staging-api.tinyhumans.ai").expect("seeds");
 
     let body = std::fs::read_to_string(home.join("config.toml")).expect("read");
     assert!(body.contains("staging-api.tinyhumans.ai"), "{body}");
@@ -79,7 +86,7 @@ fn a_blank_deployment_writes_nothing() {
     let env = env_at(tmp.path());
     medulla::home::user::write_active_user_id(tmp.path(), "acct-3").expect("adopt");
 
-    seed_account_backend(&env, "   ");
+    seed_account_backend(&env, "   ").expect("nothing to record");
 
     assert!(
         !medulla::home::medulla_home(&env)
@@ -139,4 +146,42 @@ fn a_token_of_unknown_ownership_is_never_stored() {
         };
         assert!(why.contains("did not say which account"), "{why}");
     }
+}
+
+#[test]
+fn a_trailing_slash_is_not_a_different_deployment() {
+    // The stored value and the configured one are the same endpoint; reporting a
+    // mismatch over punctuation would train the operator to ignore the warning.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let env = env_at(tmp.path());
+    medulla::home::user::write_active_user_id(tmp.path(), "acct-5").expect("adopt");
+    let home = medulla::home::medulla_home(&env);
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::write(
+        home.join("config.toml"),
+        "[backend]\nbaseUrl = \"https://self.hosted/\"\n",
+    )
+    .expect("write");
+
+    seed_account_backend(&env, "https://self.hosted").expect("same deployment");
+
+    let body = std::fs::read_to_string(home.join("config.toml")).expect("read");
+    assert!(body.contains("https://self.hosted/"), "{body}");
+}
+
+#[test]
+fn a_home_that_cannot_be_written_fails_the_login() {
+    // Completing a login here would leave the account pointing at a deployment
+    // that never issued its session — a failure the next launch reports with
+    // nothing to explain it.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let env = env_at(tmp.path());
+    medulla::home::user::write_active_user_id(tmp.path(), "acct-6").expect("adopt");
+    // A file where the account directory needs to be: creating the home fails.
+    std::fs::write(medulla::home::medulla_home(&env), "not a directory").expect("write");
+
+    assert!(
+        seed_account_backend(&env, "https://staging-api.tinyhumans.ai").is_err(),
+        "an unwritable account must not report a completed login"
+    );
 }

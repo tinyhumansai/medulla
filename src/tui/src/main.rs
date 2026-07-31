@@ -22,6 +22,7 @@ mod event_loop;
 mod hub_relay;
 mod local_host;
 mod run;
+mod sign_in;
 mod terminal;
 mod worker_loop;
 

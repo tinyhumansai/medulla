@@ -371,6 +371,14 @@ pub struct WorkflowsConfig {
     /// How long one run may take before the host abandons it.
     #[serde(default = "d_run_timeout_secs")]
     pub run_timeout_secs: u64,
+    /// The most harness tasks one run may have in flight at once.
+    ///
+    /// A node can fan out over its input (`execution: "per_item"` with a
+    /// `concurrency`), and here every item is a whole harness session. This is
+    /// sized by what the worker pool can actually serve, so a graph asking for
+    /// more is throttled to it rather than refused.
+    #[serde(default = "d_max_parallel_agents")]
+    pub max_parallel_agents: usize,
     /// Whether and how a workflow reviews its own history.
     #[serde(default)]
     pub evolve: EvolveSettings,
@@ -424,6 +432,10 @@ impl Default for EvolveSettings {
 
 /// A run may take ten minutes: long enough for real work on a coding harness,
 /// short enough that a wedged run does not pin its record forever.
+fn d_max_parallel_agents() -> usize {
+    crate::flow_engine::DEFAULT_MAX_PARALLEL_AGENTS
+}
+
 fn d_run_timeout_secs() -> u64 {
     600
 }
@@ -439,6 +451,7 @@ impl Default for WorkflowsConfig {
             tool_allowlist: Vec::new(),
             http_allowlist: Vec::new(),
             run_timeout_secs: d_run_timeout_secs(),
+            max_parallel_agents: d_max_parallel_agents(),
             evolve: EvolveSettings::default(),
         }
     }

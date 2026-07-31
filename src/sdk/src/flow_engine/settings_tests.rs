@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use super::{CapabilitySettings, DEFAULT_RUN_TIMEOUT_SECS};
+use super::{CapabilitySettings, DEFAULT_MAX_PARALLEL_AGENTS, DEFAULT_RUN_TIMEOUT_SECS};
 use crate::config::WorkflowsConfig;
 
 #[test]
@@ -89,6 +89,7 @@ fn config_becomes_settings_with_every_field_carried_across() {
         tool_allowlist: vec!["github.create_issue".into()],
         http_allowlist: vec!["api.github.com".into()],
         run_timeout_secs: 30,
+        max_parallel_agents: 6,
         evolve: Default::default(),
     };
 
@@ -100,6 +101,23 @@ fn config_becomes_settings_with_every_field_carried_across() {
     assert!(settings.tool_allowed("github.create_issue"));
     assert!(settings.http_host_allowed("api.github.com"));
     assert_eq!(settings.run_timeout_secs, 30);
+    assert_eq!(settings.max_parallel_agents, 6);
+}
+
+#[test]
+fn a_zero_agent_ceiling_falls_back_rather_than_wedging_every_agent_node() {
+    // A zero-permit semaphore would leave every agent node awaiting a permit
+    // that can never arrive, which presents as a hang rather than as a
+    // configuration mistake.
+    let config = WorkflowsConfig {
+        max_parallel_agents: 0,
+        evolve: Default::default(),
+        ..Default::default()
+    };
+
+    let settings = CapabilitySettings::from_config(&config, "/home");
+
+    assert_eq!(settings.max_parallel_agents, DEFAULT_MAX_PARALLEL_AGENTS);
 }
 
 #[test]

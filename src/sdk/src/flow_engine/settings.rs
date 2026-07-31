@@ -43,6 +43,19 @@ pub struct CapabilitySettings {
     pub http_allowlist: Vec<String>,
     /// How long one run may take before it is abandoned.
     pub run_timeout_secs: u64,
+    /// The most harness tasks one run may have in flight at once.
+    ///
+    /// A node can fan out over its input (`execution: "per_item"` with a
+    /// `concurrency`), and on this host every one of those items is a whole
+    /// harness session, not a model call. The engine bounds a *single* node's
+    /// width; this bounds the run, because several nodes can be fanning out at
+    /// the same time. Without it a workflow could dispatch a hundred sessions
+    /// at once to a worker pool sized for a handful.
+    ///
+    /// An over-wide fan-out waits for a slot rather than failing, so raising a
+    /// node's `concurrency` past this slows the run down instead of breaking
+    /// it.
+    pub max_parallel_agents: usize,
     /// The directory a `medulla:shell` script runs in.
     ///
     /// The operator's project, normally: a step that shells out almost always
@@ -56,6 +69,13 @@ pub struct CapabilitySettings {
 /// sibling host's bound; long enough for a real coding task, short enough that a
 /// wedged run does not pin its record forever.
 pub const DEFAULT_RUN_TIMEOUT_SECS: u64 = 600;
+
+/// Four harness tasks in flight per run by default.
+///
+/// Deliberately modest: a harness task is a full coding session, so the useful
+/// ceiling is set by how many a worker can actually serve at once, not by how
+/// many a graph feels like asking for. An operator with a bigger pool raises it.
+pub const DEFAULT_MAX_PARALLEL_AGENTS: usize = 4;
 
 impl CapabilitySettings {
     /// Settings rooted under a Medulla home.
@@ -76,6 +96,7 @@ impl CapabilitySettings {
             tool_allowlist: Vec::new(),
             http_allowlist: Vec::new(),
             run_timeout_secs: DEFAULT_RUN_TIMEOUT_SECS,
+            max_parallel_agents: DEFAULT_MAX_PARALLEL_AGENTS,
             workspace: String::new(),
         }
     }
@@ -146,6 +167,14 @@ impl CapabilitySettings {
             DEFAULT_RUN_TIMEOUT_SECS
         } else {
             config.run_timeout_secs
+        };
+        // Same reasoning as the timeout: a zero ceiling would make every agent
+        // node wait forever on a permit that never exists, which reads as a
+        // hang rather than as a configuration mistake.
+        settings.max_parallel_agents = if config.max_parallel_agents == 0 {
+            DEFAULT_MAX_PARALLEL_AGENTS
+        } else {
+            config.max_parallel_agents
         };
         settings
     }

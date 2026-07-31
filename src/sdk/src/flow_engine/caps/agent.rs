@@ -21,6 +21,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -109,6 +110,15 @@ pub struct HarnessAgentRunner {
     /// worker dedupes on `sender + taskId`. One of the two would be rejected as
     /// a duplicate of the other.
     sequence: AtomicU64,
+    /// Caps how many harness tasks this run has in flight at once.
+    ///
+    /// A per-item node fans out into one dispatch per item, and on this host a
+    /// dispatch is a whole harness session. The engine bounds one node's width;
+    /// this bounds the run, since several nodes can fan out at the same time.
+    /// Shared across every runner built for the run (see
+    /// [`with_limiter`](Self::with_limiter)), so the ceiling is a property of
+    /// the run rather than of one node.
+    slots: Arc<Semaphore>,
     /// Resolved prompts captured for the durable run inspector.
     evidence: Option<Arc<AgentEvidence>>,
 }
@@ -121,11 +131,13 @@ impl HarnessAgentRunner {
         settings: Arc<CapabilitySettings>,
         run_id: impl Into<String>,
     ) -> Self {
+        let slots = Arc::new(Semaphore::new(settings.max_parallel_agents.max(1)));
         Self {
             dispatch,
             settings,
             run_id: run_id.into(),
             sequence: AtomicU64::new(0),
+            slots,
             evidence: None,
         }
     }
@@ -137,13 +149,28 @@ impl HarnessAgentRunner {
         run_id: impl Into<String>,
         evidence: Arc<AgentEvidence>,
     ) -> Self {
+        let settings_max_parallel = settings.max_parallel_agents.max(1);
         Self {
             dispatch,
             settings,
             run_id: run_id.into(),
             sequence: AtomicU64::new(0),
+            slots: Arc::new(Semaphore::new(settings_max_parallel)),
             evidence: Some(evidence),
         }
+    }
+
+    /// Share an existing limiter instead of this runner's own.
+    ///
+    /// The run builds an agent runner *and* an LLM provider (which wraps a
+    /// second runner), and both dispatch to the same worker pool. Left to
+    /// themselves they would hold independent semaphores and the run's real
+    /// ceiling would be double what the operator configured, so the caller
+    /// builds one limiter and hands it to both.
+    #[must_use]
+    pub(crate) fn with_limiter(mut self, slots: Arc<Semaphore>) -> Self {
+        self.slots = slots;
+        self
     }
 
     /// Capture a resolved prompt when this request came from a tagged agent node.
@@ -206,6 +233,13 @@ impl HarnessAgentRunner {
                     .to_string(),
             ));
         }
+        // Wait for a slot before dispatching. A fanned-out node can reach here
+        // once per input item simultaneously, and each dispatch occupies a
+        // harness session for the length of a coding task. Waiting throttles an
+        // over-wide fan-out; it never fails it.
+        let _permit = self.slots.acquire().await.map_err(|_| {
+            EngineError::Capability("agent node: run concurrency limiter closed".to_string())
+        })?;
         let worker = request.worker_address.clone();
         let outcome = self
             .dispatch
@@ -264,6 +298,14 @@ impl HarnessLlm {
         Self {
             inner: HarnessAgentRunner::recording(dispatch, settings, run_id, evidence),
         }
+    }
+
+    /// Share the run's dispatch limiter — see
+    /// [`HarnessAgentRunner::with_limiter`].
+    #[must_use]
+    pub(crate) fn with_limiter(mut self, slots: Arc<Semaphore>) -> Self {
+        self.inner = self.inner.with_limiter(slots);
+        self
     }
 }
 

@@ -37,6 +37,17 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
             "The harness reply is available as `=item.text`. If the harness replied with JSON \
              it is also parsed, so `=item.json.<field>` works without an output_parser."
                 .to_string(),
+            "`execution: \"per_item\"` with a `concurrency` is how you run several harnesses at \
+             once — one session per input item, so `split_out` → agent(concurrency: 4) → merge \
+             works through a list in parallel and hands the merge one result per item. Bear in \
+             mind each item is a whole coding session, not a model call: fan out over a list you \
+             have already narrowed."
+                .to_string(),
+            "This host caps how many harness tasks a run may have in flight (`workflows.\
+             maxParallelAgents`, 4 by default) because a dispatch occupies a worker for the \
+             length of a coding task. A higher `concurrency` is throttled to that ceiling, never \
+             refused — check `workflow_host` for the current value."
+                .to_string(),
         ],
         "tool_call" => vec![
             format!(

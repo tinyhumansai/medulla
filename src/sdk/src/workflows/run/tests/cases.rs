@@ -568,3 +568,169 @@ async fn a_disabled_sub_workflow_is_refused_during_resolution() {
 
     assert!(err.to_string().contains("disabled"), "got {err}");
 }
+
+// --- per-item fan-out ---
+
+/// A dispatch that reports how many harness tasks overlapped, so a test can
+/// tell a real fan-out from a sequential loop that merely finished.
+#[derive(Default)]
+pub(super) struct ConcurrencyProbe {
+    live: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl ConcurrencyProbe {
+    fn peak(&self) -> usize {
+        self.peak.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn calls(&self) -> usize {
+        self.calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl HarnessDispatch for ConcurrencyProbe {
+    async fn dispatch(&self, _request: TaskRequest) -> Result<TaskOutcome, RunError> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let live = self.live.fetch_add(1, SeqCst) + 1;
+        self.peak.fetch_max(live, SeqCst);
+        self.calls.fetch_add(1, SeqCst);
+        // Stay "in flight" long enough for peers to start, so the gauge sees
+        // real overlap rather than a lucky interleaving.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        self.live.fetch_sub(1, SeqCst);
+        Ok(TaskOutcome {
+            reply: "done".into(),
+            usage: crate::tinyplace::TokenUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            harness: None,
+        })
+    }
+}
+
+/// `trigger → split_out → agent(per_item) → merge`: one harness task per
+/// element of the trigger's `topics` array.
+fn fanout(agent_config: serde_json::Value) -> String {
+    let mut agent = json!({ "id": "work", "kind": "agent", "name": "Work" });
+    agent["config"] = agent_config;
+    json!({
+        "id": "fanout",
+        "name": "Fan out",
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "Manual", "config": { "trigger_kind": "manual" } },
+            { "id": "split", "kind": "split_out", "name": "Each", "config": { "path": "topics" } },
+            agent,
+            { "id": "join", "kind": "merge", "name": "Join" }
+        ],
+        "edges": [
+            { "from_node": "t", "to_node": "split" },
+            { "from_node": "split", "to_node": "work" },
+            { "from_node": "work", "to_node": "join" }
+        ]
+    })
+    .to_string()
+}
+
+/// Five topics for a fan-out to multiply over.
+fn five_topics() -> serde_json::Value {
+    json!({ "topics": [{ "n": 1 }, { "n": 2 }, { "n": 3 }, { "n": 4 }, { "n": 5 }] })
+}
+
+#[tokio::test]
+async fn a_per_item_agent_node_dispatches_one_harness_task_per_item_concurrently() {
+    let harness = Harness::new();
+    harness.install(
+        &fanout(json!({
+            "prompt": "Handle the topic",
+            "input_context": "=item",
+            "execution": "per_item",
+            "concurrency": 4,
+        })),
+        "fanout",
+    );
+    let dispatch = Arc::new(ConcurrencyProbe::default());
+
+    let record = run_workflow(
+        harness.context(dispatch.clone()),
+        "fanout",
+        "run-fanout",
+        five_topics(),
+    )
+    .await
+    .expect("runs");
+
+    assert_eq!(record.status, RunStatus::Succeeded);
+    assert_eq!(dispatch.calls(), 5, "one harness task per input item");
+    assert!(
+        dispatch.peak() > 1,
+        "the point of the feature is overlap; peak was {}",
+        dispatch.peak()
+    );
+}
+
+#[tokio::test]
+async fn the_run_ceiling_bounds_a_fan_out_wider_than_the_worker_pool() {
+    // The graph asks for every item at once; the operator's ceiling is 2. The
+    // run must be throttled to 2, not fail, and not honour the graph's request.
+    let harness = Harness::new();
+    let mut settings = (*harness.settings).clone();
+    settings.max_parallel_agents = 2;
+
+    harness.install(
+        &fanout(json!({
+            "prompt": "Handle the topic",
+            "input_context": "=item",
+            "execution": "per_item",
+            "concurrency": "all",
+        })),
+        "fanout",
+    );
+    let dispatch = Arc::new(ConcurrencyProbe::default());
+    let mut context = harness.context(dispatch.clone());
+    context.settings = Arc::new(settings);
+
+    let record = run_workflow(context, "fanout", "run-capped", five_topics())
+        .await
+        .expect("an over-wide fan-out is throttled, never rejected");
+
+    assert_eq!(record.status, RunStatus::Succeeded);
+    assert_eq!(dispatch.calls(), 5, "every item still ran");
+    assert!(
+        dispatch.peak() <= 2,
+        "the host ceiling must win over the graph's request; peak was {}",
+        dispatch.peak()
+    );
+}
+
+#[tokio::test]
+async fn without_concurrency_a_per_item_node_stays_sequential() {
+    // Back-compat guard: a graph that does not ask for parallelism must not get
+    // it, however many items it maps over.
+    let harness = Harness::new();
+    harness.install(
+        &fanout(json!({
+            "prompt": "Handle the topic",
+            "input_context": "=item",
+            "execution": "per_item",
+        })),
+        "fanout",
+    );
+    let dispatch = Arc::new(ConcurrencyProbe::default());
+
+    run_workflow(
+        harness.context(dispatch.clone()),
+        "fanout",
+        "run-seq",
+        five_topics(),
+    )
+    .await
+    .expect("runs");
+
+    assert_eq!(dispatch.calls(), 5);
+    assert_eq!(dispatch.peak(), 1, "unset concurrency stays sequential");
+}

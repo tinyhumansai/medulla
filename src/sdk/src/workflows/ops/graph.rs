@@ -133,6 +133,7 @@ pub fn host_facts(config: &crate::config::WorkflowsConfig) -> Value {
         "httpAllowlist": config.http_allowlist,
         "allowCode": config.allow_code,
         "runTimeoutSecs": config.run_timeout_secs,
+        "maxParallelAgents": config.max_parallel_agents,
         "shellScriptsAvailable": shell_available,
         "notes": [
             if config.default_worker.trim().is_empty() {

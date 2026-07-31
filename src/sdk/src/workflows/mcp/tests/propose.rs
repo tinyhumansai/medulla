@@ -44,8 +44,9 @@ fn a_review_turn_is_not_shown_the_tools_it_may_not_call() {
         .filter_map(|tool| tool["name"].as_str().map(str::to_string))
         .collect();
     assert!(!listed.iter().any(|name| name == "workflow_apply_ops"));
+    assert!(!listed.iter().any(|name| name == "workflow_defaults"));
     assert!(listed.iter().any(|name| name == "workflow_propose"));
-    assert_eq!(listed.len(), TOOL_NAMES.len() - 4);
+    assert_eq!(listed.len(), TOOL_NAMES.len() - 5);
 }
 
 #[test]

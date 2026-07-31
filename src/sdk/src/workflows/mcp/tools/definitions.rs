@@ -82,8 +82,9 @@ fn all_definitions() -> Vec<Value> {
             "name": "workflow_create",
             "description":
                 "Install a workflow from a whole graph document. The document is a tinyflows \
-                 WorkflowGraph — `nodes` and `edges`, plus optional `name`, `description`, and \
-                 `enabled`. Exactly one node must be a `trigger`. An invalid graph is refused \
+                 WorkflowGraph — `nodes` and `edges`, plus optional `name`, `description`, \
+                 `enabled`, and a `defaults` block pinning the harness and model its steps run \
+                 on. Exactly one node must be a `trigger`. An invalid graph is refused \
                  and nothing is written, so validate first if you are unsure.",
             "inputSchema": schema(
                 json!({
@@ -112,6 +113,32 @@ fn all_definitions() -> Vec<Value> {
                     "ops": { "type": "array", "description": "The graph ops to apply." }
                 }),
                 &["id", "ops"],
+            ),
+        }),
+        json!({
+            "name": "workflow_defaults",
+            "description":
+                "Set what every `agent` step in a workflow runs on unless the step says \
+                 otherwise: `harness` (one of the built-in coding CLIs, or a custom preset id — \
+                 see workflow_host) and `model`. This is a property of the workflow, not of its \
+                 graph, so it is set here rather than with a graph op. Pass an empty string to \
+                 clear one; omit a field to leave it as it is. A step that names its own \
+                 `config.harness` still wins.",
+            "inputSchema": schema(
+                json!({
+                    "id": { "type": "string", "description": "The workflow to set." },
+                    "harness": {
+                        "type": "string",
+                        "description":
+                            "The harness every step defaults to. Empty string clears it.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description":
+                            "The model hint every step defaults to. Empty string clears it.",
+                    }
+                }),
+                &["id"],
             ),
         }),
         json!({

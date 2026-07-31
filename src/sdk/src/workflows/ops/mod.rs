@@ -34,7 +34,9 @@ use crate::workflows::{FileWorkflowStore, WorkflowError, WorkflowRecord, Workflo
 pub use evolve::{
     accept_proposal, add_note, evolve, notes, proposals, propose, reject_proposal, verify_proposal,
 };
-pub use graph::{apply_ops, catalog, create, delete, get, host_facts, list, preview_ops, validate};
+pub use graph::{
+    apply_ops, catalog, create, delete, get, host_facts, list, preview_ops, set_defaults, validate,
+};
 pub use runs::{cancel_run, dry_run, get_run, list_history, list_runs, rollback, run, undo};
 
 /// The store every operation reads and writes, discovered for this environment.
@@ -50,6 +52,7 @@ fn record_value(record: &WorkflowRecord) -> Value {
         "name": record.name,
         "description": record.description,
         "enabled": record.enabled,
+        "defaults": record.defaults,
         "graph": record.graph,
     })
 }

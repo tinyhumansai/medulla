@@ -37,9 +37,12 @@ pub const TOOL_MODE_ENV: &str = "MEDULLA_WORKFLOW_TOOLS";
 pub const TOOL_SCOPE_ENV: &str = "MEDULLA_WORKFLOW_SCOPE";
 
 /// The tools a [`ToolMode::Propose`] session does not get.
-const WITHHELD_IN_PROPOSE: [&str; 4] = [
+const WITHHELD_IN_PROPOSE: [&str; 5] = [
     "workflow_create",
     "workflow_apply_ops",
+    // Not part of the graph, but every bit as much an edit: changing the
+    // harness a workflow runs on changes what every future run does.
+    "workflow_defaults",
     "workflow_delete",
     "workflow_run",
 ];

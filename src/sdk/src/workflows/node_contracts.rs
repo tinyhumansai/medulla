@@ -34,6 +34,21 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
             "`config.prompt` carries the instruction. `instruction` is accepted as an alias, \
              since that is what the rest of Medulla calls it."
                 .to_string(),
+            format!(
+                "`config.harness` chooses *what* runs the step, as distinct from `agent_ref`, \
+                 which chooses *where*: one of {}, or the id of a custom harness preset the \
+                 worker exposes. `config.model` is the model hint. Omit both to inherit the \
+                 workflow's `defaults` block, and then the host's configuration.",
+                crate::flow_engine::HarnessSelector::builtin_names().join(", ")
+            ),
+            "Naming a `harness` and no `model` runs that harness on its own default model — an \
+             inherited model is deliberately left behind, because a model id chosen for one \
+             harness is meaningless or wrong on another. Name both when you mean both."
+                .to_string(),
+            "`harness` must be written plainly, never as a `=`-expression: which binary and \
+             which credentials run a step is a decision the graph makes, not one its data makes. \
+             Authoring one is refused rather than saved. `model` may be an expression."
+                .to_string(),
             "The harness reply is available as `=item.text`. If the harness replied with JSON \
              it is also parsed, so `=item.json.<field>` works without an output_parser."
                 .to_string(),

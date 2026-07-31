@@ -24,13 +24,14 @@ use super::evolve::ToolMode;
 ///
 /// There is still no tool to *cancel* a run. A copilot that started one is
 /// awaiting it; the operator cancels from the pane, where they can see it.
-pub const TOOL_NAMES: [&str; 18] = [
+pub const TOOL_NAMES: [&str; 19] = [
     "workflow_list",
     "workflow_get",
     "workflow_host",
     "workflow_catalog",
     "workflow_create",
     "workflow_apply_ops",
+    "workflow_defaults",
     "workflow_preview_ops",
     "workflow_validate",
     "workflow_dry_run",
@@ -143,6 +144,18 @@ pub(crate) async fn call(
         }
         "workflow_runs" => ops::list_runs(store, arg(&arguments, "id")?).map_err(to_rpc),
         "workflow_run_get" => ops::get_run(store, arg(&arguments, "runId")?).map_err(to_rpc),
+        "workflow_defaults" => {
+            let id = arg(&arguments, "id")?;
+            let harness = arguments.get("harness").and_then(Value::as_str);
+            let model = arguments.get("model").and_then(Value::as_str);
+            if harness.is_none() && model.is_none() {
+                return Err(RpcError::invalid_params(
+                    "workflow_defaults: pass 'harness', 'model', or both; an empty string clears \
+                     one",
+                ));
+            }
+            ops::set_defaults(store, id, harness, model).map_err(to_rpc)
+        }
         "workflow_host" => Ok(ops::host_facts(config)),
         "workflow_history" => ops::list_history(store, arg(&arguments, "id")?).map_err(to_rpc),
         "workflow_delete" => ops::delete(store, arg(&arguments, "id")?).map_err(to_rpc),

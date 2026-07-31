@@ -477,6 +477,89 @@ async fn the_host_tool_says_plainly_when_there_is_no_default_worker() {
 }
 
 #[tokio::test]
+async fn the_defaults_tool_pins_and_then_clears_a_workflow_s_harness() {
+    let (_root, store) = store();
+    call(
+        &store,
+        "workflow_create",
+        json!({ "id": "sweep", "document": document("sweep") }),
+    )
+    .await;
+
+    let (set, _) = call(
+        &store,
+        "workflow_defaults",
+        json!({ "id": "sweep", "harness": "codex", "model": "gpt-5-codex" }),
+    )
+    .await;
+    assert_eq!(set["defaults"]["harness"], "codex");
+
+    // Read back through the ordinary fetch, not from the write's own claim.
+    let (fetched, _) = call(&store, "workflow_get", json!({ "id": "sweep" })).await;
+    assert_eq!(fetched["defaults"]["model"], "gpt-5-codex");
+
+    // An empty string clears one field and leaves the other alone.
+    let (cleared, _) = call(
+        &store,
+        "workflow_defaults",
+        json!({ "id": "sweep", "harness": "" }),
+    )
+    .await;
+    assert!(cleared["defaults"].get("harness").is_none(), "{cleared}");
+    assert_eq!(cleared["defaults"]["model"], "gpt-5-codex");
+}
+
+#[tokio::test]
+async fn the_defaults_tool_refuses_a_harness_it_cannot_read() {
+    let (_root, store) = store();
+    call(
+        &store,
+        "workflow_create",
+        json!({ "id": "sweep", "document": document("sweep") }),
+    )
+    .await;
+
+    let (_, is_error) = call(
+        &store,
+        "workflow_defaults",
+        json!({ "id": "sweep", "harness": "claude code" }),
+    )
+    .await;
+
+    assert!(is_error, "an unreadable harness must be refused");
+    let (fetched, _) = call(&store, "workflow_get", json!({ "id": "sweep" })).await;
+    assert!(
+        fetched["defaults"].get("harness").is_none(),
+        "the workflow must be left untouched: {fetched}"
+    );
+}
+
+#[tokio::test]
+async fn the_host_tool_lists_the_harnesses_a_node_may_choose_between() {
+    let (_root, store) = store();
+
+    let (facts, _) = call(&store, "workflow_host", json!({})).await;
+
+    assert_eq!(
+        facts["builtinHarnesses"],
+        json!(["claude", "codex", "opencode"])
+    );
+    // Default config pins neither, so a node inherits whatever the worker runs.
+    assert_eq!(facts["defaultHarness"], json!(null));
+    assert_eq!(facts["defaultModel"], json!(null));
+    let notes: Vec<&str> = facts["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|note| note.as_str())
+        .collect();
+    assert!(
+        notes.iter().any(|note| note.contains("config.harness")),
+        "{notes:?}"
+    );
+}
+
+#[tokio::test]
 async fn history_and_delete_are_reachable_over_the_tool_surface() {
     let (_root, store) = store();
     call(

@@ -37,6 +37,47 @@ pub fn create(
     Ok(json!({ "created": record.id, "workflow": record_value(&record) }))
 }
 
+/// Set — or clear — a workflow's standing choice of harness and model.
+///
+/// A separate verb rather than a graph op, because the block is not part of the
+/// graph: it is a property of the workflow, and the patch language only speaks
+/// nodes and edges. An author who had to rewrite the whole document to pin a
+/// harness would lose everything they misremembered on the way.
+///
+/// `harness` and `model` are each three-valued: absent leaves the current
+/// setting alone, a blank string clears it, and anything else sets it. Clearing
+/// is spelled that way rather than with `null` because a tool argument that is
+/// literally absent and one that is `null` are the same thing to most callers.
+///
+/// # Errors
+///
+/// Returns [`WorkflowError`] when the workflow is missing, the harness cannot be
+/// one, or the write fails. The stored workflow is left untouched unless the
+/// whole change is accepted.
+pub fn set_defaults(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    harness: Option<&str>,
+    model: Option<&str>,
+) -> Result<Value, WorkflowError> {
+    let mut record = require(store.as_ref(), id)?;
+    if let Some(harness) = harness {
+        record.defaults.harness = Some(harness.trim().to_string()).filter(|s| !s.is_empty());
+    }
+    if let Some(model) = model {
+        record.defaults.model = Some(model.trim().to_string()).filter(|s| !s.is_empty());
+    }
+    record
+        .defaults
+        .preference()
+        .map_err(|message| WorkflowError::Invalid {
+            id: id.to_string(),
+            messages: vec![format!("`defaults`: {message}")],
+        })?;
+    store.save(&record)?;
+    Ok(json!({ "updated": record.id, "defaults": record.defaults }))
+}
+
 /// Remove a workflow.
 pub fn delete(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowError> {
     store.delete(id)?;
@@ -128,6 +169,16 @@ pub fn host_facts(config: &crate::config::WorkflowsConfig) -> Value {
         } else {
             Value::String(config.default_worker.clone())
         },
+        "builtinHarnesses": crate::flow_engine::HarnessSelector::builtin_names(),
+        "defaultHarness": config
+            .default_provider
+            .map(|provider| Value::String(provider.as_str().to_string()))
+            .unwrap_or(Value::Null),
+        "defaultModel": if config.default_model.trim().is_empty() {
+            Value::Null
+        } else {
+            Value::String(config.default_model.clone())
+        },
         "nativeTools": crate::flow_engine::caps::tools::NATIVE_TOOLS,
         "toolAllowlist": config.tool_allowlist,
         "httpAllowlist": config.http_allowlist,
@@ -142,6 +193,11 @@ pub fn host_facts(config: &crate::config::WorkflowsConfig) -> Value {
                 "An `agent` node with no `config.agent_ref` dispatches to the default worker \
                  above. Any other value must name a worker this host can actually reach."
             },
+            "An `agent` node may name its own `config.harness` and `config.model`, and a \
+             workflow document may set a `defaults` block for every node in it. Anything named \
+             there overrides `defaultHarness`/`defaultModel` above. A harness outside \
+             `builtinHarnesses` is taken as a custom preset id, and whether this host's workers \
+             expose that preset is only answered when the step runs.",
             "A `tool_call` slug outside `nativeTools` must appear in `toolAllowlist`, and even \
              then there is no third-party integration registry on this host — it will still \
              fail at run time. Express host-specific work as an `agent` node.",

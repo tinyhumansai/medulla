@@ -136,6 +136,10 @@ pub enum WorkflowAction {
     GetRun(String),
     /// `catalog [kind]` — the node kinds an author may use.
     Catalog(Option<String>),
+    /// `defaults <id>` — read, set, or clear the harness and model every step
+    /// of a workflow runs on. With neither `--harness` nor `--model` it prints
+    /// what is currently set rather than changing anything.
+    Defaults(String),
     /// `notes <id>` — everything recorded about a workflow.
     Notes(String),
     /// `note <id>` — record a note; `--kind` and `--text` say what.
@@ -178,6 +182,12 @@ pub struct WorkflowArgs {
     pub reason: Option<String>,
     /// `--supersedes <note-id>`, repeatable: notes this one replaces.
     pub supersedes: Vec<String>,
+    /// `--harness <name>`: the harness `defaults` pins for every step. An empty
+    /// string clears it; absent leaves whatever is set alone.
+    pub harness: Option<String>,
+    /// `--model <name>`: the model hint `defaults` pins for every step. Empty
+    /// clears, absent leaves alone.
+    pub model: Option<String>,
     /// The selected action.
     pub action: WorkflowAction,
 }
@@ -194,6 +204,8 @@ impl Default for WorkflowArgs {
             text: None,
             reason: None,
             supersedes: Vec::new(),
+            harness: None,
+            model: None,
             action: WorkflowAction::List,
         }
     }

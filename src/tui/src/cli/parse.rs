@@ -190,6 +190,19 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
                     out.text = it.next().cloned();
                 }
             }
+            // Empty is meaningful for both — it is how an operator clears a
+            // pinned harness or model — so these accept a value that a
+            // `!starts_with('-')` guard would otherwise have to allow anyway.
+            "--harness" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.harness = it.next().cloned();
+                }
+            }
+            "--model" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.model = it.next().cloned();
+                }
+            }
             "--reason" => {
                 if it.peek().is_some_and(|value| !value.starts_with('-')) {
                     out.reason = it.next().cloned();
@@ -247,6 +260,7 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
         }
         Some("get-run") => operand.map_or(WorkflowAction::List, WorkflowAction::GetRun),
         Some("catalog") | Some("kinds") => WorkflowAction::Catalog(operand),
+        Some("defaults") => operand.map_or(WorkflowAction::List, WorkflowAction::Defaults),
         Some("notes") => operand.map_or(WorkflowAction::List, WorkflowAction::Notes),
         Some("note") => operand.map_or(WorkflowAction::List, WorkflowAction::AddNote),
         Some("evolve") | Some("review") => {

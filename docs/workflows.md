@@ -120,8 +120,10 @@ makes — an expression there would let upstream output, including a model's own
 choose it. Authoring one is refused rather than saved. `model` may be an
 expression.
 
-The copilot sets the workflow-level block with `workflow_defaults`, and
-`workflow_host` reports what this machine offers.
+`medulla workflow defaults <id>` reads the block, and the same verb with
+`--harness`/`--model` sets it (an empty string clears one). The copilot does the
+same over `workflow_defaults`, and `workflow_host` reports what this machine
+offers.
 
 Any config string beginning `=` is a jq expression evaluated against
 `{ item, items, run, nodes }`.
@@ -130,6 +132,9 @@ Any config string beginning `=` is a jq expression evaluated against
 
 ```sh
 medulla workflow list                 # what is installed
+medulla workflow defaults triage      # what its steps run on
+medulla workflow defaults triage --harness codex --model gpt-5-codex
+medulla workflow defaults triage --harness ''   # back to the host default
 medulla workflow dry-run triage       # simulate: no harness, no network
 medulla workflow run triage           # for real, on this machine's CLIs
 medulla workflow list-runs triage     # history

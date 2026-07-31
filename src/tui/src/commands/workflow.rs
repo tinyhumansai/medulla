@@ -69,6 +69,15 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
         WorkflowAction::Catalog(kind) => ops::catalog(kind.as_deref())?,
         WorkflowAction::Run(id) => execute(&parsed, &store, &env, &cwd, id).await?,
         WorkflowAction::Resume(run_id) => resume(&parsed, &store, &env, &cwd, run_id).await?,
+        // Reading and writing share a verb because "what is this pinned to"
+        // and "pin it to that" are the same question asked twice, and a
+        // separate `show-defaults` would be a verb nobody remembers.
+        WorkflowAction::Defaults(id) => match (&parsed.harness, &parsed.model) {
+            (None, None) => json!({ "defaults": ops::get(&store, id)?["defaults"] }),
+            (harness, model) => {
+                ops::set_defaults(&store, id, harness.as_deref(), model.as_deref())?
+            }
+        },
         WorkflowAction::Notes(id) => ops::notes(&store, id)?,
         WorkflowAction::AddNote(id) => ops::add_note(
             &store,

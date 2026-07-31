@@ -412,6 +412,40 @@ fn parses_every_workflow_verb_with_its_operand() {
 }
 
 #[test]
+fn workflow_defaults_reads_the_harness_and_model_flags() {
+    let parsed = parse_workflow_args(&argv(&[
+        "defaults",
+        "sweep",
+        "--harness",
+        "codex",
+        "--model",
+        "gpt-5-codex",
+    ]));
+
+    assert_eq!(parsed.action, WorkflowAction::Defaults("sweep".into()));
+    assert_eq!(parsed.harness.as_deref(), Some("codex"));
+    assert_eq!(parsed.model.as_deref(), Some("gpt-5-codex"));
+}
+
+#[test]
+fn workflow_defaults_with_no_flags_is_a_read() {
+    // Absent is not the same as empty: absent leaves the setting alone (so the
+    // verb prints it), empty clears it.
+    let parsed = parse_workflow_args(&argv(&["defaults", "sweep"]));
+
+    assert_eq!(parsed.action, WorkflowAction::Defaults("sweep".into()));
+    assert_eq!(parsed.harness, None);
+    assert_eq!(parsed.model, None);
+}
+
+#[test]
+fn workflow_defaults_clears_with_an_empty_string() {
+    let parsed = parse_workflow_args(&argv(&["defaults", "sweep", "--harness", ""]));
+
+    assert_eq!(parsed.harness.as_deref(), Some(""));
+}
+
+#[test]
 fn workflow_aliases_reach_the_same_actions() {
     assert_eq!(
         parse_workflow_args(&argv(&["show", "sweep"])).action,

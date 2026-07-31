@@ -126,6 +126,7 @@ pub async fn run_workflow(
             "workflow '{workflow_id}' is disabled"
         )));
     }
+    refuse_unresolved_harness(&workflow)?;
 
     let settings = settings_for(&context.settings, &workflow)?;
 
@@ -292,6 +293,36 @@ fn settings_for(
     Ok(Arc::new(settings))
 }
 
+/// Refuse to run `workflow` if any `agent` node's `harness`/`provider` is an
+/// unresolved `=`-expression.
+///
+/// [`crate::workflows::gates::harness_failures`] is the same check
+/// `authoring::apply_ops`/`create` run before a write lands — but a graph can
+/// reach a run without ever passing through that write path (an operator hand-
+/// editing the saved JSON file directly, or a future store implementation that
+/// does not route through authoring), and by the time a node dispatches the
+/// engine has already resolved its config: an expression is indistinguishable
+/// from a name typed by hand. This is the last point before that happens where
+/// the raw, unresolved graph is still in hand, so it is the last point this can
+/// still be caught rather than silently letting upstream data or a model's own
+/// output choose which binary and which credentials run the step.
+///
+/// # Errors
+///
+/// Returns [`WorkflowError::Invalid`] naming every offending node.
+fn refuse_unresolved_harness(
+    workflow: &crate::workflows::WorkflowRecord,
+) -> Result<(), WorkflowError> {
+    let failures = crate::workflows::gates::harness_failures(&workflow.graph);
+    if failures.is_empty() {
+        return Ok(());
+    }
+    Err(WorkflowError::Invalid {
+        id: workflow.id.clone(),
+        messages: failures,
+    })
+}
+
 /// How a run stopped, when it did not produce an outcome.
 enum Settle {
     /// An operator or an abort frame cancelled it.
@@ -341,6 +372,7 @@ pub async fn resume_workflow(
     }
 
     let workflow = require(context.store.as_ref(), &record.workflow_id)?;
+    refuse_unresolved_harness(&workflow)?;
     let settings = settings_for(&context.settings, &workflow)?;
     let execution_graph = agent_evidence::instrumented(&workflow.graph);
     let compiled = execute::compile(&execution_graph).map_err(WorkflowError::Engine)?;

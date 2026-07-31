@@ -1,4 +1,8 @@
-//! Tests for the home module.
+//! Tests for the home module: the root/home split, the active-account marker,
+//! and the `.env` loader.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 use super::*;
 

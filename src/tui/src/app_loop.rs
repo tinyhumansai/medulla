@@ -78,30 +78,78 @@ async fn session_of(
     (session, account)
 }
 
-/// Run the login screen again for an already-booted core and store the result.
+/// What a login inside a running app resolved to.
+enum SignIn {
+    /// The operator quit the screen without signing in.
+    Quit,
+    /// The same account this process is running as, and its session is stored.
+    SameAccount,
+    /// A different account. Nothing was stored — see [`store_if_same_account`].
+    SwitchedAccount,
+}
+
+/// Run the login screen again for an already-booted core, and store the session
+/// only if it belongs to the account this process is running as.
 ///
-/// `Ok(true)` when a new session was stored and the app should start another
-/// session; `Ok(false)` when the operator quit from the screen. A core that
-/// rejects the freshly verified token is an error rather than a silent return to
-/// the screen: the token passed `/auth/me`, so a refusal here means the core and
-/// the login flow disagree about which deployment they are talking to, and
-/// looping would just ask for the same token again.
+/// A core that rejects the freshly verified token is an error rather than a
+/// silent return to the screen: the token passed `/auth/me`, so a refusal here
+/// means the core and the login flow disagree about which deployment they are
+/// talking to, and looping would just ask for the same token again.
 async fn relogin(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     core: &medulla::core_host::EmbeddedCore,
+    env: &std::collections::HashMap<String, String>,
     base_url: &str,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<SignIn> {
     match run_login_screen(terminal, base_url.to_string()).await? {
-        LoginOutcome::Quit => Ok(false),
-        LoginOutcome::Token(jwt) => {
-            medulla::core_host::auth::store_session(core, &jwt)
-                .await
-                .map_err(|e| {
-                    anyhow::anyhow!("signed in, but the core rejected the session: {e}")
-                })?;
-            Ok(true)
+        LoginOutcome::Quit => Ok(SignIn::Quit),
+        LoginOutcome::Token(jwt) => store_if_same_account(core, env, base_url, &jwt).await,
+    }
+}
+
+/// Hand a freshly verified token to the core — but only when it belongs to the
+/// account whose home this core was booted against.
+///
+/// The identity check has to come *before* the store, not after. This core's
+/// credential store lives inside one account's home, so storing first would
+/// write account B's bearer token into account A's directory: the operator ends
+/// up with a session they cannot reach (B's home has none) and a credential in a
+/// directory that is not theirs. Nothing is stored on a switch — the marker
+/// moves, the app stops, and the next launch signs in against B's own home.
+///
+/// The id comes from `/auth/me` rather than from the core's auth state because
+/// the core can only answer that question *after* the store this guards.
+///
+/// # Errors
+///
+/// The backend cannot say whose token this is, or the core rejects a session
+/// that does belong to this account.
+async fn store_if_same_account(
+    core: &medulla::core_host::EmbeddedCore,
+    env: &std::collections::HashMap<String, String>,
+    base_url: &str,
+    jwt: &str,
+) -> anyhow::Result<SignIn> {
+    let me = medulla::client::MedullaClient::new(base_url.to_string(), jwt.to_string())
+        .me()
+        .await
+        .map_err(|e| anyhow::anyhow!("signed in, but the account could not be read: {e}"))?;
+    let root = medulla::home::medulla_root(env);
+    let active = medulla::home::user::active_user_id(env, &root);
+
+    if let Some(user_id) = medulla::auth::user_id_from_me(&me) {
+        if user_id != active {
+            // A marker that cannot be written still means this token belongs to
+            // somebody the home does not: stop either way, and store nothing.
+            let _ = medulla::home::user::write_active_user_id(&root, &user_id);
+            return Ok(SignIn::SwitchedAccount);
         }
     }
+
+    medulla::core_host::auth::store_session(core, jwt)
+        .await
+        .map_err(|e| anyhow::anyhow!("signed in, but the core rejected the session: {e}"))?;
+    Ok(SignIn::SameAccount)
 }
 
 /// Whether this install has already been scoped to an account.
@@ -155,36 +203,13 @@ async fn sign_in_first_account(
     Ok(Some(jwt))
 }
 
-/// Record the account a just-signed-in core belongs to, and report whether it
-/// differs from the one this process is running as.
+/// What the operator is told when a login lands on a different account.
 ///
-/// `true` means the operator signed in as somebody else. Every path this process
-/// resolved — its config, its logs, its workflow store, the core's workspace —
-/// belongs to the previous account and cannot be re-derived in place, so the
-/// marker is moved and the caller stops rather than running the new account out
-/// of the old account's home.
-async fn adopt_core_account(
-    core: &medulla::core_host::EmbeddedCore,
-    env: &std::collections::HashMap<String, String>,
-) -> bool {
-    let Some(user_id) = medulla::core_host::auth::state(core)
-        .await
-        .ok()
-        .and_then(|state| state.user_id)
-    else {
-        return false;
-    };
-    let root = medulla::home::medulla_root(env);
-    if medulla::home::user::active_user_id(env, &root) == user_id {
-        return false;
-    }
-    // A marker that cannot be written still means this process is signed in as
-    // somebody the home does not belong to, so it stops either way. Continuing
-    // is the one outcome that would write the new account's work into the old
-    // account's directory.
-    let _ = medulla::home::user::write_active_user_id(&root, &user_id);
-    true
-}
+/// The session was deliberately not stored (see [`store_if_same_account`]), so
+/// the next launch signs in against that account's own home — which is where its
+/// credential belongs.
+const SWITCHED_ACCOUNT_NOTICE: &str =
+    "Signed in as a different account. Restart medulla to finish signing in as them.";
 
 /// Parse TUI args, select a runtime, set up the terminal, optionally run the
 /// login screen, start background services, and drive the event loop to exit.
@@ -403,19 +428,26 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 return Ok(());
             }
             LoginOutcome::Token(jwt) => {
-                // The core validates the JWT against the backend before writing
-                // it, so a rejected token fails here rather than after startup.
-                if let Err(e) = medulla::core_host::auth::store_session(&core, &jwt).await {
-                    drop(guard);
-                    anyhow::bail!("signed in, but the core rejected the session: {e}");
-                }
                 // Reached only when this install already had an account whose
                 // session went missing. Signing in as somebody else there means
-                // the process is running out of the wrong account's home.
-                if adopt_core_account(&core, &env).await {
-                    drop(guard);
-                    println!("Signed in as a different account. Restart medulla to open it.");
-                    return Ok(());
+                // the token belongs to an account this home does not, so it is
+                // never stored here — the check runs before the write.
+                //
+                // The core validates the JWT against the backend before writing
+                // it, so a rejected token fails here rather than after startup.
+                match store_if_same_account(&core, &env, &loaded.config.backend.base_url, &jwt)
+                    .await
+                {
+                    Ok(SignIn::SwitchedAccount) => {
+                        drop(guard);
+                        println!("{SWITCHED_ACCOUNT_NOTICE}");
+                        return Ok(());
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        drop(guard);
+                        return Err(e);
+                    }
                 }
                 match medulla::core_host::probe_medulla(&core).await {
                     medulla::core_host::Readiness::Ready => {
@@ -721,16 +753,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // runtime reports that it holds no session, so its logout never
                 // succeeds and this arm is unreachable for it.
                 if let Some(core) = core_arc.clone() {
-                    match relogin(&mut terminal, &core, &loaded.config.backend.base_url).await {
-                        Ok(true) => {
-                            // Signing in as a different account re-homes the
-                            // install, and this process cannot follow: its
-                            // config, logs, workflow store, and the core's own
-                            // workspace all belong to the account it started as.
-                            if adopt_core_account(&core, &env).await {
-                                account_switched = true;
-                                break Ok(());
-                            }
+                    match relogin(&mut terminal, &core, &env, &loaded.config.backend.base_url).await
+                    {
+                        // Signing in as a different account re-homes the
+                        // install, and this process cannot follow: its config,
+                        // logs, workflow store, and the core's own workspace all
+                        // belong to the account it started as. Their session was
+                        // not stored in it — the next launch signs them in
+                        // against their own home.
+                        Ok(SignIn::SwitchedAccount) => {
+                            account_switched = true;
+                            break Ok(());
+                        }
+                        Ok(SignIn::SameAccount) => {
                             (_, account) = session_of(&core, &loaded.config.backend.base_url).await;
                             runtime = core_runtime(
                                 core,
@@ -742,7 +777,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         }
                         // Quit from the login screen: the operator asked to
                         // leave, having already logged out.
-                        Ok(false) => break Ok(()),
+                        Ok(SignIn::Quit) => break Ok(()),
                         Err(e) => break Err(e),
                     }
                 }
@@ -761,7 +796,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                              // mid-session, the marker now names them, and the next launch opens their
                              // home. Nothing is lost — the previous account's directory stays put.
     if account_switched {
-        println!("Signed in as a different account. Restart medulla to open it.");
+        println!("{SWITCHED_ACCOUNT_NOTICE}");
     }
     result
 }

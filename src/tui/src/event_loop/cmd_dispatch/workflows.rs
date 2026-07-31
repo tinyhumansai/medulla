@@ -32,11 +32,12 @@ use super::AppMsg;
 pub(super) fn spawn_run(
     id: String,
     workflows_config: medulla::config::WorkflowsConfig,
+    custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let outcome = run(&id, &workflows_config).await;
+        let outcome = run(&id, &workflows_config, &custom_harnesses).await;
         let (status, failed) = match outcome {
             Ok((summary, failed)) => (summary, failed),
             Err(err) => (format!("workflow '{id}' failed: {err}"), None),
@@ -64,6 +65,7 @@ pub(super) fn spawn_run(
 async fn run(
     id: &str,
     workflows_config: &medulla::config::WorkflowsConfig,
+    custom_harnesses: &[medulla::config::CustomHarnessConfig],
 ) -> anyhow::Result<(String, Option<String>)> {
     let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -83,6 +85,11 @@ async fn run(
         default_provider: workflows_config.default_provider,
         model: (!workflows_config.default_model.is_empty())
             .then(|| workflows_config.default_model.clone()),
+        // The same presets this session's primary host advertises (see
+        // `LocalHostSpawner::custom_harnesses`), so an `agent` step naming a
+        // custom harness preset does not fail with "not configured on this
+        // host" purely because this one-shot daemon started with none.
+        custom_harnesses: custom_harnesses.to_vec(),
         ..Default::default()
     })
     .map_err(anyhow::Error::msg)?;

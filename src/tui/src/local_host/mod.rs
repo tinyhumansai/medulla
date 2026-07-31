@@ -442,6 +442,16 @@ impl LocalHostSpawner {
         self.started.lock().expect("started hosts").push(host);
         Ok(spec)
     }
+
+    /// The custom-harness presets this device's primary host was started with.
+    ///
+    /// Exposed so a one-shot embedded daemon started elsewhere for the same
+    /// session — a `medulla workflow run` invocation from the TUI's own event
+    /// loop — can advertise the same presets rather than starting with none and
+    /// rejecting a step that names one.
+    pub(crate) fn custom_harnesses(&self) -> &[medulla::config::CustomHarnessConfig] {
+        &self.options.custom_harnesses
+    }
 }
 
 /// Start every host this machine declares: the `[host]` primary, then each

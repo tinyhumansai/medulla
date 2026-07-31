@@ -229,7 +229,12 @@ pub(super) fn run_cmd(
             });
         }
         #[cfg(feature = "workflows")]
-        Cmd::RunWorkflow { id } => workflows::spawn_run(id, _workflows_config.clone(), msg_tx),
+        Cmd::RunWorkflow { id } => {
+            let custom_harnesses = local_hosts
+                .map(|spawner| spawner.custom_harnesses().to_vec())
+                .unwrap_or_default();
+            workflows::spawn_run(id, _workflows_config.clone(), custom_harnesses, msg_tx)
+        }
         #[cfg(feature = "workflows")]
         Cmd::DryRunWorkflow { id } => workflows::spawn_dry_run(id, msg_tx),
         #[cfg(feature = "workflows")]

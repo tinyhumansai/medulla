@@ -181,11 +181,19 @@ fn local_context(
         settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
     }
 
+    // A workflow's `agent` step may name a custom harness preset (see
+    // `flow_engine::harness_choice`); the embedded daemon this command starts
+    // must know that preset exists, or it rejects the step as not configured
+    // on this host even though the operator configured it right here. Filtered
+    // to this device's own `[host]` id, matching how the interactive TUI
+    // advertises presets to its primary host in `app_loop.rs`.
+    let custom_harnesses = local_custom_harnesses(&loaded);
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         model: (!loaded.config.workflows.default_model.is_empty())
             .then(|| loaded.config.workflows.default_model.clone()),
         default_provider: loaded.config.workflows.default_provider,
+        custom_harnesses,
         ..Default::default()
     })
     .map_err(anyhow::Error::msg)?;
@@ -241,6 +249,26 @@ fn read_stdin(what: &str) -> anyhow::Result<String> {
 fn read_stdin_json(what: &str) -> anyhow::Result<Value> {
     let body = read_stdin(what)?;
     serde_json::from_str(&body).map_err(|err| anyhow::anyhow!("{what}: invalid JSON: {err}"))
+}
+
+/// This machine's own custom-harness presets, for the one-shot embedded daemon
+/// this command starts.
+///
+/// Filtered to this device's `[host]` id, the same filter
+/// `local_host::options_from_config_with_custom` applies for the interactive
+/// TUI's primary host — a preset for another fleet machine is not this
+/// machine's to advertise or run. A load failure (a malformed presets file)
+/// is not fatal here: the run proceeds without custom harnesses rather than
+/// refusing to run a workflow that may not need one at all.
+fn local_custom_harnesses(
+    loaded: &medulla::config::LoadedConfig,
+) -> Vec<medulla::config::CustomHarnessConfig> {
+    let host_id = crate::local_host::host_address(&loaded.config.host);
+    medulla::config::load_layered_custom_harnesses(&loaded.sources)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|harness| harness.host_id == host_id)
+        .collect()
 }
 
 /// This machine's workflow settings.

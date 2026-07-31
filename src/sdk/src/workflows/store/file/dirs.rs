@@ -23,3 +23,7 @@ pub fn workflow_dirs(env: &HashMap<String, String>, cwd: &Path) -> Vec<PathBuf> 
         medulla_home(env).join("workflows"),
     ]
 }
+
+#[cfg(test)]
+#[path = "dirs_tests.rs"]
+mod tests;

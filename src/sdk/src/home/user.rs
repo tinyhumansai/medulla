@@ -25,7 +25,7 @@ pub const ACTIVE_USER_FILE: &str = "active_user.toml";
 /// also how an install is returned to the pre-login home without signing in
 /// (`MEDULLA_USER=local`), since nothing removes the marker: logout clears the
 /// session and leaves the selection, so signing back in still finds the
-/// account'"'"'s own config and its backend.
+/// account's own config and its backend.
 pub const MEDULLA_USER_ENV: &str = "MEDULLA_USER";
 
 /// The id used before anyone has signed in.

@@ -65,6 +65,63 @@ Things worth knowing about `agent` nodes here:
 - The harness reply is `=item.text`. If the harness replied with JSON it is
   parsed too, so `=item.json.<field>` works without an `output_parser`.
 - `config.requires_approval: true` parks the run until someone approves it.
+- `config.harness` chooses **what** runs the step, as distinct from `agent_ref`,
+  which chooses **where**: `claude`, `codex`, `opencode`, or the id of a custom
+  harness preset the worker exposes. `config.model` is the model hint.
+
+## Choosing a harness and a model
+
+A plan is rarely one model's worth of work: triage on something cheap,
+implementation on something expensive, one step on Codex because it is better at
+that step. So the choice is stated at whichever layer actually owns it, and the
+most specific one wins:
+
+| Layer | Where it is written |
+| --- | --- |
+| the step | `config.harness` / `config.model` on an `agent` node |
+| the workflow | the document's `defaults` block |
+| the host | `workflows.defaultProvider` / `workflows.defaultModel` |
+
+```json
+{
+  "id": "triage",
+  "defaults": { "harness": "claude", "model": "claude-opus-4" },
+  "nodes": [
+    { "id": "t", "kind": "trigger", "name": "start",
+      "config": { "trigger_kind": "manual" } },
+    { "id": "sift", "kind": "agent", "name": "Sift the queue",
+      "config": { "prompt": "which of these need a human?",
+                  "model": "claude-haiku-4-5" } },
+    { "id": "fix", "kind": "agent", "name": "Fix the top one",
+      "config": { "prompt": "fix it", "harness": "codex",
+                  "model": "gpt-5-codex" } }
+  ],
+  "edges": [
+    { "from_node": "t", "to_node": "sift" },
+    { "from_node": "sift", "to_node": "fix" }
+  ]
+}
+```
+
+Resolution is **paired**, not field-by-field: whichever layer names the harness
+also supplies the model, unless a layer above it named one explicitly. A node
+that says `harness: codex` and nothing else runs Codex on Codex's own default
+model rather than inheriting a Claude model id — a model chosen for one harness
+is meaningless, or wrong, on another. Name both when you mean both.
+
+A harness that is not one of the three built-in CLIs is taken as a custom
+harness preset id — the ones this machine has configured are listed by
+`workflow_host` and in the TUI's Routing → Harnesses screen. Whether the *worker*
+that runs the step exposes that preset is only answered when it runs.
+
+`harness` must be written plainly, never as a `=`-expression. Which binary and
+which credentials run a step is a decision the graph makes, not one its data
+makes — an expression there would let upstream output, including a model's own,
+choose it. Authoring one is refused rather than saved. `model` may be an
+expression.
+
+The copilot sets the workflow-level block with `workflow_defaults`, and
+`workflow_host` reports what this machine offers.
 
 Any config string beginning `=` is a jq expression evaluated against
 `{ item, items, run, nodes }`.

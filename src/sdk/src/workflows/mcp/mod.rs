@@ -98,7 +98,7 @@ pub fn preflight(env: &HashMap<String, String>, cwd: &Path) -> Result<(), String
 /// server that answered one would confuse the client's request correlation.
 pub async fn handle_request(
     store: &Arc<dyn WorkflowStore>,
-    config: &crate::config::WorkflowsConfig,
+    policy: &crate::workflows::ops::HostPolicy,
     mode: ToolMode,
     request: &Value,
 ) -> Option<Value> {
@@ -119,7 +119,7 @@ pub async fn handle_request(
             "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
         })),
         "tools/list" => Ok(json!({ "tools": tool_definitions(mode) })),
-        "tools/call" => tools::call(store, config, mode, &params).await,
+        "tools/call" => tools::call(store, policy, mode, &params).await,
         // Answered rather than errored: some clients probe for these before
         // deciding what the server offers, and an error reads as a broken
         // server rather than an empty list.
@@ -190,8 +190,21 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // config from `cwd`, silently answering with a different policy
     // (`allowCode`, `enabled`, …) than the harness session it serves was
     // actually launched under.
-    let config = crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
-        .map(|loaded| loaded.config.workflows)
+    // The custom harness presets ride along with the `workflows` section: an
+    // author choosing a harness needs to know which presets this machine has,
+    // and they live in their own config section rather than that one.
+    let policy = crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
+        .map(|loaded| {
+            let custom_harnesses = crate::config::load_layered_custom_harnesses(&loaded.sources)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|preset| preset.id)
+                .collect();
+            crate::workflows::ops::HostPolicy {
+                workflows: loaded.config.workflows,
+                custom_harnesses,
+            }
+        })
         .unwrap_or_default();
     // The mode the parent asked for. Read once at startup for the same reason
     // config is: this process serves exactly one harness session, and which
@@ -205,7 +218,7 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_request(&store, &config, mode, &request).await,
+            Ok(request) => handle_request(&store, &policy, mode, &request).await,
             Err(err) => Some(json!({
                 "jsonrpc": "2.0",
                 "id": Value::Null,

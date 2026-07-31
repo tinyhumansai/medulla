@@ -148,6 +148,32 @@ pub fn catalog(kind: Option<&str>) -> Result<Value, WorkflowError> {
     }
 }
 
+/// What a tool session is allowed to report about the machine it runs on.
+///
+/// The `workflows` config plus the one thing that is not in it: which custom
+/// harness presets this machine has. Presets live in their own config section
+/// and are loaded from the same layered sources, so they arrive here already
+/// resolved rather than being re-read per call.
+#[derive(Debug, Clone, Default)]
+pub struct HostPolicy {
+    /// The operator's `workflows` section.
+    pub workflows: crate::config::WorkflowsConfig,
+    /// The ids of the custom harness presets configured on this machine, in
+    /// config order. An author may name any of these as a node's `harness`.
+    pub custom_harnesses: Vec<String>,
+}
+
+impl HostPolicy {
+    /// A policy over `workflows` with no custom presets — every surface that
+    /// has the config but not the preset list.
+    pub fn from_workflows(workflows: crate::config::WorkflowsConfig) -> Self {
+        Self {
+            workflows,
+            custom_harnesses: Vec::new(),
+        }
+    }
+}
+
 /// What this host will actually permit a workflow to do.
 ///
 /// The grounding an author most needs and had no way to get. Every one of these
@@ -157,7 +183,8 @@ pub fn catalog(kind: Option<&str>) -> Result<Value, WorkflowError> {
 ///
 /// Read from configuration rather than guessed, so the answer is this machine's
 /// and not a plausible default.
-pub fn host_facts(config: &crate::config::WorkflowsConfig) -> Value {
+pub fn host_facts(policy: &HostPolicy) -> Value {
+    let config = &policy.workflows;
     // `run_script` refuses `ScriptLanguage::Shell` on Windows rather than
     // emulating a POSIX shell there (see its doc comment) — an author needs to
     // know that before writing a `medulla:shell`/`code` step, not after it
@@ -170,6 +197,7 @@ pub fn host_facts(config: &crate::config::WorkflowsConfig) -> Value {
             Value::String(config.default_worker.clone())
         },
         "builtinHarnesses": crate::flow_engine::HarnessSelector::builtin_names(),
+        "customHarnesses": policy.custom_harnesses,
         "defaultHarness": config
             .default_provider
             .map(|provider| Value::String(provider.as_str().to_string()))
@@ -196,8 +224,9 @@ pub fn host_facts(config: &crate::config::WorkflowsConfig) -> Value {
             "An `agent` node may name its own `config.harness` and `config.model`, and a \
              workflow document may set a `defaults` block for every node in it. Anything named \
              there overrides `defaultHarness`/`defaultModel` above. A harness outside \
-             `builtinHarnesses` is taken as a custom preset id, and whether this host's workers \
-             expose that preset is only answered when the step runs.",
+             `builtinHarnesses` is taken as a custom preset id — `customHarnesses` lists the ones \
+             this machine has configured, though the worker that runs the step is the one that \
+             has to expose it.",
             "A `tool_call` slug outside `nativeTools` must appear in `toolAllowlist`, and even \
              then there is no third-party integration registry on this host — it will still \
              fail at run time. Express host-specific work as an `agent` node.",

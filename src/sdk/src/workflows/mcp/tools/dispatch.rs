@@ -67,7 +67,7 @@ fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
 /// Run a `tools/call`.
 pub(crate) async fn call(
     store: &Arc<dyn WorkflowStore>,
-    config: &crate::config::WorkflowsConfig,
+    policy: &crate::workflows::ops::HostPolicy,
     mode: ToolMode,
     params: &Value,
 ) -> Result<Value, RpcError> {
@@ -138,7 +138,7 @@ pub(crate) async fn call(
             let input = arguments.get("input").cloned().unwrap_or(json!({}));
             let env: std::collections::HashMap<String, String> = std::env::vars().collect();
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            ops::run(store, config, &env, &cwd, id, input)
+            ops::run(store, &policy.workflows, &env, &cwd, id, input)
                 .await
                 .map_err(to_rpc)
         }
@@ -156,7 +156,7 @@ pub(crate) async fn call(
             }
             ops::set_defaults(store, id, harness, model).map_err(to_rpc)
         }
-        "workflow_host" => Ok(ops::host_facts(config)),
+        "workflow_host" => Ok(ops::host_facts(policy)),
         "workflow_history" => ops::list_history(store, arg(&arguments, "id")?).map_err(to_rpc),
         "workflow_delete" => ops::delete(store, arg(&arguments, "id")?).map_err(to_rpc),
         "workflow_notes" => ops::notes(store, arg(&arguments, "id")?).map_err(to_rpc),

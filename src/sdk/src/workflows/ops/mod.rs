@@ -36,6 +36,7 @@ pub use evolve::{
 };
 pub use graph::{
     apply_ops, catalog, create, delete, get, host_facts, list, preview_ops, set_defaults, validate,
+    HostPolicy,
 };
 pub use runs::{cancel_run, dry_run, get_run, list_history, list_runs, rollback, run, undo};
 

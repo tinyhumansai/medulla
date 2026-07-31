@@ -41,8 +41,8 @@ pub(super) fn document(id: &str) -> String {
 
 /// The host configuration these tests run against: permissive defaults, which
 /// is what a machine with no `[workflows]` section has.
-pub(super) fn config() -> crate::config::WorkflowsConfig {
-    crate::config::WorkflowsConfig::default()
+pub(super) fn config() -> crate::workflows::ops::HostPolicy {
+    crate::workflows::ops::HostPolicy::default()
 }
 
 /// Call a tool and return its parsed result payload plus the error flag.
@@ -547,6 +547,9 @@ async fn the_host_tool_lists_the_harnesses_a_node_may_choose_between() {
     // Default config pins neither, so a node inherits whatever the worker runs.
     assert_eq!(facts["defaultHarness"], json!(null));
     assert_eq!(facts["defaultModel"], json!(null));
+    // No presets configured in the fixture, but the key is always present so an
+    // author can tell "none configured" from "this host does not say".
+    assert_eq!(facts["customHarnesses"], json!([]));
     let notes: Vec<&str> = facts["notes"]
         .as_array()
         .unwrap()
@@ -556,6 +559,30 @@ async fn the_host_tool_lists_the_harnesses_a_node_may_choose_between() {
     assert!(
         notes.iter().any(|note| note.contains("config.harness")),
         "{notes:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_host_tool_names_the_custom_presets_this_machine_has() {
+    let (_root, store) = store();
+    let policy = crate::workflows::ops::HostPolicy {
+        custom_harnesses: vec!["deepseek-claude".into(), "kimi-codex".into()],
+        ..Default::default()
+    };
+    let request = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": "workflow_host", "arguments": {} },
+    });
+
+    let response = handle_request(&store, &policy, ToolMode::Full, &request)
+        .await
+        .expect("a response");
+    let facts: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+
+    assert_eq!(
+        facts["customHarnesses"],
+        json!(["deepseek-claude", "kimi-codex"])
     );
 }
 

@@ -56,7 +56,7 @@ pub(super) async fn call(
     arguments: &Value,
 ) -> Result<Value, RpcError> {
     let outcome = match name {
-        "fleet_status" => Ok(status(session)),
+        "fleet_status" => status(session).await,
         "fleet_workers" => op(session, "worker.list", json!({})).await,
         "fleet_tasks" => op(session, "task.list", json!({})).await,
         "fleet_dispatch" => {
@@ -100,29 +100,36 @@ pub(super) async fn call(
     })
 }
 
-/// What `fleet_status` reports, answered locally from the handshake.
-///
-/// No round trip: everything here was settled when the session connected, and a
-/// model calling this to decide whether delegating is possible at all should not
-/// pay for a socket call to find out.
-fn status(session: &McpSession) -> Value {
-    match session.fleet.hello() {
-        Some(hello) => json!({
-            "connected": true,
-            "version": hello.version,
-            "hubReady": hello.hub_ready,
-            "depth": hello.depth,
-            "maxDepth": hello.max_depth,
-            "maxInFlight": hello.max_in_flight,
-            "mayDispatch": hello.may_dispatch(),
-        }),
-        None => json!({
+/// What `fleet_status` reports, combining stable grant facts with live readiness.
+async fn status(session: &McpSession) -> Result<Value, String> {
+    match session.fleet.hello().cloned() {
+        Some(hello) => {
+            let hub_ready = match session.fleet.call("worker.list", json!({})).await {
+                Ok(_) => true,
+                Err(ControlError::Refused(failure))
+                    if failure.kind == crate::control_socket::ErrorKind::HubNotReady =>
+                {
+                    false
+                }
+                Err(error) => return Err(describe_failure(error)),
+            };
+            Ok(json!({
+                "connected": true,
+                "version": hello.version,
+                "hubReady": hub_ready,
+                "depth": hello.depth,
+                "maxDepth": hello.max_depth,
+                "maxInFlight": hello.max_in_flight,
+                "mayDispatch": hello.may_dispatch(),
+            }))
+        }
+        None => Ok(json!({
             "connected": false,
             "mayDispatch": false,
             "detail":
                 "no Medulla fleet is reachable from this session — do the work here rather \
                  than waiting for one",
-        }),
+        })),
     }
 }
 

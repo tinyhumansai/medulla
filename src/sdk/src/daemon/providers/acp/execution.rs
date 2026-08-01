@@ -91,7 +91,13 @@ fn medulla_mcp_servers(
             // environment by the daemon from the task frame. Read here and
             // recorded in the grant, so every later check consults the grant
             // rather than an environment the harness itself could rewrite.
-            let grant = session_grant(session, task_env, plane.max_depth, plane.max_in_flight);
+            let grant = session_grant(
+                session,
+                task_env,
+                tool_mode,
+                plane.max_depth,
+                plane.max_in_flight,
+            );
             server
                 .env
                 .push(agent_client_protocol::schema::v1::EnvVariable::new(
@@ -136,11 +142,14 @@ fn medulla_mcp_servers(
 pub(super) fn session_grant(
     session: &str,
     task_env: &HashMap<String, String>,
+    tool_mode: Option<&str>,
     max_depth: u8,
     max_in_flight: usize,
 ) -> crate::control_socket::Grant {
     let depth = crate::control_socket::depth_from_env(task_env);
-    crate::control_socket::Grant::new(session, depth, max_depth).with_max_in_flight(max_in_flight)
+    crate::control_socket::Grant::new(session, depth, max_depth)
+        .with_max_in_flight(max_in_flight)
+        .with_tool_mode(tool_mode)
 }
 
 /// Environment switch selecting ACP instead of legacy provider JSONL.

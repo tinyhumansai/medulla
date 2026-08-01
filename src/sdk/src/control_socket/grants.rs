@@ -38,6 +38,12 @@ pub struct Grant {
     pub families: ToolFamilies,
     /// The most concurrent dispatches the holder may have in flight.
     pub max_in_flight: usize,
+    /// The workflow-tool restriction delegated work must inherit.
+    ///
+    /// `None` is an ordinary authoring turn. Proposal turns carry their scoped
+    /// wire value so a reviewer cannot escape its read-only boundary by asking
+    /// another fleet worker to continue the review.
+    pub tool_mode: Option<String>,
 }
 
 impl Grant {
@@ -49,6 +55,7 @@ impl Grant {
             max_depth,
             families: ToolFamilies::default(),
             max_in_flight: 4,
+            tool_mode: None,
         }
     }
 
@@ -61,6 +68,12 @@ impl Grant {
     /// Set the concurrent-dispatch ceiling.
     pub fn with_max_in_flight(mut self, max_in_flight: usize) -> Self {
         self.max_in_flight = max_in_flight.max(1);
+        self
+    }
+
+    /// Restrict every task delegated with this grant to `tool_mode`.
+    pub fn with_tool_mode(mut self, tool_mode: Option<&str>) -> Self {
+        self.tool_mode = tool_mode.map(str::to_string);
         self
     }
 

@@ -203,10 +203,10 @@ fn build_request(
         provider,
         custom_harness: None,
         model: optional_str(params, "model"),
-        // An ordinary dispatch, so the harness it reaches gets the full
-        // authoring surface — the restricted modes belong to review turns,
-        // which are not something a tool caller can ask for.
-        tool_mode: None,
+        // A proposal-mode reviewer stays proposal-only when it delegates. The
+        // value comes from the server-side grant, never caller parameters, so
+        // the caller can neither widen nor forge the workflow scope.
+        tool_mode: grant.tool_mode.clone(),
         workflow: optional_str(params, "workflow"),
         // Context-free by default, which the field's own documentation calls
         // the invariant that lets two tasks run concurrently without seeing

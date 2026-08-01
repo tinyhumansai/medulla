@@ -282,6 +282,28 @@ async fn medulla_mints_the_ids_and_keeps_the_task_context_free() {
 }
 
 #[tokio::test]
+async fn a_proposal_grant_keeps_delegated_work_in_proposal_mode() {
+    let grant = Grant::new("review-session", 0, 2).with_tool_mode(Some("propose:workflow-a"));
+    let mut harness = Harness::with(FakeFleet::new(), grant);
+
+    let dispatched = harness
+        .call("task.dispatch", json!({ "instruction": "review this" }))
+        .await;
+    let handle = dispatched["result"]["taskId"].as_str().unwrap();
+    harness
+        .call("task.get", json!({ "taskId": handle, "waitSeconds": 5 }))
+        .await;
+
+    let requests = harness.fake.dispatched.lock().unwrap();
+    assert_eq!(
+        requests
+            .first()
+            .and_then(|request| request.tool_mode.as_deref()),
+        Some("propose:workflow-a")
+    );
+}
+
+#[tokio::test]
 async fn polling_an_unknown_task_says_tasks_do_not_outlive_the_instance() {
     let response = Harness::new()
         .call("task.get", json!({ "taskId": "mcp-nope" }))

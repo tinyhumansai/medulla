@@ -152,7 +152,9 @@ impl DaemonRuntime {
     pub(super) async fn handle_workflow_task(&self, from: String, frame: TaskFrame, id: String) {
         let correlation = frame.correlation_id.clone();
 
-        let settings = self.workflow_settings();
+        let mut settings = CapabilitySettings::clone(&self.workflow_settings());
+        settings.fleet_depth = frame.fleet_depth;
+        let settings = Arc::new(settings);
         if !settings.enabled {
             self.reply(
                 &from,

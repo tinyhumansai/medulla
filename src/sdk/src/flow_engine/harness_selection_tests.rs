@@ -142,6 +142,17 @@ async fn the_workflow_default_reaches_a_node_through_the_run_settings() {
 }
 
 #[tokio::test]
+async fn a_workflow_agent_node_inherits_the_runs_fleet_depth() {
+    let root = tempfile::tempdir().unwrap();
+    let mut settings = CapabilitySettings::clone(&settings(root.path()));
+    settings.fleet_depth = 2;
+
+    let frame = frame_for(Arc::new(settings), root.path(), json!({ "prompt": "hi" })).await;
+
+    assert_eq!(frame.fleet_depth, 2);
+}
+
+#[tokio::test]
 async fn an_unusable_harness_fails_the_node_rather_than_running_elsewhere() {
     let root = tempfile::tempdir().unwrap();
     let caps = build_capabilities(

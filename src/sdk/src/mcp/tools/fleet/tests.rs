@@ -149,20 +149,37 @@ async fn at_the_depth_ceiling_the_verbs_that_start_work_are_withheld() {
 }
 
 #[tokio::test]
-async fn status_answers_without_a_round_trip() {
-    let backend = Arc::new(FakeBackend::connected());
+async fn status_refreshes_hub_readiness_after_the_handshake() {
+    let mut backend = FakeBackend::connected();
+    backend.hello.as_mut().unwrap().hub_ready = false;
+    let backend = Arc::new(backend);
     let (_root, session) = session(backend.clone());
 
     let (payload, is_error) = call(&session, "fleet_status", json!({})).await;
 
     assert!(!is_error);
     assert_eq!(payload["connected"], json!(true));
+    assert_eq!(payload["hubReady"], json!(true));
     assert_eq!(payload["mayDispatch"], json!(true));
     assert_eq!(payload["maxDepth"], json!(2));
-    assert!(
-        backend.calls.lock().unwrap().is_empty(),
-        "status is settled at handshake; it should cost no socket call"
+    assert_eq!(
+        backend.calls.lock().unwrap().as_slice(),
+        [("worker.list".to_string(), json!({}))]
     );
+}
+
+#[tokio::test]
+async fn status_reports_a_still_connecting_hub_without_failing() {
+    let backend = Arc::new(FakeBackend::refusing(ControlError::Refused(
+        ControlFailure::new(ErrorKind::HubNotReady, "still connecting"),
+    )));
+    let (_root, session) = session(backend);
+
+    let (payload, is_error) = call(&session, "fleet_status", json!({})).await;
+
+    assert!(!is_error);
+    assert_eq!(payload["connected"], json!(true));
+    assert_eq!(payload["hubReady"], json!(false));
 }
 
 #[tokio::test]
@@ -181,15 +198,17 @@ async fn calling_a_fleet_tool_without_a_grant_is_refused_readably() {
         .contains("not available to this session"));
 }
 
-#[test]
-fn the_offline_status_payload_tells_a_model_to_do_the_work_itself() {
+#[tokio::test]
+async fn the_offline_status_payload_tells_a_model_to_do_the_work_itself() {
     // The rendering used when a session *does* hold the family but its backend
     // has no handshake — reachable if a fleet is granted and the socket dies.
     let payload = super::status(&McpSession::local(
         Arc::new(FileWorkflowStore::new(vec![], std::path::PathBuf::new())),
         Default::default(),
         ToolMode::Full,
-    ));
+    ))
+    .await
+    .unwrap();
 
     assert_eq!(payload["connected"], json!(false));
     assert_eq!(payload["mayDispatch"], json!(false));

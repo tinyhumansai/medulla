@@ -1,9 +1,17 @@
 //! Named OpenRouter-backed harness presets.
 //!
-//! A preset keeps the coding harness and the inference provider separate:
-//! Claude Code or Codex remains the agent runtime, while OpenRouter supplies
-//! the model and credential. Secrets are referenced by environment-variable
-//! name and are never stored in the config document.
+//! A preset keeps the coding harness and the inference provider separate: the
+//! coding CLI remains the agent runtime, while OpenRouter supplies the model and
+//! credential. Secrets are referenced by environment-variable name and are never
+//! stored in the config document.
+//!
+//! All three harnesses are accepted. OpenCode was excluded while presets were
+//! purely an endpoint adapter — it has native OpenRouter provider configuration
+//! and needed no help reaching the API. That native path is precisely the one
+//! that bypasses [`crate::inference_proxy`], so an OpenCode run configured
+//! outside Medulla spends the operator's credit while crediting OpenCode for the
+//! traffic. Routing it through a preset is what brings it under Medulla's
+//! attribution.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -17,8 +25,13 @@ use crate::tinyplace::HarnessProvider;
 pub const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
 /// OpenRouter's Anthropic-compatible endpoint used by Claude Code.
 pub const OPENROUTER_ANTHROPIC_URL: &str = "https://openrouter.ai/api";
-/// OpenRouter's OpenAI-compatible endpoint used by Codex.
+/// OpenRouter's OpenAI-compatible endpoint used by Codex and OpenCode.
 pub const OPENROUTER_OPENAI_URL: &str = "https://openrouter.ai/api/v1";
+
+/// The compact editor-line format, and the error shown when a line does not
+/// match it. Shared so the TUI's prompt and the parser's rejection cannot drift.
+pub const EDITOR_LINE_FORMAT: &str =
+    "expected: id | name | claude|codex|opencode | model | fast-model | host-id";
 
 /// One named harness preset that runs an OpenRouter model through a coding CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,8 +72,8 @@ impl CustomHarnessConfig {
     /// Validate and normalize a preset before it is persisted or executed.
     ///
     /// IDs are deliberately shell- and wire-safe because they cross the fleet
-    /// protocol. Only Claude Code and Codex are accepted: OpenCode already has
-    /// native OpenRouter provider configuration and does not need this adapter.
+    /// protocol. Every built-in harness is accepted — see the module docs for why
+    /// OpenCode is no longer excluded.
     pub fn normalize(mut self) -> Result<Self, String> {
         self.id = self.id.trim().to_string();
         self.name = self.name.trim().to_string();
@@ -94,12 +107,6 @@ impl CustomHarnessConfig {
         if self.api_key_env.is_empty() {
             return Err("API-key environment variable is required".into());
         }
-        if !matches!(
-            self.base_harness,
-            HarnessProvider::Claude | HarnessProvider::Codex
-        ) {
-            return Err("base harness must be claude or codex".into());
-        }
         Ok(self)
     }
 
@@ -127,8 +134,8 @@ impl CustomHarnessConfig {
     /// Non-secret environment overrides needed by the reused coding harness.
     ///
     /// Claude Code has internal model tiers, so mapping all of them is what
-    /// keeps sub-agents on OpenRouter too. Codex receives its model through the
-    /// existing `-m` argument and needs no additional variables.
+    /// keeps sub-agents on OpenRouter too. Codex and OpenCode receive their model
+    /// through an existing argument (`-m`) and need no additional variables.
     pub fn harness_env(&self) -> Vec<(String, String)> {
         if self.base_harness != HarnessProvider::Claude {
             return Vec::new();
@@ -167,15 +174,16 @@ impl CustomHarnessConfig {
 
     /// Parse the TUI's compact editor line.
     ///
-    /// The format is `id | name | claude|codex | model | fast-model | host-id`.
+    /// The format is
+    /// `id | name | claude|codex|opencode | model | fast-model | host-id`.
     /// Empty fast-model falls back to the main model.
     pub fn from_editor_line(line: &str) -> Result<Self, String> {
         let fields: Vec<&str> = line.split('|').map(str::trim).collect();
         if fields.len() != 6 {
-            return Err("expected: id | name | claude|codex | model | fast-model | host-id".into());
+            return Err(EDITOR_LINE_FORMAT.into());
         }
         let base_harness = HarnessProvider::from_wire(fields[2])
-            .ok_or_else(|| "base harness must be claude or codex".to_string())?;
+            .ok_or_else(|| "base harness must be claude, codex or opencode".to_string())?;
         Self {
             id: fields[0].into(),
             name: fields[1].into(),

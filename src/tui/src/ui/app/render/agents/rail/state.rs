@@ -11,6 +11,71 @@ use super::super::super::color;
 use super::status::{self, HarnessVisualState};
 
 impl App {
+    /// The presence/status glyph for a lane row.
+    pub(in crate::ui::app::render) fn lane_marker(
+        &self,
+        item: &AgentLane,
+        is_fn: bool,
+    ) -> &'static str {
+        if is_fn {
+            "ƒ"
+        } else if item.role != AgentRole::Agent {
+            "●"
+        } else if item.session_id.is_some() {
+            match self.session_state(item).as_deref() {
+                Some("ended") => "○",
+                _ => "●",
+            }
+        } else if let Some(aid) = &item.agent_id {
+            match self.snapshot.presence.get(aid) {
+                Some(p) if p.online => "●",
+                Some(_) => "○",
+                None if item.descriptor.is_some() => "◌",
+                None => "◆",
+            }
+        } else if item.descriptor.is_some() {
+            "◌"
+        } else {
+            "◆"
+        }
+    }
+
+    /// The state of the session backing a lane, if any.
+    pub(in crate::ui::app::render) fn session_state(&self, item: &AgentLane) -> Option<String> {
+        let (sid, pid) = (item.session_id.as_ref()?, item.parent_agent_id.as_ref()?);
+        self.snapshot
+            .sessions
+            .get(pid)?
+            .iter()
+            .find(|s| &s.id == sid)
+            .map(|s| s.state.clone())
+    }
+
+    /// A short human-readable state suffix for a lane row.
+    pub(in crate::ui::app::render) fn lane_state(
+        &self,
+        item: &AgentLane,
+        waiting_sessions: &HashSet<String>,
+    ) -> String {
+        if item.session_id.is_some() {
+            self.session_state(item)
+                .map(|_| {
+                    format!(
+                        " · {}",
+                        self.harness_visual_state(item, waiting_sessions).label()
+                    )
+                })
+                .unwrap_or_else(|| " · …".into())
+        } else if item.role == AgentRole::Agent {
+            format!(
+                " · {}",
+                self.harness_visual_state(item, waiting_sessions).label()
+            )
+        } else {
+            String::new()
+        }
+    }
+
     /// Style a lane while preserving selection visibility and harness state.
     pub(super) fn lane_style(
         &self,

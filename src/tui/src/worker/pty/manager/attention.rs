@@ -23,6 +23,7 @@
 use std::sync::{Arc, Weak};
 
 use super::super::attention::{self, AttentionKind, HarnessAttention};
+use super::session::consumed_bell_count;
 use super::PtyManager;
 
 /// How often a session's screen is reclassified.
@@ -38,6 +39,20 @@ const ATTENTION_INTERVAL: std::time::Duration = std::time::Duration::from_millis
 const ATTENTION_INTERVAL_MS: i64 = (ATTENTION_INTERVAL.as_millis() as i64) * 3 / 4;
 
 impl PtyManager {
+    /// Read the emulator's current bell counter without holding the sessions
+    /// lock while the screen is locked.
+    pub(super) fn current_bell_count(&self, id: &str) -> Option<usize> {
+        let screen = {
+            let sessions = self.inner.sessions.lock().unwrap();
+            sessions
+                .iter()
+                .find(|s| s.row.id == id)
+                .map(|s| s.screen.clone())
+        }?;
+        let parser = screen.lock().unwrap();
+        Some(parser.screen().audible_bell_count())
+    }
+
     /// Sample `id`'s screen on a timer for as long as the session lives.
     ///
     /// A timer rather than the reader thread, and that is the whole design
@@ -156,10 +171,15 @@ impl PtyManager {
     ///
     /// Returns whether there was anything to clear.
     pub fn acknowledge(&self, id: &str) -> bool {
+        let bells = self.current_bell_count(id);
         let mut sessions = self.inner.sessions.lock().unwrap();
         let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) else {
             return false;
         };
+        if let Some(bells) = bells {
+            session.seen_bells = consumed_bell_count(session.seen_bells, bells);
+        }
+        session.attention_generation = session.attention_generation.wrapping_add(1);
         session.row.attention.take().is_some()
     }
 

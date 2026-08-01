@@ -51,12 +51,7 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
     ),
     (
         HarnessProvider::Codex,
-        &[
-            "andtellcodexwhattodo",
-            "allowcodexto",
-            "codexwantsto",
-            "yesproceed",
-        ],
+        &["andtellcodexwhattodo", "allowcodexto", "codexwantsto"],
         AttentionKind::Approval,
         "codex is asking permission",
     ),

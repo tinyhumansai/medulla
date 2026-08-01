@@ -117,6 +117,8 @@ mod attention;
 mod open;
 mod screen;
 mod session;
+#[cfg(test)]
+mod tests;
 
 pub use screen::{ScreenCell, ScreenSnapshot};
 

@@ -7,6 +7,12 @@ use super::super::types::{HarnessControl, PtyState, SessionRow};
 
 use super::PtyManager;
 
+/// Advance the consumed-bell watermark without allowing a stale screen sample
+/// to move it backwards.
+pub(super) fn consumed_bell_count(seen: usize, sampled: usize) -> usize {
+    seen.max(sampled)
+}
+
 impl PtyManager {
     /// Record why a queued write never reached the child.
     ///
@@ -158,23 +164,16 @@ impl PtyManager {
     /// generation also prevents a classifier already reading the screen from
     /// restoring the completed turn's bell after this method returns.
     pub fn release(&self, id: &str) {
-        let screen = {
-            let sessions = self.inner.sessions.lock().unwrap();
-            sessions
-                .iter()
-                .find(|s| s.row.id == id)
-                .map(|s| s.screen.clone())
-        };
-        let bells = screen.map(|screen| {
-            let parser = screen.lock().unwrap();
-            parser.screen().audible_bell_count()
-        });
+        let bells = self.current_bell_count(id);
 
         let mut sessions = self.inner.sessions.lock().unwrap();
         if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
             session.row.busy = false;
             if let Some(bells) = bells {
-                session.seen_bells = bells;
+                // A classifier may have stored a newer count after the screen
+                // snapshot above. Bell counters are monotonic, so never move
+                // the consumed watermark backwards.
+                session.seen_bells = consumed_bell_count(session.seen_bells, bells);
             }
             session.attention_generation = session.attention_generation.wrapping_add(1);
             session.row.attention = session

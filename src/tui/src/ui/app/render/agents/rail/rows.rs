@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
 use unicode_width::UnicodeWidthStr;
 
@@ -12,6 +12,7 @@ use crate::worker::pty::{HarnessAttention, HarnessControl, SessionRow, ATTENTION
 
 use super::super::super::super::types::App;
 use super::super::super::color;
+use super::status::HarnessVisualState;
 use super::wrap::{home_dir, short_home, wrap_line, wrap_path};
 use super::CONT_INDENT;
 
@@ -33,7 +34,7 @@ impl App {
             self.theme.selection()
         } else if waiting.is_some() {
             Style::default()
-                .fg(Color::Yellow)
+                .fg(HarnessVisualState::NeedsInput.color())
                 .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
         } else if row.control == HarnessControl::User {
             Style::default().fg(color("cyan"))

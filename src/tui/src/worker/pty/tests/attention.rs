@@ -4,6 +4,9 @@
 //! real pty so the wiring is covered too — the reader thread refreshing, the
 //! throttle, the bell counter, and the row the UI actually reads.
 
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
+
 use super::super::attention::AttentionKind;
 use super::{sh, wait_for, PtyManager};
 
@@ -49,6 +52,28 @@ fn acknowledging_a_live_prompt_takes_the_cue_off_the_row() {
     // What is deterministic, and what the attach path depends on, is that this
     // call found a cue and removed it.
     assert!(manager.acknowledge(&id), "a live cue to clear");
+    manager.shutdown();
+}
+
+#[test]
+fn acknowledging_consumes_an_unclassified_bell() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh("printf 'ready for you\\a\\n'; sleep 30"))
+        .expect("a session");
+
+    wait_for("the bell output to reach the emulator", || {
+        super::screen_text(&manager, &id).contains("ready for you")
+    });
+    assert!(!manager.acknowledge(&id), "the poller has not stored a cue");
+
+    // Let classification resume. It must see the bell as already consumed by
+    // the acknowledgment rather than installing it after the operator leaves.
+    now.store(1_000, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    assert_eq!(manager.attention(&id), None);
     manager.shutdown();
 }
 

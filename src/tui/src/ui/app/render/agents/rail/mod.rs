@@ -14,7 +14,7 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::ui::agents::{AgentLane, AgentRole, TaskStatus};
+use crate::ui::agents::{AgentLane, TaskStatus};
 use crate::worker::pty::ATTENTION_GLYPH;
 
 use super::super::super::rail::{RailRow, NEW_HARNESS_LABEL};
@@ -264,76 +264,5 @@ impl App {
             Span::styled(format!(" {NEW_HARNESS_LABEL} "), style),
             Span::styled(" ⏎ / ^T", Style::default().add_modifier(Modifier::DIM)),
         ])
-    }
-
-    /// The presence/status glyph for a lane row.
-    pub(in crate::ui::app::render) fn lane_marker(
-        &self,
-        item: &AgentLane,
-        is_fn: bool,
-    ) -> &'static str {
-        if is_fn {
-            "ƒ"
-        } else if item.role != AgentRole::Agent {
-            "●"
-        } else if item.session_id.is_some() {
-            let state = self.session_state(item);
-            match state.as_deref() {
-                Some("ended") => "○",
-                _ => "●",
-            }
-        } else if let Some(aid) = &item.agent_id {
-            match self.snapshot.presence.get(aid) {
-                Some(p) => {
-                    if p.online {
-                        "●"
-                    } else {
-                        "○"
-                    }
-                }
-                None if item.descriptor.is_some() => "◌",
-                None => "◆",
-            }
-        } else if item.descriptor.is_some() {
-            "◌"
-        } else {
-            "◆"
-        }
-    }
-
-    /// The state of the session backing a lane, if any.
-    pub(in crate::ui::app::render) fn session_state(&self, item: &AgentLane) -> Option<String> {
-        let (sid, pid) = (item.session_id.as_ref()?, item.parent_agent_id.as_ref()?);
-        self.snapshot
-            .sessions
-            .get(pid)?
-            .iter()
-            .find(|s| &s.id == sid)
-            .map(|s| s.state.clone())
-    }
-
-    /// A short human-readable state suffix for a lane row.
-    pub(in crate::ui::app::render) fn lane_state(
-        &self,
-        item: &AgentLane,
-        waiting_sessions: &std::collections::HashSet<String>,
-    ) -> String {
-        if item.session_id.is_some() {
-            self.session_state(item)
-                .map(|_| {
-                    format!(
-                        " · {}",
-                        self.harness_visual_state(item, waiting_sessions).label()
-                    )
-                })
-                .unwrap_or_else(|| " · …".into())
-        } else if item.role == AgentRole::Agent {
-            format!(
-                " · {}",
-                self.harness_visual_state(item, waiting_sessions).label()
-            )
-        } else {
-            String::new()
-        }
     }
 }

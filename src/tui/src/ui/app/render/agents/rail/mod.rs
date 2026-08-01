@@ -207,7 +207,7 @@ impl App {
         match row {
             RailRow::Harness(session) => self.own_harness_lines(session, active, width, now),
             other => wrap_line(
-                &self.rail_row_line(other, lanes, active, waiting_sessions),
+                &self.rail_row_line(other, lanes, active, waiting_sessions, now),
                 width,
                 CONT_INDENT,
             ),

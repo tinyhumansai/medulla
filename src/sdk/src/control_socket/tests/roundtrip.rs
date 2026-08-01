@@ -108,6 +108,28 @@ async fn a_hanging_task_can_be_aborted_over_the_wire() {
 }
 
 #[tokio::test]
+async fn abort_immediately_after_dispatch_is_not_lost_before_registration() {
+    let (_dir, server, token) = serve(FakeFleet::new().with_outcome(FakeOutcome::Hang)).await;
+    let mut client = ControlClient::connect(server.path(), &token).await.unwrap();
+
+    let dispatched = client
+        .call("task.dispatch", json!({ "instruction": "forever" }))
+        .await
+        .unwrap();
+    let task_id = dispatched["taskId"].as_str().unwrap().to_string();
+    client
+        .call("task.abort", json!({ "taskId": task_id.clone() }))
+        .await
+        .unwrap();
+
+    let settled = client
+        .call("task.get", json!({ "taskId": task_id, "waitSeconds": 5 }))
+        .await
+        .unwrap();
+    assert_eq!(settled["status"], json!("aborted"));
+}
+
+#[tokio::test]
 async fn connecting_where_nothing_listens_is_no_instance_not_an_error() {
     // The ordinary case for a harness whose spawn carried no grant. It must be a
     // value the shim can turn into a readable refusal, never a reason to die.

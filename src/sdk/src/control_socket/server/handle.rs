@@ -388,12 +388,10 @@ async fn task_dispatch(
     }
     let worker = resolve_worker(ops, optional_str(params, "worker").as_deref())?;
     let request = build_request(grant, params, worker.clone())?;
-    let task_id = match registry.spawn_below_limit(
-        ops.clone(),
-        token.to_string(),
-        request,
-        grant.max_in_flight,
-    ) {
+    let task_id = match registry
+        .spawn_below_limit(ops.clone(), token.to_string(), request, grant.max_in_flight)
+        .await
+    {
         Ok(task_id) => task_id,
         Err(super::registry::SpawnError::AtCapacity(in_flight)) => {
             return Err(ControlFailure::new(

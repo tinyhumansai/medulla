@@ -181,7 +181,7 @@ impl TaskRegistry {
     /// spawned task and writes its terminal state back here. `task_id` is taken
     /// from the request rather than minted here so the caller — which also set
     /// `abort_id` — keeps the two consistent.
-    pub(super) fn spawn_below_limit(
+    pub(super) async fn spawn_below_limit(
         &self,
         ops: Arc<dyn FleetOps>,
         token: String,
@@ -191,6 +191,7 @@ impl TaskRegistry {
         let task_id = request.abort_id.clone();
         let (settled, _) = watch::channel(false);
         let (status_tx, mut status_rx) = mpsc::unbounded_channel::<String>();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
 
         let entry = TaskEntry {
             task_id: task_id.clone(),
@@ -238,7 +239,23 @@ impl TaskRegistry {
         let done_registry = self.clone();
         let done_id = task_id.clone();
         tokio::spawn(async move {
-            let state = match ops.dispatch(request, Some(status_tx)).await {
+            use std::future::Future;
+
+            let mut dispatch = Box::pin(ops.dispatch(request, Some(status_tx)));
+            // Poll through the dispatch's synchronous setup before publishing
+            // its handle. HubFleetOps reaches TaskRunner's abort registration
+            // before its first Pending, closing the dispatch-then-abort race.
+            let immediate = std::future::poll_fn(|cx| match dispatch.as_mut().poll(cx) {
+                std::task::Poll::Ready(outcome) => std::task::Poll::Ready(Some(outcome)),
+                std::task::Poll::Pending => std::task::Poll::Ready(None),
+            })
+            .await;
+            let _ = started_tx.send(());
+            let outcome = match immediate {
+                Some(outcome) => outcome,
+                None => dispatch.await,
+            };
+            let state = match outcome {
                 Ok(outcome) => TaskState::Done(Box::new(outcome)),
                 Err(error) => state_from_error(error),
             };
@@ -251,6 +268,9 @@ impl TaskRegistry {
             settled.send_replace(true);
         });
 
+        // A returned handle is now cancellable: the production dispatch has
+        // registered its abort signal, or it already settled synchronously.
+        let _ = started_rx.await;
         Ok(task_id)
     }
 

@@ -9,6 +9,8 @@ mod hub_ops;
 #[cfg(test)]
 mod hub_ops_tests;
 mod registry;
+#[cfg(test)]
+mod tests;
 
 pub use handle::{handle_control, SessionState};
 pub use hub_ops::{FleetDefaults, HubFleetOps, HubSlot};
@@ -168,10 +170,10 @@ async fn serve_connection(
     registry: TaskRegistry,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> std::io::Result<()> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncWriteExt, BufReader};
 
     let (read_half, mut write_half) = stream.into_split();
-    let mut lines = BufReader::new(read_half).lines();
+    let mut reader = BufReader::new(read_half);
     let mut session = SessionState::default();
 
     loop {
@@ -183,7 +185,7 @@ async fn serve_connection(
         let next = if session.grant().is_none() {
             tokio::select! {
                 _ = shutdown.changed() => return Ok(()),
-                read = tokio::time::timeout(HANDSHAKE_TIMEOUT, lines.next_line()) => match read {
+                read = tokio::time::timeout(HANDSHAKE_TIMEOUT, read_frame(&mut reader)) => match read {
                     Ok(next) => next?,
                     Err(_) => return Ok(()),
                 },
@@ -191,7 +193,7 @@ async fn serve_connection(
         } else {
             tokio::select! {
                 _ = shutdown.changed() => return Ok(()),
-                read = lines.next_line() => read?,
+                read = read_frame(&mut reader) => read?,
             }
         };
         let Some(line) = next else {
@@ -221,4 +223,38 @@ async fn serve_connection(
             .await?;
         write_half.flush().await?;
     }
+}
+
+/// Read one newline-delimited frame without ever accumulating an endless line.
+///
+/// `None` means EOF or an oversized frame; both close the connection. The
+/// per-call `take` limit applies before `read_until` buffers bytes, which is the
+/// property a length check after `lines.next_line()` cannot provide.
+#[cfg(unix)]
+async fn read_frame<R>(reader: &mut R) -> std::io::Result<Option<String>>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+
+    let mut bytes = Vec::with_capacity(4096);
+    let read = reader
+        .take((MAX_FRAME_BYTES + 2) as u64)
+        .read_until(b'\n', &mut bytes)
+        .await?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+        if bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
+    }
+    if bytes.len() > MAX_FRAME_BYTES {
+        return Ok(None);
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
 }

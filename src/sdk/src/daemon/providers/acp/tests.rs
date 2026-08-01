@@ -9,6 +9,21 @@ use crate::tinyplace::HarnessProvider;
 
 use super::types::FoldState;
 
+#[cfg(feature = "workflows")]
+#[test]
+fn session_grants_read_depth_from_the_task_environment() {
+    let env = HashMap::from([(
+        crate::control_socket::FLEET_DEPTH_ENV.to_string(),
+        "2".to_string(),
+    )]);
+
+    let grant = super::execution::session_grant("nested", &env, 3, 5);
+
+    assert_eq!(grant.depth, 2);
+    assert_eq!(grant.max_depth, 3);
+    assert_eq!(grant.max_in_flight, 5);
+}
+
 #[test]
 fn agent_message_chunks_form_one_reply() {
     let mut state = FoldState::new(None);

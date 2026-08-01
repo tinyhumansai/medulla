@@ -172,19 +172,27 @@ pub fn control_socket_path(
     Err(ControlSocketError::NoViablePath)
 }
 
-/// Create the socket's parent directory, private to this user.
+/// Create the socket's parent directory, private to this user when Medulla owns
+/// the path.
 ///
-/// Created at `0700` rather than created-then-tightened: the mode is applied on
-/// every call, so a directory that already existed with looser bits is fixed
-/// rather than trusted.
+/// A default path is tightened to `0700` on every call. An explicitly trusted
+/// path preserves an existing parent's permissions, but a parent created for it
+/// is still private.
 #[cfg(unix)]
-fn ensure_private_parent(path: &Path) -> Result<(), ControlSocketError> {
+fn ensure_private_parent(path: &Path, trusted_path: bool) -> Result<(), ControlSocketError> {
     use std::os::unix::fs::PermissionsExt;
 
     let Some(parent) = path.parent() else {
         return Ok(());
     };
+    let existed = parent.exists();
     std::fs::create_dir_all(parent).map_err(|e| ControlSocketError::Io(e.to_string()))?;
+    // An explicitly named path may deliberately live in a shared directory.
+    // Never mutate permissions on a directory Medulla did not create and does
+    // not own merely because the operator placed a socket beneath it.
+    if trusted_path && existed {
+        return Ok(());
+    }
     let mut perms = std::fs::metadata(parent)
         .map_err(|e| ControlSocketError::Io(e.to_string()))?
         .permissions();
@@ -214,10 +222,10 @@ fn parent_is_insecure(path: &Path) -> bool {
 
 /// Make `path` bindable, or say why it is not.
 ///
-/// Creates a private parent directory, then decides what to do about anything
-/// already at the path: nothing there is fine; a non-socket is a hard error and
-/// is never unlinked; an existing socket is *probed* by connecting to it, and
-/// only unlinked when nothing answers.
+/// Creates or validates the parent directory, then decides what to do about
+/// anything already at the path: nothing there is fine; a non-socket is a hard
+/// error and is never unlinked; an existing socket is *probed* by connecting to
+/// it, and only unlinked when nothing answers.
 ///
 /// The probe is deliberate. A pid file can go stale in the other direction — a
 /// reused pid reads as live — and needs its own locking to stay honest, whereas
@@ -233,7 +241,7 @@ fn parent_is_insecure(path: &Path) -> bool {
 pub async fn prepare_bind(path: &Path, trusted_path: bool) -> Result<(), ControlSocketError> {
     use std::os::unix::fs::FileTypeExt;
 
-    ensure_private_parent(path)?;
+    ensure_private_parent(path, trusted_path)?;
     // An operator who named an explicit path may have good reasons for an
     // unusual directory; the default path is ours and must be private.
     if !trusted_path && parent_is_insecure(path) {

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use medulla::control_socket::{
-    control_socket_path, ControlServer, FleetDefaults, FleetOps, HubFleetOps,
+    control_socket_path, ControlServer, FleetDefaults, FleetOps, HubFleetOps, CONTROL_SOCKET_ENV,
 };
 
 use crate::hub_relay::HubSlot;
@@ -62,9 +62,13 @@ pub(crate) async fn start(
             worker_address: Some(config.host.effective_address()),
         };
         let ops: Arc<dyn FleetOps> = Arc::new(HubFleetOps::new(hub, defaults));
-        // An operator who named an explicit path may have their reasons for an
-        // unusual directory; the default path is ours, and is checked.
-        let trusted_path = configured.is_some();
+        // An operator who named an explicit path in config or the environment
+        // may have their reasons for an unusual directory; the default path is
+        // ours, and is checked.
+        let trusted_path = configured.is_some()
+            || env
+                .get(CONTROL_SOCKET_ENV)
+                .is_some_and(|value| !value.trim().is_empty());
         match ControlServer::bind(&path, ops, Default::default(), trusted_path).await {
             Ok(server) => {
                 // Recorded process-wide so the ACP spawn path can mint a grant

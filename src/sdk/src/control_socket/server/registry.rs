@@ -155,6 +155,14 @@ struct Tracked {
     settled: watch::Sender<bool>,
 }
 
+/// Why a task could not be recorded for dispatch.
+pub(super) enum SpawnError {
+    /// This grant already owns the reported number of running tasks.
+    AtCapacity(usize),
+    /// The shared task table is unavailable after an internal panic.
+    Unavailable,
+}
+
 /// Every task this control plane has dispatched.
 #[derive(Clone, Default)]
 pub struct TaskRegistry {
@@ -173,7 +181,13 @@ impl TaskRegistry {
     /// spawned task and writes its terminal state back here. `task_id` is taken
     /// from the request rather than minted here so the caller — which also set
     /// `abort_id` — keeps the two consistent.
-    pub fn spawn(&self, ops: Arc<dyn FleetOps>, token: String, request: TaskRequest) -> String {
+    pub(super) fn spawn_below_limit(
+        &self,
+        ops: Arc<dyn FleetOps>,
+        token: String,
+        request: TaskRequest,
+        max_in_flight: usize,
+    ) -> Result<String, SpawnError> {
         let task_id = request.abort_id.clone();
         let (settled, _) = watch::channel(false);
         let (status_tx, mut status_rx) = mpsc::unbounded_channel::<String>();
@@ -189,8 +203,18 @@ impl TaskRegistry {
             status_tail: Vec::new(),
         };
 
-        if let Ok(mut tasks) = self.inner.lock() {
+        {
+            let mut tasks = self.inner.lock().map_err(|_| SpawnError::Unavailable)?;
             Self::evict(&mut tasks);
+            let in_flight = tasks
+                .values()
+                .filter(|tracked| {
+                    tracked.entry.token == entry.token && !tracked.entry.state.is_settled()
+                })
+                .count();
+            if in_flight >= max_in_flight {
+                return Err(SpawnError::AtCapacity(in_flight));
+            }
             tasks.insert(
                 task_id.clone(),
                 Tracked {
@@ -227,7 +251,7 @@ impl TaskRegistry {
             settled.send_replace(true);
         });
 
-        task_id
+        Ok(task_id)
     }
 
     /// Append one status line to a task's tail, dropping the oldest past the cap.

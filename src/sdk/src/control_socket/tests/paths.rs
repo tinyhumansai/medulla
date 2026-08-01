@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use super::super::path::{control_socket_path, ControlSocketError, CONTROL_SOCKET_ENV};
+#[cfg(unix)]
+use super::super::path::ControlSocketError;
+use super::super::path::{control_socket_path, CONTROL_SOCKET_ENV};
 
 /// An environment map from pairs.
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -197,5 +199,21 @@ mod bind {
             .permissions()
             .mode();
         assert_eq!(mode & 0o077, 0, "parent should be owner-only");
+    }
+
+    #[tokio::test]
+    async fn an_explicit_paths_existing_parent_keeps_its_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let path = shared.join("control.sock");
+
+        prepare_bind(&path, true).await.unwrap();
+
+        let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o777, "shared parent must not be chmodded");
     }
 }

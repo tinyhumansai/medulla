@@ -242,11 +242,22 @@ pub async fn handle_control(
         };
     }
 
-    let Some((token, grant)) = session.authenticated.clone() else {
+    let Some((token, _)) = session.authenticated.clone() else {
         return fail(
             &id,
             ErrorKind::Unauthenticated,
             "send `hello` with a valid grant before anything else",
+        );
+    };
+    // Authentication is a live capability, not a one-time identity check. A
+    // session revoke must stop connections that completed `hello` before the
+    // harness ended as well as connections opened afterwards.
+    let Some(grant) = grants.redeem(&token) else {
+        session.authenticated = None;
+        return fail(
+            &id,
+            ErrorKind::Unauthenticated,
+            "that grant is no longer valid; the session it was minted for has ended",
         );
     };
 
@@ -367,20 +378,31 @@ async fn task_dispatch(
             ),
         ));
     }
-    let in_flight = registry.in_flight(token);
-    if in_flight >= grant.max_in_flight {
-        return Err(ControlFailure::new(
-            ErrorKind::TooManyInFlight,
-            format!(
-                "you already have {in_flight} task(s) running, which is this session's limit; \
-                 wait for one to finish before dispatching another"
-            ),
-        ));
-    }
-
     let worker = resolve_worker(ops, optional_str(params, "worker").as_deref())?;
     let request = build_request(grant, params, worker.clone())?;
-    let task_id = registry.spawn(ops.clone(), token.to_string(), request);
+    let task_id = match registry.spawn_below_limit(
+        ops.clone(),
+        token.to_string(),
+        request,
+        grant.max_in_flight,
+    ) {
+        Ok(task_id) => task_id,
+        Err(super::registry::SpawnError::AtCapacity(in_flight)) => {
+            return Err(ControlFailure::new(
+                ErrorKind::TooManyInFlight,
+                format!(
+                    "you already have {in_flight} task(s) running, which is this session's limit; \
+                     wait for one to finish before dispatching another"
+                ),
+            ));
+        }
+        Err(super::registry::SpawnError::Unavailable) => {
+            return Err(ControlFailure::new(
+                ErrorKind::Internal,
+                "the task registry is unavailable",
+            ));
+        }
+    };
     Ok(json!({ "taskId": task_id, "worker": worker, "status": "running" }))
 }
 

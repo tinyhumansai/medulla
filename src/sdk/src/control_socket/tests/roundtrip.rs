@@ -155,6 +155,26 @@ async fn a_revoked_grant_stops_working_for_new_connections() {
 }
 
 #[tokio::test]
+async fn a_revoked_grant_stops_working_on_an_open_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("control.sock");
+    let grants = GrantRegistry::new();
+    let token = grants.mint(Grant::new("ending", 0, 2));
+    let ops: Arc<dyn FleetOps> = Arc::new(FakeFleet::new());
+    let _server = ControlServer::bind(&path, ops, grants.clone(), false)
+        .await
+        .unwrap();
+    let mut client = ControlClient::connect(&path, &token).await.unwrap();
+
+    grants.revoke("ending");
+
+    assert!(matches!(
+        client.call("worker.list", json!({})).await,
+        Err(ControlError::Refused(failure)) if failure.kind == ErrorKind::Unauthenticated
+    ));
+}
+
+#[tokio::test]
 async fn a_dropped_server_surfaces_as_disconnected_and_cleans_up() {
     let (_dir, server, token) = serve(FakeFleet::new()).await;
     let path = server.path().to_path_buf();

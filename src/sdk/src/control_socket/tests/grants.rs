@@ -183,6 +183,44 @@ async fn a_grant_at_its_concurrency_ceiling_sheds_rather_than_queues() {
     assert_eq!(second["error"]["retryable"], json!(true));
 }
 
+#[tokio::test]
+async fn concurrent_connections_reserve_one_in_flight_slot_atomically() {
+    let grants = GrantRegistry::new();
+    let token = grants.mint(Grant::new("busy", 0, 2).with_max_in_flight(1));
+    let ops: Arc<dyn FleetOps> = Arc::new(FakeFleet::new().with_outcome(super::FakeOutcome::Hang));
+    let registry = TaskRegistry::new();
+
+    let (first, second) = tokio::join!(
+        call(
+            &ops,
+            &grants,
+            &registry,
+            &token,
+            "task.dispatch",
+            json!({ "instruction": "first" }),
+        ),
+        call(
+            &ops,
+            &grants,
+            &registry,
+            &token,
+            "task.dispatch",
+            json!({ "instruction": "second" }),
+        ),
+    );
+
+    let successes = [&first, &second]
+        .into_iter()
+        .filter(|response| response["ok"] == json!(true))
+        .count();
+    let shed = [&first, &second]
+        .into_iter()
+        .filter(|response| response["error"]["kind"] == json!("tooManyInFlight"))
+        .count();
+    assert_eq!((successes, shed), (1, 1));
+    assert_eq!(registry.in_flight(&token), 1);
+}
+
 #[test]
 fn a_concurrency_ceiling_is_never_zero() {
     // Zero would advertise the tool and refuse every call, which reads as broken

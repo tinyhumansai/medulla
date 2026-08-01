@@ -10,9 +10,11 @@
 //! so nothing has to fail at call time to communicate it.
 
 mod offline;
+#[cfg(unix)]
 mod proxy;
 
 pub use offline::OfflineFleet;
+#[cfg(unix)]
 pub use proxy::ProxyFleet;
 
 use std::collections::HashMap;

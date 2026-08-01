@@ -39,10 +39,11 @@ use super::types::FoldState;
 fn medulla_mcp_servers(
     tool_mode: Option<&str>,
     session: &str,
+    task_env: &HashMap<String, String>,
 ) -> Vec<agent_client_protocol::schema::v1::McpServer> {
     #[cfg(not(feature = "workflows"))]
     {
-        let _ = (tool_mode, session);
+        let _ = (tool_mode, session, task_env);
         Vec::new()
     }
     #[cfg(feature = "workflows")]
@@ -50,17 +51,19 @@ fn medulla_mcp_servers(
         use agent_client_protocol::schema::v1::{McpServer, McpServerStdio};
         // An operator who turned workflows off should not have harnesses handed
         // tools that would be refused.
-        let env: std::collections::HashMap<String, String> = std::env::vars().collect();
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         // Respects the parent's `--config`, if one was recorded — see
         // `crate::config::CONFIG_PATH_ENV`. Rediscovering here regardless of
         // that would let a policy the operator explicitly chose (say,
         // `allowCode = false`) be silently overridden by whatever config this
         // subprocess's own `cwd` happens to discover.
-        let enabled =
-            crate::config::load_config(crate::config::explicit_config_from_env(&env), &env, &cwd)
-                .map(|loaded| loaded.config.workflows.enabled)
-                .unwrap_or(true);
+        let enabled = crate::config::load_config(
+            crate::config::explicit_config_from_env(task_env),
+            task_env,
+            &cwd,
+        )
+        .map(|loaded| loaded.config.workflows.enabled)
+        .unwrap_or(true);
         if !enabled {
             return Vec::new();
         }
@@ -88,9 +91,7 @@ fn medulla_mcp_servers(
             // environment by the daemon from the task frame. Read here and
             // recorded in the grant, so every later check consults the grant
             // rather than an environment the harness itself could rewrite.
-            let depth = crate::control_socket::depth_from_env(&env);
-            let grant = crate::control_socket::Grant::new(session, depth, plane.max_depth)
-                .with_max_in_flight(plane.max_in_flight);
+            let grant = session_grant(session, task_env, plane.max_depth, plane.max_in_flight);
             server
                 .env
                 .push(agent_client_protocol::schema::v1::EnvVariable::new(
@@ -127,6 +128,21 @@ fn medulla_mcp_servers(
     }
 }
 
+/// Build the capability for one ACP session from that task's own environment.
+///
+/// The daemon process serves tasks at many depths concurrently, so ambient
+/// process variables cannot describe the session being created.
+#[cfg(feature = "workflows")]
+pub(super) fn session_grant(
+    session: &str,
+    task_env: &HashMap<String, String>,
+    max_depth: u8,
+    max_in_flight: usize,
+) -> crate::control_socket::Grant {
+    let depth = crate::control_socket::depth_from_env(task_env);
+    crate::control_socket::Grant::new(session, depth, max_depth).with_max_in_flight(max_in_flight)
+}
+
 /// Environment switch selecting ACP instead of legacy provider JSONL.
 pub const HARNESS_PROTOCOL_ENV: &str = "MEDULLA_HARNESS_PROTOCOL";
 
@@ -158,6 +174,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     // Kept outside the closure, which moves its copy, so the grant can be
     // revoked once the session is over however it ended.
     let revoke_key = session_key.clone();
+    let task_env = options.env.clone();
     let state = Arc::new(Mutex::new(FoldState::new(options.on_event)));
     let notification_state = state.clone();
     let approve = options.skip_permissions;
@@ -213,7 +230,8 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // agent that edits the graph and one that can only discuss
                     // it, and it would fail silently: the model would explain
                     // what it would have done.
-                    request.mcp_servers = medulla_mcp_servers(tool_mode.as_deref(), &session_key);
+                    request.mcp_servers =
+                        medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env);
                     connection.send_request(request).block_task().await?;
                     id.into()
                 }
@@ -223,7 +241,8 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // *client* here, so this is the only way it can hand a
                     // harness anything to call — and it is what lets a coding
                     // agent author a workflow rather than only run one.
-                    request.mcp_servers = medulla_mcp_servers(tool_mode.as_deref(), &session_key);
+                    request.mcp_servers =
+                        medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env);
                     connection
                         .send_request(request)
                         .block_task()

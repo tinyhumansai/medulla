@@ -5,22 +5,30 @@
 //! exclusive, [`paths`] covers socket resolution and bind safety, and
 //! [`roundtrip`] drives a real listener with a real client.
 
+#[cfg(unix)]
 mod grants;
 mod paths;
+#[cfg(unix)]
 mod protocol;
 #[cfg(unix)]
 mod roundtrip;
 
+#[cfg(unix)]
 use std::sync::Mutex;
 
+#[cfg(unix)]
 use tokio::sync::mpsc;
 
+#[cfg(unix)]
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
+#[cfg(unix)]
 use crate::tinyplace::TokenUsage;
 
+#[cfg(unix)]
 use super::types::{FleetOps, FleetWorker};
 
 /// How a fake dispatch should end.
+#[cfg(unix)]
 #[derive(Debug, Clone)]
 pub(super) enum FakeOutcome {
     /// Settle immediately with this reply.
@@ -32,6 +40,7 @@ pub(super) enum FakeOutcome {
 }
 
 /// A fleet that answers however a test tells it to.
+#[cfg(unix)]
 pub(super) struct FakeFleet {
     /// The roster, or `None` to simulate a hub that has not connected.
     workers: Mutex<Option<Vec<FleetWorker>>>,
@@ -51,6 +60,7 @@ pub(super) struct FakeFleet {
     hang_release: tokio::sync::watch::Sender<bool>,
 }
 
+#[cfg(unix)]
 impl FakeFleet {
     /// A fleet with one worker that replies immediately.
     pub(super) fn new() -> Self {
@@ -91,6 +101,7 @@ impl FakeFleet {
     }
 }
 
+#[cfg(unix)]
 #[async_trait::async_trait]
 impl FleetOps for FakeFleet {
     fn workers(&self) -> Option<Vec<FleetWorker>> {

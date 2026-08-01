@@ -125,6 +125,18 @@ async fn an_unknown_token_is_refused() {
 }
 
 #[tokio::test]
+async fn revocation_stops_an_already_authenticated_connection() {
+    let mut harness = Harness::new();
+    harness.hello().await;
+
+    harness.grants.revoke("session-1");
+    let response = harness.raw("worker.list", json!({})).await;
+
+    assert_eq!(kind(&response), "unauthenticated");
+    assert!(harness.session.grant().is_none());
+}
+
+#[tokio::test]
 async fn a_protocol_from_another_build_is_named_as_such() {
     let mut harness = Harness::new();
     let token = harness.token.clone();

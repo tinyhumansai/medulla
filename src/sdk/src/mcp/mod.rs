@@ -33,7 +33,9 @@ mod tools;
 mod tests;
 
 pub use backend::{FleetBackend, OfflineFleet};
-pub use tools::{tool_definitions, ToolMode, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV};
+pub use tools::{
+    tool_definitions, ToolMode, FLEET_TOOL_NAMES, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV,
+};
 
 use std::collections::HashMap;
 use std::path::Path;

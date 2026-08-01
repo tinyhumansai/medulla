@@ -63,7 +63,10 @@ pub(super) fn session_with(
         store: store.clone(),
         policy,
         mode,
-        families: crate::control_socket::ToolFamilies::default(),
+        // No fleet behind this session, so no fleet family either — the two
+        // travel together, and a session claiming the family with nothing
+        // behind it is not a state production can reach.
+        families: crate::control_socket::ToolFamilies::workflows_only(),
         fleet: Arc::new(crate::mcp::OfflineFleet),
     }
 }

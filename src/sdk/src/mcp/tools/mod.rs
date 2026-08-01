@@ -8,6 +8,7 @@
 mod definitions;
 mod dispatch;
 pub mod evolve;
+pub mod fleet;
 
 pub use definitions::tool_definitions;
 pub(super) use dispatch::call;
@@ -15,3 +16,4 @@ pub(super) use dispatch::call;
 pub(crate) use dispatch::scope_error_for;
 pub use dispatch::TOOL_NAMES;
 pub use evolve::{ToolMode, TOOL_MODE_ENV, TOOL_SCOPE_ENV};
+pub use fleet::FLEET_TOOL_NAMES;

@@ -55,7 +55,7 @@ pub(super) fn schema(properties: Value, required: &[&str]) -> Value {
 }
 
 /// A required string argument.
-fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
+pub(super) fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
     arguments
         .get(name)
         .and_then(Value::as_str)
@@ -119,6 +119,12 @@ pub(crate) async fn call(
     }
     if !mode.allows(name) {
         return Ok(content(&json!({ "error": mode.refusal(name) }), true));
+    }
+
+    // The fleet family reaches the control plane rather than the local store, so
+    // it branches off before the workflow verbs are matched.
+    if name.starts_with("fleet_") {
+        return super::fleet::call(session, name, &arguments).await;
     }
     if let Some(error) = scope_error(mode, name, &arguments) {
         return Ok(content(&json!({ "error": error }), true));
@@ -306,7 +312,7 @@ fn string_list(arguments: &Value, name: &str) -> Vec<String> {
 }
 
 /// Wrap a value as an MCP tool result.
-fn content(value: &Value, is_error: bool) -> Value {
+pub(super) fn content(value: &Value, is_error: bool) -> Value {
     json!({
         "content": [{
             "type": "text",

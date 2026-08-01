@@ -19,7 +19,7 @@ use crate::workflows::node_contracts::render_node_kinds_line;
 /// family is not shown that family — so both restrictions hold without
 /// depending on the model having read and believed a standing instruction.
 pub fn tool_definitions(session: &super::super::McpSession) -> Vec<Value> {
-    all_definitions()
+    all_definitions(session)
         .into_iter()
         .filter(|tool| {
             tool.get("name")
@@ -29,8 +29,12 @@ pub fn tool_definitions(session: &super::super::McpSession) -> Vec<Value> {
         .collect()
 }
 
-/// Every tool, before any mode filtering.
-fn all_definitions() -> Vec<Value> {
+/// Every tool this session could be served, before mode and family filtering.
+///
+/// The fleet family is asked for the dispatch verbs only when this session's
+/// grant actually permits dispatching, so a depth-capped harness never sees
+/// `fleet_dispatch` in its list at all.
+fn all_definitions(session: &super::super::McpSession) -> Vec<Value> {
     let mut tools = vec![
         json!({
             "name": "workflow_list",
@@ -253,5 +257,12 @@ fn all_definitions() -> Vec<Value> {
         }),
     ];
     tools.extend(super::evolve::definitions(schema));
+    // Gated on there being a fleet at all, not merely on the family flag: a
+    // session with no grant has none for its whole life — the grant is fixed
+    // when Medulla spawns the harness — so there is no "it might appear later"
+    // that would justify advertising even `fleet_status` against thin air.
+    if let Some(hello) = session.fleet.hello() {
+        tools.extend(super::fleet::definitions(schema, hello.may_dispatch()));
+    }
     tools
 }

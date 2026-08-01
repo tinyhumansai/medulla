@@ -202,9 +202,10 @@ impl App {
         active: bool,
         width: usize,
         waiting_sessions: &std::collections::HashSet<String>,
+        now: i64,
     ) -> Vec<TLine<'static>> {
         match row {
-            RailRow::Harness(session) => self.own_harness_lines(session, active, width),
+            RailRow::Harness(session) => self.own_harness_lines(session, active, width, now),
             other => wrap_line(
                 &self.rail_row_line(other, lanes, active, waiting_sessions),
                 width,
@@ -268,6 +269,7 @@ impl App {
         row: &SessionRow,
         active: bool,
         width: usize,
+        now: i64,
     ) -> Vec<TLine<'static>> {
         // A harness waiting on the operator is the one thing on this rail worth
         // interrupting them for, so it takes the row over: its own glyph, its
@@ -337,7 +339,7 @@ impl App {
         if let Some(cue) = waiting {
             let text = format!(
                 "  {ATTENTION_GLYPH} {}",
-                cue.label(medulla::clock::now_millis())
+                cue.label(now)
             );
             lines.extend(wrap_line(
                 &TLine::from(Span::styled(clip(&text, width.max(1)), style)),

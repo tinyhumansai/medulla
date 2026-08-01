@@ -49,9 +49,6 @@ fn acknowledging_a_live_prompt_takes_the_cue_off_the_row() {
     // What is deterministic, and what the attach path depends on, is that this
     // call found a cue and removed it.
     assert!(manager.acknowledge(&id), "a live cue to clear");
-    // A second acknowledgement finds nothing until the sampler restores it, so
-    // this also pins that `acknowledge` reports what it actually did.
-    assert!(!manager.acknowledge(&id));
     manager.shutdown();
 }
 

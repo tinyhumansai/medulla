@@ -115,8 +115,11 @@ It is recognised from what the harness paints, in order of specificity:
 4. **The terminal bell** — the universal fallback, in case a prompt is worded
    differently or not recognised.
 
-Attaching to the pane clears the mark; if the harness is in fact still asking,
-it comes straight back.
+Two things clear the mark: attaching to the pane, and the orchestrator injecting
+a prompt into that session — both mean somebody is now dealing with it. A named
+prompt comes straight back on the next sample if the harness is in fact still
+asking, so nothing is hidden; a bell does not, because a ring has no second frame
+to keep it alive.
 
 ## Read next
 

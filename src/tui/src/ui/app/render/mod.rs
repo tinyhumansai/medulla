@@ -443,26 +443,38 @@ impl App {
         self.hit_tabs_row = area.y;
         let mut spans = Vec::new();
         let mut col = area.x;
+        // A harness waiting on the operator is only visible on the Agents rail,
+        // and an operator reading Workflows or Settings is exactly the person
+        // who does not know a pane has stopped. The count rides on the tab so
+        // the signal survives leaving the tab that carries it.
+        let waiting = self.harnesses_waiting();
+        // Badges are built *before* the width is measured, because they are part
+        // of what has to fit: measuring the bare names and then rendering wider
+        // labels overflows the bar on a terminal that was only just wide enough,
+        // and the tab that pushed past the edge would be the one shouting for
+        // attention.
+        let badges: Vec<String> = TABS
+            .iter()
+            .map(|name| {
+                if *name == "Agents" && waiting > 0 {
+                    format!(" {ATTENTION_GLYPH}{waiting}")
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
         let roomy_width = TABS
             .iter()
-            .map(|name| name.chars().count() + 3)
+            .zip(&badges)
+            .map(|(name, badge)| name.chars().count() + badge.chars().count() + 3)
             .sum::<usize>();
         let gap = if roomy_width <= area.width as usize {
             " "
         } else {
             ""
         };
-        // A harness waiting on the operator is only visible on the Agents rail,
-        // and an operator reading Workflows or Settings is exactly the person
-        // who does not know a pane has stopped. The count rides on the tab so
-        // the signal survives leaving the tab that carries it.
-        let waiting = self.harnesses_waiting();
         for (i, name) in TABS.iter().enumerate() {
-            let badge = if *name == "Agents" && waiting > 0 {
-                format!(" {ATTENTION_GLYPH}{waiting}")
-            } else {
-                String::new()
-            };
+            let badge = &badges[i];
             let label = if gap.is_empty() {
                 format!("{name}{badge} ")
             } else {

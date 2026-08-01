@@ -35,26 +35,23 @@ fn a_harness_sitting_on_a_permission_prompt_asks_for_the_operator() {
 }
 
 #[test]
-fn answering_a_prompt_clears_the_flag() {
+fn acknowledging_a_live_prompt_takes_the_cue_off_the_row() {
     let manager = PtyManager::new();
-    // After printing the prompt, clear the screen, then continue working. This
-    // verifies that acknowledging clears the flag and it stays clear even after
-    // the prompt has left the screen.
-    let script = "printf 'Allow Codex to run `ls`?\\n  3. No, and tell Codex what to do differently\\n'; \
-                  sleep 1; printf '\\033[2J\\033[H'; printf 'working… (esc to interrupt)\\n'; sleep 30";
-    let id = manager.open(sh(script)).expect("a session");
+    let id = manager.open(sh(PROMPT_SCRIPT)).expect("a session");
     wait_for("the prompt to be classified", || {
         manager.attention(&id).is_some()
     });
 
-    // Wait for the prompt to actually clear from the screen before acknowledging.
-    wait_for("the prompt to clear", || manager.attention(&id).is_none());
-
-    // Acknowledge has nothing to clear since the prompt is gone, but verify the
-    // flag stays clear and doesn't reappear from processing older screen state.
+    // The return value is the assertion, deliberately. The prompt is *still on
+    // screen*, so the next 200ms sample legitimately puts the cue back — that is
+    // the documented behaviour of a named cue, and asserting `attention == None`
+    // after this line would be racing the poller rather than testing anything.
+    // What is deterministic, and what the attach path depends on, is that this
+    // call found a cue and removed it.
+    assert!(manager.acknowledge(&id), "a live cue to clear");
+    // A second acknowledgement finds nothing until the sampler restores it, so
+    // this also pins that `acknowledge` reports what it actually did.
     assert!(!manager.acknowledge(&id));
-    assert_eq!(manager.attention(&id), None);
-    assert_eq!(manager.waiting_count(), 0);
     manager.shutdown();
 }
 

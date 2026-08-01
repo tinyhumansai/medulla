@@ -39,7 +39,7 @@ fn propose_mode_keeps_everything_needed_to_read_reason_and_propose() {
 
 #[test]
 fn a_review_turn_is_not_shown_the_tools_it_may_not_call() {
-    let listed: Vec<String> = tool_definitions(ToolMode::Propose)
+    let listed: Vec<String> = definitions_for(ToolMode::Propose)
         .into_iter()
         .filter_map(|tool| tool["name"].as_str().map(str::to_string))
         .collect();
@@ -51,7 +51,7 @@ fn a_review_turn_is_not_shown_the_tools_it_may_not_call() {
 
 #[test]
 fn proposal_schema_advertises_note_evidence() {
-    let proposal = tool_definitions(ToolMode::Propose)
+    let proposal = definitions_for(ToolMode::Propose)
         .into_iter()
         .find(|tool| tool["name"] == "workflow_propose")
         .expect("workflow_propose definition");
@@ -70,7 +70,7 @@ async fn a_review_turn_calling_a_withheld_tool_is_refused_and_told_what_to_use()
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": { "name": "workflow_apply_ops", "arguments": { "id": "sweep", "ops": [] } }
     });
-    let response = handle_request(&store, &config(), ToolMode::Propose, &request)
+    let response = handle_request(&session(&store, ToolMode::Propose), &request)
         .await
         .expect("a request gets a reply");
     let result = &response["result"];

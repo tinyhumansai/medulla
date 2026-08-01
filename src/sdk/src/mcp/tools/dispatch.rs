@@ -1,14 +1,13 @@
 //! Tool-call dispatch and the shared JSON helpers behind tool definitions.
 //!
-//! Names are prefixed `workflow_` so they cannot collide with the harness's own
-//! reserved tool names ([`crate::harness_contract::RESERVED_TOOL_NAMES`]).
-
-use std::sync::Arc;
+//! Names are prefixed by their family — `workflow_` and `fleet_` — so they
+//! cannot collide with each other or with the harness's own reserved tool names
+//! ([`crate::harness_contract::RESERVED_TOOL_NAMES`]).
 
 use serde_json::{json, Value};
 
 use crate::workflows::authoring::GraphHandle;
-use crate::workflows::{ops, WorkflowStore};
+use crate::workflows::ops;
 
 use super::super::RpcError;
 use super::evolve::ToolMode;
@@ -88,11 +87,12 @@ fn declared_inputs(
 
 /// Run a `tools/call`.
 pub(crate) async fn call(
-    store: &Arc<dyn WorkflowStore>,
-    policy: &crate::workflows::ops::HostPolicy,
-    mode: ToolMode,
+    session: &super::super::McpSession,
     params: &Value,
 ) -> Result<Value, RpcError> {
+    let store = &session.store;
+    let policy = &session.policy;
+    let mode = session.mode;
     let name = params
         .get("name")
         .and_then(Value::as_str)
@@ -102,6 +102,21 @@ pub(crate) async fn call(
     // Checked before the match rather than inside each arm: a withheld tool is
     // withheld whatever its arguments are, and a guard per arm is a guard that
     // will eventually be forgotten on a new one.
+    //
+    // Family first: a tool this session's grant does not cover was never
+    // advertised, so reaching here means the model called something it was not
+    // offered rather than something its turn restricts.
+    if !session.families.allows(name) {
+        return Ok(content(
+            &json!({
+                "error": format!(
+                    "'{name}' is not available to this session — the operator did not grant \
+                     it. Work with the tools you were offered."
+                )
+            }),
+            true,
+        ));
+    }
     if !mode.allows(name) {
         return Ok(content(&json!({ "error": mode.refusal(name) }), true));
     }

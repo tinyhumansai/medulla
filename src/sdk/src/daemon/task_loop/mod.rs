@@ -89,10 +89,7 @@ pub(super) fn with_tool_mode(
     {
         env.remove(crate::mcp::TOOL_MODE_ENV);
         if let Some(mode) = mode {
-            env.insert(
-                crate::mcp::TOOL_MODE_ENV.to_string(),
-                mode.to_string(),
-            );
+            env.insert(crate::mcp::TOOL_MODE_ENV.to_string(), mode.to_string());
             // Workflow tools are attached through ACP; legacy provider JSONL
             // cannot expose the MCP server an evolution turn needs.
             env.insert(

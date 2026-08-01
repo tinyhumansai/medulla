@@ -10,21 +10,21 @@
 use serde_json::{json, Value};
 
 use super::dispatch::schema;
-use super::evolve::ToolMode;
 use crate::workflows::node_contracts::render_node_kinds_line;
 
-/// The tool definitions a session in `mode` is served.
+/// The tool definitions this session is served.
 ///
 /// Filtered rather than merely documented: a turn that must not edit is not
-/// shown the editing verbs at all, so the restriction holds without depending
-/// on the model having read and believed a standing instruction.
-pub fn tool_definitions(mode: ToolMode) -> Vec<Value> {
+/// shown the editing verbs at all, and a session whose grant does not cover a
+/// family is not shown that family — so both restrictions hold without
+/// depending on the model having read and believed a standing instruction.
+pub fn tool_definitions(session: &super::super::McpSession) -> Vec<Value> {
     all_definitions()
         .into_iter()
         .filter(|tool| {
             tool.get("name")
                 .and_then(Value::as_str)
-                .is_some_and(|name| mode.allows(name))
+                .is_some_and(|name| session.mode.allows(name) && session.families.allows(name))
         })
         .collect()
 }

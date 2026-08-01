@@ -106,10 +106,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     // Read before `options` is picked apart below, and cloned because the
     // session setup runs inside an async move closure.
     #[cfg(feature = "workflows")]
-    let tool_mode: Option<String> = options
-        .env
-        .get(crate::mcp::TOOL_MODE_ENV)
-        .cloned();
+    let tool_mode: Option<String> = options.env.get(crate::mcp::TOOL_MODE_ENV).cloned();
     #[cfg(not(feature = "workflows"))]
     let tool_mode: Option<String> = None;
     let state = Arc::new(Mutex::new(FoldState::new(options.on_event)));

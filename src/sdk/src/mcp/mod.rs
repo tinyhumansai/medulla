@@ -1,25 +1,38 @@
-//! A Model Context Protocol server exposing the workflow operations.
+//! Medulla's Model Context Protocol server, offered to the harnesses it spawns.
 //!
 //! Medulla drives Claude Code and Codex over ACP as a *client*, so it cannot
 //! hand them tools the way a host application does — the tools have to be
 //! offered, and MCP is the way an ACP agent accepts them. Attaching this server
 //! to a session (`session/new`'s `mcpServers`) is what turns "a harness that can
-//! edit files" into "a harness that can build a workflow".
+//! edit files" into one that can build a workflow and delegate to the fleet it
+//! is running in.
 //!
-//! The operations are the SDK's ([`crate::workflows::ops`]), the same ones the
-//! `medulla workflow` subcommand calls, so a model that learns one has learned
-//! both and neither can drift from the other.
+//! Two tool families are served:
+//!
+//! * `workflow_*` — authoring, validating, and running saved graphs. These are
+//!   the SDK's operations ([`crate::workflows::ops`]), the same ones the
+//!   `medulla workflow` subcommand calls, so a model that learns one has learned
+//!   both and neither can drift from the other.
+//! * `fleet_*` — seeing the fleet and dispatching work into it, proxied to a
+//!   running Medulla over the control socket ([`crate::control_socket`]).
+//!
+//! Which families a session gets is decided by the grant Medulla minted for it,
+//! never by anything the session says about itself. A harness with no grant —
+//! one on a remote worker, or on a host with fleet tools switched off — is
+//! simply not shown the `fleet_*` verbs.
 //!
 //! Only the pieces of MCP a stdio tool server actually needs are implemented —
 //! `initialize`, `tools/list`, `tools/call`, and the `notifications/*` a client
 //! sends and expects nothing back from. That is the whole protocol surface for a
 //! server that exposes tools and no resources or prompts.
 
+pub mod backend;
 mod tools;
 
 #[cfg(test)]
 mod tests;
 
+pub use backend::{FleetBackend, OfflineFleet};
 pub use tools::{tool_definitions, ToolMode, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV};
 
 use std::collections::HashMap;
@@ -28,7 +41,60 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
+use crate::control_socket::ToolFamilies;
 use crate::workflows::WorkflowStore;
+
+/// Everything one MCP session serves from.
+///
+/// A struct rather than a growing parameter list: the handler needs the store,
+/// what this host permits, which slice of the authoring surface this turn gets,
+/// which families the grant covers, and the fleet — and five positional
+/// arguments is where two of the same type get silently transposed.
+pub struct McpSession {
+    /// The workflow store. Always local, always present.
+    pub store: Arc<dyn WorkflowStore>,
+    /// What this host permits a workflow to do.
+    pub policy: crate::workflows::ops::HostPolicy,
+    /// How much of the authoring surface this turn is served.
+    pub mode: ToolMode,
+    /// Which tool families the grant covers.
+    pub families: ToolFamilies,
+    /// The live fleet, or a stand-in that says there is none.
+    pub fleet: Arc<dyn FleetBackend>,
+}
+
+impl McpSession {
+    /// A session serving the workflow tools alone, off the local store.
+    ///
+    /// What a harness with no fleet grant gets, and what every session got
+    /// before the fleet tools existed.
+    pub fn local(
+        store: Arc<dyn WorkflowStore>,
+        policy: crate::workflows::ops::HostPolicy,
+        mode: ToolMode,
+    ) -> Self {
+        McpSession {
+            store,
+            policy,
+            mode,
+            families: ToolFamilies::workflows_only(),
+            fleet: Arc::new(OfflineFleet),
+        }
+    }
+
+    /// Attach a fleet, taking the families from whatever grant it redeemed.
+    ///
+    /// The families come from the backend's handshake rather than from a
+    /// caller-supplied argument, so a session cannot be given a family the
+    /// control plane did not grant it.
+    pub fn with_fleet(mut self, fleet: Arc<dyn FleetBackend>) -> Self {
+        if let Some(hello) = fleet.hello() {
+            self.families = hello.families;
+        }
+        self.fleet = fleet;
+        self
+    }
+}
 
 /// The MCP protocol version this server speaks.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -51,7 +117,11 @@ fn negotiate(requested: Option<&str>) -> &'static str {
 }
 
 /// The server's advertised name, as it appears to a model.
-pub const SERVER_NAME: &str = "medulla-workflows";
+///
+/// Plain `medulla` rather than `medulla-workflows`: it serves the fleet family
+/// too now, and a harness reads this in every tool name it sees
+/// (`mcp__medulla__fleet_dispatch`).
+pub const SERVER_NAME: &str = "medulla";
 
 /// Check that a harness session would actually be handed these tools.
 ///
@@ -96,12 +166,7 @@ pub fn preflight(env: &HashMap<String, String>, cwd: &Path) -> Result<(), String
 ///
 /// `None` for a notification, which by JSON-RPC definition gets no reply — a
 /// server that answered one would confuse the client's request correlation.
-pub async fn handle_request(
-    store: &Arc<dyn WorkflowStore>,
-    policy: &crate::workflows::ops::HostPolicy,
-    mode: ToolMode,
-    request: &Value,
-) -> Option<Value> {
+pub async fn handle_request(session: &McpSession, request: &Value) -> Option<Value> {
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
     let id = request.get("id").cloned();
     let params = request.get("params").cloned().unwrap_or(Value::Null);
@@ -118,8 +183,8 @@ pub async fn handle_request(
             "capabilities": { "tools": {} },
             "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
         })),
-        "tools/list" => Ok(json!({ "tools": tool_definitions(mode) })),
-        "tools/call" => tools::call(store, policy, mode, &params).await,
+        "tools/list" => Ok(json!({ "tools": tool_definitions(session) })),
+        "tools/call" => tools::call(session, &params).await,
         // Answered rather than errored: some clients probe for these before
         // deciding what the server offers, and an error reads as a broken
         // server rather than an empty list.
@@ -200,6 +265,12 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // config is: this process serves exactly one harness session, and which
     // kind of turn that is was decided before it was spawned.
     let mode = ToolMode::from_env(env);
+    // Connected before the first request rather than lazily: the answer decides
+    // which tools to advertise, and `tools/list` is often the very first thing
+    // asked. A host with no grant in its environment — a remote worker, or one
+    // with fleet tools turned off — gets the offline stand-in and serves the
+    // workflow tools alone rather than failing to start.
+    let session = McpSession::local(store, policy, mode).with_fleet(backend::from_env(env).await);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut stdout = tokio::io::stdout();
 
@@ -208,7 +279,7 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_request(&store, &policy, mode, &request).await,
+            Ok(request) => handle_request(&session, &request).await,
             Err(err) => Some(json!({
                 "jsonrpc": "2.0",
                 "id": Value::Null,

@@ -16,9 +16,7 @@
 # Consequence: if this repo ever grows a dependency edge into another repo, this
 # script passing tells you nothing about whether that was acceptable. Running it
 # green over such a change would be actively misleading. The real check for that
-# is a clean-clone build in a container with no credentials — see
-# `scripts/check-crate-count.sh` for the dependency-surface half, and the
-# migration plan's Step 41 criterion for the full one.
+# is a clean-clone build in a container with no credentials.
 set -euo pipefail
 
 patterns=(

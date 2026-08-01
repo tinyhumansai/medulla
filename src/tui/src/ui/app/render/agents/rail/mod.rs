@@ -101,7 +101,8 @@ impl App {
         let width = inner.width as usize;
         // Collect waiting session IDs once so render code can check membership
         // instead of acquiring a lock per lane.
-        let waiting_sessions = self.harnesses
+        let waiting_sessions = self
+            .harnesses
             .as_ref()
             .map(|h| h.sessions.waiting_sessions())
             .unwrap_or_default();
@@ -115,8 +116,14 @@ impl App {
             if index == selection.active {
                 active_line = lines.len();
             }
-            for line in self.rail_row_lines(row, &selection.lanes, index == selection.active, width, &waiting_sessions, now)
-            {
+            for line in self.rail_row_lines(
+                row,
+                &selection.lanes,
+                index == selection.active,
+                width,
+                &waiting_sessions,
+                now,
+            ) {
                 lines.push(line);
                 owners.push(index);
             }
@@ -338,10 +345,7 @@ impl App {
         // wants you; only the sentence says what for — and "approve a command"
         // and "it rang the bell" are worth different amounts of hurry.
         if let Some(cue) = waiting {
-            let text = format!(
-                "  {ATTENTION_GLYPH} {}",
-                cue.label(now)
-            );
+            let text = format!("  {ATTENTION_GLYPH} {}", cue.label(now));
             lines.extend(wrap_line(
                 &TLine::from(Span::styled(clip(&text, width.max(1)), style)),
                 width,
@@ -507,20 +511,38 @@ impl App {
     }
 
     /// A short human-readable state suffix for a lane row.
-    pub(in crate::ui::app::render) fn lane_state(&self, item: &AgentLane, waiting_sessions: &std::collections::HashSet<String>) -> String {
+    pub(in crate::ui::app::render) fn lane_state(
+        &self,
+        item: &AgentLane,
+        waiting_sessions: &std::collections::HashSet<String>,
+    ) -> String {
         if item.session_id.is_some() {
             self.session_state(item)
-                .map(|_| format!(" · {}", self.harness_visual_state(item, waiting_sessions).label()))
+                .map(|_| {
+                    format!(
+                        " · {}",
+                        self.harness_visual_state(item, waiting_sessions).label()
+                    )
+                })
                 .unwrap_or_else(|| " · …".into())
         } else if item.role == AgentRole::Agent {
-            format!(" · {}", self.harness_visual_state(item, waiting_sessions).label())
+            format!(
+                " · {}",
+                self.harness_visual_state(item, waiting_sessions).label()
+            )
         } else {
             String::new()
         }
     }
 
     /// Style a lane while preserving both selection visibility and harness state.
-    fn lane_style(&self, item: &AgentLane, is_fn: bool, active: bool, waiting_sessions: &std::collections::HashSet<String>) -> Style {
+    fn lane_style(
+        &self,
+        item: &AgentLane,
+        is_fn: bool,
+        active: bool,
+        waiting_sessions: &std::collections::HashSet<String>,
+    ) -> Style {
         let mut style = if active {
             self.theme.selection()
         } else {
@@ -550,7 +572,11 @@ impl App {
     /// it waits — so a lane whose pty is sitting on "Do you want to proceed?"
     /// reads as *running* to everything else here, right up until the task times
     /// out. The screen knows, and this is where it gets to say so.
-    fn harness_visual_state(&self, item: &AgentLane, waiting_sessions: &std::collections::HashSet<String>) -> HarnessVisualState {
+    fn harness_visual_state(
+        &self,
+        item: &AgentLane,
+        waiting_sessions: &std::collections::HashSet<String>,
+    ) -> HarnessVisualState {
         if self.lane_has_attention(item, waiting_sessions) {
             return HarnessVisualState::NeedsInput;
         }
@@ -560,7 +586,11 @@ impl App {
 
     /// Whether a lane has a waiting harness by checking the pre-resolved waiting
     /// set, avoiding per-lane session locking.
-    fn lane_has_attention(&self, item: &AgentLane, waiting_sessions: &std::collections::HashSet<String>) -> bool {
+    fn lane_has_attention(
+        &self,
+        item: &AgentLane,
+        waiting_sessions: &std::collections::HashSet<String>,
+    ) -> bool {
         let harnesses = match self.harnesses.as_ref() {
             Some(h) => h,
             None => return false,

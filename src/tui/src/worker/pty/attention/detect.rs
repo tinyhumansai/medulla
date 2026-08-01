@@ -2,8 +2,8 @@
 
 use medulla::tinyplace::HarnessProvider;
 
-use super::AttentionKind;
 use super::super::dialog::blocking_dialog;
+use super::AttentionKind;
 
 /// Phrases that mean the harness is *working*, not waiting.
 ///

@@ -159,7 +159,7 @@ pub struct SessionHandle {
     ///
     /// An `Arc` because the writer thread releases the reservation as it drains,
     /// and it outlives the `io` the queue itself lives in.
-    pub(super) queued_bytes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    pub(super) queued_bytes: Arc<AtomicUsize>,
     /// The string-valued fields, which cannot be atomics.
     pub(super) cold: Mutex<ColdFields>,
     /// The terminal emulator holding this session's screen + scrollback.

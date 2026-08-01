@@ -18,6 +18,8 @@ mod app_loop;
 #[cfg(test)]
 mod app_loop_tests;
 mod commands;
+#[cfg(feature = "workflows")]
+mod control_plane;
 mod event_loop;
 mod hub_relay;
 mod local_host;

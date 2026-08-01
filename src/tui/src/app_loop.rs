@@ -570,6 +570,15 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     )
     .await;
 
+    // Bound once, here, and held for the whole process: the socket belongs to
+    // this process rather than to a login session, and rebinding inside the
+    // relogin loop below would race this process's own live socket. The server
+    // reads the hub slot per request, so a relogin that refills that slot is
+    // picked up with no rebind.
+    #[cfg(feature = "workflows")]
+    let _control_plane =
+        crate::control_plane::start(&env, &loaded.config, hub_slot.clone(), &hub_logs).await;
+
     // A session, and another after every logout. `run` reports `Relogin` when
     // the Account page's logout landed, and the whole point of that logout is to
     // reach the login screen — dropping the operator back to the shell instead

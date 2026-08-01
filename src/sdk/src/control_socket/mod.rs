@@ -35,6 +35,7 @@
 //! This module depends only on [`crate::hub`], never on the `workflows` feature,
 //! so a build without workflows still has a working fleet plane.
 
+pub mod active;
 pub mod grants;
 pub mod path;
 pub mod types;
@@ -47,6 +48,7 @@ pub mod server;
 #[cfg(test)]
 mod tests;
 
+pub use active::{active, install, ActiveControlPlane};
 pub use grants::{Grant, GrantRegistry};
 pub use path::{control_socket_path, ControlSocketError, CONTROL_SOCKET_ENV};
 pub use types::{

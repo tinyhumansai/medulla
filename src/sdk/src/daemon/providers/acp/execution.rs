@@ -20,16 +20,24 @@ use super::types::FoldState;
 
 /// The MCP servers offered to every ACP session.
 ///
-/// Just the workflow tools, served by this same binary in a subprocess. Empty
+/// Medulla's own tool server, run as this same binary in a subprocess. Empty
 /// when the binary's path cannot be determined — a session without the tools is
 /// a session that can still do its actual job, which is better than failing to
 /// start one.
-fn workflow_mcp_servers(
+///
+/// When this process is serving a control plane, a grant is minted here for
+/// *this* session and handed to that one child. That is what makes the fleet
+/// tools exclusive: the token is the authority, it is never written to disk, and
+/// a process Medulla did not spawn has no way to obtain one. A process with no
+/// control plane — a remote worker's daemon, or a host with fleet tools switched
+/// off — mints nothing, and the child is simply never shown the fleet verbs.
+fn medulla_mcp_servers(
     tool_mode: Option<&str>,
+    session: &str,
 ) -> Vec<agent_client_protocol::schema::v1::McpServer> {
     #[cfg(not(feature = "workflows"))]
     {
-        let _ = tool_mode;
+        let _ = (tool_mode, session);
         Vec::new()
     }
     #[cfg(feature = "workflows")]
@@ -64,8 +72,28 @@ fn workflow_mcp_servers(
         // value could only ever be right for one of them. A review turn that
         // silently got the full surface could rewrite the graph it was asked
         // only to review, which is exactly what the mode exists to prevent.
-        let mut server = McpServerStdio::new(crate::mcp::SERVER_NAME, binary)
-            .args(vec!["workflow".to_string(), "mcp".to_string()]);
+        let mut server =
+            McpServerStdio::new(crate::mcp::SERVER_NAME, binary).args(vec!["mcp".to_string()]);
+        // The fleet grant, when this process has a control plane to grant
+        // against. Pushed explicitly rather than inherited for the same reason
+        // the tool mode is: it is minted per session, and an inherited one would
+        // hand a second harness the first one's capability.
+        if let Some(plane) = crate::control_socket::active() {
+            let grant = crate::control_socket::Grant::new(session, 0, plane.max_depth)
+                .with_max_in_flight(plane.max_in_flight);
+            server
+                .env
+                .push(agent_client_protocol::schema::v1::EnvVariable::new(
+                    crate::control_socket::MCP_SOCKET_ENV,
+                    plane.socket.to_string_lossy().as_ref(),
+                ));
+            server
+                .env
+                .push(agent_client_protocol::schema::v1::EnvVariable::new(
+                    crate::control_socket::MCP_GRANT_ENV,
+                    plane.grants.mint(grant),
+                ));
+        }
         if let Some(mode) = tool_mode {
             let (mode, scope) = mode
                 .split_once(':')
@@ -109,6 +137,17 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     let tool_mode: Option<String> = options.env.get(crate::mcp::TOOL_MODE_ENV).cloned();
     #[cfg(not(feature = "workflows"))]
     let tool_mode: Option<String> = None;
+    // Identifies the grant minted for this session, so it can be revoked when
+    // the session ends. A resumed session reuses the agent's own id; a new one
+    // has none yet at the moment the servers are offered, so it gets a minted
+    // key rather than waiting for an id the request itself is asking for.
+    let session_key = options
+        .resume_session_id
+        .clone()
+        .unwrap_or_else(|| format!("acp-{}", uuid::Uuid::new_v4()));
+    // Kept outside the closure, which moves its copy, so the grant can be
+    // revoked once the session is over however it ended.
+    let revoke_key = session_key.clone();
     let state = Arc::new(Mutex::new(FoldState::new(options.on_event)));
     let notification_state = state.clone();
     let approve = options.skip_permissions;
@@ -119,7 +158,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     let provider = options.provider;
     let timeout = Duration::from_millis(options.timeout_ms);
 
-    agent_client_protocol::Client
+    let result = agent_client_protocol::Client
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
@@ -164,7 +203,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // agent that edits the graph and one that can only discuss
                     // it, and it would fail silently: the model would explain
                     // what it would have done.
-                    request.mcp_servers = workflow_mcp_servers(tool_mode.as_deref());
+                    request.mcp_servers = medulla_mcp_servers(tool_mode.as_deref(), &session_key);
                     connection.send_request(request).block_task().await?;
                     id.into()
                 }
@@ -174,7 +213,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // *client* here, so this is the only way it can hand a
                     // harness anything to call — and it is what lets a coding
                     // agent author a workflow rather than only run one.
-                    request.mcp_servers = workflow_mcp_servers(tool_mode.as_deref());
+                    request.mcp_servers = medulla_mcp_servers(tool_mode.as_deref(), &session_key);
                     connection
                         .send_request(request)
                         .block_task()
@@ -231,8 +270,17 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                 session_id: Some(session_id.to_string()),
             })
         })
-        .await
-        .map_err(|error| format!("{} ACP error: {error}", provider.as_str()))
+        .await;
+
+    // The session is over, so its grant should stop working — a token that
+    // outlived the harness it was minted for is a capability nobody is holding.
+    // Tasks it already dispatched keep running: killing a working agent because
+    // the turn that asked for it finished would discard real work.
+    if let Some(plane) = crate::control_socket::active() {
+        plane.grants.revoke(&revoke_key);
+    }
+
+    result.map_err(|error| format!("{} ACP error: {error}", provider.as_str()))
 }
 
 /// Construct the ACP server command for a supported harness.

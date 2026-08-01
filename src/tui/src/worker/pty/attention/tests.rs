@@ -128,6 +128,7 @@ fn a_composer_caret_is_not_an_option() {
     assert!(!is_selected_option("> "));
     assert!(!is_selected_option("│ >                    │"));
     assert!(!is_selected_option("│ > Try \"fix the failing test\""));
+    assert!(!is_selected_option("> 1. update the parser"));
     assert!(!is_selected_option("  › 1"));
     assert!(is_selected_option("  ❯ 1. Yes"));
     assert!(is_selected_option("│ › 3) Skip until next version"));

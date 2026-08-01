@@ -99,6 +99,7 @@ impl PtyManager {
             session.row.label = label.to_string();
         }
         session.row.busy = true;
+        session.suppress_next_bell = false;
         Some(session.row.clone())
     }
 
@@ -176,6 +177,7 @@ impl PtyManager {
                 session.seen_bells = consumed_bell_count(session.seen_bells, bells);
             }
             session.attention_generation = session.attention_generation.wrapping_add(1);
+            session.suppress_next_bell = true;
             session.row.attention = session
                 .row
                 .attention

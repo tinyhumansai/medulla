@@ -265,6 +265,13 @@ pub(super) struct PtySession {
     /// release increments this revision so a classifier that started before
     /// the release cannot restore a completion cue after it was consumed.
     pub(super) attention_generation: u64,
+    /// Whether the next newly observed bell belongs to the just-completed turn.
+    ///
+    /// Transcript settlement can release a session shortly before the CLI emits
+    /// its completion bell. The next poll consumes that late chime. Claiming a
+    /// new turn or attaching to acknowledge the pane clears the suppression, so
+    /// a later turn's bell remains meaningful.
+    pub(super) suppress_next_bell: bool,
     /// Epoch ms of the last attention refresh.
     ///
     /// The reader thread wakes on every read — a full-screen repaint is dozens

@@ -138,6 +138,7 @@ impl PtyManager {
             queued_bytes: queued_bytes.clone(),
             seen_bells: 0,
             attention_generation: 0,
+            suppress_next_bell: false,
             attention_checked_at: now,
             child: Some(child),
         });

@@ -136,6 +136,90 @@ fn releasing_a_reusable_turn_consumes_an_unclassified_completion_bell() {
 }
 
 #[test]
+fn releasing_consumes_a_completion_bell_emitted_just_after_settlement() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh("read line; printf 'late completion\\a\\n'; sleep 30"))
+        .expect("a session");
+
+    manager.release(&id);
+    manager.write(&id, b"\r").expect("release the child");
+    wait_for("the late completion bell to reach the emulator", || {
+        super::screen_text(&manager, &id).contains("late completion")
+    });
+
+    // The first eligible poll consumes the post-release bell. Later polls must
+    // not resurrect it.
+    now.store(200, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    now.store(1_000, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(manager.attention(&id), None);
+    manager.shutdown();
+}
+
+#[test]
+fn claiming_the_next_turn_makes_its_bell_meaningful_again() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh(
+            "read line; printf 'next turn needs you\\a\\n'; sleep 30",
+        ))
+        .expect("a session");
+    let row = manager.row(&id).expect("a row");
+
+    manager.release(&id);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("claim the reusable session");
+    manager.write(&id, b"\r").expect("release the child");
+    wait_for("the next turn bell to reach the emulator", || {
+        super::screen_text(&manager, &id).contains("next turn needs you")
+    });
+
+    now.store(200, Ordering::SeqCst);
+    wait_for("the next turn bell to be classified", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.shutdown();
+}
+
+#[test]
+fn attention_sampling_ignores_the_operators_historical_viewport() {
+    let manager = PtyManager::new();
+    let script = "printf 'Allow Codex to run `old`?\\n› 1. Yes, proceed\\n'; \
+                  i=1; while [ $i -le 35 ]; do printf 'line %s\\n' $i; i=$((i+1)); done; \
+                  printf 'live ordinary screen\\n'; sleep 30";
+    let id = manager.open(sh(script)).expect("a session");
+
+    wait_for("the live screen to settle", || {
+        manager
+            .tail_lines(&id, 50)
+            .iter()
+            .any(|line| line == "live ordinary screen")
+    });
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    assert_eq!(manager.attention(&id), None);
+    let offset = manager.scroll_history(&id, 12, true).expect("a session");
+    assert!(offset > 0);
+    assert!(
+        super::screen_text(&manager, &id).contains("Allow Codex"),
+        "the historical viewport should contain the old prompt"
+    );
+
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    assert_eq!(manager.attention(&id), None);
+    assert_eq!(manager.scroll_history(&id, 0, true), Some(offset));
+    manager.shutdown();
+}
+
+#[test]
 fn a_bell_rung_mid_turn_is_a_progress_chime_not_a_question() {
     let manager = PtyManager::new();
     // The interrupt footer says the harness is working; a bell alongside it is

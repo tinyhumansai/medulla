@@ -73,7 +73,9 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
 ///
 /// The three CLIs disagree on the glyph and agree on everything else, so the
 /// caret is what the structural fallback keys on rather than any wording.
-const CARETS: &[char] = &['❯', '›', '▸', '>', '»'];
+// ASCII `>` is deliberately absent: every harness also uses it for the input
+// composer, where a perfectly ordinary draft can begin with `1. `.
+const CARETS: &[char] = &['❯', '›', '▸', '»'];
 
 /// Strip to lowercase alphanumerics so a match does not depend on layout.
 ///

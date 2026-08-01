@@ -110,19 +110,30 @@ impl PtyManager {
                 session.row.provider,
                 session.seen_bells,
                 session.attention_generation,
+                session.suppress_next_bell,
             )
         };
-        let (screen, provider, seen_bells, attention_generation) = taken;
+        let (screen, provider, seen_bells, attention_generation, suppress_next_bell) = taken;
 
         let (contents, bells) = {
-            let parser = screen.lock().unwrap();
-            let screen = parser.screen();
-            (screen.contents(), screen.audible_bell_count())
+            let mut parser = screen.lock().unwrap();
+            // Attention belongs to the live harness, not whichever historical
+            // viewport the operator last scrolled to. Restore their offset so
+            // background classification never moves the pane they are reading.
+            let held = parser.screen().scrollback();
+            parser.set_scrollback(0);
+            let sample = (
+                parser.screen().contents(),
+                parser.screen().audible_bell_count(),
+            );
+            parser.set_scrollback(held);
+            sample
         };
 
         // A bell only counts while the harness is not plainly mid-turn: they all
         // ring one as a tool finishes, and a progress chime is not a question.
-        let rang = bells > seen_bells && !attention::is_working(&contents);
+        let new_bell = bells > seen_bells;
+        let rang = new_bell && !suppress_next_bell && !attention::is_working(&contents);
         let cue = attention::detect(provider, &contents)
             .or_else(|| rang.then(|| attention::bell_cue(provider)));
 
@@ -135,6 +146,9 @@ impl PtyManager {
         // completed turn and must not put that turn's bell back on the row.
         if session.attention_generation != attention_generation {
             return;
+        }
+        if suppress_next_bell && new_bell {
+            session.suppress_next_bell = false;
         }
         // Recorded whether or not it produced a cue, so one ring is never
         // counted twice.
@@ -180,6 +194,7 @@ impl PtyManager {
             session.seen_bells = consumed_bell_count(session.seen_bells, bells);
         }
         session.attention_generation = session.attention_generation.wrapping_add(1);
+        session.suppress_next_bell = false;
         session.row.attention.take().is_some()
     }
 

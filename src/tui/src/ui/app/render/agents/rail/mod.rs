@@ -221,6 +221,7 @@ impl App {
         lanes: &[AgentLane],
         active: bool,
         waiting_sessions: &std::collections::HashSet<String>,
+        now: i64,
     ) -> TLine<'static> {
         match row {
             RailRow::Agent(row) => self.agent_row_line(row, lanes, active, waiting_sessions),
@@ -232,7 +233,7 @@ impl App {
             // Only reached through `rail_row_lines`, which draws a harness over
             // several lines; kept total so measurement can call either.
             RailRow::Harness(row) => self
-                .own_harness_lines(row, active, RAIL_MAX_CONTENT)
+                .own_harness_lines(row, active, RAIL_MAX_CONTENT, now)
                 .into_iter()
                 .next()
                 .unwrap_or_default(),

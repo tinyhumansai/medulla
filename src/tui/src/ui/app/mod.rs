@@ -28,6 +28,7 @@ mod input;
 mod keys;
 mod rail;
 mod render;
+mod routing_options;
 mod settings_edit;
 mod state;
 mod status_line;

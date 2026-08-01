@@ -18,7 +18,6 @@ use crate::ui::theme::Theme;
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackQuery, FeedbackType};
 use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
-use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 
 /// The ordered top-level tab names. The tab index selects into this array.
 ///
@@ -104,70 +103,7 @@ pub(super) const TM_OVERVIEW: usize = 0;
 pub(super) const TM_BOUNTIES: usize = 1;
 pub(super) const TM_LEADERBOARD: usize = 2;
 
-/// Display metadata coupled to the routing strategy it applies.
-#[derive(Clone, Copy)]
-pub(super) struct RoutingStrategyOption {
-    /// Runtime strategy sent when the option is applied.
-    pub(super) strategy: RoutingStrategy,
-    /// Short label rendered in the strategy chooser.
-    pub(super) label: &'static str,
-    /// Operator-facing explanation of the selection rule.
-    pub(super) description: &'static str,
-}
-
-/// Routing strategy options in the order shown by the chooser.
-pub(super) const ROUTING_STRATEGIES: [RoutingStrategyOption; 4] = [
-    RoutingStrategyOption {
-        strategy: RoutingStrategy::Manual,
-        label: "Manual",
-        description: "Keep the host explicitly selected on the Hosts page.",
-    },
-    RoutingStrategyOption {
-        strategy: RoutingStrategy::Balanced,
-        label: "Balanced",
-        description: "Choose the most CPU cores, breaking ties by available RAM.",
-    },
-    RoutingStrategyOption {
-        strategy: RoutingStrategy::CpuFirst,
-        label: "CPU First",
-        description: "Choose the host with the most logical CPU cores.",
-    },
-    RoutingStrategyOption {
-        strategy: RoutingStrategy::MemoryFirst,
-        label: "Memory First",
-        description: "Choose the host with the most currently available RAM.",
-    },
-];
-
-/// Display metadata for one subscription-level selection rule.
-#[derive(Clone, Copy)]
-pub(super) struct SubscriptionStrategyOption {
-    /// Runtime strategy sent when the option is applied.
-    pub(super) strategy: SubscriptionRoutingStrategy,
-    /// Short label rendered in the strategy chooser.
-    pub(super) label: &'static str,
-    /// Operator-facing explanation of the budget comparison.
-    pub(super) description: &'static str,
-}
-
-/// Subscription strategy options in the order shown by the chooser.
-pub(super) const SUBSCRIPTION_STRATEGIES: [SubscriptionStrategyOption; 3] = [
-    SubscriptionStrategyOption {
-        strategy: SubscriptionRoutingStrategy::Manual,
-        label: "Manual",
-        description: "Keep the requested provider or the host's configured default.",
-    },
-    SubscriptionStrategyOption {
-        strategy: SubscriptionRoutingStrategy::Balanced,
-        label: "Balanced",
-        description: "Choose the ready subscription with the most remaining percentage.",
-    },
-    SubscriptionStrategyOption {
-        strategy: SubscriptionRoutingStrategy::MostAvailableBudget,
-        label: "Most Available Budget",
-        description: "Choose the ready subscription with the most remaining tokens.",
-    },
-];
+pub(super) use super::routing_options::{ROUTING_STRATEGIES, SUBSCRIPTION_STRATEGIES};
 
 /// The Settings tab's left-nav subpages, in order (number keys 1-9 jump to them).
 ///

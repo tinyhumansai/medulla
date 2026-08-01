@@ -12,6 +12,7 @@ pub mod clipboard;
 pub mod clock;
 pub mod config;
 pub mod contacts;
+pub mod control_socket;
 pub mod core_host;
 pub mod daemon;
 #[cfg(feature = "workflows")]

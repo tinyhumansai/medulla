@@ -37,12 +37,22 @@ fn a_harness_sitting_on_a_permission_prompt_asks_for_the_operator() {
 #[test]
 fn answering_a_prompt_clears_the_flag() {
     let manager = PtyManager::new();
-    let id = manager.open(sh(PROMPT_SCRIPT)).expect("a session");
+    // After printing the prompt, clear the screen, then continue working. This
+    // verifies that acknowledging clears the flag and it stays clear even after
+    // the prompt has left the screen.
+    let script = "printf 'Allow Codex to run `ls`?\\n  3. No, and tell Codex what to do differently\\n'; \
+                  sleep 1; printf '\\033[2J\\033[H'; printf 'working… (esc to interrupt)\\n'; sleep 30";
+    let id = manager.open(sh(script)).expect("a session");
     wait_for("the prompt to be classified", || {
         manager.attention(&id).is_some()
     });
 
-    assert!(manager.acknowledge(&id));
+    // Wait for the prompt to actually clear from the screen before acknowledging.
+    wait_for("the prompt to clear", || manager.attention(&id).is_none());
+
+    // Acknowledge has nothing to clear since the prompt is gone, but verify the
+    // flag stays clear and doesn't reappear from processing older screen state.
+    assert!(!manager.acknowledge(&id));
     assert_eq!(manager.attention(&id), None);
     assert_eq!(manager.waiting_count(), 0);
     manager.shutdown();

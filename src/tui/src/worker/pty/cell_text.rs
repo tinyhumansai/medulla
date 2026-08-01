@@ -17,6 +17,9 @@
 //!
 //! Same size as the `String` it replaces (24 bytes), so nothing downstream grew.
 
+#[cfg(test)]
+mod tests;
+
 /// How many bytes fit without allocating.
 ///
 /// Sized so `CellText` is exactly as wide as the `String` it replaced: 15 bytes
@@ -24,17 +27,19 @@
 /// discriminant rides in the padding the enum already has.
 const INLINE_CAP: usize = 15;
 
-/// The text of one terminal cell.
+/// The inline-or-heap representation, kept private to this module.
 ///
-/// The variant fields are deliberately module-private — `Inline`'s `len` is an
-/// invariant relied on by [`as_str`](Self::as_str)'s unchecked slice
-/// (`buf[..len]`), not just a stored value. An external caller building a
-/// `CellText` literal with a `len` past `INLINE_CAP` would slice out of bounds
-/// and panic; keeping the fields private confines construction to
-/// [`From<&str>`](CellText#impl-From<%26str>-for-CellText), whose only path in
-/// is a validated copy from a real `&str`.
+/// `Inline`'s `len` is an invariant [`CellText::as_str`]'s unchecked slice
+/// (`buf[..len]`) depends on, not just a stored value — a `len` past
+/// [`INLINE_CAP`] slices out of bounds and panics. Rust enum-variant fields
+/// always share the visibility of their enum (there is no way to mark just
+/// `len` private), so the only way to keep this un-forgeable is to keep the
+/// enum itself unreachable from outside the module: [`CellText`] wraps it in a
+/// field private to *that* type instead, and every path in — [`CellText::new`],
+/// [`CellText::blank`], and `From<&str>` — copies a real `&str` and computes
+/// `len` itself.
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub enum CellText {
+enum Repr {
     /// Short enough to live in the struct — the overwhelmingly common case.
     Inline {
         /// The UTF-8 bytes; only `len` of them are meaningful.
@@ -46,13 +51,21 @@ pub enum CellText {
     Heap(Box<str>),
 }
 
+/// The text of one terminal cell.
+///
+/// See [`Repr`] for why the representation is a private field rather than a
+/// public enum: an external caller cannot construct or match on an invalid
+/// inline length.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct CellText(Repr);
+
 impl CellText {
     /// An empty cell.
     pub const fn new() -> Self {
-        CellText::Inline {
+        CellText(Repr::Inline {
             buf: [0; INLINE_CAP],
             len: 0,
-        }
+        })
     }
 
     /// A single space — what a blank cell renders as.
@@ -62,30 +75,37 @@ impl CellText {
     pub const fn blank() -> Self {
         let mut buf = [0; INLINE_CAP];
         buf[0] = b' ';
-        CellText::Inline { buf, len: 1 }
+        CellText(Repr::Inline { buf, len: 1 })
     }
 
     /// The text as a string slice.
     pub fn as_str(&self) -> &str {
-        match self {
-            CellText::Inline { buf, len } => {
-                // The only constructor copies a `&str` in, so these bytes are
+        match &self.0 {
+            Repr::Inline { buf, len } => {
+                // The only constructors copy a `&str` in, so these bytes are
                 // always a valid prefix boundary of one. `unwrap_or` rather than
                 // `expect` so a hypothetical bug degrades to a blank cell
                 // instead of taking the render pass down with it.
                 debug_assert!(std::str::from_utf8(&buf[..*len as usize]).is_ok());
                 std::str::from_utf8(&buf[..*len as usize]).unwrap_or("")
             }
-            CellText::Heap(text) => text,
+            Repr::Heap(text) => text,
         }
     }
 
     /// Whether the cell holds nothing.
     pub fn is_empty(&self) -> bool {
-        match self {
-            CellText::Inline { len, .. } => *len == 0,
-            CellText::Heap(text) => text.is_empty(),
+        match &self.0 {
+            Repr::Inline { len, .. } => *len == 0,
+            Repr::Heap(text) => text.is_empty(),
         }
+    }
+
+    /// Whether the text is stored inline (no heap allocation). Test-only: used
+    /// to assert the allocation-avoiding path was actually taken.
+    #[cfg(test)]
+    fn is_inline(&self) -> bool {
+        matches!(self.0, Repr::Inline { .. })
     }
 }
 
@@ -99,14 +119,14 @@ impl From<&str> for CellText {
     fn from(text: &str) -> Self {
         let bytes = text.as_bytes();
         if bytes.len() > INLINE_CAP {
-            return CellText::Heap(text.into());
+            return CellText(Repr::Heap(text.into()));
         }
         let mut buf = [0u8; INLINE_CAP];
         buf[..bytes.len()].copy_from_slice(bytes);
-        CellText::Inline {
+        CellText(Repr::Inline {
             buf,
             len: bytes.len() as u8,
-        }
+        })
     }
 }
 
@@ -147,70 +167,5 @@ impl PartialEq<str> for CellText {
 impl PartialEq<&str> for CellText {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn short_text_stays_inline() {
-        for text in ["", " ", "a", "é", "▀", "😀"] {
-            let cell = CellText::from(text);
-            assert!(
-                matches!(cell, CellText::Inline { .. }),
-                "{text:?} should not allocate"
-            );
-            assert_eq!(cell.as_str(), text);
-        }
-    }
-
-    #[test]
-    fn a_long_grapheme_cluster_falls_back_to_the_heap() {
-        // A ZWJ family emoji is 25 bytes — past the inline capacity, and the
-        // reason the fallback exists rather than truncating.
-        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
-        assert!(family.len() > INLINE_CAP);
-        let cell = CellText::from(family);
-        assert!(matches!(cell, CellText::Heap(_)));
-        assert_eq!(cell.as_str(), family);
-    }
-
-    #[test]
-    fn the_boundary_length_is_still_inline() {
-        let text = "x".repeat(INLINE_CAP);
-        assert!(matches!(
-            CellText::from(text.as_str()),
-            CellText::Inline { .. }
-        ));
-        assert_eq!(CellText::from(text.as_str()).as_str(), text);
-
-        let over = "x".repeat(INLINE_CAP + 1);
-        assert!(matches!(CellText::from(over.as_str()), CellText::Heap(_)));
-    }
-
-    #[test]
-    fn default_is_empty() {
-        assert!(CellText::default().is_empty());
-        assert_eq!(CellText::default().as_str(), "");
-    }
-
-    #[test]
-    fn it_is_no_wider_than_the_string_it_replaced() {
-        // The point of the inline representation is to remove an allocation, not
-        // to trade it for a fatter snapshot.
-        assert!(std::mem::size_of::<CellText>() <= std::mem::size_of::<String>());
-    }
-
-    #[test]
-    fn equality_matches_the_underlying_text() {
-        assert_eq!(CellText::from("ab"), CellText::from("ab"));
-        assert_ne!(CellText::from("ab"), CellText::from("ac"));
-        // Bound first: comparing a temporary trips `clippy::cmp_owned`, which
-        // does not know that a short `CellText` never allocates.
-        let cell = CellText::from("ab");
-        assert!(cell == *"ab");
-        assert!(cell == "ab");
     }
 }

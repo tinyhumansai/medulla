@@ -205,25 +205,35 @@ fn ensure_private_parent(path: &Path, trusted_path: bool) -> Result<(), ControlS
     Ok(())
 }
 
-/// Whether another user could replace entries in the socket's parent directory.
+/// The nearest directory through which another user could replace the socket.
 ///
-/// A writable parent means another user could unlink our socket and bind their
-/// own in its place, which no permission on the socket file itself prevents.
-/// A sticky directory such as `/tmp` is the exception: the kernel permits its
-/// users to remove only entries they own, so the socket remains protected.
+/// Every ancestor matters: even when the immediate parent is private, a
+/// writable grandparent could replace that entire directory and recreate the
+/// socket path. A sticky directory such as `/tmp` is the exception: the kernel
+/// permits its users to remove only entries they own.
 #[cfg(unix)]
-fn parent_is_insecure(path: &Path) -> bool {
+fn insecure_ancestor(path: &Path) -> Result<Option<PathBuf>, ControlSocketError> {
     use std::os::unix::fs::PermissionsExt;
 
-    let Some(parent) = path.parent() else {
-        return false;
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| ControlSocketError::Io(error.to_string()))?
+            .join(path)
     };
-    std::fs::metadata(parent)
-        .map(|meta| {
-            let mode = meta.permissions().mode();
-            mode & 0o022 != 0 && mode & 0o1000 == 0
-        })
-        .unwrap_or(false)
+    let Some(parent) = absolute.parent() else {
+        return Ok(None);
+    };
+    for ancestor in parent.ancestors() {
+        let meta = std::fs::metadata(ancestor)
+            .map_err(|error| ControlSocketError::Io(error.to_string()))?;
+        let mode = meta.permissions().mode();
+        if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+            return Ok(Some(ancestor.to_path_buf()));
+        }
+    }
+    Ok(None)
 }
 
 /// Make `path` bindable, or say why it is not.
@@ -249,10 +259,8 @@ pub async fn prepare_bind(path: &Path, trusted_path: bool) -> Result<(), Control
     use std::os::unix::fs::FileTypeExt;
 
     ensure_private_parent(path, trusted_path)?;
-    if parent_is_insecure(path) {
-        return Err(ControlSocketError::InsecureParent(
-            path.parent().unwrap_or(path).to_path_buf(),
-        ));
+    if let Some(ancestor) = insecure_ancestor(path)? {
+        return Err(ControlSocketError::InsecureParent(ancestor));
     }
 
     let meta = match std::fs::symlink_metadata(path) {

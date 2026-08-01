@@ -99,6 +99,13 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    // Missing means operator-started work for compatibility with older peers.
+    // A present value must fit exactly; narrowing with `as` would turn 256 into
+    // root depth zero and let a malformed frame widen delegated capabilities.
+    let fleet_depth = match obj.get("fleet_depth") {
+        None => 0,
+        Some(value) => u8::try_from(value.as_u64()?).ok()?,
+    };
 
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
@@ -114,12 +121,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         tool_mode,
         workflow,
         conversation,
-        // Absent means zero: a peer on an older build says nothing about depth,
-        // and treating that as operator-started work is the safe reading.
-        fleet_depth: obj
-            .get("fleet_depth")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0) as u8,
+        fleet_depth,
         usage,
         work,
     })

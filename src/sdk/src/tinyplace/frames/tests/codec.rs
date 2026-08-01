@@ -39,6 +39,21 @@ fn encodes_a_minimal_frame() {
 }
 
 #[test]
+fn rejects_a_fleet_depth_that_cannot_fit_the_protocol_type() {
+    let body = json!({
+        "proto": TINYPLACE_PROTO,
+        "kind": "task",
+        "taskId": "cycle-1",
+        "text": "do the thing",
+        "ts": "2026-07-18T00:00:00.000Z",
+        "fleet_depth": 256,
+    })
+    .to_string();
+
+    assert!(decode_task_frame(&body).is_none());
+}
+
+#[test]
 fn encodes_optional_fields_when_present() {
     let body = encode_task_frame(EncodeFrameInput {
         kind: TaskFrameKind::CapabilitiesResult,

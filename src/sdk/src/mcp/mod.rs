@@ -47,6 +47,7 @@
 
 pub mod backend;
 mod tools;
+mod types;
 
 #[cfg(test)]
 mod tests;
@@ -55,67 +56,12 @@ pub use backend::{FleetBackend, OfflineFleet};
 pub use tools::{
     tool_definitions, ToolMode, FLEET_TOOL_NAMES, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV,
 };
+pub use types::McpSession;
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 
 use serde_json::{json, Value};
-
-use crate::control_socket::ToolFamilies;
-use crate::workflows::WorkflowStore;
-
-/// Everything one MCP session serves from.
-///
-/// A struct rather than a growing parameter list: the handler needs the store,
-/// what this host permits, which slice of the authoring surface this turn gets,
-/// which families the grant covers, and the fleet — and five positional
-/// arguments is where two of the same type get silently transposed.
-pub struct McpSession {
-    /// The workflow store. Always local, always present.
-    pub store: Arc<dyn WorkflowStore>,
-    /// What this host permits a workflow to do.
-    pub policy: crate::workflows::ops::HostPolicy,
-    /// How much of the authoring surface this turn is served.
-    pub mode: ToolMode,
-    /// Which tool families the grant covers.
-    pub families: ToolFamilies,
-    /// The live fleet, or a stand-in that says there is none.
-    pub fleet: Arc<dyn FleetBackend>,
-}
-
-impl McpSession {
-    /// A session serving the workflow tools alone, off the local store.
-    ///
-    /// What a harness with no fleet grant gets, and what every session got
-    /// before the fleet tools existed.
-    pub fn local(
-        store: Arc<dyn WorkflowStore>,
-        policy: crate::workflows::ops::HostPolicy,
-        mode: ToolMode,
-    ) -> Self {
-        McpSession {
-            store,
-            policy,
-            mode,
-            families: ToolFamilies::workflows_only(),
-            fleet: Arc::new(OfflineFleet),
-        }
-    }
-
-    /// Attach a fleet, taking the families from whatever grant it redeemed.
-    ///
-    /// The families come from the backend's handshake rather than from a
-    /// caller-supplied argument, so a session cannot be given a family the
-    /// control plane did not grant it.
-    pub fn with_fleet(mut self, fleet: Arc<dyn FleetBackend>) -> Self {
-        if let Some(hello) = fleet.hello() {
-            self.families = hello.families;
-        }
-        self.fleet = fleet;
-        self
-    }
-}
 
 /// The MCP protocol version this server speaks.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";

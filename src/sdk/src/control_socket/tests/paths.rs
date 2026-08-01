@@ -233,4 +233,28 @@ mod bind {
         let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o777, "refusal must not mutate the parent");
     }
+
+    #[tokio::test]
+    async fn an_explicit_path_refuses_a_private_parent_beneath_a_replaceable_ancestor() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("shared");
+        let private = shared.join("private");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let result = prepare_bind(&private.join("control.sock"), true).await;
+
+        assert!(matches!(
+            result,
+            Err(ControlSocketError::InsecureParent(path)) if path == shared
+        ));
+        assert_eq!(
+            std::fs::metadata(&private).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "validation must preserve the explicit private parent"
+        );
+    }
 }

@@ -333,3 +333,21 @@ fn agent_env_omits_attribution_when_off() {
     assert!(!env.contains_key("MEDULLA_ATTRIBUTION"));
     assert!(!env.contains_key("GIT_CONFIG_KEY_0"));
 }
+
+#[test]
+fn agent_env_strips_inherited_fleet_capabilities() {
+    let mut options = attribution_options(false);
+    options.env.insert(
+        crate::control_socket::MCP_SOCKET_ENV.to_string(),
+        "/tmp/another-session.sock".to_string(),
+    );
+    options.env.insert(
+        crate::control_socket::MCP_GRANT_ENV.to_string(),
+        "another-session-token".to_string(),
+    );
+
+    let env = super::execution::acp_env(&options);
+
+    assert!(!env.contains_key(crate::control_socket::MCP_SOCKET_ENV));
+    assert!(!env.contains_key(crate::control_socket::MCP_GRANT_ENV));
+}

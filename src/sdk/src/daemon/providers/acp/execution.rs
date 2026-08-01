@@ -369,6 +369,11 @@ fn agent_for(options: &RunTaskOptions) -> AcpAgent {
 /// and the key left to the agent.
 pub(super) fn acp_env(options: &RunTaskOptions) -> HashMap<String, String> {
     let mut env = options.env.clone();
+    // A fleet capability belongs only to the per-session MCP subprocess. The
+    // ACP agent itself inherits this map, so retaining an ambient pair here
+    // would let it redeem a grant minted for another process or session.
+    env.remove(crate::control_socket::MCP_SOCKET_ENV);
+    env.remove(crate::control_socket::MCP_GRANT_ENV);
     let attribution_env = crate::attribution::attribution_env(options.attribution, &env);
     env.extend(attribution_env);
     if let Some(router) = &options.router {

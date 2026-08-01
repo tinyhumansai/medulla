@@ -20,5 +20,5 @@ mod screen;
 mod state;
 mod types;
 
-pub(crate) use types::{ColdFields, SessionIo, SessionMeta};
+pub(crate) use types::SessionMeta;
 pub use types::{SessionHandle, MAX_QUEUED_WRITE_BYTES};

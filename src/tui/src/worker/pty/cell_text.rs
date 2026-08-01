@@ -25,6 +25,14 @@
 const INLINE_CAP: usize = 15;
 
 /// The text of one terminal cell.
+///
+/// The variant fields are deliberately module-private — `Inline`'s `len` is an
+/// invariant relied on by [`as_str`](Self::as_str)'s unchecked slice
+/// (`buf[..len]`), not just a stored value. An external caller building a
+/// `CellText` literal with a `len` past `INLINE_CAP` would slice out of bounds
+/// and panic; keeping the fields private confines construction to
+/// [`From<&str>`](CellText#impl-From<%26str>-for-CellText), whose only path in
+/// is a validated copy from a real `&str`.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum CellText {
     /// Short enough to live in the struct — the overwhelmingly common case.

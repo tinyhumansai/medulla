@@ -2,8 +2,12 @@
 //! the loopback endpoint a child is pointed at, and the router rewrite handed to
 //! a spawn seam.
 //!
-//! Only shapes and their trivial impls live here. Minting tokens and resolving
-//! keys is [`super::mod`]'s job; forwarding is [`super::serve`]'s.
+//! Only shapes and their trivial impls live here. Minting tokens is
+//! [`super::lifecycle`]'s job, key resolution is [`super::routing`]'s, and
+//! forwarding is [`super::serve`]'s.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::config::RouterConfig;
 use crate::tinyplace::HarnessProvider;
@@ -26,6 +30,27 @@ pub const UPSTREAM_URL_ENV: &str = "MEDULLA_OPENROUTER_URL";
 /// [`crate::config::custom_harnesses`], which describe the same two endpoints
 /// from the configuration side.
 pub const OPENROUTER_ROOT: &str = "https://openrouter.ai/api";
+
+/// The loopback token to upstream-key mapping used by the serving loop.
+///
+/// Keyed both ways so request authentication is fast while token minting stays
+/// idempotent for repeated spawns using the same OpenRouter credential.
+#[derive(Debug, Default)]
+pub(super) struct CredentialRegistry {
+    pub(super) by_token: HashMap<String, String>,
+    pub(super) by_key: HashMap<String, String>,
+}
+
+/// A running proxy and the credentials it accepts.
+///
+/// One handle serves every harness in the process. Clones share the credential
+/// registry, so a token minted through one clone is immediately usable by the
+/// serving loop.
+#[derive(Debug, Clone)]
+pub struct ProxyHandle {
+    pub(super) port: u16,
+    pub(super) registry: Arc<Mutex<CredentialRegistry>>,
+}
 
 /// The request dialect a harness speaks, which decides both the mount it is
 /// pointed at and the upstream path the mount maps onto.

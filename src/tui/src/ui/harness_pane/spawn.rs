@@ -122,7 +122,7 @@ impl LocalHarnesses {
         // harness is Medulla's traffic just as much as a dispatched one, so it
         // carries the same attribution — and must be just as unable to bypass it.
         let mut router = custom_router.or_else(|| self.router.clone());
-        medulla::inference_proxy::route_spawn(&mut router, &mut env)?;
+        medulla::inference_proxy::route_spawn(choice.provider, &mut router, &mut env)?;
         let Some(router) = router else {
             return Ok((env, extra_args));
         };

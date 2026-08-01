@@ -21,8 +21,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
-use super::types::UpstreamShape;
-use super::CredentialRegistry;
+use super::types::{CredentialRegistry, UpstreamShape};
 
 /// The body type both proxied and locally-generated responses use.
 type ProxyBody = BoxBody<Bytes, std::io::Error>;

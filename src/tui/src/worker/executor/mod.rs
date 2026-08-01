@@ -371,7 +371,7 @@ impl PtySessionExecutor {
         // proxy, and the real key is scrubbed from `env` here, before any of it
         // reaches the child. A no-op for every other endpoint.
         let mut router = options.router.clone();
-        medulla::inference_proxy::route_spawn(&mut router, &mut env)?;
+        medulla::inference_proxy::route_spawn(options.provider, &mut router, &mut env)?;
         if let Some(router) = &router {
             let injection = medulla::tinyplace::env::router_env(options.provider, router);
             for (key, value) in injection.env {

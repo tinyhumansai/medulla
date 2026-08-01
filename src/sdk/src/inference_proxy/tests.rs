@@ -9,8 +9,10 @@ use std::collections::HashMap;
 
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 
+use super::routing::{is_openrouter, resolve_key};
 use super::*;
 use crate::config::{RouterConfig, RouterProviderConfig};
+use crate::tinyplace::HarnessProvider;
 
 /// Build a header map from `(name, value)` pairs.
 fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
@@ -177,32 +179,45 @@ fn lookalike_and_unrelated_hosts_are_not_openrouter() {
 
 #[test]
 fn each_provider_is_mounted_on_its_own_dialect() {
-    let routing =
-        route_openrouter(&openrouter_router(), &endpoint(), "OPENROUTER_API_KEY").expect("routed");
+    for (provider, expected) in [
+        (HarnessProvider::Claude, "http://127.0.0.1:4242/anthropic"),
+        (HarnessProvider::Codex, "http://127.0.0.1:4242/openai"),
+        (HarnessProvider::Opencode, "http://127.0.0.1:4242/openai"),
+    ] {
+        let routing = route_openrouter(
+            &openrouter_router(),
+            provider,
+            &endpoint(),
+            "OPENROUTER_API_KEY",
+        )
+        .expect("routed");
 
-    let providers = &routing.router.providers;
-    assert_eq!(
-        providers.get("claude").unwrap().base_url.as_deref(),
-        Some("http://127.0.0.1:4242/anthropic")
-    );
-    assert_eq!(
-        providers.get("codex").unwrap().base_url.as_deref(),
-        Some("http://127.0.0.1:4242/openai")
-    );
-    assert_eq!(
-        providers.get("opencode").unwrap().base_url.as_deref(),
-        Some("http://127.0.0.1:4242/openai")
-    );
+        assert_eq!(
+            routing
+                .router
+                .providers
+                .get(provider.as_str())
+                .unwrap()
+                .base_url
+                .as_deref(),
+            Some(expected)
+        );
+        assert_eq!(routing.router.providers.len(), 1);
+    }
 }
 
 #[test]
 fn routing_swaps_the_key_name_for_the_token_name() {
-    let routing =
-        route_openrouter(&openrouter_router(), &endpoint(), "OPENROUTER_API_KEY").expect("routed");
+    let routing = route_openrouter(
+        &openrouter_router(),
+        HarnessProvider::Claude,
+        &endpoint(),
+        "OPENROUTER_API_KEY",
+    )
+    .expect("routed");
 
     assert_eq!(routing.router.api_key_env.as_deref(), Some(PROXY_TOKEN_ENV));
-    // Cleared so a provider added later cannot inherit a direct endpoint.
-    assert_eq!(routing.router.base_url, None);
+    assert_eq!(routing.router.base_url.as_deref(), Some(OPENROUTER_ROOT));
     assert_eq!(
         routing.env,
         vec![(PROXY_TOKEN_ENV.to_string(), "mdl-testtoken".to_string())]
@@ -213,7 +228,8 @@ fn routing_swaps_the_key_name_for_the_token_name() {
 fn routing_scrubs_both_the_configured_and_default_key_names() {
     let mut router = openrouter_router();
     router.api_key_env = Some("MY_OR_KEY".to_string());
-    let routing = route_openrouter(&router, &endpoint(), "MY_OR_KEY").expect("routed");
+    let routing = route_openrouter(&router, HarnessProvider::Claude, &endpoint(), "MY_OR_KEY")
+        .expect("routed");
 
     assert!(routing.scrub_env.contains(&"MY_OR_KEY".to_string()));
     assert!(routing
@@ -223,8 +239,13 @@ fn routing_scrubs_both_the_configured_and_default_key_names() {
 
 #[test]
 fn routing_scrub_list_has_no_duplicates_for_the_default_name() {
-    let routing =
-        route_openrouter(&openrouter_router(), &endpoint(), "OPENROUTER_API_KEY").expect("routed");
+    let routing = route_openrouter(
+        &openrouter_router(),
+        HarnessProvider::Claude,
+        &endpoint(),
+        "OPENROUTER_API_KEY",
+    )
+    .expect("routed");
     assert_eq!(routing.scrub_env, vec!["OPENROUTER_API_KEY".to_string()]);
 }
 
@@ -235,28 +256,66 @@ fn a_non_openrouter_router_is_left_alone() {
         api_key_env: Some("GATEWAY_KEY".to_string()),
         ..RouterConfig::default()
     };
-    assert!(route_openrouter(&router, &endpoint(), "GATEWAY_KEY").is_none());
+    assert!(
+        route_openrouter(&router, HarnessProvider::Claude, &endpoint(), "GATEWAY_KEY").is_none()
+    );
 }
 
 #[test]
 fn an_unconfigured_router_is_left_alone() {
-    assert!(
-        route_openrouter(&RouterConfig::default(), &endpoint(), "OPENROUTER_API_KEY").is_none()
-    );
+    assert!(route_openrouter(
+        &RouterConfig::default(),
+        HarnessProvider::Claude,
+        &endpoint(),
+        "OPENROUTER_API_KEY"
+    )
+    .is_none());
 }
 
 #[test]
-fn a_mixed_router_is_refused_rather_than_partly_routed() {
-    // `apiKeyEnv` is router-wide, so routing only the OpenRouter provider would
-    // hand the loopback token to the other endpoint as well.
-    let mut router = openrouter_router();
+fn another_providers_openrouter_override_does_not_route_this_spawn() {
+    let mut router = RouterConfig {
+        api_key_env: Some("OPENROUTER_API_KEY".to_string()),
+        ..RouterConfig::default()
+    };
     router.providers.insert(
-        "codex".to_string(),
+        "claude".to_string(),
         RouterProviderConfig {
-            base_url: Some("https://gateway.internal/v1".to_string()),
+            base_url: Some(OPENROUTER_ROOT.to_string()),
         },
     );
-    assert!(route_openrouter(&router, &endpoint(), "OPENROUTER_API_KEY").is_none());
+    assert!(route_openrouter(
+        &router,
+        HarnessProvider::Codex,
+        &endpoint(),
+        "OPENROUTER_API_KEY"
+    )
+    .is_none());
+}
+
+#[test]
+fn another_providers_override_does_not_scrub_this_spawns_key() {
+    let mut configured = RouterConfig {
+        api_key_env: Some("OPENROUTER_API_KEY".to_string()),
+        ..RouterConfig::default()
+    };
+    configured.providers.insert(
+        "claude".to_string(),
+        RouterProviderConfig {
+            base_url: Some(OPENROUTER_ROOT.to_string()),
+        },
+    );
+    let mut router = Some(configured.clone());
+    let mut env = HashMap::from([("OPENROUTER_API_KEY".to_string(), "sk-or-real".to_string())]);
+
+    route_spawn(HarnessProvider::Codex, &mut router, &mut env).expect("no-op");
+
+    assert_eq!(router, Some(configured));
+    assert_eq!(
+        env.get("OPENROUTER_API_KEY").map(String::as_str),
+        Some("sk-or-real")
+    );
+    assert!(!env.contains_key(PROXY_TOKEN_ENV));
 }
 
 #[test]
@@ -271,7 +330,13 @@ fn a_provider_override_alone_is_enough_to_route() {
             base_url: Some(OPENROUTER_ROOT.to_string()),
         },
     );
-    let routing = route_openrouter(&router, &endpoint(), "OPENROUTER_API_KEY").expect("routed");
+    let routing = route_openrouter(
+        &router,
+        HarnessProvider::Claude,
+        &endpoint(),
+        "OPENROUTER_API_KEY",
+    )
+    .expect("routed");
 
     assert_eq!(
         routing
@@ -295,7 +360,13 @@ fn models_survive_the_rewrite() {
         "reasoning".to_string(),
         "anthropic/claude-opus-4".to_string(),
     );
-    let routing = route_openrouter(&router, &endpoint(), "OPENROUTER_API_KEY").expect("routed");
+    let routing = route_openrouter(
+        &router,
+        HarnessProvider::Claude,
+        &endpoint(),
+        "OPENROUTER_API_KEY",
+    )
+    .expect("routed");
 
     assert_eq!(
         routing.router.model_for_tier("reasoning"),
@@ -316,7 +387,7 @@ fn route_spawn_scrubs_the_real_key_and_rewrites_the_router() {
             "http://127.0.0.1:1/api".to_string(),
         ),
     ]);
-    route_spawn(&mut router, &mut env).expect("routed");
+    route_spawn(HarnessProvider::Claude, &mut router, &mut env).expect("routed");
 
     // The real key is gone — a harness in this environment has nothing to reach
     // OpenRouter with except the loopback token.
@@ -338,7 +409,7 @@ fn route_spawn_leaves_an_unrouted_run_untouched() {
     let mut router = None;
     let mut env: HashMap<String, String> =
         HashMap::from([("OPENROUTER_API_KEY".to_string(), "sk-or-real".to_string())]);
-    route_spawn(&mut router, &mut env).expect("no-op");
+    route_spawn(HarnessProvider::Claude, &mut router, &mut env).expect("no-op");
 
     assert!(router.is_none());
     // Nothing scrubbed: with no `[router]` the key is the harness's own business.
@@ -372,7 +443,12 @@ fn a_blank_or_absent_key_resolves_to_nothing() {
 fn a_run_without_a_key_is_not_routed() {
     // No key exported → `Ok(None)`, and crucially no listener is started, so an
     // otherwise-working direct run is left exactly as it was.
-    let routed = route_run(&openrouter_router(), &HashMap::new()).expect("no error");
+    let routed = route_run(
+        &openrouter_router(),
+        HarnessProvider::Claude,
+        &HashMap::new(),
+    )
+    .expect("no error");
     assert!(routed.is_none());
 }
 

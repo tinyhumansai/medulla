@@ -61,7 +61,7 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
     // Medulla's loopback proxy for the attribution headers on the wire to be ours
     // and for the child to never hold the real key. A no-op for every endpoint
     // that is not OpenRouter.
-    crate::inference_proxy::route_spawn(&mut options.router, &mut options.env)?;
+    crate::inference_proxy::route_spawn(options.provider, &mut options.router, &mut options.env)?;
     if super::acp::uses_acp(&options) {
         return super::acp::run_acp_task(options).await;
     }

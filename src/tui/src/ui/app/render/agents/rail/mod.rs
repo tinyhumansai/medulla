@@ -363,6 +363,7 @@ impl App {
         row: &AgentRow,
         lanes: &[AgentLane],
         active: bool,
+        waiting_sessions: &std::collections::HashSet<String>,
     ) -> TLine<'static> {
         match row {
             AgentRow::Separator => TLine::from(Span::styled(
@@ -419,7 +420,7 @@ impl App {
                     ),
                 };
                 let marker = self.lane_marker(item, is_fn);
-                let state = self.lane_state(item);
+                let state = self.lane_state(item, waiting_sessions);
                 let sessions_note = if let Some(aid) = &item.agent_id {
                     let list = self.snapshot.sessions.get(aid).cloned().unwrap_or_default();
                     if list.is_empty() {
@@ -499,13 +500,13 @@ impl App {
     }
 
     /// A short human-readable state suffix for a lane row.
-    pub(in crate::ui::app::render) fn lane_state(&self, item: &AgentLane) -> String {
+    pub(in crate::ui::app::render) fn lane_state(&self, item: &AgentLane, waiting_sessions: &std::collections::HashSet<String>) -> String {
         if item.session_id.is_some() {
             self.session_state(item)
-                .map(|_| format!(" · {}", self.harness_visual_state(item).label()))
+                .map(|_| format!(" · {}", self.harness_visual_state(item, waiting_sessions).label()))
                 .unwrap_or_else(|| " · …".into())
         } else if item.role == AgentRole::Agent {
-            format!(" · {}", self.harness_visual_state(item).label())
+            format!(" · {}", self.harness_visual_state(item, waiting_sessions).label())
         } else {
             String::new()
         }

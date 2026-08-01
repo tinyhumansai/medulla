@@ -24,9 +24,8 @@ use medulla::config::{
 };
 use ratatui::style::Style;
 use ratatui::text::{Line as TLine, Span};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::ui::util::{clip, clip_left};
 use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
 
 use super::wrap::{short_home, wrap_path};
@@ -237,7 +236,7 @@ fn layout_line(
 
 /// A fixed-width field clipped to the room it has, or `None` when it has none.
 fn fit(text: &str, room: usize) -> Option<String> {
-    (room > 0).then(|| clip(text, room))
+    (room > 0).then(|| clip_cells(text, room))
 }
 
 /// The provider name in the operator's chosen spelling.
@@ -273,7 +272,7 @@ fn branch_text(row: &SessionRow, room: usize, path_shares_line: bool) -> Option<
     let reserve = if path_shares_line { PATH_RESERVE } else { 0 };
     let budget = room.saturating_sub(reserve).min(BRANCH_MAX);
     // Below two columns all that fits is the ellipsis, which says nothing.
-    (budget >= 2).then(|| clip(branch, budget))
+    (budget >= 2).then(|| clip_cells(branch, budget))
 }
 
 /// The working directory in the operator's chosen spelling, or `None` when it
@@ -290,13 +289,63 @@ fn path_text(
     Some(match style {
         // Clipped from the front: the tail names the checkout, and several rows
         // all reading `/Users/someone/work/…` would distinguish nothing.
-        PathStyle::Full => clip_left(&row.cwd, room),
+        PathStyle::Full => clip_left_cells(&row.cwd, room),
         PathStyle::Shortened => {
             let path = short_home(&row.cwd, home);
             wrap_path(&path, room, 1).concat()
         }
-        PathStyle::Last => clip_left(last_segment(&row.cwd), room),
+        PathStyle::Last => clip_left_cells(last_segment(&row.cwd), room),
     })
+}
+
+/// Collapses whitespace and clips the right edge to `width` terminal cells.
+///
+/// Status-line values come from provider names, branches, and paths, all of
+/// which may contain wide glyphs. Counting Unicode scalars would allow a CJK
+/// value to consume twice its assigned rail budget.
+fn clip_cells(value: &str, width: usize) -> String {
+    let single = single_line(value);
+    if single.width() <= width {
+        return single;
+    }
+    let budget = width.saturating_sub(1);
+    let mut used = 0;
+    let mut out = String::new();
+    for character in single.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > budget {
+            break;
+        }
+        used += character_width;
+        out.push(character);
+    }
+    out.push('…');
+    out
+}
+
+/// Collapses whitespace and clips the left edge to `width` terminal cells.
+fn clip_left_cells(value: &str, width: usize) -> String {
+    let single = single_line(value);
+    if single.width() <= width {
+        return single;
+    }
+    let budget = width.saturating_sub(1);
+    let mut used = 0;
+    let mut start = single.len();
+    for (index, character) in single.char_indices().rev() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > budget {
+            break;
+        }
+        used += character_width;
+        start = index;
+    }
+    format!("…{}", &single[start..])
+}
+
+/// Normalizes a user-controlled value into the one-line form the rail draws.
+fn single_line(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Whether this session is in a state an operator would want flagged.

@@ -481,6 +481,32 @@ fn every_line_is_still_bounded_by_the_rail_width() {
 }
 
 #[test]
+fn wide_branch_and_path_glyphs_stay_within_their_cell_budget() {
+    let mut row = harness_row("/workspace/项目/medulla界面");
+    row.branch = Some("功能/状态显示分支".into());
+
+    for path_style in [PathStyle::Full, PathStyle::Last] {
+        let app = app_with(StatusLineConfig {
+            state: FieldPlacement::Hidden,
+            harness: FieldPlacement::Hidden,
+            control: FieldPlacement::Hidden,
+            branch: FieldPlacement::Line1,
+            path: FieldPlacement::Line2,
+            path_style,
+            ..StatusLineConfig::default()
+        });
+        let lines = app.own_harness_lines(&row, false, 10);
+
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines.iter().all(|line| line.width() <= 10),
+            "{path_style:?}: {lines:?}"
+        );
+        assert!(lines.iter().all(|line| line.to_string().contains('…')));
+    }
+}
+
+#[test]
 fn the_harness_name_and_control_state_have_compact_spellings() {
     let row = harness_row("/workspace/medulla");
 

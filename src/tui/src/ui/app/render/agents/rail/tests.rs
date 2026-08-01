@@ -73,6 +73,14 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
 }
 
 #[test]
+fn viewport_keeps_all_three_lines_of_the_selected_harness_visible() {
+    // One row precedes the selected three-line harness and another follows it.
+    // Centering only the selected row's first line starts at zero and clips its
+    // final line, while starting at one keeps the complete row in view.
+    assert_eq!(super::selected_row_viewport_start(1, 4, 5, 3), 1);
+}
+
+#[test]
 fn an_operator_harness_uses_one_compact_line_like_the_orchestrator() {
     let app = app();
     let lines = app.own_harness_lines(&harness_row("/workspace/medulla"), false, 48);

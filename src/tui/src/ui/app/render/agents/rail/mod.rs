@@ -113,6 +113,7 @@ impl App {
         let mut lines: Vec<TLine> = Vec::new();
         let mut owners: Vec<usize> = Vec::new();
         let mut active_line = 0;
+        let mut active_line_end = 0;
         for (index, row) in selection.rows.iter().enumerate() {
             if index == selection.active {
                 active_line = lines.len();
@@ -122,10 +123,14 @@ impl App {
                 lines.push(line);
                 owners.push(index);
             }
+            if index == selection.active {
+                active_line_end = lines.len();
+            }
         }
 
         let capacity = (inner.height as usize).max(1);
-        let start = crate::ui::selection::viewport_start(active_line, lines.len(), capacity);
+        let start =
+            selected_row_viewport_start(active_line, active_line_end, lines.len(), capacity);
         self.hit_agents = Some((
             inner,
             owners.iter().skip(start).take(capacity).copied().collect(),
@@ -476,5 +481,22 @@ impl App {
     fn harness_visual_state(&self, item: &AgentLane) -> HarnessVisualState {
         let session = self.session_state(item);
         status::classify(item, session.as_deref())
+    }
+}
+
+/// Center the selected row while keeping its final line visible when the full
+/// multi-line row fits in the viewport.
+fn selected_row_viewport_start(
+    active_start: usize,
+    active_end: usize,
+    total: usize,
+    capacity: usize,
+) -> usize {
+    let start = crate::ui::selection::viewport_start(active_start, total, capacity);
+    let row_height = active_end.saturating_sub(active_start);
+    if row_height <= capacity && active_end > start.saturating_add(capacity) {
+        active_end.saturating_sub(capacity)
+    } else {
+        start
     }
 }

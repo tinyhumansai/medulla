@@ -65,6 +65,17 @@ pub(super) fn record_outcome(
     activity.observed(task_id, kind, &content, crate::clock::now_millis());
 }
 
+/// The Agents-view key for a task dispatched through the control plane.
+///
+/// It carries the server-minted abort handle, not the worker-facing dedupe id,
+/// so the operator can cancel the row even after its originating grant ends.
+pub(super) fn activity_key(request: &TaskRequest) -> String {
+    match request.cycle_id.as_deref() {
+        Some(cycle) => format!("{cycle}/t:{}", request.abort_id),
+        None => request.abort_id.clone(),
+    }
+}
+
 /// [`FleetOps`] backed by whatever handle is in the slot right now.
 pub struct HubFleetOps {
     slot: HubSlot,
@@ -163,7 +174,7 @@ impl FleetOps for HubFleetOps {
         // onto no worker at all.
         let activity = handle.activity();
         let agent_id = self.roster_id(&handle, &request.worker_address);
-        let task_id = request.task_id.clone();
+        let task_id = activity_key(&request);
         activity.dispatched(&task_id, &agent_id);
 
         let tee = tee_status(activity.clone(), task_id.clone(), status);

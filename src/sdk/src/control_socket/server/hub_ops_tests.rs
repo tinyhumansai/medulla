@@ -2,7 +2,7 @@
 //! the fleet tools is *visible* — attributed to a lane and reporting progress
 //! the way an operator-started task does.
 
-use super::hub_ops::{record_outcome, tee_status};
+use super::hub_ops::{activity_key, record_outcome, tee_status};
 use super::{FleetDefaults, HubFleetOps, HubSlot};
 use crate::control_socket::FleetOps;
 use crate::hub::{ActivityLog, RunError, TaskOutcome, TaskRequest};
@@ -57,6 +57,11 @@ fn an_unconnected_hub_is_not_an_empty_fleet() {
     let ops = HubFleetOps::new(HubSlot::default(), FleetDefaults::default());
 
     assert!(ops.workers().is_none());
+}
+
+#[test]
+fn mcp_activity_uses_the_cycle_and_abort_handle_the_ui_can_cancel() {
+    assert_eq!(activity_key(&request("alpha")), "mcp:session/t:mcp-abort-1");
 }
 
 #[test]

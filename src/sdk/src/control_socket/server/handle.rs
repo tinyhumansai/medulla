@@ -185,6 +185,14 @@ fn build_request(
     worker_address: String,
 ) -> Result<TaskRequest, ControlFailure> {
     let instruction = required_str(params, "instruction")?;
+    let workflow = optional_str(params, "workflow");
+    if grant.tool_mode.is_some() && workflow.is_some() {
+        return Err(ControlFailure::new(
+            ErrorKind::BadRequest,
+            "a proposal-only session may delegate a review instruction, but cannot run a saved \
+             workflow through the fleet",
+        ));
+    }
     let provider = match optional_str(params, "harness") {
         Some(name) => Some(HarnessProvider::from_wire(&name).ok_or_else(|| {
             ControlFailure::new(
@@ -207,7 +215,7 @@ fn build_request(
         // value comes from the server-side grant, never caller parameters, so
         // the caller can neither widen nor forge the workflow scope.
         tool_mode: grant.tool_mode.clone(),
-        workflow: optional_str(params, "workflow"),
+        workflow,
         // Context-free by default, which the field's own documentation calls
         // the invariant that lets two tasks run concurrently without seeing
         // each other's work. A parallel dispatch tool must preserve it.

@@ -38,6 +38,7 @@ pub(crate) async fn start(
     env: &HashMap<String, String>,
     config: &medulla::config::TuiConfig,
     hub: HubSlot,
+    local_default_worker: Option<String>,
     logs: &medulla_tui::log::LogBuffer,
 ) -> Option<ControlServer> {
     if !config.mcp.fleet_tools {
@@ -45,7 +46,7 @@ pub(crate) async fn start(
     }
     #[cfg(not(unix))]
     {
-        let _ = (env, hub, logs);
+        let _ = (env, hub, local_default_worker, logs);
         None
     }
     #[cfg(unix)]
@@ -59,7 +60,7 @@ pub(crate) async fn start(
             }
         };
         let defaults = FleetDefaults {
-            worker_address: Some(config.host.effective_address()),
+            worker_address: local_default_worker,
         };
         let ops: Arc<dyn FleetOps> = Arc::new(HubFleetOps::new(hub, defaults));
         // An operator who named an explicit path in config or the environment

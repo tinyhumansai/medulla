@@ -29,6 +29,7 @@ async fn fleet_tools_off_binds_nothing_at_all() {
         &env(&[]),
         &config(root.path(), false),
         HubSlot::default(),
+        None,
         &logs,
     )
     .await;
@@ -48,6 +49,7 @@ async fn binding_serves_and_cleans_up_after_itself() {
         &env(&[]),
         &config(root.path(), true),
         HubSlot::default(),
+        Some("this-device".into()),
         &logs,
     )
     .await
@@ -75,6 +77,7 @@ async fn a_second_instance_does_not_take_a_live_address() {
         &env(&[]),
         &config(root.path(), true),
         HubSlot::default(),
+        Some("this-device".into()),
         &logs,
     )
     .await
@@ -84,6 +87,7 @@ async fn a_second_instance_does_not_take_a_live_address() {
         &env(&[]),
         &config(root.path(), true),
         HubSlot::default(),
+        Some("this-device".into()),
         &logs,
     )
     .await;

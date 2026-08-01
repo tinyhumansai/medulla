@@ -304,6 +304,22 @@ async fn a_proposal_grant_keeps_delegated_work_in_proposal_mode() {
 }
 
 #[tokio::test]
+async fn a_proposal_grant_cannot_run_a_saved_workflow_through_the_fleet() {
+    let grant = Grant::new("review-session", 0, 2).with_tool_mode(Some("propose:workflow-a"));
+    let mut harness = Harness::with(FakeFleet::new(), grant);
+
+    let response = harness
+        .call(
+            "task.dispatch",
+            json!({ "instruction": "run it", "workflow": "dangerous" }),
+        )
+        .await;
+
+    assert_eq!(kind(&response), "badRequest");
+    assert!(harness.fake.dispatched.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn polling_an_unknown_task_says_tasks_do_not_outlive_the_instance() {
     let response = Harness::new()
         .call("task.get", json!({ "taskId": "mcp-nope" }))

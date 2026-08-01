@@ -105,6 +105,9 @@ impl App {
             .as_ref()
             .map(|h| h.sessions.waiting_sessions())
             .unwrap_or_default();
+        // Use a consistent timestamp across all rows so a waiting harness reports
+        // the same elapsed time throughout the frame, not a new one for each row.
+        let now = medulla::clock::now_millis();
         let mut lines: Vec<TLine> = Vec::new();
         let mut owners: Vec<usize> = Vec::new();
         let mut active_line = 0;
@@ -112,7 +115,7 @@ impl App {
             if index == selection.active {
                 active_line = lines.len();
             }
-            for line in self.rail_row_lines(row, &selection.lanes, index == selection.active, width, &waiting_sessions)
+            for line in self.rail_row_lines(row, &selection.lanes, index == selection.active, width, &waiting_sessions, now)
             {
                 lines.push(line);
                 owners.push(index);

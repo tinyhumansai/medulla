@@ -14,6 +14,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::ui::app::App;
 use crate::worker::pty::{AttentionKind, HarnessAttention, HarnessControl, PtyState, SessionRow};
 
+use super::rail_title;
+use super::state::{classify_lane, lane_waiting_session};
+use super::status::HarnessVisualState;
 use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
 
 fn app() -> App {
@@ -486,4 +489,40 @@ fn an_exited_harness_stops_asking_for_anything() {
 
     assert_eq!(lines.len(), 1);
     assert!(lines[0].to_string().starts_with("✓ codex"), "{}", lines[0]);
+}
+
+#[test]
+fn lane_attention_skips_the_attached_session_and_takes_the_first_waiting_one() {
+    let mut item = lane();
+    item.tasks = vec![
+        task(TaskStatus::Running, false, 1),
+        task(TaskStatus::Running, false, 2),
+        task(TaskStatus::Running, false, 3),
+    ];
+    let waiting = ["w-1".to_string(), "w-2".to_string()].into_iter().collect();
+
+    let found = lane_waiting_session(&item, Some("w-1"), &waiting, |task_id| match task_id {
+        "task-1" => Some("w-1".to_string()),
+        "task-2" => Some("not-waiting".to_string()),
+        "task-3" => Some("w-2".to_string()),
+        _ => None,
+    });
+
+    assert_eq!(found.as_deref(), Some("w-2"));
+    assert_eq!(
+        classify_lane(&item, Some("running"), found.is_some()),
+        HarnessVisualState::NeedsInput,
+        "PTY attention must outrank ordinary running state"
+    );
+}
+
+#[test]
+fn rail_title_reports_the_attention_snapshot_count() {
+    let mut item = lane();
+    item.tasks = vec![task(TaskStatus::Running, false, 1)];
+
+    assert_eq!(
+        rail_title(&[item], 2),
+        "Agents · 1 · 1 running · ⚠ 2 waiting on you"
+    );
 }

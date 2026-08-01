@@ -13,24 +13,23 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
 
-use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
-use crate::ui::util::{clip, fmt_tokens};
-use crate::worker::pty::{HarnessAttention, HarnessControl, SessionRow, ATTENTION_GLYPH};
+use crate::ui::agents::{AgentLane, AgentRole, TaskStatus};
+use crate::worker::pty::ATTENTION_GLYPH;
 
 use super::super::super::rail::{RailRow, NEW_HARNESS_LABEL};
 use super::super::super::types::App;
 use super::super::color;
 use super::types::{AgentsPanes, Selection};
 
+mod rows;
+mod state;
 mod status;
 #[cfg(test)]
 mod tests;
 mod wrap;
 
-use status::HarnessVisualState;
-use wrap::{home_dir, short_home, wrap_line, wrap_path};
+use wrap::wrap_line;
 
 /// The most content columns the Agents rail ever takes.
 ///
@@ -44,6 +43,29 @@ pub(super) const RAIL_MAX_CONTENT: usize = 36;
 /// How far a wrapped row's continuation lines are indented, so a row that took
 /// two lines still reads as one row rather than as two entries.
 const CONT_INDENT: usize = 5;
+
+/// Build the rail title from the lane inventory and one attention snapshot.
+fn rail_title(lanes: &[AgentLane], waiting: usize) -> String {
+    let running_tasks: usize = lanes
+        .iter()
+        .map(|lane| {
+            lane.tasks
+                .iter()
+                .filter(|task| task.status == TaskStatus::Running)
+                .count()
+        })
+        .sum();
+    let agents = lanes.iter().filter(|lane| !lane.role.is_function()).count();
+    let mut title = if running_tasks > 0 {
+        format!("Agents · {agents} · {running_tasks} running")
+    } else {
+        format!("Agents · {agents}")
+    };
+    if waiting > 0 {
+        title.push_str(&format!(" · {ATTENTION_GLYPH} {waiting} waiting on you"));
+    }
+    title
+}
 
 impl App {
     /// Draw the threads strip and the rail list under it.
@@ -60,21 +82,6 @@ impl App {
             self.hit_threads = None;
         }
 
-        let running_tasks: usize = selection
-            .lanes
-            .iter()
-            .map(|l| {
-                l.tasks
-                    .iter()
-                    .filter(|t| t.status == TaskStatus::Running)
-                    .count()
-            })
-            .sum();
-        let agents = selection
-            .lanes
-            .iter()
-            .filter(|l| !l.role.is_function())
-            .count();
         // Collected once for the whole frame: the header count, the lane styling,
         // and the harness rows all answer from this one snapshot, so they cannot
         // disagree with each other — and the render thread takes the sessions
@@ -88,16 +95,7 @@ impl App {
         // rather than on rows of their own — the same number the tab badge
         // carries, so the two can never disagree.
         let waiting = App::count_waiting(&waiting_sessions, &self.harness_focus);
-        let mut title = if running_tasks > 0 {
-            format!("Agents · {agents} · {running_tasks} running")
-        } else {
-            format!("Agents · {agents}")
-        };
-        // Last, and in the same vocabulary as the rows: a scrolled-away harness
-        // stuck on a prompt is otherwise invisible until you find it.
-        if waiting > 0 {
-            title.push_str(&format!(" · {ATTENTION_GLYPH} {waiting} waiting on you"));
-        }
+        let title = rail_title(&selection.lanes, waiting);
         // The border says which half the keyboard is driving. Without it, Esc
         // moving focus to the rail is invisible until the next arrow press.
         let block = crate::ui::widgets::panel(&self.theme, title, self.agents_rail_focused());
@@ -268,204 +266,6 @@ impl App {
         ])
     }
 
-    /// Format one operator-started harness as one compact rail row.
-    ///
-    /// Says who holds it in words rather than only by colour: "unmanaged" is the
-    /// whole reason the row exists, and an operator who hands one to the
-    /// orchestrator needs to see that it took effect. The working directory is
-    /// shortened to the remaining width rather than consuming another row.
-    fn own_harness_lines(
-        &self,
-        row: &SessionRow,
-        active: bool,
-        width: usize,
-        now: i64,
-    ) -> Vec<TLine<'static>> {
-        // A harness waiting on the operator is the one thing on this rail worth
-        // interrupting them for, so it takes the row over: its own glyph, its
-        // own colour, and a blink. Everything else the row says — who holds it,
-        // which branch, which directory — is still true and still there, just no
-        // longer what the eye lands on first.
-        let waiting = self.harness_attention(row);
-        let control = match row.control {
-            HarnessControl::User => " · unmanaged",
-            HarnessControl::Orchestrator => " · orchestrator",
-        };
-        let style = if active {
-            self.theme.selection()
-        } else if waiting.is_some() {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
-        } else if row.control == HarnessControl::User {
-            Style::default().fg(color("cyan"))
-        } else {
-            Style::default()
-        };
-        let glyph = match &waiting {
-            // Not the state glyph: the session *is* running, and saying so here
-            // would be answering a question nobody is asking about a row that
-            // needs something done to it.
-            Some(_) => ATTENTION_GLYPH,
-            None => row.state.glyph(),
-        };
-        let head = format!("{glyph} {}{control}", row.provider.as_str());
-        let head = if width == 0 {
-            String::new()
-        } else {
-            clip(&head, width)
-        };
-        let detail_style = if active {
-            style
-        } else {
-            style.add_modifier(Modifier::DIM)
-        };
-        const SEPARATOR: &str = " · ";
-        let mut spans = vec![Span::styled(head, style)];
-        let mut used = spans[0].width();
-        let appearance = &self.loaded.config.appearance;
-        if appearance.show_harness_branch {
-            if let Some(branch) = row.branch.as_deref() {
-                let remaining = width.saturating_sub(used + SEPARATOR.width());
-                let reserve_for_path = if appearance.show_harness_path { 7 } else { 0 };
-                let branch_room = remaining.saturating_sub(reserve_for_path).min(16);
-                if branch_room >= 2 {
-                    let branch = clip(branch, branch_room);
-                    used += SEPARATOR.width() + branch.width();
-                    spans.push(Span::styled(format!("{SEPARATOR}{branch}"), detail_style));
-                }
-            }
-        }
-        let path_room = width.saturating_sub(used + SEPARATOR.width());
-        if appearance.show_harness_path && path_room >= 4 {
-            let path = short_home(&row.cwd, home_dir().as_deref());
-            let path = wrap_path(&path, path_room, 1).concat();
-            spans.push(Span::styled(format!("{SEPARATOR}{path}"), detail_style));
-        }
-        let mut lines = vec![TLine::from(spans)];
-        // On its own line, in words. The colour and the blink say *that* it
-        // wants you; only the sentence says what for — and "approve a command"
-        // and "it rang the bell" are worth different amounts of hurry.
-        if let Some(cue) = waiting {
-            let text = format!("  {ATTENTION_GLYPH} {}", cue.label(now));
-            lines.extend(wrap_line(
-                &TLine::from(Span::styled(clip(&text, width.max(1)), style)),
-                width,
-                CONT_INDENT,
-            ));
-        }
-        lines
-    }
-
-    /// The cue a harness row should blink about, if it should.
-    ///
-    /// The attached session never blinks: its screen is the thing the operator
-    /// is looking at, and a row shouting about a prompt that is already filling
-    /// the pane beside it is noise. Nor does an exited one — whatever it was
-    /// asking, nobody can answer it now.
-    fn harness_attention(&self, row: &SessionRow) -> Option<HarnessAttention> {
-        if !row.state.is_running() || self.harness_focus.is_attached_to(&row.id) {
-            return None;
-        }
-        row.attention.clone()
-    }
-
-    /// Format one Agents-list row (separator, "more", sub-task, or lane).
-    pub(super) fn agent_row_line(
-        &self,
-        row: &AgentRow,
-        lanes: &[AgentLane],
-        active: bool,
-        waiting_sessions: &std::collections::HashSet<String>,
-    ) -> TLine<'static> {
-        match row {
-            AgentRow::Separator => TLine::from(Span::styled(
-                "── functions ──",
-                Style::default().add_modifier(Modifier::DIM),
-            )),
-            AgentRow::More { hidden, .. } => TLine::from(Span::styled(
-                format!("   └ +{hidden} more"),
-                Style::default().add_modifier(Modifier::DIM),
-            )),
-            AgentRow::Sub { task, last, .. } => {
-                let branch = if *last { "└" } else { "├" };
-                let mut style = Style::default();
-                if active {
-                    style = self.theme.selection();
-                }
-                let status_style = if active {
-                    style
-                } else {
-                    style.fg(color(task.status.color()))
-                };
-                // The chip is what makes a row worth reading at a glance: a
-                // task that says "running · 12 turns" is indistinguishable from
-                // every other one, while "3/7 ⑂2" says where it has got to.
-                let chip = task
-                    .work
-                    .as_deref()
-                    .map(crate::ui::work::work_chip)
-                    .filter(|chip| !chip.is_empty())
-                    .map(|chip| format!(" · {chip}"))
-                    .unwrap_or_default();
-                TLine::from(vec![
-                    Span::styled(format!("   {branch} {} · ", task.task_id), style),
-                    Span::styled(task.status.label().to_string(), status_style),
-                    Span::styled(format!(" · {} turns{chip}", task.turns), style),
-                ])
-            }
-            AgentRow::Lane { lane_index } => {
-                let Some(item) = lanes.get(*lane_index) else {
-                    return TLine::from("");
-                };
-                let window = self.loaded.config.medulla.context_window() as i64;
-                let is_fn = item.role.is_function();
-                let ctx = match item.context_tokens {
-                    None => String::new(),
-                    Some(used) if item.role == AgentRole::Agent => {
-                        format!(" · ctx {}", fmt_tokens(used))
-                    }
-                    Some(used) => format!(
-                        " · ctx {}/{} {}%",
-                        fmt_tokens(used),
-                        fmt_tokens(window),
-                        ((used as f64 / window as f64) * 100.0).round() as i64
-                    ),
-                };
-                let marker = self.lane_marker(item, is_fn);
-                let state = self.lane_state(item, waiting_sessions);
-                let sessions_note = if let Some(aid) = &item.agent_id {
-                    let list = self.snapshot.sessions.get(aid).cloned().unwrap_or_default();
-                    if list.is_empty() {
-                        String::new()
-                    } else {
-                        let live = list.iter().filter(|s| s.state != "ended").count();
-                        format!(" · {}/{} sess", live, list.len())
-                    }
-                } else {
-                    String::new()
-                };
-                let style = self.lane_style(item, is_fn, active, waiting_sessions);
-                let work_note = item
-                    .work
-                    .as_deref()
-                    .map(crate::ui::work::work_chip)
-                    .filter(|chip| !chip.is_empty())
-                    .map(|chip| format!(" · {chip}"))
-                    .unwrap_or_default();
-                crate::ui::agent_lane::line(
-                    marker,
-                    item.label.clone(),
-                    format!(
-                        " · {}{ctx}{state}{sessions_note}{work_note}",
-                        item.turns.len()
-                    ),
-                    style,
-                )
-            }
-        }
-    }
-
     /// The presence/status glyph for a lane row.
     pub(in crate::ui::app::render) fn lane_marker(
         &self,
@@ -535,72 +335,5 @@ impl App {
         } else {
             String::new()
         }
-    }
-
-    /// Style a lane while preserving both selection visibility and harness state.
-    fn lane_style(
-        &self,
-        item: &AgentLane,
-        is_fn: bool,
-        active: bool,
-        waiting_sessions: &std::collections::HashSet<String>,
-    ) -> Style {
-        let mut style = if active {
-            self.theme.selection()
-        } else {
-            Style::default()
-        };
-        if item.role == AgentRole::Agent {
-            let state = self.harness_visual_state(item, waiting_sessions);
-            style = style.fg(state.color());
-            if state.flashes() {
-                style = style.add_modifier(Modifier::SLOW_BLINK);
-            }
-        } else {
-            style = style.fg(color(item.role.color()));
-        }
-        if is_fn {
-            style = style.add_modifier(Modifier::DIM);
-        }
-        style
-    }
-
-    /// Resolve the current state instead of letting an older terminal task
-    /// override newer work. Pending input wins over active work, then the most
-    /// recent terminal task supplies completion or error.
-    ///
-    /// A local harness stopped on its own permission prompt outranks all of it.
-    /// The event fold cannot see that state — the harness writes no record while
-    /// it waits — so a lane whose pty is sitting on "Do you want to proceed?"
-    /// reads as *running* to everything else here, right up until the task times
-    /// out. The screen knows, and this is where it gets to say so.
-    fn harness_visual_state(
-        &self,
-        item: &AgentLane,
-        waiting_sessions: &std::collections::HashSet<String>,
-    ) -> HarnessVisualState {
-        if self.lane_has_attention(item, waiting_sessions) {
-            return HarnessVisualState::NeedsInput;
-        }
-        let session = self.session_state(item);
-        status::classify(item, session.as_deref())
-    }
-
-    /// Whether a lane has a waiting harness by checking the pre-resolved waiting
-    /// set, avoiding per-lane session locking.
-    fn lane_has_attention(
-        &self,
-        item: &AgentLane,
-        waiting_sessions: &std::collections::HashSet<String>,
-    ) -> bool {
-        let harnesses = match self.harnesses.as_ref() {
-            Some(h) => h,
-            None => return false,
-        };
-        item.tasks
-            .iter()
-            .filter_map(|task| harnesses.session_for_task(&task.task_id))
-            .filter(|session| !self.harness_focus.is_attached_to(session))
-            .any(|session| waiting_sessions.contains(&session))
     }
 }

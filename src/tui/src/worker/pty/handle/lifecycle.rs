@@ -8,9 +8,7 @@ use portable_pty::{Child, MasterPty};
 
 use super::super::sync::lock;
 use super::super::types::HarnessControl;
-use super::types::{
-    ColdFields, SessionIo, SessionMeta, NO_EXIT_CODE, STATE_EXITED, STATE_RUNNING,
-};
+use super::types::{ColdFields, SessionIo, SessionMeta, NO_EXIT_CODE, STATE_EXITED, STATE_RUNNING};
 use super::SessionHandle;
 
 impl SessionHandle {

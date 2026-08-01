@@ -5,9 +5,13 @@
 //!
 //! Three rules shape it:
 //!
-//! - **Refreshed from the reader thread**, on a throttle. The screen is the only
-//!   place the answer exists, and it changes with every read; recomputing per
-//!   read would reclassify the same frame dozens of times during one repaint.
+//! - **Refreshed from a timer thread**, on a 200 ms interval. Attention is a
+//!   property of the screen at rest: a harness paints its permission prompt and
+//!   then goes silent, which is the state being detected. Sampling from the
+//!   reader thread would only catch frames while bytes are arriving, missing the
+//!   final frame that carries the question. A timer avoids that race. The reader
+//!   thread can call [`Self::refresh_attention`] directly but is throttled so a
+//!   fast harness does not turn a heuristic into a hot loop.
 //! - **A named cue outranks a vague one, and an incumbent keeps its clock.** A
 //!   permission prompt repainted every frame must read as one prompt that has
 //!   been up for four minutes, not as a fresh one every frame — that elapsed

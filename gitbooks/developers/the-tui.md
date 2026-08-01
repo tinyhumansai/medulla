@@ -105,10 +105,16 @@ and blinks with a `⚠`, says what it is waiting for and for how long
 ("codex is asking permission · 42s"), and the Agents tab carries a `⚠2` badge so
 a stuck pane is visible from whatever tab you are on.
 
-It is recognised from what the harness paints: the permission and approval
-prompts of `claude`, `codex`, and `opencode`, the startup trust dialogs, any
-numbered menu with the cursor resting on an option, and — for anything
-unrecognised — the terminal bell, which all three ring when they want a human.
+It is recognised from what the harness paints, in order of specificity:
+
+1. **Startup dialogs** — trust and permissions that gate the whole session.
+2. **Named prompts** — distinctive phrases that each CLI writes when it is asking
+   (e.g. `claude` shows "No, and tell Claude what to do differently"; `codex`
+   shows "Allow Codex to…").
+3. **Numbered menus** — a caret resting on a numbered option, or `(y/n)`.
+4. **The terminal bell** — the universal fallback, in case a prompt is worded
+   differently or not recognised.
+
 Attaching to the pane clears the mark; if the harness is in fact still asking,
 it comes straight back.
 

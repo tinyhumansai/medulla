@@ -99,6 +99,15 @@ pub struct LocalHarnesses {
     /// The configured `[router]`, injected into an operator-started harness the
     /// same way the executor injects it into a task's.
     pub router: Option<medulla::config::RouterConfig>,
+    /// Whether commits made in an operator-started harness are attributed to
+    /// Medulla — the resolved `attribution.commit` config value (on by
+    /// default).
+    ///
+    /// Held here for the same reason `router` is: this is the one spawn seam
+    /// the executor does not own, and a setting that applied to dispatched work
+    /// but not to a harness the operator opened by hand would make attribution
+    /// depend on which door the session came through.
+    pub attribution: bool,
 }
 
 impl LocalHarnesses {

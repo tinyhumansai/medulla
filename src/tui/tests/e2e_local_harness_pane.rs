@@ -176,6 +176,7 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
         providers: vec![HarnessProvider::Codex],
         custom_harnesses: Vec::new(),
         router: None,
+        attribution: true,
     };
 
     // Before dispatch there is nothing to show — the pane must not invent a
@@ -224,6 +225,7 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
         providers: vec![HarnessProvider::Codex],
         custom_harnesses: Vec::new(),
         router: None,
+        attribution: true,
     };
 
     dispatch(&runtime, task_id);
@@ -260,6 +262,7 @@ async fn a_task_that_names_no_session_shows_no_screen_rather_than_someone_elses(
         providers: vec![HarnessProvider::Codex],
         custom_harnesses: Vec::new(),
         router: None,
+        attribution: true,
     };
 
     dispatch(&runtime, "mine#0");

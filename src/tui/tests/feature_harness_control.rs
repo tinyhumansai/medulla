@@ -85,6 +85,7 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
         providers: vec![HarnessProvider::Codex],
         custom_harnesses: Vec::new(),
         router: None,
+        attribution: true,
     });
     app
 }

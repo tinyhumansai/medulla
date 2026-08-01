@@ -87,6 +87,7 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         providers: vec![HarnessProvider::Codex],
         custom_harnesses: Vec::new(),
         router: None,
+        attribution: true,
     }
 }
 
@@ -120,6 +121,9 @@ fn picker_choices_include_every_native_provider_and_registered_preset() {
 #[test]
 fn registered_preset_supplies_its_router_key_and_model_environment() {
     let mut harnesses = harnesses(PtyManager::new());
+    // This test is about the router injection, and attribution adds argv and
+    // environment of its own; it has its own tests below.
+    harnesses.attribution = false;
     harnesses
         .env
         .insert("OPENROUTER_API_KEY".into(), "secret".into());
@@ -140,6 +144,67 @@ fn registered_preset_supplies_its_router_key_and_model_environment() {
     );
     assert_eq!(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "deepseek/fast");
     assert!(extra_args.is_empty());
+}
+
+/// A harness the operator opens by hand is still one Medulla launched, and was
+/// the last spawn seam that produced unattributed commits with
+/// `attribution.commit = true` — the executor's own path had been fixed, this
+/// one had not.
+#[test]
+fn an_operator_started_harness_carries_commit_attribution() {
+    let harnesses = harnesses(PtyManager::new());
+
+    let (env, extra_args) = harnesses
+        .spawn_env(&HarnessChoice::native(HarnessProvider::Claude))
+        .expect("a native provider is launchable");
+
+    assert!(
+        env.get("MEDULLA_ATTRIBUTION")
+            .is_some_and(|v| v.contains("Co-authored-by: Medulla")),
+        "the child must carry the trailer: {env:?}"
+    );
+    assert_eq!(
+        env.get("GIT_CONFIG_KEY_0").map(String::as_str),
+        Some("core.hooksPath"),
+        "the hook is the mechanism of record and must be activated: {env:?}"
+    );
+    assert!(
+        env.contains_key("GIT_CONFIG_VALUE_0"),
+        "the hook directory must be named: {env:?}"
+    );
+    // Claude additionally takes the advisory `--settings` hint.
+    assert!(
+        extra_args.windows(2).any(|w| w[0] == "--settings"),
+        "claude also gets the inline settings hint: {extra_args:?}"
+    );
+}
+
+#[test]
+fn an_operator_started_harness_omits_attribution_when_configured_off() {
+    let mut harnesses = harnesses(PtyManager::new());
+    harnesses.attribution = false;
+
+    let (env, extra_args) = harnesses
+        .spawn_env(&HarnessChoice::native(HarnessProvider::Claude))
+        .expect("a native provider is launchable");
+
+    assert!(!env.contains_key("MEDULLA_ATTRIBUTION"), "{env:?}");
+    assert!(!env.contains_key("GIT_CONFIG_KEY_0"), "{env:?}");
+    assert!(extra_args.is_empty(), "{extra_args:?}");
+}
+
+/// Codex has no `--settings` equivalent, so its attribution is the hook alone.
+/// Inventing a flag for it would be a spawn that exits on an unknown argument.
+#[test]
+fn a_codex_harness_is_attributed_by_hook_without_extra_argv() {
+    let harnesses = harnesses(PtyManager::new());
+
+    let (env, extra_args) = harnesses
+        .spawn_env(&HarnessChoice::native(HarnessProvider::Codex))
+        .expect("a native provider is launchable");
+
+    assert!(env.contains_key("MEDULLA_ATTRIBUTION"), "{env:?}");
+    assert!(extra_args.is_empty(), "{extra_args:?}");
 }
 
 /// Spin until `check` passes or the deadline expires.

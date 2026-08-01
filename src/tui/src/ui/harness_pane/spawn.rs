@@ -106,6 +106,16 @@ impl LocalHarnesses {
     ) -> Result<(std::collections::HashMap<String, String>, Vec<String>), String> {
         let mut env = self.env.clone();
         let mut extra_args = Vec::new();
+        // A harness the operator opened by hand is still one Medulla launched,
+        // so its commits carry the same trailer a dispatched task's do. This is
+        // the seam the executor's own `spawn_env` cannot reach — without it,
+        // attribution depended on which door the session came through.
+        let attribution_env = medulla::attribution::attribution_env(self.attribution, &env);
+        env.extend(attribution_env);
+        extra_args.extend(medulla::attribution::attribution_args(
+            choice.provider,
+            self.attribution,
+        ));
         let custom_router = choice.preset.as_ref().map(|preset| preset.router());
         let router = custom_router.as_ref().or(self.router.as_ref());
         let Some(router) = router else {

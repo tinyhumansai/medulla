@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 
-use crate::hub::{HubHandle, RunError, TaskOutcome, TaskRequest};
+use crate::hub::{ActivityLog, HubHandle, RunError, TaskOutcome, TaskRequest};
 
 use super::super::types::{FleetOps, FleetWorker};
 
@@ -28,6 +28,43 @@ pub struct FleetDefaults {
     pub worker_address: Option<String>,
 }
 
+/// Tee a dispatch's status frames into the activity log and on to a poller.
+///
+/// A tee rather than a move: `fleet_result` needs the frames for its progress,
+/// and the Agents view needs them to show the task doing something. Forwarding
+/// to only one of the two trades one blind spot for another.
+pub(super) fn tee_status(
+    activity: ActivityLog,
+    task_id: String,
+    onward: Option<mpsc::UnboundedSender<String>>,
+) -> mpsc::UnboundedSender<String> {
+    let (tee, mut frames) = mpsc::unbounded_channel::<String>();
+    tokio::spawn(async move {
+        while let Some(line) = frames.recv().await {
+            activity.observed(&task_id, "status", &line, crate::clock::now_millis());
+            if let Some(onward) = &onward {
+                // A closed receiver means the poller gave up; the activity log
+                // still wants the rest, so this does not end the loop.
+                let _ = onward.send(line);
+            }
+        }
+    });
+    tee
+}
+
+/// Record how a dispatch ended, in the frame kinds the Agents view renders.
+pub(super) fn record_outcome(
+    activity: &ActivityLog,
+    task_id: &str,
+    outcome: &Result<TaskOutcome, RunError>,
+) {
+    let (kind, content) = match outcome {
+        Ok(result) => ("reply", result.reply.clone()),
+        Err(error) => ("error", error.to_string()),
+    };
+    activity.observed(task_id, kind, &content, crate::clock::now_millis());
+}
+
 /// [`FleetOps`] backed by whatever handle is in the slot right now.
 pub struct HubFleetOps {
     slot: HubSlot,
@@ -43,6 +80,20 @@ impl HubFleetOps {
     /// The handle currently in the slot, if the hub has connected.
     fn handle(&self) -> Option<HubHandle> {
         self.slot.lock().ok()?.clone()
+    }
+
+    /// The roster id for a worker address, for attributing activity to a lane.
+    ///
+    /// Falls back to the address itself when the roster does not name it: the
+    /// Agents view would rather show a task against an unfamiliar id than lose
+    /// it to no lane at all.
+    fn roster_id(&self, handle: &HubHandle, address: &str) -> String {
+        handle
+            .list()
+            .into_iter()
+            .find(|worker| worker.address == address)
+            .map(|worker| worker.id)
+            .unwrap_or_else(|| address.to_string())
     }
 }
 
@@ -100,7 +151,25 @@ impl FleetOps for HubFleetOps {
                 "the hub is not connected yet, so there is nothing to dispatch through".to_string(),
             ));
         };
-        handle.task_runner().run(request, status).await
+
+        // Recorded into the same activity log the orchestrator's own dispatches
+        // use, so a task a harness started appears in the Agents view beside the
+        // ones an operator started. Work running on somebody's machine that
+        // their UI does not show is work they cannot see, cannot attribute, and
+        // cannot stop — which is the worst property this surface could have.
+        //
+        // Attributed before the dispatch, for the reason the inbound path gives:
+        // a frame arriving before its dispatch is recorded would be orphaned
+        // onto no worker at all.
+        let activity = handle.activity();
+        let agent_id = self.roster_id(&handle, &request.worker_address);
+        let task_id = request.task_id.clone();
+        activity.dispatched(&task_id, &agent_id);
+
+        let tee = tee_status(activity.clone(), task_id.clone(), status);
+        let outcome = handle.task_runner().run(request, Some(tee)).await;
+        record_outcome(&activity, &task_id, &outcome);
+        outcome
     }
 
     fn abort(&self, abort_id: &str) {

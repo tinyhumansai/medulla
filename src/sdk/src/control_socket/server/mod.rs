@@ -6,6 +6,8 @@
 
 mod handle;
 mod hub_ops;
+#[cfg(test)]
+mod hub_ops_tests;
 mod registry;
 
 pub use handle::{handle_control, SessionState};

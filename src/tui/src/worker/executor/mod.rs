@@ -186,7 +186,7 @@ impl PtySessionExecutor {
         // return sent in the same burst is absorbed by the paste, which leaves
         // the prompt sitting in the composer, complete and unsent.
         if let Err(err) = super::pty::inject_prompt(&self.sessions, &id, &options.prompt).await {
-            self.finish_turn(&id, class);
+            self.finish_turn(&id, class, false);
             return Err(err);
         }
 
@@ -226,7 +226,7 @@ impl PtySessionExecutor {
         let outcome = self
             .await_turn(&id, provider, tailer, abort, on_event, timeout_ms)
             .await;
-        self.finish_turn(&id, class);
+        self.finish_turn(&id, class, true);
         outcome
     }
 
@@ -235,14 +235,18 @@ impl PtySessionExecutor {
     /// Bounded task sessions normally die with their reply. Operator takeover
     /// changes that lifetime: the PTY is now an interactive workspace, so the
     /// executor may release its busy claim but must not close the process.
-    fn finish_turn(&self, id: &str, class: SessionClass) {
+    fn finish_turn(&self, id: &str, class: SessionClass, submitted: bool) {
         if class == SessionClass::Bounded && self.sessions.control(id) != Some(HarnessControl::User)
         {
             self.sessions.close(id);
         } else {
             // Free it for the operator or this peer's next turn. Released on
             // error too: a failed turn left busy can never be reused again.
-            self.sessions.release(id);
+            if submitted {
+                self.sessions.settle_turn(id);
+            } else {
+                self.sessions.release(id);
+            }
         }
     }
 

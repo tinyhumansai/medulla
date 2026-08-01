@@ -99,17 +99,20 @@ impl PtyManager {
         true
     }
 
-    /// Mark a session free for the next turn.
+    /// Mark a session free without implying that a turn was submitted.
     ///
-    /// A bell heard as the turn settled is a completion chime, not a durable
-    /// request for the operator. Consume the emulator's current bell count and
-    /// clear that fallback cue while retaining named prompts, which still
-    /// describe something visible on the reusable screen. Bumping the attention
-    /// generation also prevents a classifier already reading the screen from
-    /// restoring the completed turn's bell after this method returns.
+    /// Used for failed injection and claim rollback, where no completion chime
+    /// can be pending and the next bell must remain meaningful.
     pub fn release(&self, id: &str) {
         if let Some(session) = self.handle(id) {
             session.release();
+        }
+    }
+
+    /// Mark a submitted turn complete and suppress its completion chime.
+    pub fn settle_turn(&self, id: &str) {
+        if let Some(session) = self.handle(id) {
+            session.settle_turn();
         }
     }
 

@@ -127,7 +127,7 @@ fn releasing_a_reusable_turn_consumes_an_unclassified_completion_bell() {
     wait_for("the completion output to reach the emulator", || {
         super::screen_text(&manager, &id).contains("turn complete")
     });
-    manager.release(&id);
+    manager.settle_turn(&id);
 
     std::thread::sleep(std::time::Duration::from_millis(600));
     assert_eq!(manager.attention(&id), None);
@@ -145,7 +145,7 @@ fn releasing_consumes_a_completion_bell_emitted_just_after_settlement() {
         .expect("a session");
     let row = manager.row(&id).expect("a row");
 
-    manager.release(&id);
+    manager.settle_turn(&id);
     assert!(
         !manager.acknowledge(&id),
         "the late bell does not exist yet"
@@ -179,7 +179,7 @@ fn claiming_the_next_turn_makes_its_bell_meaningful_again() {
         .expect("a session");
     let row = manager.row(&id).expect("a row");
 
-    manager.release(&id);
+    manager.settle_turn(&id);
     manager.write(&id, b"\r").expect("emit the old chime");
     wait_for("the old completion bell to reach the emulator", || {
         super::screen_text(&manager, &id).contains("old completion")
@@ -219,7 +219,7 @@ fn a_consumed_completion_bell_does_not_hide_the_next_turns_first_bell() {
     wait_for("the completion bell to arrive before release", || {
         super::screen_text(&manager, &id).contains("old completion")
     });
-    manager.release(&id);
+    manager.settle_turn(&id);
     manager
         .claim_idle(&row.label, row.provider)
         .expect("reuse the session");
@@ -230,6 +230,38 @@ fn a_consumed_completion_bell_does_not_hide_the_next_turns_first_bell() {
 
     now.store(200, Ordering::SeqCst);
     wait_for("the reused turn's first bell to be classified", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.shutdown();
+}
+
+#[test]
+fn freeing_without_a_submitted_turn_does_not_suppress_the_next_bell() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh(
+            "read line; printf 'permission fallback\\a\\n'; sleep 30",
+        ))
+        .expect("a session");
+    let row = manager.row(&id).expect("a row");
+
+    // This is the injection-failure/claim-rollback path: no turn reached the
+    // harness, so there can be no completion bell to suppress.
+    manager.release(&id);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("reuse the freed session");
+    manager.write(&id, b"\r").expect("emit the first real bell");
+    wait_for("the bell output to paint", || {
+        super::screen_text(&manager, &id).contains("permission fallback")
+    });
+
+    now.store(200, Ordering::SeqCst);
+    wait_for("the first real bell to remain eligible", || {
         manager
             .attention(&id)
             .is_some_and(|cue| cue.kind == AttentionKind::Bell)

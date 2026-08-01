@@ -90,6 +90,11 @@ impl SessionHandle {
 
     /// Mark the session free for the next turn.
     pub(in super::super) fn release(&self) {
+        self.busy.store(false, Ordering::Release);
+    }
+
+    /// Mark a submitted turn complete and consume its completion chime.
+    pub(in super::super) fn settle_turn(&self) {
         let bells = self.bell_count();
         let mut attention = lock(&self.attention);
         let completion_bell_already_arrived = bells > attention.seen_bells;
@@ -103,7 +108,7 @@ impl SessionHandle {
             .cue
             .take()
             .filter(|cue| cue.kind != AttentionKind::Bell);
-        self.busy.store(false, Ordering::Release);
+        self.release();
     }
 
     /// Clear the current cue because a person or injected turn is handling it.

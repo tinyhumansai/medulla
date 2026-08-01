@@ -52,6 +52,9 @@ const MEDULLA_ATTRIBUTION_KEY: &str = "MEDULLA_ATTRIBUTION";
 /// repository's real hooks directory.
 const BASE_COUNT_KEY: &str = "MEDULLA_GIT_CONFIG_BASE_COUNT";
 
+/// The caller's legacy inline Git config before Medulla appends its hook path.
+const BASE_PARAMETERS_KEY: &str = "MEDULLA_GIT_CONFIG_BASE_PARAMETERS";
+
 /// Client-side hooks git may invoke. Every one gets a shim so that redirecting
 /// `core.hooksPath` does not disable the repository's own copy.
 ///
@@ -98,9 +101,10 @@ self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # a CI-supplied core.hooksPath is one we must still delegate to. --path expands
 # `~/...`, which git does natively but `git config --get` does not.
 base_count=${MEDULLA_GIT_CONFIG_BASE_COUNT:-0}
-orig_dir=$(GIT_CONFIG_COUNT=$base_count git config --path --get core.hooksPath 2>/dev/null)
+base_parameters=${MEDULLA_GIT_CONFIG_BASE_PARAMETERS-}
+orig_dir=$(GIT_CONFIG_PARAMETERS="$base_parameters" GIT_CONFIG_COUNT=$base_count git config --path --get core.hooksPath 2>/dev/null)
 if [ -z "$orig_dir" ]; then
-    orig_dir=$(GIT_CONFIG_COUNT=$base_count git rev-parse --git-path hooks 2>/dev/null)
+    orig_dir=$(GIT_CONFIG_PARAMETERS="$base_parameters" GIT_CONFIG_COUNT=$base_count git rev-parse --git-path hooks 2>/dev/null)
 fi
 if [ -n "$orig_dir" ] && [ "$orig_dir" != "$self_dir" ] && [ -x "$orig_dir/$hook_name" ]; then
     "$orig_dir/$hook_name" "$@" || exit $?
@@ -169,6 +173,11 @@ pub fn hook_env(trailer: &str, base_env: &HashMap<String, String>) -> HashMap<St
     let mut env = HashMap::new();
     env.insert(MEDULLA_ATTRIBUTION_KEY.to_string(), trailer.to_string());
     env.insert(BASE_COUNT_KEY.to_string(), base_count.to_string());
+    let base_parameters = base_env
+        .get("GIT_CONFIG_PARAMETERS")
+        .cloned()
+        .unwrap_or_default();
+    env.insert(BASE_PARAMETERS_KEY.to_string(), base_parameters.clone());
     env.insert("GIT_CONFIG_COUNT".to_string(), (base_count + 1).to_string());
     env.insert(
         format!("GIT_CONFIG_KEY_{base_count}"),
@@ -178,7 +187,30 @@ pub fn hook_env(trailer: &str, base_env: &HashMap<String, String>) -> HashMap<St
         format!("GIT_CONFIG_VALUE_{base_count}"),
         hook_dir.to_string_lossy().into_owned(),
     );
+    // Git before 2.31 does not read GIT_CONFIG_COUNT/KEY/VALUE. Keep the
+    // older inline-config channel in parallel so the hook works there too.
+    let legacy_entry = legacy_config_parameter("core.hooksPath", &hook_dir.to_string_lossy());
+    env.insert(
+        "GIT_CONFIG_PARAMETERS".to_string(),
+        if base_parameters.is_empty() {
+            legacy_entry
+        } else {
+            format!("{base_parameters} {legacy_entry}")
+        },
+    );
     env
+}
+
+/// Encodes one entry in Git's shell-quoted `GIT_CONFIG_PARAMETERS` format.
+///
+/// Apostrophes must close the current quoted segment, contribute an escaped
+/// apostrophe, and reopen it. This is the same representation Git emits for a
+/// shell-safe single-quoted argument and keeps temp paths valid regardless of
+/// their ancestors.
+#[cfg(unix)]
+pub(super) fn legacy_config_parameter(key: &str, value: &str) -> String {
+    let parameter = format!("{key}={value}");
+    format!("'{}'", parameter.replace('\'', "'\\''"))
 }
 
 #[cfg(not(unix))]

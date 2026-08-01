@@ -129,9 +129,13 @@ fn without_a_runtime_dir_the_fallback_uses_the_temp_dir() {
     .unwrap();
 
     assert!(resolved.as_os_str().len() <= 103);
-    // A string prefix, not `Path::starts_with`: that compares whole path
-    // components, so a partial component like "medulla-" never matches.
-    assert!(resolved.to_string_lossy().starts_with("/tmp/medulla-"));
+    // Compare path components so the assertion is independent of the host's
+    // path separator (the SDK library tests also run on Windows).
+    assert!(resolved.starts_with(std::path::Path::new("/tmp")));
+    assert!(resolved
+        .parent()
+        .and_then(std::path::Path::file_name)
+        .is_some_and(|name| name.to_string_lossy().starts_with("medulla-")));
 }
 
 #[cfg(unix)]

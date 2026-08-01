@@ -543,24 +543,25 @@ impl App {
     /// it waits — so a lane whose pty is sitting on "Do you want to proceed?"
     /// reads as *running* to everything else here, right up until the task times
     /// out. The screen knows, and this is where it gets to say so.
-    fn harness_visual_state(&self, item: &AgentLane) -> HarnessVisualState {
-        if self.lane_attention(item).is_some() {
+    fn harness_visual_state(&self, item: &AgentLane, waiting_sessions: &std::collections::HashSet<String>) -> HarnessVisualState {
+        if self.lane_has_attention(item, waiting_sessions) {
             return HarnessVisualState::NeedsInput;
         }
         let session = self.session_state(item);
         status::classify(item, session.as_deref())
     }
 
-    /// The cue from a local harness serving one of this lane's tasks, if any.
-    ///
-    /// The attached session is skipped for the same reason a harness row skips
-    /// it: the operator is looking at the prompt already.
-    fn lane_attention(&self, item: &AgentLane) -> Option<HarnessAttention> {
-        let harnesses = self.harnesses.as_ref()?;
+    /// Whether a lane has a waiting harness by checking the pre-resolved waiting
+    /// set, avoiding per-lane session locking.
+    fn lane_has_attention(&self, item: &AgentLane, waiting_sessions: &std::collections::HashSet<String>) -> bool {
+        let harnesses = match self.harnesses.as_ref() {
+            Some(h) => h,
+            None => return false,
+        };
         item.tasks
             .iter()
             .filter_map(|task| harnesses.session_for_task(&task.task_id))
             .filter(|session| !self.harness_focus.is_attached_to(session))
-            .find_map(|session| harnesses.sessions.attention(&session))
+            .any(|session| waiting_sessions.contains(&session))
     }
 }

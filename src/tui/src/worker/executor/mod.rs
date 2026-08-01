@@ -133,7 +133,14 @@ impl PtySessionExecutor {
             medulla::clock::now_millis(),
         )
         .with_claims(self.claims.clone());
-        let opened = self.session_for(&options, class)?;
+        // Two steps, and the split is load-bearing: `RunTaskOptions` is `Send`
+        // but not `Sync`, so a borrow of it held across an await would make this
+        // future un-spawnable. Deciding what to run is synchronous and gives the
+        // borrow back; only the owned [`LaunchSpec`] crosses the await.
+        let opened = match self.session_for(&options, class)? {
+            SessionPlan::Reuse(opened) => opened,
+            SessionPlan::Launch(spec) => self.launch(spec).await?,
+        };
         if let Some(pinned) = &opened.harness_session_id {
             // A reused session's transcript already exists, so the fresh-session
             // rules — ignore what is already there, discount anything older than
@@ -255,12 +262,15 @@ impl PtySessionExecutor {
         self.sessions.close(id);
     }
 
-    /// Find or open the session that serves this task.
+    /// Decide which session serves this task: reuse an idle one, or launch.
+    ///
+    /// Synchronous, and returns a plan rather than a session, because the launch
+    /// itself must not happen here — see [`PtySessionExecutor::launch`].
     fn session_for(
         &self,
         options: &RunTaskOptions,
         class: SessionClass,
-    ) -> Result<OpenedSession, String> {
+    ) -> Result<SessionPlan, String> {
         if class == SessionClass::Unbound {
             // Reuse this peer's session only when it is *idle*. A harness serves
             // one turn at a time: a fan-out that pastes three prompts into one
@@ -272,11 +282,11 @@ impl PtySessionExecutor {
                 .sessions
                 .claim_idle(&options.conversation, options.provider)
             {
-                return Ok(OpenedSession {
+                return Ok(SessionPlan::Reuse(OpenedSession {
                     id: row.id.clone(),
                     harness_session_id: row.session_id.clone(),
                     reused: true,
-                });
+                }));
             }
         }
         let label = if options.conversation.is_empty() {
@@ -291,7 +301,7 @@ impl PtySessionExecutor {
         // same conversation is the same trade the headless executor's own resume
         // path accepts.
         let (env, extra_args) = self.spawn_env(options)?;
-        let id = self.sessions.open(LaunchSpec {
+        Ok(SessionPlan::Launch(LaunchSpec {
             provider: options.provider,
             bin: medulla::tinyplace::env::provider_bin(options.provider, &self.env),
             cwd: options.cwd.clone(),
@@ -301,7 +311,22 @@ impl PtySessionExecutor {
             label,
             model: options.model.clone(),
             session_id: None,
-        })?;
+        }))
+    }
+
+    /// Start a fresh harness on the blocking pool.
+    ///
+    /// [`PtyManager::open`] forks, execs, and may back off while a pty frees up
+    /// — all of it blocking. Calling it inline parked a tokio worker for up to
+    /// half a second per launch, and a burst of task frames could park most of
+    /// the runtime, taking the inbox drain and every screen sampler down with
+    /// it since they share one. So the launch goes to the blocking pool, which
+    /// is what it is for.
+    async fn launch(&self, spec: LaunchSpec) -> Result<OpenedSession, String> {
+        let sessions = self.sessions.clone();
+        let id = tokio::task::spawn_blocking(move || sessions.open(spec))
+            .await
+            .map_err(|err| format!("pty launch did not complete: {err}"))??;
         let harness_session_id = self.sessions.row(&id).and_then(|row| row.session_id);
         Ok(OpenedSession {
             id,
@@ -500,5 +525,5 @@ pub fn agent_kind(provider: HarnessProvider) -> Option<SessionAgentKind> {
 }
 
 mod types;
-use types::OpenedSession;
 pub use types::PtySessionExecutor;
+use types::{OpenedSession, SessionPlan};

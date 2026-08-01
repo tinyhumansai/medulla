@@ -14,6 +14,20 @@ pub(super) struct OpenedSession {
     /// Whether this task joined a session that was already running.
     pub(super) reused: bool,
 }
+/// What serving a task needs: an existing session, or a launch to perform.
+///
+/// The split exists so the decision and the launch can happen on different
+/// sides of an await. `RunTaskOptions` is `Send` but not `Sync`, so a borrow of
+/// it held across one would make the whole run future un-spawnable — and the
+/// launch has to cross an await, because it belongs on the blocking pool rather
+/// than on a runtime worker.
+pub(super) enum SessionPlan {
+    /// An idle session for this conversation, already claimed.
+    Reuse(OpenedSession),
+    /// Nothing reusable: start a harness with this spec.
+    Launch(LaunchSpec),
+}
+
 /// Runs delegated tasks inside live harness sessions.
 #[derive(Clone)]
 pub struct PtySessionExecutor {

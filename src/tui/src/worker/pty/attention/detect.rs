@@ -116,7 +116,7 @@ pub fn is_working(screen: &str) -> bool {
 /// A menu whose options are not numbered therefore does not match here; it is
 /// left to the per-harness markers, which is the right trade. A missed blink is
 /// cheaper than a rail that blinks at nothing.
-fn is_selected_option(line: &str) -> bool {
+pub(super) fn is_selected_option(line: &str) -> bool {
     let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
     let mut chars = trimmed.chars();
     if !chars.next().is_some_and(|first| CARETS.contains(&first)) {

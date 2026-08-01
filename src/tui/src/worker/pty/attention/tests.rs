@@ -4,7 +4,10 @@
 //! carets, wrapped lines — because that layout is exactly what the matcher has
 //! to survive.
 
-use super::*;
+use medulla::tinyplace::HarnessProvider;
+
+use super::detect::{detect, is_selected_option, is_working};
+use super::types::{AttentionKind, HarnessAttention};
 
 /// Claude's tool-permission prompt, as the CLI paints it.
 const CLAUDE_PERMISSION: &str = "\

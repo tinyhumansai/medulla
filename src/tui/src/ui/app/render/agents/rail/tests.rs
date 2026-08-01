@@ -101,6 +101,7 @@ fn a_long_harness_path_is_shortened_instead_of_adding_rows() {
         &harness_row("/workspace/tinyhumans/products/medulla-public"),
         false,
         36,
+        NOW,
     );
 
     assert_eq!(lines.len(), 1, "a long path must still use one rail row");
@@ -221,6 +222,7 @@ fn current_harness_activity_takes_priority_over_an_old_error() {
         &AgentRow::Lane { lane_index: 0 },
         std::slice::from_ref(&harness),
         false,
+        &none_waiting(),
     );
 
     assert_eq!(line.spans[0].style.fg, Some(Color::Green));
@@ -242,6 +244,7 @@ fn selected_working_harness_keeps_its_status_color_and_flash() {
         &AgentRow::Lane { lane_index: 0 },
         std::slice::from_ref(&harness),
         true,
+        &none_waiting(),
     );
     let style = line.spans[0].style;
 

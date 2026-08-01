@@ -90,19 +90,21 @@ fn a_bell_from_an_idle_harness_asks_for_the_operator() {
 }
 
 #[test]
-fn releasing_a_reusable_turn_clears_its_completion_bell() {
+fn releasing_a_reusable_turn_consumes_an_unclassified_completion_bell() {
     let manager = PtyManager::new();
     let id = manager
         .open(sh("printf 'turn complete\\a\\n'; sleep 30"))
         .expect("a session");
 
-    wait_for("the completion bell to be noticed", || {
-        manager
-            .attention(&id)
-            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    // Release as soon as the reader has painted the output, before the 200 ms
+    // attention poller has classified its bell. This is the production race:
+    // finish_turn can release while the completion chime is pending.
+    wait_for("the completion output to reach the emulator", || {
+        super::screen_text(&manager, &id).contains("turn complete")
     });
     manager.release(&id);
 
+    std::thread::sleep(std::time::Duration::from_millis(600));
     assert_eq!(manager.attention(&id), None);
     assert_eq!(manager.waiting_count(), 0);
     manager.shutdown();

@@ -152,12 +152,31 @@ impl PtyManager {
     /// Mark a session free for the next turn.
     ///
     /// A bell heard as the turn settled is a completion chime, not a durable
-    /// request for the operator. Clear that fallback cue while retaining named
-    /// prompts, which still describe something visible on the reusable screen.
+    /// request for the operator. Consume the emulator's current bell count and
+    /// clear that fallback cue while retaining named prompts, which still
+    /// describe something visible on the reusable screen. Bumping the attention
+    /// generation also prevents a classifier already reading the screen from
+    /// restoring the completed turn's bell after this method returns.
     pub fn release(&self, id: &str) {
+        let screen = {
+            let sessions = self.inner.sessions.lock().unwrap();
+            sessions
+                .iter()
+                .find(|s| s.row.id == id)
+                .map(|s| s.screen.clone())
+        };
+        let bells = screen.map(|screen| {
+            let parser = screen.lock().unwrap();
+            parser.screen().audible_bell_count()
+        });
+
         let mut sessions = self.inner.sessions.lock().unwrap();
         if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
             session.row.busy = false;
+            if let Some(bells) = bells {
+                session.seen_bells = bells;
+            }
+            session.attention_generation = session.attention_generation.wrapping_add(1);
             session.row.attention = session
                 .row
                 .attention

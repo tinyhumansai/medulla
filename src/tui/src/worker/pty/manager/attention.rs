@@ -94,9 +94,10 @@ impl PtyManager {
                 session.screen.clone(),
                 session.row.provider,
                 session.seen_bells,
+                session.attention_generation,
             )
         };
-        let (screen, provider, seen_bells) = taken;
+        let (screen, provider, seen_bells, attention_generation) = taken;
 
         let (contents, bells) = {
             let parser = screen.lock().unwrap();
@@ -114,6 +115,12 @@ impl PtyManager {
         let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) else {
             return;
         };
+        // A release can happen while the screen is classified outside the
+        // sessions lock. Its generation bump means this sample belongs to the
+        // completed turn and must not put that turn's bell back on the row.
+        if session.attention_generation != attention_generation {
+            return;
+        }
         // Recorded whether or not it produced a cue, so one ring is never
         // counted twice.
         session.seen_bells = bells;

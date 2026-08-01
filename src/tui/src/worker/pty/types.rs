@@ -259,6 +259,12 @@ pub(super) struct PtySession {
     /// what was already seen is remembered here, and any increase since is a
     /// harness asking for the operator.
     pub(super) seen_bells: usize,
+    /// Revision of the session's attention state.
+    ///
+    /// Classification reads the screen without holding the sessions lock. A
+    /// release increments this revision so a classifier that started before
+    /// the release cannot restore a completion cue after it was consumed.
+    pub(super) attention_generation: u64,
     /// Epoch ms of the last attention refresh.
     ///
     /// The reader thread wakes on every read — a full-screen repaint is dozens

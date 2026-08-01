@@ -75,10 +75,19 @@ impl App {
             .iter()
             .filter(|l| !l.role.is_function())
             .count();
+        // Collected once for the whole frame: the header count, the lane styling,
+        // and the harness rows all answer from this one snapshot, so they cannot
+        // disagree with each other — and the render thread takes the sessions
+        // lock once rather than once per lane per task.
+        let waiting_sessions = self
+            .harnesses
+            .as_ref()
+            .map(|h| h.sessions.waiting_sessions())
+            .unwrap_or_default();
         // Every waiting harness on the device, including the ones inside lanes
         // rather than on rows of their own — the same number the tab badge
         // carries, so the two can never disagree.
-        let waiting = self.harnesses_waiting();
+        let waiting = App::count_waiting(&waiting_sessions, &self.harness_focus);
         let mut title = if running_tasks > 0 {
             format!("Agents · {agents} · {running_tasks} running")
         } else {
@@ -99,13 +108,6 @@ impl App {
         // in *lines* and each drawn line remembers the row it came from. Without
         // that map a click below a wrapped row would select its neighbour.
         let width = inner.width as usize;
-        // Collect waiting session IDs once so render code can check membership
-        // instead of acquiring a lock per lane.
-        let waiting_sessions = self
-            .harnesses
-            .as_ref()
-            .map(|h| h.sessions.waiting_sessions())
-            .unwrap_or_default();
         // Use a consistent timestamp across all rows so a waiting harness reports
         // the same elapsed time throughout the frame, not a new one for each row.
         let now = medulla::clock::now_millis();

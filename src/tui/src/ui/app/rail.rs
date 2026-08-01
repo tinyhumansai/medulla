@@ -122,16 +122,30 @@ impl App {
     /// The attached session is excluded. Its prompt is on screen in front of
     /// the person the count is for, so counting it would ask them to go and
     /// look at what they are already looking at.
+    /// Reads the waiting *ids* rather than [`rows`](crate::worker::pty::PtyManager::rows),
+    /// which clones every session's whole row. This runs on the render thread
+    /// once per frame for the tab badge, so it takes one lock and copies the
+    /// handful of ids that are actually waiting — usually none.
     pub(in crate::ui) fn harnesses_waiting(&self) -> usize {
         let Some(harnesses) = self.harnesses.as_ref() else {
             return 0;
         };
-        harnesses
-            .sessions
-            .rows()
+        Self::count_waiting(&harnesses.sessions.waiting_sessions(), &self.harness_focus)
+    }
+
+    /// The same count from an already-collected waiting set.
+    ///
+    /// The rail collects that set anyway to style its lanes, so the header count
+    /// is derived from it instead of taking the lock a second time — and, more
+    /// to the point, the header and the rows beneath it are then answering from
+    /// one snapshot rather than from two taken a few microseconds apart.
+    pub(in crate::ui) fn count_waiting(
+        waiting: &std::collections::HashSet<String>,
+        focus: &crate::ui::harness_pane::HarnessFocus,
+    ) -> usize {
+        waiting
             .iter()
-            .filter(|row| row.state.is_running() && row.attention.is_some())
-            .filter(|row| !self.harness_focus.is_attached_to(&row.id))
+            .filter(|id| !focus.is_attached_to(id))
             .count()
     }
 

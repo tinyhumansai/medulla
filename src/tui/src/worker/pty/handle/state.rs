@@ -6,7 +6,7 @@ use medulla::tinyplace::HarnessProvider;
 
 use super::super::sync::lock;
 use super::super::types::{PtyState, SessionRow};
-use super::types::{NO_EXIT_CODE, STATE_EXITED, STATE_FAILED, STATE_RUNNING};
+use super::types::{NO_EXIT_CODE, STATE_FAILED, STATE_RUNNING};
 use super::SessionHandle;
 
 impl SessionHandle {

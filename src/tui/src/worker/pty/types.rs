@@ -1,11 +1,7 @@
 //! Data model for PTY-backed harness sessions: how one is launched, what the
 //! operator watches about it, and the handle the UI holds.
 
-use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Mutex};
-
 use medulla::tinyplace::HarnessProvider;
-use portable_pty::{Child, MasterPty};
 
 use super::attention::HarnessAttention;
 
@@ -212,77 +208,4 @@ impl SessionRow {
     pub fn idle_ms(&self, now: i64) -> i64 {
         now.saturating_sub(self.last_output_at).max(0)
     }
-}
-
-/// One live PTY-backed harness session.
-///
-/// The emulator screen is behind its own mutex so the reader task can feed it
-/// while the render thread reads it, without either blocking on the child.
-pub(super) struct PtySession {
-    /// The operator-facing projection.
-    pub(super) row: SessionRow,
-    /// The terminal emulator holding this session's screen + scrollback.
-    pub(super) screen: Arc<Mutex<vt100::Parser>>,
-    /// The PTY master — the write side (keystrokes in) and the resize handle.
-    pub(super) master: Box<dyn MasterPty + Send>,
-    /// Queue onto this session's writer thread, which owns the master's write
-    /// half.
-    ///
-    /// The writer itself is deliberately **not** held here. A pty write parks in
-    /// the kernel for as long as the child leaves its stdin undrained — a harness
-    /// still loading, or sitting on a startup dialog, does exactly that — and
-    /// every path that reaches a session, including the render pass on every
-    /// frame, goes through the manager's single lock. Holding the writer here
-    /// meant [`PtyManager::write`](super::manager::PtyManager::write) performed
-    /// that blocking write with the lock held, so one unread paste froze the
-    /// whole TUI.
-    ///
-    /// The channel itself is unbounded, because a bounded one blocks its sender
-    /// once full — the very failure being removed. The bound lives in
-    /// [`queued_bytes`](Self::queued_bytes) instead, where it can be enforced by
-    /// refusing rather than by waiting.
-    pub(super) writes: std::sync::mpsc::Sender<Vec<u8>>,
-    /// How many bytes sit in [`writes`](Self::writes) still unwritten.
-    ///
-    /// The budget a caller is admitted against, so a child that never drains its
-    /// stdin cannot make the queue grow without limit. Reserved before queueing
-    /// and released as each write leaves, so two concurrent writers cannot both
-    /// see room and both take it.
-    ///
-    /// Counted in bytes rather than messages: one write is an arbitrarily long
-    /// paste, so a message count would bound nothing that matters.
-    pub(super) queued_bytes: Arc<AtomicUsize>,
-    /// The emulator's audible-bell count as of the last attention refresh.
-    ///
-    /// The bell is an *event*, not a screen state: by the time anything reads
-    /// the emulator the ring is over, and only the counter says it happened. So
-    /// what was already seen is remembered here, and any increase since is a
-    /// harness asking for the operator.
-    pub(super) seen_bells: usize,
-    /// Revision of the session's attention state.
-    ///
-    /// Classification reads the screen without holding the sessions lock. A
-    /// release increments this revision so a classifier that started before
-    /// the release cannot restore a completion cue after it was consumed.
-    pub(super) attention_generation: u64,
-    /// Whether the next newly observed bell belongs to the just-completed turn.
-    ///
-    /// Transcript settlement can release a session shortly before the CLI emits
-    /// its completion bell. The next poll consumes that late chime. The flag is
-    /// cleared only when a new bell is actually consumed; attaching or claiming
-    /// reuse before the old chime arrives must not reclassify it as fresh.
-    pub(super) suppress_next_bell: bool,
-    /// Epoch ms of the last attention refresh.
-    ///
-    /// The reader thread wakes on every read — a full-screen repaint is dozens
-    /// of them — and reclassifying the whole screen that often would burn a core
-    /// re-reading the same frame. Attention is a human-facing signal, so it is
-    /// recomputed on a human timescale (see `ATTENTION_INTERVAL_MS`).
-    pub(super) attention_checked_at: i64,
-    /// The child handle, for signalling and reaping.
-    ///
-    /// `Option` so the reaper can take it out and block on `wait()` *without*
-    /// holding the manager's lock — see [`PtyManager`](super::manager::PtyManager)'s
-    /// `mark_finished`. `None` means the child has been reaped.
-    pub(super) child: Option<Box<dyn Child + Send + Sync>>,
 }

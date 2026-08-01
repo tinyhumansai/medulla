@@ -1,11 +1,14 @@
 //! Session bookkeeping: liveness, claiming, and the rows callers read.
+//!
+//! Every method here that can block is the same shape: resolve the handle, drop
+//! the registry lock, act on the session. The two that cannot — building rows
+//! and counting live sessions — read under the lock, since they touch nothing
+//! but atomics and run every frame.
 
 use medulla::tinyplace::HarnessProvider;
 
-use super::super::attention::AttentionKind;
-use super::super::types::{HarnessControl, PtyState, SessionRow};
-
-use super::PtyManager;
+use super::super::types::{HarnessControl, SessionRow};
+use super::{read, write, PtyManager};
 
 /// Advance the consumed-bell watermark without allowing a stale screen sample
 /// to move it backwards.
@@ -14,63 +17,13 @@ pub(super) fn consumed_bell_count(seen: usize, sampled: usize) -> usize {
 }
 
 impl PtyManager {
-    /// Record why a queued write never reached the child.
-    ///
-    /// The write half is drained by a thread (see [`PtyManager`]'s
-    /// `spawn_writer`), so a failed write has no caller to return to — this row
-    /// field is where it is kept instead. Last-one-wins: the interesting failure
-    /// is the current one, and a session whose pty has stopped accepting bytes
-    /// will not recover to produce a different one.
-    pub(super) fn record_write_error(&self, id: &str, error: &str) {
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
-            session.row.last_error = Some(error.to_string());
-        }
-    }
-
-    /// Record that a session produced output.
-    pub(super) fn touch(&self, id: &str) {
-        let now = self.now();
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
-            session.row.last_output_at = now;
-        }
-    }
-
-    /// Reap a session whose PTY has closed and record its exit status.
-    ///
-    /// The child is taken out of the record and waited on with the lock
-    /// **released**. EOF on the pty master and the child's exit are not
-    /// simultaneous, so `wait()` can block for a moment — and holding the
-    /// manager's lock across it stalls every render frame, which shows up as the
-    /// whole TUI freezing when a session ends.
-    pub(super) fn mark_finished(&self, id: &str) {
-        let child = {
-            let mut sessions = self.inner.sessions.lock().unwrap();
-            match sessions.iter_mut().find(|s| s.row.id == id) {
-                Some(session) => session.child.take(),
-                None => return,
-            }
-        };
-        let code = child
-            .and_then(|mut child| child.wait().ok())
-            .map(|status| status.exit_code() as i32);
-
-        let now = self.now();
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
-            session.row.state = PtyState::Exited { code };
-            session.row.last_output_at = now;
-        }
-    }
-
-    /// Every session, open order — the list pane's rows.
     /// Take an idle session for `label` on `provider`, marking it busy.
     ///
-    /// Find-and-claim under one lock, deliberately. Checking `busy` and then
-    /// setting it in two steps lets two concurrent tasks both observe the same
-    /// idle session and both take it — which is precisely the collision this
-    /// exists to prevent, and it would show up only under a real fan-out.
+    /// The claim is a compare-exchange on the session's own `busy` flag, so it
+    /// is atomic without holding the registry: two concurrent tasks that both
+    /// see the same idle session cannot both take it, because only one CAS can
+    /// win and the loser simply keeps looking. That collision is precisely what
+    /// this exists to prevent, and it only shows up under a real fan-out.
     ///
     /// A session the operator holds is never returned, however idle it looks.
     /// That is the whole of the unmanaged-harness feature and the whole of
@@ -87,19 +40,16 @@ impl PtyManager {
     ///
     /// `None` when there is no idle session, and the caller opens a fresh one.
     pub fn claim_idle(&self, label: &str, provider: HarnessProvider) -> Option<SessionRow> {
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        let session = sessions.iter_mut().find(|s| {
-            (s.row.label == label || is_unassigned_operator_session(&s.row))
-                && s.row.provider == provider
-                && s.row.state.is_running()
-                && !s.row.busy
-                && s.row.control.is_orchestrator()
-        })?;
-        if is_unassigned_operator_session(&session.row) {
-            session.row.label = label.to_string();
-        }
-        session.row.busy = true;
-        Some(session.row.clone())
+        let session = self
+            .handles()
+            .into_iter()
+            .filter(|session| session.provider() == provider && session.serves_label(label))
+            .find(|session| session.try_claim())?;
+        // After the claim, never before: the winner of the compare-exchange is
+        // the one task entitled to rename the session, so adoption inherits the
+        // claim's exclusivity instead of needing a lock of its own.
+        session.adopt_label(label);
+        Some(session.row())
     }
 
     /// The operator-held session covering `cwd`, if there is one.
@@ -114,29 +64,24 @@ impl PtyManager {
     ///
     /// A workspace with a person in it is not shared, however idle another
     /// harness in it looks, so this is consulted *before* reuse rather than after.
+    ///
+    /// Walks a cloned list of handles rather than holding the registry, because
+    /// `same_workspace` canonicalizes both paths and that is a filesystem call —
+    /// exactly the blocking work no caller may hold the registry across.
     pub fn operator_hold(&self, cwd: &str) -> Option<SessionRow> {
-        self.inner
-            .sessions
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|s| {
-                s.row.control == HarnessControl::User
-                    && s.row.state.is_running()
-                    && same_workspace(&s.row.cwd, cwd)
+        self.handles()
+            .into_iter()
+            .find(|session| {
+                session.control() == HarnessControl::User
+                    && session.is_running()
+                    && same_workspace(session.cwd(), cwd)
             })
-            .map(|s| s.row.clone())
+            .map(|session| session.row())
     }
 
     /// Who currently holds `id`, if it is a session we know about.
     pub fn control(&self, id: &str) -> Option<HarnessControl> {
-        self.inner
-            .sessions
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|s| s.row.id == id)
-            .map(|s| s.row.control)
+        self.handle(id).map(|session| session.control())
     }
 
     /// Hand `id` to `control`, returning whether the session existed.
@@ -147,11 +92,10 @@ impl PtyManager {
     /// running that turn. Clearing `busy` on handback would advertise a harness
     /// as free while it was still finishing someone else's work.
     pub fn set_control(&self, id: &str, control: HarnessControl) -> bool {
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) else {
+        let Some(session) = self.handle(id) else {
             return false;
         };
-        session.row.control = control;
+        session.set_control(control);
         true
     }
 
@@ -164,57 +108,50 @@ impl PtyManager {
     /// generation also prevents a classifier already reading the screen from
     /// restoring the completed turn's bell after this method returns.
     pub fn release(&self, id: &str) {
-        let bells = self.current_bell_count(id);
-
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
-            session.row.busy = false;
-            if let Some(bells) = bells {
-                // A classifier may have stored a newer count after the screen
-                // snapshot above. Bell counters are monotonic, so never move
-                // the consumed watermark backwards.
-                session.seen_bells = consumed_bell_count(session.seen_bells, bells);
-            }
-            session.attention_generation = session.attention_generation.wrapping_add(1);
-            session.suppress_next_bell = true;
-            session.row.attention = session
-                .row
-                .attention
-                .take()
-                .filter(|cue| cue.kind != AttentionKind::Bell);
+        if let Some(session) = self.handle(id) {
+            session.release();
         }
     }
 
+    /// Every session, open order — the list pane's rows.
+    ///
+    /// Built under the registry's read lock rather than off a cloned `Arc` list,
+    /// which is the one place that is worth doing: this runs every frame, and
+    /// building a row touches only atomics and one small per-session mutex —
+    /// never a pty, a child, or an emulator. The rule the split enforces is that
+    /// nothing holds the registry across *blocking* work, and none of this
+    /// blocks. Read locks do not exclude each other, so concurrent renders and
+    /// samplers still proceed in parallel.
     pub fn rows(&self) -> Vec<SessionRow> {
-        self.inner
-            .sessions
-            .lock()
-            .unwrap()
+        read(&self.inner.sessions)
             .iter()
-            .map(|s| s.row.clone())
+            .map(|session| session.row())
             .collect()
     }
 
     /// One session's row by id.
     pub fn row(&self, id: &str) -> Option<SessionRow> {
-        self.inner
-            .sessions
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|s| s.row.id == id)
-            .map(|s| s.row.clone())
+        self.handle(id).map(|session| session.row())
     }
 
     /// How many sessions are still running.
+    ///
+    /// One relaxed atomic load per session, where it used to be a global lock
+    /// and a full scan — and it is asked on every render frame.
     pub fn running_count(&self) -> usize {
-        self.inner
-            .sessions
-            .lock()
-            .unwrap()
+        read(&self.inner.sessions)
             .iter()
-            .filter(|s| s.row.state.is_running())
+            .filter(|session| session.is_running())
             .count()
+    }
+
+    /// The screen change counter for `id`.
+    ///
+    /// Bumped whenever the emulator consumes output, so a caller that remembers
+    /// what it last rendered can skip rebuilding a snapshot for a screen that
+    /// has not moved.
+    pub fn generation(&self, id: &str) -> Option<u64> {
+        self.handle(id).map(|session| session.generation())
     }
 
     /// Record the harness session id a tailer read back from the rollout.
@@ -223,11 +160,8 @@ impl PtyManager {
     /// written line one of its rollout. Claude's is minted at spawn and never
     /// changes, so this is a no-op there.
     pub fn record_session_id(&self, id: &str, harness_session_id: impl Into<String>) {
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
-            if session.row.session_id.is_none() {
-                session.row.session_id = Some(harness_session_id.into());
-            }
+        if let Some(session) = self.handle(id) {
+            session.record_session_id(harness_session_id.into());
         }
     }
 
@@ -236,15 +170,16 @@ impl PtyManager {
     /// Sends the child a kill rather than typing `/exit`: the harnesses disagree
     /// on the command, and a session the operator asked to close should not
     /// depend on the model cooperating.
+    ///
+    /// The exit status is settled by the reader thread when the pty closes a
+    /// moment later; this only marks the session as no longer live, so nothing
+    /// claims it in the meantime.
     pub fn close(&self, id: &str) -> bool {
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) else {
+        let Some(session) = self.handle(id) else {
             return false;
         };
-        if let Some(child) = session.child.as_mut() {
-            let _ = child.kill();
-        }
-        session.row.state = PtyState::Exited { code: None };
+        session.kill();
+        session.mark_closed();
         true
     }
 
@@ -253,10 +188,10 @@ impl PtyManager {
     /// Refuses while the child is alive, so a forgotten session can never leave
     /// an orphaned process holding a PTY.
     pub fn forget(&self, id: &str) -> bool {
-        let mut sessions = self.inner.sessions.lock().unwrap();
+        let mut sessions = write(&self.inner.sessions);
         let Some(index) = sessions
             .iter()
-            .position(|s| s.row.id == id && !s.row.state.is_running())
+            .position(|session| session.id() == id && !session.is_running())
         else {
             return false;
         };
@@ -266,18 +201,10 @@ impl PtyManager {
 
     /// Kill every child. Called on shutdown so no harness outlives the TUI.
     pub fn shutdown(&self) {
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        for session in sessions.iter_mut() {
-            if let Some(child) = session.child.as_mut() {
-                let _ = child.kill();
-            }
+        for session in self.handles() {
+            session.kill();
         }
     }
-}
-
-/// Whether an operator-spawned session has not yet served a real conversation.
-fn is_unassigned_operator_session(row: &SessionRow) -> bool {
-    row.user_spawned && row.label.starts_with("you:")
 }
 
 /// Whether two paths name the same working directory.

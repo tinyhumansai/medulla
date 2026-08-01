@@ -261,9 +261,31 @@ fn agent_for(options: &RunTaskOptions) -> AcpAgent {
 /// The agent process is the one that ends up running `git commit`, so the
 /// attribution hook env has to land here too: direct provider runs apply it at
 /// their spawn seam, which ACP dispatch bypasses.
+///
+/// The same is true of a configured `[router]`. ACP dispatch is chosen by
+/// transport (`MEDULLA_HARNESS_PROTOCOL=acp`), not by endpoint, so an operator
+/// who pointed this worker at a custom endpoint means it for ACP runs as well —
+/// and for OpenRouter that endpoint is the local attribution proxy, which an
+/// unrouted ACP agent would walk straight past.
+///
+/// A configured `apiKeyEnv` whose variable is unset is *not* fatal here, unlike
+/// the direct spawn seam: the ACP server may hold its own credentials, and this
+/// path has no error frame to surface a refusal through. The endpoint is applied
+/// and the key left to the agent.
 pub(super) fn acp_env(options: &RunTaskOptions) -> HashMap<String, String> {
     let mut env = options.env.clone();
     let attribution_env = crate::attribution::attribution_env(options.attribution, &env);
     env.extend(attribution_env);
+    if let Some(router) = &options.router {
+        let injection = crate::tinyplace::env::router_env(options.provider, router);
+        for (key, value) in injection.env {
+            env.insert(key, value);
+        }
+        for (child_var, source_name) in injection.secret_env {
+            if let Some(secret) = options.env.get(&source_name).filter(|v| !v.is_empty()) {
+                env.insert(child_var, secret.clone());
+            }
+        }
+    }
     env
 }

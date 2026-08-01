@@ -47,6 +47,17 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
+# The loopback inference proxy's server half. `reqwest` is the client half and
+# already links hyper 1.x, so these add no new tree — only the server feature of
+# a crate the graph resolves anyway. Deliberately NOT axum: the vendored
+# OpenHuman core's axum sits behind a feature this build disables, and pulling a
+# router framework into the workspace for one listener with two mount points
+# would link far more than it saves.
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }

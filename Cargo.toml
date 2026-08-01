@@ -43,6 +43,15 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "process", "fs", "signal", "net"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
+# The server half of the loopback inference proxy. reqwest 0.12 already resolves
+# hyper 1.x, http 1.x and bytes, so these pin the same versions rather than
+# introducing a second HTTP stack. `hyper-util` supplies only the tokio IO
+# adapter (`TokioIo`) — no connection pool, no service router.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
 # Depended on only to pick a TLS backend explicitly. rustls 0.23 refuses to
 # guess when more than one provider is compiled in, and this workspace has two:
 # `ring` arrives with reqwest's `rustls-tls`, `aws-lc-rs` with the vendored

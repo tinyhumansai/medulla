@@ -64,7 +64,7 @@ fn workflow_mcp_servers(
         // value could only ever be right for one of them. A review turn that
         // silently got the full surface could rewrite the graph it was asked
         // only to review, which is exactly what the mode exists to prevent.
-        let mut server = McpServerStdio::new(crate::workflows::mcp::SERVER_NAME, binary)
+        let mut server = McpServerStdio::new(crate::mcp::SERVER_NAME, binary)
             .args(vec!["workflow".to_string(), "mcp".to_string()]);
         if let Some(mode) = tool_mode {
             let (mode, scope) = mode
@@ -73,14 +73,14 @@ fn workflow_mcp_servers(
             server
                 .env
                 .push(agent_client_protocol::schema::v1::EnvVariable::new(
-                    crate::workflows::mcp::TOOL_MODE_ENV,
+                    crate::mcp::TOOL_MODE_ENV,
                     mode,
                 ));
             if let Some(scope) = scope {
                 server
                     .env
                     .push(agent_client_protocol::schema::v1::EnvVariable::new(
-                        crate::workflows::mcp::TOOL_SCOPE_ENV,
+                        crate::mcp::TOOL_SCOPE_ENV,
                         scope,
                     ));
             }
@@ -108,7 +108,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     #[cfg(feature = "workflows")]
     let tool_mode: Option<String> = options
         .env
-        .get(crate::workflows::mcp::TOOL_MODE_ENV)
+        .get(crate::mcp::TOOL_MODE_ENV)
         .cloned();
     #[cfg(not(feature = "workflows"))]
     let tool_mode: Option<String> = None;

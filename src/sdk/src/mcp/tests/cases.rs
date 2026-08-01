@@ -10,7 +10,7 @@ pub(super) use serde_json::json;
 
 pub(super) use super::super::*;
 use crate::harness_contract::is_reserved_tool_name;
-pub(super) use crate::workflows::mcp::ToolMode;
+pub(super) use crate::mcp::ToolMode;
 pub(super) use crate::workflows::{FileWorkflowStore, WorkflowStore};
 
 /// Create an isolated file store and keep its temporary root alive.

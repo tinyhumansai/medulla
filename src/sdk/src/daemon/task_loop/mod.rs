@@ -87,10 +87,10 @@ pub(super) fn with_tool_mode(
 ) -> std::collections::HashMap<String, String> {
     #[cfg(feature = "workflows")]
     {
-        env.remove(crate::workflows::mcp::TOOL_MODE_ENV);
+        env.remove(crate::mcp::TOOL_MODE_ENV);
         if let Some(mode) = mode {
             env.insert(
-                crate::workflows::mcp::TOOL_MODE_ENV.to_string(),
+                crate::mcp::TOOL_MODE_ENV.to_string(),
                 mode.to_string(),
             );
             // Workflow tools are attached through ACP; legacy provider JSONL

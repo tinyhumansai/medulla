@@ -25,6 +25,13 @@ pub mod hub;
 pub mod inference_proxy;
 pub mod init;
 pub mod logging;
+/// Medulla's own MCP server, offered to the harnesses it spawns.
+///
+/// Still gated on `workflows` because the `workflow_*` tool family delegates to
+/// [`workflows::ops`]; the `fleet_*` family added beside it depends only on
+/// [`control_socket`].
+#[cfg(feature = "workflows")]
+pub mod mcp;
 pub mod onboarding;
 pub(crate) mod persistence;
 pub mod runtime;

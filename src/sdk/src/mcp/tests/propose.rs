@@ -102,14 +102,14 @@ fn the_mode_is_read_from_the_environment_and_defaults_to_full() {
 
 #[test]
 fn review_writes_are_scoped_to_the_reviewed_workflow() {
-    let foreign = crate::workflows::mcp::tools::scope_error_for(
+    let foreign = crate::mcp::tools::scope_error_for(
         ToolMode::Propose,
         "workflow_note_add",
         &json!({ "id": "other" }),
         Some("sweep"),
     );
     assert!(foreign.is_some_and(|error| error.contains("sweep")));
-    assert!(crate::workflows::mcp::tools::scope_error_for(
+    assert!(crate::mcp::tools::scope_error_for(
         ToolMode::Propose,
         "workflow_propose",
         &json!({ "id": "sweep" }),

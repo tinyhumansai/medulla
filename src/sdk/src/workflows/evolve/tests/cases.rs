@@ -593,7 +593,7 @@ async fn a_review_turn_asks_for_the_restricted_tool_set() {
 
 #[test]
 fn an_ordinary_copilot_turn_asks_for_nothing_and_gets_the_full_surface() {
-    use crate::workflows::mcp::ToolMode;
+    use crate::mcp::ToolMode;
 
     // The default has to stay permissive: every dispatch but a review's leaves
     // this unset, and a mistake here would silently disarm the copilot.

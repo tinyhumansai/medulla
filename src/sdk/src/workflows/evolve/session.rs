@@ -16,7 +16,7 @@ use super::types::{EvolveConfig, EvolveOutcome, EvolveTrigger};
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::hub::TaskRequest;
 use crate::workflows::copilot::{CopilotRequest, FailedRun, Mode};
-use crate::workflows::mcp::ToolMode;
+use crate::mcp::ToolMode;
 use crate::workflows::{
     current_notes, require, NoteKind, NoteSource, RunRecord, RunStatus, WorkflowError,
     WorkflowNote, WorkflowStore,

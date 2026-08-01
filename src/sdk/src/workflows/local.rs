@@ -215,7 +215,7 @@ pub async fn evolve_here(
         crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
         "acp".to_string(),
     );
-    crate::workflows::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
+    crate::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
 
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),

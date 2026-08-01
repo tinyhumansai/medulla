@@ -114,6 +114,12 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         tool_mode,
         workflow,
         conversation,
+        // Absent means zero: a peer on an older build says nothing about depth,
+        // and treating that as operator-started work is the safe reading.
+        fleet_depth: obj
+            .get("fleet_depth")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u8,
         usage,
         work,
     })

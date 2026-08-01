@@ -77,6 +77,7 @@ impl Relay for FakeWorker {
                         tool_mode: None,
                         workflow: None,
                         conversation: None,
+                        fleet_depth: 0,
                     },
                     None,
                 ),
@@ -101,6 +102,7 @@ impl Relay for FakeWorker {
                             tool_mode: None,
                             workflow: None,
                             conversation: None,
+                            fleet_depth: 0,
                         },
                         None,
                     ),
@@ -139,6 +141,7 @@ impl Relay for FakeWorker {
                     tool_mode: None,
                     workflow: None,
                     conversation: None,
+                    fleet_depth: 0,
                 },
                 usage,
             ),
@@ -175,6 +178,7 @@ impl Relay for FakeWorker {
                             tool_mode: None,
                             workflow: None,
                             conversation: None,
+                            fleet_depth: 0,
                         },
                         None,
                     ),
@@ -265,6 +269,7 @@ pub(in crate::hub::tests) fn req(instruction: &str) -> TaskRequest {
         tool_mode: None,
         workflow: None,
         conversation: None,
+        fleet_depth: 0,
     }
 }
 

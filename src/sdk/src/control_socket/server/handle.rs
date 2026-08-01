@@ -212,6 +212,10 @@ fn build_request(
         // the invariant that lets two tasks run concurrently without seeing
         // each other's work. A parallel dispatch tool must preserve it.
         conversation: None,
+        // One level below whoever asked. Taken from the *grant* rather than
+        // from the request, so a caller cannot dispatch a child shallower than
+        // itself and buy back the fan-out its own depth denied it.
+        fleet_depth: grant.child_depth(),
     })
 }
 

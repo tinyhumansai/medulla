@@ -52,8 +52,8 @@ pub use active::{active, install, ActiveControlPlane};
 pub use grants::{Grant, GrantRegistry};
 pub use path::{control_socket_path, ControlSocketError, CONTROL_SOCKET_ENV};
 pub use types::{
-    grant_from_env, ControlError, ControlFailure, ErrorKind, FleetOps, FleetWorker, Hello,
-    ToolFamilies, MCP_GRANT_ENV, MCP_SOCKET_ENV, PROTOCOL_VERSION,
+    depth_from_env, grant_from_env, ControlError, ControlFailure, ErrorKind, FleetOps, FleetWorker,
+    Hello, ToolFamilies, FLEET_DEPTH_ENV, MCP_GRANT_ENV, MCP_SOCKET_ENV, PROTOCOL_VERSION,
 };
 
 #[cfg(unix)]

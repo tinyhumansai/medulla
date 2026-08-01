@@ -232,6 +232,7 @@ async fn run() -> Result<(), String> {
         tool_mode: None,
         workflow: None,
         conversation: None,
+        fleet_depth: 0,
     });
     transport
         .send(&to, &frame)

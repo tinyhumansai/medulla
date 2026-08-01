@@ -121,6 +121,7 @@ fn task_frame(task_id: &str, prompt: &str) -> String {
         tool_mode: None,
         workflow: None,
         conversation: None,
+        fleet_depth: 0,
     })
 }
 
@@ -243,6 +244,7 @@ async fn the_host_answers_a_capability_probe_with_what_this_machine_has() {
             tool_mode: None,
             workflow: None,
             conversation: None,
+            fleet_depth: 0,
         }),
     )
     .await

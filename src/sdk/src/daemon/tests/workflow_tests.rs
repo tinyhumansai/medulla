@@ -39,6 +39,7 @@ async fn workflow_dispatch_waits_for_a_daemon_harness_slot() {
                 tool_mode: Some("propose:sweep".into()),
                 workflow: None,
                 conversation: None,
+                fleet_depth: 0,
             })
             .await
     });

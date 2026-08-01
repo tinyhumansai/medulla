@@ -163,6 +163,7 @@ pub fn task_frame(
         tool_mode: None,
         workflow: None,
         conversation: None,
+        fleet_depth: 0,
     })
 }
 

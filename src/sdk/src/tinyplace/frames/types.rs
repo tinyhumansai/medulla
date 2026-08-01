@@ -339,6 +339,14 @@ pub struct TaskFrame {
     /// [`route_session_class`]: crate::sessions::route_session_class
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub conversation: Option<String>,
+    /// How deep in a dispatch tree the harness running this task sits.
+    ///
+    /// `0` — the default when a peer omits it — is work an operator started.
+    /// Carried on the frame so the receiving daemon knows it independently of
+    /// the sender's own environment, which is what lets the fan-out guard hold
+    /// across a process boundary.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub fleet_depth: u8,
     /// Reported on `reply` frames when the child harness surfaced token counts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TokenUsage>,
@@ -396,6 +404,13 @@ pub struct EncodeFrameInput {
     /// through. `None` on every response and on ordinary tasks, which stay
     /// context-free by design — see [`TaskFrame::conversation`].
     pub conversation: Option<String>,
+    /// How deep in a dispatch tree the harness running this task sits.
+    ///
+    /// `0` — the default when a peer omits it — is work an operator started.
+    /// Carried on the frame so the receiving daemon knows it independently of
+    /// the sender's own environment, which is what lets the fan-out guard hold
+    /// across a process boundary.
+    pub fleet_depth: u8,
 }
 
 /// What an agent reports it can do, merged with facts its host establishes.
@@ -543,4 +558,9 @@ where
         .iter()
         .filter_map(|s| HarnessProvider::from_wire(s))
         .collect())
+}
+
+/// Whether a depth is the default, so it stays off the wire for ordinary work.
+fn is_zero(depth: &u8) -> bool {
+    *depth == 0
 }

@@ -262,6 +262,7 @@ async fn a_hub_watches_a_real_workers_screen_over_the_relay() {
         tool_mode: None,
         workflow: None,
         conversation: None,
+        fleet_depth: 0,
     });
     hub_tx
         .send(&worker_addr, &body)

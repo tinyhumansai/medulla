@@ -261,6 +261,7 @@ async fn mailbox_poll_decodes_skips_and_acknowledges() {
         tool_mode: None,
         workflow: None,
         conversation: None,
+        fleet_depth: 0,
     });
 
     let mock = MockTinyplace::start(MockConfig {

@@ -51,6 +51,7 @@ impl TaskRunner {
                 tool_mode: None,
                 workflow: None,
                 conversation: None,
+                fleet_depth: 0,
             });
             if let Err(error) = self.relay.send(address, &body).await {
                 self.capabilities_waiters

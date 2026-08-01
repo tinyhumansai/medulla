@@ -137,6 +137,7 @@ fn frame(task_id: &str, text: &str, workflow: Option<&str>) -> String {
         tool_mode: None,
         workflow: workflow.map(str::to_string),
         conversation: None,
+        fleet_depth: 0,
     })
 }
 
@@ -266,6 +267,7 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
             tool_mode: None,
             workflow: None,
             conversation: None,
+            fleet_depth: 0,
         }),
     )
     .await

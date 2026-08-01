@@ -21,6 +21,7 @@ fn request() -> TaskRequest {
         // The copilot keys its turns to a conversation, so a fixture standing in
         // for one carries a key too.
         conversation: Some("cloud-copilot:demo".into()),
+        fleet_depth: 0,
     }
 }
 

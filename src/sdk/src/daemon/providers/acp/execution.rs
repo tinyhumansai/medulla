@@ -79,7 +79,12 @@ fn medulla_mcp_servers(
         // the tool mode is: it is minted per session, and an inherited one would
         // hand a second harness the first one's capability.
         if let Some(plane) = crate::control_socket::active() {
-            let grant = crate::control_socket::Grant::new(session, 0, plane.max_depth)
+            // The depth this task was dispatched at, written into the harness
+            // environment by the daemon from the task frame. Read here and
+            // recorded in the grant, so every later check consults the grant
+            // rather than an environment the harness itself could rewrite.
+            let depth = crate::control_socket::depth_from_env(&env);
+            let grant = crate::control_socket::Grant::new(session, depth, plane.max_depth)
                 .with_max_in_flight(plane.max_in_flight);
             server
                 .env

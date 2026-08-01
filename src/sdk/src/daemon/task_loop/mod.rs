@@ -85,6 +85,31 @@ pub(super) fn with_tool_mode(
     mut env: std::collections::HashMap<String, String>,
     mode: Option<&str>,
 ) -> std::collections::HashMap<String, String> {
+    with_tool_mode_at_depth(env_without_depth(&mut env), mode, 0)
+}
+
+/// Strip any inherited depth so it cannot leak from this process into a task.
+fn env_without_depth(
+    env: &mut std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, String> {
+    env.remove(crate::control_socket::FLEET_DEPTH_ENV);
+    std::mem::take(env)
+}
+
+/// [`with_tool_mode`], and the depth the task's harness runs at.
+///
+/// Always written, never inherited: one daemon serves tasks at several depths,
+/// so a value left over from its own environment could only ever be right for
+/// one of them — and being wrong here means a fan-out guard that does not bite.
+pub(super) fn with_tool_mode_at_depth(
+    mut env: std::collections::HashMap<String, String>,
+    mode: Option<&str>,
+    depth: u8,
+) -> std::collections::HashMap<String, String> {
+    env.insert(
+        crate::control_socket::FLEET_DEPTH_ENV.to_string(),
+        depth.to_string(),
+    );
     #[cfg(feature = "workflows")]
     {
         env.remove(crate::mcp::TOOL_MODE_ENV);

@@ -144,6 +144,7 @@ impl EvolveSession {
             // would be the run that triggered it, again.
             workflow: None,
             conversation: Some(self.conversation.clone()),
+            fleet_depth: 0,
         };
         let outcome = self.dispatch.dispatch_with_status(request, status).await?;
 

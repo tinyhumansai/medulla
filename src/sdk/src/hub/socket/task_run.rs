@@ -251,6 +251,7 @@ pub(super) async fn handle_task_run(
         // discrete work, and honouring a conversation named on the wire would
         // let one caller's task resume a session opened for another's.
         conversation: None,
+        fleet_depth: 0,
     };
 
     let outcome = runner.run(req, Some(tx)).await;

@@ -310,6 +310,25 @@ pub const MCP_SOCKET_ENV: &str = "MEDULLA_MCP_SOCKET";
 /// permissions, only present one that means nothing.
 pub const MCP_GRANT_ENV: &str = "MEDULLA_MCP_GRANT";
 
+/// Environment variable carrying a task's depth in the dispatch tree.
+///
+/// Set by the daemon from [`TaskRequest::fleet_depth`](crate::hub::TaskRequest),
+/// and read when minting the grant for the harness that task runs on. Absent
+/// means depth zero: work an operator started.
+///
+/// Not a security boundary on its own — a harness could rewrite it in its own
+/// environment — which is why the value it produces is written into a *grant*
+/// held server-side, and every later check reads the grant rather than the
+/// environment.
+pub const FLEET_DEPTH_ENV: &str = "MEDULLA_FLEET_DEPTH";
+
+/// The depth this task runs at, from the environment its harness was given.
+pub fn depth_from_env(env: &HashMap<String, String>) -> u8 {
+    env.get(FLEET_DEPTH_ENV)
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
+}
+
 /// Read the socket path and grant token a spawn was handed, if it was handed any.
 ///
 /// `None` whenever either is missing, which is the ordinary state for a harness

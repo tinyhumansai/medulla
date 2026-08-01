@@ -23,6 +23,7 @@ fn encodes_a_minimal_frame() {
         tool_mode: None,
         workflow: None,
         conversation: None,
+        fleet_depth: 0,
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["proto"], TINYPLACE_PROTO);
@@ -52,6 +53,7 @@ fn encodes_optional_fields_when_present() {
         tool_mode: None,
         workflow: Some("nightly-sweep".to_string()),
         conversation: None,
+        fleet_depth: 0,
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["kind"], "capabilities_result");
@@ -89,6 +91,7 @@ fn round_trips_every_kind() {
             tool_mode: None,
             workflow: None,
             conversation: None,
+            fleet_depth: 0,
         });
         let decoded = decode_task_frame(&body).expect("valid frame decodes");
         assert_eq!(decoded.kind, kind);
@@ -132,6 +135,7 @@ fn carries_a_model_hint_through_encode_and_decode() {
         tool_mode: None,
         workflow: None,
         conversation: None,
+        fleet_depth: 0,
     });
     let decoded = decode_task_frame(&body).unwrap();
     assert_eq!(decoded.model.as_deref(), Some("openrouter/some-model"));
@@ -449,6 +453,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
             tool_mode: None,
             workflow: None,
             conversation: None,
+            fleet_depth: 0,
         },
         None,
         Some(snapshot.clone()),
@@ -473,6 +478,7 @@ fn an_empty_work_snapshot_is_left_off_the_wire() {
             tool_mode: None,
             workflow: None,
             conversation: None,
+            fleet_depth: 0,
         },
         None,
         Some(crate::harness_work::WorkSnapshot::default()),

@@ -166,6 +166,7 @@ impl CopilotSession {
             tool_mode: None,
             workflow: None,
             conversation: Some(self.conversation.clone()),
+            fleet_depth: 0,
         };
 
         let outcome = self.dispatch.dispatch_with_status(request, status).await?;
@@ -238,6 +239,7 @@ impl CopilotSession {
             tool_mode: None,
             workflow: None,
             conversation: Some(self.conversation.clone()),
+            fleet_depth: 0,
         };
 
         let outcome = self.dispatch.dispatch_with_status(request, status).await?;

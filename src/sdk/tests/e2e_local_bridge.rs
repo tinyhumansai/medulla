@@ -41,6 +41,7 @@ async fn task_runner_round_trips_entirely_over_the_local_bridge() {
                                 tool_mode: None,
                                 workflow: None,
                                 conversation: None,
+                                fleet_depth: 0,
                             }),
                         )
                         .await
@@ -67,6 +68,7 @@ async fn task_runner_round_trips_entirely_over_the_local_bridge() {
                 tool_mode: None,
                 workflow: None,
                 conversation: None,
+                fleet_depth: 0,
             },
             None,
         )

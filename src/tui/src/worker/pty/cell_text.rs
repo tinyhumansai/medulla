@@ -18,6 +18,7 @@
 //! Same size as the `String` it replaces (24 bytes), so nothing downstream grew.
 
 #[cfg(test)]
+#[path = "cell_text_tests.rs"]
 mod tests;
 
 /// How many bytes fit without allocating.

@@ -76,16 +76,34 @@ pub fn route_openrouter(
 /// Resolve the OpenRouter credential named by `router` from a run environment.
 pub(super) fn resolve_key(
     router: &RouterConfig,
+    provider: HarnessProvider,
     env: &HashMap<String, String>,
 ) -> Option<(String, String)> {
-    let name = router
+    if let Some(name) = router
         .api_key_env
         .as_deref()
         .map(str::trim)
         .filter(|name| !name.is_empty())
-        .unwrap_or(OPENROUTER_API_KEY_ENV);
-    let value = env.get(name).map(|value| value.trim())?;
-    (!value.is_empty()).then(|| (name.to_string(), value.to_string()))
+    {
+        let value = env.get(name).map(|value| value.trim())?;
+        return (!value.is_empty()).then(|| (name.to_string(), value.to_string()));
+    }
+
+    // Endpoint-only router configuration intentionally leaves a harness's own
+    // credentials in place. Prefer the documented OpenRouter variable, then the
+    // native variable the selected harness would inherit for this dialect.
+    let provider_key = match provider {
+        HarnessProvider::Claude => "ANTHROPIC_AUTH_TOKEN",
+        HarnessProvider::Codex | HarnessProvider::Opencode => "OPENAI_API_KEY",
+    };
+    [OPENROUTER_API_KEY_ENV, provider_key]
+        .into_iter()
+        .find_map(|name| {
+            env.get(name)
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .map(|value| (name.to_string(), value.to_string()))
+        })
 }
 
 /// Route the selected provider through the shared proxy, starting it on demand.
@@ -97,7 +115,7 @@ pub fn route_run(
     provider: HarnessProvider,
     env: &HashMap<String, String>,
 ) -> Result<Option<ProxyRouting>, String> {
-    let Some((name, key)) = resolve_key(router, env) else {
+    let Some((name, key)) = resolve_key(router, provider, env) else {
         return Ok(None);
     };
     let probe = ProxyEndpoint {

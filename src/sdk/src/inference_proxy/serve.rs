@@ -11,6 +11,7 @@
 
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures::TryStreamExt;
@@ -133,6 +134,11 @@ async fn accept_loop(listener: TcpListener, state: ProxyState) {
             // every in-flight harness with it.
             Err(error) => {
                 tracing::debug!(%error, "attribution proxy accept failed");
+                // Persistent resource errors (notably file-descriptor
+                // exhaustion) return immediately. Yield with a bounded delay so
+                // the dedicated runtime neither spins nor floods the log while
+                // the process is already under pressure.
+                tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }
         };

@@ -37,7 +37,9 @@ The two mounts exist because the harnesses speak different dialects:
 
 The child is given a machine-local token, and the real OpenRouter key is removed
 from its environment entirely — both the variable your preset names in
-`apiKeyEnv` and the default `OPENROUTER_API_KEY`.
+`apiKeyEnv` and the default `OPENROUTER_API_KEY`. For an endpoint-only preset,
+the selected harness's inherited credential (`ANTHROPIC_AUTH_TOKEN` or
+`OPENAI_API_KEY`) is used as the upstream key and scrubbed too.
 
 This is what makes the attribution reliable rather than decorative. A harness
 holding the real key could ignore the base URL and call OpenRouter itself; a

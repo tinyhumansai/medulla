@@ -34,27 +34,29 @@ different keys do not.
 
 ## Contents
 
-- [`mod.rs`](./mod.rs) — module docs, the `ProxyHandle` and its credential
-  registry, the shared lazy listener, and `route_openrouter` / `route_run` /
-  `apply_env`, the seam-facing API.
+- [`mod.rs`](./mod.rs) — module docs and public wiring.
+- [`types.rs`](./types.rs) — endpoint, routing, handle, registry, and dialect
+  data types.
+- [`lifecycle.rs`](./lifecycle.rs) — proxy startup, token minting, and the shared
+  process-wide listener.
+- [`routing.rs`](./routing.rs) — provider-scoped router and child-environment
+  rewriting at the spawn seam.
 - [`headers.rs`](./headers.rs) — the pure request-header rewrite. All attribution
   policy lives here: what is stripped, what is injected, what is forwarded
   verbatim.
 - [`serve.rs`](./serve.rs) — the accept loop, the loopback-peer and token guards,
   mount-to-upstream mapping, and the bidirectional streaming forward.
-- [`types.rs`](./types.rs) — `ProxyEndpoint`, `UpstreamShape`, `ProxyRouting`,
-  and the environment-variable name constants.
 - [`tests.rs`](./tests.rs) — offline unit tests for the rewrite, host
   recognition, routing and token minting. Socket-level behaviour is covered by
   `src/sdk/tests/e2e_attribution_proxy.rs`.
 
 ## Integration
 
-Spawn seams call `route_run(router, env)` and, on `Some(routing)`, use
-`routing.router` in place of their own and apply `apply_env(&routing, &mut env)`.
-Nothing downstream changes: `RouterConfig` and
-`crate::tinyplace::env::router_env` do the injection exactly as they did before,
-they are simply pointed at loopback.
+Spawn seams call `route_spawn(provider, router, env)`, which atomically replaces
+an OpenRouter-bound provider's endpoint, injects its loopback token, and scrubs
+the upstream credential. Nothing downstream changes: `RouterConfig` and
+`crate::tinyplace::env::router_env` perform the same child injection, simply
+pointed at loopback.
 
 `MEDULLA_OPENROUTER_URL` overrides the upstream so tests stay offline.
 

@@ -426,7 +426,7 @@ fn key_resolution_falls_back_to_the_documented_default() {
         ..RouterConfig::default()
     };
     let env = HashMap::from([("OPENROUTER_API_KEY".to_string(), "sk-or-real".to_string())]);
-    let resolved = resolve_key(&router, &env).expect("resolved");
+    let resolved = resolve_key(&router, HarnessProvider::Claude, &env).expect("resolved");
     assert_eq!(resolved.0, "OPENROUTER_API_KEY");
     assert_eq!(resolved.1, "sk-or-real");
 }
@@ -434,9 +434,45 @@ fn key_resolution_falls_back_to_the_documented_default() {
 #[test]
 fn a_blank_or_absent_key_resolves_to_nothing() {
     let router = openrouter_router();
-    assert!(resolve_key(&router, &HashMap::new()).is_none());
+    assert!(resolve_key(&router, HarnessProvider::Claude, &HashMap::new()).is_none());
     let blank = HashMap::from([("OPENROUTER_API_KEY".to_string(), "   ".to_string())]);
-    assert!(resolve_key(&router, &blank).is_none());
+    assert!(resolve_key(&router, HarnessProvider::Claude, &blank).is_none());
+}
+
+#[test]
+fn endpoint_only_openrouter_uses_the_selected_providers_inherited_key() {
+    let router = RouterConfig {
+        base_url: Some(OPENROUTER_ROOT.to_string()),
+        ..RouterConfig::default()
+    };
+    let env = HashMap::from([("OPENAI_API_KEY".to_string(), "sk-or-real".to_string())]);
+
+    let resolved = resolve_key(&router, HarnessProvider::Codex, &env).expect("resolved");
+
+    assert_eq!(resolved.0, "OPENAI_API_KEY");
+    assert_eq!(resolved.1, "sk-or-real");
+}
+
+#[test]
+fn endpoint_only_openrouter_spawn_proxies_and_scrubs_the_inherited_key() {
+    let mut router = Some(RouterConfig {
+        base_url: Some(OPENROUTER_ROOT.to_string()),
+        ..RouterConfig::default()
+    });
+    let mut env = HashMap::from([("OPENAI_API_KEY".to_string(), "sk-or-real".to_string())]);
+
+    route_spawn(HarnessProvider::Codex, &mut router, &mut env).expect("routed");
+
+    assert!(!env.contains_key("OPENAI_API_KEY"));
+    assert!(env
+        .get(PROXY_TOKEN_ENV)
+        .is_some_and(|token| token.starts_with("mdl-")));
+    let routed = router.expect("router retained");
+    assert_eq!(routed.api_key_env.as_deref(), Some(PROXY_TOKEN_ENV));
+    assert!(routed
+        .base_url_for("codex")
+        .expect("codex routed")
+        .starts_with("http://127.0.0.1:"));
 }
 
 #[test]

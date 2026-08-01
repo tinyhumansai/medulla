@@ -75,10 +75,13 @@ async fn opencode_is_refused_rather_than_left_to_hang() {
 async fn an_aborted_task_stops_waiting_and_says_so() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_string_lossy().into_owned();
-    // A harness that never completes its turn.
-    let script = "read -r prompt; sleep 30".to_string();
+    // A harness that accepts the turn, then blocks on an unrecognised prompt.
+    // Its bell is the only attention evidence and must survive the failed turn.
+    let script = "read -r prompt; printf 'permission fallback\\a\\r\\n'; while :; do sleep 1; done"
+        .to_string();
 
     let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
     let mut opts = options(&env, "peer", &script, &cwd);
     let abort = opts.abort.clone();
     opts.abort = abort.clone();
@@ -87,7 +90,20 @@ async fn an_aborted_task_stops_waiting_and_says_so() {
         let executor = executor.clone();
         async move { executor.run_for_test(opts).await }
     });
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if sessions.rows().iter().any(|row| {
+                row.attention
+                    .as_ref()
+                    .is_some_and(|cue| cue.kind == super::super::pty::AttentionKind::Bell)
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the prompt bell must be classified");
     abort.abort();
 
     let result = tokio::time::timeout(Duration::from_secs(30), handle)
@@ -96,7 +112,14 @@ async fn an_aborted_task_stops_waiting_and_says_so() {
         .expect("task did not panic");
     let error = result.expect_err("an aborted turn is an error, not a silent success");
     assert!(error.contains("aborted"), "got: {error}");
-    executor.sessions_for_test().shutdown();
+    assert!(
+        sessions.rows().iter().any(|row| row
+            .attention
+            .as_ref()
+            .is_some_and(|cue| cue.kind == super::super::pty::AttentionKind::Bell)),
+        "a submitted but unsettled turn must retain its prompt attention"
+    );
+    sessions.shutdown();
 }
 
 #[tokio::test]

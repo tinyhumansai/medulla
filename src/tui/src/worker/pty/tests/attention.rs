@@ -308,6 +308,35 @@ fn suppression_consumes_only_one_bell_from_a_batch() {
 }
 
 #[test]
+fn successive_settlements_track_each_pending_completion_bell() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh("read line; printf 'two completions\\a\\a\\n'; sleep 30"))
+        .expect("a session");
+    let row = manager.row(&id).expect("a row");
+
+    manager.settle_turn(&id);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("claim the second turn");
+    manager.settle_turn(&id);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("reuse after both turns settle");
+    manager.write(&id, b"\r").expect("emit both late chimes");
+    wait_for("both completion bells to paint", || {
+        super::screen_text(&manager, &id).contains("two completions")
+    });
+
+    now.store(200, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(manager.attention(&id), None);
+    manager.shutdown();
+}
+
+#[test]
 fn freeing_without_a_submitted_turn_does_not_suppress_the_next_bell() {
     let now = Arc::new(AtomicI64::new(0));
     let clock = Arc::clone(&now);

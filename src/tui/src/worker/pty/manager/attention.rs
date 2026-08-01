@@ -69,21 +69,25 @@ impl PtyManager {
 
 /// Reclassify one live screen unless it was sampled too recently.
 fn refresh(session: &SessionHandle, now: i64) {
-    let (seen_bells, generation, suppress_next_bell) = {
+    let (seen_bells, generation, pending_completion_bells) = {
         let mut state = lock(&session.attention);
         if now.saturating_sub(state.checked_at) < ATTENTION_INTERVAL_MS {
             return;
         }
         state.checked_at = now;
-        (state.seen_bells, state.generation, state.suppress_next_bell)
+        (
+            state.seen_bells,
+            state.generation,
+            state.pending_completion_bells,
+        )
     };
 
     let (contents, bells) = session.attention_sample();
     let unseen_bells = bells.saturating_sub(seen_bells);
-    // Settlement suppresses one completion chime, not the whole sample. The
-    // child can emit that delayed chime and the next turn's request before this
-    // 200 ms poll runs; any additional bell must remain eligible.
-    let eligible_bells = unseen_bells.saturating_sub(usize::from(suppress_next_bell));
+    // Settlement suppresses the exact number of pending completion chimes, not
+    // the whole sample. The child can emit delayed chimes and the next turn's
+    // request before this 200 ms poll runs; any additional bell remains eligible.
+    let eligible_bells = unseen_bells.saturating_sub(pending_completion_bells);
     let rang = eligible_bells > 0 && !attention::is_working(&contents);
     let cue = attention::detect(session.provider(), &contents)
         .or_else(|| rang.then(|| attention::bell_cue(session.provider())));
@@ -93,9 +97,8 @@ fn refresh(session: &SessionHandle, now: i64) {
     if state.generation != generation {
         return;
     }
-    if suppress_next_bell && unseen_bells > 0 {
-        state.suppress_next_bell = false;
-    }
+    let consumed_pending = unseen_bells.min(pending_completion_bells);
+    state.pending_completion_bells -= consumed_pending;
     state.seen_bells = consumed_bell_count(state.seen_bells, bells);
     state.cue = match (cue, state.cue.take()) {
         (None, held) => held.filter(|held| held.kind == AttentionKind::Bell),

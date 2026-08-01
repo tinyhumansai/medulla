@@ -97,7 +97,10 @@ impl SessionHandle {
     pub(in super::super) fn settle_turn(&self) {
         let bells = self.bell_count();
         let mut attention = lock(&self.attention);
-        let completion_bell_already_accounted_for = bells > attention.seen_bells
+        let unseen_bells = bells.saturating_sub(attention.seen_bells);
+        let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
+        attention.pending_completion_bells -= consumed_pending;
+        let completion_bell_already_accounted_for = unseen_bells > consumed_pending
             || attention
                 .cue
                 .as_ref()
@@ -105,9 +108,13 @@ impl SessionHandle {
         attention.seen_bells = attention.seen_bells.max(bells);
         attention.generation = attention.generation.wrapping_add(1);
         // A bell already represented by the current cue is just as consumed as
-        // an unclassified bell past the watermark. In either case, arming
-        // suppression here would discard the reused turn's first real request.
-        attention.suppress_next_bell = !completion_bell_already_accounted_for;
+        // an unclassified bell past the watermark. Otherwise record one more
+        // promised completion chime; several turns can settle before their
+        // delayed bells reach the emulator, so this must be a count, not a bit.
+        if !completion_bell_already_accounted_for {
+            attention.pending_completion_bells =
+                attention.pending_completion_bells.saturating_add(1);
+        }
         attention.cue = attention
             .cue
             .take()
@@ -119,11 +126,10 @@ impl SessionHandle {
     pub(in super::super) fn acknowledge_attention(&self) -> bool {
         let bells = self.bell_count();
         let mut attention = lock(&self.attention);
-        let consumed_suppressed = attention.suppress_next_bell && bells > attention.seen_bells;
+        let unseen_bells = bells.saturating_sub(attention.seen_bells);
+        let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
+        attention.pending_completion_bells -= consumed_pending;
         attention.seen_bells = attention.seen_bells.max(bells);
-        if consumed_suppressed {
-            attention.suppress_next_bell = false;
-        }
         attention.generation = attention.generation.wrapping_add(1);
         attention.cue.take().is_some()
     }

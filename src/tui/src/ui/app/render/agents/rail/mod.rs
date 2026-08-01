@@ -216,9 +216,10 @@ impl App {
         row: &RailRow,
         lanes: &[AgentLane],
         active: bool,
+        waiting_sessions: &std::collections::HashSet<String>,
     ) -> TLine<'static> {
         match row {
-            RailRow::Agent(row) => self.agent_row_line(row, lanes, active),
+            RailRow::Agent(row) => self.agent_row_line(row, lanes, active, waiting_sessions),
             RailRow::NewHarness => self.new_harness_line(active),
             RailRow::HarnessSeparator => TLine::from(Span::styled(
                 "── your harnesses ──",

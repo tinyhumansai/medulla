@@ -118,6 +118,14 @@ impl App {
             }
             self.harness_took_control = true;
         }
+        // Attaching answers whatever the harness was blinking about: the
+        // operator is now looking at the screen that was asking. A named prompt
+        // that is still up returns on the next refresh, so nothing is lost by
+        // clearing it here — and a rail that keeps blinking at the pane you are
+        // already typing in is how an indicator becomes furniture.
+        if let Some(harnesses) = self.harnesses.as_ref() {
+            harnesses.sessions.acknowledge(&session);
+        }
         self.harness_focus = HarnessFocus::Attached(session);
         self.set_status(format!(
             "Typing into the harness · you have control · {FOCUS_CHORD_LABEL} to release"

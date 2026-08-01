@@ -17,7 +17,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
 use crate::ui::util::{clip, fmt_tokens};
-use crate::worker::pty::{HarnessControl, SessionRow};
+use crate::worker::pty::{HarnessAttention, HarnessControl, SessionRow, ATTENTION_GLYPH};
 
 use super::super::super::rail::{RailRow, NEW_HARNESS_LABEL};
 use super::super::super::types::App;
@@ -75,11 +75,20 @@ impl App {
             .iter()
             .filter(|l| !l.role.is_function())
             .count();
-        let title = if running_tasks > 0 {
+        // Every waiting harness on the device, including the ones inside lanes
+        // rather than on rows of their own — the same number the tab badge
+        // carries, so the two can never disagree.
+        let waiting = self.harnesses_waiting();
+        let mut title = if running_tasks > 0 {
             format!("Agents · {agents} · {running_tasks} running")
         } else {
             format!("Agents · {agents}")
         };
+        // Last, and in the same vocabulary as the rows: a scrolled-away harness
+        // stuck on a prompt is otherwise invisible until you find it.
+        if waiting > 0 {
+            title.push_str(&format!(" · {ATTENTION_GLYPH} {waiting} waiting on you"));
+        }
         // The border says which half the keyboard is driving. Without it, Esc
         // moving focus to the rail is invisible until the next arrow press.
         let block = crate::ui::widgets::panel(&self.theme, title, self.agents_rail_focused());
@@ -249,18 +258,35 @@ impl App {
         active: bool,
         width: usize,
     ) -> Vec<TLine<'static>> {
+        // A harness waiting on the operator is the one thing on this rail worth
+        // interrupting them for, so it takes the row over: its own glyph, its
+        // own colour, and a blink. Everything else the row says — who holds it,
+        // which branch, which directory — is still true and still there, just no
+        // longer what the eye lands on first.
+        let waiting = self.harness_attention(row);
         let control = match row.control {
             HarnessControl::User => " · unmanaged",
             HarnessControl::Orchestrator => " · orchestrator",
         };
         let style = if active {
             self.theme.selection()
+        } else if waiting.is_some() {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
         } else if row.control == HarnessControl::User {
             Style::default().fg(color("cyan"))
         } else {
             Style::default()
         };
-        let head = format!("{} {}{control}", row.state.glyph(), row.provider.as_str());
+        let glyph = match &waiting {
+            // Not the state glyph: the session *is* running, and saying so here
+            // would be answering a question nobody is asking about a row that
+            // needs something done to it.
+            Some(_) => ATTENTION_GLYPH,
+            None => row.state.glyph(),
+        };
+        let head = format!("{glyph} {}{control}", row.provider.as_str());
         let head = if width == 0 {
             String::new()
         } else {
@@ -293,7 +319,35 @@ impl App {
             let path = wrap_path(&path, path_room, 1).concat();
             spans.push(Span::styled(format!("{SEPARATOR}{path}"), detail_style));
         }
-        vec![TLine::from(spans)]
+        let mut lines = vec![TLine::from(spans)];
+        // On its own line, in words. The colour and the blink say *that* it
+        // wants you; only the sentence says what for — and "approve a command"
+        // and "it rang the bell" are worth different amounts of hurry.
+        if let Some(cue) = waiting {
+            let text = format!(
+                "  {ATTENTION_GLYPH} {}",
+                cue.label(medulla::clock::now_millis())
+            );
+            lines.extend(wrap_line(
+                &TLine::from(Span::styled(clip(&text, width.max(1)), style)),
+                width,
+                CONT_INDENT,
+            ));
+        }
+        lines
+    }
+
+    /// The cue a harness row should blink about, if it should.
+    ///
+    /// The attached session never blinks: its screen is the thing the operator
+    /// is looking at, and a row shouting about a prompt that is already filling
+    /// the pane beside it is noise. Nor does an exited one — whatever it was
+    /// asking, nobody can answer it now.
+    fn harness_attention(&self, row: &SessionRow) -> Option<HarnessAttention> {
+        if !row.state.is_running() || self.harness_focus.is_attached_to(&row.id) {
+            return None;
+        }
+        row.attention.clone()
     }
 
     /// Format one Agents-list row (separator, "more", sub-task, or lane).
@@ -475,8 +529,30 @@ impl App {
     /// Resolve the current state instead of letting an older terminal task
     /// override newer work. Pending input wins over active work, then the most
     /// recent terminal task supplies completion or error.
+    ///
+    /// A local harness stopped on its own permission prompt outranks all of it.
+    /// The event fold cannot see that state — the harness writes no record while
+    /// it waits — so a lane whose pty is sitting on "Do you want to proceed?"
+    /// reads as *running* to everything else here, right up until the task times
+    /// out. The screen knows, and this is where it gets to say so.
     fn harness_visual_state(&self, item: &AgentLane) -> HarnessVisualState {
+        if self.lane_attention(item).is_some() {
+            return HarnessVisualState::NeedsInput;
+        }
         let session = self.session_state(item);
         status::classify(item, session.as_deref())
+    }
+
+    /// The cue from a local harness serving one of this lane's tasks, if any.
+    ///
+    /// The attached session is skipped for the same reason a harness row skips
+    /// it: the operator is looking at the prompt already.
+    fn lane_attention(&self, item: &AgentLane) -> Option<HarnessAttention> {
+        let harnesses = self.harnesses.as_ref()?;
+        item.tasks
+            .iter()
+            .filter_map(|task| harnesses.session_for_task(&task.task_id))
+            .filter(|session| !self.harness_focus.is_attached_to(session))
+            .find_map(|session| harnesses.sessions.attention(&session))
     }
 }

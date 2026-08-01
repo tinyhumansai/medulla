@@ -12,7 +12,7 @@ use ratatui::text::{Line as TLine, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::App;
-use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
+use crate::worker::pty::{AttentionKind, HarnessAttention, HarnessControl, PtyState, SessionRow};
 
 use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
 
@@ -69,6 +69,7 @@ fn harness_row(cwd: &str) -> SessionRow {
         busy: false,
         control: HarnessControl::User,
         user_spawned: true,
+        attention: None,
     }
 }
 
@@ -142,7 +143,7 @@ fn a_non_git_harness_omits_the_branch_without_a_placeholder() {
 }
 
 #[test]
-fn harness_rows_color_each_lifecycle_state_and_only_working_flashes() {
+fn harness_rows_color_each_lifecycle_state_and_only_the_live_ones_flash() {
     let app = app();
     let row = AgentRow::Lane { lane_index: 0 };
     let cases = [
@@ -154,11 +155,14 @@ fn harness_rows_color_each_lifecycle_state_and_only_working_flashes() {
             true,
             " · working",
         ),
+        // Blinks, like working does, and for a stronger reason: this is the one
+        // state that will not resolve itself. Yellow rather than green is what
+        // tells the two blinks apart.
         (
             vec![task(TaskStatus::Running, true, 1)],
             1,
             Color::Yellow,
-            false,
+            true,
             " · needs input",
         ),
         (
@@ -411,4 +415,63 @@ fn an_unknown_home_leaves_the_path_alone() {
     // inventing a `~` for a directory we cannot place would be a lie.
     assert_eq!(short_home("/srv/repos/auth", None), "/srv/repos/auth");
     assert_eq!(short_home("/srv/repos/auth", Some("")), "/srv/repos/auth");
+}
+
+/// A harness row carrying a cue, as the pty layer would have set it.
+fn waiting_row(cwd: &str) -> SessionRow {
+    let mut row = harness_row(cwd);
+    row.attention = Some(HarnessAttention::new(
+        AttentionKind::Approval,
+        "codex is asking permission",
+        0,
+    ));
+    row
+}
+
+#[test]
+fn a_harness_waiting_on_you_blinks_and_says_what_it_wants() {
+    let app = app();
+    let lines = app.own_harness_lines(&waiting_row("/workspace/medulla"), false, 48);
+
+    // The state glyph is replaced, not appended: "running" is not the fact this
+    // row is trying to get across.
+    assert!(lines[0].to_string().starts_with("⚠ codex"), "{}", lines[0]);
+    let style = lines[0].spans[0].style;
+    assert_eq!(style.fg, Some(Color::Yellow));
+    assert!(style.add_modifier.contains(Modifier::SLOW_BLINK));
+    // …and the reason is in words underneath, because a blink alone does not
+    // say whether to hurry.
+    assert!(
+        lines[1].to_string().contains("asking permission"),
+        "{}",
+        lines[1]
+    );
+}
+
+#[test]
+fn the_pane_you_are_typing_in_does_not_blink_at_you() {
+    let mut app = app();
+    let row = waiting_row("/workspace/medulla");
+    app.harness_focus = crate::ui::harness_pane::HarnessFocus::Attached(row.id.clone());
+
+    let lines = app.own_harness_lines(&row, false, 48);
+
+    assert_eq!(lines.len(), 1, "no second line: {lines:?}");
+    assert!(!lines[0].spans[0]
+        .style
+        .add_modifier
+        .contains(Modifier::SLOW_BLINK));
+}
+
+#[test]
+fn an_exited_harness_stops_asking_for_anything() {
+    let app = app();
+    let mut row = waiting_row("/workspace/medulla");
+    // Whatever it was asking, nobody can answer it now.
+    row.state = PtyState::Exited { code: Some(0) };
+
+    let lines = app.own_harness_lines(&row, false, 48);
+
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].to_string().starts_with("✓ codex"), "{}", lines[0]);
 }

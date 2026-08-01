@@ -112,6 +112,29 @@ impl App {
         rows
     }
 
+    /// How many local harnesses are waiting on the operator right now.
+    ///
+    /// Counts every live session on this device, not only the rows on the rail:
+    /// a harness the orchestrator started and then got stuck on a permission
+    /// prompt is exactly the case an operator needs told about, and it has no
+    /// row of its own — it is somewhere inside a lane.
+    ///
+    /// The attached session is excluded. Its prompt is on screen in front of
+    /// the person the count is for, so counting it would ask them to go and
+    /// look at what they are already looking at.
+    pub(in crate::ui) fn harnesses_waiting(&self) -> usize {
+        let Some(harnesses) = self.harnesses.as_ref() else {
+            return 0;
+        };
+        harnesses
+            .sessions
+            .rows()
+            .iter()
+            .filter(|row| row.state.is_running() && row.attention.is_some())
+            .filter(|row| !self.harness_focus.is_attached_to(&row.id))
+            .count()
+    }
+
     /// The harnesses this operator started, oldest first.
     ///
     /// Exited ones stay listed: the last screen is often the reason it exited,

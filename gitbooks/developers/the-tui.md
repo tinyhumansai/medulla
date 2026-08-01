@@ -96,6 +96,22 @@ the prompt), or cancel a task with `Alt`+`X`, and the operation absorbs the
 change rather than restarting. `Ctrl`+`]` attaches the live harness pane for the
 selected lane.
 
+### When a harness needs you
+
+A harness stopped on its own permission prompt looks exactly like one that is
+thinking hard: still running, still holding its session, saying nothing. Medulla
+watches each harness's screen for that state and marks it — the row turns yellow
+and blinks with a `⚠`, says what it is waiting for and for how long
+("codex is asking permission · 42s"), and the Agents tab carries a `⚠2` badge so
+a stuck pane is visible from whatever tab you are on.
+
+It is recognised from what the harness paints: the permission and approval
+prompts of `claude`, `codex`, and `opencode`, the startup trust dialogs, any
+numbered menu with the cursor resting on an option, and — for anything
+unrecognised — the terminal bell, which all three ring when they want a human.
+Attaching to the pane clears the mark; if the harness is in fact still asking,
+it comes straight back.
+
 ## Read next
 
 * [CLI Reference](cli-reference.md) — every subcommand and flag.

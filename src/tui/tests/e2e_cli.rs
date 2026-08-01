@@ -297,6 +297,139 @@ fn open_pty() -> (std::fs::File, std::fs::File) {
     }
 }
 
+/// Drive `medulla mcp` over its stdio transport and collect the replies.
+///
+/// The MCP stdio transport is the only way this command is ever invoked — an
+/// ACP agent spawns it — so this exercises the real contract: newline-delimited
+/// JSON-RPC in, the same out, and a clean exit when stdin closes.
+fn run_mcp(
+    requests: &[serde_json::Value],
+    home: &std::path::Path,
+) -> (Vec<serde_json::Value>, bool) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        .arg("mcp")
+        .env("MEDULLA_HOME", home)
+        .env_remove("MEDULLA_TOKEN")
+        .env_remove("MEDULLA_MCP_SOCKET")
+        .env_remove("MEDULLA_MCP_GRANT")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the medulla binary should run");
+
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        for request in requests {
+            writeln!(stdin, "{request}").expect("write a request");
+        }
+    }
+    // Dropping stdin closes the stream, which is how an MCP client ends a
+    // session; the server must exit rather than hang on it.
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("the server should exit");
+    let replies = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("replies are JSON"))
+        .collect();
+    (replies, output.status.success())
+}
+
+#[test]
+fn mcp_serves_the_workflow_tools_and_exits_when_stdin_closes() {
+    let home = TempDir::new().unwrap();
+
+    let (replies, exited_cleanly) = run_mcp(
+        &[
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": { "protocolVersion": "2024-11-05" },
+            }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+        ],
+        home.path(),
+    );
+
+    assert!(exited_cleanly, "closing stdin should end the session");
+    assert_eq!(replies.len(), 2, "one reply per request: {replies:?}");
+    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "medulla");
+    assert_eq!(replies[0]["result"]["protocolVersion"], "2024-11-05");
+
+    let names: Vec<&str> = replies[1]["result"]["tools"]
+        .as_array()
+        .expect("a tool list")
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"workflow_list"), "{names:?}");
+    // No grant reached this process, so it has no fleet and must not offer one.
+    assert!(
+        !names.iter().any(|name| name.starts_with("fleet_")),
+        "fleet tools were advertised with no grant: {names:?}"
+    );
+}
+
+#[test]
+fn mcp_answers_a_notification_with_nothing() {
+    // A JSON-RPC notification has no id and by definition gets no reply. A
+    // server that answered one would desynchronise the client's correlation.
+    let home = TempDir::new().unwrap();
+
+    let (replies, exited_cleanly) = run_mcp(
+        &[
+            serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" }),
+        ],
+        home.path(),
+    );
+
+    assert!(exited_cleanly);
+    assert_eq!(
+        replies.len(),
+        1,
+        "the notification drew a reply: {replies:?}"
+    );
+    assert_eq!(replies[0]["id"], 1);
+}
+
+#[test]
+fn mcp_answers_a_malformed_frame_and_keeps_going() {
+    let home = TempDir::new().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        .arg("mcp")
+        .env("MEDULLA_HOME", home.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the medulla binary should run");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        writeln!(stdin, "{{not json}}").unwrap();
+        writeln!(
+            stdin,
+            "{}",
+            serde_json::json!({ "jsonrpc": "2.0", "id": 7, "method": "ping" })
+        )
+        .unwrap();
+    }
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("exit");
+    let replies: Vec<serde_json::Value> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+
+    // One bad frame does not end the session: the client that sent it is still
+    // a client, and the next request is answered normally.
+    assert_eq!(replies[0]["error"]["code"], -32700);
+    assert_eq!(replies[1]["id"], 7);
+}
+
 #[cfg(unix)]
 unsafe extern "C" {
     fn setsid() -> std::os::raw::c_int;

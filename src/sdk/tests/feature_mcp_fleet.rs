@@ -191,10 +191,8 @@ async fn a_grant_at_the_ceiling_dispatches_nothing_over_the_wire() {
 
 #[tokio::test]
 async fn a_workflows_only_grant_gets_no_fleet_surface_at_all() {
-    let (_dir, _server, _fleet, session) = wired(
-        Grant::new("session", 0, 2).with_families(ToolFamilies::workflows_only()),
-    )
-    .await;
+    let (_dir, _server, _fleet, session) =
+        wired(Grant::new("session", 0, 2).with_families(ToolFamilies::workflows_only())).await;
 
     let names = advertised(&session).await;
 

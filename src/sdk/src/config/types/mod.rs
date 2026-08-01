@@ -64,11 +64,15 @@ fn d_task_protocol() -> String {
 mod connections;
 mod document;
 mod fleet;
+mod mcp;
+#[cfg(test)]
+mod mcp_tests;
 mod orchestration;
 mod presentation;
 
 pub use connections::*;
 pub use document::*;
 pub use fleet::*;
+pub use mcp::*;
 pub use orchestration::*;
 pub use presentation::*;

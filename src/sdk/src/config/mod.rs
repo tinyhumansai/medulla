@@ -44,9 +44,9 @@ pub use persist::{
 pub use types::{
     AppearanceConfig, AttributionConfig, BackendConfig, BudgetConfig, CoreConfig, EvolveSettings,
     FleetConfig, HarnessSection, HostSection, HubSection, HubWorkerConfig, LoadedConfig,
-    MedullaConfig, OnboardingConfig, OpencodeConfig, Peer, ProviderBudgetConfig, RouterConfig,
-    RouterProviderConfig, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig, WorkflowConfig,
-    WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
+    McpSection, MedullaConfig, OnboardingConfig, OpencodeConfig, Peer, ProviderBudgetConfig,
+    RouterConfig, RouterProviderConfig, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
+    WorkflowConfig, WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, display_host, is_staging,

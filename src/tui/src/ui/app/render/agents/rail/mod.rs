@@ -99,6 +99,12 @@ impl App {
         // in *lines* and each drawn line remembers the row it came from. Without
         // that map a click below a wrapped row would select its neighbour.
         let width = inner.width as usize;
+        // Collect waiting session IDs once so render code can check membership
+        // instead of acquiring a lock per lane.
+        let waiting_sessions = self.harnesses
+            .as_ref()
+            .map(|h| h.sessions.waiting_sessions())
+            .unwrap_or_default();
         let mut lines: Vec<TLine> = Vec::new();
         let mut owners: Vec<usize> = Vec::new();
         let mut active_line = 0;
@@ -106,7 +112,7 @@ impl App {
             if index == selection.active {
                 active_line = lines.len();
             }
-            for line in self.rail_row_lines(row, &selection.lanes, index == selection.active, width)
+            for line in self.rail_row_lines(row, &selection.lanes, index == selection.active, width, &waiting_sessions)
             {
                 lines.push(line);
                 owners.push(index);
@@ -192,11 +198,12 @@ impl App {
         lanes: &[AgentLane],
         active: bool,
         width: usize,
+        waiting_sessions: &std::collections::HashSet<String>,
     ) -> Vec<TLine<'static>> {
         match row {
             RailRow::Harness(session) => self.own_harness_lines(session, active, width),
             other => wrap_line(
-                &self.rail_row_line(other, lanes, active),
+                &self.rail_row_line(other, lanes, active, waiting_sessions),
                 width,
                 CONT_INDENT,
             ),

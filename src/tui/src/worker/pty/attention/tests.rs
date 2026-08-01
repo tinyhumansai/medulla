@@ -80,6 +80,12 @@ fn ordinary_allow_codex_text_does_not_interrupt_a_working_codex() {
 }
 
 #[test]
+fn ordinary_codex_wants_text_does_not_interrupt_a_working_codex() {
+    let screen = "Assistant: Codex wants to update these files\nWorking… (esc to interrupt)";
+    assert!(detect(HarnessProvider::Codex, screen).is_none());
+}
+
+#[test]
 fn an_ordinary_question_does_not_interrupt_a_working_claude() {
     let screen =
         "Assistant: Do you want to proceed with the refactor?\nWorking… (esc to interrupt)";

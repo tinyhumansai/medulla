@@ -149,7 +149,7 @@ impl App {
             .count()
     }
 
-    /// The harnesses this operator started, oldest first.
+    /// The harnesses this operator started or now holds, oldest first.
     ///
     /// Exited ones stay listed: the last screen is often the reason it exited,
     /// and a row that vanishes on failure is a row that hides the failure. They
@@ -162,7 +162,9 @@ impl App {
             .sessions
             .rows()
             .into_iter()
-            .filter(|row| row.user_spawned)
+            .filter(|row| {
+                row.user_spawned || row.control == crate::worker::pty::HarnessControl::User
+            })
             .collect();
         rows.sort_by_key(|row| row.started_at);
         rows

@@ -119,6 +119,12 @@ async fn an_aborted_task_stops_waiting_and_says_so() {
             .is_some_and(|cue| cue.kind == super::super::pty::AttentionKind::Bell)),
         "a submitted but unsettled turn must retain its prompt attention"
     );
+    assert!(
+        sessions.rows().iter().any(|row| {
+            row.attention.is_some() && row.control == super::super::pty::HarnessControl::User
+        }),
+        "the failed prompt must be handed to the operator before its task binding disappears"
+    );
     sessions.shutdown();
 }
 

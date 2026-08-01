@@ -30,6 +30,32 @@ pub(super) const NO_EXIT_CODE: i64 = i64::MIN;
 /// than a limit anything legitimate will meet.
 pub const MAX_QUEUED_WRITE_BYTES: usize = 1024 * 1024;
 
+/// Give `bytes` back to a session's write budget, never going below zero.
+///
+/// Saturating rather than a bare `fetch_sub`, because the two callers can race
+/// in one specific way. The writer thread ends by storing 0 — a queue nothing
+/// will drain must not keep occupying the budget — while a concurrent
+/// [`SessionHandle::write`](super::SessionHandle::write) may already have
+/// reserved its bytes and not yet sent them. If that send then fails because the
+/// writer has just gone, the write path releases a reservation the store has
+/// already cleared, and on an unsigned counter `fetch_sub` wraps to about
+/// `usize::MAX` — which reads as permanently over-quota and refuses every later
+/// write to that session.
+///
+/// Today that is unreachable in effect: the write path checks liveness before it
+/// consults the budget, and a session whose writer has gone is reaped moments
+/// later, so those writes are already refused for a different reason. That is
+/// two accidents holding it up, either of which a later change could remove, and
+/// the counter is the sort of thing that eventually gets surfaced as a metric.
+/// Cheaper to make it unrepresentable.
+pub(crate) fn release_queued(queued_bytes: &AtomicUsize, bytes: usize) {
+    let _ = queued_bytes.fetch_update(
+        std::sync::atomic::Ordering::AcqRel,
+        std::sync::atomic::Ordering::Acquire,
+        |queued| Some(queued.saturating_sub(bytes)),
+    );
+}
+
 /// The pty ends we keep open for the lifetime of the child.
 ///
 /// Dropped as a unit when the session is reaped: the master and the write queue

@@ -8,7 +8,7 @@ use std::sync::{Arc, Weak};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
 
-use super::super::handle::{SessionHandle, SessionMeta};
+use super::super::handle::{release_queued, SessionHandle, SessionMeta};
 use super::super::launch::{interactive_args, mint_session_id};
 use super::super::types::{LaunchSpec, DEFAULT_COLS, DEFAULT_ROWS, SCROLLBACK};
 
@@ -187,7 +187,7 @@ impl PtyManager {
                 let wrote = writer.write_all(&bytes).and_then(|()| writer.flush());
                 // Released whether or not it landed: the budget counts what is
                 // *waiting*, and these bytes are not waiting any more.
-                queued_bytes.fetch_sub(bytes.len(), Ordering::AcqRel);
+                release_queued(&queued_bytes, bytes.len());
                 if let Err(err) = wrote {
                     failure = Some(err.to_string());
                     break;

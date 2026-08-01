@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 use portable_pty::PtySize;
 
 use super::super::sync::lock;
-use super::types::MAX_QUEUED_WRITE_BYTES;
+use super::types::{release_queued, MAX_QUEUED_WRITE_BYTES};
 use super::SessionHandle;
 
 impl SessionHandle {
@@ -75,7 +75,10 @@ impl SessionHandle {
         // Fails only if the writer thread has stopped, which means the pty stopped
         // accepting bytes. Worth reporting: the caller's keystrokes went nowhere.
         writes.send(bytes.to_vec()).map_err(|_| {
-            self.queued_bytes.fetch_sub(bytes.len(), Ordering::AcqRel);
+            // Saturating: the writer thread may already have zeroed the budget on
+            // its way out, and these bytes were reserved before that. See
+            // [`release_queued`].
+            release_queued(&self.queued_bytes, bytes.len());
             format!("{}: the writer thread is gone", self.meta.id)
         })
     }

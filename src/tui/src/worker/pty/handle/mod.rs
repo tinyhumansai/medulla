@@ -20,5 +20,8 @@ mod screen;
 mod state;
 mod types;
 
-pub(crate) use types::SessionMeta;
+#[cfg(test)]
+mod tests;
+
+pub(crate) use types::{release_queued, SessionMeta};
 pub use types::{SessionHandle, MAX_QUEUED_WRITE_BYTES};

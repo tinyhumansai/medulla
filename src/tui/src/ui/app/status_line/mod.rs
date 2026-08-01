@@ -15,52 +15,12 @@ use medulla::config::{wire_value, StatusLineConfig};
 
 use super::types::App;
 
-/// One editable row on the Status line page.
-///
-/// Each of a field's three questions — where, when, how spelled — is its own
-/// row rather than a second axis of one row: `←/→` then means the same thing
-/// everywhere, and the page reads as a list of answers rather than as a grid
-/// needing another key to move within.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct StatusLineRow {
-    /// The row's label, as shown on the page.
-    pub label: &'static str,
-    /// Which field of the config it edits.
-    pub field: StatusLineField,
-    /// Whether it qualifies the row above it, and so is indented under it.
-    pub is_qualifier: bool,
-}
+mod types;
 
-/// Which value on [`StatusLineConfig`] a row edits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StatusLineField {
-    /// Where the run-state glyph sits.
-    State,
-    /// When the run-state glyph is drawn.
-    StateWhen,
-    /// Where the harness name sits.
-    Harness,
-    /// When the harness name is drawn.
-    HarnessWhen,
-    /// How the harness name is spelled.
-    HarnessStyle,
-    /// Where the control state sits.
-    Control,
-    /// When the control state is drawn.
-    ControlWhen,
-    /// How the control state is spelled.
-    ControlStyle,
-    /// Where the Git branch sits.
-    Branch,
-    /// When the Git branch is drawn.
-    BranchWhen,
-    /// Where the working directory sits.
-    Path,
-    /// When the working directory is drawn.
-    PathWhen,
-    /// How much of the working directory is spelled out.
-    PathStyle,
-}
+#[cfg(test)]
+mod tests;
+
+pub(super) use types::*;
 
 /// The page's rows, in display order. A field's qualifiers follow it.
 pub(super) const STATUS_LINE_ROWS: [StatusLineRow; 13] = [

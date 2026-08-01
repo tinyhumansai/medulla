@@ -189,9 +189,7 @@ pub fn hook_env(trailer: &str, base_env: &HashMap<String, String>) -> HashMap<St
     );
     // Git before 2.31 does not read GIT_CONFIG_COUNT/KEY/VALUE. Keep the
     // older inline-config channel in parallel so the hook works there too.
-    // `build_hook_dir` creates an alphanumeric temporary basename, so this
-    // single-quoted entry cannot contain a quote that needs escaping.
-    let legacy_entry = format!("'core.hooksPath={}'", hook_dir.to_string_lossy());
+    let legacy_entry = legacy_config_parameter("core.hooksPath", &hook_dir.to_string_lossy());
     env.insert(
         "GIT_CONFIG_PARAMETERS".to_string(),
         if base_parameters.is_empty() {
@@ -201,6 +199,18 @@ pub fn hook_env(trailer: &str, base_env: &HashMap<String, String>) -> HashMap<St
         },
     );
     env
+}
+
+/// Encodes one entry in Git's shell-quoted `GIT_CONFIG_PARAMETERS` format.
+///
+/// Apostrophes must close the current quoted segment, contribute an escaped
+/// apostrophe, and reopen it. This is the same representation Git emits for a
+/// shell-safe single-quoted argument and keeps temp paths valid regardless of
+/// their ancestors.
+#[cfg(unix)]
+pub(super) fn legacy_config_parameter(key: &str, value: &str) -> String {
+    let parameter = format!("{key}={value}");
+    format!("'{}'", parameter.replace('\'', "'\\''"))
 }
 
 #[cfg(not(unix))]

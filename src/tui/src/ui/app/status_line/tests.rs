@@ -1,7 +1,4 @@
 //! Tests for the Status line page's mutations and their persistence.
-//!
-//! Named for Appearance because that is where these preferences used to live;
-//! the migration path off those keys is asserted here too.
 
 use std::sync::Arc;
 
@@ -12,8 +9,8 @@ use medulla::config::{
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 
-use super::status_line::{StatusLineField, STATUS_LINE_ROWS};
-use super::App;
+use super::{StatusLineField, STATUS_LINE_ROWS};
+use crate::ui::app::App;
 
 fn app(path: &std::path::Path) -> App {
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());

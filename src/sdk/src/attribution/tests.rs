@@ -510,6 +510,28 @@ fn a_clean_environment_puts_our_pair_at_slot_zero() {
     assert!(env["GIT_CONFIG_PARAMETERS"].contains("core.hooksPath="));
 }
 
+/// Legacy inline config remains parseable when a temporary-directory ancestor
+/// contains an apostrophe or whitespace.
+#[cfg(unix)]
+#[test]
+fn legacy_hook_path_escapes_apostrophes() {
+    let path = "/tmp/Medulla agent's hooks";
+    let parameter = super::prepare_commit_msg::legacy_config_parameter("core.hooksPath", path);
+    let output = std::process::Command::new("git")
+        .args(["config", "--get", "core.hooksPath"])
+        .env_remove("GIT_CONFIG_COUNT")
+        .env("GIT_CONFIG_PARAMETERS", parameter)
+        .output()
+        .expect("git reads legacy inline config");
+
+    assert!(
+        output.status.success(),
+        "git rejected encoded path: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), path);
+}
+
 /// A malformed inherited count is treated as absent rather than appended after —
 /// git would reject the value anyway, and guessing helps nobody.
 #[cfg(unix)]

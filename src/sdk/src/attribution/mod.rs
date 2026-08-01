@@ -55,6 +55,9 @@ use crate::tinyplace::HarnessProvider;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod prepare_commit_msg_tests;
+
 /// Generator for the git hook shims that inject the Medulla `Co-authored-by`
 /// trailer via environment variables. The mechanism of record for every
 /// provider.

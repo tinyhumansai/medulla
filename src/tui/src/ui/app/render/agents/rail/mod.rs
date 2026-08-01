@@ -25,6 +25,8 @@ use super::types::{AgentsPanes, Selection};
 mod harness_line;
 mod status;
 #[cfg(test)]
+mod status_line_tests;
+#[cfg(test)]
 mod tests;
 mod wrap;
 

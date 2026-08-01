@@ -1,6 +1,9 @@
 //! Data types for one live PTY session.
-#[allow(unused_imports)]
-use super::*;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicU8, AtomicUsize};
+use std::sync::{Arc, Mutex};
+
+use medulla::tinyplace::HarnessProvider;
+use portable_pty::{Child, MasterPty};
 
 /// [`SessionHandle::state`] discriminants. Kept as a `u8` so the whole liveness
 /// question is one relaxed atomic load rather than a lock.

@@ -180,4 +180,19 @@ impl PtyManager {
             .filter(|s| s.row.state.is_running() && s.row.attention.is_some())
             .count()
     }
+
+    /// All live session IDs that are waiting on the operator.
+    ///
+    /// Collects the waiting set in one locked pass, so render code can check
+    /// membership instead of acquiring a lock per lane.
+    pub fn waiting_sessions(&self) -> std::collections::HashSet<String> {
+        self.inner
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.row.state.is_running() && s.row.attention.is_some())
+            .map(|s| s.row.id.clone())
+            .collect()
+    }
 }

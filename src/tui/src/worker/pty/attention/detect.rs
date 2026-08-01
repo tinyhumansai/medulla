@@ -20,9 +20,8 @@ const WORKING: &[&str] = &["esctointerrupt", "esctocancel", "ctrlctostop"];
 /// layout of a full-screen TUI — see [`squash`].
 ///
 /// Claude's and Codex's entries are taken from their installed CLIs. OpenCode's
-/// are its documented permission wording and are the least certain of the three;
-/// they are additive, so if OpenCode words a prompt differently the structural
-/// fallback below still catches the menu it drew.
+/// permission menu is matched structurally below because its individual labels
+/// are too generic to be safe markers on their own.
 const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
     (
         HarnessProvider::Claude,
@@ -49,19 +48,16 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         AttentionKind::Approval,
         "codex is asking permission",
     ),
-    (
-        HarnessProvider::Opencode,
-        &[
-            "opencodewantsto",
-            "alwaysallow",
-            "allowonce",
-            "rejectrequest",
-            "permissionrequired",
-        ],
-        AttentionKind::Approval,
-        "opencode is asking permission",
-    ),
 ];
+
+/// Whether OpenCode drew its permission action menu.
+///
+/// Each label alone is ordinary prose ("always allow retries", "allow once").
+/// Their combination is the recognizable menu context and avoids flagging
+/// retained conversation even while the working footer is visible.
+fn has_opencode_permission_menu(squashed: &str) -> bool {
+    squashed.contains("allowonce") && squashed.contains("alwaysallow")
+}
 
 /// Carets a harness rests on the option it would take if you pressed Return.
 ///
@@ -164,6 +160,12 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
         .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
     {
         return Some((*kind, (*what).to_string()));
+    }
+    if provider == HarnessProvider::Opencode && has_opencode_permission_menu(&squashed) {
+        return Some((
+            AttentionKind::Approval,
+            "opencode is asking permission".to_string(),
+        ));
     }
 
     // Unrecognised wording, recognisable shape. Vetoed while the harness is

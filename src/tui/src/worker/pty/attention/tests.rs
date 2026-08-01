@@ -132,6 +132,14 @@ fn opencode_permission_wording_is_an_approval() {
 }
 
 #[test]
+fn one_generic_opencode_permission_phrase_is_not_an_approval() {
+    for phrase in ["always allow retries", "permission required for this file"] {
+        let screen = format!("Assistant: {phrase}\nWorking… (esc to interrupt)");
+        assert!(detect(HarnessProvider::Opencode, &screen).is_none());
+    }
+}
+
+#[test]
 fn an_idle_composer_is_not_a_question() {
     // The single most important negative: this is what every harness shows for
     // most of its life, and blinking through it would train the operator to

@@ -2,6 +2,7 @@
 
 use medulla::tinyplace::HarnessProvider;
 
+use super::super::attention::AttentionKind;
 use super::super::types::{HarnessControl, PtyState, SessionRow};
 
 use super::PtyManager;
@@ -149,10 +150,19 @@ impl PtyManager {
     }
 
     /// Mark a session free for the next turn.
+    ///
+    /// A bell heard as the turn settled is a completion chime, not a durable
+    /// request for the operator. Clear that fallback cue while retaining named
+    /// prompts, which still describe something visible on the reusable screen.
     pub fn release(&self, id: &str) {
         let mut sessions = self.inner.sessions.lock().unwrap();
         if let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) {
             session.row.busy = false;
+            session.row.attention = session
+                .row
+                .attention
+                .take()
+                .filter(|cue| cue.kind != AttentionKind::Bell);
         }
     }
 

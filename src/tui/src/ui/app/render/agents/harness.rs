@@ -128,7 +128,7 @@ impl App {
         // find out why. Dropped once attached — they are in it now, and the
         // prompt itself is a foot below the title.
         let waiting = match (&row, attached) {
-            (Some(row), false) => row.attention.clone(),
+            (Some(row), false) if row.state.is_running() => row.attention.clone(),
             _ => None,
         };
         let what = match &row {

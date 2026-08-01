@@ -90,6 +90,25 @@ fn a_bell_from_an_idle_harness_asks_for_the_operator() {
 }
 
 #[test]
+fn releasing_a_reusable_turn_clears_its_completion_bell() {
+    let manager = PtyManager::new();
+    let id = manager
+        .open(sh("printf 'turn complete\\a\\n'; sleep 30"))
+        .expect("a session");
+
+    wait_for("the completion bell to be noticed", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.release(&id);
+
+    assert_eq!(manager.attention(&id), None);
+    assert_eq!(manager.waiting_count(), 0);
+    manager.shutdown();
+}
+
+#[test]
 fn a_bell_rung_mid_turn_is_a_progress_chime_not_a_question() {
     let manager = PtyManager::new();
     // The interrupt footer says the harness is working; a bell alongside it is

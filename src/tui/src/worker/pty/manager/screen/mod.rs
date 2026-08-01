@@ -1,6 +1,9 @@
 //! The emulator surface the UI renders, and the cells it renders into.
-
-use portable_pty::PtySize;
+//!
+//! Thin delegation onto [`SessionHandle`](super::super::handle::SessionHandle):
+//! the emulator lock belongs to the session, so a large snapshot on one no
+//! longer excludes the reader thread of another. What each operation actually
+//! does is documented on the handle.
 
 use super::PtyManager;
 
@@ -16,10 +19,7 @@ impl PtyManager {
     ///
     /// `None` when the session is unknown.
     pub fn bracketed_paste(&self, id: &str) -> Option<bool> {
-        let sessions = self.inner.sessions.lock().unwrap();
-        let session = sessions.iter().find(|s| s.row.id == id)?;
-        let parser = session.screen.lock().unwrap();
-        Some(parser.screen().bracketed_paste())
+        Some(self.handle(id)?.bracketed_paste())
     }
 
     /// Which mouse protocol the child has turned on, if any.
@@ -36,14 +36,7 @@ impl PtyManager {
         &self,
         id: &str,
     ) -> Option<(vt100::MouseProtocolMode, vt100::MouseProtocolEncoding)> {
-        let sessions = self.inner.sessions.lock().unwrap();
-        let session = sessions.iter().find(|s| s.row.id == id)?;
-        let parser = session.screen.lock().unwrap();
-        let screen = parser.screen();
-        Some((
-            screen.mouse_protocol_mode(),
-            screen.mouse_protocol_encoding(),
-        ))
+        Some(self.handle(id)?.mouse_protocol())
     }
 
     /// Move `id`'s emulator scrollback by `rows`, towards the history when `up`.
@@ -55,34 +48,10 @@ impl PtyManager {
     /// nothing at all.
     ///
     /// Returns the resulting offset, or `None` when the session is unknown.
-    ///
-    /// **Bounded to one screenful**, and not by choice. `vt100` 0.15's
-    /// `set_scrollback` clamps the offset to the number of retained lines, but
-    /// its `visible_rows` then computes `visible_row_count - offset` — so any
-    /// offset larger than the screen height underflows and panics inside the
-    /// crate, taking the TUI with it. Clamping here is the fix we can make from
-    /// outside it. The practical effect is that this fallback reaches one screen
-    /// back, not the full retained history.
-    ///
-    /// That ceiling is tolerable because this is the *fallback*: Claude Code and
-    /// Codex both enable mouse reporting, so their wheel events are forwarded and
-    /// they scroll their own (complete) history. This path only serves a harness
-    /// that takes no mouse input at all.
+    /// Bounded to one screenful — see the handle for why that ceiling is forced
+    /// on us rather than chosen.
     pub fn scroll_history(&self, id: &str, rows: usize, up: bool) -> Option<usize> {
-        let sessions = self.inner.sessions.lock().unwrap();
-        let session = sessions.iter().find(|s| s.row.id == id)?;
-        let mut parser = session.screen.lock().unwrap();
-        let (visible_rows, _) = parser.screen().size();
-        let current = parser.screen().scrollback();
-        let wanted = if up {
-            current.saturating_add(rows)
-        } else {
-            current.saturating_sub(rows)
-        };
-        parser.set_scrollback(wanted.min(usize::from(visible_rows)));
-        // Read back rather than returning `wanted`: the emulator applies its own
-        // clamp on top of ours, so this is the only honest answer.
-        Some(parser.screen().scrollback())
+        Some(self.handle(id)?.scroll_history(rows, up))
     }
 
     /// Snap `id`'s emulator back to the live screen.
@@ -91,11 +60,9 @@ impl PtyManager {
     /// otherwise keep painting behind them, unseen. Called when the pane is
     /// typed into: typing means "I am here now", not "keep showing me the past".
     pub fn scroll_to_live(&self, id: &str) {
-        let sessions = self.inner.sessions.lock().unwrap();
-        let Some(session) = sessions.iter().find(|s| s.row.id == id) else {
-            return;
-        };
-        session.screen.lock().unwrap().set_scrollback(0);
+        if let Some(session) = self.handle(id) {
+            session.scroll_to_live();
+        }
     }
 
     /// Render `id`'s current screen as `(rows_of_cells, cursor)`.
@@ -103,87 +70,73 @@ impl PtyManager {
     /// Returns owned rows rather than a borrow of the emulator: the render pass
     /// must not hold the parser's lock while the reader thread wants it.
     pub fn screen_rows(&self, id: &str) -> Option<ScreenSnapshot> {
-        let sessions = self.inner.sessions.lock().unwrap();
-        let session = sessions.iter().find(|s| s.row.id == id)?;
-        let parser = session.screen.lock().unwrap();
-        let screen = parser.screen();
-        let (rows, cols) = screen.size();
-        let cells = (0..rows)
-            .map(|row| {
-                (0..cols)
-                    .map(|col| {
-                        screen
-                            .cell(row, col)
-                            .map(|cell| ScreenCell {
-                                text: {
-                                    let contents = cell.contents();
-                                    if contents.is_empty() {
-                                        " ".to_string()
-                                    } else {
-                                        contents
-                                    }
-                                },
-                                fg: cell.fgcolor(),
-                                bg: cell.bgcolor(),
-                                bold: cell.bold(),
-                                italic: cell.italic(),
-                                underline: cell.underline(),
-                                inverse: cell.inverse(),
-                            })
-                            .unwrap_or_default()
-                    })
-                    .collect()
-            })
-            .collect();
-        Some(ScreenSnapshot {
-            cells,
-            cursor: screen.cursor_position(),
-            hide_cursor: screen.hide_cursor(),
-        })
+        Some(self.handle(id)?.snapshot())
+    }
+
+    /// Write `id`'s screen into `out` as plain text, one line per row.
+    ///
+    /// For deciding *what is on* the screen rather than drawing it. The caller
+    /// owns the buffer so a poller can reuse one: this is read at 40 Hz per
+    /// starting session while a prompt is being injected, and the path it
+    /// replaces built a whole [`ScreenSnapshot`] and joined it, several times
+    /// per tick.
+    ///
+    /// Returns whether the session exists; `out` is cleared either way.
+    pub fn screen_text_into(&self, id: &str, out: &mut String) -> bool {
+        match self.handle(id) {
+            Some(session) => {
+                session.text_into(out);
+                true
+            }
+            None => {
+                out.clear();
+                false
+            }
+        }
+    }
+
+    /// Write `id`'s screen into `out` with whitespace removed and case folded.
+    ///
+    /// The form [`super::super::inject`] counts prompt needles in, produced in
+    /// one pass off the emulator instead of a snapshot plus two more full-screen
+    /// strings.
+    ///
+    /// Returns whether the session exists; `out` is cleared either way.
+    pub fn screen_squashed_into(&self, id: &str, out: &mut String) -> bool {
+        match self.handle(id) {
+            Some(session) => {
+                session.squashed_text_into(out);
+                true
+            }
+            None => {
+                out.clear();
+                false
+            }
+        }
     }
 
     /// Resize a session's PTY and emulator to `cols` x `rows`.
     ///
     /// Both must move together: the child reflows to the PTY size, so an
-    /// emulator of a different size would render a torn screen.
+    /// emulator of a different size would render a torn screen. Short-circuits
+    /// when the size already matches, so calling it every frame is a lock and a
+    /// compare rather than a `SIGWINCH` per redraw.
     pub fn resize(&self, id: &str, cols: u16, rows: u16) {
-        if cols == 0 || rows == 0 {
-            return;
+        if let Some(session) = self.handle(id) {
+            session.resize(cols, rows);
         }
-        let sessions = self.inner.sessions.lock().unwrap();
-        let Some(session) = sessions.iter().find(|s| s.row.id == id) else {
-            return;
-        };
-        {
-            let mut parser = session.screen.lock().unwrap();
-            if parser.screen().size() == (rows, cols) {
-                return; // already correct — skip the SIGWINCH storm
-            }
-            parser.set_size(rows, cols);
-        }
-        let _ = session.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        });
     }
 
     /// Write raw bytes to a session's PTY — the focused pane's keystrokes.
+    ///
+    /// Blocks only this session: a child that has stopped draining its input
+    /// parks the write in the kernel, and that used to happen under the one lock
+    /// every other session and the render loop needed.
     pub fn write(&self, id: &str, bytes: &[u8]) -> Result<(), String> {
-        let mut sessions = self.inner.sessions.lock().unwrap();
-        let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) else {
-            return Err(format!("no session {id}"));
-        };
-        if !session.row.state.is_running() {
-            return Err(format!("{id} has exited"));
+        match self.handle(id) {
+            Some(session) => session.write(bytes),
+            None => Err(format!("no session {id}")),
         }
-        use std::io::Write as _;
-        session
-            .writer
-            .write_all(bytes)
-            .and_then(|()| session.writer.flush())
-            .map_err(|err| format!("{id}: {err}"))
     }
 }
 

@@ -17,7 +17,7 @@ use super::*;
 /// A cell with text and no styling.
 fn cell(text: &str) -> ScreenCell {
     ScreenCell {
-        text: text.to_string(),
+        text: text.into(),
         ..ScreenCell::default()
     }
 }

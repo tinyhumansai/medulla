@@ -1,10 +1,7 @@
 //! Data model for PTY-backed harness sessions: how one is launched, what the
 //! operator watches about it, and the handle the UI holds.
 
-use std::sync::{Arc, Mutex};
-
 use medulla::tinyplace::HarnessProvider;
-use portable_pty::{Child, MasterPty};
 
 /// Default geometry for a freshly opened session, before the UI reports the real
 /// pane size. Wide enough that a harness's first full-screen paint is not
@@ -128,25 +125,4 @@ impl SessionRow {
     pub fn idle_ms(&self, now: i64) -> i64 {
         now.saturating_sub(self.last_output_at).max(0)
     }
-}
-
-/// One live PTY-backed harness session.
-///
-/// The emulator screen is behind its own mutex so the reader task can feed it
-/// while the render thread reads it, without either blocking on the child.
-pub(super) struct PtySession {
-    /// The operator-facing projection.
-    pub(super) row: SessionRow,
-    /// The terminal emulator holding this session's screen + scrollback.
-    pub(super) screen: Arc<Mutex<vt100::Parser>>,
-    /// The PTY master — the write side (keystrokes in) and the resize handle.
-    pub(super) master: Box<dyn MasterPty + Send>,
-    /// A writer onto the master, kept open for input injection.
-    pub(super) writer: Box<dyn std::io::Write + Send>,
-    /// The child handle, for signalling and reaping.
-    ///
-    /// `Option` so the reaper can take it out and block on `wait()` *without*
-    /// holding the manager's lock — see [`PtyManager`](super::manager::PtyManager)'s
-    /// `mark_finished`. `None` means the child has been reaped.
-    pub(super) child: Option<Box<dyn Child + Send + Sync>>,
 }

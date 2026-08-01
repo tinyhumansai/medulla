@@ -1,0 +1,165 @@
+//! One session's emulator surface: what the UI renders, and the cheap text
+//! projections the injector matches against.
+
+use super::super::cell_text::CellText;
+use super::super::manager::{ScreenCell, ScreenSnapshot};
+use super::super::sync::lock;
+use super::SessionHandle;
+
+/// What an empty cell renders as. A `const` so the common case is a copy of a
+/// fixed 16-byte value rather than a fresh construction per cell.
+const BLANK: CellText = CellText::blank();
+
+impl SessionHandle {
+    /// Whether the child has turned bracketed-paste mode on (DECSET 2004).
+    pub(in super::super) fn bracketed_paste(&self) -> bool {
+        lock(&self.screen).screen().bracketed_paste()
+    }
+
+    /// Which mouse protocol the child has turned on, if any.
+    pub(in super::super) fn mouse_protocol(
+        &self,
+    ) -> (vt100::MouseProtocolMode, vt100::MouseProtocolEncoding) {
+        let parser = lock(&self.screen);
+        let screen = parser.screen();
+        (
+            screen.mouse_protocol_mode(),
+            screen.mouse_protocol_encoding(),
+        )
+    }
+
+    /// Feed bytes from the pty into the emulator.
+    pub(in super::super) fn process(&self, bytes: &[u8]) {
+        lock(&self.screen).process(bytes);
+    }
+
+    /// Move the emulator's scrollback by `rows`, towards the history when `up`.
+    ///
+    /// **Bounded to one screenful**, and not by choice: `vt100` 0.15's
+    /// `visible_rows` computes `visible_row_count - offset`, so any offset
+    /// larger than the screen height underflows and panics inside the crate.
+    /// Clamping here is the fix available from outside it.
+    pub(in super::super) fn scroll_history(&self, rows: usize, up: bool) -> usize {
+        let mut parser = lock(&self.screen);
+        let (visible_rows, _) = parser.screen().size();
+        let current = parser.screen().scrollback();
+        let wanted = if up {
+            current.saturating_add(rows)
+        } else {
+            current.saturating_sub(rows)
+        };
+        parser.set_scrollback(wanted.min(usize::from(visible_rows)));
+        // Read back rather than returning `wanted`: the emulator applies its own
+        // clamp on top of ours, so this is the only honest answer.
+        parser.screen().scrollback()
+    }
+
+    /// Snap the emulator back to the live screen.
+    pub(in super::super) fn scroll_to_live(&self) {
+        lock(&self.screen).set_scrollback(0);
+    }
+
+    /// Render the current screen as `(rows_of_cells, cursor)`.
+    ///
+    /// Owned, so the render pass never holds the emulator's lock.
+    ///
+    /// The per-cell allocation that remains is `vt100`'s, not ours:
+    /// `Cell::contents` builds a fresh `String` on every call and there is no
+    /// borrowing accessor in 0.15. What [`CellText`] and `has_contents` buy is
+    /// that a **blank** cell now costs nothing at all — no `contents` call, no
+    /// allocation — and a harness screen is mostly blank. The text a cell does
+    /// hold is copied inline and vt100's temporary is dropped immediately, so a
+    /// snapshot no longer holds thousands of live heap strings either.
+    pub(in super::super) fn snapshot(&self) -> ScreenSnapshot {
+        let parser = lock(&self.screen);
+        let screen = parser.screen();
+        let (rows, cols) = screen.size();
+        let cells = (0..rows)
+            .map(|row| {
+                let mut line = Vec::with_capacity(usize::from(cols));
+                for col in 0..cols {
+                    line.push(match screen.cell(row, col) {
+                        Some(cell) => ScreenCell {
+                            text: if cell.has_contents() {
+                                CellText::from(cell.contents().as_str())
+                            } else {
+                                BLANK
+                            },
+                            fg: cell.fgcolor(),
+                            bg: cell.bgcolor(),
+                            bold: cell.bold(),
+                            italic: cell.italic(),
+                            underline: cell.underline(),
+                            inverse: cell.inverse(),
+                        },
+                        None => ScreenCell::default(),
+                    });
+                }
+                line
+            })
+            .collect();
+        ScreenSnapshot {
+            cells,
+            cursor: screen.cursor_position(),
+            hide_cursor: screen.hide_cursor(),
+        }
+    }
+
+    /// Write the screen's plain text into `out`, one line per row.
+    ///
+    /// For recognising *what is on* the screen rather than rendering it. The
+    /// caller supplies the buffer so a poller can reuse one: this is called at
+    /// 40 Hz per starting session while a prompt is being injected, and building
+    /// a full [`ScreenSnapshot`] and then joining it — which is what that path
+    /// used to do, four times per tick — was the single largest source of
+    /// allocation churn during a fan-out.
+    pub(in super::super) fn text_into(&self, out: &mut String) {
+        out.clear();
+        let parser = lock(&self.screen);
+        let screen = parser.screen();
+        let (rows, cols) = screen.size();
+        for row in 0..rows {
+            if row > 0 {
+                out.push('\n');
+            }
+            for col in 0..cols {
+                // `has_contents` first: `Cell::contents` allocates a `String`
+                // every time it is called, and most of a screen is blank.
+                match screen.cell(row, col) {
+                    Some(cell) if cell.has_contents() => out.push_str(&cell.contents()),
+                    _ => out.push(' '),
+                }
+            }
+        }
+    }
+
+    /// Write the screen into `out` with whitespace removed and case folded.
+    ///
+    /// The form [`super::super::inject`] counts needles in. Produced in one pass
+    /// straight from the emulator, where it used to be a snapshot, then a join,
+    /// then a second full-screen string per `occurrences` call.
+    pub(in super::super) fn squashed_text_into(&self, out: &mut String) {
+        out.clear();
+        let parser = lock(&self.screen);
+        let screen = parser.screen();
+        let (rows, cols) = screen.size();
+        for row in 0..rows {
+            for col in 0..cols {
+                // A blank cell contributes nothing to the squashed form, so
+                // skipping it here avoids `contents`' allocation entirely — and
+                // most of a screen is blank.
+                let Some(cell) = screen.cell(row, col).filter(|cell| cell.has_contents()) else {
+                    continue;
+                };
+                for ch in cell.contents().chars() {
+                    if ch.is_whitespace() {
+                        continue;
+                    }
+                    for lowered in ch.to_lowercase() {
+                        out.push(lowered);
+                    }
+                }
+            }
+        }
+    }
+}

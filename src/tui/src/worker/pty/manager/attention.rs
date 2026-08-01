@@ -32,8 +32,10 @@ use super::PtyManager;
 /// turn a heuristic into a hot loop.
 const ATTENTION_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
-/// The same interval, for the throttle that guards a direct call.
-const ATTENTION_INTERVAL_MS: i64 = 200;
+/// The floor between two classifications, for the throttle that guards a direct
+/// call. Deliberately under [`ATTENTION_INTERVAL`], so a poll that wakes on time
+/// is never throttled out by its own period.
+const ATTENTION_INTERVAL_MS: i64 = (ATTENTION_INTERVAL.as_millis() as i64) * 3 / 4;
 
 impl PtyManager {
     /// Sample `id`'s screen on a timer for as long as the session lives.
@@ -70,8 +72,10 @@ impl PtyManager {
     /// Reclassify `id`'s screen and update its cue, at most every
     /// [`ATTENTION_INTERVAL_MS`].
     ///
-    /// Called from the reader thread after each chunk lands in the emulator.
-    /// Cheap when throttled out: one lock, one comparison.
+    /// Primary caller is the timer thread spawned by [`Self::spawn_attention_poller`],
+    /// which runs every [`ATTENTION_INTERVAL`]. The reader thread may call this
+    /// directly but is throttled so fast redraws do not turn classification into
+    /// a hot loop. Cheap when throttled out: one lock, one comparison.
     pub(super) fn refresh_attention(&self, id: &str) {
         let now = self.now();
         // Everything needed off the session is taken under the lock and the
@@ -103,12 +107,8 @@ impl PtyManager {
         // A bell only counts while the harness is not plainly mid-turn: they all
         // ring one as a tool finishes, and a progress chime is not a question.
         let rang = bells > seen_bells && !attention::is_working(&contents);
-        let cue = attention::detect(provider, &contents).or_else(|| {
-            rang.then(|| {
-                let (kind, what) = attention::bell_cue(provider);
-                (kind, what)
-            })
-        });
+        let cue = attention::detect(provider, &contents)
+            .or_else(|| rang.then(|| attention::bell_cue(provider)));
 
         let mut sessions = self.inner.sessions.lock().unwrap();
         let Some(session) = sessions.iter_mut().find(|s| s.row.id == id) else {

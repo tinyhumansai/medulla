@@ -74,6 +74,13 @@ fn ordinary_yes_proceed_text_does_not_interrupt_a_working_codex() {
 }
 
 #[test]
+fn an_ordinary_question_does_not_interrupt_a_working_claude() {
+    let screen =
+        "Assistant: Do you want to proceed with the refactor?\nWorking… (esc to interrupt)";
+    assert!(detect(HarnessProvider::Claude, screen).is_none());
+}
+
+#[test]
 fn a_startup_dialog_outranks_a_prompt() {
     // Codex's trust dialog, which `dialog` also recognises: the cue must carry
     // that module's wording rather than the generic approval one.

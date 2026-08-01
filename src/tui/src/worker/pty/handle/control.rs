@@ -92,9 +92,13 @@ impl SessionHandle {
     pub(in super::super) fn release(&self) {
         let bells = self.bell_count();
         let mut attention = lock(&self.attention);
+        let completion_bell_already_arrived = bells > attention.seen_bells;
         attention.seen_bells = attention.seen_bells.max(bells);
         attention.generation = attention.generation.wrapping_add(1);
-        attention.suppress_next_bell = true;
+        // If release itself consumed a new bell, the completion chime is no
+        // longer pending. Suppressing unconditionally would discard the reused
+        // turn's first real request when the CLI emits no second trailing bell.
+        attention.suppress_next_bell = !completion_bell_already_arrived;
         attention.cue = attention
             .cue
             .take()

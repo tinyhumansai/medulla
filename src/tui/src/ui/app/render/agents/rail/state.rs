@@ -131,6 +131,20 @@ impl App {
         )
         .is_some()
     }
+
+    /// Whether the exact task row is backed by a waiting local harness.
+    pub(super) fn task_attention(&self, task_id: &str, waiting_sessions: &HashSet<String>) -> bool {
+        let Some(harnesses) = self.harnesses.as_ref() else {
+            return false;
+        };
+        task_waiting_session(
+            task_id,
+            self.harness_focus.attached_to(),
+            waiting_sessions,
+            |task_id| harnesses.session_for_task(task_id),
+        )
+        .is_some()
+    }
 }
 
 /// Classify a lane after the PTY attention snapshot has been resolved.
@@ -158,4 +172,15 @@ pub(super) fn lane_waiting_session(
         .filter_map(|task| resolve(&task.task_id))
         .filter(|session| attached != Some(session.as_str()))
         .find(|session| waiting_sessions.contains(session))
+}
+
+/// Return a task's waiting session unless its pane is already attached.
+pub(super) fn task_waiting_session(
+    task_id: &str,
+    attached: Option<&str>,
+    waiting_sessions: &HashSet<String>,
+    mut resolve: impl FnMut(&str) -> Option<String>,
+) -> Option<String> {
+    resolve(task_id)
+        .filter(|session| attached != Some(session.as_str()) && waiting_sessions.contains(session))
 }

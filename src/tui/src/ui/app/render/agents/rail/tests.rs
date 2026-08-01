@@ -15,7 +15,7 @@ use crate::ui::app::App;
 use crate::worker::pty::{AttentionKind, HarnessAttention, HarnessControl, PtyState, SessionRow};
 
 use super::rail_title;
-use super::state::{classify_lane, lane_waiting_session};
+use super::state::{classify_lane, lane_waiting_session, task_waiting_session};
 use super::status::HarnessVisualState;
 use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
 
@@ -513,6 +513,30 @@ fn lane_attention_skips_the_attached_session_and_takes_the_first_waiting_one() {
         classify_lane(&item, Some("running"), found.is_some()),
         HarnessVisualState::NeedsInput,
         "PTY attention must outrank ordinary running state"
+    );
+}
+
+#[test]
+fn task_attention_marks_only_the_exact_waiting_session() {
+    let waiting = ["w-2".to_string()].into_iter().collect();
+    let resolve = |task_id: &str| match task_id {
+        "task-1" => Some("w-1".to_string()),
+        "task-2" => Some("w-2".to_string()),
+        _ => None,
+    };
+
+    assert_eq!(
+        task_waiting_session("task-2", None, &waiting, resolve).as_deref(),
+        Some("w-2")
+    );
+    assert_eq!(
+        task_waiting_session("task-1", None, &waiting, resolve),
+        None
+    );
+    assert_eq!(
+        task_waiting_session("task-2", Some("w-2"), &waiting, resolve),
+        None,
+        "the attached pane is already being handled"
     );
 }
 

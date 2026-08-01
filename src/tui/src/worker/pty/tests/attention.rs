@@ -206,6 +206,38 @@ fn claiming_the_next_turn_makes_its_bell_meaningful_again() {
 }
 
 #[test]
+fn a_consumed_completion_bell_does_not_hide_the_next_turns_first_bell() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh("read first; printf 'old completion\\a\\n'; read second; printf 'next request\\a\\n'; sleep 30"))
+        .expect("a session");
+    let row = manager.row(&id).expect("a row");
+
+    manager.write(&id, b"\r").expect("emit completion bell");
+    wait_for("the completion bell to arrive before release", || {
+        super::screen_text(&manager, &id).contains("old completion")
+    });
+    manager.release(&id);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("reuse the session");
+    manager.write(&id, b"\r").expect("emit next turn bell");
+    wait_for("the next turn request to paint", || {
+        super::screen_text(&manager, &id).contains("next request")
+    });
+
+    now.store(200, Ordering::SeqCst);
+    wait_for("the reused turn's first bell to be classified", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.shutdown();
+}
+
+#[test]
 fn attention_sampling_ignores_the_operators_historical_viewport() {
     let manager = PtyManager::new();
     let script = "printf 'Allow Codex to run `old`?\\n› 1. Yes, proceed\\n'; \

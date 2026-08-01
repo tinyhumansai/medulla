@@ -117,15 +117,26 @@ impl App {
             )),
             AgentRow::Sub { task, last, .. } => {
                 let branch = if *last { "└" } else { "├" };
-                let style = if active {
+                let needs_input = self.task_attention(&task.task_id, waiting_sessions);
+                let mut style = if active {
                     self.theme.selection()
                 } else {
                     Style::default()
                 };
-                let status_style = if active {
+                if needs_input {
+                    style = style
+                        .fg(HarnessVisualState::NeedsInput.color())
+                        .add_modifier(Modifier::SLOW_BLINK);
+                }
+                let status_style = if active || needs_input {
                     style
                 } else {
                     style.fg(color(task.status.color()))
+                };
+                let status = if needs_input {
+                    HarnessVisualState::NeedsInput.label()
+                } else {
+                    task.status.label()
                 };
                 let chip = task
                     .work
@@ -136,7 +147,7 @@ impl App {
                     .unwrap_or_default();
                 TLine::from(vec![
                     Span::styled(format!("   {branch} {} · ", task.task_id), style),
-                    Span::styled(task.status.label().to_string(), status_style),
+                    Span::styled(status.to_string(), status_style),
                     Span::styled(format!(" · {} turns{chip}", task.turns), style),
                 ])
             }

@@ -26,16 +26,10 @@ const WORKING: &[&str] = &["esctointerrupt", "esctocancel", "ctrlctostop"];
 const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
     (
         HarnessProvider::Claude,
-        // "3. No, and tell Claude what to do differently" is on every one of
-        // claude's permission prompts and on nothing else, which makes it the
-        // load-bearing marker here; the rest catch the prompt by its question.
-        &[
-            "noandtellclaudewhattodo",
-            "doyouwanttoproceed",
-            "doyouwanttomakethisedit",
-            "doyouwanttocreate",
-            "yesanddontaskagain",
-        ],
+        // These are option labels unique to Claude's permission menu. Generic
+        // question wording is deliberately absent: it can appear in ordinary
+        // conversation while Claude is still working.
+        &["noandtellclaudewhattodo", "yesanddontaskagain"],
         AttentionKind::Approval,
         "claude is asking permission",
     ),
@@ -45,7 +39,7 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         // unique to it, so it is named separately from the tool prompts above:
         // an operator reading the rail wants to know a plan is ready, which is
         // a different thing to answer than a shell command.
-        &["keepplanning", "wouldyouliketoproceed"],
+        &["keepplanning"],
         AttentionKind::Approval,
         "claude finished planning and wants a decision",
     ),

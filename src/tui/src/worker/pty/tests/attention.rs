@@ -238,6 +238,76 @@ fn a_consumed_completion_bell_does_not_hide_the_next_turns_first_bell() {
 }
 
 #[test]
+fn a_classified_completion_bell_does_not_hide_the_next_turns_first_bell() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh("read first; printf 'old completion\\a\\n'; read second; printf 'next request\\a\\n'; sleep 30"))
+        .expect("a session");
+    let row = manager.row(&id).expect("a row");
+
+    manager.write(&id, b"\r").expect("emit completion bell");
+    wait_for("the completion bell to paint", || {
+        super::screen_text(&manager, &id).contains("old completion")
+    });
+    now.store(200, Ordering::SeqCst);
+    wait_for("the completion bell to be classified", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+
+    manager.settle_turn(&id);
+    assert_eq!(manager.attention(&id), None);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("reuse the settled session");
+    manager.write(&id, b"\r").expect("emit next turn bell");
+    wait_for("the next request to paint", || {
+        super::screen_text(&manager, &id).contains("next request")
+    });
+
+    now.store(500, Ordering::SeqCst);
+    wait_for("the reused turn's bell to be classified", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.shutdown();
+}
+
+#[test]
+fn suppression_consumes_only_one_bell_from_a_batch() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh(
+            "read line; printf 'late completion\\a next request\\a\\n'; sleep 30",
+        ))
+        .expect("a session");
+    let row = manager.row(&id).expect("a row");
+
+    manager.settle_turn(&id);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("reuse before either bell arrives");
+    manager.write(&id, b"\r").expect("emit both bells");
+    wait_for("both bell outputs to paint", || {
+        super::screen_text(&manager, &id).contains("next request")
+    });
+
+    now.store(200, Ordering::SeqCst);
+    wait_for("the second bell in the batch to remain eligible", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.shutdown();
+}
+
+#[test]
 fn freeing_without_a_submitted_turn_does_not_suppress_the_next_bell() {
     let now = Arc::new(AtomicI64::new(0));
     let clock = Arc::clone(&now);

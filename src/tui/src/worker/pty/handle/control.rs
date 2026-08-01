@@ -97,13 +97,17 @@ impl SessionHandle {
     pub(in super::super) fn settle_turn(&self) {
         let bells = self.bell_count();
         let mut attention = lock(&self.attention);
-        let completion_bell_already_arrived = bells > attention.seen_bells;
+        let completion_bell_already_accounted_for = bells > attention.seen_bells
+            || attention
+                .cue
+                .as_ref()
+                .is_some_and(|cue| cue.kind == AttentionKind::Bell);
         attention.seen_bells = attention.seen_bells.max(bells);
         attention.generation = attention.generation.wrapping_add(1);
-        // If release itself consumed a new bell, the completion chime is no
-        // longer pending. Suppressing unconditionally would discard the reused
-        // turn's first real request when the CLI emits no second trailing bell.
-        attention.suppress_next_bell = !completion_bell_already_arrived;
+        // A bell already represented by the current cue is just as consumed as
+        // an unclassified bell past the watermark. In either case, arming
+        // suppression here would discard the reused turn's first real request.
+        attention.suppress_next_bell = !completion_bell_already_accounted_for;
         attention.cue = attention
             .cue
             .take()

@@ -79,8 +79,12 @@ fn refresh(session: &SessionHandle, now: i64) {
     };
 
     let (contents, bells) = session.attention_sample();
-    let new_bell = bells > seen_bells;
-    let rang = new_bell && !suppress_next_bell && !attention::is_working(&contents);
+    let unseen_bells = bells.saturating_sub(seen_bells);
+    // Settlement suppresses one completion chime, not the whole sample. The
+    // child can emit that delayed chime and the next turn's request before this
+    // 200 ms poll runs; any additional bell must remain eligible.
+    let eligible_bells = unseen_bells.saturating_sub(usize::from(suppress_next_bell));
+    let rang = eligible_bells > 0 && !attention::is_working(&contents);
     let cue = attention::detect(session.provider(), &contents)
         .or_else(|| rang.then(|| attention::bell_cue(session.provider())));
 
@@ -89,7 +93,7 @@ fn refresh(session: &SessionHandle, now: i64) {
     if state.generation != generation {
         return;
     }
-    if suppress_next_bell && new_bell {
+    if suppress_next_bell && unseen_bells > 0 {
         state.suppress_next_bell = false;
     }
     state.seen_bells = consumed_bell_count(state.seen_bells, bells);

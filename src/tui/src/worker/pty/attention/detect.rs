@@ -45,7 +45,7 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
     ),
     (
         HarnessProvider::Codex,
-        &["andtellcodexwhattodo", "allowcodexto", "codexwantsto"],
+        &["andtellcodexwhattodo", "codexwantsto"],
         AttentionKind::Approval,
         "codex is asking permission",
     ),
@@ -130,7 +130,14 @@ pub(super) fn is_selected_option(line: &str) -> bool {
 /// the squashed form — `(y/n)` squashes to `yn`, which appears in ordinary
 /// prose.
 fn has_yes_no(screen: &str) -> bool {
-    let lower = screen.to_lowercase();
+    // A terminal retains old output above its live prompt. Only the bottommost
+    // non-empty line can be the active bare confirmation; searching the whole
+    // viewport makes a completed `(y/n)` exchange blink forever while the
+    // composer below it is idle.
+    let Some(line) = screen.lines().rev().find(|line| !line.trim().is_empty()) else {
+        return false;
+    };
+    let lower = line.to_lowercase();
     ["(y/n)", "[y/n]", "(y/n/a)", "[y/n/a]", "(yes/no)"]
         .iter()
         .any(|marker| lower.contains(marker))

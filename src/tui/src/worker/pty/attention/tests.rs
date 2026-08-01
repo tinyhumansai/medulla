@@ -74,6 +74,12 @@ fn ordinary_yes_proceed_text_does_not_interrupt_a_working_codex() {
 }
 
 #[test]
+fn ordinary_allow_codex_text_does_not_interrupt_a_working_codex() {
+    let screen = "User: allow Codex to finish the refactor\nWorking… (esc to interrupt)";
+    assert!(detect(HarnessProvider::Codex, screen).is_none());
+}
+
+#[test]
 fn an_ordinary_question_does_not_interrupt_a_working_claude() {
     let screen =
         "Assistant: Do you want to proceed with the refactor?\nWorking… (esc to interrupt)";
@@ -104,6 +110,12 @@ fn a_yes_no_confirmation_is_a_choice() {
     let (kind, _) =
         detect(HarnessProvider::Opencode, "Overwrite config.toml? (y/n)").expect("a cue");
     assert_eq!(kind, AttentionKind::Choice);
+}
+
+#[test]
+fn a_retained_yes_no_exchange_above_the_composer_is_not_a_choice() {
+    let screen = "Overwrite config.toml? (y/n)\naccepted\n\n> Try \"fix the failing test\"";
+    assert!(detect(HarnessProvider::Opencode, screen).is_none());
 }
 
 #[test]

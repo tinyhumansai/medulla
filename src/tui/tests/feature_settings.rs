@@ -189,6 +189,7 @@ fn each_settings_subpage_renders_its_signature() {
     let signatures = [
         ("Usage", "This session"),
         ("Appearance", "Appearance"),
+        ("Status line", "Preview"),
         ("Config", "Effective configuration ·"),
         ("Trace", "Trace ·"),
         ("Context", "Environment ·"),

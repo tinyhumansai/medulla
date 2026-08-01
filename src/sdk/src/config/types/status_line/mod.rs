@@ -17,6 +17,9 @@ use super::*;
 
 mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub use types::*;
 
 impl FieldPlacement {
@@ -137,11 +140,6 @@ impl PathStyle {
     }
 }
 
-/// Step through a fixed option list, wrapping at either end.
-///
-/// Shared by every style enum above so `←`/`→` behave identically on every row
-/// of the settings page. An unrecognized current value lands on the first
-/// option, which cannot happen through the type system but keeps this total.
 /// The camelCase string serde writes for `value`, for persisting one key.
 ///
 /// Derived from the `Serialize` impl rather than hand-written per enum, so a
@@ -161,6 +159,11 @@ pub fn wire_value<T: Serialize + Default>(value: &T) -> String {
         .unwrap_or_default()
 }
 
+/// Steps through a fixed option list, wrapping forwards or backwards at its ends.
+///
+/// Shared by every style enum above so `←`/`→` behave identically on every row
+/// of the settings page. An unrecognized current value starts from the first
+/// option, which cannot happen for these enums but keeps this helper total.
 fn cycle<T: Copy + PartialEq>(order: &[T], current: T, forward: bool) -> T {
     let index = order.iter().position(|item| *item == current).unwrap_or(0);
     let len = order.len();

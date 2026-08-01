@@ -433,7 +433,7 @@ impl App {
                 } else {
                     String::new()
                 };
-                let style = self.lane_style(item, is_fn, active);
+                let style = self.lane_style(item, is_fn, active, waiting_sessions);
                 let work_note = item
                     .work
                     .as_deref()
@@ -514,14 +514,14 @@ impl App {
     }
 
     /// Style a lane while preserving both selection visibility and harness state.
-    fn lane_style(&self, item: &AgentLane, is_fn: bool, active: bool) -> Style {
+    fn lane_style(&self, item: &AgentLane, is_fn: bool, active: bool, waiting_sessions: &std::collections::HashSet<String>) -> Style {
         let mut style = if active {
             self.theme.selection()
         } else {
             Style::default()
         };
         if item.role == AgentRole::Agent {
-            let state = self.harness_visual_state(item);
+            let state = self.harness_visual_state(item, waiting_sessions);
             style = style.fg(state.color());
             if state.flashes() {
                 style = style.add_modifier(Modifier::SLOW_BLINK);

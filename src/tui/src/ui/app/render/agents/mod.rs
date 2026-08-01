@@ -137,7 +137,7 @@ impl App {
             .rows
             .iter()
             .flat_map(|row| {
-                self.rail_row_lines(row, &selection.lanes, false, rail::RAIL_MAX_CONTENT)
+                self.rail_row_lines(row, &selection.lanes, false, rail::RAIL_MAX_CONTENT, &std::collections::HashSet::new())
             })
             .map(|line| line.width())
             .chain(threads.iter().map(|line| line.width()))

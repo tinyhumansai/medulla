@@ -99,7 +99,6 @@ impl PtyManager {
             session.row.label = label.to_string();
         }
         session.row.busy = true;
-        session.suppress_next_bell = false;
         Some(session.row.clone())
     }
 

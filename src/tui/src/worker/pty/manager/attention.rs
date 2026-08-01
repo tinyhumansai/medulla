@@ -191,10 +191,13 @@ impl PtyManager {
             return false;
         };
         if let Some(bells) = bells {
+            let consumed_suppressed_bell = session.suppress_next_bell && bells > session.seen_bells;
             session.seen_bells = consumed_bell_count(session.seen_bells, bells);
+            if consumed_suppressed_bell {
+                session.suppress_next_bell = false;
+            }
         }
         session.attention_generation = session.attention_generation.wrapping_add(1);
-        session.suppress_next_bell = false;
         session.row.attention.take().is_some()
     }
 

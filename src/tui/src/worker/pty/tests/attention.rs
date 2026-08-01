@@ -143,8 +143,16 @@ fn releasing_consumes_a_completion_bell_emitted_just_after_settlement() {
     let id = manager
         .open(sh("read line; printf 'late completion\\a\\n'; sleep 30"))
         .expect("a session");
+    let row = manager.row(&id).expect("a row");
 
     manager.release(&id);
+    assert!(
+        !manager.acknowledge(&id),
+        "the late bell does not exist yet"
+    );
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("reuse can begin before the old chime arrives");
     manager.write(&id, b"\r").expect("release the child");
     wait_for("the late completion bell to reach the emulator", || {
         super::screen_text(&manager, &id).contains("late completion")
@@ -166,22 +174,29 @@ fn claiming_the_next_turn_makes_its_bell_meaningful_again() {
     let clock = Arc::clone(&now);
     let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
     let id = manager
-        .open(sh(
-            "read line; printf 'next turn needs you\\a\\n'; sleep 30",
-        ))
+        .open(sh("read first; printf 'old completion\\a\\n'; \
+             read second; printf 'next turn needs you\\a\\n'; sleep 30"))
         .expect("a session");
     let row = manager.row(&id).expect("a row");
 
     manager.release(&id);
+    manager.write(&id, b"\r").expect("emit the old chime");
+    wait_for("the old completion bell to reach the emulator", || {
+        super::screen_text(&manager, &id).contains("old completion")
+    });
+    now.store(200, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(manager.attention(&id), None);
+
     manager
         .claim_idle(&row.label, row.provider)
         .expect("claim the reusable session");
-    manager.write(&id, b"\r").expect("release the child");
+    manager.write(&id, b"\r").expect("emit the new turn bell");
     wait_for("the next turn bell to reach the emulator", || {
         super::screen_text(&manager, &id).contains("next turn needs you")
     });
 
-    now.store(200, Ordering::SeqCst);
+    now.store(500, Ordering::SeqCst);
     wait_for("the next turn bell to be classified", || {
         manager
             .attention(&id)

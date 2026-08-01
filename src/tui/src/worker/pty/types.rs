@@ -268,9 +268,9 @@ pub(super) struct PtySession {
     /// Whether the next newly observed bell belongs to the just-completed turn.
     ///
     /// Transcript settlement can release a session shortly before the CLI emits
-    /// its completion bell. The next poll consumes that late chime. Claiming a
-    /// new turn or attaching to acknowledge the pane clears the suppression, so
-    /// a later turn's bell remains meaningful.
+    /// its completion bell. The next poll consumes that late chime. The flag is
+    /// cleared only when a new bell is actually consumed; attaching or claiming
+    /// reuse before the old chime arrives must not reclassify it as fresh.
     pub(super) suppress_next_bell: bool,
     /// Epoch ms of the last attention refresh.
     ///

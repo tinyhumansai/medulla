@@ -129,11 +129,15 @@ impl PtyManager {
                 busy: !spec.user_spawned,
                 control: spec.control,
                 user_spawned: spec.user_spawned,
+                // Nothing has painted yet, so there is nothing to be waiting on.
+                attention: None,
             },
             screen: screen.clone(),
             master: pty.master,
             writes,
             queued_bytes: queued_bytes.clone(),
+            seen_bells: 0,
+            attention_checked_at: now,
             child: Some(child),
         });
 
@@ -145,6 +149,9 @@ impl PtyManager {
         // reason.
         self.spawn_reader(id.clone(), reader, screen);
         self.spawn_writer(id.clone(), writer, queued, queued_bytes);
+        // Watches the screen for the question that stops this harness — see
+        // `spawn_attention_poller` for why it is a timer and not the reader.
+        self.spawn_attention_poller(id.clone());
 
         Ok(id)
     }

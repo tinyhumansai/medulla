@@ -90,6 +90,12 @@ const DIALOG_CLEAR_BUDGET: Duration = Duration::from_millis(3_000);
 /// for, waits for it to be taken, then presses Enter. Errors if the session is
 /// unknown or is no longer running.
 pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Result<(), String> {
+    // Whatever this harness was asking the operator for, it is about to be
+    // given a turn instead — so the flag that was making its row blink is
+    // answered. It comes straight back on the next refresh if the harness is in
+    // fact still sitting on a prompt (which `clear_startup_dialogs` below is
+    // about to find out), so this cannot hide a real block.
+    sessions.acknowledge(id);
     let bracketed = await_ready(sessions, id).await?;
 
     // Modes set and screen painted does not mean "ready for a prompt". A

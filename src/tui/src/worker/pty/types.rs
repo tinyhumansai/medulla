@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 use medulla::tinyplace::HarnessProvider;
 use portable_pty::{Child, MasterPty};
 
+use super::attention::HarnessAttention;
+
 /// Default geometry for a freshly opened session, before the UI reports the real
 /// pane size. Wide enough that a harness's first full-screen paint is not
 /// mangled by an 80-column assumption it then has to reflow out of.
@@ -191,6 +193,18 @@ pub struct SessionRow {
     pub control: HarnessControl,
     /// Whether an operator spawned it rather than a task frame. Display only.
     pub user_spawned: bool,
+    /// What this harness is waiting on the operator for, if anything.
+    ///
+    /// The one piece of session state nothing else on this row can express. A
+    /// harness stopped on a permission prompt is running, not busy in any way
+    /// the orchestrator knows about, and producing no output — so `state`,
+    /// `busy`, and `last_output_at` all read exactly as they do for a harness
+    /// thinking hard, and the operator watching a different pane never learns
+    /// it stopped. Recomputed from the screen as it paints (see
+    /// [`attention`](super::attention)), and what makes the row blink.
+    ///
+    /// `None` is the ordinary state: working, idle at a composer, or exited.
+    pub attention: Option<HarnessAttention>,
 }
 
 impl SessionRow {
@@ -238,6 +252,20 @@ pub(super) struct PtySession {
     /// Counted in bytes rather than messages: one write is an arbitrarily long
     /// paste, so a message count would bound nothing that matters.
     pub(super) queued_bytes: Arc<AtomicUsize>,
+    /// The emulator's audible-bell count as of the last attention refresh.
+    ///
+    /// The bell is an *event*, not a screen state: by the time anything reads
+    /// the emulator the ring is over, and only the counter says it happened. So
+    /// what was already seen is remembered here, and any increase since is a
+    /// harness asking for the operator.
+    pub(super) seen_bells: usize,
+    /// Epoch ms of the last attention refresh.
+    ///
+    /// The reader thread wakes on every read — a full-screen repaint is dozens
+    /// of them — and reclassifying the whole screen that often would burn a core
+    /// re-reading the same frame. Attention is a human-facing signal, so it is
+    /// recomputed on a human timescale (see `ATTENTION_INTERVAL_MS`).
+    pub(super) attention_checked_at: i64,
     /// The child handle, for signalling and reaping.
     ///
     /// `Option` so the reaper can take it out and block on `wait()` *without*

@@ -15,10 +15,13 @@
 //! - [`launch`] — the interactive argv and the input-injection encoding.
 //! - [`inject`] — the timing and mode choreography that gets a prompt accepted.
 //! - [`dialog`] — recognising a harness blocked on a startup dialog.
+//! - [`attention`] — recognising a harness blocked on the *operator*, which is
+//!   what makes its row blink.
 //! - [`manager`] — [`PtyManager`], which owns the children, the emulators, and
 //!   the reader threads.
 //! - [`types`] — the data model.
 
+pub mod attention;
 pub mod dialog;
 pub mod inject;
 pub mod launch;
@@ -31,6 +34,7 @@ pub mod types;
 #[cfg(all(test, unix))]
 mod tests;
 
+pub use attention::{AttentionKind, HarnessAttention, ATTENTION_GLYPH};
 pub use inject::inject_prompt;
 pub use manager::{PtyManager, ScreenCell, ScreenSnapshot};
 pub use types::{HarnessControl, LaunchSpec, PtyState, SessionRow};

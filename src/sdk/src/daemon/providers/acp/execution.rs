@@ -28,9 +28,14 @@ use super::types::FoldState;
 /// When this process is serving a control plane, a grant is minted here for
 /// *this* session and handed to that one child. That is what makes the fleet
 /// tools exclusive: the token is the authority, it is never written to disk, and
-/// a process Medulla did not spawn has no way to obtain one. A process with no
-/// control plane — a remote worker's daemon, or a host with fleet tools switched
-/// off — mints nothing, and the child is simply never shown the fleet verbs.
+/// a process Medulla did not spawn has no way to obtain one.
+///
+/// A process with no control plane mints nothing, and the child is never shown
+/// the fleet verbs. That is the ordinary case on a remote worker, whose daemon
+/// runs dispatched tasks but has no hub of its own — so the same instruction
+/// reaches a harness with the fleet tools locally and without them remotely.
+/// Withheld rather than advertised-and-failing, so a model plans around what it
+/// has instead of retrying something structurally unavailable.
 fn medulla_mcp_servers(
     tool_mode: Option<&str>,
     session: &str,

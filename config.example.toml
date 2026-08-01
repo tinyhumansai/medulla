@@ -175,6 +175,12 @@ tokenEnv = "MEDULLA_TOKEN"
 # [mcp]
 # Offer the fleet_* tools — see the fleet, dispatch work to it, poll and abort.
 # Turning this off leaves the workflow_* tools untouched.
+#
+# These only exist on a host that is running a fleet — in practice the machine
+# you drive Medulla from. A harness dispatched to a remote worker is run by that
+# worker's daemon, which has no hub of its own, so it gets the workflow_* tools
+# and is never shown the fleet ones. The same instruction therefore reaches a
+# harness with a different tool surface depending on where the task landed.
 # fleetTools = true
 # How deep a dispatch tree may go before fleet_dispatch is withheld, counted
 # from the operator's own turn. 0 lets no spawned harness dispatch; 1 lets only

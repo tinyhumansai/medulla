@@ -17,9 +17,28 @@
 //!   running Medulla over the control socket ([`crate::control_socket`]).
 //!
 //! Which families a session gets is decided by the grant Medulla minted for it,
-//! never by anything the session says about itself. A harness with no grant —
-//! one on a remote worker, or on a host with fleet tools switched off — is
-//! simply not shown the `fleet_*` verbs.
+//! never by anything the session says about itself.
+//!
+//! # Where the fleet tools exist
+//!
+//! Only on a host that is *running* a fleet — one whose process bound a control
+//! plane ([`crate::control_socket::active`]). In practice that means the
+//! operator's own machine. A harness Medulla dispatched to a remote worker is
+//! executed by that worker's daemon, which has no hub of its own and so mints no
+//! grant; it gets the `workflow_*` family and nothing else.
+//!
+//! So the same prompt reaches a harness with a different tool surface depending
+//! on where the task landed. That is deliberate, and it is why the difference is
+//! expressed by *withholding the verbs* rather than by advertising tools that
+//! fail: a model on a remote worker is never told about a fleet it cannot reach,
+//! so it plans around what it has instead of retrying something structurally
+//! unavailable. `fleet_status` exists for the case where a session does hold the
+//! family and wants to know the fleet's shape before planning around it.
+//!
+//! Routing a remote worker's fleet calls back to the orchestrator over the
+//! tiny.place bridge would remove the asymmetry, and is deliberately not done
+//! here: it needs frames, cross-machine correlation, and abort routing that this
+//! surface does not yet have.
 //!
 //! Only the pieces of MCP a stdio tool server actually needs are implemented —
 //! `initialize`, `tools/list`, `tools/call`, and the `notifications/*` a client

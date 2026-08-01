@@ -15,7 +15,7 @@ login screen; `medulla --mock` skips straight to the offline demo runtime.
 | **TokenMaxxxing** | Token spend and headroom — **Overview**, **Bounties**, **Leaderboard**. |
 | **Routing** | What capacity exists — **Hosts**, **Harnesses**, **Workspaces**, **Agent Templates**, **Add Host**, **Strategies**. |
 | **Memory** | A placeholder. The persona-memory layer is out of this build, and the tab says so rather than disappearing. |
-| **Settings** | **Usage**, **Appearance**, **Config**, **Trace**, **Context**, **Account**, **Help**, grouped under General, Debug, and About. |
+| **Settings** | **Usage**, **Appearance**, **Status line**, **Config**, **Trace**, **Context**, **Account**, **Help**, grouped under General, Debug, and About. |
 
 `Tab` walks the top-level views. Within a tab, `↑↓` walk the left nav and `1`-`9`
 jump to a page. The Settings tab's Help subpage — or `/help` — lists the

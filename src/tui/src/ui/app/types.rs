@@ -169,13 +169,14 @@ pub(super) const SUBSCRIPTION_STRATEGIES: [SubscriptionStrategyOption; 3] = [
     },
 ];
 
-/// The Settings tab's left-nav subpages, in order (number keys 1-8 jump to them).
+/// The Settings tab's left-nav subpages, in order (number keys 1-9 jump to them).
 ///
 /// This is the flat, selectable list [`App::settings_index`] indexes into.
 /// [`SETTINGS_GROUPS`] overlays the display-only headings.
-pub const SETTINGS_SUBPAGES: [&str; 8] = [
+pub const SETTINGS_SUBPAGES: [&str; 9] = [
     "Usage",
     "Appearance",
+    "Status line",
     "Config",
     "Feedback",
     "Trace",
@@ -198,12 +199,13 @@ pub const SETTINGS_GROUPS: [(&str, usize); 3] = [
 // Settings subpage indices.
 pub(super) const SP_USAGE: usize = 0;
 pub(super) const SP_APPEARANCE: usize = 1;
-pub(super) const SP_CONFIG: usize = 2;
-pub(super) const SP_FEEDBACK: usize = 3;
-pub(super) const SP_TRACE: usize = 4;
-pub(super) const SP_CONTEXT: usize = 5;
-pub(super) const SP_ACCOUNT: usize = 6;
-pub(super) const SP_HELP: usize = 7;
+pub(super) const SP_STATUS_LINE: usize = 2;
+pub(super) const SP_CONFIG: usize = 3;
+pub(super) const SP_FEEDBACK: usize = 4;
+pub(super) const SP_TRACE: usize = 5;
+pub(super) const SP_CONTEXT: usize = 6;
+pub(super) const SP_ACCOUNT: usize = 7;
+pub(super) const SP_HELP: usize = 8;
 
 /// Which kind of host the Add Host page is collecting.
 ///
@@ -947,6 +949,8 @@ pub struct App {
     pub(super) settings_focused: bool,
     /// The selected theme role on the Appearance subpage.
     pub(super) appearance_index: usize,
+    /// The selected field row on the Status line subpage.
+    pub(super) status_line_index: usize,
     /// The selected editable row on the Config subpage.
     pub(super) config_index: usize,
     /// Whether the Account subpage's logout is armed. Logging out clears stored

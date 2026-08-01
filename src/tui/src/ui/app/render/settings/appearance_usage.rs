@@ -11,7 +11,7 @@ use crate::ui::stream;
 use crate::ui::theme::{color_to_string, THEME_ROLES};
 use crate::ui::util::clip;
 
-use super::super::super::appearance::{APPEARANCE_ROWS, HARNESS_BRANCH_ROW, HARNESS_PATH_ROW};
+use super::super::super::appearance::APPEARANCE_ROWS;
 use super::super::super::types::App;
 
 impl App {
@@ -37,33 +37,14 @@ impl App {
             ]));
         }
         lines.push(TLine::from(""));
-        for (index, label, enabled) in [
-            (
-                HARNESS_BRANCH_ROW,
-                "Harness branch",
-                self.loaded.config.appearance.show_harness_branch,
-            ),
-            (
-                HARNESS_PATH_ROW,
-                "Harness short path",
-                self.loaded.config.appearance.show_harness_path,
-            ),
-        ] {
-            let text_style = if index == sel {
-                self.theme.selection()
-            } else {
-                Style::default()
-            };
-            let marker = if index == sel { "▸ " } else { "  " };
-            let check = if enabled { "[x]" } else { "[ ]" };
-            lines.push(TLine::from(Span::styled(
-                format!("{marker}{check} {label}"),
-                text_style,
-            )));
-        }
-        lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
             "j/k select · ←/→ or Enter change · applies live",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+        // The harness-row toggles used to sit here. Point at where they went
+        // rather than leaving an operator to find the new page by accident.
+        lines.push(TLine::from(Span::styled(
+            "harness rows are laid out on the Status line page",
             Style::default().add_modifier(Modifier::DIM),
         )));
         let where_saved = match &self.config_path {
@@ -160,7 +141,7 @@ impl App {
         }
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
-            "r refresh · c effective config · 1-4 switch settings pages",
+            "r refresh · c effective config · 1-9 switch settings pages",
             dim,
         )));
         f.render_widget(

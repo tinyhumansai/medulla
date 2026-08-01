@@ -254,7 +254,7 @@ a mode — it is how delegation works.
 
 The terminal app organizes this into Overview, Agents, Workflows,
 TokenMaxxxing, Routing, Memory, and Settings — the last of which holds Usage,
-Appearance, Config, Trace, Context, Account, and Help, grouped under General,
+Appearance, Status line, Config, Trace, Context, Account, and Help, grouped under General,
 Debug, and About headings. Overview is the at-a-glance panel: runtime identity
 and health, the active cycle, recent events, the last cycle's results, the task
 ledger, any pending decision, and a **This device** panel for what this machine

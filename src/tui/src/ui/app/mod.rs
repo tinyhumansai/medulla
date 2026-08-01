@@ -32,6 +32,7 @@ mod rail;
 mod render;
 mod settings_edit;
 mod state;
+mod status_line;
 mod templates;
 mod types;
 #[cfg(feature = "workflows")]

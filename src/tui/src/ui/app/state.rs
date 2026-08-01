@@ -116,6 +116,7 @@ impl App {
             settings_index: 0,
             settings_focused: false,
             appearance_index: 0,
+            status_line_index: 0,
             config_index: 0,
             logout_armed: false,
             relogin_requested: false,

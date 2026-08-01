@@ -66,9 +66,11 @@ mod document;
 mod fleet;
 mod orchestration;
 mod presentation;
+mod status_line;
 
 pub use connections::*;
 pub use document::*;
 pub use fleet::*;
 pub use orchestration::*;
 pub use presentation::*;
+pub use status_line::*;

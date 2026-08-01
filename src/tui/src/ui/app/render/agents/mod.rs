@@ -35,6 +35,8 @@ mod work_tests;
 
 use types::{AgentsPanes, Selection};
 
+pub(in crate::ui::app) use rail::RAIL_MAX_CONTENT;
+
 impl App {
     /// Draw the Agents tab: rail, transcript, composer.
     pub(super) fn draw_agents(&mut self, f: &mut Frame, area: Rect) {

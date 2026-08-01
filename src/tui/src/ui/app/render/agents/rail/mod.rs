@@ -8,29 +8,28 @@
 //! their own concern, kept in [`wrap`] so this file stays about *what* a row
 //! says rather than how it is laid out across columns.
 
+use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
+use crate::ui::util::fmt_tokens;
+use crate::worker::pty::{HarnessControl, SessionRow};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
-
-use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
-use crate::ui::util::{clip, fmt_tokens};
-use crate::worker::pty::{HarnessControl, SessionRow};
 
 use super::super::super::rail::{RailRow, NEW_HARNESS_LABEL};
 use super::super::super::types::App;
 use super::super::color;
 use super::types::{AgentsPanes, Selection};
 
+mod harness_line;
 mod status;
 #[cfg(test)]
 mod tests;
 mod wrap;
 
 use status::HarnessVisualState;
-use wrap::{home_dir, short_home, wrap_line, wrap_path};
+use wrap::{home_dir, wrap_line};
 
 /// The most content columns the Agents rail ever takes.
 ///
@@ -39,7 +38,7 @@ use wrap::{home_dir, short_home, wrap_line, wrap_path};
 /// path — an absolute working directory is easily eighty columns — push the
 /// transcript into a gutter. Rows that do not fit within this wrap onto a second
 /// line instead of buying width nothing else needs.
-pub(super) const RAIL_MAX_CONTENT: usize = 36;
+pub(in crate::ui::app) const RAIL_MAX_CONTENT: usize = 36;
 
 /// How far a wrapped row's continuation lines are indented, so a row that took
 /// two lines still reads as one row rather than as two entries.
@@ -237,22 +236,20 @@ impl App {
         ])
     }
 
-    /// Format one operator-started harness as one compact rail row.
+    /// Format one operator-started harness as the rail row the operator asked
+    /// for.
     ///
-    /// Says who holds it in words rather than only by colour: "unmanaged" is the
-    /// whole reason the row exists, and an operator who hands one to the
-    /// orchestrator needs to see that it took effect. The working directory is
-    /// shortened to the remaining width rather than consuming another row.
-    fn own_harness_lines(
+    /// What the row *says* is theirs to choose — see
+    /// [`StatusLineConfig`](medulla::config::StatusLineConfig) and the Status
+    /// line settings page. This decides only the two things the rail owns: the
+    /// colour, which says who holds the session before any word is read, and
+    /// the width it must fit inside.
+    pub(in super::super::super) fn own_harness_lines(
         &self,
         row: &SessionRow,
         active: bool,
         width: usize,
     ) -> Vec<TLine<'static>> {
-        let control = match row.control {
-            HarnessControl::User => " · unmanaged",
-            HarnessControl::Orchestrator => " · orchestrator",
-        };
         let style = if active {
             self.theme.selection()
         } else if row.control == HarnessControl::User {
@@ -260,40 +257,20 @@ impl App {
         } else {
             Style::default()
         };
-        let head = format!("{} {}{control}", row.state.glyph(), row.provider.as_str());
-        let head = if width == 0 {
-            String::new()
-        } else {
-            clip(&head, width)
-        };
         let detail_style = if active {
             style
         } else {
             style.add_modifier(Modifier::DIM)
         };
-        const SEPARATOR: &str = " · ";
-        let mut spans = vec![Span::styled(head, style)];
-        let mut used = spans[0].width();
-        let appearance = &self.loaded.config.appearance;
-        if appearance.show_harness_branch {
-            if let Some(branch) = row.branch.as_deref() {
-                let remaining = width.saturating_sub(used + SEPARATOR.width());
-                let reserve_for_path = if appearance.show_harness_path { 7 } else { 0 };
-                let branch_room = remaining.saturating_sub(reserve_for_path).min(16);
-                if branch_room >= 2 {
-                    let branch = clip(branch, branch_room);
-                    used += SEPARATOR.width() + branch.width();
-                    spans.push(Span::styled(format!("{SEPARATOR}{branch}"), detail_style));
-                }
-            }
-        }
-        let path_room = width.saturating_sub(used + SEPARATOR.width());
-        if appearance.show_harness_path && path_room >= 4 {
-            let path = short_home(&row.cwd, home_dir().as_deref());
-            let path = wrap_path(&path, path_room, 1).concat();
-            spans.push(Span::styled(format!("{SEPARATOR}{path}"), detail_style));
-        }
-        vec![TLine::from(spans)]
+        harness_line::harness_lines(
+            &self.loaded.config.status_line(),
+            row,
+            home_dir().as_deref(),
+            active,
+            width,
+            style,
+            detail_style,
+        )
     }
 
     /// Format one Agents-list row (separator, "more", sub-task, or lane).

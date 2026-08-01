@@ -15,7 +15,8 @@ use ratatui::Frame;
 use crate::ui::multi_pane;
 
 use super::super::types::{
-    App, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_FEEDBACK, SP_TRACE, SP_USAGE,
+    App, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_FEEDBACK, SP_STATUS_LINE, SP_TRACE,
+    SP_USAGE,
 };
 
 mod account;
@@ -24,6 +25,7 @@ mod config;
 mod debug;
 mod help;
 mod nav;
+mod status_line;
 
 impl App {
     /// Draw the Settings tab: the grouped subpage nav on the left, the active
@@ -37,6 +39,7 @@ impl App {
         match self.settings_index {
             SP_USAGE => self.draw_usage(f, content),
             SP_APPEARANCE => self.draw_appearance(f, content),
+            SP_STATUS_LINE => self.draw_status_line_settings(f, content),
             SP_CONFIG => self.draw_config(f, content),
             SP_FEEDBACK => self.draw_feedback(f, content),
             SP_TRACE => self.draw_trace(f, content),

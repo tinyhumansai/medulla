@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! The fleet plane wired as it ships: a real control server, a real proxy
 //! backend, and the real MCP request handler, with only the fleet itself faked.
 //!

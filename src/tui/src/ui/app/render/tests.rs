@@ -87,7 +87,7 @@ fn an_unbacked_worker_is_unknown_and_a_roster_seeded_one_is_idle() {
     let a = app();
     // Nothing known at all.
     assert_eq!(a.lane_marker(&lane(AgentRole::Agent), false), "◆");
-    assert_eq!(a.lane_state(&lane(AgentRole::Agent)), " · inactive");
+    assert_eq!(a.lane_state(&lane(AgentRole::Agent), &std::collections::HashSet::new()), " · inactive");
 }
 
 #[test]
@@ -140,14 +140,14 @@ fn a_session_lane_reflects_its_peer_session_state() {
     live.parent_agent_id = Some("machine-1".to_string());
     assert_eq!(a.session_state(&live).as_deref(), Some("running"));
     assert_eq!(a.lane_marker(&live, false), "●");
-    assert_eq!(a.lane_state(&live), " · working");
+    assert_eq!(a.lane_state(&live, &std::collections::HashSet::new()), " · working");
 
     // An ended session is terminal and reads as completed.
     let mut done = lane(AgentRole::Agent);
     done.session_id = Some("s-done".to_string());
     done.parent_agent_id = Some("machine-1".to_string());
     assert_eq!(a.lane_marker(&done, false), "○");
-    assert_eq!(a.lane_state(&done), " · completed");
+    assert_eq!(a.lane_state(&done, &std::collections::HashSet::new()), " · completed");
 
     // A session id whose parent machine is unknown resolves to nothing, and the
     // row degrades to the pending suffix instead of claiming a state.
@@ -155,7 +155,7 @@ fn a_session_lane_reflects_its_peer_session_state() {
     orphan.session_id = Some("s-live".to_string());
     orphan.parent_agent_id = Some("machine-nope".to_string());
     assert_eq!(a.session_state(&orphan), None);
-    assert_eq!(a.lane_state(&orphan), " · …");
+    assert_eq!(a.lane_state(&orphan, &std::collections::HashSet::new()), " · …");
 
     // No parent at all → the lookup short-circuits.
     let mut parentless = lane(AgentRole::Agent);

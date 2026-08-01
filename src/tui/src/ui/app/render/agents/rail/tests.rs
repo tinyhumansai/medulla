@@ -21,6 +21,15 @@ fn app() -> App {
     App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()))
 }
 
+/// A fixed "now" for row rendering, so an elapsed-time suffix in an assertion
+/// does not depend on when the test ran.
+const NOW: i64 = 10_000;
+
+/// No harness is waiting, which is what most of these rows assume.
+fn none_waiting() -> std::collections::HashSet<String> {
+    std::collections::HashSet::new()
+}
+
 fn lane() -> AgentLane {
     AgentLane {
         key: "k".into(),
@@ -76,7 +85,7 @@ fn harness_row(cwd: &str) -> SessionRow {
 #[test]
 fn an_operator_harness_uses_one_compact_line_like_the_orchestrator() {
     let app = app();
-    let lines = app.own_harness_lines(&harness_row("/workspace/medulla"), false, 48);
+    let lines = app.own_harness_lines(&harness_row("/workspace/medulla"), false, 48, NOW);
 
     assert_eq!(lines.len(), 1, "a harness should consume one rail row");
     assert_eq!(
@@ -106,7 +115,7 @@ fn a_long_harness_path_is_shortened_instead_of_adding_rows() {
 fn a_harness_prefix_never_exceeds_the_available_width() {
     let app = app();
     for width in [0, 1, 4, 8] {
-        let line = &app.own_harness_lines(&harness_row("/workspace/medulla"), false, width)[0];
+        let line = &app.own_harness_lines(&harness_row("/workspace/medulla"), false, width, NOW)[0];
         assert!(line.width() <= width, "width {width}: {line:?}");
     }
 }
@@ -118,14 +127,14 @@ fn harness_branch_and_path_can_be_hidden_independently() {
 
     app.loaded.config.appearance.show_harness_branch = false;
     assert_eq!(
-        app.own_harness_lines(&row, false, 48)[0].to_string(),
+        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · /workspace/medulla"
     );
 
     app.loaded.config.appearance.show_harness_branch = true;
     app.loaded.config.appearance.show_harness_path = false;
     assert_eq!(
-        app.own_harness_lines(&row, false, 48)[0].to_string(),
+        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · main"
     );
 }
@@ -137,7 +146,7 @@ fn a_non_git_harness_omits_the_branch_without_a_placeholder() {
     row.branch = None;
 
     assert_eq!(
-        app.own_harness_lines(&row, false, 48)[0].to_string(),
+        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · /workspace/medulla"
     );
 }
@@ -185,7 +194,7 @@ fn harness_rows_color_each_lifecycle_state_and_only_the_live_ones_flash() {
         let mut harness = lane();
         harness.tasks = tasks;
         harness.active_tasks = active_tasks;
-        let line = app.agent_row_line(&row, std::slice::from_ref(&harness), false);
+        let line = app.agent_row_line(&row, std::slice::from_ref(&harness), false, &none_waiting());
         let style = line.spans[0].style;
         assert_eq!(style.fg, Some(color), "row: {}", line);
         assert_eq!(
@@ -194,7 +203,7 @@ fn harness_rows_color_each_lifecycle_state_and_only_the_live_ones_flash() {
             "row: {}",
             line
         );
-        assert_eq!(app.lane_state(&harness), suffix);
+        assert_eq!(app.lane_state(&harness, &none_waiting()), suffix);
     }
 }
 
@@ -219,7 +228,7 @@ fn current_harness_activity_takes_priority_over_an_old_error() {
         .style
         .add_modifier
         .contains(Modifier::SLOW_BLINK));
-    assert_eq!(app.lane_state(&harness), " · working");
+    assert_eq!(app.lane_state(&harness, &none_waiting()), " · working");
 }
 
 #[test]
@@ -431,7 +440,7 @@ fn waiting_row(cwd: &str) -> SessionRow {
 #[test]
 fn a_harness_waiting_on_you_blinks_and_says_what_it_wants() {
     let app = app();
-    let lines = app.own_harness_lines(&waiting_row("/workspace/medulla"), false, 48);
+    let lines = app.own_harness_lines(&waiting_row("/workspace/medulla"), false, 48, NOW);
 
     // The state glyph is replaced, not appended: "running" is not the fact this
     // row is trying to get across.
@@ -454,7 +463,7 @@ fn the_pane_you_are_typing_in_does_not_blink_at_you() {
     let row = waiting_row("/workspace/medulla");
     app.harness_focus = crate::ui::harness_pane::HarnessFocus::Attached(row.id.clone());
 
-    let lines = app.own_harness_lines(&row, false, 48);
+    let lines = app.own_harness_lines(&row, false, 48, NOW);
 
     assert_eq!(lines.len(), 1, "no second line: {lines:?}");
     assert!(!lines[0].spans[0]
@@ -470,7 +479,7 @@ fn an_exited_harness_stops_asking_for_anything() {
     // Whatever it was asking, nobody can answer it now.
     row.state = PtyState::Exited { code: Some(0) };
 
-    let lines = app.own_harness_lines(&row, false, 48);
+    let lines = app.own_harness_lines(&row, false, 48, NOW);
 
     assert_eq!(lines.len(), 1);
     assert!(lines[0].to_string().starts_with("✓ codex"), "{}", lines[0]);

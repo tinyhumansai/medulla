@@ -304,21 +304,48 @@ fn models_survive_the_rewrite() {
 }
 
 #[test]
-fn apply_env_scrubs_the_real_key_and_adds_the_token() {
-    let routing =
-        route_openrouter(&openrouter_router(), &endpoint(), "OPENROUTER_API_KEY").expect("routed");
+fn route_spawn_scrubs_the_real_key_and_rewrites_the_router() {
+    let mut router = Some(openrouter_router());
     let mut env: HashMap<String, String> = HashMap::from([
         ("OPENROUTER_API_KEY".to_string(), "sk-or-real".to_string()),
         ("PATH".to_string(), "/usr/bin".to_string()),
+        // Keeps the listener off the network: the run never reaches upstream in
+        // this test, but starting one that could would be wrong regardless.
+        (
+            UPSTREAM_URL_ENV.to_string(),
+            "http://127.0.0.1:1/api".to_string(),
+        ),
     ]);
-    apply_env(&routing, &mut env);
+    route_spawn(&mut router, &mut env).expect("routed");
 
+    // The real key is gone — a harness in this environment has nothing to reach
+    // OpenRouter with except the loopback token.
     assert!(!env.contains_key("OPENROUTER_API_KEY"));
-    assert_eq!(
-        env.get(PROXY_TOKEN_ENV).map(String::as_str),
-        Some("mdl-testtoken")
-    );
+    let token = env.get(PROXY_TOKEN_ENV).expect("token exported");
+    assert!(token.starts_with("mdl-"));
     assert_eq!(env.get("PATH").map(String::as_str), Some("/usr/bin"));
+
+    let router = router.expect("router kept");
+    assert_eq!(router.api_key_env.as_deref(), Some(PROXY_TOKEN_ENV));
+    assert!(router
+        .base_url_for("claude")
+        .expect("claude routed")
+        .starts_with("http://127.0.0.1:"));
+}
+
+#[test]
+fn route_spawn_leaves_an_unrouted_run_untouched() {
+    let mut router = None;
+    let mut env: HashMap<String, String> =
+        HashMap::from([("OPENROUTER_API_KEY".to_string(), "sk-or-real".to_string())]);
+    route_spawn(&mut router, &mut env).expect("no-op");
+
+    assert!(router.is_none());
+    // Nothing scrubbed: with no `[router]` the key is the harness's own business.
+    assert_eq!(
+        env.get("OPENROUTER_API_KEY").map(String::as_str),
+        Some("sk-or-real")
+    );
 }
 
 #[test]
@@ -341,13 +368,11 @@ fn a_blank_or_absent_key_resolves_to_nothing() {
     assert!(resolve_key(&router, &blank).is_none());
 }
 
-#[tokio::test]
-async fn a_run_without_a_key_is_not_routed() {
+#[test]
+fn a_run_without_a_key_is_not_routed() {
     // No key exported → `Ok(None)`, and crucially no listener is started, so an
     // otherwise-working direct run is left exactly as it was.
-    let routed = route_run(&openrouter_router(), &HashMap::new())
-        .await
-        .expect("no error");
+    let routed = route_run(&openrouter_router(), &HashMap::new()).expect("no error");
     assert!(routed.is_none());
 }
 
@@ -412,11 +437,9 @@ fn upstream_urls_carry_the_query_string() {
     );
 }
 
-#[tokio::test]
-async fn tokens_are_minted_once_per_credential() {
-    let handle = ProxyHandle::start(OPENROUTER_ROOT.to_string())
-        .await
-        .expect("proxy starts");
+#[test]
+fn tokens_are_minted_once_per_credential() {
+    let handle = ProxyHandle::start(OPENROUTER_ROOT.to_string()).expect("proxy starts");
 
     let first = handle.endpoint_for_key("sk-or-one");
     let again = handle.endpoint_for_key("sk-or-one");

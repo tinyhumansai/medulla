@@ -367,15 +367,29 @@ impl PtySessionExecutor {
             options.provider,
             options.attribution,
         ));
-        if let Some(router) = &options.router {
+        // OpenRouter-bound runs are re-pointed at Medulla's loopback attribution
+        // proxy, and the real key is scrubbed from `env` here, before any of it
+        // reaches the child. A no-op for every other endpoint.
+        let mut router = options.router.clone();
+        medulla::inference_proxy::route_spawn(&mut router, &mut env)?;
+        if let Some(router) = &router {
             let injection = medulla::tinyplace::env::router_env(options.provider, router);
             for (key, value) in injection.env {
                 env.insert(key, value);
             }
             for (child_var, source_name) in injection.secret_env {
-                match options.env.get(&source_name).filter(|v| !v.is_empty()) {
+                // Resolved from `env`, not `options.env`: when the run was routed
+                // through the attribution proxy the name to resolve is the token
+                // the routing just placed there, and the original key has been
+                // scrubbed. Cloned before inserting so the read does not borrow
+                // across the write.
+                let secret = env
+                    .get(&source_name)
+                    .filter(|value| !value.is_empty())
+                    .cloned();
+                match secret {
                     Some(secret) => {
-                        env.insert(child_var, secret.clone());
+                        env.insert(child_var, secret);
                     }
                     None => {
                         return Err(format!(

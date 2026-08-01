@@ -38,58 +38,122 @@ struct ProxyState {
     client: reqwest::Client,
 }
 
-/// Bind `127.0.0.1:0`, spawn the accept loop, and return the bound port.
+/// Bind `127.0.0.1:0` on a dedicated runtime thread and return the bound port.
 ///
-/// Binding before returning is what lets a caller hand the port to a child
-/// immediately: the listener is already accepting by the time this resolves, so
-/// there is no window in which a harness could connect and be refused.
-pub(super) async fn spawn(
+/// # Why its own thread and runtime
+///
+/// The three spawn seams that need a proxy are ordinary synchronous functions —
+/// the daemon's `run_provider_attempt`, the TUI executor's `spawn_env`, and the
+/// harness pane's. Making startup `async` would colour all three and ripple out
+/// through the UI code that calls them, for a listener that binds in
+/// microseconds. Owning a runtime instead keeps startup callable from anywhere,
+/// including from inside another runtime where `block_on` would panic.
+///
+/// It also isolates the traffic: a harness streaming tokens cannot compete for
+/// scheduler time with the terminal UI's own runtime.
+///
+/// Returns only once the socket is bound and accepting, so a caller may hand the
+/// port to a child immediately with no window in which a harness could connect
+/// and be refused.
+pub(super) fn spawn(
     upstream_root: String,
     registry: Arc<Mutex<CredentialRegistry>>,
 ) -> std::io::Result<u16> {
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
-    let state = ProxyState {
-        upstream_root,
-        registry,
-        // No timeout is configured: a harness turn legitimately streams for many
-        // minutes, and a request timeout here would sever it mid-answer. The
-        // child's own cancellation is what ends a run.
-        client: reqwest::Client::builder()
-            .build()
-            .map_err(std::io::Error::other)?,
-    };
-    tokio::spawn(async move {
-        loop {
-            let (stream, peer) = match listener.accept().await {
-                Ok(accepted) => accepted,
-                // An accept error is per-connection (fd limits, a client that
-                // vanished mid-handshake); tearing the listener down would take
-                // every in-flight harness with it.
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::io::Result<u16>>();
+    std::thread::Builder::new()
+        .name("medulla-attribution-proxy".to_string())
+        .spawn(move || {
+            // Two workers rather than one: several harnesses stream concurrently,
+            // and a current-thread runtime would serialize their TLS handshakes
+            // behind whichever connection is mid-negotiation.
+            let runtime = match tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
                 Err(error) => {
-                    tracing::debug!(%error, "attribution proxy accept failed");
-                    continue;
+                    let _ = ready_tx.send(Err(error));
+                    return;
                 }
             };
-            // Same guard as the OAuth loopback listener: nothing off this machine
-            // may present a token, even if the port were somehow reachable.
-            if !peer.ip().is_loopback() {
+            runtime.block_on(async move {
+                let listener = match TcpListener::bind("127.0.0.1:0").await {
+                    Ok(listener) => listener,
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error));
+                        return;
+                    }
+                };
+                let port = match listener.local_addr() {
+                    Ok(address) => address.port(),
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error));
+                        return;
+                    }
+                };
+                let client = match reqwest::Client::builder().build() {
+                    Ok(client) => client,
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(std::io::Error::other(error)));
+                        return;
+                    }
+                };
+                let state = ProxyState {
+                    upstream_root,
+                    registry,
+                    // No timeout is configured: a harness turn legitimately
+                    // streams for many minutes, and a request timeout here would
+                    // sever it mid-answer. The child's own cancellation ends a run.
+                    client,
+                };
+                if ready_tx.send(Ok(port)).is_err() {
+                    // The caller is gone, so nothing will ever be routed here.
+                    return;
+                }
+                accept_loop(listener, state).await;
+            });
+        })?;
+
+    ready_rx.recv().map_err(|_| {
+        std::io::Error::other("attribution proxy thread exited before it finished binding")
+    })?
+}
+
+/// Accept loopback connections until the process ends.
+///
+/// There is no shutdown path on purpose: a proxy with no registered credentials
+/// already rejects every request, so an idle listener costs one fd and nothing
+/// else, while a shutdown race could sever a harness mid-turn.
+async fn accept_loop(listener: TcpListener, state: ProxyState) {
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            // An accept error is per-connection (fd limits, a client that
+            // vanished mid-handshake); tearing the listener down would take
+            // every in-flight harness with it.
+            Err(error) => {
+                tracing::debug!(%error, "attribution proxy accept failed");
                 continue;
             }
-            let state = state.clone();
-            tokio::spawn(async move {
-                let io = TokioIo::new(stream);
-                let service = service_fn(move |req| handle(req, state.clone()));
-                if let Err(error) = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(io, service)
-                    .await
-                {
-                    tracing::debug!(%error, "attribution proxy connection ended");
-                }
-            });
+        };
+        // Same guard as the OAuth loopback listener: nothing off this machine may
+        // present a token, even if the port were somehow reachable.
+        if !peer.ip().is_loopback() {
+            continue;
         }
-    });
-    Ok(port)
+        let state = state.clone();
+        tokio::spawn(async move {
+            let io = TokioIo::new(stream);
+            let service = service_fn(move |req| handle(req, state.clone()));
+            if let Err(error) = hyper::server::conn::http1::Builder::new()
+                .serve_connection(io, service)
+                .await
+            {
+                tracing::debug!(%error, "attribution proxy connection ended");
+            }
+        });
+    }
 }
 
 /// A short plain-text response for the locally-generated (non-proxied) cases.

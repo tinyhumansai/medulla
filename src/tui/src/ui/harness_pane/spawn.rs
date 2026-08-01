@@ -117,18 +117,29 @@ impl LocalHarnesses {
             self.attribution,
         ));
         let custom_router = choice.preset.as_ref().map(|preset| preset.router());
-        let router = custom_router.as_ref().or(self.router.as_ref());
+        // OpenRouter-bound sessions are re-pointed at Medulla's loopback
+        // attribution proxy and the real key is scrubbed from `env`. A hand-opened
+        // harness is Medulla's traffic just as much as a dispatched one, so it
+        // carries the same attribution — and must be just as unable to bypass it.
+        let mut router = custom_router.or_else(|| self.router.clone());
+        medulla::inference_proxy::route_spawn(&mut router, &mut env)?;
         let Some(router) = router else {
             return Ok((env, extra_args));
         };
-        let injection = medulla::tinyplace::env::router_env(choice.provider, router);
+        let injection = medulla::tinyplace::env::router_env(choice.provider, &router);
         for (key, value) in injection.env {
             env.insert(key, value);
         }
         for (child_var, source_name) in injection.secret_env {
-            match self.env.get(&source_name).filter(|v| !v.is_empty()) {
+            // From `env`, not `self.env`: a routed run resolves the proxy token
+            // the routing just placed there, and the real key is already gone.
+            let secret = env
+                .get(&source_name)
+                .filter(|value| !value.is_empty())
+                .cloned();
+            match secret {
                 Some(secret) => {
-                    env.insert(child_var, secret.clone());
+                    env.insert(child_var, secret);
                 }
                 None => {
                     return Err(format!(

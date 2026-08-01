@@ -82,12 +82,13 @@ impl ProxyHandle {
     /// Bind an ephemeral loopback port and start serving.
     ///
     /// `upstream_root` is the OpenRouter API root; tests pass a local mock so the
-    /// suite stays offline. The accept loop is spawned onto the ambient tokio
-    /// runtime and lives as long as the process — there is no shutdown, because
-    /// a proxy with no registered credentials already rejects everything.
-    pub async fn start(upstream_root: String) -> std::io::Result<Self> {
+    /// suite stays offline. Synchronous, and safe to call from inside a runtime:
+    /// the listener gets a thread and runtime of its own (see [`serve::spawn`]),
+    /// which is what lets the three synchronous spawn seams start it without
+    /// becoming `async` themselves.
+    pub fn start(upstream_root: String) -> std::io::Result<Self> {
         let registry = Arc::new(Mutex::new(CredentialRegistry::default()));
-        let port = serve::spawn(upstream_root, Arc::clone(&registry)).await?;
+        let port = serve::spawn(upstream_root, Arc::clone(&registry))?;
         Ok(Self { port, registry })
     }
 
@@ -133,7 +134,7 @@ impl ProxyHandle {
 /// A single listener serves every harness: the token, not the port, is what
 /// separates credentials, so there is nothing to gain from a port per run and a
 /// great deal of socket churn to lose.
-static SHARED: tokio::sync::OnceCell<ProxyHandle> = tokio::sync::OnceCell::const_new();
+static SHARED: std::sync::OnceLock<Result<ProxyHandle, String>> = std::sync::OnceLock::new();
 
 /// The upstream root, honouring the [`UPSTREAM_URL_ENV`] test override.
 fn upstream_root(env: &HashMap<String, String>) -> String {
@@ -145,14 +146,19 @@ fn upstream_root(env: &HashMap<String, String>) -> String {
 }
 
 /// Return the shared proxy, starting it if this is the first caller.
-pub async fn shared(env: &HashMap<String, String>) -> Result<&'static ProxyHandle, String> {
+///
+/// The outcome is memoized either way. A bind failure is not retried on the next
+/// spawn: it means the machine could not give this process a loopback socket, and
+/// re-attempting once per harness launch would turn one clear error into a
+/// stutter of identical ones.
+pub fn shared(env: &HashMap<String, String>) -> Result<&'static ProxyHandle, String> {
     SHARED
-        .get_or_try_init(|| async {
+        .get_or_init(|| {
             ProxyHandle::start(upstream_root(env))
-                .await
                 .map_err(|error| format!("could not start the local attribution proxy: {error}"))
         })
-        .await
+        .as_ref()
+        .map_err(String::clone)
 }
 
 /// Whether `base_url` points at OpenRouter.
@@ -269,7 +275,7 @@ fn resolve_key(router: &RouterConfig, env: &HashMap<String, String>) -> Option<(
 /// when the run is not OpenRouter-bound or its key is not exported — in both
 /// cases the caller proceeds exactly as before, since a proxy with no upstream
 /// credential could only turn a working run into a 401.
-pub async fn route_run(
+pub fn route_run(
     router: &RouterConfig,
     env: &HashMap<String, String>,
 ) -> Result<Option<ProxyRouting>, String> {
@@ -285,21 +291,39 @@ pub async fn route_run(
     if route_openrouter(router, &probe, &name).is_none() {
         return Ok(None);
     }
-    let handle = shared(env).await?;
+    let handle = shared(env)?;
     let endpoint = handle.endpoint_for_key(&key);
     Ok(route_openrouter(router, &endpoint, &name))
 }
 
-/// Apply a routing decision to a spawn seam's environment map.
+/// Route one spawn's router and environment through the proxy, in place.
 ///
-/// Shared by the three seams so the scrub can never be forgotten at one of them
-/// — which would leave the real key in that seam's children and reopen the
-/// bypass this module closes.
-pub fn apply_env(routing: &ProxyRouting, env: &mut HashMap<String, String>) {
+/// The single entry point every spawn seam calls. Keeping it one function is the
+/// point: a seam that applied the router rewrite but forgot the environment
+/// scrub would leave the real OpenRouter key in that seam's children, and the
+/// harness could then bypass the proxy entirely — which is exactly the hole this
+/// module exists to close.
+///
+/// A no-op for runs that are not OpenRouter-bound. Errors only when the proxy
+/// could not be started, which is a hard error at the seam rather than a silent
+/// direct spawn: falling back would send unattributed traffic and re-expose the
+/// key, quietly undoing the thing the operator configured.
+pub fn route_spawn(
+    router: &mut Option<RouterConfig>,
+    env: &mut HashMap<String, String>,
+) -> Result<(), String> {
+    let Some(configured) = router.as_ref() else {
+        return Ok(());
+    };
+    let Some(routing) = route_run(configured, env)? else {
+        return Ok(());
+    };
     for name in &routing.scrub_env {
         env.remove(name);
     }
     for (name, value) in &routing.env {
         env.insert(name.clone(), value.clone());
     }
+    *router = Some(routing.router);
+    Ok(())
 }

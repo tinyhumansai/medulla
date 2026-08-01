@@ -112,8 +112,15 @@ impl App {
             ))
         };
 
+        // One healthy row under the cursor, one healthy row that is not, and
+        // one that needs attention: together they preview every visibility.
+        let samples = [
+            (sample_selected as fn() -> SessionRow, true, "selected"),
+            (sample_orchestrator, false, "not selected"),
+            (sample_alerting, false, "on alert"),
+        ];
         let mut lines = vec![rule("┌", "┐")];
-        for (index, (sample, active, caption)) in SAMPLES.iter().enumerate() {
+        for (index, (sample, active, caption)) in samples.iter().enumerate() {
             if index > 0 {
                 lines.push(rule("├", "┤"));
             }
@@ -141,20 +148,6 @@ impl App {
         lines
     }
 }
-
-/// The preview's sample rows: the constructor, whether the rail cursor is on it,
-/// and the caption naming what it stands for.
-type Sample = (fn() -> SessionRow, bool, &'static str);
-
-/// One healthy row under the cursor, one healthy row that is not, and one that
-/// needs attention — between them every [`FieldVisibility`] answer is visible.
-///
-/// [`FieldVisibility`]: medulla::config::FieldVisibility
-const SAMPLES: [Sample; 3] = [
-    (sample_selected, true, "selected"),
-    (sample_orchestrator, false, "not selected"),
-    (sample_alerting, false, "on alert"),
-];
 
 /// A running, operator-held harness in a Git checkout — the common case, and the
 /// one whose path is long enough to show what the layout costs it.

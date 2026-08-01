@@ -951,6 +951,9 @@ pub struct App {
     pub(super) appearance_index: usize,
     /// The selected field row on the Status line subpage.
     pub(super) status_line_index: usize,
+    /// Whether the next persisted status-line edit must write the complete
+    /// legacy-derived section rather than one field.
+    pub(super) status_line_promotion_pending: bool,
     /// The selected editable row on the Config subpage.
     pub(super) config_index: usize,
     /// Whether the Account subpage's logout is armed. Logging out clears stored

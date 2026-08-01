@@ -149,6 +149,38 @@ fn first_edit_persists_the_complete_legacy_derived_layout() {
 }
 
 #[test]
+fn failed_legacy_promotion_retries_the_complete_section() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[appearance]\nshowHarnessBranch = false\nshowHarnessPath = false\n",
+    )
+    .unwrap();
+
+    let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
+    let mut loaded = LoadedConfig::defaults(path.display().to_string());
+    loaded.config.appearance.show_harness_branch = false;
+    loaded.config.appearance.show_harness_path = false;
+    let mut app = App::new(runtime, loaded);
+    // A directory cannot be replaced with a config file, making the first
+    // promotion fail without relying on platform-specific permission bits.
+    app.set_config_path(dir.path().to_path_buf());
+    app.status_line_index = row_of(StatusLineField::State);
+
+    app.cycle_status_line_row(true);
+    assert!(app.status().contains("save failed"));
+
+    app.set_config_path(path.clone());
+    app.cycle_status_line_row(true);
+
+    let persisted = saved(&path).status_line();
+    assert_eq!(persisted.state, FieldPlacement::Line3);
+    assert_eq!(persisted.branch, FieldPlacement::Hidden);
+    assert_eq!(persisted.path, FieldPlacement::Hidden);
+}
+
+#[test]
 fn an_explicit_status_line_section_wins_over_the_legacy_keys() {
     let mut config = TuiConfig::default();
     config.appearance.show_harness_path = false;

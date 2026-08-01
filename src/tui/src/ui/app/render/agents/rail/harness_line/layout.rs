@@ -9,7 +9,7 @@
 //! here is not just "join with a separator":
 //!
 //! - **The row never exceeds its width.** The rail is capped at
-//!   [`RAIL_MAX_CONTENT`](super::RAIL_MAX_CONTENT) columns precisely so one long
+//!   [`RAIL_MAX_CONTENT`](super::super::RAIL_MAX_CONTENT) columns precisely so one long
 //!   working directory cannot push the transcript into a gutter, and a row that
 //!   overran that cap would put the cost back.
 //! - **The path spends what is left, and loses its head rather than its tail.**
@@ -28,7 +28,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
 
-use super::wrap::{short_home, wrap_path};
+use super::super::wrap::{short_home, wrap_path};
+
+use super::types::Field;
 
 /// The most lines one harness row may occupy.
 ///
@@ -59,25 +61,6 @@ const PATH_RESERVE: usize = 7;
 
 /// The least room a working directory is drawn in at all.
 const PATH_MIN: usize = 4;
-
-/// The status-line fields, in the fixed order they are drawn within a line.
-///
-/// Order is not configurable. Placement answers "which line", and that is the
-/// question operators actually differ on; letting them also permute the fields
-/// would multiply the settings page without making any row easier to read.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Field {
-    /// The run-state glyph.
-    State,
-    /// The harness provider.
-    Harness,
-    /// Who holds the session.
-    Control,
-    /// The Git branch of the working directory.
-    Branch,
-    /// The working directory.
-    Path,
-}
 
 /// Every field, in draw order.
 const ORDER: [Field; 5] = [
@@ -132,7 +115,7 @@ impl Field {
 /// stays a pure function of its inputs: this is presentation logic, and a
 /// renderer that consults the process environment cannot be tested on a machine
 /// that disagrees with the fixture.
-pub(super) fn harness_lines(
+pub(in crate::ui::app::render::agents::rail) fn harness_lines(
     cfg: &StatusLineConfig,
     row: &SessionRow,
     home: Option<&str>,

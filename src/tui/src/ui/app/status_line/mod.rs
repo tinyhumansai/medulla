@@ -171,7 +171,6 @@ impl App {
     /// Cycle the selected row's value, apply it live, and persist it.
     pub(super) fn cycle_status_line_row(&mut self, forward: bool) {
         let row = STATUS_LINE_ROWS[self.status_line_index.min(STATUS_LINE_ROW_COUNT - 1)];
-        let promotes_legacy_config = self.loaded.config.status_line.is_none();
         let mut cfg = self.status_line_config();
         row.field.cycle(&mut cfg, forward);
         // Write the whole struct back: the first edit is also what promotes a
@@ -179,14 +178,7 @@ impl App {
         // explicit `[statusLine]` section.
         self.loaded.config.status_line = Some(cfg);
         let (label, wire) = row.field.value(&cfg);
-        self.persist_status_line_now(
-            &cfg,
-            promotes_legacy_config,
-            row.field.key(),
-            row.field.name(),
-            label,
-            wire,
-        );
+        self.persist_status_line_now(&cfg, row.field.key(), row.field.name(), label, wire);
     }
 
     /// Write one status-line key to the injected config path.
@@ -197,7 +189,6 @@ impl App {
     fn persist_status_line_now(
         &mut self,
         cfg: &StatusLineConfig,
-        promotes_legacy_config: bool,
         key: &str,
         row: &str,
         label: &str,
@@ -205,7 +196,7 @@ impl App {
     ) {
         match &self.config_path {
             Some(path) => {
-                let result = if promotes_legacy_config {
+                let result = if self.status_line_promotion_pending {
                     toml::Value::try_from(cfg)
                         .map_err(anyhow::Error::from)
                         .and_then(|value| match value {
@@ -225,7 +216,10 @@ impl App {
                     )
                 };
                 match result {
-                    Ok(()) => self.set_status(format!("Status line · {row} → {label} (saved)")),
+                    Ok(()) => {
+                        self.status_line_promotion_pending = false;
+                        self.set_status(format!("Status line · {row} → {label} (saved)"));
+                    }
                     Err(error) => self.set_status(format!("Status line · save failed: {error}")),
                 }
             }

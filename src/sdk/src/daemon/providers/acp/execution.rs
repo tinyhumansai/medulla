@@ -57,14 +57,18 @@ fn medulla_mcp_servers(
         // that would let a policy the operator explicitly chose (say,
         // `allowCode = false`) be silently overridden by whatever config this
         // subprocess's own `cwd` happens to discover.
-        let enabled = crate::config::load_config(
+        let workflows_enabled = crate::config::load_config(
             crate::config::explicit_config_from_env(task_env),
             task_env,
             &cwd,
         )
         .map(|loaded| loaded.config.workflows.enabled)
         .unwrap_or(true);
-        if !enabled {
+        let active_plane = crate::control_socket::active();
+        // With neither family available there is no server worth attaching.
+        // A host running a fleet still attaches it when workflow authoring is
+        // disabled; the grant below withholds only the workflow family.
+        if !workflows_enabled && active_plane.is_none() {
             return Vec::new();
         }
         let Ok(binary) = std::env::current_exe() else {
@@ -86,7 +90,7 @@ fn medulla_mcp_servers(
         // against. Pushed explicitly rather than inherited for the same reason
         // the tool mode is: it is minted per session, and an inherited one would
         // hand a second harness the first one's capability.
-        if let Some(plane) = crate::control_socket::active() {
+        if let Some(plane) = active_plane {
             // The depth this task was dispatched at, written into the harness
             // environment by the daemon from the task frame. Read here and
             // recorded in the grant, so every later check consults the grant
@@ -95,6 +99,7 @@ fn medulla_mcp_servers(
                 session,
                 task_env,
                 tool_mode,
+                workflows_enabled,
                 plane.max_depth,
                 plane.max_in_flight,
             );
@@ -143,11 +148,18 @@ pub(super) fn session_grant(
     session: &str,
     task_env: &HashMap<String, String>,
     tool_mode: Option<&str>,
+    workflows_enabled: bool,
     max_depth: u8,
     max_in_flight: usize,
 ) -> crate::control_socket::Grant {
     let depth = crate::control_socket::depth_from_env(task_env);
+    let families = if workflows_enabled {
+        crate::control_socket::ToolFamilies::default()
+    } else {
+        crate::control_socket::ToolFamilies::fleet_only()
+    };
     crate::control_socket::Grant::new(session, depth, max_depth)
+        .with_families(families)
         .with_max_in_flight(max_in_flight)
         .with_tool_mode(tool_mode)
 }

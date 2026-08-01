@@ -17,12 +17,21 @@ fn session_grants_read_depth_from_the_task_environment() {
         "2".to_string(),
     )]);
 
-    let grant = super::execution::session_grant("nested", &env, Some("propose:demo"), 3, 5);
+    let grant = super::execution::session_grant("nested", &env, Some("propose:demo"), true, 3, 5);
 
     assert_eq!(grant.depth, 2);
     assert_eq!(grant.max_depth, 3);
     assert_eq!(grant.max_in_flight, 5);
     assert_eq!(grant.tool_mode.as_deref(), Some("propose:demo"));
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn disabling_workflows_keeps_the_fleet_family_on_the_session_grant() {
+    let grant = super::execution::session_grant("fleet-only", &HashMap::new(), None, false, 2, 4);
+
+    assert!(!grant.families.workflows);
+    assert!(grant.families.fleet);
 }
 
 #[test]

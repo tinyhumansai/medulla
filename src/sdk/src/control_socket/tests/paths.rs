@@ -208,12 +208,29 @@ mod bind {
         let dir = tempfile::tempdir().unwrap();
         let shared = dir.path().join("shared");
         std::fs::create_dir(&shared).unwrap();
-        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let path = shared.join("control.sock");
 
         prepare_bind(&path, true).await.unwrap();
 
         let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o777, "shared parent must not be chmodded");
+        assert_eq!(mode & 0o1777, 0o1777, "shared parent must not be chmodded");
+    }
+
+    #[tokio::test]
+    async fn an_explicit_path_refuses_a_replaceable_parent_without_chmodding_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let path = shared.join("control.sock");
+
+        let result = prepare_bind(&path, true).await;
+
+        assert!(matches!(result, Err(ControlSocketError::InsecureParent(_))));
+        let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o777, "refusal must not mutate the parent");
     }
 }

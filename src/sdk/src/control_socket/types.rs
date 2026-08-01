@@ -175,6 +175,14 @@ impl ToolFamilies {
         }
     }
 
+    /// Only the fleet tools — what a fleet host serves when workflows are off.
+    pub fn fleet_only() -> Self {
+        ToolFamilies {
+            workflows: false,
+            fleet: true,
+        }
+    }
+
     /// Whether a tool by this name belongs to a family this grant may call.
     ///
     /// Matched on the name's prefix, which is why the prefixes are load-bearing

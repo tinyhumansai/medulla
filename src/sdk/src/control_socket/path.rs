@@ -175,9 +175,10 @@ pub fn control_socket_path(
 /// Create the socket's parent directory, private to this user when Medulla owns
 /// the path.
 ///
-/// A default path is tightened to `0700` on every call. An explicitly trusted
-/// path preserves an existing parent's permissions, but a parent created for it
-/// is still private.
+/// A default path is tightened to `0700` on every call. An explicit path
+/// preserves an existing parent's permissions, but a parent created for it is
+/// still private. Existing explicit parents are validated separately after
+/// this function returns.
 #[cfg(unix)]
 fn ensure_private_parent(path: &Path, trusted_path: bool) -> Result<(), ControlSocketError> {
     use std::os::unix::fs::PermissionsExt;
@@ -204,10 +205,12 @@ fn ensure_private_parent(path: &Path, trusted_path: bool) -> Result<(), ControlS
     Ok(())
 }
 
-/// Whether the socket's parent directory is writable by group or others.
+/// Whether another user could replace entries in the socket's parent directory.
 ///
 /// A writable parent means another user could unlink our socket and bind their
 /// own in its place, which no permission on the socket file itself prevents.
+/// A sticky directory such as `/tmp` is the exception: the kernel permits its
+/// users to remove only entries they own, so the socket remains protected.
 #[cfg(unix)]
 fn parent_is_insecure(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -216,7 +219,10 @@ fn parent_is_insecure(path: &Path) -> bool {
         return false;
     };
     std::fs::metadata(parent)
-        .map(|meta| meta.permissions().mode() & 0o022 != 0)
+        .map(|meta| {
+            let mode = meta.permissions().mode();
+            mode & 0o022 != 0 && mode & 0o1000 == 0
+        })
         .unwrap_or(false)
 }
 
@@ -235,16 +241,15 @@ fn parent_is_insecure(path: &Path) -> bool {
 ///
 /// [`ControlSocketError::AlreadyBound`] when a live instance holds the path,
 /// [`ControlSocketError::NotASocket`] when something else occupies it, and
-/// [`ControlSocketError::InsecureParent`] when the directory is world-writable
-/// and `trusted_path` is false.
+/// [`ControlSocketError::InsecureParent`] when another user could replace an
+/// entry in the parent directory. Explicit paths preserve existing directory
+/// modes, but do not bypass this validation.
 #[cfg(unix)]
 pub async fn prepare_bind(path: &Path, trusted_path: bool) -> Result<(), ControlSocketError> {
     use std::os::unix::fs::FileTypeExt;
 
     ensure_private_parent(path, trusted_path)?;
-    // An operator who named an explicit path may have good reasons for an
-    // unusual directory; the default path is ours and must be private.
-    if !trusted_path && parent_is_insecure(path) {
+    if parent_is_insecure(path) {
         return Err(ControlSocketError::InsecureParent(
             path.parent().unwrap_or(path).to_path_buf(),
         ));

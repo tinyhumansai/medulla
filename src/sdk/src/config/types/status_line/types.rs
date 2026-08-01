@@ -58,7 +58,8 @@ pub enum ControlStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum PathStyle {
-    /// The whole path, cut at the right edge only when it does not fit.
+    /// The whole path, with its leading edge elided when it does not fit so the
+    /// checkout name remains visible.
     Full,
     /// The home directory collapsed and leading segments elided as needed.
     #[default]

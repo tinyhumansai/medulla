@@ -45,6 +45,25 @@ pub(in crate::ui::app) const RAIL_MAX_CONTENT: usize = 36;
 const CONT_INDENT: usize = 5;
 
 impl App {
+    /// Render every form of a row that can affect the rail's width.
+    ///
+    /// Harness fields may be visible only while selected, so measuring only the
+    /// inactive form would allocate a rail that clips the row as soon as the
+    /// cursor reaches it. Other row types only change style when selected.
+    pub(super) fn rail_row_measurement_lines(
+        &self,
+        row: &RailRow,
+        lanes: &[AgentLane],
+    ) -> Vec<TLine<'static>> {
+        match row {
+            RailRow::Harness(_) => [false, true]
+                .into_iter()
+                .flat_map(|active| self.rail_row_lines(row, lanes, active, RAIL_MAX_CONTENT))
+                .collect(),
+            _ => self.rail_row_lines(row, lanes, false, RAIL_MAX_CONTENT),
+        }
+    }
+
     /// Draw the threads strip and the rail list under it.
     pub(super) fn draw_agents_rail(
         &mut self,

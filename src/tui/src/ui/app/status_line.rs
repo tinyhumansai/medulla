@@ -211,6 +211,7 @@ impl App {
     /// Cycle the selected row's value, apply it live, and persist it.
     pub(super) fn cycle_status_line_row(&mut self, forward: bool) {
         let row = STATUS_LINE_ROWS[self.status_line_index.min(STATUS_LINE_ROW_COUNT - 1)];
+        let promotes_legacy_config = self.loaded.config.status_line.is_none();
         let mut cfg = self.status_line_config();
         row.field.cycle(&mut cfg, forward);
         // Write the whole struct back: the first edit is also what promotes a
@@ -218,7 +219,14 @@ impl App {
         // explicit `[statusLine]` section.
         self.loaded.config.status_line = Some(cfg);
         let (label, wire) = row.field.value(&cfg);
-        self.persist_status_line_now(row.field.key(), row.field.name(), label, wire);
+        self.persist_status_line_now(
+            &cfg,
+            promotes_legacy_config,
+            row.field.key(),
+            row.field.name(),
+            label,
+            wire,
+        );
     }
 
     /// Write one status-line key to the injected config path.
@@ -226,15 +234,37 @@ impl App {
     /// Reports the target in the status bar either way: config is layered, so a
     /// higher-precedence file can still override what was just written, and an
     /// operator whose change did not stick needs to know which file was tried.
-    fn persist_status_line_now(&mut self, key: &str, row: &str, label: &str, wire: String) {
+    fn persist_status_line_now(
+        &mut self,
+        cfg: &StatusLineConfig,
+        promotes_legacy_config: bool,
+        key: &str,
+        row: &str,
+        label: &str,
+        wire: String,
+    ) {
         match &self.config_path {
             Some(path) => {
-                match medulla::config::persist_setting(
-                    path,
-                    "statusLine",
-                    key,
-                    toml::Value::String(wire),
-                ) {
+                let result = if promotes_legacy_config {
+                    toml::Value::try_from(cfg)
+                        .map_err(anyhow::Error::from)
+                        .and_then(|value| match value {
+                            toml::Value::Table(table) => {
+                                medulla::config::persist_section(path, "statusLine", table)
+                            }
+                            _ => Err(anyhow::anyhow!(
+                                "status-line config must serialize as a table"
+                            )),
+                        })
+                } else {
+                    medulla::config::persist_setting(
+                        path,
+                        "statusLine",
+                        key,
+                        toml::Value::String(wire),
+                    )
+                };
+                match result {
                     Ok(()) => self.set_status(format!("Status line · {row} → {label} (saved)")),
                     Err(error) => self.set_status(format!("Status line · save failed: {error}")),
                 }

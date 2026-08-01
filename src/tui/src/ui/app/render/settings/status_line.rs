@@ -50,6 +50,7 @@ impl App {
         lines.extend(self.status_line_preview(dim));
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled("Fields", bold)));
+        let selected_line = lines.len() + selected;
 
         for (index, row) in STATUS_LINE_ROWS.iter().enumerate() {
             let style = if index == selected {
@@ -84,7 +85,15 @@ impl App {
             },
             dim,
         )));
-        f.render_widget(Paragraph::new(Text::from(lines)), inner);
+        // Scroll only far enough to keep the selected field visible. The
+        // preview stays pinned while the upper rows fit, then yields space as
+        // the cursor moves toward the bottom of a short terminal.
+        let viewport_height = usize::from(inner.height);
+        let scroll = selected_line
+            .saturating_add(1)
+            .saturating_sub(viewport_height)
+            .min(usize::from(u16::MAX)) as u16;
+        f.render_widget(Paragraph::new(Text::from(lines)).scroll((scroll, 0)), inner);
     }
 
     /// The preview: three sample harness rows inside a rail-width frame, each

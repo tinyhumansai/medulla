@@ -15,24 +15,9 @@
 
 use super::*;
 
-/// Where one status-line field is drawn, or that it is not drawn at all.
-///
-/// "Hidden" is a placement rather than a separate boolean so every field is
-/// configured the same way and the settings page can cycle one control through
-/// all three states.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum FieldPlacement {
-    /// The first line of the harness row.
-    #[default]
-    Line1,
-    /// The second line, indented under the first.
-    Line2,
-    /// The third line, indented under the first.
-    Line3,
-    /// Not drawn.
-    Hidden,
-}
+mod types;
+
+pub use types::*;
 
 impl FieldPlacement {
     /// The label shown on the Status line settings page.
@@ -67,26 +52,6 @@ impl FieldPlacement {
     }
 }
 
-/// When a placed status-line field is actually drawn.
-///
-/// Placement answers *where*; this answers *whether, right now*. The two are
-/// separate because the interesting cases are conditional: a working directory
-/// that only appears on the row you have selected costs the other rows nothing,
-/// and an error field that only appears when there is an error is invisible
-/// until the moment it matters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum FieldVisibility {
-    /// Drawn on every harness row.
-    #[default]
-    Always,
-    /// Drawn only on the row the rail cursor is on.
-    Active,
-    /// Drawn only when the harness needs attention — it failed, exited
-    /// non-zero, or recorded an error.
-    Alert,
-}
-
 impl FieldVisibility {
     /// The label shown on the Status line settings page.
     pub fn label(self) -> &'static str {
@@ -118,19 +83,6 @@ impl FieldVisibility {
     }
 }
 
-/// How the harness provider is spelled on a status line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum HarnessNameStyle {
-    /// The product name — "Claude Code".
-    Long,
-    /// The command name — "claude". The historical rail spelling.
-    #[default]
-    Short,
-    /// A single glyph, for operators who already know their harnesses apart.
-    Icon,
-}
-
 impl HarnessNameStyle {
     /// The label shown on the Status line settings page.
     pub fn label(self) -> &'static str {
@@ -152,20 +104,6 @@ impl HarnessNameStyle {
     }
 }
 
-/// How the managed/unmanaged control state is spelled.
-///
-/// Hiding it is [`FieldPlacement::Hidden`] rather than a third variant here, so
-/// the "where" and the "how" stay separate questions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum ControlStyle {
-    /// Words — "unmanaged" / "orchestrator".
-    #[default]
-    Text,
-    /// A single glyph, for operators who have learned the two marks.
-    Icon,
-}
-
 impl ControlStyle {
     /// The label shown on the Status line settings page.
     pub fn label(self) -> &'static str {
@@ -180,20 +118,6 @@ impl ControlStyle {
         const ORDER: [ControlStyle; 2] = [ControlStyle::Text, ControlStyle::Icon];
         cycle(&ORDER, self, forward)
     }
-}
-
-/// How much of a harness's working directory is spelled out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum PathStyle {
-    /// The whole path, cut at the right edge only when it does not fit.
-    Full,
-    /// `$HOME` collapsed to `~` and leading segments elided with `…`, keeping
-    /// the tail that names the checkout. The historical rail spelling.
-    #[default]
-    Shortened,
-    /// The last path segment alone — usually the directory name.
-    Last,
 }
 
 impl PathStyle {
@@ -246,43 +170,6 @@ fn cycle<T: Copy + PartialEq>(order: &[T], current: T, forward: bool) -> T {
         (index + len - 1) % len
     };
     order[next]
-}
-
-/// The operator's harness status-line layout.
-///
-/// Defaults reproduce the row exactly as it was before this section existed —
-/// `● codex · unmanaged · main · ~/work/medulla`, all on one line — so an
-/// installation that never opens the settings page sees no change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct StatusLineConfig {
-    /// Where the run-state glyph (`●` / `✓` / `✕`) is drawn.
-    pub state: FieldPlacement,
-    /// When the run-state glyph is drawn.
-    pub state_when: FieldVisibility,
-    /// Where the harness provider name is drawn.
-    pub harness: FieldPlacement,
-    /// When the harness provider name is drawn.
-    pub harness_when: FieldVisibility,
-    /// How the harness provider name is spelled.
-    pub harness_style: HarnessNameStyle,
-    /// Where the managed/unmanaged control state is drawn.
-    pub control: FieldPlacement,
-    /// When the control state is drawn.
-    pub control_when: FieldVisibility,
-    /// How the control state is spelled.
-    pub control_style: ControlStyle,
-    /// Where the Git branch is drawn. Rows for a non-repository working
-    /// directory omit it regardless.
-    pub branch: FieldPlacement,
-    /// When the Git branch is drawn.
-    pub branch_when: FieldVisibility,
-    /// Where the working directory is drawn.
-    pub path: FieldPlacement,
-    /// When the working directory is drawn.
-    pub path_when: FieldVisibility,
-    /// How much of the working directory is spelled out.
-    pub path_style: PathStyle,
 }
 
 impl Default for StatusLineConfig {

@@ -126,6 +126,32 @@ fn the_legacy_appearance_toggles_are_read_as_placements() {
 }
 
 #[test]
+fn first_edit_persists_the_complete_legacy_derived_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[appearance]\nshowHarnessBranch = false\nshowHarnessPath = false\n",
+    )
+    .unwrap();
+
+    let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
+    let mut loaded = LoadedConfig::defaults(path.display().to_string());
+    loaded.config.appearance.show_harness_branch = false;
+    loaded.config.appearance.show_harness_path = false;
+    let mut app = App::new(runtime, loaded);
+    app.set_config_path(path.clone());
+    app.status_line_index = row_of(StatusLineField::State);
+
+    app.cycle_status_line_row(true);
+
+    let persisted = saved(&path).status_line();
+    assert_eq!(persisted.state, FieldPlacement::Line2);
+    assert_eq!(persisted.branch, FieldPlacement::Hidden);
+    assert_eq!(persisted.path, FieldPlacement::Hidden);
+}
+
+#[test]
 fn an_explicit_status_line_section_wins_over_the_legacy_keys() {
     let mut config = TuiConfig::default();
     config.appearance.show_harness_path = false;

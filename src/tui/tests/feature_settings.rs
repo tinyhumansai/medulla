@@ -106,6 +106,22 @@ fn arrow_keys_move_subpage_selector() {
 }
 
 #[test]
+fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
+    let mut app = settings_app();
+    let _ = key(&mut app, KeyCode::Char('3'));
+    for _ in 0..12 {
+        let _ = key(&mut app, KeyCode::Down);
+    }
+
+    let out = text_of(&draw(&mut app, 80, 24));
+
+    assert!(
+        out.contains("shortened"),
+        "the selected path-style value must remain visible: {out}"
+    );
+}
+
+#[test]
 fn appearance_cycling_changes_live_theme() {
     let mut app = settings_app();
     let _ = key(&mut app, KeyCode::Char('2')); // Appearance

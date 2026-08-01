@@ -138,9 +138,7 @@ impl App {
         let widest = selection
             .rows
             .iter()
-            .flat_map(|row| {
-                self.rail_row_lines(row, &selection.lanes, false, rail::RAIL_MAX_CONTENT)
-            })
+            .flat_map(|row| self.rail_row_measurement_lines(row, &selection.lanes))
             .map(|line| line.width())
             .chain(threads.iter().map(|line| line.width()))
             .max()

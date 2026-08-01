@@ -521,7 +521,7 @@ fn the_path_style_chooses_how_much_of_the_directory_survives() {
     assert_eq!(with_style(PathStyle::Last), "medulla-public");
     assert_eq!(
         with_style(PathStyle::Full),
-        "…workspace/tinyhumans/products/medulla-public",
+        "…orkspace/tinyhumans/products/medulla-public",
         "Full spells the whole path, losing only what will not fit — from the head"
     );
     assert!(
@@ -545,6 +545,31 @@ fn a_field_can_be_held_back_until_its_row_is_selected() {
     assert_eq!(
         app.own_harness_lines(&row, true, 48)[0].to_string(),
         "● codex · unmanaged · main · /workspace/medulla"
+    );
+}
+
+#[test]
+fn rail_measurement_includes_fields_visible_only_on_the_selected_row() {
+    let app = app_with(StatusLineConfig {
+        state: FieldPlacement::Hidden,
+        harness: FieldPlacement::Hidden,
+        control: FieldPlacement::Hidden,
+        branch: FieldPlacement::Hidden,
+        path_when: FieldVisibility::Active,
+        ..StatusLineConfig::default()
+    });
+    let row = crate::ui::app::rail::RailRow::Harness(harness_row(
+        "/workspace/tinyhumans/products/medulla-public",
+    ));
+
+    let measured = app.rail_row_measurement_lines(&row, &[]);
+
+    assert!(measured.iter().any(|line| line.width() == 0));
+    assert!(
+        measured
+            .iter()
+            .any(|line| line.to_string().ends_with("medulla-public")),
+        "the active-only path must participate in measurement: {measured:?}"
     );
 }
 

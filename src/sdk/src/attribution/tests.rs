@@ -199,6 +199,11 @@ impl HookRepo {
             .env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "core.hooksPath")
             .env("GIT_CONFIG_VALUE_0", &self.hook_dir)
+            .env(
+                "GIT_CONFIG_PARAMETERS",
+                format!("'core.hooksPath={}'", self.hook_dir.display()),
+            )
+            .env("MEDULLA_GIT_CONFIG_BASE_PARAMETERS", "")
             .output()
             .expect("git invocation");
         assert!(
@@ -361,6 +366,11 @@ fn a_failing_repository_hook_still_blocks_the_commit() {
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "core.hooksPath")
         .env("GIT_CONFIG_VALUE_0", &repo.hook_dir)
+        .env(
+            "GIT_CONFIG_PARAMETERS",
+            format!("'core.hooksPath={}'", repo.hook_dir.display()),
+        )
+        .env("MEDULLA_GIT_CONFIG_BASE_PARAMETERS", "")
         .output()
         .expect("git commit");
 
@@ -413,6 +423,11 @@ fn a_tilde_in_the_repository_hooks_path_is_expanded() {
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "core.hooksPath")
         .env("GIT_CONFIG_VALUE_0", &repo.hook_dir)
+        .env(
+            "GIT_CONFIG_PARAMETERS",
+            format!("'core.hooksPath={}'", repo.hook_dir.display()),
+        )
+        .env("MEDULLA_GIT_CONFIG_BASE_PARAMETERS", "")
         .output()
         .expect("git commit");
     assert!(
@@ -442,6 +457,10 @@ fn inherited_git_config_entries_are_preserved() {
         ),
         ("GIT_CONFIG_KEY_1".to_string(), "safe.directory".to_string()),
         ("GIT_CONFIG_VALUE_1".to_string(), "*".to_string()),
+        (
+            "GIT_CONFIG_PARAMETERS".to_string(),
+            "'user.name=CI User'".to_string(),
+        ),
     ]);
     let env = super::attribution_env(true, &base);
 
@@ -464,6 +483,14 @@ fn inherited_git_config_entries_are_preserved() {
         env.get("MEDULLA_GIT_CONFIG_BASE_COUNT"),
         Some(&"2".to_string())
     );
+    assert_eq!(
+        env.get("MEDULLA_GIT_CONFIG_BASE_PARAMETERS"),
+        Some(&"'user.name=CI User'".to_string())
+    );
+    assert!(
+        env["GIT_CONFIG_PARAMETERS"].starts_with("'user.name=CI User' "),
+        "legacy inline config must be preserved: {env:?}"
+    );
 }
 
 /// With no inherited git config, our pair lands at slot zero.
@@ -480,6 +507,7 @@ fn a_clean_environment_puts_our_pair_at_slot_zero() {
         env.get("MEDULLA_GIT_CONFIG_BASE_COUNT"),
         Some(&"0".to_string())
     );
+    assert!(env["GIT_CONFIG_PARAMETERS"].contains("core.hooksPath="));
 }
 
 /// A malformed inherited count is treated as absent rather than appended after —

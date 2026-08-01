@@ -33,7 +33,7 @@ use medulla::sessions::{SessionClass, TurnStream};
 use medulla::tinyplace::HarnessProvider;
 use medulla::wrapper::tail::SessionTailer;
 
-use super::pty::{LaunchSpec, PtyManager};
+use super::pty::{HarnessControl, LaunchSpec, PtyManager};
 
 /// How often the transcript is polled while a turn runs.
 ///
@@ -186,11 +186,7 @@ impl PtySessionExecutor {
         // return sent in the same burst is absorbed by the paste, which leaves
         // the prompt sitting in the composer, complete and unsent.
         if let Err(err) = super::pty::inject_prompt(&self.sessions, &id, &options.prompt).await {
-            if class == SessionClass::Bounded {
-                self.sessions.close(&id);
-            } else {
-                self.sessions.release(&id);
-            }
+            self.finish_turn(&id, class);
             return Err(err);
         }
 
@@ -230,16 +226,24 @@ impl PtySessionExecutor {
         let outcome = self
             .await_turn(&id, provider, tailer, abort, on_event, timeout_ms)
             .await;
-        if class == SessionClass::Bounded {
-            // Bounded means bounded: the session dies with its reply.
-            self.sessions.close(&id);
-        } else {
-            // Free it for this peer's next turn. Released on the error path too:
-            // a session left claimed by a failed turn is never reusable again,
-            // and every later task would open a new harness.
-            self.sessions.release(&id);
-        }
+        self.finish_turn(&id, class);
         outcome
+    }
+
+    /// Settle executor ownership without destroying a session the operator took.
+    ///
+    /// Bounded task sessions normally die with their reply. Operator takeover
+    /// changes that lifetime: the PTY is now an interactive workspace, so the
+    /// executor may release its busy claim but must not close the process.
+    fn finish_turn(&self, id: &str, class: SessionClass) {
+        if class == SessionClass::Bounded && self.sessions.control(id) != Some(HarnessControl::User)
+        {
+            self.sessions.close(id);
+        } else {
+            // Free it for the operator or this peer's next turn. Released on
+            // error too: a failed turn left busy can never be reused again.
+            self.sessions.release(id);
+        }
     }
 
     /// Interrupt a running turn and take its session out of service.
@@ -271,6 +275,25 @@ impl PtySessionExecutor {
         options: &RunTaskOptions,
         class: SessionClass,
     ) -> Result<SessionPlan, String> {
+        // Exclusivity, and it comes first. A workspace an operator is working in
+        // is not available to the orchestrator at all — not "reuse nothing in
+        // it", but "start nothing in it". Checked ahead of the reuse branch
+        // below on purpose: a folder with a person in it is not shared, however
+        // idle some other harness sitting in it happens to look.
+        //
+        // Refused with the shared prefix rather than silently routed around, so
+        // the hub can settle it as `RunError::Held` and the orchestrator is told
+        // *why* it cannot work here — a task that vanishes into a retry with no
+        // reason is the failure this replaces.
+        if let Some(held) = self.sessions.operator_hold(&options.cwd) {
+            return Err(format!(
+                "{}: an operator is working in {} ({} session {})",
+                medulla::daemon::HARNESS_HELD_PREFIX,
+                options.cwd,
+                held.provider.as_str(),
+                held.id,
+            ));
+        }
         if class == SessionClass::Unbound {
             // Reuse this peer's session only when it is *idle*. A harness serves
             // one turn at a time: a fan-out that pastes three prompts into one
@@ -311,6 +334,11 @@ impl PtySessionExecutor {
             label,
             model: options.model.clone(),
             session_id: None,
+            // Opened to serve a task frame, so the orchestrator holds it. An
+            // operator can still take it over later; that is what stops the
+            // next frame landing in a composer they are typing in.
+            control: HarnessControl::Orchestrator,
+            user_spawned: false,
         }))
     }
 
@@ -336,7 +364,7 @@ impl PtySessionExecutor {
     }
 
     /// The environment and extra argv a fresh launch spawns with: this
-    /// executor's base environment, layered with the `[router]` injection the
+    /// task-scoped environment, layered with the `[router]` injection the
     /// headless executor already applies at its own spawn seam.
     ///
     /// Without this, switching the local host to `PtySessionExecutor` silently
@@ -354,15 +382,23 @@ impl PtySessionExecutor {
         &self,
         options: &RunTaskOptions,
     ) -> Result<(HashMap<String, String>, Vec<String>), String> {
-        let mut env = self.env.clone();
+        let mut env = options.env.clone();
         let mut extra_args = options.extra_args.clone();
+        // Commits made in a watched PTY session are just as much Medulla's work
+        // as headless ones, so this path carries the same attribution.
+        let attribution_env = medulla::attribution::attribution_env(options.attribution, &env);
+        env.extend(attribution_env);
+        extra_args.extend(medulla::attribution::attribution_args(
+            options.provider,
+            options.attribution,
+        ));
         if let Some(router) = &options.router {
             let injection = medulla::tinyplace::env::router_env(options.provider, router);
             for (key, value) in injection.env {
                 env.insert(key, value);
             }
             for (child_var, source_name) in injection.secret_env {
-                match self.env.get(&source_name).filter(|v| !v.is_empty()) {
+                match options.env.get(&source_name).filter(|v| !v.is_empty()) {
                     Some(secret) => {
                         env.insert(child_var, secret.clone());
                     }
@@ -404,6 +440,17 @@ impl PtySessionExecutor {
         let mut last_line_at = medulla::clock::now_millis();
 
         loop {
+            // Taking control is an ownership transfer, not merely a display
+            // preference. Yield before processing aborts or transcript output
+            // so the executor cannot send Ctrl-C, report a stale completion, or
+            // later close the PTY underneath the operator.
+            if self.sessions.control(id) == Some(HarnessControl::User) {
+                return Err(format!(
+                    "{}: operator took control of the {} session",
+                    medulla::daemon::HARNESS_HELD_PREFIX,
+                    provider.as_str()
+                ));
+            }
             if abort.is_aborted() {
                 // A real interrupt, not a kill: Ctrl-C reaches the harness the
                 // same way the operator's would, and the session survives it.

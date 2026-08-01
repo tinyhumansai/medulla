@@ -34,4 +34,4 @@ pub use loopback::{open_browser, run_login_flow, start_loopback, LoopbackListene
 pub use migrate::remove_retired_credentials;
 pub use token::{is_one_time_login_token, resolve_backend_token};
 pub use types::{Credentials, LoginError, LoopbackConfig, Provider, DEFAULT_LOGIN_TIMEOUT};
-pub use url::{describe_me, login_url, random_state_nonce, redirect_uri};
+pub use url::{describe_me, login_url, random_state_nonce, redirect_uri, user_id_from_me};

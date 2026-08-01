@@ -19,6 +19,23 @@ fn app() -> App {
     App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()))
 }
 
+#[test]
+fn harness_choice_window_keeps_the_selection_visible() {
+    assert_eq!(
+        super::harness_modals::harness_choice_window(20, 0, 13),
+        0..13
+    );
+    assert_eq!(
+        super::harness_modals::harness_choice_window(20, 10, 13),
+        4..17
+    );
+    assert_eq!(
+        super::harness_modals::harness_choice_window(20, 19, 13),
+        7..20
+    );
+    assert_eq!(super::harness_modals::harness_choice_window(2, 1, 13), 0..2);
+}
+
 fn lane(role: AgentRole) -> AgentLane {
     AgentLane {
         key: "k".into(),
@@ -70,7 +87,7 @@ fn an_unbacked_worker_is_unknown_and_a_roster_seeded_one_is_idle() {
     let a = app();
     // Nothing known at all.
     assert_eq!(a.lane_marker(&lane(AgentRole::Agent), false), "◆");
-    assert_eq!(a.lane_state(&lane(AgentRole::Agent)), " · idle");
+    assert_eq!(a.lane_state(&lane(AgentRole::Agent)), " · inactive");
 }
 
 #[test]
@@ -123,14 +140,14 @@ fn a_session_lane_reflects_its_peer_session_state() {
     live.parent_agent_id = Some("machine-1".to_string());
     assert_eq!(a.session_state(&live).as_deref(), Some("running"));
     assert_eq!(a.lane_marker(&live, false), "●");
-    assert_eq!(a.lane_state(&live), " · running");
+    assert_eq!(a.lane_state(&live), " · working");
 
-    // An ended session is hollow and reads as inactive.
+    // An ended session is terminal and reads as completed.
     let mut done = lane(AgentRole::Agent);
     done.session_id = Some("s-done".to_string());
     done.parent_agent_id = Some("machine-1".to_string());
     assert_eq!(a.lane_marker(&done, false), "○");
-    assert_eq!(a.lane_state(&done), " · inactive");
+    assert_eq!(a.lane_state(&done), " · completed");
 
     // A session id whose parent machine is unknown resolves to nothing, and the
     // row degrades to the pending suffix instead of claiming a state.

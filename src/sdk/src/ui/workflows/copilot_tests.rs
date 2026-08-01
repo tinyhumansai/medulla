@@ -14,6 +14,21 @@ fn asking_records_the_instruction_and_marks_the_thread_busy() {
 }
 
 #[test]
+fn one_of_two_overlapping_turns_finishing_keeps_the_thread_busy() {
+    let mut state = CopilotState::new("sweep");
+    state.ask("operator edit");
+    state.ask("automatic failure review");
+
+    state.reply("edit done");
+
+    assert!(state.busy);
+    assert_eq!(state.in_flight, 1);
+    state.reply("review done");
+    assert!(!state.busy);
+    assert_eq!(state.in_flight, 0);
+}
+
+#[test]
 fn a_reply_ends_the_turn() {
     let mut state = CopilotState::new("sweep");
     state.ask("go");
@@ -123,6 +138,98 @@ fn ordinary_progress_frames_stay_status_lines() {
 }
 
 #[test]
+fn streamed_thinking_snapshots_replace_one_compact_line() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("thinking · Checking the workflow.");
+    state.progress("thinking · Checking the workflow. It has four nodes.");
+
+    assert_eq!(state.turns.len(), 1);
+    assert_eq!(state.turns[0].role, TurnRole::Status);
+    assert_eq!(
+        state.turns[0].text,
+        "thinking · Checking the workflow. It has four nodes."
+    );
+}
+
+#[test]
+fn first_thinking_snapshot_is_bounded() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress(&format!("thinking · {}", "x".repeat(2_000)));
+
+    assert_eq!(state.turns.len(), 1);
+    assert!(state.turns[0].text.chars().count() <= MAX_THINKING_CHARS);
+    assert!(state.turns[0].text.starts_with("thinking · …"));
+}
+
+#[test]
+fn a_late_tool_detail_updates_the_matching_call_in_place() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("running Terminal\u{1f}shell-1");
+    state.progress("running Terminal · $ cargo test\u{1f}shell-1");
+
+    assert_eq!(state.turns.len(), 1);
+    assert_eq!(state.turns[0].text, "Terminal · $ cargo test");
+}
+
+#[test]
+fn a_tool_result_settles_the_latest_call_in_place() {
+    let mut state = CopilotState::new("sweep");
+    state.progress("running Terminal · $ cargo test");
+
+    state.progress("tool completed · 2.4 KiB output");
+
+    assert_eq!(state.turns.len(), 1);
+    assert_eq!(state.turns[0].role, TurnRole::ToolSuccess);
+    assert_eq!(
+        state.turns[0].text,
+        "Terminal · $ cargo test · 2.4 KiB output"
+    );
+}
+
+#[test]
+fn a_failed_tool_result_marks_the_call_and_keeps_the_exit_code() {
+    let mut state = CopilotState::new("sweep");
+    state.progress("running Terminal · $ cargo test");
+
+    state.progress("tool failed · exit 101");
+
+    assert_eq!(state.turns.len(), 1);
+    assert_eq!(state.turns[0].role, TurnRole::ToolFailure);
+    assert!(state.turns[0].text.ends_with("exit 101"));
+}
+
+#[test]
+fn an_ambiguous_result_does_not_settle_the_wrong_overlapping_tool() {
+    let mut state = CopilotState::new("sweep");
+    state.progress("running Read · first.rs");
+    state.progress("running Terminal · $ cargo test");
+
+    state.progress("tool failed · exit 2");
+
+    assert_eq!(state.turns[0].role, TurnRole::Tool);
+    assert_eq!(state.turns[1].role, TurnRole::Tool);
+    assert_eq!(state.turns[2].role, TurnRole::Status);
+    assert_eq!(state.turns[2].text, "tool failed · exit 2");
+}
+
+#[test]
+fn call_ids_settle_the_matching_overlapping_tool() {
+    let mut state = CopilotState::new("sweep");
+    state.progress("running Read · first.rs\u{1f}read-1");
+    state.progress("running Terminal · $ cargo test\u{1f}shell-1");
+
+    state.progress("tool failed · exit 2\u{1f}shell-1");
+    state.progress("tool completed\u{1f}read-1");
+
+    assert_eq!(state.turns[0].role, TurnRole::ToolSuccess);
+    assert_eq!(state.turns[1].role, TurnRole::ToolFailure);
+    assert!(state.turns[1].text.ends_with("exit 2"));
+}
+
+#[test]
 fn the_same_tool_called_twice_is_two_lines() {
     // Unlike a repeated status frame, which is a poll. Two calls are two things
     // that happened, and collapsing them under-reports the work.
@@ -164,14 +271,16 @@ fn every_role_has_a_glyph_and_a_colour_and_only_progress_is_dim() {
         TurnRole::Agent,
         TurnRole::Status,
         TurnRole::Tool,
+        TurnRole::ToolSuccess,
+        TurnRole::ToolFailure,
         TurnRole::Change,
         TurnRole::Error,
     ] {
         assert!(!role.glyph().is_empty(), "{role:?}");
         assert!(!role.color().is_empty(), "{role:?}");
-        // Both kinds of progress are secondary to what was asked, said, and
-        // changed — the three the eye should land on first.
-        let secondary = matches!(role, TurnRole::Status | TurnRole::Tool);
+        // Chatter is secondary; a concrete tool operation is part of the
+        // durable record of what the turn actually did.
+        let secondary = role == TurnRole::Status;
         assert_eq!(role.dim(), secondary, "{role:?}");
     }
 }

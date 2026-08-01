@@ -14,8 +14,9 @@ use std::time::{Duration, Instant};
 
 use medulla::tinyplace::HarnessProvider;
 
-use crate::worker::pty::{LaunchSpec, PtyManager};
+use crate::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 
+use super::super::HarnessChoice;
 use super::super::LocalHarnesses;
 
 /// A spec that runs `sh -c <script>` on a pty.
@@ -39,6 +40,8 @@ fn sh(script: &str) -> LaunchSpec {
         label: "test".to_string(),
         session_id: None,
         model: None,
+        control: HarnessControl::Orchestrator,
+        user_spawned: false,
     }
 }
 
@@ -64,7 +67,9 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         extra_args: Vec::new(),
         skip_permissions: false,
         router: None,
+        custom_harnesses: Vec::new(),
         budget: None,
+        attribution: true,
     };
     let run_task: medulla::daemon::providers::RunTaskFn =
         std::sync::Arc::new(|_| Box::pin(async { Err("not used in these tests".to_string()) }));
@@ -73,9 +78,133 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
     });
     LocalHarnesses {
         sessions,
-        runtime: medulla::daemon::DaemonRuntime::new(config, run_task, send),
+        runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
+            medulla::daemon::DaemonRuntime::new(config, run_task, send),
+        ])),
         hub_address: "medulla-orchestrator".to_string(),
+        env: HashMap::new(),
+        workspace: "/".to_string(),
+        providers: vec![HarnessProvider::Codex],
+        custom_harnesses: Vec::new(),
+        router: None,
+        attribution: true,
     }
+}
+
+#[test]
+fn picker_choices_include_every_native_provider_and_registered_preset() {
+    let mut harnesses = harnesses(PtyManager::new());
+    harnesses.providers = vec![
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+    ];
+    harnesses.custom_harnesses = vec![medulla::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek Codex | codex | deepseek/deepseek-chat | | this-device",
+    )
+    .unwrap()];
+
+    let choices = harnesses.choices();
+    let labels = choices
+        .iter()
+        .map(HarnessChoice::display_name)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        labels,
+        ["Claude Code", "Codex", "OpenCode", "DeepSeek Codex"]
+    );
+    assert_eq!(choices[3].id(), "deepseek");
+    assert_eq!(choices[3].provider, HarnessProvider::Codex);
+}
+
+#[test]
+fn registered_preset_supplies_its_router_key_and_model_environment() {
+    let mut harnesses = harnesses(PtyManager::new());
+    // This test is about the router injection, and attribution adds argv and
+    // environment of its own; it has its own tests below.
+    harnesses.attribution = false;
+    harnesses
+        .env
+        .insert("OPENROUTER_API_KEY".into(), "secret".into());
+    let preset = medulla::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek Claude | claude | deepseek/deepseek-chat | deepseek/fast | this-device",
+    )
+    .unwrap();
+
+    let (env, extra_args) = harnesses
+        .spawn_env(&HarnessChoice::custom(preset))
+        .expect("registered preset is launchable");
+
+    assert_eq!(env["ANTHROPIC_BASE_URL"], "https://openrouter.ai/api");
+    assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "secret");
+    assert_eq!(
+        env["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+        "deepseek/deepseek-chat"
+    );
+    assert_eq!(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "deepseek/fast");
+    assert!(extra_args.is_empty());
+}
+
+/// A harness the operator opens by hand is still one Medulla launched, and was
+/// the last spawn seam that produced unattributed commits with
+/// `attribution.commit = true` — the executor's own path had been fixed, this
+/// one had not.
+#[test]
+fn an_operator_started_harness_carries_commit_attribution() {
+    let harnesses = harnesses(PtyManager::new());
+
+    let (env, extra_args) = harnesses
+        .spawn_env(&HarnessChoice::native(HarnessProvider::Claude))
+        .expect("a native provider is launchable");
+
+    assert!(
+        env.get("MEDULLA_ATTRIBUTION")
+            .is_some_and(|v| v.contains("Co-authored-by: Medulla")),
+        "the child must carry the trailer: {env:?}"
+    );
+    assert_eq!(
+        env.get("GIT_CONFIG_KEY_0").map(String::as_str),
+        Some("core.hooksPath"),
+        "the hook is the mechanism of record and must be activated: {env:?}"
+    );
+    assert!(
+        env.contains_key("GIT_CONFIG_VALUE_0"),
+        "the hook directory must be named: {env:?}"
+    );
+    // Claude additionally takes the advisory `--settings` hint.
+    assert!(
+        extra_args.windows(2).any(|w| w[0] == "--settings"),
+        "claude also gets the inline settings hint: {extra_args:?}"
+    );
+}
+
+#[test]
+fn an_operator_started_harness_omits_attribution_when_configured_off() {
+    let mut harnesses = harnesses(PtyManager::new());
+    harnesses.attribution = false;
+
+    let (env, extra_args) = harnesses
+        .spawn_env(&HarnessChoice::native(HarnessProvider::Claude))
+        .expect("a native provider is launchable");
+
+    assert!(!env.contains_key("MEDULLA_ATTRIBUTION"), "{env:?}");
+    assert!(!env.contains_key("GIT_CONFIG_KEY_0"), "{env:?}");
+    assert!(extra_args.is_empty(), "{extra_args:?}");
+}
+
+/// Codex has no `--settings` equivalent, so its attribution is the hook alone.
+/// Inventing a flag for it would be a spawn that exits on an unknown argument.
+#[test]
+fn a_codex_harness_is_attributed_by_hook_without_extra_argv() {
+    let harnesses = harnesses(PtyManager::new());
+
+    let (env, extra_args) = harnesses
+        .spawn_env(&HarnessChoice::native(HarnessProvider::Codex))
+        .expect("a native provider is launchable");
+
+    assert!(env.contains_key("MEDULLA_ATTRIBUTION"), "{env:?}");
+    assert!(extra_args.is_empty(), "{extra_args:?}");
 }
 
 /// Spin until `check` passes or the deadline expires.

@@ -81,6 +81,8 @@ pub fn config(
         extra_args: Vec::new(),
         skip_permissions: false,
         router: None,
+        attribution: true,
+        custom_harnesses: Vec::new(),
         budget: None,
     }
 }
@@ -108,8 +110,11 @@ pub fn frame(
         correlation_id: correlation.map(str::to_string),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
+        conversation: None,
     }
 }
 
@@ -125,6 +130,34 @@ pub fn blocking_runner(ready: mpsc::UnboundedSender<()>, gate: Arc<Notify>) -> R
                 session_id: None,
                 usage: None,
                 provider: opts.provider,
+                reply: "done".to_string(),
+                events: 0,
+            })
+        })
+    })
+}
+
+/// A runner that blocks its **OS thread** for `held`, the way a real executor
+/// can.
+///
+/// Distinct from [`blocking_runner`], which awaits and so yields its thread. A
+/// pty write to a child that has stopped draining its stdin parks in the kernel,
+/// which pins the tokio worker running the task — and that is what strands
+/// anything the dispatcher spawned into the same worker's LIFO slot. Only a
+/// thread-blocking runner reproduces it.
+///
+/// `options` is held for the whole call, matching every real executor: it owns
+/// `on_event`, and with it the last status sender, so dropping it early would end
+/// the status consumer for an unrelated reason and mask what is under test.
+pub fn thread_blocking_runner(held: Duration) -> RunTaskFn {
+    Arc::new(move |options: RunTaskOptions| {
+        Box::pin(async move {
+            let options = options;
+            std::thread::sleep(held);
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: options.provider,
                 reply: "done".to_string(),
                 events: 0,
             })

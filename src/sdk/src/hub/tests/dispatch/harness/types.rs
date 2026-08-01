@@ -35,7 +35,7 @@ pub(in crate::hub::tests) enum Mode {
     InvalidSystemInfo,
     /// Answers a capability probe with the given [`AgentCapabilities`] (its
     /// budgets/readiness serialized into a `capabilities_result` frame).
-    Capabilities(AgentCapabilities),
+    Capabilities(Box<AgentCapabilities>),
     /// A third peer answers first, under the dispatch's own correlation id, and
     /// the real worker replies after it. Models the shared inbox: every contact
     /// of this identity can post to it, and correlation ids are not secrets.

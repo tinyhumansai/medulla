@@ -44,5 +44,9 @@ mod tests;
 
 pub use entry::run_daemon;
 pub use listener::{spawn_inbox_listener, ws_inbox_enabled, ListenerGuard, PushInbox, SeenIds};
-pub use status::{status_detail, work_detail, TOOL_PREFIX};
-pub use types::{DaemonConfig, DaemonRuntime, LogFn, NowFn, SendFn};
+pub(crate) use status::TOOL_CALL_ID_SEPARATOR;
+pub use status::{status_detail, work_detail, THINKING_PREFIX, TOOL_PREFIX};
+pub use types::{
+    DaemonConfig, DaemonRuntime, LogFn, NowFn, SendFn, CAPACITY_REJECTION_PREFIX,
+    HARNESS_HELD_PREFIX,
+};

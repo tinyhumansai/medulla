@@ -412,6 +412,40 @@ fn parses_every_workflow_verb_with_its_operand() {
 }
 
 #[test]
+fn workflow_defaults_reads_the_harness_and_model_flags() {
+    let parsed = parse_workflow_args(&argv(&[
+        "defaults",
+        "sweep",
+        "--harness",
+        "codex",
+        "--model",
+        "gpt-5-codex",
+    ]));
+
+    assert_eq!(parsed.action, WorkflowAction::Defaults("sweep".into()));
+    assert_eq!(parsed.harness.as_deref(), Some("codex"));
+    assert_eq!(parsed.model.as_deref(), Some("gpt-5-codex"));
+}
+
+#[test]
+fn workflow_defaults_with_no_flags_is_a_read() {
+    // Absent is not the same as empty: absent leaves the setting alone (so the
+    // verb prints it), empty clears it.
+    let parsed = parse_workflow_args(&argv(&["defaults", "sweep"]));
+
+    assert_eq!(parsed.action, WorkflowAction::Defaults("sweep".into()));
+    assert_eq!(parsed.harness, None);
+    assert_eq!(parsed.model, None);
+}
+
+#[test]
+fn workflow_defaults_clears_with_an_empty_string() {
+    let parsed = parse_workflow_args(&argv(&["defaults", "sweep", "--harness", ""]));
+
+    assert_eq!(parsed.harness.as_deref(), Some(""));
+}
+
+#[test]
 fn workflow_aliases_reach_the_same_actions() {
     assert_eq!(
         parse_workflow_args(&argv(&["show", "sweep"])).action,
@@ -497,6 +531,22 @@ fn workflow_flags_are_parsed_alongside_the_verb() {
     assert_eq!(parsed.input.as_deref(), Some("{\"n\":1}"));
     assert_eq!(parsed.run_id.as_deref(), Some("r9"));
     assert_eq!(parsed.config.as_deref(), Some("/tmp/c.toml"));
+
+    let missing = parse_workflow_args(&argv(&[
+        "note",
+        "sweep",
+        "--kind",
+        "--text",
+        "--reason",
+        "--supersedes",
+        "--run-id",
+        "r10",
+    ]));
+    assert_eq!(missing.kind, None);
+    assert_eq!(missing.text, None);
+    assert_eq!(missing.reason, None);
+    assert!(missing.supersedes.is_empty());
+    assert_eq!(missing.run_id.as_deref(), Some("r10"));
 }
 
 #[test]

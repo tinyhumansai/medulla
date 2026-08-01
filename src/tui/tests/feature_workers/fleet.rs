@@ -6,6 +6,10 @@
 //! twice; its hosts and harnesses are the Routing tab's Harnesses page, which
 //! reads the same capacity. These now assert the absence rather than the
 //! duplication.
+//!
+//! Both pages these render — Agent Templates and the Harnesses capacity view —
+//! are reachable from `ROUTING_SUBPAGES`. Only Workspaces is hidden, and its
+//! tests are the ignored ones.
 
 use crate::helpers::*;
 

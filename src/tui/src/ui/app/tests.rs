@@ -4,6 +4,7 @@
 use super::*;
 use std::sync::Arc;
 
+use super::types::RP_HARNESSES;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
@@ -51,6 +52,28 @@ fn every_tab_renders() {
 }
 
 #[test]
+fn harnesses_page_renders_custom_openrouter_presets_and_editor_controls() {
+    let mut a = app();
+    a.tab_index = tab("Hosts");
+    a.routing_index = RP_HARNESSES;
+    a.routing_focused = true;
+    a.credential_status.openrouter_api_key = true;
+    a.custom_harnesses = vec![medulla::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek via Claude | claude | deepseek/deepseek-chat | | this-device",
+    )
+    .expect("valid custom harness")];
+
+    let out = render(&mut a);
+
+    assert!(out.contains("Custom OpenRouter harnesses"));
+    assert!(out.contains("DeepSeek via Claude"));
+    assert!(out.contains("key connected"));
+    assert!(out.contains("a add"));
+    assert!(out.contains("e edit"));
+    assert!(!out.contains("sk-or-"));
+}
+
+#[test]
 fn slash_help_switches_tab() {
     let mut a = app();
     a.tab_index = 1;
@@ -85,6 +108,25 @@ fn typing_inserts_into_draft() {
     assert_eq!(a.draft.text, "hi");
     a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
     assert_eq!(a.draft.text, "hi\n");
+}
+
+#[test]
+fn enter_on_a_harness_uses_the_attach_path_in_normal_mode() {
+    let mut a = app();
+    a.tab_index = tab("Agents");
+    a.focus_agents_rail();
+    // The render pass records the harness behind the visible pane. A vanished
+    // session exercises the refusal path without opening a real child here;
+    // importantly, Enter is still consumed as an attach attempt instead of
+    // returning to the composer or submitting a turn.
+    a.harness_pane_session = Some("just-exited".to_string());
+
+    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(cmd.is_none());
+    assert!(a.agents_rail_focused());
+    assert!(a.status().contains("harness has exited"), "{}", a.status());
+    assert_eq!(a.attached_harness(), None);
 }
 
 #[test]
@@ -125,10 +167,27 @@ fn clicking_a_context_chunk_selects_it() {
     assert_eq!(a.context_index, 1);
 }
 
+#[cfg(feature = "workflows")]
+#[test]
+fn the_wheel_scrolls_the_workflow_preview_only_when_the_pointer_is_over_it() {
+    let mut a = app();
+    a.tab_index = tab("Workflows");
+    a.hit_workflow_preview = Some(ratatui::layout::Rect::new(40, 10, 30, 12));
+
+    a.scroll_at(50, 15, false);
+    assert_eq!(a.wf.preview_scroll, 3);
+
+    a.scroll_at(10, 15, false);
+    assert_eq!(a.wf.preview_scroll, 3);
+
+    a.scroll_at(50, 15, true);
+    assert_eq!(a.wf.preview_scroll, 0);
+}
+
 #[test]
 fn routing_strategies_render_host_and_subscription_groups() {
     let mut a = app();
-    a.tab_index = tab("Routing");
+    a.tab_index = tab("Hosts");
     a.routing_index = types::RP_STRATEGIES;
     a.routing_focused = true;
 
@@ -144,7 +203,7 @@ fn subscription_strategy_navigation_persists_and_emits_its_own_operation() {
     let dir = tempfile::tempdir().unwrap();
     let mut a = app();
     a.set_config_path(dir.path().join("config.toml"));
-    a.tab_index = tab("Routing");
+    a.tab_index = tab("Hosts");
     a.routing_index = types::RP_STRATEGIES;
     a.routing_focused = true;
 

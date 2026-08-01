@@ -4,49 +4,65 @@
 //! itself is only a registry: find the handle, drop the registry lock, call a
 //! method. See [`types`] for why the state is split the way it is.
 
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicU8, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 use medulla::tinyplace::HarnessProvider;
 use portable_pty::{Child, MasterPty, PtySize};
 
 use super::sync::lock;
-use super::types::{PtyState, SessionRow};
+use super::types::{HarnessControl, PtyState, SessionRow};
 
 mod screen;
 mod types;
 
-pub use types::SessionHandle;
 pub(crate) use types::{ColdFields, SessionIo, SessionMeta};
+pub use types::{SessionHandle, MAX_QUEUED_WRITE_BYTES};
 use types::{NO_EXIT_CODE, STATE_EXITED, STATE_FAILED, STATE_RUNNING};
 
 impl SessionHandle {
     /// Build a handle for a child that has just been spawned.
+    ///
+    /// `writes` is the sending half of the queue the session's writer thread
+    /// drains, and `queued_bytes` the budget they share; see
+    /// [`SessionIo::writes`].
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         meta: SessionMeta,
+        label: String,
         session_id: Option<String>,
+        control: HarnessControl,
         screen: vt100::Parser,
         master: Box<dyn MasterPty + Send>,
-        writer: Box<dyn std::io::Write + Send>,
+        writes: Sender<Vec<u8>>,
+        queued_bytes: Arc<AtomicUsize>,
         child: Box<dyn Child + Send + Sync>,
     ) -> Self {
         let started_at = meta.started_at;
+        // Opened because a turn is about to run in it. Claimed here so a
+        // concurrent task cannot take it in the gap before that turn starts.
+        //
+        // Not so for an operator-spawned session: nothing is about to run in it,
+        // it is sitting at a prompt waiting to be typed in. Leaving it claimed
+        // would make the rail read "busy" for a harness that is plainly idle.
+        let busy = !meta.user_spawned;
         SessionHandle {
             meta,
             state: AtomicU8::new(STATE_RUNNING),
             exit_code: AtomicI64::new(NO_EXIT_CODE),
             last_output_at: AtomicI64::new(started_at),
             generation: AtomicU64::new(0),
-            // Opened because a turn is about to run in it. Claimed here so a
-            // concurrent task cannot take it in the gap before that turn starts.
-            busy: AtomicBool::new(true),
+            busy: AtomicBool::new(busy),
+            operator_held: AtomicBool::new(control == HarnessControl::User),
+            queued_bytes,
             cold: Mutex::new(ColdFields {
+                label,
                 session_id,
                 last_error: None,
             }),
             screen: Mutex::new(screen),
-            io: Mutex::new(Some(SessionIo { master, writer })),
+            io: Mutex::new(Some(SessionIo { master, writes })),
             child: Mutex::new(Some(child)),
         }
     }
@@ -56,9 +72,15 @@ impl SessionHandle {
         &self.meta.id
     }
 
-    /// The list label — the peer's id.
-    pub fn label(&self) -> &str {
-        &self.meta.label
+    /// The list label — the peer's id, or `you:<harness>` for one an operator
+    /// started.
+    pub fn label(&self) -> String {
+        lock(&self.cold).label.clone()
+    }
+
+    /// The working directory the child runs in.
+    pub fn cwd(&self) -> &str {
+        &self.meta.cwd
     }
 
     /// Which harness is running.
@@ -114,17 +136,84 @@ impl SessionHandle {
         self.busy.load(Ordering::Acquire)
     }
 
-    /// Take this session for a turn, if it is free and alive.
+    /// Who holds this session right now.
+    pub fn control(&self) -> HarnessControl {
+        if self.operator_held.load(Ordering::Acquire) {
+            HarnessControl::User
+        } else {
+            HarnessControl::Orchestrator
+        }
+    }
+
+    /// Hand the session to `control`.
+    ///
+    /// Deliberately leaves `busy` alone. The two flags answer different
+    /// questions — `busy` is "is a turn running in it", control is "who is
+    /// allowed to start one" — and a session taken over mid-turn is still
+    /// running that turn. Clearing `busy` on handback would advertise a harness
+    /// as free while it was still finishing someone else's work.
+    pub(super) fn set_control(&self, control: HarnessControl) {
+        self.operator_held
+            .store(control == HarnessControl::User, Ordering::Release);
+    }
+
+    /// Whether this session may serve `label`'s next turn.
+    ///
+    /// Its own label, or the synthetic `you:<harness>` one of a handed-back
+    /// operator session that has not served a real conversation yet — see
+    /// [`adopt_label`](Self::adopt_label).
+    pub(super) fn serves_label(&self, label: &str) -> bool {
+        let cold = lock(&self.cold);
+        cold.label == label || (self.meta.user_spawned && cold.label.starts_with("you:"))
+    }
+
+    /// Adopt `label` if this is a handed-back operator session still carrying
+    /// its synthetic one.
+    ///
+    /// Called by the winner of [`try_claim`](Self::try_claim), so the rename
+    /// happens once and under the same claim that made it exclusive. After it,
+    /// reuse obeys the same exact-label rule as every task-spawned session —
+    /// adoption must not turn one harness into a cross-conversation pool.
+    pub(super) fn adopt_label(&self, label: &str) {
+        let mut cold = lock(&self.cold);
+        if self.meta.user_spawned && cold.label.starts_with("you:") {
+            cold.label = label.to_string();
+        }
+    }
+
+    /// Take this session for a turn, if it is free, alive, and the
+    /// orchestrator's to take.
     ///
     /// A single compare-exchange, which is what makes the claim atomic without
     /// the registry lock the old find-and-claim needed: two tasks racing for the
     /// same idle session cannot both win, because only one CAS can succeed.
+    ///
+    /// A session the operator holds is never claimed, however idle it looks.
+    /// That is the whole of the unmanaged-harness feature and the whole of
+    /// takeover: without it, attaching to a pane and typing does not stop the
+    /// orchestrator pasting a task prompt into the same composer — the exact
+    /// two-writers collision `busy` exists to prevent, reachable by an operator
+    /// simply focusing a harness.
+    /// Control is checked again *after* the claim lands, and the claim given
+    /// back if it changed: an operator who takes a harness in the window between
+    /// the two must win it, because the alternative is a prompt pasted into
+    /// their composer a moment after they started typing.
     pub(super) fn try_claim(&self) -> bool {
-        self.is_running()
-            && self
-                .busy
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
+        if !self.is_running() || !self.control().is_orchestrator() {
+            return false;
+        }
+        if self
+            .busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return false;
+        }
+        if self.control().is_orchestrator() {
+            return true;
+        }
+        self.release();
+        false
     }
 
     /// Mark the session free for the next turn.
@@ -148,20 +237,34 @@ impl SessionHandle {
         }
     }
 
+    /// Record why a queued write never reached the child.
+    ///
+    /// The write half is drained by a thread (see the manager's `spawn_writer`),
+    /// so a failed write has no caller to return to — this row field is where it
+    /// is kept instead. Last-one-wins: the interesting failure is the current
+    /// one, and a session whose pty has stopped accepting bytes will not recover
+    /// to produce a different one.
+    pub(super) fn record_error(&self, error: String) {
+        lock(&self.cold).last_error = Some(error);
+    }
+
     /// The operator-facing projection of this session, for the list pane.
     pub fn row(&self) -> SessionRow {
         let cold = lock(&self.cold);
         SessionRow {
             id: self.meta.id.clone(),
-            label: self.meta.label.clone(),
+            label: cold.label.clone(),
             provider: self.meta.provider,
             state: self.state(),
             cwd: self.meta.cwd.clone(),
+            branch: self.meta.branch.clone(),
             session_id: cold.session_id.clone(),
             started_at: self.meta.started_at,
             last_output_at: self.last_output_at(),
             last_error: cold.last_error.clone(),
             busy: self.is_busy(),
+            control: self.control(),
+            user_spawned: self.meta.user_spawned,
         }
     }
 
@@ -194,11 +297,13 @@ impl SessionHandle {
     /// global lock, which showed up as the whole TUI freezing when a session
     /// ended.
     ///
-    /// The pty ends are dropped here too. They are two file descriptors per
-    /// session and nothing reads them once the child is gone, but they used to
-    /// be held until an operator pressed the key that forgot the session — so a
-    /// worker serving a long fan-out leaked a pair per finished task until it
-    /// could not open any more.
+    /// The pty ends are dropped here too. They are file descriptors, and nothing
+    /// reads or writes them once the child is gone, but they used to be held
+    /// until an operator pressed the key that forgot the session — so a worker
+    /// serving a long fan-out leaked a pair per finished task until it could not
+    /// open any more. Dropping them also drops the write queue's sender, which
+    /// is what ends the writer thread rather than leaving it parked on a receive
+    /// nothing will ever satisfy.
     pub(super) fn reap(&self, now: i64) {
         let child = lock(&self.child).take();
         let code = child
@@ -214,27 +319,75 @@ impl SessionHandle {
         *lock(&self.io) = None;
     }
 
-    /// Write raw bytes to the pty.
+    /// Queue raw bytes for the pty — the focused pane's keystrokes, and the
+    /// prompts [`inject_prompt`](super::inject_prompt) pastes.
     ///
-    /// Only this session's `io` lock is held, and deliberately so. `write_all`
-    /// on a pty master **blocks** when the child is not draining its input — mid
-    /// tool call, stopped on a modal, or simply slow — and the kernel's tty
-    /// buffer is only a few kilobytes, which an injected prompt can exceed on
-    /// its own. Under the old single lock that parked every reader thread, every
-    /// render frame, and every other session behind one wedged child.
+    /// Returns as soon as the bytes are queued; the session's writer thread
+    /// performs the write. Nothing here blocks, and that is the point twice
+    /// over. `write_all` on a pty master **parks in the kernel** when the child
+    /// is not draining its input — mid tool call, stopped on a modal, or simply
+    /// still loading — and the tty buffer is only a few kilobytes, which an
+    /// injected prompt can exceed on its own. Giving every session its own locks
+    /// stops that stalling *other* sessions; handing the write to a thread stops
+    /// it stalling the *caller*, which on the keystroke path is the render
+    /// thread.
+    ///
+    /// Queueing cannot block, so the queue is bounded by *refusal* instead:
+    /// [`MAX_QUEUED_WRITE_BYTES`] of unwritten bytes per session, past which a
+    /// write is rejected rather than waited out. A child that never drains its
+    /// stdin therefore cannot make this grow without limit.
+    ///
+    /// # Errors
+    ///
+    /// When the session has exited, when `bytes` alone exceeds the queue, when
+    /// the queue is already full, or when the writer thread is gone. A failure
+    /// of the *write itself* has no caller left to reach and is recorded on the
+    /// row's `last_error` instead.
     pub(super) fn write(&self, bytes: &[u8]) -> Result<(), String> {
+        // Refused before anything is copied: a write larger than the whole budget
+        // can never be admitted, however empty the queue is, and saying so here
+        // beats reserving and unwinding.
+        if bytes.len() > MAX_QUEUED_WRITE_BYTES {
+            return Err(format!(
+                "{}: {} bytes is more than the {MAX_QUEUED_WRITE_BYTES}-byte write queue holds",
+                self.meta.id,
+                bytes.len()
+            ));
+        }
         if !self.is_running() {
             return Err(format!("{} has exited", self.meta.id));
         }
-        let mut io = lock(&self.io);
-        let Some(io) = io.as_mut() else {
-            return Err(format!("{} has exited", self.meta.id));
+        // The queue handle is cloned out and the guard dropped *before* the send,
+        // so even this session's own lock is held for a clone and nothing more.
+        let writes = {
+            let io = lock(&self.io);
+            let Some(io) = io.as_ref() else {
+                return Err(format!("{} has exited", self.meta.id));
+            };
+            io.writes.clone()
         };
-        use std::io::Write as _;
-        io.writer
-            .write_all(bytes)
-            .and_then(|()| io.writer.flush())
-            .map_err(|err| format!("{}: {err}", self.meta.id))
+        // Reserved before queueing, and atomically, so two concurrent writers
+        // cannot both observe room and both take it.
+        if self
+            .queued_bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                let wanted = queued + bytes.len();
+                (wanted <= MAX_QUEUED_WRITE_BYTES).then_some(wanted)
+            })
+            .is_err()
+        {
+            return Err(format!(
+                "{}: the write queue is full ({MAX_QUEUED_WRITE_BYTES} bytes unwritten) — \
+                 the harness is not reading its input",
+                self.meta.id
+            ));
+        }
+        // Fails only if the writer thread has stopped, which means the pty stopped
+        // accepting bytes. Worth reporting: the caller's keystrokes went nowhere.
+        writes.send(bytes.to_vec()).map_err(|_| {
+            self.queued_bytes.fetch_sub(bytes.len(), Ordering::AcqRel);
+            format!("{}: the writer thread is gone", self.meta.id)
+        })
     }
 
     /// Resize the pty and the emulator together.

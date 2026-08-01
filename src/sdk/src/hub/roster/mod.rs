@@ -21,12 +21,30 @@ use serde_json::{json, Value};
 /// orchestrator only auto-assigns an untargeted task to an agent whose
 /// availability is exactly `"online"`, and a blank one would be silently
 /// excluded from every fan-out.
-fn to_agent(w: &HubWorker) -> Value {
+fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
+    // The roles this worker was toggled on for, resolved against the catalog.
+    // An id with no template behind it is dropped rather than advertised: a
+    // role the orchestrator cannot look up is a routing hint it cannot act on.
+    let roles: Vec<&crate::runtime::AgentTemplate> = w
+        .roles
+        .iter()
+        .filter_map(|id| catalog.iter().find(|t| &t.id == id))
+        .collect();
     // `metadata.workspace` is what places the agent: the backend turns it into a
     // WorkspaceDescriptor and sets the agent's `workspaceId` from it. Omitted
     // rather than sent empty when unknown, so the backend falls through to the
     // worker's probed `capabilities.cwd` instead of placing it at "".
     let mut metadata = json!({ "address": w.address, "harness": w.harness });
+    // The role ids, not just their text. The description and tags are what the
+    // model reads; the ids are what anything downstream joins on — asking for a
+    // role by name, or applying its tools and instructions at delegate time.
+    //
+    // The *resolved* ids, for that reason. Advertising an id the catalog does
+    // not have hands a joiner a key with nothing behind it, which is the same
+    // unactionable hint the description and tags already drop.
+    if !roles.is_empty() {
+        metadata["roles"] = json!(roles.iter().map(|t| t.id.as_str()).collect::<Vec<_>>());
+    }
     if let Some(workspace) = w
         .workspace
         .as_deref()
@@ -34,6 +52,33 @@ fn to_agent(w: &HubWorker) -> Value {
         .filter(|p| !p.is_empty())
     {
         metadata["workspace"] = json!(workspace);
+    }
+    // Who holds the harness, and only when that is a person. Absent means the
+    // orchestrator has it, which is both the common case and the one worth
+    // keeping byte-stable: this advert is re-emitted on every roster mutation,
+    // and a key that flips on each one is a diff nobody can read.
+    if w.control.is_operator() {
+        metadata["control"] = json!(w.control.as_str());
+        if let Some(reason) = w
+            .control_reason
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+        {
+            metadata["controlReason"] = json!(reason);
+        }
+        if let Some(since) = w.control_since {
+            metadata["controlSince"] = json!(since);
+        }
+    }
+    // The brief from the last handback. Carried only while the orchestrator
+    // actually holds the harness: an invitation to continue work in a workspace
+    // the operator has since re-taken is one the orchestrator cannot act on, and
+    // planning against it wastes a pass.
+    if let (false, Some(handoff)) = (w.control.is_operator(), w.handoff.as_ref()) {
+        if let Ok(value) = serde_json::to_value(handoff) {
+            metadata["handoff"] = value;
+        }
     }
     json!({
         "id": w.id,
@@ -43,11 +88,43 @@ fn to_agent(w: &HubWorker) -> Value {
         // here. Unlabelled, the two coincide and there is nothing to get wrong;
         // labelled, the id is a visible slug of the name.
         "name": w.label.clone().unwrap_or_else(|| w.id.clone()),
-        "description": format!("{} daemon", w.harness),
+        // What this worker is *for*, when the operator has said. The harness is
+        // how work runs; the role is what work it should get, and only the
+        // second is something the orchestrator can route on. With no roles
+        // chosen this is the harness line it always was — an unspecified worker
+        // stays a general one rather than being described as nothing.
+        "description": if roles.is_empty() {
+            format!("{} daemon", w.harness)
+        } else {
+            roles
+                .iter()
+                .map(|t| t.description.trim())
+                .filter(|d| !d.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ")
+        },
         "availability": "online",
-        "tags": ["code"],
+        // `code` is kept whatever else is set: every one of these runs a coding
+        // harness, and dropping it would take a role-tagged worker out of the
+        // fan-outs that ask for code.
+        "tags": role_tags(&roles),
         "metadata": metadata,
     })
+}
+
+/// The tag set a worker advertises: `code`, plus each role's own tags.
+///
+/// Deduplicated and ordered, so two roles sharing a tag advertise it once and
+/// the list does not reshuffle between registrations for no reason.
+fn role_tags(roles: &[&crate::runtime::AgentTemplate]) -> Vec<String> {
+    let mut tags = vec!["code".to_string()];
+    for tag in roles.iter().flat_map(|t| t.tags.iter()) {
+        let tag = tag.trim();
+        if !tag.is_empty() && !tags.iter().any(|held| held == tag) {
+            tags.push(tag.to_string());
+        }
+    }
+    tags
 }
 
 /// The `register_agents` payload for the roster, minus anything known to be down.
@@ -69,9 +146,14 @@ fn to_agent(w: &HubWorker) -> Value {
 pub(super) fn register_payload(
     workers: &[HubWorker],
     online: &std::collections::HashMap<String, bool>,
+    catalog: &[crate::runtime::AgentTemplate],
 ) -> Value {
     let reachable = workers.iter().filter(|w| is_reachable(w, online));
-    json!({ "agents": reachable.map(to_agent).collect::<Vec<_>>() })
+    json!({
+        "agents": reachable
+            .map(|w| to_agent(w, catalog))
+            .collect::<Vec<_>>()
+    })
 }
 
 /// Whether `w` should be advertised, given what presence reported.

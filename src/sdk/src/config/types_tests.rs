@@ -45,6 +45,20 @@ fn defaults_are_applied() {
     );
     assert_eq!(cfg.medulla.context_window(), 1_000_000);
     assert!(cfg.workflow.workspaces.is_empty());
+    assert!(cfg.workflows.allow_code);
+    assert!(cfg.appearance.show_harness_branch);
+    assert!(cfg.appearance.show_harness_path);
+}
+
+#[test]
+fn appearance_harness_details_parse_independently() {
+    let cfg: TuiConfig = serde_json::from_str(
+        r#"{"appearance":{"showHarnessBranch":false,"showHarnessPath":true}}"#,
+    )
+    .unwrap();
+
+    assert!(!cfg.appearance.show_harness_branch);
+    assert!(cfg.appearance.show_harness_path);
 }
 
 #[test]
@@ -52,6 +66,20 @@ fn workflow_workspaces_parse_for_daemon_workers() {
     let cfg: TuiConfig =
         serde_json::from_str(r#"{"workflow":{"workspaces":["/one","/two"]}}"#).unwrap();
     assert_eq!(cfg.workflow.workspaces, vec!["/one", "/two"]);
+}
+
+#[test]
+fn harness_recent_workspaces_round_trip_as_picker_history() {
+    let cfg: TuiConfig =
+        serde_json::from_str(r#"{"harness":{"recentWorkspaces":["/work/second","/work/first"]}}"#)
+            .unwrap();
+    assert_eq!(
+        cfg.harness.recent_workspaces,
+        ["/work/second", "/work/first"]
+    );
+
+    let encoded = serde_json::to_string(&cfg).unwrap();
+    assert!(encoded.contains("\"recentWorkspaces\""));
 }
 
 #[test]

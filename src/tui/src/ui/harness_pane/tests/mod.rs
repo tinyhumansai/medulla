@@ -1,6 +1,7 @@
 //! Unit tests for the embedded harness pane, split so no file exceeds the
 //! repo's 500-line ceiling: this module covers key encoding, mouse-wheel
-//! encoding, and focus; [`session`] drives a real child on a real
+//! encoding, and focus; [`buttons`] covers click/drag/release encoding and the
+//! per-mode gate on it; [`session`] drives a real child on a real
 //! pseudo-terminal to cover the session-facing half of [`super::LocalHarnesses`].
 //!
 //! The encoder is where a mistake is invisible until an operator is sitting in
@@ -16,6 +17,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 // half of its tests is not.
 #[cfg(unix)]
 mod session;
+
+mod buttons;
 
 use super::keys::{encode, is_focus_chord};
 use super::mouse;

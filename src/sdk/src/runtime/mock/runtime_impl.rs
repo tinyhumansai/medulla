@@ -1,13 +1,17 @@
 //! The [`Runtime`] trait implementation for [`MockRuntime`]: snapshotting,
-//! subscription, the scripted submit/abort/session lifecycle, and forking.
-//! This is the behaviour half of the mock; the data model it drives lives in
-//! [`super::types`].
+//! subscription, the scripted submit/abort/session lifecycle, forking, and the
+//! scripted feedback board. This is the behaviour half of the mock; the data
+//! model it drives lives in [`super::types`].
 
 use std::collections::HashMap;
 
 use futures::future::BoxFuture;
 use tokio::sync::broadcast;
 
+use crate::client::{
+    FeedbackComment, FeedbackDetail, FeedbackItem, FeedbackPage, FeedbackQuery, FeedbackSubmission,
+    FeedbackType,
+};
 use crate::runtime::{ContextItem, CycleResultSummary, Runtime, RuntimeSnapshot};
 use crate::ui::chat_store::{ChatMessage, MainChatSummary};
 use crate::ui::events::{TuiEvent, Usage};
@@ -127,6 +131,29 @@ impl Runtime for MockRuntime {
         })
     }
 
+    /// Record the brief instead of sending it, and succeed.
+    ///
+    /// The offline demo has no hub, but a handoff that reported failure here
+    /// would make every mocked end-to-end test assert the error path rather than
+    /// the feature.
+    fn hand_off_harness(
+        &self,
+        brief: crate::hub::HarnessHandoff,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        self.record("hand_off_harness");
+        self.record_handoff(brief);
+        Box::pin(async { Ok(()) })
+    }
+
+    fn hold_harness(
+        &self,
+        _workspace: String,
+        _reason: Option<String>,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        self.record("hold_harness");
+        Box::pin(async { Ok(()) })
+    }
+
     fn abort(&self) {
         self.record("abort");
         {
@@ -176,6 +203,49 @@ impl Runtime for MockRuntime {
     fn answer_question(&self, cycle_id: String, question_id: String, body: String) {
         self.record(&format!("answer_question:{cycle_id}:{question_id}:{body}"));
         self.ping();
+    }
+
+    // --- feedback board (scripted; see [`super::feedback`]) ----------------
+
+    fn list_feedback(
+        &self,
+        query: FeedbackQuery,
+    ) -> BoxFuture<'static, anyhow::Result<Option<FeedbackPage>>> {
+        let page = self.mock_list(&query);
+        Box::pin(async move { Ok(Some(page)) })
+    }
+
+    fn feedback_detail(&self, id: String) -> BoxFuture<'static, anyhow::Result<FeedbackDetail>> {
+        let result = self.mock_detail(&id);
+        Box::pin(async move { result })
+    }
+
+    fn vote_feedback(
+        &self,
+        id: String,
+        value: i8,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackItem>> {
+        let result = self.mock_vote(&id, value);
+        Box::pin(async move { result })
+    }
+
+    fn comment_feedback(
+        &self,
+        id: String,
+        body: String,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackComment>> {
+        let result = self.mock_comment(&id, &body);
+        Box::pin(async move { result })
+    }
+
+    fn submit_feedback(
+        &self,
+        kind: FeedbackType,
+        title: String,
+        body: String,
+    ) -> BoxFuture<'static, anyhow::Result<FeedbackSubmission>> {
+        let result = self.mock_submit(kind, &title, &body);
+        Box::pin(async move { Ok(result) })
     }
 
     fn list_main_chats(&self) -> BoxFuture<'static, anyhow::Result<Vec<MainChatSummary>>> {

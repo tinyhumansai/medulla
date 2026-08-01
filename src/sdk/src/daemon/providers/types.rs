@@ -139,6 +139,10 @@ pub struct RunTaskOptions {
     /// from this run's `env` by name) into the child's environment at spawn.
     /// `None` (the default) means routing is off and the child spawns unchanged.
     pub router: Option<RouterConfig>,
+    /// Whether commits this run makes are attributed to Medulla — the resolved
+    /// `attribution.commit` config value (on by default; see
+    /// [`crate::config::AttributionConfig`]).
+    pub attribution: bool,
     /// Fired for each parsed semantic event — drives periodic status frames.
     pub on_event: Option<OnEvent>,
     /// Register a stdin channel for `input`-frame forwarding into the child.
@@ -193,4 +197,5 @@ pub(super) struct RunSpec {
     pub(super) resume_session_id: Option<String>,
     pub(super) abort: Abort,
     pub(super) router: Option<RouterConfig>,
+    pub(super) attribution: bool,
 }

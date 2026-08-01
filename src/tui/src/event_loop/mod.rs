@@ -30,6 +30,7 @@ use types::AppMsg;
 pub(crate) use types::{SessionExit, SessionWiring};
 use update_checker::spawn_update_checker;
 
+pub(crate) use cmd_dispatch::clear_copilot_hosts;
 use cmd_dispatch::run_cmd;
 
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
@@ -42,6 +43,7 @@ pub(crate) async fn run(
 ) -> anyhow::Result<SessionExit> {
     let SessionWiring {
         loaded,
+        local_hosts,
         startup_status,
         tinyplace_obs,
         config_path,
@@ -94,7 +96,26 @@ pub(crate) async fn run(
             maybe_event = reader.next() => {
                 if let Some(Ok(ev)) = maybe_event {
                     if let Some(cmd) = app.on_event(ev) {
-                        run_cmd(cmd, &runtime, &app.loaded.config.workflows, &msg_tx);
+                        run_cmd(
+                            cmd,
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
+                    }
+                    // Commands raised by handlers that cannot return one — the
+                    // handback prompt, the harness key layer, the mouse path.
+                    // Drained here, in submission order, so they run against the
+                    // same state the event that produced them left behind.
+                    while let Some(cmd) = app.take_pending_cmd() {
+                        run_cmd(
+                            cmd,
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
                     }
                 }
             }
@@ -102,7 +123,13 @@ pub(crate) async fn run(
                 if recv.is_ok() {
                     app.refresh_snapshot();
                     if should_refresh_context(&mut app) {
-                        run_cmd(Cmd::InspectContext, &runtime, &app.loaded.config.workflows, &msg_tx);
+                        run_cmd(
+                            Cmd::InspectContext,
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
                     }
                 }
             }
@@ -121,7 +148,10 @@ pub(crate) async fn run(
                         app.refresh_snapshot();
                         app.set_status(s);
                     }
-                    AppMsg::TasksLoaded(document) => app.set_tasks(document),
+                    #[cfg(feature = "workflows")]
+                    AppMsg::CopilotStarted { workflow, instruction } => {
+                        app.copilot_started(&workflow, &instruction);
+                    }
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotStatus { workflow, line } => {
                         app.copilot_status(&workflow, line);
@@ -132,10 +162,82 @@ pub(crate) async fn run(
                         reply,
                         changes,
                         created,
-                    } => app.copilot_finished(&workflow, reply, changes, created),
+                        removed,
+                    } => {
+                        // The conversation follows the workflow. A create turn
+                        // ran on a sentinel thread because there was no id yet;
+                        // now there is one, so the harness session moves onto it
+                        // and the operator's follow-up is turn two of the same
+                        // conversation rather than turn one of a new one.
+                        if let Some(created) = &created {
+                            cmd_dispatch::adopt_copilot_host(&workflow, created);
+                        }
+                        // Nothing left to continue, and no reason to keep a
+                        // daemon and its harness processes alive for it.
+                        if removed {
+                            cmd_dispatch::close_copilot_host(&workflow);
+                        }
+                        // A queued follow-up comes back as a command to run:
+                        // the drain happens after the catalogue refresh, so it
+                        // sees the graph this turn left behind.
+                        let queued = app.copilot_finished(&workflow, reply, changes, created);
+                        if let Some(cmd) = queued {
+                            run_cmd(
+                                cmd,
+                                &runtime,
+                                &app.loaded.config.workflows,
+                                &msg_tx,
+                                local_hosts.as_ref(),
+                            );
+                        }
+                    }
                     #[cfg(feature = "workflows")]
-                    AppMsg::CopilotFailed { workflow, error } => {
-                        app.copilot_failed(&workflow, error);
+                    AppMsg::CopilotFailed {
+                        workflow,
+                        instruction,
+                        error,
+                    } => {
+                        app.copilot_failed(&workflow, instruction, error);
+                    }
+                    #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowsChanged => app.reload_workflows(),
+                    AppMsg::FeedbackLoaded { query, page } => {
+                        if !app.set_feedback_page(query, page) {
+                            continue;
+                        }
+                        // Pull the newly selected row's comments in the same beat.
+                        if let Some(cmd) = app.feedback_detail_cmd() {
+                            run_cmd(
+                                cmd,
+                                &runtime,
+                                &app.loaded.config.workflows,
+                                &msg_tx,
+                                local_hosts.as_ref(),
+                            );
+                        }
+                    }
+                    AppMsg::FeedbackComments { id, comments } => {
+                        app.set_feedback_comments(id, comments);
+                    }
+                    AppMsg::FeedbackItemUpdated(item) => {
+                        app.apply_feedback_item(item);
+                        app.set_status("Feedback · vote recorded");
+                    }
+                    AppMsg::FeedbackChanged(status) => {
+                        app.set_status(status);
+                        // The board is about to be re-read; forgetting which
+                        // item's comments are loaded is what makes the reload
+                        // fetch them again, so a just-posted comment appears.
+                        app.invalidate_feedback_detail();
+                        // A comment or submission changes the board, so re-pull
+                        // it rather than patching state locally.
+                        run_cmd(
+                            Cmd::LoadFeedback(app.feedback_query()),
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
                     }
                     AppMsg::UpdateAvailable(notice) => {
                         app.set_update_notice(notice.clone());

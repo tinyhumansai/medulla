@@ -1,8 +1,10 @@
 //! Launching a harness on a fresh pty, and draining it into the emulator.
 
-use std::io::Read;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::io::{Read, Write};
+use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::{Arc, Weak};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
 
@@ -26,6 +28,9 @@ impl PtyManager {
     /// worker for up to half a second per launch, which under a burst starved
     /// the runtime the inbox drain and the screen samplers also live on.
     pub fn open(&self, spec: LaunchSpec) -> Result<String, String> {
+        // Before the pty, because it shells out to `git`: one more reason this
+        // whole function belongs on a blocking thread.
+        let branch = git_branch(&spec.cwd);
         let pty = open_pty()?;
 
         // Mint the id *before* spawning, so the transcript this session writes is
@@ -75,20 +80,29 @@ impl PtyManager {
             .take_writer()
             .map_err(|err| format!("could not write to the pty: {err}"))?;
 
+        // The write half moves onto its own thread below; the session holds
+        // only the queue, so no caller ever waits on a child that is not
+        // reading. See `SessionIo::writes`.
+        let (writes, queued) = channel::<Vec<u8>>();
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
         let now = self.now();
         let id = format!("w_{}", self.inner.next_id.fetch_add(1, Ordering::SeqCst));
         let handle = Arc::new(SessionHandle::new(
             SessionMeta {
                 id: id.clone(),
-                label: spec.label,
                 provider: spec.provider,
                 cwd: spec.cwd,
+                branch,
                 started_at: now,
+                user_spawned: spec.user_spawned,
             },
+            spec.label,
             session_id,
+            spec.control,
             vt100::Parser::new(DEFAULT_ROWS, DEFAULT_COLS, SCROLLBACK),
             pty.master,
-            writer,
+            writes,
+            queued_bytes.clone(),
             child,
         ));
 
@@ -98,6 +112,7 @@ impl PtyManager {
         // greets the pty immediately would otherwise have its first output land
         // before there is a session to record it against — losing the
         // `last_output_at` that idle detection reads.
+        self.spawn_writer(Arc::downgrade(&handle), writer, queued, queued_bytes);
         self.spawn_reader(handle, reader);
 
         Ok(id)
@@ -139,6 +154,83 @@ impl PtyManager {
             handle.reap(manager.now());
         });
     }
+
+    /// Drain queued bytes onto the PTY master on a blocking thread.
+    ///
+    /// The mirror of [`spawn_reader`](Self::spawn_reader), and a thread for a
+    /// stronger reason than symmetry: a pty write parks in the kernel until the
+    /// child drains its stdin, so on the async runtime it would occupy a worker,
+    /// and on the caller it froze whichever thread queued the bytes — the render
+    /// thread, for a keystroke. Here it may park as long as it likes with nobody
+    /// waiting on it.
+    ///
+    /// Ends when the session's queue is dropped, which reaping the session or
+    /// forgetting it both do. A thread parked mid-write instead unblocks when
+    /// the child is killed and the pty closes, which is what `close` and
+    /// `shutdown` do.
+    ///
+    /// Holds a [`Weak`], not an `Arc`: the sender it waits on lives *inside* the
+    /// handle, so an owning reference would keep alive the very thing whose drop
+    /// is meant to end this loop.
+    fn spawn_writer(
+        &self,
+        handle: Weak<SessionHandle>,
+        mut writer: Box<dyn Write + Send>,
+        queued: Receiver<Vec<u8>>,
+        queued_bytes: Arc<AtomicUsize>,
+    ) {
+        std::thread::spawn(move || {
+            let mut failure = None;
+            // `recv` rather than `for`, so the receiver survives the loop and the
+            // bytes still waiting can be accounted for below.
+            while let Ok(bytes) = queued.recv() {
+                let wrote = writer.write_all(&bytes).and_then(|()| writer.flush());
+                // Released whether or not it landed: the budget counts what is
+                // *waiting*, and these bytes are not waiting any more.
+                queued_bytes.fetch_sub(bytes.len(), Ordering::AcqRel);
+                if let Err(err) = wrote {
+                    failure = Some(err.to_string());
+                    break;
+                }
+            }
+            // Whatever is still queued will never reach the child. Counted, not
+            // dropped in silence: every one of those bytes had a caller that was
+            // told `Ok`, and "your paste was slow" and "your paste was lost" are
+            // different problems with different fixes.
+            let abandoned: usize = queued.try_iter().map(|bytes| bytes.len()).sum();
+            // A queue nothing will ever drain must not keep occupying the budget,
+            // or a later write would be refused as "full" against bytes that are
+            // already gone. Racing a concurrent reservation can only leave this
+            // permissive, which is safe: writes to a dead session fail anyway.
+            queued_bytes.store(0, Ordering::Release);
+            // Only a real failure is worth recording. A session closed normally
+            // drops its sender to end this loop, and its handle is usually gone
+            // by now anyway.
+            let (Some(err), Some(handle)) = (failure, handle.upgrade()) else {
+                return;
+            };
+            let lost = if abandoned > 0 {
+                format!(" ({abandoned} queued byte(s) never written)")
+            } else {
+                String::new()
+            };
+            handle.record_error(format!("{}: {err}{lost}", handle.id()));
+        });
+    }
+}
+
+/// Resolve the checked-out branch without treating a non-repository or
+/// detached `HEAD` as an error.
+fn git_branch(cwd: &str) -> Option<String> {
+    let output = Command::new("git")
+        .args(["-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|branch| !branch.is_empty())
 }
 
 /// Allocate a pty, retrying only the failures that are actually transient.

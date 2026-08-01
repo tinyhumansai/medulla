@@ -29,8 +29,10 @@ screen. `login` and `logout` delete any such file left by an older install, sinc
 nothing reads it any more and it holds a bearer token no logout could invalidate.
 
 On the next `medulla` run the TUI finds the session and starts straight into the
-app. `medulla logout` ends it. Precedence for the backend token stays: inline
-`backend.token` > `backend.tokenEnv` > the core's session.
+app. `medulla logout` ends it — the session only: the account stays selected, so
+signing back in returns to the same home and the same deployment. See
+[Medulla home](configuration.md#medulla-home). Precedence for the backend token
+stays: inline `backend.token` > `backend.tokenEnv` > the core's session.
 
 ## Token via environment
 

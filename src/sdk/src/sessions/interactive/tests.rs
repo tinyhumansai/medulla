@@ -237,8 +237,12 @@ async fn open_rejects_a_binary_that_is_not_on_the_sessions_path() {
 fn fake_harness(dir: &std::path::Path, body: &str) -> InteractiveSpec {
     use std::os::unix::fs::PermissionsExt;
     let path = dir.join("fake-claude");
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let staging_path = dir.join("fake-claude.tmp");
+    // Publish the fixture only after its writer has closed so Linux cannot
+    // reject a concurrent spawn with ETXTBSY ("Text file busy").
+    std::fs::write(&staging_path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&staging_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::rename(&staging_path, &path).unwrap();
     let mut env = std::collections::HashMap::new();
     env.insert(
         "PATH".to_string(),

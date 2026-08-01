@@ -9,19 +9,43 @@ Medulla ships as a single binary, `medulla`: a [ratatui](https://ratatui.rs/) te
 
 ## Install the prebuilt binary
 
-The install script downloads the release asset for your platform, verifies its SHA-256 against the [release](https://github.com/tinyhumansai/medulla/releases) manifest when a checksum tool (`sha256sum`, `shasum`, or `openssl`) is available — otherwise it warns and skips the check — and installs to `~/.medulla/bin`:
+Both installers do the same thing: resolve the release manifest, download the asset for your platform, verify its SHA-256, and install to `~/.medulla/bin`. If no prebuilt asset ships for your platform, they fall back to `cargo install`.
+
+**macOS and Linux** — `install.sh`, POSIX `sh`, needs `curl` or `wget` plus `tar`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh -s -- 0.5.3   # pin a version
 ```
 
-If the installer updated your `PATH`, reload your shell (`exec $SHELL`, or open a new terminal) so the `medulla` command resolves; otherwise invoke it directly as `~/.medulla/bin/medulla`.
+The checksum is verified when `sha256sum`, `shasum`, or `openssl` is available; with none of them it warns and skips the check rather than failing.
 
-* Pin a version: `| sh -s -- X.Y.Z`.
-* Change the install prefix: set `MEDULLA_HOME`.
-* On a platform without a prebuilt asset the script falls back to `cargo install`.
+**Windows** — `install.ps1`, works in PowerShell 7 (`pwsh`) and in the Windows PowerShell 5.1 that ships in the box:
 
-Prebuilt binaries ship for Linux (x86\_64, aarch64), macOS (Apple Silicon), and Windows (x86\_64). See [platform support](getting-started.md#platform-support) for what's unix-only.
+```powershell
+irm https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.ps1 | iex
+```
+
+Installs to `%USERPROFILE%\.medulla\bin` and appends it to your **user** `PATH`, so no elevation is needed. Verification is always on — `Get-FileHash` is built in. To pin a version, the script needs to be on disk so it can take an argument:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.ps1 -OutFile install.ps1
+.\install.ps1 -Version 0.5.3
+```
+
+If a running `medulla.exe` holds a lock on its own image, the installer moves it aside as `medulla.exe.old` rather than failing.
+
+Both scripts honour the same environment variables:
+
+| Variable | Effect |
+| --- | --- |
+| `MEDULLA_HOME` | Install prefix (default `~/.medulla`). |
+| `MEDULLA_NO_MODIFY_PATH=1` | Do not touch shell profiles or the user `PATH`. |
+| `MEDULLA_UPDATE_URL` | Override the release manifest URL (for testing). |
+
+If the installer updated your `PATH`, open a new terminal — or run `exec $SHELL` — so the `medulla` command resolves; otherwise invoke it directly from the install prefix.
+
+Prebuilt binaries ship for Linux (x86\_64, aarch64), macOS (Apple Silicon), and Windows (x86\_64). See [platform support](#platform-support) for what is unix-only. Every installer is exercised on each of those platforms — plus Fedora, Debian, and Rocky — by the `Install scripts` CI workflow, which installs from the real published release and then runs the binary.
 
 ## Build from source
 
@@ -53,7 +77,7 @@ If you start `medulla` with no working credentials, the TUI shows an in-terminal
 cargo run       # or: medulla, with no token configured
 ```
 
-With no token and no core socket, `medulla` opens a login screen; press `m` to continue offline against the mock runtime — a scripted demo with no credentials and no network, and the fastest way to explore the interface. Open the Settings tab (its Help subpage) or run `/help` for keybindings. Usage, effective config, and the color-theme editor live under Settings as well (`/usage`, `/config`, `/theme`).
+With nobody signed in, `medulla` opens a login screen; press `m` to continue offline against the mock runtime — a scripted demo with no credentials and no network, and the fastest way to explore the interface. Open the Settings tab (its Help subpage) or run `/help` for keybindings. Usage, effective config, and the color-theme editor live under Settings as well (`/usage`, `/config`, `/theme`).
 
 ## Use the SDK from your own crate
 
@@ -64,11 +88,19 @@ Add the SDK as a git dependency (the repo vendors its path deps, so no extra set
 medulla = { git = "https://github.com/tinyhumansai/medulla", tag = "v0.3.0" }
 ```
 
-The [`medulla` SDK crate](../../src/sdk/) is a UI-free logic library: the HTTP/SSE client for the backend API, the runtime adapters, persona memory, and the tiny.place integration. See [Architecture](architecture.md) for how the pieces fit together.
+The [`medulla` SDK crate](../../src/sdk/) is a UI-free logic library: the HTTP/SSE client for the backend API, the runtime adapters over the embedded core, sessions, workflows, and the tiny.place integration. See [Architecture](architecture.md) for how the pieces fit together.
 
 ## Platform support
 
-Linux (x86\_64, aarch64), macOS (Apple Silicon), and Windows (x86\_64) all build and ship prebuilt binaries. The [core-socket runtime](configuration.md#core-socket), the headless [daemon's](cli-reference.md#medulla-daemon) provider-spawn paths, and the [harness wrappers](cli-reference.md#harness-wrappers) are unix-only; the interactive TUI over the backend and mock runtimes, and `medulla update`, work everywhere.
+Linux (x86\_64, aarch64), macOS (Apple Silicon), and Windows (x86\_64) all build and ship prebuilt binaries. The [daemon's](cli-reference.md#medulla-daemon) provider-spawn paths and the [harness wrappers](cli-reference.md#harness-wrappers) are unix-only; the interactive TUI, `medulla run`, and `medulla update` work everywhere, since the core is embedded rather than reached over a Unix socket.
+
+### The Linux glibc floor
+
+The prebuilt Linux binaries are built on Ubuntu 24.04 and therefore need **glibc 2.39 or newer**. That covers Ubuntu 24.04+, Debian 13+, and current Fedora, but *not* the long-term enterprise distributions — RHEL 9 and its rebuilds (Rocky, AlmaLinux), Debian 12, or Amazon Linux 2023, which ship glibc 2.34-2.36.
+
+On those systems the download would succeed and every later invocation would die on a missing symbol version, so `install.sh` runs the binary once immediately after installing it. If it cannot start, the installer removes it, says why, and falls back to building from source — which works anywhere Rust does. Install Rust from [rustup.rs](https://rustup.rs/) first and re-run; with no `cargo` present the installer stops with that explanation rather than leaving a file that only fails when you try to use it.
+
+Verified continuously: the `Install scripts` workflow runs the supported matrix end to end, and separately asserts on Rocky 9 that the installer refuses and explains itself.
 
 ## Next steps
 

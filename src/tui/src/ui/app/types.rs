@@ -15,6 +15,7 @@ use ratatui::layout::Rect;
 
 use crate::ui::composer::{Draft, TextPrompt};
 use crate::ui::theme::Theme;
+use medulla::client::{FeedbackComment, FeedbackItem, FeedbackQuery, FeedbackType};
 use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
@@ -36,30 +37,24 @@ use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 /// exists, and a workflow is *work* — a plan they read, edit, and run, with a
 /// graph to navigate and a copilot to edit it by. Three panes' worth of surface
 /// does not fit in a subpage of something else.
+/// `Tasks` and `Memory` are commented out rather than deleted: the code behind
+/// both still builds and their render paths are intact, so restoring either is
+/// putting one line back. Memory is out of the build entirely (its tab said
+/// "coming soon"); Tasks duplicates what the Agents tab already shows per lane.
 #[cfg(feature = "workflows")]
-pub const TABS: [&str; 8] = [
+pub const TABS: [&str; 6] = [
     "Overview",
     "Agents",
-    "Tasks",
     "Workflows",
-    "TokenMaxxxing",
-    "Routing",
-    "Memory",
+    "Hosts",
+    "Feedback",
     "Settings",
 ];
 
 /// Without the workflow engine. A slim build must not offer a tab that cannot
 /// draw anything.
 #[cfg(not(feature = "workflows"))]
-pub const TABS: [&str; 7] = [
-    "Overview",
-    "Agents",
-    "Tasks",
-    "TokenMaxxxing",
-    "Routing",
-    "Memory",
-    "Settings",
-];
+pub const TABS: [&str; 5] = ["Overview", "Agents", "Hosts", "Feedback", "Settings"];
 
 /// The Routing tab's left-nav pages.
 ///
@@ -76,10 +71,18 @@ pub const TABS: [&str; 7] = [
 /// beside the lanes running on it. These pages are the *management* surfaces —
 /// what you register, authenticate, and choose — not the picture. Workflows is
 /// not here either: it is a tab of its own (see [`TABS`]).
-pub const ROUTING_SUBPAGES: [&str; 6] = [
+/// Ordered by the containment chain, as before: the machine, what runs on it,
+/// what may be stood up there, how to add another, and how work is routed
+/// between them.
+///
+/// Only Workspaces is commented out, and only because Add Host › Local
+/// supersedes it: an entry there was advisory routing context, whereas a local
+/// host actually runs work in its directory. Its draw arm, keys and
+/// `[host].workspaces` persistence all still build, so restoring it is putting
+/// its name back here and renumbering.
+pub const ROUTING_SUBPAGES: [&str; 5] = [
     "Hosts",
     "Harnesses",
-    "Workspaces",
     "Agent Templates",
     "Add Host",
     "Strategies",
@@ -87,16 +90,12 @@ pub const ROUTING_SUBPAGES: [&str; 6] = [
 
 pub(super) const RP_HOSTS: usize = 0;
 pub(super) const RP_HARNESSES: usize = 1;
-pub(super) const RP_WORKSPACES: usize = 2;
-pub(super) const RP_TEMPLATES: usize = 3;
-pub(super) const RP_ADD_HOST: usize = 4;
-pub(super) const RP_STRATEGIES: usize = 5;
-
-/// The Tasks tab's left-nav pages.
-pub const TASKS_SUBPAGES: [&str; 2] = ["All Tasks", "Sources"];
-
-pub(super) const TP_TASKS: usize = 0;
-pub(super) const TP_SOURCES: usize = 1;
+pub(super) const RP_TEMPLATES: usize = 2;
+pub(super) const RP_ADD_HOST: usize = 3;
+pub(super) const RP_STRATEGIES: usize = 4;
+// Past the end of `ROUTING_SUBPAGES`, so the nav clamp cannot reach it and its
+// arm is unreachable — the page is off without its code rotting.
+pub(super) const RP_WORKSPACES: usize = 5;
 
 /// The TokenMaxxxing tab's sidebar pages.
 pub(super) const TOKENMAXXING_SUBPAGES: [&str; 3] = ["Overview", "Bounties", "Leaderboard"];
@@ -170,14 +169,15 @@ pub(super) const SUBSCRIPTION_STRATEGIES: [SubscriptionStrategyOption; 3] = [
     },
 ];
 
-/// The Settings tab's left-nav subpages, in order (number keys 1-7 jump to them).
+/// The Settings tab's left-nav subpages, in order (number keys 1-8 jump to them).
 ///
 /// This is the flat, selectable list [`App::settings_index`] indexes into.
 /// [`SETTINGS_GROUPS`] overlays the display-only headings.
-pub const SETTINGS_SUBPAGES: [&str; 7] = [
+pub const SETTINGS_SUBPAGES: [&str; 8] = [
     "Usage",
     "Appearance",
     "Config",
+    "Feedback",
     "Trace",
     "Context",
     "Account",
@@ -199,10 +199,49 @@ pub const SETTINGS_GROUPS: [(&str, usize); 3] = [
 pub(super) const SP_USAGE: usize = 0;
 pub(super) const SP_APPEARANCE: usize = 1;
 pub(super) const SP_CONFIG: usize = 2;
-pub(super) const SP_TRACE: usize = 3;
-pub(super) const SP_CONTEXT: usize = 4;
-pub(super) const SP_ACCOUNT: usize = 5;
-pub(super) const SP_HELP: usize = 6;
+pub(super) const SP_FEEDBACK: usize = 3;
+pub(super) const SP_TRACE: usize = 4;
+pub(super) const SP_CONTEXT: usize = 5;
+pub(super) const SP_ACCOUNT: usize = 6;
+pub(super) const SP_HELP: usize = 7;
+
+/// Which kind of host the Add Host page is collecting.
+///
+/// The two differ in everything that matters — a remote is reached by address
+/// over tiny.place, a local one by a directory on this machine — so asking
+/// which first is what lets each ask only for what it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddHostKind {
+    /// A directory on this machine, served in-process.
+    Local,
+    /// Another machine, reached by its tiny.place address.
+    Remote,
+}
+
+impl AddHostKind {
+    /// The choices in the order they are offered.
+    pub const ALL: [AddHostKind; 2] = [AddHostKind::Local, AddHostKind::Remote];
+
+    /// The one-word name shown in the picker.
+    pub fn label(self) -> &'static str {
+        match self {
+            AddHostKind::Local => "Local",
+            AddHostKind::Remote => "Remote",
+        }
+    }
+
+    /// What choosing this actually does, so the picker explains itself.
+    pub fn description(self) -> &'static str {
+        match self {
+            AddHostKind::Local => {
+                "a directory on this machine · runs in this process, watchable and typeable"
+            }
+            AddHostKind::Remote => {
+                "another machine · reached by its tiny.place address, needs a contact edge"
+            }
+        }
+    }
+}
 
 /// The index of a tab by name, or 0 if unknown. Keeps tab jumps robust as the tab
 /// list grows.
@@ -300,6 +339,11 @@ pub struct WorkflowsState {
     /// because a render pass must not touch the disk, and re-laying it out every
     /// frame would move boxes under the cursor.
     pub(super) graph: Option<Box<medulla::workflows::WorkflowGraph>>,
+    /// The selected workflow's own choice of harness and model, cached with the
+    /// graph and for the same reason. Not part of the graph, so a preview
+    /// reading only [`graph`](Self::graph) would report the host's harness for a
+    /// workflow that pinned its own.
+    pub(super) defaults: medulla::workflows::WorkflowDefaults,
     /// The laid-out form of [`graph`](Self::graph).
     pub(super) layout: medulla::ui::workflows::GraphLayout,
     /// Selected node in the canvas, in the layout's reading order.
@@ -308,6 +352,13 @@ pub struct WorkflowsState {
     pub(super) canvas_layer: usize,
     /// Vertical scroll of the canvas, in lanes.
     pub(super) canvas_lane: usize,
+    /// Rows inside the graph panel during its most recent render.
+    ///
+    /// Navigation uses this measured viewport rather than the full terminal
+    /// height, because the selected-node preview shares the content column.
+    pub(super) graph_rows: usize,
+    /// Top line of the rich selected-step preview.
+    pub(super) preview_scroll: usize,
     /// Whether the inspector below the canvas is expanded over it.
     pub(super) inspector_open: bool,
     /// The run being overlaid on the graph, when a run row is selected.
@@ -338,6 +389,18 @@ pub enum Cmd {
     Logout,
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
+    /// Start a host on this device now, and register it with the hub.
+    ///
+    /// Carries the declaration rather than only an index into config: the
+    /// config is the app's, and the loop that can actually start a host is not.
+    /// `index` is the entry's position within `[[hosts]]`, which is the basis an
+    /// unnamed host's address is derived from at every other site.
+    StartLocalHost {
+        /// The host declaration to bind.
+        host: Box<medulla::config::HostSection>,
+        /// Its position within `[[hosts]]`.
+        index: usize,
+    },
     /// Retarget the live screen subscription: stop watching one task, start
     /// watching another. Both halves ride one command so the change is atomic
     /// from the loop's point of view — a stop that landed without its start
@@ -348,18 +411,48 @@ pub enum Cmd {
         /// The `(worker address, task id)` to start streaming, if any.
         start: Option<(String, String)>,
     },
+    /// Push a handoff brief for a harness the operator just gave back.
+    ///
+    /// Off the render thread because it does two things that must not block a
+    /// frame: shells out to `git` for the branch, and awaits a socket emit.
+    /// Arrives with `branch`/`project` unset — the dispatcher fills them.
+    HandOffHarness(Box<medulla::hub::HarnessHandoff>),
+    /// Tell the orchestrator the operator has taken the harness in a workspace.
+    HoldHarness {
+        /// The workspace being taken.
+        workspace: String,
+        /// Why, when the operator said.
+        reason: Option<String>,
+    },
     /// Fetch account-level usage from the backend for the Usage tab.
     LoadUsage,
-    /// Reload the local task document.
-    LoadTasks,
-    /// Persist a new or edited local task.
-    SaveTask(Box<medulla::tasks::Task>),
-    /// Persist the complete local task document.
-    SaveTasks(Box<medulla::tasks::TaskDocument>),
-    /// Remove a local task by id.
-    DeleteTask(String),
-    /// Synchronize one configured task source.
-    SyncTasks(String),
+    /// Load a page of the feedback board for the Feedback surface.
+    LoadFeedback(FeedbackQuery),
+    /// Load one board item's comments for the detail pane.
+    LoadFeedbackDetail(String),
+    /// Cast, change, or retract a vote on a board item.
+    VoteFeedback {
+        /// The item being voted on.
+        id: String,
+        /// `1` upvote, `-1` downvote, `0` retract.
+        value: i8,
+    },
+    /// Post a comment on a board item.
+    CommentFeedback {
+        /// The item being commented on.
+        id: String,
+        /// The comment text.
+        body: String,
+    },
+    /// Submit new feedback to the board.
+    SubmitFeedback {
+        /// Feature request or bug report.
+        kind: FeedbackType,
+        /// The submission's title.
+        title: String,
+        /// The submission's body.
+        body: String,
+    },
     /// Re-read the declared fleet (roster + capacity) from the runtime.
     RefreshFleet,
     /// Run an installed workflow on this machine.
@@ -371,6 +464,10 @@ pub enum Cmd {
     RunWorkflow {
         /// The workflow to run.
         id: String,
+        /// Values for the workflow's declared inputs, collected from the
+        /// operator before this command was emitted. Empty when the workflow
+        /// declares none.
+        inputs: serde_json::Map<String, serde_json::Value>,
     },
     /// Ask the copilot to change or explain a workflow.
     ///
@@ -405,6 +502,70 @@ pub enum Cmd {
     DryRunWorkflow {
         /// The workflow to simulate.
         id: String,
+        /// Values for the workflow's declared inputs — a simulation resolves
+        /// `=inputs.<name>` bindings like a real run, so it needs them too.
+        inputs: serde_json::Map<String, serde_json::Value>,
+    },
+    /// Take back a workflow's most recent edit.
+    ///
+    /// Off-thread with the rest: it reads the history directory and writes a
+    /// definition, and the store's methods are synchronous by contract.
+    #[cfg(feature = "workflows")]
+    UndoWorkflow {
+        /// The workflow to restore.
+        id: String,
+    },
+    /// Stop the copilot turn running on a thread.
+    #[cfg(feature = "workflows")]
+    AbortCopilot {
+        /// Which copilot thread to stop.
+        thread: String,
+    },
+    /// Ask the copilot to diagnose a failed run and fix its cause.
+    ///
+    /// Separate from [`Cmd::CopilotTurn`] because it carries the failure: the
+    /// run, its error, and the nodes implicated. All three are on screen when
+    /// the operator presses the key, and a turn that had to rediscover them
+    /// would start a step behind.
+    #[cfg(feature = "workflows")]
+    RepairWorkflow {
+        /// The workflow the run belongs to.
+        workflow: String,
+        /// The operator's words, if they typed any.
+        instruction: String,
+        /// The run to diagnose.
+        run_id: String,
+    },
+    /// Review a workflow against its own history.
+    ///
+    /// Unlike [`Cmd::RepairWorkflow`], this turn may not edit: it records what
+    /// it learns and proposes changes for the operator to accept. The two are
+    /// separate commands rather than one with a flag because they are different
+    /// asks — repair is "fix this now", review is "what should change".
+    #[cfg(feature = "workflows")]
+    EvolveWorkflow {
+        /// The workflow to review.
+        workflow: String,
+        /// The failed run to lead with, when the review was triggered by one.
+        run_id: Option<String>,
+    },
+    /// Apply a proposed change to the saved graph.
+    #[cfg(feature = "workflows")]
+    AcceptProposal {
+        /// The workflow being changed, so the pane can be refreshed.
+        workflow: String,
+        /// The proposal to apply.
+        proposal_id: String,
+    },
+    /// Turn a proposed change down.
+    #[cfg(feature = "workflows")]
+    RejectProposal {
+        /// The workflow the proposal was for.
+        workflow: String,
+        /// The proposal to decline.
+        proposal_id: String,
+        /// Why, recorded as a note so a later review does not propose it again.
+        reason: String,
     },
 }
 
@@ -416,20 +577,118 @@ pub(super) struct ResumePicker {
     pub(super) index: usize,
 }
 
+/// The modal state for the "start a harness" picker overlay.
+pub(super) struct HarnessPicker {
+    /// Installed providers and registered presets, in offer order.
+    pub(super) choices: Vec<crate::ui::harness_pane::HarnessChoice>,
+    /// The highlighted row.
+    pub(super) index: usize,
+    /// Which half of the two-step picker owns the keyboard.
+    pub(super) step: HarnessPickerStep,
+    /// Default directory used to seed the editable workspace query.
+    pub(super) cwd: String,
+    /// Inline fuzzy-completion text on the workspace step.
+    pub(super) workspace_query: String,
+    /// Cached workspace rows, refreshed only when the query changes.
+    pub(super) workspace_choices: Vec<WorkspaceChoice>,
+    /// Highlighted workspace completion.
+    pub(super) workspace_index: usize,
+}
+
+/// Active stage of the manual harness launcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HarnessPickerStep {
+    /// Choose an installed CLI or registered preset.
+    Harness,
+    /// Choose or complete the working directory.
+    Workspace,
+}
+
+/// One cached workspace completion and why it was suggested.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct WorkspaceChoice {
+    /// Absolute directory path.
+    pub(super) path: String,
+    /// Short operator-facing provenance such as `recent` or `folder`.
+    pub(super) source: &'static str,
+}
+
+/// The "you still hold this harness" confirmation shown on release.
+///
+/// Modelled on an unsaved-changes prompt, and for the same reason: an operator
+/// who took a harness over and walked away has left the orchestrator locked out
+/// of it, and the moment they release the keyboard is the only moment they are
+/// certainly thinking about it. Silently handing it back would be worse — it
+/// would resume dispatch into a harness mid-thought.
+pub(super) struct HandbackPrompt {
+    /// The session the operator is releasing.
+    pub(super) session: String,
+    /// Whether attaching is what took control, as opposed to an explicit
+    /// `/takecontrol`. An explicit take is a decision, so the prompt says so
+    /// rather than implying the operator got here by accident.
+    pub(super) took_control: bool,
+    /// What the operator wants continued, typed into the prompt.
+    ///
+    /// This is the moment they actually have the context — they are leaving the
+    /// harness *now* — so it is the one place worth asking. `/handoff <note>`
+    /// exists for the operator who already knows; this is for the one who is
+    /// only reminded by being asked.
+    pub(super) note: crate::ui::composer::Draft,
+    /// Whether keystrokes are going into the note rather than answering.
+    ///
+    /// Modal because `y`/`n` have to keep meaning yes and no: an operator who
+    /// starts typing a note that begins with "no, ..." must not have the first
+    /// letter answer the question for them.
+    pub(super) editing_note: bool,
+}
+
+/// What to do when the operator releases a harness they hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HandbackPolicy {
+    /// Ask, every time.
+    #[default]
+    Ask,
+    /// Always hand back without asking.
+    Always,
+    /// Never hand back; releasing the keyboard keeps control.
+    Never,
+}
+
+impl HandbackPolicy {
+    /// Parse the `[harness].handback` config value, falling back to
+    /// [`Ask`](Self::Ask) for anything unrecognized — a typo in a config file
+    /// should not silently change who controls a harness.
+    pub fn from_config(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "always" => HandbackPolicy::Always,
+            "never" => HandbackPolicy::Never,
+            _ => HandbackPolicy::Ask,
+        }
+    }
+}
+
 /// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
-    /// Create a task from a title line.
-    TaskCreate,
-    /// Edit the selected task title.
-    TaskEdit(String),
-    /// Add a GitHub source from `owner/repository`.
-    SourceAdd,
     /// Add a worker from an address/@handle line.
     HostAdd,
     /// Edit the label of the worker with the given id.
     HostEditLabel(String),
     /// Declare another directory this device may work in.
     WorkspaceAdd,
+    /// Add a named OpenRouter-backed coding harness.
+    CustomHarnessAdd,
+    /// Edit the custom harness with the given stable id.
+    CustomHarnessEdit(String),
+    /// The working directory for a new local host, with the harness already
+    /// chosen. Blank accepts the default — where this process is running.
+    LocalHostWorkspace(medulla::tinyplace::HarnessProvider),
+    /// Reject a workflow proposal with the operator's explanation.
+    RejectProposal {
+        /// The workflow the proposal belongs to.
+        workflow: String,
+        /// The proposal awaiting the decision.
+        proposal_id: String,
+    },
     /// Answer a pending sub-agent question.
     AnswerQuestion {
         /// The cycle the question belongs to.
@@ -446,6 +705,81 @@ pub(super) enum PromptKind {
         /// Harness question id.
         question_id: String,
     },
+    /// Comment on the given feedback board item.
+    FeedbackComment {
+        /// The item being commented on.
+        id: String,
+    },
+    /// Step one of submitting feedback: the title. Submitting advances to
+    /// [`PromptKind::FeedbackBody`] rather than sending anything.
+    FeedbackTitle {
+        /// Feature request or bug report, chosen by which key opened the prompt.
+        kind: FeedbackType,
+    },
+    /// Step two of submitting feedback: the body. Submitting sends it.
+    FeedbackBody {
+        /// Feature request or bug report.
+        kind: FeedbackType,
+        /// The title captured in step one.
+        title: String,
+    },
+    /// One field of a workflow's declared inputs, collected before the run
+    /// starts. Submitting either opens the prompt for the next field or, when
+    /// this was the last, dispatches the run.
+    ///
+    /// The whole set is carried on the prompt rather than parked in `App`
+    /// state, so cancelling with `Esc` abandons the collected values with it —
+    /// a half-filled set cannot leak into the next run.
+    WorkflowInput {
+        /// The workflow the values are being collected for.
+        workflow_id: String,
+        /// Whether to dispatch a dry run rather than a real one.
+        dry_run: bool,
+        /// The fields still to ask about; the head is the one on screen.
+        remaining: Vec<medulla::workflows::WorkflowInput>,
+        /// What has been collected so far, keyed by input name.
+        collected: serde_json::Map<String, serde_json::Value>,
+    },
+}
+
+/// The Feedback surface's state: the loaded page, the selected row, that row's
+/// comments, and the active query.
+pub(super) struct FeedbackState {
+    /// The current page of board items.
+    pub(super) items: Vec<FeedbackItem>,
+    /// Total items matching the query across all pages.
+    pub(super) total: i64,
+    /// The highlighted row.
+    pub(super) index: usize,
+    /// Comments for [`FeedbackState::detail_id`], loaded lazily on selection.
+    pub(super) comments: Vec<FeedbackComment>,
+    /// Which item [`FeedbackState::comments`] belongs to.
+    pub(super) detail_id: Option<String>,
+    /// Scroll offset within the detail pane.
+    pub(super) detail_scroll: usize,
+    /// The active filter/sort/pagination.
+    pub(super) query: FeedbackQuery,
+    /// Whether the runtime serves a board at all. `false` renders a sign-in
+    /// hint instead of an empty list.
+    pub(super) supported: bool,
+    /// Whether a board load is in flight (drives the header's "loading…").
+    pub(super) loading: bool,
+}
+
+impl Default for FeedbackState {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            total: 0,
+            index: 0,
+            comments: Vec::new(),
+            detail_id: None,
+            detail_scroll: 0,
+            query: FeedbackQuery::default(),
+            supported: true,
+            loading: false,
+        }
+    }
 }
 
 /// A single-line inline input overlay shared with daemon controls.
@@ -494,12 +828,29 @@ pub struct App {
     pub(super) chat_scroll: usize,
     /// Selected row in the command peek, while it is open.
     pub(super) command_index: usize,
+    /// Installed harnesses offered by the Add Host wizard, detected once.
+    ///
+    /// Detection reads the environment and stat-checks every provider binary on
+    /// `PATH`. The wizard asked on every render frame *and* every keypress, so a
+    /// page that is drawn at the frame rate was doing filesystem work to answer
+    /// a question whose answer cannot change while the process runs.
+    pub(super) add_host_provider_cache:
+        std::cell::OnceCell<Vec<medulla::tinyplace::HarnessProvider>>,
     /// Selected row on the Routing Hosts page.
     pub(super) host_index: usize,
+    /// Whether ↑↓ on the Hosts page drives the role toggles in the preview
+    /// rather than the host list above it. Tab moves between the two.
+    pub(super) host_roles_focus: bool,
+    /// Selected role in the preview's toggle list, while it has focus.
+    pub(super) host_role_index: usize,
     /// Selected row on the Routing Workspaces page.
     pub(super) workspace_index: usize,
     /// Selected row on the Routing Agent Templates page.
     pub(super) template_index: usize,
+    /// OpenRouter-backed harness presets loaded from the active config.
+    pub(super) custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
+    /// Selected row on the Routing Harnesses page.
+    pub(super) custom_harness_index: usize,
     /// Scroll offset inside the open agent-template popup.
     pub(super) template_scroll: usize,
     /// Whether the agent-template popup is open over the catalog.
@@ -520,20 +871,37 @@ pub struct App {
     /// Why the run history could not be read, if it could not.
     #[cfg(feature = "workflows")]
     pub(super) workflow_runs_error: Option<String>,
+    /// What the selected workflow has learned, newest first.
+    ///
+    /// Cached beside the runs and refreshed with them, for the same reason: a
+    /// render pass must not touch the disk.
+    #[cfg(feature = "workflows")]
+    pub(super) workflow_notes: Vec<medulla::workflows::WorkflowNote>,
+    /// Changes proposed for the selected workflow, newest first.
+    #[cfg(feature = "workflows")]
+    pub(super) workflow_proposals: Vec<medulla::workflows::WorkflowProposal>,
     /// The Workflows tab's panes, cursors, and copilot threads.
     #[cfg(feature = "workflows")]
     pub(super) wf: WorkflowsState,
     /// A workflow store attached directly, overriding the layered one this
     /// client would otherwise resolve.
     ///
-    /// The layered store always includes the *current directory's*
-    /// `.medulla/workflows`, which is right in use — a workflow checked into the
-    /// repository you are working in should be listed — and wrong under test,
-    /// where it makes the catalogue depend on whatever happens to be in the
-    /// developer's checkout. `None` resolves the layered store, as a real
-    /// session does.
+    /// The layered store always reads the current directory's
+    /// `.medulla/workflows` as repository defaults, then overlays the
+    /// user-global workflow directory. That is useful in a real session and
+    /// wrong under test, where it makes the catalogue depend on the developer's
+    /// checkout. `None` resolves the layered store, as a real session does.
     #[cfg(feature = "workflows")]
     pub(super) workflow_store_override: Option<Arc<dyn medulla::workflows::WorkflowStore>>,
+    /// Which kind of host the Add Host page is offering — a cursor into
+    /// [`AddHostKind::ALL`].
+    pub(super) add_host_kind: usize,
+    /// Which harness a new local host will run — a cursor into the detected
+    /// provider list.
+    pub(super) add_host_harness: usize,
+    /// Whether the kind picker has been answered, so the arrows move on to the
+    /// harness list rather than re-picking local versus remote.
+    pub(super) add_host_kind_chosen: bool,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
     /// Whether keyboard focus is inside the Routing content pane.
@@ -546,21 +914,13 @@ pub struct App {
     pub(super) subscription_strategy_focused: bool,
     /// Credential presence captured on startup and refreshed when its pane opens.
     pub(super) credential_status: CredentialStatus,
-    /// The active Tasks subpage (index into [`TASKS_SUBPAGES`]).
-    pub(super) tasks_index: usize,
-    /// Whether keyboard focus is inside the Tasks content pane.
-    pub(super) tasks_focused: bool,
-    /// Selected provider row on the Tasks Sources page.
-    pub(super) task_source_index: usize,
-    /// Whether the selected task or source's detail modal is visible.
-    pub(super) tasks_detail_open: bool,
     /// The active TokenMaxxxing sidebar page.
     pub(super) tokenmaxxing_index: usize,
     /// Whether keyboard focus is inside the TokenMaxxxing content pane.
     pub(super) tokenmaxxing_focused: bool,
+    /// Feedback-board state (lazily loaded on entry / refresh).
+    pub(super) feedback: FeedbackState,
     /// Feedback-board tab state (lazily loaded on tab entry / refresh).
-    /// Durable local task document displayed by the Tasks tab.
-    pub(super) tasks: medulla::tasks::TaskDocument,
     /// Whether the prepared-decision modal is visible.
     pub(super) decision_open: bool,
     /// Highlighted decision row.
@@ -617,7 +977,10 @@ pub struct App {
     pub(super) area: Rect,
     pub(super) hit_tabs: Vec<(u16, u16)>,
     pub(super) hit_tabs_row: u16,
-    pub(super) hit_agents: Option<(Rect, usize)>,
+    /// Where the Agents rail drew, and which rail row each of its visible lines
+    /// belongs to. A row may wrap onto several lines, so a click resolves
+    /// through this map rather than by adding an offset to a first-row index.
+    pub(super) hit_agents: Option<(Rect, Vec<usize>)>,
     // Where the embedded harness screen landed, and whose it is. Recorded so a
     // wheel event can be routed to the terminal under the pointer and given
     // coordinates relative to *its* origin rather than the screen's.
@@ -625,9 +988,10 @@ pub struct App {
     /// The threads strip's hit box and its first visible row, for click-to-switch.
     pub(super) hit_threads: Option<(Rect, usize)>,
     pub(super) hit_context: Option<Rect>,
+    /// The selected workflow step's preview, for pointer-wheel scrolling.
+    pub(super) hit_workflow_preview: Option<Rect>,
     /// Where the active tab's subpage nav drew its page rows. Only one nav is on
-    /// screen at a time, so one field serves Tasks, Routing, Memory, and
-    /// Settings.
+    /// screen at a time, so one field serves Routing and Settings.
     pub(super) hit_nav: crate::ui::multi_pane::NavHits,
     /// Every pane drawn this frame, in draw order. A pointer selection is
     /// clamped to whichever of these it started in, so a drag reads one pane's
@@ -672,4 +1036,32 @@ pub struct App {
     // is where the rail cursor is turned into a selection; cleared at the top of
     // every draw so it can never name a pane that is no longer on screen.
     pub(super) harness_pane_session: Option<String>,
+    /// The "start a harness" picker, while it is open.
+    pub(super) harness_picker: Option<HarnessPicker>,
+    /// The "you still hold this harness" confirmation, while it is open.
+    pub(super) handback_prompt: Option<HandbackPrompt>,
+    /// How far the Help page is scrolled, in lines.
+    pub(super) help_scroll: u16,
+    /// What releasing a held harness does, from `[harness].handback`.
+    pub(super) handback_policy: HandbackPolicy,
+    /// Whether attaching is what took control of the current harness.
+    ///
+    /// Distinguishes "you picked this up by focusing in" from "you asked for it
+    /// with /takecontrol", which the release prompt words differently: the
+    /// second was a decision, and re-asking about it as though it were an
+    /// accident is how a confirmation becomes noise.
+    pub(super) harness_took_control: bool,
+    /// Commands raised by synchronous input handlers, drained by the event loop.
+    ///
+    /// The key and mouse handlers that move harness control cannot return a
+    /// [`Cmd`] — `handle_handback_key` returns `()`, `handle_harness_key`
+    /// returns `bool`, and the mouse path returns nothing — and threading an
+    /// `Option<Cmd>` back through all three would be a wide, test-breaking
+    /// change to say one thing. So they push here instead, and the loop drains
+    /// it right after the event that produced it. Commands run in submission
+    /// order.
+    pub(super) pending_cmds: std::collections::VecDeque<Cmd>,
+    /// Whether operator-started harnesses launch with the permission-bypass
+    /// flag, from `[harness].skipPermissions`.
+    pub(super) harness_skip_permissions: bool,
 }

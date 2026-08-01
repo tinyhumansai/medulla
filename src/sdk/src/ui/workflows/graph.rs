@@ -371,6 +371,7 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::OutputParser => "output_parser",
         NodeKind::SubWorkflow => "sub_workflow",
         NodeKind::Memory => "memory",
+        NodeKind::Dedup => "dedup",
     }
 }
 
@@ -396,6 +397,9 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         // A store read or written, not a step that transforms what passes
         // through it — the shape says "shelf" rather than "arrow".
         NodeKind::Memory => "▤",
+        // A filter that lets each key past once: what it drops is a repeat, so
+        // the shape says "not equal to what already went through".
+        NodeKind::Dedup => "≠",
     }
 }
 
@@ -412,7 +416,14 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         // Grouped with the reaching-outside kinds: a memory node's result comes
         // from the host's store, not from anything the graph carries.
         NodeKind::ToolCall | NodeKind::HttpRequest | NodeKind::Code | NodeKind::Memory => "cyan",
-        NodeKind::Condition | NodeKind::Switch | NodeKind::Merge | NodeKind::SplitOut => "yellow",
+        // `dedup` reads durable state, but what it *does* to the graph is route:
+        // an item either continues or is dropped, so it reads with the control
+        // flow rather than with the kinds that reach outside the process.
+        NodeKind::Condition
+        | NodeKind::Switch
+        | NodeKind::Merge
+        | NodeKind::SplitOut
+        | NodeKind::Dedup => "yellow",
         NodeKind::Transform | NodeKind::OutputParser => "blue",
     }
 }
@@ -474,6 +485,8 @@ pub fn node_summary(node: &Node) -> String {
             (Some(operation), None) => operation,
             (None, _) => String::new(),
         },
+        // The key expression is the whole of what a dedup node decides by.
+        NodeKind::Dedup => text("key").unwrap_or_default(),
         NodeKind::Merge => node
             .config
             .get("inputs")

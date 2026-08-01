@@ -3202,7 +3202,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "medulla"
-version = "0.5.3"
+version = "0.5.6"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3231,7 +3231,7 @@ dependencies = [
 
 [[package]]
 name = "medulla-tui"
-version = "0.5.3"
+version = "0.5.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3247,6 +3247,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.23",
+ "unicode-width 0.2.0",
  "uuid 1.24.0",
  "vt100",
 ]
@@ -3713,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman"
-version = "0.63.5"
+version = "0.63.6"
 dependencies = [
  "aes-gcm",
  "aho-corasick",

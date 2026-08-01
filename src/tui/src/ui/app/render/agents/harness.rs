@@ -37,6 +37,17 @@ impl App {
     /// work that is over), or when the answer would be a guess.
     pub(super) fn local_harness_session(&self, selection: &Selection) -> Option<String> {
         let harnesses = self.harnesses.as_ref()?;
+        // An operator-started harness row *is* a session — it names one
+        // directly rather than through a task, which is the whole reason it
+        // needs its own rail group: nothing ever dispatched into it, so the
+        // runtime has no `(sender, task id)` record to resolve.
+        if let Some(id) = selection
+            .rows
+            .get(selection.active)
+            .and_then(|row| row.session_id())
+        {
+            return Some(id.to_string());
+        }
         if let Some(task) = &selection.task {
             return harnesses.session_for_task(&task.task_id);
         }
@@ -112,7 +123,16 @@ impl App {
             .as_ref()
             .and_then(|harnesses| harnesses.sessions.row(session_id));
         let what = match &row {
-            Some(row) => format!("{} · {}", row.provider.as_str(), row.state.as_str()),
+            // Who holds it goes in the title because it is the fact that
+            // decides whether a prompt typed here will be interleaved with the
+            // orchestrator's — and it is invisible everywhere else once the
+            // cursor is on a lane rather than on the harness's own rail row.
+            Some(row) => format!(
+                "{} · {} · {}",
+                row.provider.as_str(),
+                row.state.as_str(),
+                row.control.as_str()
+            ),
             // A session that vanished between resolving and drawing. Rare, and
             // naming it beats a title that claims a provider we no longer know.
             None => "harness".to_string(),
@@ -120,7 +140,7 @@ impl App {
         if attached {
             format!("{what} · typing here · {FOCUS_CHORD_LABEL} to release")
         } else {
-            format!("{what} · {FOCUS_CHORD_LABEL} to type")
+            format!("{what} · Enter or {FOCUS_CHORD_LABEL} to type")
         }
     }
 }

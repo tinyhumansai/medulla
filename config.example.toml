@@ -95,6 +95,30 @@ tokenEnv = "MEDULLA_TOKEN"
 # skipPermissions = true
 
 # ---------------------------------------------------------------------------
+# customHarnesses — OpenRouter models through Claude Code or Codex
+# ---------------------------------------------------------------------------
+# When OPENROUTER_API_KEY is present, Routing › Harnesses can add and edit these
+# presets. The coding CLI remains the agent harness while OpenRouter supplies
+# the model. This makes, for example, DeepSeek through Claude Code available as
+# named capacity on one fleet host.
+#
+# apiKeyEnv stores only the environment-variable name; never put the key value
+# in this file. Claude presets map the main model onto Opus and fastModel onto
+# the Sonnet/Haiku tiers so sub-agents keep using OpenRouter. Codex receives the
+# model through its normal -m argument.
+# [[customHarnesses]]
+# id = "deepseek"
+# name = "DeepSeek via Claude"
+# baseHarness = "claude"              # claude | codex
+# model = "deepseek/deepseek-chat"
+# fastModel = "deepseek/deepseek-chat"
+# hostId = "this-device"               # must match [host].address
+# default = false
+# apiKeyEnv = "OPENROUTER_API_KEY"
+# baseUrl = "https://openrouter.ai/api" # optional; defaults per base harness
+# contextWindow = 114000                # optional; Claude auto-compaction window
+
+# ---------------------------------------------------------------------------
 # core — the medulla-serve NDJSON orchestration socket (optional)
 # ---------------------------------------------------------------------------
 # [core]
@@ -120,6 +144,19 @@ tokenEnv = "MEDULLA_TOKEN"
 # Env override: MEDULLA_STATE_DIR.
 # ---------------------------------------------------------------------------
 # stateDir = "/absolute/path/to/state"
+
+# ---------------------------------------------------------------------------
+# workflows — authored workflow capabilities (optional)
+# ---------------------------------------------------------------------------
+# Definitions are saved under <home>/workflows and runtime state under
+# <home>/state/workflows. Code execution is on by default but is not sandboxed;
+# set allowCode = false before loading workflows you do not trust. HTTP and
+# third-party tools remain deny-by-default.
+# [workflows]
+# allowCode = true
+# runTimeoutSecs = 600
+# toolAllowlist = []
+# httpAllowlist = []
 
 # ---------------------------------------------------------------------------
 # workflow — daemon worker workspace allowlist
@@ -175,6 +212,12 @@ tokenEnv = "MEDULLA_TOKEN"
 # accent = "magenta"      # inline overlay borders (prompt / resume picker)
 # selectionFg = "black"   # text drawn on top of the primary selection background
 # dimBorder = "darkgray"  # panel borders
+
+# Harness-row details shown in the Agents tab. Both default to true and can
+# also be toggled live from Settings › Appearance.
+# [appearance]
+# showHarnessBranch = true
+# showHarnessPath = true
 
 # ---------------------------------------------------------------------------
 # fleet — operator-declared capacity: the Host → Harness → Workspace → Agent

@@ -87,6 +87,17 @@ impl App {
             }
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
             KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
+            KeyCode::Char('u') => WorkflowsKey::Handled(self.undo_selected_workflow()),
+            // `f` for "fix". Only meaningful with the cursor on a run, which is
+            // where the operator is when they can see one failed.
+            KeyCode::Char('f') => WorkflowsKey::Handled(self.repair_selected_run()),
+            // `e` for "evolve": review this workflow and say what should change.
+            // Distinct from `f`, which fixes one run now.
+            KeyCode::Char('e') => WorkflowsKey::Handled(self.evolve_selected_workflow()),
+            // The operator's half of a review. Deliberately keys an agent has no
+            // equivalent of: applying a proposed change is a person's decision.
+            KeyCode::Char('a') => WorkflowsKey::Handled(self.accept_selected_proposal()),
+            KeyCode::Char('n') => WorkflowsKey::Handled(self.reject_selected_proposal()),
             // Every other character is swallowed so a stray letter cannot fire a
             // content-pane action from the menu — the settlement Settings makes.
             KeyCode::Char(_) => WorkflowsKey::Handled(None),
@@ -151,6 +162,18 @@ impl App {
             }
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
             KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
+            KeyCode::Char('u') => WorkflowsKey::Handled(self.undo_selected_workflow()),
+            KeyCode::Char('f') => WorkflowsKey::Handled(self.repair_selected_run()),
+            KeyCode::PageUp => {
+                self.wf.preview_scroll = self.wf.preview_scroll.saturating_sub(6);
+                WorkflowsKey::Handled(None)
+            }
+            KeyCode::PageDown => {
+                self.wf.preview_scroll = self.wf.preview_scroll.saturating_add(6);
+                WorkflowsKey::Handled(None)
+            }
+            KeyCode::Char('a') => WorkflowsKey::Handled(self.accept_selected_proposal()),
+            KeyCode::Char('n') => WorkflowsKey::Handled(self.reject_selected_proposal()),
             _ => WorkflowsKey::Unhandled,
         }
     }
@@ -203,6 +226,12 @@ impl App {
                 }
                 WorkflowsKey::Handled(None)
             }
+            // Retry, but only with nothing typed: every printable key in this
+            // pane types, and an `r` that sometimes did something else instead
+            // would be worse than no retry at all.
+            KeyCode::Char('r') if self.wf.draft.text.is_empty() => {
+                WorkflowsKey::Handled(self.retry_copilot())
+            }
             KeyCode::Char(c) if !alt => {
                 self.wf.draft =
                     insert_at(&self.wf.draft.text, self.wf.draft.cursor, &c.to_string());
@@ -210,6 +239,22 @@ impl App {
             }
             _ => WorkflowsKey::Unhandled,
         }
+    }
+
+    /// Take back the last edit to the selected workflow.
+    ///
+    /// Deliberately not confirmed. Undo is the *recovery* gesture — the one an
+    /// operator reaches for after the copilot did something they did not want —
+    /// and a confirmation prompt in front of it would put a decision between
+    /// them and the fix. It is also itself undoable: the restore is snapshotted
+    /// like any other write, so pressing `u` twice returns to where you were.
+    fn undo_selected_workflow(&mut self) -> Option<Cmd> {
+        if self.wf.creating {
+            self.set_status("Nothing to undo — this workflow has not been created yet");
+            return None;
+        }
+        let id = self.selected_workflow()?.id.clone();
+        Some(Cmd::UndoWorkflow { id })
     }
 
     /// Run the selected workflow, refusing a disabled one.
@@ -225,8 +270,31 @@ impl App {
             return None;
         }
         let (id, name) = (workflow.id.clone(), workflow.name.clone());
+        let declared = workflow.inputs.clone();
+        if !declared.is_empty() {
+            return self.begin_workflow_inputs(id, false, declared);
+        }
         self.set_status(format!("Running {name}…"));
-        Some(Cmd::RunWorkflow { id })
+        Some(Cmd::RunWorkflow {
+            id,
+            inputs: Default::default(),
+        })
+    }
+
+    /// Open the first of one prompt per declared input, ahead of a run.
+    ///
+    /// Returns `None` because the run is not dispatched yet: the command is
+    /// emitted by [`super::super::commands`] when the last field is submitted.
+    /// Cancelling any prompt abandons the whole set — the collected values live
+    /// on the prompt, so there is nothing left behind to leak into a later run.
+    fn begin_workflow_inputs(
+        &mut self,
+        workflow_id: String,
+        dry_run: bool,
+        remaining: Vec<medulla::workflows::WorkflowInput>,
+    ) -> Option<Cmd> {
+        self.open_workflow_input_prompt(workflow_id, dry_run, remaining, Default::default());
+        None
     }
 
     /// Simulate the selected workflow.
@@ -241,8 +309,15 @@ impl App {
         }
         let workflow = self.selected_workflow()?;
         let (id, name) = (workflow.id.clone(), workflow.name.clone());
+        let declared = workflow.inputs.clone();
+        if !declared.is_empty() {
+            return self.begin_workflow_inputs(id, true, declared);
+        }
         self.set_status(format!("Simulating {name}…"));
-        Some(Cmd::DryRunWorkflow { id })
+        Some(Cmd::DryRunWorkflow {
+            id,
+            inputs: Default::default(),
+        })
     }
 }
 

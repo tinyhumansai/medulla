@@ -59,6 +59,47 @@ impl SessionHandle {
         lock(&self.screen).set_scrollback(0);
     }
 
+    /// The last `max` non-blank lines of the screen, oldest first.
+    ///
+    /// What a handoff brief carries: enough of what the operator was doing for
+    /// the orchestrator to continue the thread rather than restart it. Plain
+    /// text, not cells — nobody downstream renders it, they read it.
+    ///
+    /// Reads at scrollback offset 0 and puts the operator's offset back
+    /// afterwards, so capturing a brief does not move the pane they are looking
+    /// at. Only this session's emulator lock is taken, so a brief captured on
+    /// one harness never stalls another's reader thread.
+    ///
+    /// **Bounded to one screenful.** `vt100` 0.15's `visible_rows` underflows
+    /// for any offset past the screen height — see
+    /// [`scroll_history`](Self::scroll_history) — so walking the full retained
+    /// history would panic the TUI. One screen is what a brief needs anyway; the
+    /// harness's own transcript is where deep history lives.
+    pub(in super::super) fn tail_lines(&self, max: usize) -> Vec<String> {
+        let contents = {
+            let mut parser = lock(&self.screen);
+            let held = parser.screen().scrollback();
+            parser.set_scrollback(0);
+            let contents = parser.screen().contents();
+            parser.set_scrollback(held);
+            contents
+        };
+
+        let mut lines: Vec<String> = contents
+            .lines()
+            .map(|line| line.trim_end().to_string())
+            .collect();
+        // A harness pane is mostly empty space below the prompt, so the tail is
+        // otherwise all blanks and the brief carries nothing.
+        while lines.last().is_some_and(|line| line.is_empty()) {
+            lines.pop();
+        }
+        if lines.len() > max {
+            lines.drain(..lines.len() - max);
+        }
+        lines
+    }
+
     /// Render the current screen as `(rows_of_cells, cursor)`.
     ///
     /// Owned, so the render pass never holds the emulator's lock.

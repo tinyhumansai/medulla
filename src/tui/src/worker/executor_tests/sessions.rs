@@ -352,3 +352,124 @@ async fn sequential_task_frames_from_one_sender_do_not_share_a_session() {
     );
     sessions.shutdown();
 }
+
+#[tokio::test]
+async fn a_dispatch_into_a_workspace_the_operator_holds_is_refused() {
+    // The bug this closes: taking over the only harness in a workspace did not
+    // stop the orchestrator working there — `session_for` fell through the reuse
+    // branch and simply OPENED A SECOND HARNESS in the same folder. Two agents,
+    // one working tree, no mutual exclusion. So the assertion that matters here
+    // is not just that the task is refused; it is that nothing new was spawned.
+    use super::super::pty::{HarnessControl, LaunchSpec};
+
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let rollout = dir.path().join("rollout-held.jsonl");
+    let script = fake_harness_script(&rollout.to_string_lossy(), &cwd, "unreachable");
+
+    let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
+
+    // The operator starts a harness here and keeps it.
+    let held = sessions
+        .open(LaunchSpec {
+            provider: HarnessProvider::Codex,
+            bin: "/bin/sh".to_string(),
+            cwd: cwd.clone(),
+            env: HashMap::new(),
+            extra_args: vec!["-c".to_string(), "sleep 30".to_string()],
+            skip_permissions: false,
+            label: "you:codex".to_string(),
+            model: None,
+            session_id: None,
+            control: HarnessControl::User,
+            user_spawned: true,
+        })
+        .expect("the operator's harness must start");
+    let before = sessions.rows().len();
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(30),
+        executor
+            .clone()
+            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
+    )
+    .await
+    .expect("must settle")
+    .expect_err("a workspace an operator holds must refuse the task");
+
+    assert!(
+        error.starts_with(medulla::daemon::HARNESS_HELD_PREFIX),
+        "the refusal must carry the shared prefix so the hub can settle it as \
+         Held rather than as an ordinary worker error — got: {error}"
+    );
+    assert_eq!(
+        sessions.rows().len(),
+        before,
+        "refusing the task must not leave a rival harness running in the \
+         operator's working tree"
+    );
+
+    sessions.close(&held);
+    sessions.shutdown();
+}
+
+#[tokio::test]
+async fn a_dispatch_runs_again_once_the_harness_is_handed_back() {
+    // The other half: the hold is a pause, not a wall. Handing back must make
+    // the workspace usable again without the operator restarting anything.
+    use super::super::pty::{HarnessControl, LaunchSpec};
+
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let rollout = dir.path().join("rollout-handback.jsonl");
+    let script = fake_harness_script(&rollout.to_string_lossy(), &cwd, "picked it up");
+
+    let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
+
+    // The operator's harness runs the fake agent, not a bare shell: after the
+    // handback the executor REUSES this very process, so it has to be something
+    // that can actually serve the turn.
+    let held = sessions
+        .open(LaunchSpec {
+            provider: HarnessProvider::Codex,
+            bin: "/bin/sh".to_string(),
+            cwd: cwd.clone(),
+            env: env.clone(),
+            extra_args: vec!["-c".to_string(), script.clone()],
+            skip_permissions: false,
+            label: "you:codex".to_string(),
+            model: None,
+            session_id: None,
+            control: HarnessControl::User,
+            user_spawned: true,
+        })
+        .expect("the operator's harness must start");
+
+    assert!(tokio::time::timeout(
+        Duration::from_secs(30),
+        executor
+            .clone()
+            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
+    )
+    .await
+    .expect("must settle")
+    .is_err());
+
+    // The operator hands it back.
+    assert!(sessions.set_control(&held, HarnessControl::Orchestrator));
+
+    let reply = tokio::time::timeout(
+        Duration::from_secs(30),
+        executor
+            .clone()
+            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
+    )
+    .await
+    .expect("must settle")
+    .expect("a handed-back workspace must accept work again");
+    assert!(reply.reply.contains("picked it up"), "got: {reply:?}");
+
+    sessions.shutdown();
+}

@@ -20,13 +20,33 @@ pub(super) enum AppMsg {
     UsageLoaded(Option<serde_json::Value>),
     /// A newer release was detected by the background update checker.
     UpdateAvailable(String),
-    /// Current local task document.
-    TasksLoaded(medulla::tasks::TaskDocument),
+    /// An automatic review began outside the selected pane.
+    #[cfg(feature = "workflows")]
+    CopilotStarted {
+        /// The workflow whose automatic review started.
+        workflow: String,
+        /// The synthetic user turn shown in its transcript.
+        instruction: String,
+    },
+    /// A page of the feedback board. `None` = this runtime has no board.
+    FeedbackLoaded {
+        /// The query that produced it, so a superseded load can be dropped.
+        query: medulla::client::FeedbackQuery,
+        /// The page itself.
+        page: Option<medulla::client::FeedbackPage>,
+    },
+    /// Comments for one board item.
+    FeedbackComments {
+        /// The item the comments belong to.
+        id: String,
+        /// The item's comments, oldest first.
+        comments: Vec<medulla::client::FeedbackComment>,
+    },
+    /// A board item the server re-tallied after a vote.
+    FeedbackItemUpdated(medulla::client::FeedbackItem),
+    /// A feedback action finished; reload the board and report `status`.
+    FeedbackChanged(String),
     /// A progress line from a running copilot turn.
-    ///
-    /// Addressed by workflow rather than applied to whatever is selected: the
-    /// operator may have moved the rail on while the turn runs, and the line
-    /// belongs to the thread that asked for it.
     #[cfg(feature = "workflows")]
     CopilotStatus {
         /// The workflow whose turn reported it.
@@ -45,15 +65,27 @@ pub(super) enum AppMsg {
         changes: Vec<String>,
         /// The workflow the turn created, for a create turn that made one.
         created: Option<String>,
+        /// Whether the workflow the turn was scoped to no longer exists, so its
+        /// conversation can be closed down with it.
+        removed: bool,
     },
     /// A copilot turn failed.
     #[cfg(feature = "workflows")]
     CopilotFailed {
         /// The workflow the turn was scoped to.
         workflow: String,
+        /// The instruction belonging to this specific failed turn.
+        instruction: String,
         /// Why it failed.
         error: String,
     },
+    /// The workflow store was written to by something other than a copilot turn,
+    /// so the catalogue on screen is stale.
+    ///
+    /// Carries no payload: what changed is whatever the store now holds, and a
+    /// re-read is both cheaper and more honest than describing the edit twice.
+    #[cfg(feature = "workflows")]
+    WorkflowsChanged,
 }
 
 /// Why the event loop stopped.
@@ -76,6 +108,10 @@ pub(crate) enum SessionExit {
 pub(crate) struct SessionWiring {
     /// The loaded configuration for this session.
     pub loaded: medulla::config::LoadedConfig,
+    /// Starts a host on this device after launch. `None` when this device is
+    /// not hosting — there is then no bus binding or session manager to hand a
+    /// new host, and the command says so rather than half-starting one.
+    pub local_hosts: Option<crate::local_host::LocalHostSpawner>,
     /// A note to show on the status line at startup, if any.
     pub startup_status: Option<String>,
     /// The tiny.place presence observation, when that service is running.
@@ -83,7 +119,7 @@ pub(crate) struct SessionWiring {
         Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
     /// Where appearance/config edits are persisted.
     pub config_path: std::path::PathBuf,
-    /// The Medulla home: where local task/appearance state is kept.
+    /// The Medulla home: where user-level application state is kept.
     pub medulla_home: std::path::PathBuf,
     /// The account the embedded core is signed in as, when it is.
     ///

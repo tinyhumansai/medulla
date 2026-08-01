@@ -66,19 +66,144 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
 
     // Verify the token and greet the user.
     let client = MedullaClient::new(base_url.clone(), jwt.clone());
-    match client.me().await {
-        Ok(me) => println!("{}", medulla::auth::describe_me(&me)),
+    let me = match client.me().await {
+        Ok(me) => {
+            println!("{}", medulla::auth::describe_me(&me));
+            me
+        }
         Err(e) => return Err(anyhow::anyhow!("token verification failed: {e}")),
-    }
+    };
+
+    // Record who this is *before* booting, because the id chooses the home the
+    // core is about to be pointed at. Taken from `/auth/me` rather than from the
+    // core's own auth state for the same reason: the core's state lives inside
+    // the directory this id selects.
+    //
+    // A refusal stops the login here, before a core is booted or a token
+    // written: the alternative is storing this account's bearer in a directory
+    // that belongs to somebody else.
+    adopt_account(&env, &me, &base_url).map_err(|why| anyhow::anyhow!("signed in, but {why}"))?;
 
     // Boot last: the flow above can take minutes of browser round-trip, and a
     // core sitting open across it buys nothing.
-    let core = auth_core(&env).await?;
+    let core = auth_core(&env, parsed.config.as_deref()).await?;
     medulla::core_host::auth::store_session(&core, &jwt)
         .await
         .map_err(|e| anyhow::anyhow!("the core rejected the session: {e}"))?;
     sweep_retired_credentials(&env);
     println!("Signed in to {base_url}.");
+    Ok(())
+}
+
+/// Scope this install to the account named by an `/auth/me` response, and prove
+/// that the home now in effect is that account's.
+///
+/// Writes the root-level active-user marker, which is what every later launch
+/// reads to resolve its home — so this must happen before anything derives a
+/// path from [`medulla::home::medulla_home`], and certainly before the core is
+/// booted against one.
+///
+/// # Why this refuses rather than warns
+///
+/// A caller stores the session immediately after, into whichever home is in
+/// effect. So "recorded the account" is not the question — "does the home this
+/// process will use belong to the account that just authenticated" is, and three
+/// things make those differ: a response with no id, a marker that cannot be
+/// written, and `MEDULLA_USER`, which outranks the marker and therefore survives
+/// a successful write. Any of them would put one account's bearer token in
+/// another account's credential store. The comparison against
+/// [`medulla::home::medulla_home`] covers all three at once, because it asks the
+/// resolver the same question every later launch will ask it.
+///
+/// An id-less response is refused outright, including on a fresh install: the
+/// pre-login home would accept it, but nothing would ever make it an *account*,
+/// so every launch would sign in again and every such login would share one
+/// credential store.
+///
+/// # Errors
+///
+/// Returns an operator-facing sentence when the effective home is not the
+/// authenticated account's. The caller must not store a session after one.
+pub(crate) fn adopt_account(
+    env: &std::collections::HashMap<String, String>,
+    me: &serde_json::Value,
+    base_url: &str,
+) -> Result<(), String> {
+    let root = medulla::home::medulla_root(env);
+
+    let Some(user_id) = medulla::auth::user_id_from_me(me) else {
+        // No carve-out for a fresh install. Letting an id-less login settle into
+        // the pre-login home looks harmless — nothing to cross yet — but it
+        // never becomes an account: `sign_in::account_is_active` keeps reading
+        // `local` as signed out, so every launch runs the login flow again, and
+        // every id-less account on the machine shares that one credential store.
+        // The whole layout is keyed on this id, so a login without one has
+        // nowhere correct to go and should say so.
+        return Err(
+            "the backend did not say which account this token belongs to, and every account's \
+             directory is named by that id — there is nowhere correct to store this session"
+                .to_string(),
+        );
+    };
+
+    // Before the id is joined to anything. It comes from a backend response and
+    // becomes a directory name, so `..`, a separator, or an absolute path would
+    // otherwise reach `seed_account_backend` — which creates directories and
+    // merges a config file — at a path outside the root, on a login that may
+    // then be refused anyway.
+    let user_id = medulla::home::user::sanitize_account_id(&user_id).ok_or_else(|| {
+        format!("the backend named an account id that cannot be a directory name ({user_id:?})")
+    })?;
+
+    // `MEDULLA_USER` selects an account for *this process* without touching the
+    // selection every other process reads, so honouring it means not writing the
+    // marker at all — not even when the authenticated account matches, which
+    // would still overwrite a marker naming somebody else.
+    let overridden = env
+        .get(medulla::home::user::MEDULLA_USER_ENV)
+        .map(|v| v.trim())
+        .is_some_and(|v| !v.is_empty());
+
+    let expected = root.join(&user_id);
+
+    // The override is checked before anything is written. A refused login must
+    // leave no trace: seeding first would create the authenticated account's
+    // config in a home this process is not going to use, on a login that ends
+    // in an error.
+    if overridden && medulla::home::medulla_home(env) != expected {
+        return Err(format!(
+            "signed in as {user_id}, but {} pins this process to another account — unset it to \
+             use that account's own directory",
+            medulla::home::user::MEDULLA_USER_ENV,
+        ));
+    }
+
+    // Describe the account before selecting it. The other order leaves a failed
+    // login with the marker already moved: the command reports failure, stores
+    // no session, and every later launch resolves to the account whose home
+    // could not be written — skipping the first-account flow that would fix it.
+    let notice = crate::sign_in::seed_account_backend(&expected, base_url)
+        .map_err(|err| format!("this account's config could not be written ({err})"))?;
+    if let Some(notice) = notice {
+        eprintln!("{notice}");
+    }
+
+    if !overridden {
+        medulla::home::user::write_active_user_id(&root, &user_id)
+            .map_err(|err| format!("this account could not be recorded ({err})"))?;
+    }
+
+    // Final check that the resolver agrees, which is what every later launch
+    // will ask it.
+    let effective = medulla::home::medulla_home(env);
+    if effective != expected {
+        return Err(format!(
+            "signed in as {user_id}, but this process resolves its home to {} — unset \
+             {} to use that account's own directory",
+            effective.display(),
+            medulla::home::user::MEDULLA_USER_ENV,
+        ));
+    }
     Ok(())
 }
 
@@ -89,15 +214,22 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
 /// developer's real `~/.openhuman` instead of the one this process's
 /// `MEDULLA_HOME` implies — so `medulla login` would sign in a workspace the TUI
 /// never reads.
+/// `config` is the operator's explicit `--config`, which stays authoritative
+/// here. Rediscovering config from the account home instead would defeat the
+/// flag exactly where it matters most: `medulla login --config staging.toml`
+/// verifies a token against the file's endpoint, and an account that already
+/// declares a different `backend.baseUrl` would then have the core validate that
+/// token against *its* endpoint and reject the login.
 async fn auth_core(
     env: &std::collections::HashMap<String, String>,
+    config: Option<&str>,
 ) -> anyhow::Result<medulla::core_host::EmbeddedCore> {
     let home = medulla::home::medulla_home(env);
     medulla::core_host::bind_workspace(env, &home);
     // The session must be stored against the backend this host is configured
     // for, or `medulla login` signs into one deployment and the TUI probes
     // another.
-    let loaded = load_config(None, env, &home)?;
+    let loaded = load_config(config, env, &home)?;
     medulla::core_host::bind_medulla_base_url(env, &loaded.config.backend.base_url);
     // And the core's own backend client with it: storing a session validates it
     // against `/auth/me` there, not on the Medulla base above.
@@ -117,7 +249,7 @@ async fn session_credentials(
     env: &std::collections::HashMap<String, String>,
     base_url: &str,
 ) -> Option<Credentials> {
-    let core = auth_core(env).await.ok()?;
+    let core = auth_core(env, None).await.ok()?;
     let jwt = medulla::core_host::auth::session_token(&core)
         .await
         .ok()??;
@@ -133,11 +265,26 @@ async fn session_credentials(
 /// unsure of their state can always run it.
 pub(crate) async fn run_logout() -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let core = auth_core(&env).await?;
+    let core = auth_core(&env, None).await?;
     medulla::core_host::auth::clear_session(&core)
         .await
         .map_err(|e| anyhow::anyhow!("failed to clear the session: {e}"))?;
     sweep_retired_credentials(&env);
+    // The session is cleared; the account selection is deliberately not.
+    //
+    // "Signed out" means "no session", not "no account". The account's directory
+    // stays on disk either way, and the marker is what lets the next launch
+    // *find* it — including its `config.toml`. Clearing the marker would send
+    // that launch to the pre-login home and its default backend, so an operator
+    // on staging or a self-hosted deployment would be offered a login against
+    // production, with no way back to their own endpoint short of an environment
+    // variable. The one thing logout must not do is make signing back in
+    // impossible.
+    //
+    // So logging back in as the same account lands in the same home, with the
+    // same config, logs, and workflow store. Signing in as somebody else moves
+    // the marker through the account-switch path, which is the only thing that
+    // should move it.
     println!("Logged out.");
     Ok(())
 }

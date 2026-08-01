@@ -14,17 +14,18 @@ pub mod code;
 pub mod dispatch;
 pub mod http;
 pub mod mocks;
+pub mod script;
 pub mod state;
 pub mod tools;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde_json::Value;
 use tinyflows::caps::{Capabilities, WorkflowResolver};
 use tinyflows::engine::{Checkpointer, FileCheckpointer};
 
+use crate::flow_engine::agent_evidence::AgentEvidence;
 use crate::flow_engine::settings::CapabilitySettings;
 
 use self::agent::{HarnessAgentRunner, HarnessLlm};
@@ -33,9 +34,6 @@ use self::dispatch::HarnessDispatch;
 use self::http::{AllowlistHttpClient, HttpCredential};
 use self::state::FileStateStore;
 use self::tools::MedullaToolInvoker;
-
-/// How long a `code` node may run when a host has enabled them.
-const CODE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Everything a run needs from the host, other than its settings.
 ///
@@ -62,23 +60,72 @@ pub fn build_capabilities(
     state_namespace: &str,
     run_id: &str,
 ) -> Capabilities {
+    build_capabilities_inner(settings, services, state_namespace, run_id, None)
+}
+
+/// Build capabilities that also capture resolved agent prompts for run history.
+pub(crate) fn build_capabilities_with_agent_evidence(
+    settings: Arc<CapabilitySettings>,
+    services: HostServices,
+    state_namespace: &str,
+    run_id: &str,
+    evidence: Arc<AgentEvidence>,
+) -> Capabilities {
+    build_capabilities_inner(settings, services, state_namespace, run_id, Some(evidence))
+}
+
+/// Shared capability assembly, optionally instrumented with agent evidence.
+fn build_capabilities_inner(
+    settings: Arc<CapabilitySettings>,
+    services: HostServices,
+    state_namespace: &str,
+    run_id: &str,
+    evidence: Option<Arc<AgentEvidence>>,
+) -> Capabilities {
     let code: Arc<dyn tinyflows::caps::CodeRunner> = if settings.allow_code {
-        Arc::new(ProcessCodeRunner::new(CODE_TIMEOUT))
+        // The same bound `medulla:shell` uses, so an author who moves a
+        // script between the two does not silently change its deadline.
+        Arc::new(ProcessCodeRunner::new(settings.script_timeout()))
     } else {
         Arc::new(DeniedCodeRunner)
     };
 
+    // One limiter for the whole run. The agent runner and the LLM provider both
+    // dispatch to the same worker pool, so giving each its own semaphore would
+    // make the run's real ceiling twice what the operator configured.
+    let slots = Arc::new(tokio::sync::Semaphore::new(
+        settings.max_parallel_agents.max(1),
+    ));
+
+    let llm: Arc<dyn tinyflows::caps::LlmProvider> = match &evidence {
+        Some(evidence) => Arc::new(
+            HarnessLlm::recording(
+                services.dispatch.clone(),
+                settings.clone(),
+                run_id,
+                evidence.clone(),
+            )
+            .with_limiter(slots.clone()),
+        ),
+        None => Arc::new(
+            HarnessLlm::new(services.dispatch.clone(), settings.clone(), run_id)
+                .with_limiter(slots.clone()),
+        ),
+    };
+    let agent: Arc<dyn tinyflows::caps::AgentRunner> = match evidence {
+        Some(evidence) => Arc::new(
+            HarnessAgentRunner::recording(services.dispatch, settings.clone(), run_id, evidence)
+                .with_limiter(slots),
+        ),
+        None => Arc::new(
+            HarnessAgentRunner::new(services.dispatch, settings.clone(), run_id)
+                .with_limiter(slots),
+        ),
+    };
+
     Capabilities {
-        llm: Arc::new(HarnessLlm::new(
-            services.dispatch.clone(),
-            settings.clone(),
-            run_id,
-        )),
-        agent: Some(Arc::new(HarnessAgentRunner::new(
-            services.dispatch,
-            settings.clone(),
-            run_id,
-        ))),
+        llm,
+        agent: Some(agent),
         tools: Arc::new(MedullaToolInvoker::new(settings.clone())),
         http: Arc::new(AllowlistHttpClient::new(
             settings.clone(),

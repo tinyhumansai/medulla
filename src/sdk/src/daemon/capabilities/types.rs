@@ -36,6 +36,10 @@ pub struct ProbeOptions {
     /// straight to the provider on ambient credentials or fail to authenticate.
     /// `None` leaves routing off.
     pub router: Option<crate::config::RouterConfig>,
+    /// Whether commits made by harnesses this probe launches are attributed to
+    /// Medulla — the resolved `attribution.commit` config value (on by default;
+    /// see [`crate::config::AttributionConfig`]).
+    pub attribution: bool,
 }
 pub(super) struct ReportedCapabilities {
     pub(super) accessible_dirs: Vec<String>,

@@ -78,6 +78,7 @@ fn probe_options_in(run_task: RunTaskFn, workspace: &str) -> ProbeOptions {
         abort: Abort::new(),
         budget: None,
         router: None,
+        attribution: true,
     }
 }
 

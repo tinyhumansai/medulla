@@ -109,6 +109,7 @@ fn a_peer_with_no_presence_reading_is_marked_as_merely_announced() {
 fn local_worker(address: &str, label: Option<&str>) -> WorkerInfo {
     WorkerInfo {
         id: address.into(),
+        roles: Vec::new(),
         address: address.into(),
         handle: None,
         label: label.map(str::to_string),

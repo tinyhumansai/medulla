@@ -17,13 +17,29 @@
 //! [`progress_tests`](mod@self) round-trips a real tool-call event through both
 //! so the two cannot drift apart silently.
 
-use crate::daemon::TOOL_PREFIX;
+use crate::daemon::{THINKING_PREFIX, TOOL_CALL_ID_SEPARATOR, TOOL_PREFIX};
 
 /// What a progress frame turns out to be.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Progress {
     /// A tool call, as `name: display` with the producer's prefix removed.
-    Tool(String),
+    Tool {
+        /// Stable provider call id, when the producer supplied one.
+        call_id: Option<String>,
+        /// Compact human-readable tool summary.
+        text: String,
+    },
+    /// The latest tool call settled; the transcript updates that call in place.
+    ToolResult {
+        /// Whether execution failed.
+        failed: bool,
+        /// Compact settlement metadata such as exit code or output size.
+        detail: String,
+        /// Stable provider call id, when the producer supplied one.
+        call_id: Option<String>,
+    },
+    /// A streamed fragment of provider-emitted reasoning.
+    Thinking(String),
     /// Anything else — thinking, writing, a provider's own wording.
     Status(String),
 }
@@ -36,10 +52,35 @@ pub enum Progress {
 /// the caller's dedup already collapses those, and swallowing them here would
 /// hide a provider emitting blanks.
 pub fn classify(frame: &str) -> Progress {
+    let (frame, call_id) = frame
+        .rsplit_once(TOOL_CALL_ID_SEPARATOR)
+        .map_or((frame, None), |(detail, id)| {
+            (detail, (!id.is_empty()).then(|| id.to_string()))
+        });
+    if let Some(detail) = frame.strip_prefix("tool completed") {
+        return Progress::ToolResult {
+            failed: false,
+            detail: detail.trim_start_matches(" · ").trim().to_string(),
+            call_id,
+        };
+    }
+    if let Some(detail) = frame.strip_prefix("tool failed") {
+        return Progress::ToolResult {
+            failed: true,
+            detail: detail.trim_start_matches(" · ").trim().to_string(),
+            call_id,
+        };
+    }
+    if let Some(fragment) = frame.strip_prefix(THINKING_PREFIX) {
+        return Progress::Thinking(fragment.to_string());
+    }
     match frame.strip_prefix(TOOL_PREFIX) {
         // A bare prefix with nothing after it is not a tool call worth a line of
         // its own; it says only that something ran.
-        Some(rest) if !rest.trim().is_empty() => Progress::Tool(rest.trim().to_string()),
+        Some(rest) if !rest.trim().is_empty() => Progress::Tool {
+            call_id,
+            text: rest.trim().to_string(),
+        },
         _ => Progress::Status(frame.to_string()),
     }
 }

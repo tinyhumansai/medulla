@@ -74,6 +74,7 @@ pub async fn run_provider_task(options: RunTaskOptions) -> Result<RunTaskResult,
         resume_session_id: options.resume_session_id,
         abort: options.abort,
         router: options.router,
+        attribution: options.attribution,
     };
     let mut attempt: u32 = 1;
     loop {
@@ -131,15 +132,13 @@ async fn run_provider_attempt(
     // this child's argv. Empty for providers with no such knob.
     extra_args.extend(crate::attribution::attribution_args(
         spec.provider,
-        &spec.env,
+        spec.attribution,
     ));
     // For providers that use the git-hook path (Codex, Opencode), merge the
     // prepare-commit-msg hook env vars into the child's environment.
     let mut merged_env = spec.env.clone();
-    merged_env.extend(crate::attribution::attribution_env(
-        spec.provider,
-        &merged_env,
-    ));
+    let attribution_env = crate::attribution::attribution_env(spec.attribution, &merged_env);
+    merged_env.extend(attribution_env);
     // Custom OpenAI-compatible router: layer the provider's endpoint env (and,
     // when configured, its API key) into the child at the spawn seam, so headless
     // daemon, operator-TUI daemon, and interactive wrappers all route identically.
@@ -342,8 +341,6 @@ async fn run_provider_attempt(
     // child the pipe may not be drained yet, and a lost stderr tail hides the
     // transient-lock marker the retry loop keys on.
     let _ = tokio::time::timeout(Duration::from_millis(500), stderr_task).await;
-    // Clean up any git hook temp directory created by attribution_env.
-    crate::attribution::cleanup_hook_tmpdir();
     if spec.abort.is_aborted() {
         return Err(format!("{} task aborted", provider_name(spec.provider)));
     }

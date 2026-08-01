@@ -66,9 +66,11 @@ fn a_blank_backend_url_binds_nothing_rather_than_an_empty_endpoint() {
 fn workspace_nests_under_the_medulla_home() {
     // Nested, not a sibling: deleting a scratch MEDULLA_HOME must take the
     // core's state with it, or the next run silently inherits stale state.
+    // Directly under the account home, with no `openhuman/` level: the home is
+    // already one account's, and the `workspace` leaf is what puts OpenHuman's
+    // config at `<home>/.openhuman` rather than inside the state tree.
     let dir = workspace_dir(Path::new("/tmp/scratch-home"));
-    assert!(dir.starts_with("/tmp/scratch-home"), "{}", dir.display());
-    assert!(dir.ends_with("openhuman/workspace"), "{}", dir.display());
+    assert_eq!(dir, PathBuf::from("/tmp/scratch-home/workspace"));
 }
 
 #[test]

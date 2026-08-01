@@ -211,8 +211,65 @@ fn describe_me_variants() {
     assert_eq!(describe_me(&email), "Logged in as a@b.c");
     let nested = serde_json::json!({"user":{"userId":"u9"}});
     assert_eq!(describe_me(&nested), "Logged in as u9");
+    // The shape the live backend returns — the summary names the same id the
+    // home is scoped to, so both readers must agree on the spelling.
+    let mongo = serde_json::json!({"email":"a@b.c","_id":"68f0a1b2c3d4e5f60718293a"});
+    assert_eq!(
+        describe_me(&mongo),
+        "Logged in as a@b.c (68f0a1b2c3d4e5f60718293a)"
+    );
     let empty = serde_json::json!({});
     assert_eq!(describe_me(&empty), "Logged in.");
+}
+
+#[test]
+fn the_account_id_is_read_from_either_shape_and_either_spelling() {
+    // This id becomes a directory name — the account's whole home hangs off it —
+    // so every shape a deployment has returned has to resolve to the same value.
+    let flat = serde_json::json!({"email":"a@b.c","id":"u1"});
+    assert_eq!(super::user_id_from_me(&flat).as_deref(), Some("u1"));
+    let nested = serde_json::json!({"user":{"userId":"u9"}});
+    assert_eq!(super::user_id_from_me(&nested).as_deref(), Some("u9"));
+    // `id` wins over `userId` when a response carries both, matching the line
+    // the operator is shown.
+    let both = serde_json::json!({"id":"u1","userId":"u2"});
+    assert_eq!(super::user_id_from_me(&both).as_deref(), Some("u1"));
+
+    // What the live backend actually sends: `/auth/me` hands back a Mongoose
+    // document's `toJSON()`, which carries `_id` and no `id` at all. Missing this
+    // spelling failed every real login with "the backend did not say which
+    // account this token belongs to".
+    let mongo = serde_json::json!({"_id":"68f0a1b2c3d4e5f60718293a","email":"a@b.c"});
+    assert_eq!(
+        super::user_id_from_me(&mongo).as_deref(),
+        Some("68f0a1b2c3d4e5f60718293a")
+    );
+    // …and the Extended JSON spelling of the same field.
+    let extended = serde_json::json!({"_id":{"$oid":"68f0a1b2c3d4e5f60718293a"}});
+    assert_eq!(
+        super::user_id_from_me(&extended).as_deref(),
+        Some("68f0a1b2c3d4e5f60718293a")
+    );
+    // An explicit `id` is the public identifier when both are present.
+    let public_and_raw = serde_json::json!({"id":"u1","_id":"68f0a1b2c3d4e5f60718293a"});
+    assert_eq!(
+        super::user_id_from_me(&public_and_raw).as_deref(),
+        Some("u1")
+    );
+
+    // Nothing usable reads as absent rather than as an empty directory name.
+    assert_eq!(super::user_id_from_me(&serde_json::json!({})), None);
+    assert_eq!(
+        super::user_id_from_me(&serde_json::json!({"id":"  "})),
+        None
+    );
+    assert_eq!(super::user_id_from_me(&serde_json::json!({"id":7})), None);
+    // A non-string `id` still lets a usable `_id` answer, rather than poisoning
+    // the lookup at the first key.
+    assert_eq!(
+        super::user_id_from_me(&serde_json::json!({"id":7,"_id":"abc"})).as_deref(),
+        Some("abc")
+    );
 }
 
 async fn send_request(port: u16, request: &str) {

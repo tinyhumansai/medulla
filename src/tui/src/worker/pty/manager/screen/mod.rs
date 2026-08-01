@@ -65,6 +65,31 @@ impl PtyManager {
         }
     }
 
+    /// The last `max` non-blank lines of `id`'s screen, oldest first.
+    ///
+    /// This is what a handoff brief carries: enough of what the operator was
+    /// doing for the orchestrator to continue the thread rather than restart it.
+    /// Plain text, not cells — nobody downstream renders it, they read it.
+    ///
+    /// Reads at scrollback offset 0 and puts the operator's offset back
+    /// afterwards. Capturing a brief must not move the pane they are looking at,
+    /// and the alternative — snapping them to the live screen as a side effect of
+    /// handing a harness over — is the kind of thing that reads as the TUI
+    /// glitching.
+    ///
+    /// **Bounded to one screenful.** `vt100` 0.15's `visible_rows` underflows for
+    /// any offset past the screen height (see [`scroll_history`](Self::scroll_history)),
+    /// so walking the full retained history would panic the TUI. One screen is
+    /// what a brief needs anyway; the harness's own transcript is where deep
+    /// history lives.
+    ///
+    /// Empty when the session is unknown.
+    pub fn tail_lines(&self, id: &str, max: usize) -> Vec<String> {
+        self.handle(id)
+            .map(|session| session.tail_lines(max))
+            .unwrap_or_default()
+    }
+
     /// Render `id`'s current screen as `(rows_of_cells, cursor)`.
     ///
     /// Returns owned rows rather than a borrow of the emulator: the render pass
@@ -127,12 +152,35 @@ impl PtyManager {
         }
     }
 
-    /// Write raw bytes to a session's PTY — the focused pane's keystrokes.
+    /// Queue raw bytes for a session's PTY — the focused pane's keystrokes, and
+    /// the prompts [`inject_prompt`](super::super::inject_prompt) pastes.
     ///
-    /// Blocks only this session: a child that has stopped draining its input
-    /// parks the write in the kernel, and that used to happen under the one lock
-    /// every other session and the render loop needed.
+    /// Returns as soon as the bytes are queued; the session's writer thread
+    /// performs the write. That split is the point, twice over. A pty write
+    /// parks in the kernel until the child drains its stdin, and a harness that
+    /// is still loading or sitting on a startup dialog never does. Giving every
+    /// session its own locks (see [`SessionHandle`](super::super::SessionHandle))
+    /// stops that stalling *other* sessions and the render pass that used to
+    /// queue behind the one global lock; handing the write to a thread stops it
+    /// stalling the *caller*, which on the keystroke path is the render thread
+    /// itself. Nothing here may block, for that reason.
+    ///
+    /// Queueing cannot block, so the queue is bounded by *refusal* instead:
+    /// [`MAX_QUEUED_WRITE_BYTES`](super::super::handle::MAX_QUEUED_WRITE_BYTES)
+    /// of unwritten bytes per session, past which a write is rejected rather
+    /// than waited out. A child that never drains its stdin therefore cannot
+    /// make this grow without limit.
+    ///
+    /// # Errors
+    ///
+    /// When `id` names no session, when that session has exited, when `bytes`
+    /// alone exceeds the queue, when the queue is already full, or when the
+    /// writer thread is gone. A failure of the *write itself* has no caller left
+    /// to reach and is recorded on the row's `last_error` instead.
     pub fn write(&self, id: &str, bytes: &[u8]) -> Result<(), String> {
+        // The registry lock is held for the lookup and the `Arc` clone; the
+        // admission check, the reservation, and the send all happen against the
+        // session alone. See `SessionHandle::write`.
         match self.handle(id) {
             Some(session) => session.write(bytes),
             None => Err(format!("no session {id}")),

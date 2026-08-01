@@ -22,6 +22,29 @@ pub enum SlashCommand {
     NewSession,
     /// `/resume` — open the saved-chat picker.
     Resume,
+    /// `/harness [provider] [path]` — start a harness the orchestrator will not
+    /// dispatch into.
+    ///
+    /// Both arguments are optional: with neither, the front end opens its
+    /// picker. Parsing does not validate the path — only the front end knows
+    /// what the active workspace is, and a path that does not exist is a
+    /// spawn-time error with a much better message than a parse-time one.
+    NewHarness {
+        /// The harness CLI to run, lowercased, when one was named.
+        provider: Option<String>,
+        /// The working directory to start it in, when one was given.
+        path: Option<String>,
+    },
+    /// `/takecontrol` — take the selected harness from the orchestrator.
+    TakeControl,
+    /// `/handoff [note]` — give the selected harness back to the orchestrator,
+    /// optionally saying what you were in the middle of.
+    HandOff {
+        /// What the operator wants continued, in their words. The single most
+        /// useful thing in a brief: the transcript shows what happened, this
+        /// says what it was *for*.
+        note: Option<String>,
+    },
     /// `/abort` — request cancellation of the running cycle.
     Abort,
     /// `/clear` — reset the view (runtime history is retained).
@@ -34,10 +57,8 @@ pub enum SlashCommand {
     Settings,
     /// `/usage` — show the usage subpage (fetches account usage on entry).
     Usage,
-    /// `/memory [query]`, `/mem [query]` — open the Memory tab. The persona
-    /// layer is out of the build, so the query is parsed and ignored rather
-    /// than the command disappearing from under an operator's fingers.
-    Memory(Option<String>),
+    /// `/feedback`, `/fb` — open the feedback board.
+    Feedback,
     /// `/mouse` — toggle mouse capture.
     ToggleMouse,
     /// `/copy [all|last]` — copy the transcript at the given scope.

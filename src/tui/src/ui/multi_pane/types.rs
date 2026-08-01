@@ -1,6 +1,7 @@
 //! Data types shared by reusable multi-pane navigation.
 
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 
 /// Where a drawn subpage nav put its clickable page rows.
 ///
@@ -48,6 +49,8 @@ pub(crate) struct NavRow<'a> {
     /// Whether the row is secondary — a heading, or an entry that is disabled
     /// or otherwise not actionable.
     pub(crate) dim: bool,
+    /// Optional semantic foreground colour, used by status-bearing rows.
+    pub(crate) color: Option<Color>,
     /// Whether a click on the row should select something. Headings are drawn
     /// but inert, which is what keeps a click on one from selecting whichever
     /// entry happens to share its offset.
@@ -63,6 +66,7 @@ impl<'a> NavRow<'a> {
             indent: 0,
             selected: false,
             dim: false,
+            color: None,
             selectable: true,
         }
     }
@@ -75,6 +79,7 @@ impl<'a> NavRow<'a> {
             indent: 0,
             selected: false,
             dim: true,
+            color: None,
             selectable: false,
         }
     }

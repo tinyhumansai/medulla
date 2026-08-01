@@ -57,6 +57,7 @@ fn settings_tab_renders_nav_and_default_usage_subpage() {
         "Usage",
         "Appearance",
         "Config",
+        "Feedback",
         "Trace",
         "Context",
         "Account",
@@ -76,8 +77,8 @@ fn number_keys_jump_subpages() {
     assert_eq!(app.settings_subpage(), "Appearance");
     let _ = key(&mut app, KeyCode::Char('3'));
     assert_eq!(app.settings_subpage(), "Config");
-    // Help is the last subpage; the nav lost Feedback, so it is now 7 not 8.
-    let _ = key(&mut app, KeyCode::Char('7'));
+    // Help is the last subpage — eighth, now that Feedback is back on the nav.
+    let _ = key(&mut app, KeyCode::Char('8'));
     assert_eq!(app.settings_subpage(), "Help");
     let out = text_of(&draw(&mut app, 140, 40));
     assert!(out.contains("Commands"), "help subpage: {out}");
@@ -253,11 +254,11 @@ fn the_settings_nav_groups_its_subpages() {
 }
 
 #[test]
-fn trace_and_context_are_no_longer_top_level_tabs() {
-    for gone in ["Trace", "Context"] {
+fn secondary_and_paused_surfaces_are_not_top_level_tabs() {
+    for gone in ["Trace", "Context", "TokenMaxxxing"] {
         assert!(
             !TABS.contains(&gone),
-            "{gone} should live under Settings, not the tab bar"
+            "{gone} should not appear in the tab bar"
         );
     }
 }

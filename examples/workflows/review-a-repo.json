@@ -1,0 +1,83 @@
+{
+  "id": "review-a-repo",
+  "name": "Review a repo",
+  "description": "Review a named repository and summarize the risks, parameterized by declared inputs rather than hard-coded into the graph.",
+  "enabled": true,
+  "inputs": [
+    {
+      "name": "repo",
+      "type": "string",
+      "required": true,
+      "description": "Repository to review, as owner/name"
+    },
+    {
+      "name": "focus",
+      "type": "string",
+      "default": "correctness and error handling",
+      "description": "What the review should weigh most"
+    },
+    {
+      "name": "include_tests",
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to read the test suite as part of the review"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "trigger",
+      "name": "Start",
+      "config": {
+        "trigger_kind": "manual"
+      }
+    },
+    {
+      "id": "review",
+      "kind": "agent",
+      "name": "Review",
+      "config": {
+        "prompt": "=\"Review the repository \" + .inputs.repo + \". Weigh \" + .inputs.focus + \" most heavily. \" + (if .inputs.include_tests then \"Read the test suite too.\" else \"Skip the test suite.\" end) + \" Report every risk you find, worst first.\"",
+        "output_parser": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "risks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "verdict": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "summarize",
+      "kind": "transform",
+      "name": "Summarize",
+      "config": {
+        "set": {
+          "repo": "=inputs.repo",
+          "focus": "=inputs.focus",
+          "verdict": "=item.json.json.verdict",
+          "risk_count": "=.item.json.json.risks | length"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "start",
+      "to_node": "review"
+    },
+    {
+      "from_node": "review",
+      "to_node": "summarize"
+    }
+  ]
+}

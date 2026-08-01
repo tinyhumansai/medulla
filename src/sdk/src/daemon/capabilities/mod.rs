@@ -56,6 +56,7 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         project: git.project.clone(),
         branch: git.branch.clone(),
         providers: options.providers.clone(),
+        custom_harnesses: Vec::new(),
         tools: Vec::new(),
         mcp_servers: Vec::new(),
         // Filled in by the daemon from its own workflow store: this probe
@@ -98,6 +99,7 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         // the probe leaks this machine's context to the direct provider (or fails
         // when the only credential is bound to the gateway via `apiKeyEnv`).
         router: options.router.clone(),
+        attribution: options.attribution,
         on_event: None,
         on_stdin: None,
         on_session: None,

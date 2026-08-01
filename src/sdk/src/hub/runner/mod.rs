@@ -49,6 +49,16 @@ const ACK_WINDOW: Duration = Duration::from_secs(12);
 /// crashed or vanished worker (which stops sending frames) cannot pin its
 /// correlation entry and spawned handler forever: without this bound, a worker
 /// that acks and then dies before sending a terminal frame would leak.
+///
+/// It is deliberately shorter than the runtime a worker permits a task, and that
+/// is only sound because the worker heartbeats: a task waiting for a harness
+/// slot, or grinding through one long tool call, emits a status frame every
+/// heartbeat period (a small multiple of its status throttle, capped at 60s)
+/// even when the harness itself says nothing. Silence past this window therefore
+/// means the worker is gone, not that the work is slow. Shortening the worker's
+/// heartbeat guarantee without shortening this window — or lengthening it past
+/// this window — brings back the failure this pairing exists to prevent: healthy
+/// dispatches reaped as `bridge task timed out`.
 const IDLE_WINDOW: Duration = Duration::from_secs(240);
 
 /// How many times to reset the Signal session + resend before giving up. Covers
@@ -200,6 +210,27 @@ impl TaskRunner {
         }
     }
 
+    /// Cancel every dispatch this runner has in flight.
+    ///
+    /// For a caller that owns a runner serving one piece of work and wants to
+    /// stop it without having kept the task id — the copilot pane, whose runner
+    /// serves one conversation. On a runner shared by unrelated work this would
+    /// be far too broad, which is why nothing shared calls it.
+    ///
+    /// Best-effort in the same way [`abort_task`](Self::abort_task) is: a
+    /// poisoned lock leaves each dispatch to its own liveness bound.
+    pub fn abort_all(&self) {
+        let signals: Vec<_> = self
+            .aborts
+            .lock()
+            .ok()
+            .map(|map| map.values().cloned().collect())
+            .unwrap_or_default();
+        for signal in signals {
+            signal.notify_one();
+        }
+    }
+
     /// Dispatch `req` to its worker and await the terminal `reply`/`error`, with
     /// automatic recovery from a desynced session.
     ///
@@ -295,8 +326,11 @@ impl TaskRunner {
                 correlation_id: Some(cid.clone()),
                 harness: None,
                 provider: req.provider,
+                custom_harness: req.custom_harness.clone(),
                 model: req.model.clone(),
+                tool_mode: req.tool_mode.clone(),
                 workflow: req.workflow.clone(),
+                conversation: req.conversation.clone(),
             });
 
             if let Err(e) = self.relay.send(&req.worker_address, &body).await {
@@ -393,18 +427,33 @@ async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) 
         correlation_id: Some(cid.to_string()),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
+        conversation: None,
     });
     let _ = relay.send(address, &body).await;
 }
 
 /// Map the oneshot outcome into a [`RunError`].
+///
+/// A worker's load-shed rejection is separated out here rather than at the far
+/// end: it arrives as an ordinary `error` frame, but it means "I did not try
+/// this", not "this failed". Recognised by the prefix the daemon builds every
+/// such message from, so the two ends share one constant instead of a copied
+/// literal.
 fn settle(
     terminal: Result<Result<TaskOutcome, String>, oneshot::error::RecvError>,
 ) -> Result<TaskOutcome, RunError> {
     match terminal {
         Ok(Ok(outcome)) => Ok(outcome),
+        Ok(Err(msg)) if msg.starts_with(crate::daemon::CAPACITY_REJECTION_PREFIX) => {
+            Err(RunError::Busy(msg))
+        }
+        Ok(Err(msg)) if msg.starts_with(crate::daemon::HARNESS_HELD_PREFIX) => {
+            Err(RunError::Held(msg))
+        }
         Ok(Err(msg)) => Err(RunError::Worker(msg)),
         Err(_) => Err(RunError::Transport("dispatch waiter dropped".into())),
     }

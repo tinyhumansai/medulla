@@ -71,6 +71,24 @@ pub const COMMANDS: &[CommandSpec] = &[
         description: "Pick up an earlier saved session",
     },
     CommandSpec {
+        name: "harness",
+        aliases: &[],
+        args: "[provider] [path]",
+        description: "Start a harness the orchestrator will not touch",
+    },
+    CommandSpec {
+        name: "takecontrol",
+        aliases: &["take"],
+        args: "",
+        description: "Take this harness from the orchestrator",
+    },
+    CommandSpec {
+        name: "handoff",
+        aliases: &["hand"],
+        args: "[note]",
+        description: "Give this harness back, with a note on what to continue",
+    },
+    CommandSpec {
         name: "abort",
         aliases: &[],
         args: "",
@@ -89,12 +107,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         description: "Copy the transcript to the clipboard",
     },
     CommandSpec {
-        name: "memory",
-        aliases: &["mem"],
-        args: "[query]",
-        description: "Persona memory (coming soon)",
-    },
-    CommandSpec {
         name: "usage",
         aliases: &[],
         args: "",
@@ -111,6 +123,12 @@ pub const COMMANDS: &[CommandSpec] = &[
         aliases: &[],
         args: "",
         description: "Show the loaded configuration",
+    },
+    CommandSpec {
+        name: "feedback",
+        aliases: &["fb"],
+        args: "",
+        description: "Open the feedback board",
     },
     CommandSpec {
         name: "mouse",
@@ -136,7 +154,7 @@ pub const COMMANDS: &[CommandSpec] = &[
 /// command being typed.
 ///
 /// The peek is for *choosing* a command, so it closes as soon as one has been
-/// chosen: a line with an argument (`/memory rust`) has moved on to the
+/// chosen: a line with an argument (`/copy last`) has moved on to the
 /// argument, and a bare exact match still offers itself so the description
 /// stays readable until Enter. An unmatched prefix yields an empty list rather
 /// than `None` — "no such command" is worth showing, and silently hiding the

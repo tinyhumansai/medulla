@@ -53,6 +53,54 @@ impl PtyState {
     }
 }
 
+/// Who is allowed to drive a harness session right now.
+///
+/// Keyboard focus ([`HarnessFocus`](crate::ui::harness_pane::HarnessFocus)) says
+/// where *keystrokes* go; this says who holds *authority*. They are not the same
+/// thing, and conflating them is what let the orchestrator paste a task prompt
+/// into a composer the operator was already typing in — a harness serves one turn
+/// at a time, so two writers produce one confidently wrong answer rather than an
+/// error.
+///
+/// This is the single gate on dispatch: [`claim_idle`](super::PtyManager::claim_idle)
+/// only ever returns an orchestrator-held session. An "unmanaged" harness is not a
+/// separate kind of thing — it is one that was born [`User`](Self::User)-held and
+/// has not been handed over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HarnessControl {
+    /// The orchestrator may dispatch task frames into this session.
+    #[default]
+    Orchestrator,
+    /// The operator holds it. Dispatch skips it entirely until it is handed back.
+    User,
+}
+
+impl HarnessControl {
+    /// The display string, from the operator's point of view.
+    ///
+    /// "you" rather than "user" because it is rendered next to a harness the
+    /// person reading it is looking at.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HarnessControl::Orchestrator => "orchestrator",
+            HarnessControl::User => "you",
+        }
+    }
+
+    /// Whether the orchestrator may dispatch into a session in this state.
+    pub fn is_orchestrator(self) -> bool {
+        matches!(self, HarnessControl::Orchestrator)
+    }
+
+    /// The other side of the handover, for a toggle.
+    pub fn toggled(self) -> Self {
+        match self {
+            HarnessControl::Orchestrator => HarnessControl::User,
+            HarnessControl::User => HarnessControl::Orchestrator,
+        }
+    }
+}
+
 /// How to launch one harness session.
 #[derive(Debug, Clone)]
 pub struct LaunchSpec {
@@ -87,6 +135,18 @@ pub struct LaunchSpec {
     /// file is newest. Codex has no such flag; its rollout records its own id on
     /// line one, which the tailer reads back instead.
     pub session_id: Option<String>,
+    /// Who holds the session the moment it opens.
+    ///
+    /// A task frame opens an [`Orchestrator`](HarnessControl::Orchestrator)
+    /// session; an operator spawning one from the TUI opens a
+    /// [`User`](HarnessControl::User) one, which is what makes it unmanaged.
+    pub control: HarnessControl,
+    /// Whether an operator asked for this session rather than a task frame.
+    ///
+    /// Display only — never gate behaviour on it. Control is the gate; this
+    /// exists so the rail can say "unmanaged" instead of the less useful
+    /// "orchestrator-spawned, currently yours".
+    pub user_spawned: bool,
 }
 
 /// The operator-facing projection of one session, for the list pane.
@@ -102,6 +162,11 @@ pub struct SessionRow {
     pub state: PtyState,
     /// The working directory the child runs in.
     pub cwd: String,
+    /// Git branch resolved from the working directory when the session opened.
+    ///
+    /// `None` means the directory is not in a repository or has a detached
+    /// `HEAD`.
+    pub branch: Option<String>,
     /// The harness session id, once known — minted for claude, read back from
     /// the rollout for codex. This is what pins the transcript tailer.
     pub session_id: Option<String>,
@@ -118,6 +183,10 @@ pub struct SessionRow {
     /// completion. So a busy session is not reusable, however idle its pty
     /// looks.
     pub busy: bool,
+    /// Who holds this session right now — see [`HarnessControl`].
+    pub control: HarnessControl,
+    /// Whether an operator spawned it rather than a task frame. Display only.
+    pub user_spawned: bool,
 }
 
 impl SessionRow {

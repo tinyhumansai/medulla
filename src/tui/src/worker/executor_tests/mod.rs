@@ -126,6 +126,7 @@ fn options(
         on_event: None,
         on_stdin: None,
         on_session: None,
+        attribution: true,
     }
 }
 

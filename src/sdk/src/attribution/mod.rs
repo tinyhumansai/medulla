@@ -1,10 +1,16 @@
 //! Git commit attribution for Medulla-launched harnesses.
 //!
 //! When Medulla spawns a coding-agent CLI, commits that agent makes should say
-//! so. This module resolves the CLI flags that carry that attribution, as pure
-//! functions over an injected environment map — the same contract as
-//! [`crate::tinyplace::env`], so precedence is unit-testable and identical across the
-//! wrapper and the headless daemon.
+//! so. This module builds the flags and environment that carry that
+//! attribution, as pure functions over a resolved on/off value, so the wrapper
+//! and the headless daemon behave identically and both are unit-testable.
+//!
+//! # Configuration
+//!
+//! Attribution is config-driven: the `[attribution] commit` config key
+//! ([`crate::config::AttributionConfig`]), on by default.
+//! Callers resolve it from the loaded config and pass it in — this module never
+//! reads the environment or the filesystem to decide.
 //!
 //! # Mechanism
 //!
@@ -20,33 +26,39 @@
 //!
 //! # Coverage
 //!
-//! Only Claude Code exposes a knob for this today. Its `attribution.commit`
-//! setting *replaces* the built-in `Co-Authored-By: Claude <noreply@anthropic.com>`
-//! line verbatim, and `--settings` accepts inline JSON that layers over the
-//! user's `settings.json`.
+//! Every provider is attributed the same way: a temporary `prepare-commit-msg`
+//! git hook ([`prepare_commit_msg`]) that runs inside `git commit` itself.
+//!
+//! This is deliberate. Claude Code does expose an `attribution.commit` setting,
+//! and `--settings` layers inline JSON over the user's `settings.json`, but the
+//! setting is only *advisory*: its value is interpolated into the Bash tool
+//! description as "End git commit messages with: …", so it depends on the model
+//! choosing to follow it. Verified against Claude Code 2.1.220 — when the task
+//! brief dictates the commit message ("commit with message 'x'"), the model
+//! writes that message verbatim and the trailer never appears. Since a Medulla
+//! task brief routinely dictates commit messages, that path dropped attribution
+//! exactly when it mattered.
 //!
 //! Codex (as of 0.144.6) hardcodes `Co-authored-by: Codex <noreply@openai.com>`
-//! with no config key to override it, and Opencode exposes no equivalent. Both
-//! therefore resolve to no arguments — they are left to their own defaults
-//! rather than silently misattributed.
+//! with no config key to override it, and Opencode exposes no equivalent knob
+//! at all.
+//!
+//! So the hook is the mechanism of record. Claude additionally still receives
+//! the `--settings` flag ([`attribution_args`]) as a belt-and-braces hint; the
+//! hook applies the trailer with `git interpret-trailers --if-exists
+//! addIfDifferent`, so the two mechanisms agreeing produces one trailer, not two.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Mutex;
 
 use crate::tinyplace::HarnessProvider;
 
 #[cfg(test)]
 mod tests;
 
-/// Generator for `prepare-commit-msg` git hooks that inject the Medulla
-/// `Co-authored-by` trailer via environment variables. Used for providers
-/// (Codex, Opencode) whose CLI has no built-in attribution knob.
+/// Generator for the git hook shims that inject the Medulla `Co-authored-by`
+/// trailer via environment variables. The mechanism of record for every
+/// provider.
 pub mod prepare_commit_msg;
-
-/// Kill-switch env var. Any value other than `1` / `true` / `yes` / `on`
-/// disables attribution.
-pub const ATTRIBUTION_ENV_KEY: &str = "TINYPLACE_GIT_ATTRIBUTION";
 
 /// Display name used in the `Co-authored-by` trailer.
 pub const ATTRIBUTION_NAME: &str = "Medulla";
@@ -64,27 +76,15 @@ pub fn attribution_trailer() -> String {
     format!("Co-authored-by: {ATTRIBUTION_NAME} <{ATTRIBUTION_EMAIL}>")
 }
 
-/// Whether attribution is enabled. Defaults to `true`; set
-/// `TINYPLACE_GIT_ATTRIBUTION` to `0` / `false` / `no` / `off` (or empty) to
-/// disable. Unrecognised values are treated as disabled, so a typo fails closed
-/// rather than silently attributing.
-pub fn attribution_enabled(env: &HashMap<String, String>) -> bool {
-    match env.get(ATTRIBUTION_ENV_KEY) {
-        None => true,
-        Some(raw) => matches!(
-            raw.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        ),
-    }
-}
-
 /// Extra CLI arguments that make `provider` attribute its commits to Medulla.
 ///
-/// Returns an empty vector when attribution is disabled, or when the provider
-/// has no mechanism to retarget its trailer (Codex, Opencode). Callers prepend
-/// these to the child argv alongside `TINYPLACE_<P>_ARGS`.
-pub fn attribution_args(provider: HarnessProvider, env: &HashMap<String, String>) -> Vec<String> {
-    if !attribution_enabled(env) {
+/// `enabled` is the resolved `attribution.commit` config value — see
+/// [`crate::config::AttributionConfig`]. Returns an empty vector when
+/// attribution is off, or when the provider has no mechanism to retarget its
+/// trailer (Codex, Opencode). Callers prepend these to the child argv alongside
+/// `TINYPLACE_<P>_ARGS`.
+pub fn attribution_args(provider: HarnessProvider, enabled: bool) -> Vec<String> {
+    if !enabled {
         return Vec::new();
     }
     match provider {
@@ -106,46 +106,32 @@ fn claude_settings_json() -> String {
     value.to_string()
 }
 
-/// Module-level storage for the temporary hook directory, so
-/// [`cleanup_hook_tmpdir`] can remove it after the harness exits without the
-/// caller needing to carry a [`PathBuf`] through every spawn path.
-static HOOK_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
-
 /// Environment variables that make a harness attribute its commits to Medulla
-/// via the `prepare-commit-msg` git hook.
+/// via the git hook shims.
 ///
-/// Claude Code receives CLI flags instead ([`attribution_args`]), so this
-/// returns empty for it. Codex and Opencode get their attribution through a
-/// temporary `prepare-commit-msg` hook gated by `MEDULLA_ATTRIBUTION`.
+/// Every provider takes this path, including Claude Code — see the module docs
+/// for why its own `attribution.commit` setting is not sufficient on its own.
+/// The hook is gated at runtime by `MEDULLA_ATTRIBUTION`.
 ///
-/// The hook directory is stored in module-level state and must be cleaned up
-/// after the harness exits by calling [`cleanup_hook_tmpdir`].
+/// `enabled` is the resolved `attribution.commit` config value — see
+/// [`crate::config::AttributionConfig`].
 ///
-/// Returns an empty map when attribution is disabled for *any* provider.
+/// The hook directory is shared process-wide and outlives every child, so this
+/// is safe to call for concurrent spawns and needs no cleanup from the caller
+/// (see [`prepare_commit_msg`]).
+///
+/// `base_env` is the environment the result will be merged into: the returned
+/// `GIT_CONFIG_*` entries are appended after whatever it already carries rather
+/// than replacing them.
+///
+/// Returns an empty map when attribution is off, and on non-Unix platforms
+/// (git hooks are not supported there).
 pub fn attribution_env(
-    provider: HarnessProvider,
-    env: &HashMap<String, String>,
+    enabled: bool,
+    base_env: &HashMap<String, String>,
 ) -> HashMap<String, String> {
-    if !attribution_enabled(env) {
+    if !enabled {
         return HashMap::new();
     }
-    match provider {
-        HarnessProvider::Claude => HashMap::new(),
-        HarnessProvider::Codex | HarnessProvider::Opencode => {
-            let (hook_env, hook_dir) = prepare_commit_msg::generate_hook(&attribution_trailer());
-            *HOOK_DIR.lock().unwrap() = Some(hook_dir);
-            hook_env
-        }
-    }
-}
-
-/// Remove the temporary hook directory that [`attribution_env`] created.
-///
-/// Safe to call even when no hook was generated — this is a no-op in that
-/// case. Idempotent: a second call after cleanup does nothing.
-pub fn cleanup_hook_tmpdir() {
-    let mut guard = HOOK_DIR.lock().unwrap();
-    if let Some(path) = guard.take() {
-        prepare_commit_msg::cleanup_hook_dir(&path);
-    }
+    prepare_commit_msg::hook_env(&attribution_trailer(), base_env)
 }

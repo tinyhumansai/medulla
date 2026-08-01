@@ -162,7 +162,7 @@ pub fn parse_workspace_args(args: &[String]) -> WorkspaceArgs {
 pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
     let mut out = WorkflowArgs::default();
     let mut bare: Vec<String> = Vec::new();
-    let mut it = args.iter();
+    let mut it = args.iter().peekable();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--config" => {
@@ -175,9 +175,54 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
                     out.input = Some(v.clone());
                 }
             }
+            "--inputs" => {
+                if let Some(v) = it.next() {
+                    out.inputs = Some(v.clone());
+                }
+            }
+            "--set" => {
+                if let Some(v) = it.next() {
+                    out.set.push(v.clone());
+                }
+            }
             "--run-id" => {
                 if let Some(v) = it.next() {
                     out.run_id = Some(v.clone());
+                }
+            }
+            "--kind" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.kind = it.next().cloned();
+                }
+            }
+            "--text" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.text = it.next().cloned();
+                }
+            }
+            // Empty is meaningful for both — it is how an operator clears a
+            // pinned harness or model — so these accept a value that a
+            // `!starts_with('-')` guard would otherwise have to allow anyway.
+            "--harness" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.harness = it.next().cloned();
+                }
+            }
+            "--model" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.model = it.next().cloned();
+                }
+            }
+            "--reason" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.reason = it.next().cloned();
+                }
+            }
+            // Repeatable: one conclusion can replace several earlier guesses.
+            "--supersedes" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.supersedes
+                        .push(it.next().expect("peeked value exists").clone());
                 }
             }
             // Repeatable: a paused run may be holding more than one gate, and
@@ -225,6 +270,15 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
         }
         Some("get-run") => operand.map_or(WorkflowAction::List, WorkflowAction::GetRun),
         Some("catalog") | Some("kinds") => WorkflowAction::Catalog(operand),
+        Some("defaults") => operand.map_or(WorkflowAction::List, WorkflowAction::Defaults),
+        Some("notes") => operand.map_or(WorkflowAction::List, WorkflowAction::Notes),
+        Some("note") => operand.map_or(WorkflowAction::List, WorkflowAction::AddNote),
+        Some("evolve") | Some("review") => {
+            operand.map_or(WorkflowAction::List, WorkflowAction::Evolve)
+        }
+        Some("proposals") => operand.map_or(WorkflowAction::List, WorkflowAction::Proposals),
+        Some("accept") => operand.map_or(WorkflowAction::List, WorkflowAction::Accept),
+        Some("reject") => operand.map_or(WorkflowAction::List, WorkflowAction::Reject),
         Some("mcp") => WorkflowAction::Mcp,
         _ => WorkflowAction::List,
     };
@@ -289,7 +343,7 @@ pub fn help_text() -> String {
         "medulla {version}\n\n\
 Usage:\n  \
 medulla                 Start the interactive chat TUI (default)\n  \
-medulla run <text>      Submit one instruction to a local medulla-serve socket and stream events (JSON lines)\n  \
+medulla run <text>      Submit one instruction to the embedded core and stream the cycle's events (JSON lines)\n  \
 medulla daemon [flags]  Run the daemon TUI (agents, master, workspaces, requests)\n  \
 medulla daemon --headless  Run without the operator screen (automatic when piped)\n  \
                         --workspace <dir>      where peer tasks run\n  \
@@ -323,6 +377,8 @@ Wrapper flags:\n  \
 --                      Pass all following arguments to the CLI verbatim\n\n\
 Workflow flags:\n  \
 --input <json>          Trigger payload for run / dry-run\n  \
+--inputs <json>         Declared workflow inputs, as an object keyed by name\n  \
+--set <name>=<value>    One declared input (repeatable; wins over --inputs)\n  \
 --run-id <id>           Id to give the run (default: a fresh one)\n  \
 --approve <node-id>     Gate to release on resume (repeatable)\n  \
 --reject <node-id>      Gate to refuse on resume (repeatable)\n\n\

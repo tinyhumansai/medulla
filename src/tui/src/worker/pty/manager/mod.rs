@@ -19,10 +19,22 @@
 //! harness on a fresh pty and drains it, [`session`] is the bookkeeping every
 //! other caller reads, and [`screen`] is the emulator surface the UI renders.
 //!
-//! The reader runs on a **blocking thread**, not a tokio task: `portable-pty`'s
-//! reader is a synchronous `Read` with no async variant, and parking it on the
-//! async runtime would occupy a worker forever. It feeds the shared emulator and
-//! exits when the master closes.
+//! Both halves of the master run on **blocking threads**, not tokio tasks:
+//! `portable-pty` offers only synchronous `Read`/`Write`, and parking either on
+//! the async runtime would occupy a worker forever. The reader feeds the shared
+//! emulator and exits when the master closes; the writer drains a per-session
+//! queue.
+//!
+//! The writer's thread earns its keep beyond that. A pty write blocks until the
+//! child drains its stdin, and a harness that is still loading or sitting on a
+//! startup dialog does not — so writing inline, under the one lock every reader
+//! here took, froze the whole TUI on a single unread paste. Every method on this
+//! type therefore holds the registry for a lookup and an `Arc` clone and nothing
+//! more: see [`handle`](Self::handle), which is that seam, and
+//! [`write`](Self::write), [`forget`](Self::forget), and `SessionHandle::reap`,
+//! which each act on the session with the registry already released. [`rows`](Self::rows)
+//! and [`running_count`](Self::running_count) are the deliberate exceptions —
+//! they read atomics only, never block, and run every frame.
 
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};

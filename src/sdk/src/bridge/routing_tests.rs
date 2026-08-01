@@ -252,3 +252,33 @@ async fn a_local_only_bridge_has_nobody_to_ask_about_presence() {
     let bridge = RoutingBridge::local_only(hub);
     assert!(bridge.presence(&["GRVaddr".to_string()]).await.is_empty());
 }
+
+#[tokio::test]
+async fn a_device_local_address_is_answered_here_not_asked_of_the_relay() {
+    // The regression this exists to catch: a host bound in this process is not
+    // a tiny.place identity and never heartbeats, so asking the relay returns
+    // "no record" — which reads as offline and withholds every host on this
+    // machine from the roster. Its liveness is knowable exactly right here.
+    let network = LocalBridgeNetwork::new();
+    let hub = network.bind("presence-hub").unwrap();
+    let _host = network.bind("this-device").unwrap();
+    // The remote answers everything as down, so anything forwarded to it is
+    // visible as `false` in the result.
+    let remote = Arc::new(RecordingRemote::default());
+    let bridge = RoutingBridge::new(hub, remote as Arc<dyn Bridge>);
+
+    let answered = bridge
+        .presence(&["this-device".to_string(), "GRVremote".to_string()])
+        .await;
+
+    assert_eq!(
+        answered.get("this-device"),
+        Some(&true),
+        "a bound local host is up, and the relay is never consulted about it"
+    );
+    assert_eq!(
+        answered.get("GRVremote"),
+        Some(&false),
+        "a remote address still goes to the relay"
+    );
+}

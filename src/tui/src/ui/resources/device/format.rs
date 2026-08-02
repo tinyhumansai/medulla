@@ -94,7 +94,18 @@ fn metric_line(
         // byte counts behind a `Value` are unavailable, the percentage is the
         // detail worth keeping.
         ResourceDisplay::Value if width >= VALUE_MIN_WIDTH => match values {
-            Some((used, total)) => format!("{label} {}/{}", bytes(used), bytes(total)),
+            Some((used, total)) => {
+                // `VALUE_MIN_WIDTH` assumes typical byte counts. A large enough
+                // filesystem widens the pair past the rail anyway, so measure the
+                // finished line and keep the percentage when it would overflow.
+                // Labels and byte counts are ASCII, so bytes are columns here.
+                let pair = format!("{label} {}/{}", bytes(used), bytes(total));
+                if pair.len() <= width {
+                    pair
+                } else {
+                    percent
+                }
+            }
             None => percent,
         },
         ResourceDisplay::Bar if width >= BAR_MIN_WIDTH => {

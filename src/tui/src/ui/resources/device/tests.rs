@@ -157,3 +157,28 @@ fn live_sampling_is_self_consistent_and_withholds_cpu_on_the_first_reading() {
         }
     }
 }
+
+#[test]
+fn an_oversized_value_pair_falls_back_to_the_percentage() {
+    let config = AppearanceConfig {
+        device_disk: ResourceDisplay::Value,
+        ..AppearanceConfig::default()
+    };
+    // `bytes` tops out at gigabytes, so a petabyte-scale filesystem renders a
+    // very wide pair even though the width clears VALUE_MIN_WIDTH. The line must
+    // degrade rather than overflow into the navigation rows.
+    let sample = DeviceSnapshot {
+        cpu_fraction: None,
+        memory_used_bytes: None,
+        memory_total_bytes: None,
+        disk_used_bytes: Some(9_500_000_000_000_000),
+        disk_total_bytes: Some(10_000_000_000_000_000),
+    };
+    assert_eq!(device_lines(&config, sample, 25, 3), ["Device disk 95%"]);
+
+    // With room for the full pair it is kept.
+    assert_eq!(
+        device_lines(&config, sample, 40, 3),
+        ["Device disk 8847564G/9313226G"]
+    );
+}

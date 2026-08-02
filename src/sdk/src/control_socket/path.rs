@@ -114,9 +114,9 @@ fn fits(path: &Path) -> bool {
 ///
 /// When the account-scoped path would overflow the platform's socket address
 /// limit, falls back to a hashed short path under `$XDG_RUNTIME_DIR` and then
-/// `$TMPDIR`, each inside a private per-account directory. An explicit path from
-/// the environment or config is returned as given — an operator who names a path
-/// gets that path, and a silent substitution would be worse than the bind error.
+/// `$TMPDIR`, each inside a private per-account directory. Explicit relative
+/// paths are anchored to this process's current directory before they are
+/// shared with child processes, whose own working directory may differ.
 ///
 /// # Errors
 ///
@@ -130,10 +130,10 @@ pub fn control_socket_path(
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
     {
-        return Ok(PathBuf::from(explicit));
+        return absolute_override(explicit);
     }
     if let Some(explicit) = configured.map(str::trim).filter(|s| !s.is_empty()) {
-        return Ok(PathBuf::from(explicit));
+        return absolute_override(explicit);
     }
 
     let home = crate::home::medulla_home(env);
@@ -170,6 +170,20 @@ pub fn control_socket_path(
     }
 
     Err(ControlSocketError::NoViablePath)
+}
+
+/// Anchor an operator-supplied relative path before it crosses a process boundary.
+fn absolute_override(explicit: &str) -> Result<PathBuf, ControlSocketError> {
+    let path = PathBuf::from(explicit);
+    // A rooted slash path is the Unix spelling accepted by the runtime. Treat
+    // it as anchored in cross-platform unit tests too, even though Windows
+    // requires a drive prefix for `is_absolute` to return true.
+    if path.is_absolute() || path.has_root() {
+        return Ok(path);
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .map_err(|error| ControlSocketError::Io(error.to_string()))
 }
 
 /// Create the socket's parent directory, private to this user when Medulla owns

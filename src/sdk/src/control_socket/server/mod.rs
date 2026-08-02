@@ -11,12 +11,14 @@ mod hub_ops_tests;
 mod registry;
 #[cfg(test)]
 mod tests;
+mod types;
 
 pub use handle::{handle_control, SessionState};
 pub use hub_ops::{FleetDefaults, HubFleetOps, HubSlot};
 pub use registry::{TaskEntry, TaskRegistry, TaskState};
+pub use types::ControlServer;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -39,27 +41,6 @@ const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// authenticated shim holds its connection open for the whole harness session
 /// and is idle for most of it.
 const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// A bound control socket, serving until dropped.
-///
-/// Dropping stops the accept loop, closes every connection already open, and
-/// unlinks the socket file — the last only if the file at that path is still the
-/// one this server bound, since a later drop must not delete the socket a
-/// restarted instance has since put there.
-///
-/// Closing live connections is the part worth stating: they hold their own
-/// [`FleetOps`] handle, so a connection left running after its server was
-/// dropped would keep dispatching into a fleet nothing is supervising any more.
-pub struct ControlServer {
-    path: PathBuf,
-    /// The `(device, inode)` of the socket at bind time, so cleanup can tell
-    /// "our socket" from "a newer instance's socket at the same path".
-    identity: Option<(u64, u64)>,
-    accept: tokio::task::JoinHandle<()>,
-    grants: GrantRegistry,
-    /// Flipped on drop; watched by the accept loop and every connection.
-    shutdown: tokio::sync::watch::Sender<bool>,
-}
 
 impl ControlServer {
     /// Bind `path` and start serving `ops`.

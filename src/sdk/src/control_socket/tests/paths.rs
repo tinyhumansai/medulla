@@ -40,6 +40,18 @@ fn config_wins_over_the_home_derived_default() {
 }
 
 #[test]
+fn a_relative_override_is_anchored_before_child_processes_receive_it() {
+    let resolved =
+        control_socket_path(&env(&[(CONTROL_SOCKET_ENV, "run/control.sock")]), None).unwrap();
+
+    assert!(resolved.is_absolute());
+    assert_eq!(
+        resolved,
+        std::env::current_dir().unwrap().join("run/control.sock")
+    );
+}
+
+#[test]
 fn a_blank_override_does_not_mask_the_next_source() {
     // An exported-but-empty variable is the shape a shell script leaves behind,
     // and treating it as a real path would resolve the socket to "".

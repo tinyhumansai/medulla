@@ -31,9 +31,11 @@ impl DeviceFooter {
         let enabled = appearance.device_cpu != ResourceDisplay::Off
             || appearance.device_ram != ResourceDisplay::Off
             || appearance.device_disk != ResourceDisplay::Off;
-        let snapshot = enabled
-            .then(|| app.device_monitor.sample())
-            .unwrap_or_default();
+        let snapshot = if enabled {
+            app.device_monitor.sample()
+        } else {
+            Default::default()
+        };
         let lines = crate::ui::resources::device_lines(appearance, snapshot, width, budget);
         let footer_height = if lines.is_empty() { 0 } else { lines.len() + 1 };
         let navigation_capacity = rail_height.saturating_sub(footer_height).max(1);

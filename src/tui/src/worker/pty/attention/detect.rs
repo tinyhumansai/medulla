@@ -33,16 +33,6 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         "claude is asking permission",
     ),
     (
-        HarnessProvider::Claude,
-        // Plan mode's exit prompt. "keep planning" is its third option and is
-        // unique to it, so it is named separately from the tool prompts above:
-        // an operator reading the rail wants to know a plan is ready, which is
-        // a different thing to answer than a shell command.
-        &["keepplanning"],
-        AttentionKind::Approval,
-        "claude finished planning and wants a decision",
-    ),
-    (
         HarnessProvider::Codex,
         &["andtellcodexwhattodo"],
         AttentionKind::Approval,
@@ -57,6 +47,41 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
 /// retained conversation even while the working footer is visible.
 fn has_opencode_permission_menu(squashed: &str) -> bool {
     squashed.contains("allowonce") && squashed.contains("alwaysallow")
+}
+
+/// Whether Claude drew the numbered menu used to leave plan mode.
+///
+/// "Keep planning" is ordinary conversational language, so its words alone
+/// are not a safe marker. Require it to be a numbered option in the active
+/// menu tail, alongside the selected-option structure that proves the harness
+/// is waiting for a choice.
+fn has_claude_plan_exit_menu(screen: &str) -> bool {
+    has_active_selected_option(screen)
+        && screen
+            .lines()
+            .rev()
+            .filter(|line| !line.trim().is_empty())
+            .take(6)
+            .any(|line| numbered_option_contains(line, "keepplanning"))
+}
+
+/// Whether a numbered menu row's label contains `marker`.
+fn numbered_option_contains(line: &str, marker: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    let without_caret = trimmed
+        .strip_prefix(|first| CARETS.contains(&first))
+        .unwrap_or(trimmed)
+        .trim_start();
+    let digits: String = without_caret
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    if digits.is_empty() {
+        return false;
+    }
+    let after = &without_caret[digits.len()..];
+    matches!(after.chars().next(), Some('.') | Some(')'))
+        && squash(after[1..].trim_start()).contains(marker)
 }
 
 /// Carets a harness rests on the option it would take if you pressed Return.
@@ -238,6 +263,15 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
         .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
     {
         return Some((*kind, (*what).to_string()));
+    }
+    if provider == HarnessProvider::Claude
+        && !is_working(screen)
+        && has_claude_plan_exit_menu(screen)
+    {
+        return Some((
+            AttentionKind::Approval,
+            "claude finished planning and wants a decision".to_string(),
+        ));
     }
     if provider == HarnessProvider::Opencode && has_opencode_permission_menu(&squashed) {
         return Some((

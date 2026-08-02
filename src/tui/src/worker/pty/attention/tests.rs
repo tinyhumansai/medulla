@@ -55,6 +55,16 @@ fn claude_plan_prompt_names_planning() {
 }
 
 #[test]
+fn ordinary_keep_planning_words_are_not_a_plan_prompt() {
+    for screen in [
+        "User: keep planning while you investigate",
+        "User: keep planning while you investigate\nWorking… (esc to interrupt)",
+    ] {
+        assert!(detect(HarnessProvider::Claude, screen).is_none());
+    }
+}
+
+#[test]
 fn a_working_harness_wants_nothing() {
     assert!(detect(HarnessProvider::Claude, CLAUDE_WORKING).is_none());
     assert!(is_working(CLAUDE_WORKING));

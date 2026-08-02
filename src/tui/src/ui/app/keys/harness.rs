@@ -21,6 +21,7 @@ use crate::ui::harness_pane::{
     keys::{encode, is_focus_chord},
     HarnessFocus, FOCUS_CHORD_LABEL,
 };
+use crate::worker::pty::launch::bracket_paste;
 use crate::worker::pty::HarnessControl;
 
 use super::super::types::App;
@@ -101,7 +102,11 @@ impl App {
     /// The handback prompt is included for completeness even though
     /// [`App::on_key`] answers it before anything else gets a look in — a later
     /// reordering should not quietly reopen the hole this closes.
-    fn overlay_owns_keys(&self) -> bool {
+    ///
+    /// Also the paste router's answer to "is there something in front of the
+    /// composer": one list, so an overlay added later cannot own the keyboard
+    /// while a paste still lands behind it.
+    pub(in crate::ui::app) fn overlay_owns_keys(&self) -> bool {
         self.handback_prompt.is_some()
             || self.prompt.is_some()
             || self.harness_picker.is_some()
@@ -173,11 +178,45 @@ impl App {
         let Some(bytes) = encode(key) else {
             return;
         };
+        self.write_to_harness(session, &bytes);
+    }
+
+    /// Hand a bracketed-paste payload to the attached harness.
+    ///
+    /// The attached pane *is* the operator's terminal, so a paste has to reach
+    /// the child the way its own terminal would deliver one: as a paste, not as
+    /// the keystrokes it happens to spell. Replaying it as keys is what makes a
+    /// multi-line clipboard submit itself once per line inside Claude Code.
+    ///
+    /// How it is encoded is the child's choice, not ours — the same rule the
+    /// wheel follows for mouse reports. A child that turned bracketed paste on
+    /// gets the markers and takes the whole payload as one block; one that never
+    /// asked gets the bytes alone, because `ESC[200~` sent to it arrives as an
+    /// escape key press followed by literal text. Line breaks become `\r` in
+    /// that case for the same reason [`encode`] maps Enter to it: the child's
+    /// line discipline is raw and reads carriage return as the end of a line.
+    pub(in crate::ui::app) fn paste_into_harness(&mut self, session: &str, text: &str) {
+        let bracketed = self
+            .harnesses
+            .as_ref()
+            .and_then(|harnesses| harnesses.sessions.bracketed_paste(session))
+            .unwrap_or(false);
+        let bytes = if bracketed {
+            bracket_paste(text)
+        } else {
+            text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
+        };
+        self.write_to_harness(session, &bytes);
+    }
+
+    /// Write already-encoded bytes to the attached harness, detaching if the
+    /// child has stopped listening.
+    fn write_to_harness(&mut self, session: &str, bytes: &[u8]) {
         let Some(harnesses) = self.harnesses.clone() else {
             self.release_harness();
             return;
         };
-        if let Err(err) = harnesses.write(session, &bytes) {
+        if let Err(err) = harnesses.write(session, bytes) {
             // The child died between the last frame and this keystroke. Give
             // the session back on the way out: a dead harness left under user
             // control is a slot nothing can ever reclaim, and there is nobody

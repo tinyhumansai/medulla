@@ -55,12 +55,16 @@ pub(crate) async fn run_login_screen(
 
         tokio::select! {
             maybe_event = reader.next() => {
-                if let Some(Ok(Event::Key(key))) = maybe_event {
-                    if key.kind != KeyEventKind::Release {
+                match maybe_event {
+                    Some(Ok(Event::Key(key))) if key.kind != KeyEventKind::Release => {
                         if let Some(cmd) = screen.handle_key(key) {
                             dispatch_login_cmd(cmd, &base_url, &tx, &mut loopback_task);
                         }
                     }
+                    // Bracketed paste is on for this screen's terminal, so a
+                    // pasted API key arrives here rather than as key presses.
+                    Some(Ok(Event::Paste(text))) => screen.handle_paste(&text),
+                    _ => {}
                 }
             }
             Some(ev) = rx.recv() => screen.apply(ev),

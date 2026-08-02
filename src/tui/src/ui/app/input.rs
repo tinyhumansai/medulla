@@ -68,17 +68,29 @@ impl App {
     /// the command the peek happens to be highlighting. Only an explicit `Enter`
     /// submits.
     ///
-    /// An open inline prompt takes the payload first, flattened to one line
-    /// because that is all it can draw. Otherwise the Agents composer takes it,
-    /// with `\r\n` and bare `\r` normalised to `\n`. Modals that own no text
-    /// field (the resume picker, the decisions overlay) swallow the paste rather
-    /// than let it land in a composer the operator cannot see.
+    /// Who takes it follows [`App::on_key`]'s precedence exactly, because a
+    /// paste that landed somewhere the keyboard is not would be a payload the
+    /// operator never sees again. So: the hand-back question first, since it is
+    /// asked while still attached and the chrome holds the keyboard until it is
+    /// answered; then the attached harness, which owns the keyboard outright and
+    /// therefore owns the paste; then an open inline prompt, flattened to one
+    /// line because that is all it can draw. Otherwise the Agents composer takes
+    /// it, with `\r\n` and bare `\r` normalised to `\n`. Modals that own no text
+    /// field (the harness and resume pickers, the decisions overlay) swallow the
+    /// paste for the same reason they swallow the keyboard.
     fn on_paste(&mut self, text: &str) {
+        if self.handback_prompt.is_some() {
+            return;
+        }
+        if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
+            self.paste_into_harness(&session, text);
+            return;
+        }
         if let Some(prompt) = self.prompt.as_mut() {
             prompt.paste(text);
             return;
         }
-        if self.tab() != "Agents" || self.resume_picker.is_some() || self.decision_open {
+        if self.tab() != "Agents" || self.overlay_owns_keys() {
             return;
         }
         self.draft = insert_at(&self.draft.text, self.draft.cursor, &normalize_paste(text));

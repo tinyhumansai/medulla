@@ -21,7 +21,7 @@ async fn serve(fleet: FakeFleet) -> (tempfile::TempDir, ControlServer, String) {
     let grants = GrantRegistry::new();
     let token = grants.mint(Grant::new("session", 0, 2));
     let ops: Arc<dyn FleetOps> = Arc::new(fleet);
-    let server = ControlServer::bind(&path, ops, grants, false)
+    let server = ControlServer::bind(&path, ops, grants)
         .await
         .expect("the socket should bind");
     (dir, server, token)
@@ -180,7 +180,7 @@ async fn a_revoked_grant_stops_working_for_new_connections() {
     let grants = GrantRegistry::new();
     let token = grants.mint(Grant::new("ending", 0, 2));
     let ops: Arc<dyn FleetOps> = Arc::new(FakeFleet::new());
-    let server = ControlServer::bind(&path, ops, grants.clone(), false)
+    let server = ControlServer::bind(&path, ops, grants.clone())
         .await
         .unwrap();
 
@@ -200,7 +200,7 @@ async fn a_revoked_grant_stops_working_on_an_open_connection() {
     let grants = GrantRegistry::new();
     let token = grants.mint(Grant::new("ending", 0, 2));
     let ops: Arc<dyn FleetOps> = Arc::new(FakeFleet::new());
-    let _server = ControlServer::bind(&path, ops, grants.clone(), false)
+    let _server = ControlServer::bind(&path, ops, grants.clone())
         .await
         .unwrap();
     let mut client = ControlClient::connect(&path, &token).await.unwrap();
@@ -240,7 +240,7 @@ async fn a_second_server_will_not_steal_a_live_address() {
     let (_dir, server, _token) = serve(FakeFleet::new()).await;
     let ops: Arc<dyn FleetOps> = Arc::new(FakeFleet::new());
 
-    let second = ControlServer::bind(server.path(), ops, GrantRegistry::new(), false).await;
+    let second = ControlServer::bind(server.path(), ops, GrantRegistry::new()).await;
 
     assert!(
         second.is_err(),

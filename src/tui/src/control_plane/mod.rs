@@ -17,9 +17,11 @@ use std::collections::HashMap;
 #[cfg(unix)]
 use std::sync::Arc;
 
+#[cfg(all(test, unix))]
+use medulla::control_socket::CONTROL_SOCKET_ENV;
 #[cfg(unix)]
 use medulla::control_socket::{
-    control_socket_path, ControlServer, FleetDefaults, FleetOps, HubFleetOps, CONTROL_SOCKET_ENV,
+    control_socket_path, ControlServer, FleetDefaults, FleetOps, HubFleetOps,
 };
 
 use crate::hub_relay::HubSlot;
@@ -60,16 +62,9 @@ pub(crate) async fn start(
         worker_address: local_default_worker,
     };
     let ops: Arc<dyn FleetOps> = Arc::new(HubFleetOps::new(hub, defaults));
-    // Both explicit sources may name an existing directory Medulla does not
-    // own, so preserve its mode. This does not trust the path: bind still
-    // rejects every replaceable ancestor after preserving permissions. The
-    // environment override takes precedence over config.
-    let env_override = env
-        .get(CONTROL_SOCKET_ENV)
-        .is_some_and(|value| !value.trim().is_empty());
-    let preserve_existing_parent =
-        env_override || configured.is_some_and(|value| !value.trim().is_empty());
-    match ControlServer::bind(&path, ops, Default::default(), preserve_existing_parent).await {
+    // Binding preserves every existing parent directory's mode, then rejects
+    // any replaceable ancestor. Only a directory it creates is chmodded.
+    match ControlServer::bind(&path, ops, Default::default()).await {
         Ok(server) => {
             // Recorded process-wide so the ACP spawn path can mint a grant
             // per session without the registry being threaded through the

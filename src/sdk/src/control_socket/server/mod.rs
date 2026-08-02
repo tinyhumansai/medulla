@@ -7,18 +7,16 @@
 mod connection;
 mod handle;
 mod hub_ops;
-#[cfg(test)]
-mod hub_ops_tests;
 mod registry;
-#[cfg(test)]
-mod registry_tests;
 #[cfg(test)]
 mod tests;
 mod types;
 
 pub use handle::{handle_control, MAX_WAIT};
-pub use hub_ops::{FleetDefaults, HubFleetOps, HubSlot};
-pub use types::{ControlServer, SessionState, TaskEntry, TaskRegistry, TaskState};
+pub use hub_ops::HubFleetOps;
+pub use types::{
+    ControlServer, FleetDefaults, HubSlot, SessionState, TaskEntry, TaskRegistry, TaskState,
+};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -33,10 +31,9 @@ use connection::{read_frame, MAX_FRAME_BYTES};
 impl ControlServer {
     /// Bind `path` and start serving `ops`.
     ///
-    /// `preserve_existing_parent` prevents Medulla from changing permissions on
-    /// an existing directory named explicitly. Every path is still checked for
-    /// insecure ancestors before bind; the default account-scoped directory is
-    /// ours, so Medulla may tighten it first.
+    /// Existing parent directories are never chmodded. Every path is still
+    /// checked for insecure ancestors before bind; only a parent directory
+    /// created by this call is tightened to owner-only access.
     ///
     /// # Errors
     ///
@@ -48,12 +45,11 @@ impl ControlServer {
         path: &Path,
         ops: Arc<dyn FleetOps>,
         grants: GrantRegistry,
-        preserve_existing_parent: bool,
     ) -> Result<Self, ControlSocketError> {
         // Held through `bind`: check+unlink without this claim lets two
         // starters both reclaim one stale inode and the second unlink the
         // first starter's freshly bound socket.
-        let _bind_guard = prepare_bind(path, preserve_existing_parent).await?;
+        let _bind_guard = prepare_bind(path).await?;
         let listener = tokio::net::UnixListener::bind(path)
             .map_err(|e| ControlSocketError::Io(e.to_string()))?;
         restrict_socket(path)?;

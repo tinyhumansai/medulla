@@ -1,5 +1,8 @@
 //! Socket framing tests for the control-plane listener.
 
+mod hub_ops;
+mod registry;
+
 #[cfg(unix)]
 #[tokio::test]
 async fn an_endless_oversized_line_is_bounded_before_it_is_fully_read() {

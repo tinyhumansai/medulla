@@ -97,6 +97,37 @@ async fn forwards_input_into_running_task() {
     runtime.idle().await;
 }
 
+#[cfg(feature = "workflows")]
+#[tokio::test]
+async fn input_for_an_acp_task_is_rejected_instead_of_buffered() {
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+    let gate = Arc::new(Notify::new());
+    let received = Arc::new(StdMutex::new(Vec::new()));
+    let run_task = stdin_runner(ready_tx, gate.clone(), received.clone());
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+    let mut task = task_frame("t1", "work", None);
+    task.tool_mode = Some("propose".to_string());
+
+    runtime.handle_message("peer".into(), String::new(), Some(task));
+    wait_ready(&mut ready_rx).await;
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(input_frame("t1", "extra guidance", None)),
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    assert!(received.lock().unwrap().is_empty());
+    assert!(decoded_frames(&recorded).iter().any(|frame| {
+        frame.kind == TaskFrameKind::Error
+            && frame.text == "task transport does not accept mid-run input"
+    }));
+
+    gate.notify_waiters();
+    runtime.idle().await;
+}
+
 #[tokio::test]
 async fn abort_with_mismatched_correlation_leaves_the_running_task_alone() {
     // Task ids recur by construction — they are positional per `delegate_tasks`

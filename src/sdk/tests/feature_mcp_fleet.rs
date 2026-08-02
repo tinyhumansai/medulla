@@ -80,7 +80,7 @@ async fn wired(
         dispatched: Mutex::new(Vec::new()),
     });
     let ops: Arc<dyn FleetOps> = fleet.clone();
-    let server = ControlServer::bind(&socket, ops, grants, false)
+    let server = ControlServer::bind(&socket, ops, grants)
         .await
         .expect("the control socket binds");
 

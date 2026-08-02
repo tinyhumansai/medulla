@@ -6,27 +6,12 @@
 //! usually absent; and a relogin *replaces* the handle, so a captured one goes
 //! stale mid-session while still looking valid.
 
-use std::sync::{Arc, Mutex};
-
 use tokio::sync::mpsc;
 
 use crate::hub::{ActivityLog, HubHandle, RunError, TaskOutcome, TaskRequest};
 
 use super::super::types::{FleetOps, FleetWorker};
-
-/// The shared slot the hub fills once it connects.
-///
-/// Structurally identical to [`crate::runtime::openhuman::HubSlot`], and the
-/// same type — named here so this module does not depend on the runtime.
-pub type HubSlot = Arc<Mutex<Option<HubHandle>>>;
-
-/// Fleet defaults for dispatches that name no worker.
-#[derive(Debug, Clone, Default)]
-pub struct FleetDefaults {
-    /// The worker address to use when neither the caller nor the roster's
-    /// selection names one. Usually this device's own host address.
-    pub worker_address: Option<String>,
-}
+use super::types::{FleetDefaults, HubSlot};
 
 /// Forward a dispatch's status frames to its control-plane poller.
 ///

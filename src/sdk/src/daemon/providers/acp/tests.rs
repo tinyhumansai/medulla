@@ -44,7 +44,7 @@ async fn a_parent_handoff_is_exchanged_before_the_mcp_server_is_attached() {
     let grants = crate::control_socket::GrantRegistry::new();
     let parent_token = grants.mint(crate::control_socket::Grant::new("parent", 1, 3));
     let ops: Arc<dyn crate::control_socket::FleetOps> = Arc::new(NoFleet);
-    let _server = crate::control_socket::ControlServer::bind(&path, ops, grants, false)
+    let _server = crate::control_socket::ControlServer::bind(&path, ops, grants)
         .await
         .unwrap();
     let env = HashMap::from([

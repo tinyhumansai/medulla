@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::super::types::{FleetOps, FleetWorker};
-use super::registry::MAX_IN_FLIGHT_GLOBAL;
-use super::types::{SpawnError, TaskRegistry, TaskState};
+use super::super::super::types::{FleetOps, FleetWorker};
+use super::super::registry::MAX_IN_FLIGHT_GLOBAL;
+use super::super::types::{SpawnError, TaskRegistry, TaskState};
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
 
 /// A fleet whose tasks remain active until the test runtime shuts down.

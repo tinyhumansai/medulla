@@ -38,7 +38,7 @@ async fn a_workflow_run_converts_its_parent_grant_into_a_verified_handoff() {
     let grants = crate::control_socket::GrantRegistry::new();
     let token = grants.mint(crate::control_socket::Grant::new("parent", 1, 3));
     let ops: Arc<dyn crate::control_socket::FleetOps> = Arc::new(NoFleet);
-    let _server = crate::control_socket::ControlServer::bind(&path, ops, grants, false)
+    let _server = crate::control_socket::ControlServer::bind(&path, ops, grants)
         .await
         .unwrap();
     let env = std::collections::HashMap::from([

@@ -226,18 +226,14 @@ fn absolute_path(path: PathBuf) -> Result<PathBuf, ControlSocketError> {
         .map_err(|error| ControlSocketError::Io(error.to_string()))
 }
 
-/// Create the socket's parent directory, private to this user when Medulla owns
-/// the path.
+/// Create the socket's parent directory, private to this user when newly made.
 ///
-/// A default path is tightened to `0700` on every call. An explicit path
-/// preserves an existing parent's permissions, but a parent created for it is
-/// still private. Existing explicit parents are validated separately after
-/// this function returns.
+/// Existing directories are never mutated, regardless of how the path was
+/// selected. They may be shared deliberately or reached through a symlink;
+/// security validation after this call either accepts their current mode or
+/// rejects it without changing operator-owned filesystem state.
 #[cfg(unix)]
-fn ensure_private_parent(
-    path: &Path,
-    preserve_existing_parent: bool,
-) -> Result<(), ControlSocketError> {
+fn ensure_private_parent(path: &Path) -> Result<(), ControlSocketError> {
     use std::os::unix::fs::PermissionsExt;
 
     let Some(parent) = path.parent() else {
@@ -245,10 +241,10 @@ fn ensure_private_parent(
     };
     let existed = parent.exists();
     std::fs::create_dir_all(parent).map_err(|e| ControlSocketError::Io(e.to_string()))?;
-    // An explicitly named path may deliberately live in a shared directory.
-    // Never mutate permissions on a directory Medulla did not create and does
-    // not own merely because the operator placed a socket beneath it.
-    if preserve_existing_parent && existed {
+    // Never mutate permissions on a directory Medulla did not create. This is
+    // independent of whether the path was explicit: a derived MEDULLA_HOME can
+    // also name an existing shared directory or a symlink to one.
+    if existed {
         return Ok(());
     }
     let mut perms = std::fs::metadata(parent)
@@ -341,18 +337,15 @@ fn socket_identity(meta: &std::fs::Metadata) -> (u64, u64) {
 /// [`ControlSocketError::AlreadyBound`] when a live instance holds the path,
 /// [`ControlSocketError::NotASocket`] when something else occupies it, and
 /// [`ControlSocketError::InsecureParent`] when another user could replace an
-/// entry in the parent directory. Explicit paths preserve existing directory
-/// modes, but do not bypass this validation. The returned [`BindGuard`] must be
-/// held until `UnixListener::bind` completes so another starter cannot reclaim
-/// the same stale path between this function and bind.
+/// entry in the parent directory. Existing directory modes are always
+/// preserved, but do not bypass this validation. The returned [`BindGuard`]
+/// must be held until `UnixListener::bind` completes so another starter cannot
+/// reclaim the same stale path between this function and bind.
 #[cfg(unix)]
-pub async fn prepare_bind(
-    path: &Path,
-    preserve_existing_parent: bool,
-) -> Result<BindGuard, ControlSocketError> {
+pub async fn prepare_bind(path: &Path) -> Result<BindGuard, ControlSocketError> {
     use std::os::unix::fs::FileTypeExt;
 
-    ensure_private_parent(path, preserve_existing_parent)?;
+    ensure_private_parent(path)?;
     if let Some(ancestor) = insecure_ancestor(path)? {
         return Err(ControlSocketError::InsecureParent(ancestor));
     }

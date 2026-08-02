@@ -7,7 +7,21 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 
 use super::super::grants::{Grant, GrantRegistry};
-use crate::hub::TaskOutcome;
+use crate::hub::{HubHandle, TaskOutcome};
+
+/// The shared slot the hub fills once it connects.
+///
+/// Structurally identical to [`crate::runtime::openhuman::HubSlot`], and the
+/// same type — named here so the control server does not depend on the runtime.
+pub type HubSlot = Arc<Mutex<Option<HubHandle>>>;
+
+/// Fleet defaults for dispatches that name no worker.
+#[derive(Debug, Clone, Default)]
+pub struct FleetDefaults {
+    /// The worker address used when neither the caller nor roster selection
+    /// names one. Usually this device's own host address.
+    pub worker_address: Option<String>,
+}
 
 /// How a dispatched task ended, in terms a model can act on.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -2,8 +2,8 @@
 //! the fleet tools is *visible* — attributed to a lane and reporting progress
 //! the way an operator-started task does.
 
-use super::hub_ops::{activity_key, record_outcome, tee_status};
-use super::{FleetDefaults, HubFleetOps, HubSlot};
+use super::super::hub_ops::{activity_key, record_outcome, tee_status};
+use super::super::{FleetDefaults, HubFleetOps, HubSlot};
 use crate::control_socket::FleetOps;
 use crate::hub::{ActivityLog, RunError, TaskOutcome, TaskRequest};
 use crate::tinyplace::TokenUsage;

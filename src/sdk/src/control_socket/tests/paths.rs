@@ -177,7 +177,7 @@ mod bind {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("control.sock");
 
-        assert!(prepare_bind(&path, false).await.is_ok());
+        assert!(prepare_bind(&path).await.is_ok());
     }
 
     #[tokio::test]
@@ -188,7 +188,7 @@ mod bind {
         let path = dir.path().join("control.sock");
         std::fs::write(&path, b"not a socket").unwrap();
 
-        let result = prepare_bind(&path, false).await;
+        let result = prepare_bind(&path).await;
 
         assert!(matches!(result, Err(ControlSocketError::NotASocket(_))));
         assert_eq!(std::fs::read(&path).unwrap(), b"not a socket");
@@ -202,7 +202,7 @@ mod bind {
         drop(tokio::net::UnixListener::bind(&path).unwrap());
         assert!(path.exists());
 
-        assert!(prepare_bind(&path, false).await.is_ok());
+        assert!(prepare_bind(&path).await.is_ok());
         assert!(!path.exists(), "the stale socket should have been unlinked");
     }
 
@@ -210,9 +210,9 @@ mod bind {
     async fn bind_preparation_is_serialized_until_the_caller_binds() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("control.sock");
-        let first = prepare_bind(&path, false).await.unwrap();
+        let first = prepare_bind(&path).await.unwrap();
         let competing_path = path.clone();
-        let mut competing = tokio::spawn(async move { prepare_bind(&competing_path, false).await });
+        let mut competing = tokio::spawn(async move { prepare_bind(&competing_path).await });
 
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(50), &mut competing)
@@ -234,10 +234,10 @@ mod bind {
     async fn a_stuck_bind_lock_is_bounded_instead_of_hanging_startup() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("control.sock");
-        let _held = prepare_bind(&path, false).await.unwrap();
+        let _held = prepare_bind(&path).await.unwrap();
         let started = std::time::Instant::now();
 
-        let result = prepare_bind(&path, false).await;
+        let result = prepare_bind(&path).await;
 
         assert!(matches!(result, Err(ControlSocketError::AlreadyBound(_))));
         assert!(
@@ -252,7 +252,7 @@ mod bind {
         let path = dir.path().join("control.sock");
         let _listener = tokio::net::UnixListener::bind(&path).unwrap();
 
-        let result = prepare_bind(&path, false).await;
+        let result = prepare_bind(&path).await;
 
         assert!(matches!(result, Err(ControlSocketError::AlreadyBound(_))));
         assert!(path.exists(), "a live instance's socket must survive");
@@ -265,7 +265,7 @@ mod bind {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("control.sock");
 
-        drop(prepare_bind(&path, false).await.unwrap());
+        drop(prepare_bind(&path).await.unwrap());
 
         let mode = std::fs::metadata(path.parent().unwrap())
             .unwrap()
@@ -284,10 +284,30 @@ mod bind {
         std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let path = shared.join("control.sock");
 
-        drop(prepare_bind(&path, true).await.unwrap());
+        drop(prepare_bind(&path).await.unwrap());
 
         let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
         assert_eq!(mode & 0o1777, 0o1777, "shared parent must not be chmodded");
+    }
+
+    #[tokio::test]
+    async fn a_derived_paths_existing_symlinked_parent_is_never_chmodded() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let actual = dir.path().join("account-root");
+        let linked = dir.path().join("linked-account-root");
+        std::fs::create_dir(&actual).unwrap();
+        std::fs::set_permissions(&actual, std::fs::Permissions::from_mode(0o750)).unwrap();
+        symlink(&actual, &linked).unwrap();
+
+        drop(prepare_bind(&linked.join("control.sock")).await.unwrap());
+
+        assert_eq!(
+            std::fs::metadata(&actual).unwrap().permissions().mode() & 0o777,
+            0o750,
+            "a derived path must preserve an existing symlink target"
+        );
     }
 
     #[test]
@@ -315,7 +335,7 @@ mod bind {
         std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
         let path = shared.join("control.sock");
 
-        let result = prepare_bind(&path, true).await;
+        let result = prepare_bind(&path).await;
 
         assert!(matches!(result, Err(ControlSocketError::InsecureParent(_))));
         let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
@@ -335,7 +355,7 @@ mod bind {
         let linked_parent = private_parent.join("socket-parent");
         symlink(&actual_parent, &linked_parent).unwrap();
 
-        let result = prepare_bind(&linked_parent.join("control.sock"), true).await;
+        let result = prepare_bind(&linked_parent.join("control.sock")).await;
         let resolved_actual_parent = std::fs::canonicalize(&actual_parent).unwrap();
 
         assert!(matches!(
@@ -355,7 +375,7 @@ mod bind {
         std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
         std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
 
-        let result = prepare_bind(&private.join("control.sock"), true).await;
+        let result = prepare_bind(&private.join("control.sock")).await;
         let resolved_shared = std::fs::canonicalize(&shared).unwrap();
 
         assert!(matches!(

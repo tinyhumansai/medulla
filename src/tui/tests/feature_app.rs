@@ -143,6 +143,32 @@ fn shift_enter_inserts_newline_and_esc_clears() {
 }
 
 #[test]
+fn bracketed_paste_inserts_normalized_multiline_text_without_submitting() {
+    let (mut app, _rt) = empty_app();
+    app.tab_index = 1;
+
+    let cmd = app.on_event(Event::Paste("first\r\nsecond\rthird\n".into()));
+
+    assert!(cmd.is_none());
+    assert_eq!(app.draft_text(), "first\nsecond\nthird\n");
+    assert_eq!(app.draft_cursor(), 19);
+}
+
+#[test]
+fn bracketed_paste_inserts_at_the_composer_cursor() {
+    let (mut app, _rt) = empty_app();
+    app.tab_index = 1;
+    type_str(&mut app, "ac");
+    let _ = app.on_event(key(KeyCode::Left));
+
+    let cmd = app.on_event(Event::Paste("b\n".into()));
+
+    assert!(cmd.is_none());
+    assert_eq!(app.draft_text(), "ab\nc");
+    assert_eq!(app.draft_cursor(), 3);
+}
+
+#[test]
 fn multiline_caret_walks_rows_before_history() {
     let (mut app, _rt) = empty_app();
     // Prime history so the fallback has something to recall.

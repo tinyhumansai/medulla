@@ -7,8 +7,8 @@
 use std::io::{self, Write};
 
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
@@ -17,15 +17,15 @@ use crossterm::terminal::{
 use crossterm::{execute, queue};
 
 impl TermGuard {
-    /// Enter raw mode, optionally the alternate screen, enable mouse capture,
-    /// and push the kitty disambiguation flag when the terminal supports it.
+    /// Enter raw mode, optionally the alternate screen, enable bracketed paste
+    /// and mouse capture, and push the kitty disambiguation flag when supported.
     pub(crate) fn setup(alt_screen: bool) -> io::Result<Self> {
         enable_raw_mode()?;
         let mut out = io::stdout();
         if alt_screen {
             execute!(out, EnterAlternateScreen)?;
         }
-        execute!(out, EnableMouseCapture)?;
+        execute!(out, EnableBracketedPaste, EnableMouseCapture)?;
         let kitty = supports_keyboard_enhancement().unwrap_or(false);
         if kitty {
             queue!(
@@ -52,7 +52,7 @@ pub(crate) fn restore(alt_screen: bool, kitty: bool) {
     if kitty {
         let _ = queue!(out, PopKeyboardEnhancementFlags);
     }
-    let _ = execute!(out, DisableMouseCapture);
+    let _ = execute!(out, DisableMouseCapture, DisableBracketedPaste);
     if alt_screen {
         let _ = execute!(out, LeaveAlternateScreen);
     }

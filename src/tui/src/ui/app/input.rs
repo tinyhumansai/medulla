@@ -13,6 +13,7 @@ use super::types::{
     App, Cmd, MEMORY_SUBPAGES, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TASKS_SUBPAGES,
     TOKENMAXXING_SUBPAGES,
 };
+use crate::ui::composer::insert_at;
 
 impl App {
     /// Route a terminal event to the key or mouse handler, producing any command
@@ -23,8 +24,31 @@ impl App {
                 self.on_key(k)
             }
             Event::Mouse(m) => self.on_mouse(m),
+            Event::Paste(text) => {
+                self.on_paste(&text);
+                None
+            }
             _ => None,
         }
+    }
+
+    /// Insert a bracketed-paste payload into the active chat composer.
+    ///
+    /// Terminal paste payloads may use CRLF or bare carriage returns. Keeping
+    /// one internal newline representation makes caret movement predictable,
+    /// while treating the entire payload as text guarantees it cannot trigger
+    /// the command peek or submit bindings.
+    fn on_paste(&mut self, text: &str) {
+        if self.tab() != "Agents"
+            || self.resume_picker.is_some()
+            || self.prompt.is_some()
+            || self.decision_open
+        {
+            return;
+        }
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        self.draft = insert_at(&self.draft.text, self.draft.cursor, &normalized);
+        self.command_index = 0;
     }
 
     /// Handle scroll and left-click mouse events for the active tab.

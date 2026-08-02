@@ -20,6 +20,22 @@ fn policy_at(root: &tempfile::TempDir) -> ScriptPolicy {
     ScriptPolicy::new(&root.path().to_string_lossy())
 }
 
+/// A path this platform actually considers absolute.
+///
+/// `/etc/passwd` is *not* absolute on Windows — it has no drive prefix — so a
+/// test hard-coding it would take the traversal branch there and assert against
+/// the wrong message.
+const fn absolute_path() -> &'static str {
+    #[cfg(windows)]
+    {
+        r"C:\Windows\System32\drivers\etc\hosts"
+    }
+    #[cfg(not(windows))]
+    {
+        "/etc/passwd"
+    }
+}
+
 #[test]
 fn a_script_in_the_workspace_resolves() {
     let root = workspace();
@@ -53,7 +69,7 @@ fn absolute_and_traversing_paths_are_refused() {
     let policy = policy_at(&root);
 
     for (raw, needle) in [
-        ("/etc/passwd", "must be relative to the workspace"),
+        (absolute_path(), "must be relative to the workspace"),
         ("../../etc/passwd", "must not traverse outside"),
         ("scripts/../../escape.sh", "must not traverse outside"),
     ] {

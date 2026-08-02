@@ -21,6 +21,18 @@ use tinyflows::caps::ToolInvoker;
 use super::caps::tools::MedullaToolInvoker;
 use super::settings::CapabilitySettings;
 
+/// A path this platform actually considers absolute.
+const fn absolute_path() -> &'static str {
+    #[cfg(windows)]
+    {
+        r"C:\Windows\System32\drivers\etc\hosts"
+    }
+    #[cfg(not(windows))]
+    {
+        "/etc/profile"
+    }
+}
+
 /// Settings with script execution turned on, rooted at `workspace`.
 fn scripting_settings(workspace: &std::path::Path) -> Arc<CapabilitySettings> {
     let mut settings = CapabilitySettings::rooted_at(workspace);
@@ -286,7 +298,10 @@ async fn a_script_outside_the_workspace_is_refused_rather_than_run() {
             "must not traverse outside",
         ),
         (
-            json!({ "script_path": "/etc/profile" }),
+            // Absolute on this platform specifically: `/etc/profile` has no
+            // drive prefix, so Windows would take the traversal branch instead
+            // and the assertion below would be checking the wrong message.
+            json!({ "script_path": absolute_path() }),
             "must be relative to the workspace",
         ),
         (

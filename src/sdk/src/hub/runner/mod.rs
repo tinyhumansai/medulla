@@ -223,7 +223,11 @@ impl TaskRunner {
     }
 
     /// Return the active dispatch receipt for a worker/task pair.
-    pub async fn kill_correlation_for(&self, worker: &str, task_id: &str) -> Option<String> {
+    pub async fn kill_correlation_for(
+        &self,
+        worker: &str,
+        task_id: &str,
+    ) -> Option<(String, String)> {
         self.waiters
             .lock()
             .await
@@ -231,7 +235,7 @@ impl TaskRunner {
             .find(|(_, waiter)| {
                 waiter.from == worker && waiter.task_id == task_id && waiter.screen_kill
             })
-            .map(|(correlation, _)| correlation.clone())
+            .map(|(correlation, waiter)| (correlation.clone(), waiter.wire_task_id.clone()))
     }
 
     /// Cancel every dispatch this runner has in flight.
@@ -363,6 +367,7 @@ impl TaskRunner {
                     task_id: visible_task_id
                         .clone()
                         .unwrap_or_else(|| req.task_id.clone()),
+                    wire_task_id: req.task_id.clone(),
                     screen_kill,
                     from: req.worker_address.clone(),
                     reply: tx,

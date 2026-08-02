@@ -10,7 +10,25 @@ impl DaemonRuntime {
     /// Answer a `capabilities` probe with the cached [`AgentCapabilities`].
     pub(super) async fn handle_capabilities(&self, from: String, frame: TaskFrame) {
         #[cfg_attr(not(feature = "workflows"), allow(unused_mut))]
-        let mut capabilities = self.get_capabilities().await;
+        let mut capabilities = if self
+            .inner
+            .screen_kill
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && self.inner.capabilities.lock().await.is_none()
+        {
+            let runtime = self.clone();
+            tokio::spawn(async move {
+                runtime.get_capabilities().await;
+            });
+            AgentCapabilities {
+                cwd: Some(self.inner.config.workspace.clone()),
+                providers: self.inner.config.providers.clone(),
+                screen_kill: true,
+                ..Default::default()
+            }
+        } else {
+            self.get_capabilities().await
+        };
         capabilities.screen_kill = self
             .inner
             .screen_kill

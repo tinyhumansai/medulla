@@ -135,7 +135,7 @@ impl HubHandle {
     /// The worker resolves the task against the authenticated sender before it
     /// touches a PTY, so this cannot be used to kill another controller's work.
     pub async fn kill(&self, worker: &str, task_id: &str) -> Result<(), String> {
-        let correlation_id = self
+        let (correlation_id, wire_task_id) = self
             .runner
             .kill_correlation_for(worker, task_id)
             .await
@@ -144,7 +144,7 @@ impl HubHandle {
             })?;
         let body =
             crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Kill {
-                task_id: task_id.to_string(),
+                task_id: wire_task_id,
                 correlation_id,
             });
         (self.log)(&format!("hub: killing task {task_id} on {worker}"));

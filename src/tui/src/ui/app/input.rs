@@ -6,7 +6,7 @@
 use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
 
 use super::rail::RailRow;
-use crate::ui::agents::{agent_row_model, AgentRole, AgentRow};
+use crate::ui::agents::{agent_row_model, AgentRole, AgentRow, TaskStatus};
 use crate::ui::composer::Draft;
 
 use super::types::{App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_SUBPAGES};
@@ -525,6 +525,9 @@ impl App {
         else {
             return None;
         };
+        if task.status != TaskStatus::Running {
+            return None;
+        }
         let lanes = self.lanes();
         let lane = lanes.get(*lane_index)?;
         // `Agent` is main's name for a roster agent / delegated task / peer

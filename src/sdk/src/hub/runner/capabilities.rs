@@ -106,7 +106,13 @@ impl TaskRunner {
         tokio::select! {
             biased;
             _ = abort.notified() => {
-                self.aborts.lock().expect("aborts lock").remove(abort_id);
+                let mut aborts = self.aborts.lock().expect("aborts lock");
+                if aborts
+                    .get(abort_id)
+                    .is_some_and(|current| std::sync::Arc::ptr_eq(current, &abort))
+                {
+                    aborts.remove(abort_id);
+                }
                 Err(RunError::Aborted)
             }
             result = self.capabilities(address) => result,

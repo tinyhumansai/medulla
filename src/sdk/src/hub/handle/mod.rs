@@ -135,14 +135,13 @@ impl HubHandle {
     /// The worker resolves the task against the authenticated sender before it
     /// touches a PTY, so this cannot be used to kill another controller's work.
     pub async fn kill(&self, worker: &str, task_id: &str) -> Result<(), String> {
-        if !self.runner.supports_screen_kill(worker).await {
-            return Err("worker does not advertise harness termination support".to_string());
-        }
         let correlation_id = self
             .runner
-            .correlation_for(worker, task_id)
+            .kill_correlation_for(worker, task_id)
             .await
-            .ok_or_else(|| format!("task {task_id} is no longer running on {worker}"))?;
+            .ok_or_else(|| {
+                format!("task {task_id} is not running with termination support on {worker}")
+            })?;
         let body =
             crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Kill {
                 task_id: task_id.to_string(),

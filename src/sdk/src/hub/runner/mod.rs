@@ -212,23 +212,15 @@ impl TaskRunner {
     }
 
     /// Return the active dispatch receipt for a worker/task pair.
-    pub async fn correlation_for(&self, worker: &str, task_id: &str) -> Option<String> {
+    pub async fn kill_correlation_for(&self, worker: &str, task_id: &str) -> Option<String> {
         self.waiters
             .lock()
             .await
             .iter()
-            .find(|(_, waiter)| waiter.from == worker && waiter.task_id == task_id)
+            .find(|(_, waiter)| {
+                waiter.from == worker && waiter.task_id == task_id && waiter.screen_kill
+            })
             .map(|(correlation, _)| correlation.clone())
-    }
-
-    /// Return whether the worker advertised screen termination during a
-    /// capability negotiation completed before its current dispatch.
-    pub async fn supports_screen_kill(&self, worker: &str) -> bool {
-        self.capabilities
-            .lock()
-            .await
-            .get(worker)
-            .is_some_and(|capabilities| capabilities.screen_kill)
     }
 
     /// Cancel every dispatch this runner has in flight.
@@ -322,6 +314,12 @@ impl TaskRunner {
         }
 
         let mut attempt = 0u32;
+        let screen_kill = self
+            .capabilities
+            .lock()
+            .await
+            .get(&req.worker_address)
+            .is_some_and(|capabilities| capabilities.screen_kill);
         loop {
             let cid = format!(
                 "{}/{}/{}",
@@ -335,6 +333,7 @@ impl TaskRunner {
                 cid.clone(),
                 Waiter {
                     task_id: req.task_id.clone(),
+                    screen_kill,
                     from: req.worker_address.clone(),
                     reply: tx,
                     status: status.clone(),

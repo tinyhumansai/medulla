@@ -371,6 +371,9 @@ impl App {
     }
 
     pub fn set_status(&mut self, s: impl Into<String>) {
+        // A destructive confirmation is valid only while its question remains
+        // visible. Any asynchronous status replacement cancels it.
+        self.kill_armed = None;
         self.status = s.into();
     }
 

@@ -5,6 +5,8 @@ use super::*;
 pub(super) struct Waiter {
     /// The task id this dispatch carries on the wire.
     pub(super) task_id: String,
+    /// Screen termination support negotiated for this exact dispatch.
+    pub(super) screen_kill: bool,
     /// The worker address this dispatch was sent to — the only sender whose
     /// frames may settle it. See [`Probe::from`].
     pub(super) from: String,

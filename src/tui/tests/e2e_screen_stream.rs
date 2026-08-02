@@ -95,7 +95,7 @@ fn runtime_serving(sessions: PtyManager, session_id: String) -> DaemonRuntime {
         let sessions = sessions.clone();
         Box::pin(async move {
             if let Some(report) = options.on_session {
-                report(session_id);
+                report(session_id.clone());
             }
             // Hold the task open so its record — and therefore the subscription
             // resolving through it — stays live for the duration of the test.

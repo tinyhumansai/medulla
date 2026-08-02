@@ -35,10 +35,29 @@ pub(super) fn workspace_event_from_output(
 fn json_report(output: &str) -> Option<(String, String)> {
     let start = output.find('{')?;
     let value: Value = serde_json::from_str(&output[start..]).ok()?;
-    if value.get("status").and_then(Value::as_str) != Some("ready") {
+    if !has_worktree_signature(&value) {
         return None;
     }
     report_fields(&value)
+}
+
+/// Verify fields unique to the helper's stable JSON contract before trusting
+/// generic names such as `path` and `branch` as session facts.
+fn has_worktree_signature(value: &Value) -> bool {
+    value.get("status").and_then(Value::as_str) == Some("ready")
+        && value.get("repository").and_then(Value::as_str).is_some()
+        && value.get("head").and_then(Value::as_str).is_some()
+        && value.get("headShort").and_then(Value::as_str).is_some()
+        && value.get("created").and_then(Value::as_bool).is_some()
+        && value.get("nextCommand").and_then(Value::as_str).is_some()
+        && value
+            .pointer("/submodules/state")
+            .and_then(Value::as_str)
+            == Some("initialized_recursive")
+        && value
+            .pointer("/submodules/count")
+            .and_then(Value::as_u64)
+            .is_some()
 }
 
 /// Read the default stable `[PASS] WORKTREE_READY` report.

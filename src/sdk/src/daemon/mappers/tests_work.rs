@@ -246,7 +246,18 @@ fn codex_json_worktree_report_moves_the_session_to_the_created_branch() {
                 "type": "command_execution",
                 "id": "cmd-1",
                 "command": "worktree fix-label --json",
-                "aggregated_output": "initializing\n{\"status\":\"ready\",\"path\":\"/repo/worktrees/fix-label\",\"branch\":\"fix-label\"}",
+                "aggregated_output": concat!(
+                    "initializing\n{",
+                    "\"status\":\"ready\",",
+                    "\"repository\":\"/repo\",",
+                    "\"path\":\"/repo/worktrees/fix-label\",",
+                    "\"branch\":\"fix-label\",",
+                    "\"head\":\"abc123456789\",",
+                    "\"headShort\":\"abc1234\",",
+                    "\"created\":true,",
+                    "\"submodules\":{\"state\":\"initialized_recursive\",\"count\":0},",
+                    "\"nextCommand\":\"cd /repo/worktrees/fix-label\"}"
+                ),
                 "exit_code": 0
             }
         })],
@@ -279,6 +290,15 @@ fn failed_or_unrelated_command_output_does_not_move_the_session() {
                     "type": "command_execution",
                     "id": "cmd-2",
                     "aggregated_output": "path: /also-wrong\nbranch: wrong",
+                    "exit_code": 0
+                }
+            }),
+            json!({
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "id": "cmd-3",
+                    "aggregated_output": "{\"status\":\"ready\",\"path\":\"/deploy\",\"branch\":\"prod\"}",
                     "exit_code": 0
                 }
             }),

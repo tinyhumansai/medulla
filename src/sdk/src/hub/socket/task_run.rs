@@ -162,6 +162,11 @@ pub(super) async fn handle_task_run(
         return;
     };
 
+    // Negotiate once before dispatch. Besides informing automatic provider
+    // selection, this records static control-plane support so an emergency kill
+    // never waits behind a fresh probe of a wedged worker.
+    let capabilities = runner.capabilities(&worker_address).await.ok();
+
     // An explicit provider is authoritative. Only an untargeted task consults
     // the subscription strategy, and a failed/unknown budget probe falls open
     // to the daemon's own configured default.
@@ -174,12 +179,9 @@ pub(super) async fn handle_task_run(
             if strategy == crate::runtime::SubscriptionRoutingStrategy::Manual {
                 None
             } else {
-                match runner.capabilities(&worker_address).await {
-                    Ok(capabilities) => {
-                        super::super::roster::subscription_for_strategy(&capabilities, strategy)
-                    }
-                    Err(_) => None,
-                }
+                capabilities.as_ref().and_then(|capabilities| {
+                    super::super::roster::subscription_for_strategy(capabilities, strategy)
+                })
             }
         }
     };

@@ -183,6 +183,7 @@ impl TaskRunner {
             waiters,
             system_info_waiters,
             capabilities_waiters,
+            capabilities: Arc::new(Mutex::new(HashMap::new())),
             aborts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             counter: AtomicU64::new(0),
             ack_window,
@@ -218,6 +219,16 @@ impl TaskRunner {
             .iter()
             .find(|(_, waiter)| waiter.from == worker && waiter.task_id == task_id)
             .map(|(correlation, _)| correlation.clone())
+    }
+
+    /// Return whether the worker advertised screen termination during a
+    /// capability negotiation completed before its current dispatch.
+    pub async fn supports_screen_kill(&self, worker: &str) -> bool {
+        self.capabilities
+            .lock()
+            .await
+            .get(worker)
+            .is_some_and(|capabilities| capabilities.screen_kill)
     }
 
     /// Cancel every dispatch this runner has in flight.

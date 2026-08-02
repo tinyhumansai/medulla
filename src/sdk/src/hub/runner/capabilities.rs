@@ -60,7 +60,13 @@ impl TaskRunner {
                 return Err(RunError::Transport(error));
             }
             match tokio::time::timeout(self.ack_window, receiver).await {
-                Ok(Ok(Ok(caps))) => return Ok(caps),
+                Ok(Ok(Ok(caps))) => {
+                    self.capabilities
+                        .lock()
+                        .await
+                        .insert(address.to_string(), caps.clone());
+                    return Ok(caps);
+                }
                 Ok(Ok(Err(error))) => return Err(RunError::Worker(error)),
                 Ok(Err(_)) => {
                     return Err(RunError::Transport(

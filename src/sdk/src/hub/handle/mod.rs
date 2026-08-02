@@ -135,12 +135,7 @@ impl HubHandle {
     /// The worker resolves the task against the authenticated sender before it
     /// touches a PTY, so this cannot be used to kill another controller's work.
     pub async fn kill(&self, worker: &str, task_id: &str) -> Result<(), String> {
-        let capabilities = self
-            .runner
-            .capabilities(worker)
-            .await
-            .map_err(|error| error.to_string())?;
-        if !capabilities.screen_kill {
+        if !self.runner.supports_screen_kill(worker).await {
             return Err("worker does not advertise harness termination support".to_string());
         }
         let correlation_id = self

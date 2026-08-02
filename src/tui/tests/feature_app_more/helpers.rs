@@ -3,7 +3,7 @@
 //! `TestBackend` render helper. Re-exports the crossterm/ratatui/medulla types
 //! the grouped test modules need so they can `use crate::helpers::*;`.
 
-pub use std::sync::Arc;
+pub use std::sync::{Arc, Mutex};
 
 pub use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -41,6 +41,75 @@ pub fn empty_app() -> (App, Arc<MockRuntime>) {
 pub struct FleetRuntime {
     pub inner: Arc<MockRuntime>,
     pub workers: Vec<medulla::runtime::WorkerInfo>,
+}
+
+/// A runtime whose backend steering is unavailable but whose local MCP task
+/// cancellation path is observable.
+pub struct LocalCancelRuntime {
+    pub inner: Arc<MockRuntime>,
+    pub cancelled: Mutex<Vec<(String, String)>>,
+}
+
+impl medulla::runtime::Runtime for LocalCancelRuntime {
+    fn describe(&self) -> String {
+        "LocalCancelRuntime (test)".into()
+    }
+
+    fn snapshot(&self) -> medulla::runtime::RuntimeSnapshot {
+        self.inner.snapshot()
+    }
+
+    fn subscribe(&self) -> tokio::sync::broadcast::Receiver<()> {
+        self.inner.subscribe()
+    }
+
+    fn submit(&self, input: String) -> futures::future::BoxFuture<'static, anyhow::Result<()>> {
+        self.inner.submit(input)
+    }
+
+    fn abort(&self) {
+        self.inner.abort()
+    }
+
+    fn new_session(&self) {
+        self.inner.new_session()
+    }
+
+    fn set_active_thread(&self, id: String) {
+        self.inner.set_active_thread(id)
+    }
+
+    fn list_main_chats(
+        &self,
+    ) -> futures::future::BoxFuture<
+        'static,
+        anyhow::Result<Vec<medulla_tui::ui::chat_store::MainChatSummary>>,
+    > {
+        self.inner.list_main_chats()
+    }
+
+    fn resume_chat(&self, id: String) -> futures::future::BoxFuture<'static, anyhow::Result<()>> {
+        self.inner.resume_chat(id)
+    }
+
+    fn inspect_context(
+        &self,
+    ) -> futures::future::BoxFuture<'static, anyhow::Result<Vec<medulla::runtime::ContextItem>>>
+    {
+        self.inner.inspect_context()
+    }
+
+    fn shutdown(&self) -> futures::future::BoxFuture<'static, anyhow::Result<()>> {
+        self.inner.shutdown()
+    }
+
+    fn steering_reaches_backend(&self) -> bool {
+        false
+    }
+
+    fn cancel_task(&self, cycle_id: String, task_id: String) {
+        self.cancelled.lock().unwrap().push((cycle_id, task_id));
+    }
 }
 
 impl medulla::runtime::Runtime for FleetRuntime {

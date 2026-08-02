@@ -318,6 +318,23 @@ pub struct TaskFrame {
     /// id it could not find.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub workflow: Option<String>,
+    /// Inbound-only fingerprint of the exact workflow definition selected by
+    /// the sender.
+    #[serde(
+        rename = "workflowFingerprint",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub workflow_fingerprint: Option<String>,
+    /// Inbound-only values for the selected workflow's declared inputs.
+    ///
+    /// Omitted on ordinary tasks and when a workflow needs no declared values.
+    #[serde(
+        rename = "inputs",
+        skip_serializing_if = "serde_json::Map::is_empty",
+        default
+    )]
+    pub workflow_inputs: serde_json::Map<String, serde_json::Value>,
     /// Inbound-only: which slice of the workflow tools this task's harness is
     /// served.
     ///
@@ -354,6 +371,14 @@ pub struct TaskFrame {
     /// [`route_session_class`]: crate::sessions::route_session_class
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub conversation: Option<String>,
+    /// How deep in a dispatch tree the harness running this task sits.
+    ///
+    /// `0` — the default when a peer omits it — is work an operator started.
+    /// Carried on the frame so the receiving daemon knows it independently of
+    /// the sender's own environment, which is what lets the fan-out guard hold
+    /// across a process boundary.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub fleet_depth: u8,
     /// Reported on `reply` frames when the child harness surfaced token counts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TokenUsage>,
@@ -407,10 +432,21 @@ pub struct EncodeFrameInput {
     /// Inbound-only: the installed workflow to run instead of treating `text` as
     /// an instruction. `None` on every response and on ordinary tasks.
     pub workflow: Option<String>,
+    /// Inbound-only fingerprint of the selected workflow definition.
+    pub workflow_fingerprint: Option<String>,
+    /// Inbound-only values for the selected workflow's declared inputs.
+    pub workflow_inputs: serde_json::Map<String, serde_json::Value>,
     /// Inbound-only: the continuity group successive tasks share a session
     /// through. `None` on every response and on ordinary tasks, which stay
     /// context-free by design — see [`TaskFrame::conversation`].
     pub conversation: Option<String>,
+    /// How deep in a dispatch tree the harness running this task sits.
+    ///
+    /// `0` — the default when a peer omits it — is work an operator started.
+    /// Carried on the frame so the receiving daemon knows it independently of
+    /// the sender's own environment, which is what lets the fan-out guard hold
+    /// across a process boundary.
+    pub fleet_depth: u8,
 }
 
 /// What an agent reports it can do, merged with facts its host establishes.
@@ -516,6 +552,40 @@ pub struct WorkflowAdvert {
     /// How many steps it has — a rough cost signal.
     #[serde(rename = "nodeCount", default)]
     pub node_count: usize,
+    /// Fingerprint of the complete persisted definition.
+    ///
+    /// A caller sends this back when dispatching the workflow. The worker can
+    /// then refuse an id whose definition changed or differs from a same-named
+    /// workflow on another machine instead of silently running the wrong graph.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub fingerprint: String,
+    /// Inputs the workflow declares, so a remote caller can construct a valid
+    /// dispatch without consulting a different machine's workflow store.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<WorkflowInputAdvert>,
+}
+
+/// One declared input in a remotely advertised workflow.
+///
+/// This transport type mirrors the engine's input declaration without making
+/// the tiny.place protocol depend on the optional workflow engine feature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowInputAdvert {
+    /// The key a caller supplies in `inputs`.
+    pub name: String,
+    /// Declared JSON type: `string`, `number`, `boolean`, or `json`.
+    #[serde(rename = "type", default, skip_serializing_if = "String::is_empty")]
+    pub ty: String,
+    /// Human-readable purpose of the input.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// Whether a caller must supply a value.
+    #[serde(default)]
+    pub required: bool,
+    /// Value used when the caller omits this input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
 }
 
 /// Deserialize a `Vec<String>`, discarding non-string and blank entries.
@@ -558,4 +628,9 @@ where
         .iter()
         .filter_map(|s| HarnessProvider::from_wire(s))
         .collect())
+}
+
+/// Whether a depth is the default, so it stays off the wire for ordinary work.
+fn is_zero(depth: &u8) -> bool {
+    *depth == 0
 }

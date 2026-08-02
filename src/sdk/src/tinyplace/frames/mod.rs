@@ -26,5 +26,5 @@ pub use encode::{encode_task_frame, encode_task_frame_with_usage, encode_task_fr
 pub use types::{
     AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert, EncodeFrameInput,
     HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrame, TaskFrameKind, TokenUsage,
-    WorkflowAdvert, TINYPLACE_PROTO,
+    WorkflowAdvert, WorkflowInputAdvert, TINYPLACE_PROTO,
 };

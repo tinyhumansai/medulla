@@ -88,6 +88,10 @@ pub struct StatusLineConfig {
     pub control_when: FieldVisibility,
     /// How the control state is spelled.
     pub control_style: ControlStyle,
+    /// Where the harness's human-facing thread name is drawn.
+    pub thread: FieldPlacement,
+    /// When the thread name is drawn.
+    pub thread_when: FieldVisibility,
     /// Where the Git branch is drawn.
     pub branch: FieldPlacement,
     /// When the Git branch is drawn.

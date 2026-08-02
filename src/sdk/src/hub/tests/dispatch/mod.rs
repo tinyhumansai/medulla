@@ -467,10 +467,11 @@ async fn aborting_an_unknown_task_is_a_harmless_no_op() {
     // here) must not panic or block — the registry simply has no entry.
     let worker = FakeWorker::new(Mode::Reply("done".to_string()));
     let runner = TaskRunner::start(worker, Duration::from_millis(5));
-    runner.abort_task("never-dispatched");
+    assert!(!runner.abort_task("never-dispatched"));
     // The runner is still fully usable afterwards.
     let outcome = runner.run(req("x"), None).await.expect("ok");
     assert_eq!(outcome.reply, "done");
+    assert!(!runner.abort_task("t1"), "a settled task is no longer live");
 }
 
 #[tokio::test]

@@ -160,6 +160,7 @@ fn sample_selected() -> SessionRow {
         cwd: "/home/you/work/tinyhumans/medulla-public".into(),
         branch: Some("feat/status-line".into()),
         session_id: None,
+        thread_name: Some("Ship the status line".into()),
         started_at: 0,
         last_output_at: 0,
         last_error: None,

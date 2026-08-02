@@ -31,6 +31,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("workspace") | Some("workspaces") => Command::Workspace,
         Some("hub") => Command::Hub,
         Some("workflow") | Some("workflows") => Command::Workflow,
+        Some("mcp") => Command::Mcp,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),
@@ -357,7 +358,8 @@ medulla logout          Clear stored credentials\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
 medulla workspace <cmd> Workspace registry: add [dir]|list|remove <dir|id>\n  \
 medulla workflow <cmd>  Workflows: list|get|create|apply-ops|validate|dry-run|run|resume|cancel|catalog\n  \
-medulla workflow mcp    Serve the workflow tools over MCP (for ACP sessions)\n  \
+medulla mcp             Serve Medulla's tools over MCP (spawned for harnesses)\n  \
+medulla workflow mcp    Alias for `medulla mcp`, workflow tools only\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
 medulla version         Print the version\n  \
 medulla help            Show this help\n\n\

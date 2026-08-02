@@ -88,6 +88,40 @@ fn observed_records_the_frame_verbatim() {
 }
 
 #[test]
+fn a_wire_id_can_feed_an_operator_visible_cancellable_task() {
+    let log = ActivityLog::new();
+    log.dispatched_as("wire-unique-1", "cycle/t:abort-1", "worker-a");
+    let work = crate::harness_work::WorkSnapshot {
+        goal: Some("ship the patch".to_string()),
+        ..Default::default()
+    };
+
+    log.observed_with_work(
+        "wire-unique-1",
+        "ack",
+        "accepted",
+        42,
+        Some(Box::new(work.clone())),
+    );
+
+    let snapshot = log.snapshot();
+    let entry = &snapshot[0];
+    assert_eq!(entry.task_id, "cycle/t:abort-1");
+    assert_eq!(entry.agent_id, "worker-a");
+    assert_eq!(entry.work.as_deref(), Some(&work));
+}
+
+#[test]
+fn terminal_lookup_resolves_the_worker_id_to_its_visible_alias() {
+    let log = ActivityLog::new();
+    log.dispatched_as("wire-1", "cycle/t:abort-1", "worker-a");
+    log.observed("wire-1", "reply", "done", 42);
+
+    assert!(log.has_terminal("wire-1"));
+    assert!(log.has_terminal("cycle/t:abort-1"));
+}
+
+#[test]
 fn a_task_with_only_non_terminal_frames_counts_as_running() {
     let log = ActivityLog::new();
     log.dispatched("task-1", "worker-a");

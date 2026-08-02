@@ -593,13 +593,14 @@ async fn a_review_turn_asks_for_the_restricted_tool_set() {
 
 #[test]
 fn an_ordinary_copilot_turn_asks_for_nothing_and_gets_the_full_surface() {
-    use crate::workflows::mcp::ToolMode;
+    use crate::mcp::ToolMode;
 
     // The default has to stay permissive: every dispatch but a review's leaves
     // this unset, and a mistake here would silently disarm the copilot.
     assert_eq!(ToolMode::from_wire(None), ToolMode::Full);
     assert_eq!(ToolMode::from_wire(Some("propose")), ToolMode::Propose);
     assert_eq!(ToolMode::from_wire(Some("full")), ToolMode::Full);
+    assert_eq!(ToolMode::from_wire(Some("execute")), ToolMode::Propose);
     // Round-trips, so a frame written by one build is read the same by another.
     assert_eq!(
         ToolMode::from_wire(Some(ToolMode::Propose.as_wire())),

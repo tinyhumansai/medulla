@@ -9,6 +9,99 @@ use crate::tinyplace::HarnessProvider;
 
 use super::types::FoldState;
 
+#[cfg(all(feature = "workflows", unix))]
+struct NoFleet;
+
+#[cfg(all(feature = "workflows", unix))]
+#[async_trait::async_trait]
+impl crate::control_socket::FleetOps for NoFleet {
+    fn workers(&self) -> Option<Vec<crate::control_socket::FleetWorker>> {
+        Some(Vec::new())
+    }
+
+    fn default_worker(&self) -> Option<String> {
+        None
+    }
+
+    async fn dispatch(
+        &self,
+        _request: crate::hub::TaskRequest,
+        _status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ) -> Result<crate::hub::TaskOutcome, crate::hub::RunError> {
+        unreachable!("grant exchange never dispatches")
+    }
+
+    fn abort(&self, _abort_id: &str) -> bool {
+        false
+    }
+}
+
+#[cfg(all(feature = "workflows", unix))]
+#[tokio::test]
+async fn a_parent_handoff_is_exchanged_before_the_mcp_server_is_attached() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("control.sock");
+    let grants = crate::control_socket::GrantRegistry::new();
+    let parent_token = grants.mint(crate::control_socket::Grant::new("parent", 1, 3));
+    let ops: Arc<dyn crate::control_socket::FleetOps> = Arc::new(NoFleet);
+    let _server = crate::control_socket::ControlServer::bind(&path, ops, grants)
+        .await
+        .unwrap();
+    let env = HashMap::from([
+        (
+            crate::control_socket::MCP_PARENT_SOCKET_ENV.to_string(),
+            path.to_string_lossy().into_owned(),
+        ),
+        (
+            crate::control_socket::MCP_PARENT_GRANT_ENV.to_string(),
+            parent_token.clone(),
+        ),
+    ]);
+
+    let servers = super::execution::medulla_mcp_servers(None, "child", &env).await;
+    let agent_client_protocol::schema::v1::McpServer::Stdio(server) = &servers[0] else {
+        panic!("Medulla MCP server must use stdio");
+    };
+    let child_token = server
+        .env
+        .iter()
+        .find(|var| var.name == crate::control_socket::MCP_GRANT_ENV)
+        .map(|var| var.value.clone())
+        .expect("child grant attached");
+    let child = crate::control_socket::ControlClient::connect(&path, &child_token)
+        .await
+        .unwrap();
+
+    assert_ne!(child_token, parent_token);
+    assert_eq!(child.hello().depth, 2);
+    assert_eq!(child.hello().max_depth, 3);
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn session_grants_read_depth_from_the_task_environment() {
+    let env = HashMap::from([(
+        crate::control_socket::FLEET_DEPTH_ENV.to_string(),
+        "2".to_string(),
+    )]);
+
+    let grant = super::execution::session_grant("nested", &env, Some("propose:demo"), true, 3, 5);
+
+    assert_eq!(grant.depth, 2);
+    assert_eq!(grant.max_depth, 3);
+    assert_eq!(grant.max_in_flight, 5);
+    assert_eq!(grant.tool_mode.as_deref(), Some("propose:demo"));
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn disabling_workflows_keeps_the_fleet_family_on_the_session_grant() {
+    let grant = super::execution::session_grant("fleet-only", &HashMap::new(), None, false, 2, 4);
+
+    assert!(!grant.families.workflows);
+    assert!(grant.families.fleet);
+}
+
 #[test]
 fn agent_message_chunks_form_one_reply() {
     let mut state = FoldState::new(None);
@@ -307,4 +400,22 @@ fn agent_env_omits_attribution_when_off() {
     let env = super::execution::acp_env(&attribution_options(false));
     assert!(!env.contains_key("MEDULLA_ATTRIBUTION"));
     assert!(!env.contains_key("GIT_CONFIG_KEY_0"));
+}
+
+#[test]
+fn agent_env_strips_inherited_fleet_capabilities() {
+    let mut options = attribution_options(false);
+    options.env.insert(
+        crate::control_socket::MCP_SOCKET_ENV.to_string(),
+        "/tmp/another-session.sock".to_string(),
+    );
+    options.env.insert(
+        crate::control_socket::MCP_GRANT_ENV.to_string(),
+        "another-session-token".to_string(),
+    );
+
+    let env = super::execution::acp_env(&options);
+
+    assert!(!env.contains_key(crate::control_socket::MCP_SOCKET_ENV));
+    assert!(!env.contains_key(crate::control_socket::MCP_GRANT_ENV));
 }

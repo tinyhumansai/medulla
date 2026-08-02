@@ -2,7 +2,6 @@
 
 use crate::tinyplace::{TaskFrame, TaskFrameKind};
 
-use super::super::providers::{self};
 use super::super::types::DaemonRuntime;
 
 impl DaemonRuntime {
@@ -87,12 +86,13 @@ impl DaemonRuntime {
                     );
                     if mismatch {
                         no_match
-                    } else if !providers::supports_stdin(task.provider) {
-                        // The child has a null stdin; buffering would silently
-                        // discard the guidance, so reject it honestly instead.
+                    } else if !task.accepts_stdin {
+                        // The provider or selected transport has no stdin
+                        // registration path. Buffering would silently discard
+                        // the guidance, so reject it honestly instead.
                         (
                             TaskFrameKind::Error,
-                            "provider does not accept mid-run input",
+                            "task transport does not accept mid-run input",
                             task.provider,
                         )
                     } else {

@@ -304,6 +304,34 @@ impl FileWorkflowStore {
         }
         result
     }
+
+    /// Atomically save a workflow when the selected part of its current record
+    /// still matches the caller's observation.
+    fn save_if_current_matches(
+        &self,
+        record: &WorkflowRecord,
+        expected_fingerprint: &str,
+        fingerprint: impl FnOnce(&WorkflowRecord) -> String,
+    ) -> Result<bool, WorkflowError> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.with_definition_lock(&record.id, || {
+            let Some(current) = self.get(&record.id)? else {
+                return Ok(false);
+            };
+            if fingerprint(&current) != expected_fingerprint {
+                return Ok(false);
+            }
+            let path = self.definition_path(&record.id)?;
+            validate_graph(&record.id, &record.graph)?;
+            let document = to_document(record)?;
+            revisions::capture(self.write_dir(), &current)?;
+            write_atomic(&path, &document)?;
+            Ok(true)
+        })
+    }
 }
 
 /// Make a stable best-effort absolute identity when a path does not yet exist.
@@ -374,24 +402,21 @@ impl WorkflowStore for FileWorkflowStore {
         record: &WorkflowRecord,
         expected_fingerprint: &str,
     ) -> Result<bool, WorkflowError> {
-        let _guard = self
-            .write_lock
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        self.with_definition_lock(&record.id, || {
-            let Some(current) = self.get(&record.id)? else {
-                return Ok(false);
-            };
-            if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
-                return Ok(false);
-            }
-            let path = self.definition_path(&record.id)?;
-            validate_graph(&record.id, &record.graph)?;
-            let document = to_document(record)?;
-            revisions::capture(self.write_dir(), &current)?;
-            write_atomic(&path, &document)?;
-            Ok(true)
+        self.save_if_current_matches(record, expected_fingerprint, |current| {
+            crate::workflows::fingerprint(&current.graph)
         })
+    }
+
+    fn save_if_record_fingerprint(
+        &self,
+        record: &WorkflowRecord,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        self.save_if_current_matches(
+            record,
+            expected_fingerprint,
+            crate::workflows::record_fingerprint,
+        )
     }
 
     fn delete(&self, id: &str) -> Result<(), WorkflowError> {

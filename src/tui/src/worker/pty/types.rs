@@ -172,6 +172,9 @@ pub struct SessionRow {
     /// The harness session id, once known — minted for claude, read back from
     /// the rollout for codex. This is what pins the transcript tailer.
     pub session_id: Option<String>,
+    /// Human-facing thread name advertised by the harness through the terminal
+    /// title, including names changed interactively with `/rename`.
+    pub thread_name: Option<String>,
     /// Epoch ms when the session started.
     pub started_at: i64,
     /// Epoch ms of the last output byte — the liveness signal the list shows.

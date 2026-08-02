@@ -120,7 +120,10 @@ async fn start_task(runtime: &DaemonRuntime, from: &str, task_id: &str) {
         model: None,
         tool_mode: None,
         workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
         conversation: None,
+        fleet_depth: 0,
     });
     let frame = medulla::tinyplace::decode_task_frame(&body);
     runtime.handle_message(from.to_string(), body, frame);

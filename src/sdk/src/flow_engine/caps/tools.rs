@@ -18,7 +18,8 @@ use tinyflows::error::{EngineError, Result};
 
 use crate::flow_engine::settings::CapabilitySettings;
 
-use super::script::{run_script, ScriptLanguage};
+use super::script::{run_script, ScriptLanguage, ScriptRequest, ScriptSource};
+use super::script_policy::{read_env, ScriptPolicy};
 
 /// The prefix marking a slug this host implements natively.
 pub const NATIVE_TOOL_PREFIX: &str = "medulla:";
@@ -77,6 +78,14 @@ impl MedullaToolInvoker {
     /// daemon's privileges. The difference from a `code` node is *where* — this
     /// one runs in the workspace, because a step that shells out almost always
     /// means to touch the project.
+    ///
+    /// `args.script` is an inline script; `args.script_path` runs a file that is
+    /// already in the workspace, which is how a repository's own
+    /// `scripts/release.sh` becomes a workflow step instead of being pasted into
+    /// the graph. `args.cwd` narrows where it runs and `args.env` adds variables
+    /// to the inherited environment. All three are author-supplied strings that
+    /// reach the operating system, so all three go through
+    /// [`super::script_policy`] first.
     async fn shell(&self, args: Value) -> Result<Value> {
         if !self.settings.allow_code {
             return Err(EngineError::Capability(
@@ -87,16 +96,33 @@ impl MedullaToolInvoker {
             ));
         }
 
-        let source = args
-            .get("script")
-            .and_then(Value::as_str)
-            .filter(|source| !source.trim().is_empty())
-            .ok_or_else(|| {
-                EngineError::Capability(
-                    "medulla:shell: `args.script` is required and must be the script to run"
+        let policy = ScriptPolicy::new(&self.settings.workspace);
+        let inline = non_empty_str(&args, "script", "a non-empty script")?;
+        let path = non_empty_str(&args, "script_path", "a non-empty path")?;
+
+        // Exactly one, never both: a call carrying each would otherwise run
+        // whichever this function happened to check first, which is precisely
+        // the kind of thing a reviewer misses.
+        let resolved_path = match (inline, path) {
+            (Some(_), Some(_)) => {
+                return Err(EngineError::Capability(
+                    "medulla:shell: pass `args.script` or `args.script_path`, not both".to_string(),
+                ));
+            }
+            (None, Some(raw)) => Some(policy.resolve_script(raw)?),
+            _ => None,
+        };
+        let source = match (&inline, &resolved_path) {
+            (Some(inline), _) => ScriptSource::Inline(inline),
+            (None, Some(path)) => ScriptSource::File(path),
+            (None, None) => {
+                return Err(EngineError::Capability(
+                    "medulla:shell: `args.script` (an inline script) or `args.script_path` (a \
+                     file in the workspace) is required"
                         .to_string(),
-                )
-            })?;
+                ));
+            }
+        };
 
         // Defaults to shell because that is what the slug says; naming another
         // language is how a step runs a short node or python program in the
@@ -111,14 +137,19 @@ impl MedullaToolInvoker {
             None => ScriptLanguage::Shell,
         };
 
-        let workspace = std::path::Path::new(&self.settings.workspace);
-        let output = run_script(
+        let cwd = non_empty_str(&args, "cwd", "a non-empty path")?
+            .map(|raw| policy.resolve_cwd(raw))
+            .transpose()?;
+        let env = read_env(args.get("env"))?;
+
+        let output = run_script(ScriptRequest {
             language,
             source,
-            args.get("input").unwrap_or(&Value::Null),
-            self.settings.script_timeout(),
-            workspace.is_dir().then_some(workspace),
-        )
+            input: args.get("input").unwrap_or(&Value::Null),
+            timeout: self.settings.script_timeout(),
+            cwd: cwd.as_deref().or_else(|| policy.workspace()),
+            env: &env,
+        })
         .await?;
 
         Ok(json!({
@@ -129,6 +160,28 @@ impl MedullaToolInvoker {
             "stderr": output.stderr,
         }))
     }
+}
+
+/// Reads an optional string argument, refusing a present-but-unusable one.
+///
+/// Absent and `null` mean "not given". Anything else must be a non-blank
+/// string, because a malformed argument must not fail open: `{"cwd": 3}`
+/// quietly ignored would run the step at the workspace root, read the wrong
+/// file, and report success.
+fn non_empty_str<'a>(args: &'a Value, name: &str, expected: &str) -> Result<Option<&'a str>> {
+    let Some(value) = args.get(name) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    value
+        .as_str()
+        .filter(|raw| !raw.trim().is_empty())
+        .map(Some)
+        .ok_or_else(|| {
+            EngineError::Capability(format!("medulla:shell: `args.{name}` must be {expected}"))
+        })
 }
 
 #[async_trait]

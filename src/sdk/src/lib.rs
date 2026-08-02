@@ -12,6 +12,7 @@ pub mod clipboard;
 pub mod clock;
 pub mod config;
 pub mod contacts;
+pub mod control_socket;
 pub mod core_host;
 pub mod daemon;
 #[cfg(feature = "workflows")]
@@ -24,6 +25,13 @@ pub mod hub;
 pub mod inference_proxy;
 pub mod init;
 pub mod logging;
+/// Medulla's own MCP server, offered to the harnesses it spawns.
+///
+/// Still gated on `workflows` because the `workflow_*` tool family delegates to
+/// [`workflows::ops`]; the `fleet_*` family added beside it depends only on
+/// [`control_socket`].
+#[cfg(feature = "workflows")]
+pub mod mcp;
 pub mod onboarding;
 pub(crate) mod persistence;
 pub mod runtime;

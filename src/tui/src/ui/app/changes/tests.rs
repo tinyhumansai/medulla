@@ -121,6 +121,7 @@ fn load_an_unborn_repository_lists_initial_files_without_commits() {
 }
 
 #[test]
+#[cfg(unix)]
 fn patch_treats_pathspec_magic_in_a_tracked_filename_literally() {
     let directory = tempdir().expect("temp repo");
     init_repo(directory.path());

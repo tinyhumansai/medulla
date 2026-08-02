@@ -75,6 +75,14 @@ impl DeviceMonitor {
         self.snapshot
     }
 
+    /// The most recent reading, without touching the host.
+    ///
+    /// Layout runs before drawing and must not force a refresh; it only needs
+    /// the magnitudes to size the rail.
+    pub fn last(&self) -> DeviceSnapshot {
+        self.injected.unwrap_or(self.snapshot)
+    }
+
     /// Replace live sampling with a fixed reading, for tests.
     pub fn inject(&mut self, snapshot: DeviceSnapshot) {
         self.injected = Some(snapshot);

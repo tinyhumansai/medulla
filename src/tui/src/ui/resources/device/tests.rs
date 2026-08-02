@@ -6,7 +6,7 @@
 use medulla::config::{AppearanceConfig, ResourceDisplay};
 
 use super::super::types::DeviceSnapshot;
-use super::{device_lines, DeviceMonitor};
+use super::{device_lines, device_width_hint, DeviceMonitor};
 
 /// A 32 GiB machine at 25% CPU with 8 GiB in use and a 400 GiB disk 75% full.
 fn sample() -> DeviceSnapshot {
@@ -241,4 +241,27 @@ fn a_value_pair_is_kept_on_any_rail_wide_enough_to_hold_it() {
     );
     // One column short, and the percentage is the honest fallback.
     assert_eq!(device_lines(&config, sample(), 16, 3), ["Device RAM 25%"]);
+}
+
+#[test]
+fn the_width_hint_reserves_room_for_a_configured_bar() {
+    let config = AppearanceConfig {
+        device_cpu: ResourceDisplay::Bar,
+        ..AppearanceConfig::default()
+    };
+    // "Device CPU ████ 100%" — the rail must be sized to this, not to the 18
+    // columns the orchestrator row alone would ask for, or the bar would
+    // degrade to a percentage on every frame and the setting would look broken.
+    assert_eq!(device_width_hint(&config, sample()), 20);
+
+    // Sized against a saturated reading, so the hint does not shrink when the
+    // machine is idle and make the rail jitter as usage moves.
+    let idle = DeviceSnapshot {
+        cpu_fraction: Some(0.0),
+        ..sample()
+    };
+    assert_eq!(device_width_hint(&config, idle), 20);
+
+    // Nothing enabled asks for nothing.
+    assert_eq!(device_width_hint(&AppearanceConfig::default(), sample()), 0);
 }

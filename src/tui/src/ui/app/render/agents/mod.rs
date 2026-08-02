@@ -141,6 +141,12 @@ impl App {
             .flat_map(|row| self.rail_row_measurement_lines(row, &selection.lanes))
             .map(|line| line.width())
             .chain(threads.iter().map(|line| line.width()))
+            // The device footer shares the rail, so a rail sized to its rows
+            // alone left a configured bar too narrow to ever render.
+            .chain(std::iter::once(crate::ui::resources::device_width_hint(
+                &self.loaded.config.appearance,
+                self.device_monitor.last(),
+            )))
             .max()
             .unwrap_or(0)
             .min(rail::RAIL_MAX_CONTENT);

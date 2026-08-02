@@ -144,3 +144,28 @@ fn bytes(value: u64) -> String {
         format!("{:.0}M", value / MIB)
     }
 }
+
+/// Columns the enabled device readings need to render in their configured form.
+///
+/// The rail is sized from its rows, but the footer lives in the same rail: with
+/// only the orchestrator row present the sidebar came out at 18 columns, so a
+/// configured bar (19–20 columns) silently degraded to a percentage and the
+/// `Bar` setting looked broken until unrelated rows widened the rail.
+///
+/// Measured against a fully-loaded reading rather than the live one so the rail
+/// keeps a stable width as usage moves; `values` still comes from the latest
+/// sample, since a byte pair's width depends on the magnitudes in it.
+pub fn device_width_hint(config: &AppearanceConfig, sample: DeviceSnapshot) -> usize {
+    let saturated = DeviceSnapshot {
+        cpu_fraction: Some(1.0),
+        ..sample
+    };
+    device_lines(config, saturated, usize::MAX, DEVICE_METRIC_COUNT)
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
+/// Device readings the footer can show: CPU, RAM, and disk.
+const DEVICE_METRIC_COUNT: usize = 3;

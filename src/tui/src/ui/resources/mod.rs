@@ -14,7 +14,7 @@
 
 use medulla::config::{AppearanceConfig, ResourceDisplay};
 
-pub use device::{device_lines, DeviceMonitor};
+pub use device::{device_lines, device_width_hint, DeviceMonitor};
 pub use types::{DeviceSnapshot, ResourceMonitor, ResourceSnapshot};
 
 mod device;

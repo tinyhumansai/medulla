@@ -96,11 +96,15 @@ pub(super) fn with_tool_mode_at_depth(
         if let Some(mode) = mode {
             env.insert(crate::mcp::TOOL_MODE_ENV.to_string(), mode.to_string());
         }
-        if mode.is_some() || depth > 0 {
+        if mode.is_some()
+            || delegated_task_can_reach_fleet(depth, crate::control_socket::active().is_some())
+        {
             // Medulla tools are attached through ACP; legacy provider JSONL
             // cannot expose the MCP server. Restricted workflow turns need it
-            // for authoring, while a full-mode fleet delegation needs it so a
-            // child below the fleet root can delegate again up to max depth.
+            // for authoring. A full-mode fleet delegation needs it only on the
+            // process that owns the control plane; a remote worker cannot mint
+            // a fleet grant, so forcing ACP there changes transport without
+            // adding any tools and can break an otherwise installed direct CLI.
             env.insert(
                 crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
                 "acp".to_string(),
@@ -112,4 +116,10 @@ pub(super) fn with_tool_mode_at_depth(
     #[cfg(not(feature = "workflows"))]
     let _ = mode;
     env
+}
+
+/// Whether a delegated full-mode task can receive fleet tools from this host.
+#[cfg(feature = "workflows")]
+pub(super) fn delegated_task_can_reach_fleet(depth: u8, has_active_plane: bool) -> bool {
+    depth > 0 && has_active_plane
 }

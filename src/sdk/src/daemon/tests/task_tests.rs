@@ -52,19 +52,29 @@ fn task_with_tool_mode_forces_acp_transport() {
 
 #[cfg(feature = "workflows")]
 #[test]
-fn delegated_full_mode_task_forces_acp_transport() {
+fn delegated_full_mode_task_on_a_remote_worker_keeps_its_provider_transport() {
     let env = crate::daemon::task_loop::with_tool_mode_at_depth(
         std::collections::HashMap::new(),
         None,
         1,
     );
 
-    assert_eq!(
-        env.get(crate::daemon::providers::HARNESS_PROTOCOL_ENV)
-            .map(String::as_str),
-        Some("acp")
-    );
+    assert!(!env.contains_key(crate::daemon::providers::HARNESS_PROTOCOL_ENV));
     assert!(!env.contains_key(crate::mcp::TOOL_MODE_ENV));
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn a_delegated_task_needs_acp_when_this_process_owns_the_fleet_plane() {
+    assert!(crate::daemon::task_loop::delegated_task_can_reach_fleet(
+        1, true
+    ));
+    assert!(!crate::daemon::task_loop::delegated_task_can_reach_fleet(
+        0, true
+    ));
+    assert!(!crate::daemon::task_loop::delegated_task_can_reach_fleet(
+        1, false
+    ));
 }
 
 #[tokio::test]

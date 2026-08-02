@@ -27,6 +27,9 @@ mod harness_workspace;
 mod harness_workspace_tests;
 mod input;
 mod keys;
+mod overlays;
+#[cfg(test)]
+mod overlays_tests;
 mod rail;
 mod render;
 mod routing_options;

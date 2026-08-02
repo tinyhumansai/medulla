@@ -16,8 +16,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
-    App, Cmd, HandbackPolicy, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT,
-    SP_FEEDBACK, SP_USAGE, TABS,
+    App, Cmd, HandbackPolicy, ResumePicker, ROUTING_SUBPAGES, RP_TEMPLATES, SETTINGS_SUBPAGES,
+    SP_CONTEXT, SP_FEEDBACK, SP_USAGE, TABS,
 };
 
 impl App {
@@ -248,6 +248,23 @@ impl App {
     /// Whether the resume-picker modal is open. Test/inspection seam.
     pub fn resume_open(&self) -> bool {
         self.resume_picker.is_some()
+    }
+
+    /// Whether the agent-template popup is actually on screen.
+    ///
+    /// `template_modal` alone is not that question. The popup is a detail view
+    /// belonging to Hosts › Agent Templates, and its keys — `Esc`, `Enter`,
+    /// `PageUp`/`PageDown` — are bound only on that page, because `Tab` still
+    /// switches tabs while it is up and nothing clears the flag on the way out.
+    /// Treating the flag as "the popup is up" therefore drew it over whichever
+    /// tab the operator landed on, with no key on that tab able to dismiss it,
+    /// while the pane behind it silently took every keystroke *and* every paste.
+    ///
+    /// So both the draw and [`App::overlay_owns_keys`] ask this instead, which
+    /// keeps "is it visible?" and "does it own input?" the same question — the
+    /// disagreement between those two is what the bug was made of.
+    pub(in crate::ui::app) fn template_popup_open(&self) -> bool {
+        self.template_modal && self.tab() == "Hosts" && self.routing_index == RP_TEMPLATES
     }
 
     /// Whether an inline prompt overlay (Workers add/edit, Agents answer) is open,

@@ -17,6 +17,7 @@ use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::util::{clip, clock, wrap};
 use crate::worker::pty::ATTENTION_GLYPH;
 
+use super::overlays::Overlay;
 use super::types::{App, TABS};
 
 mod agents;
@@ -339,25 +340,21 @@ impl App {
         self.draw_shortcuts(f, rows[0]);
         self.draw_tabs(f, rows[1]);
         self.draw_content(f, rows[2]);
-        if self.decision_open {
-            self.draw_decisions(f, rows[2]);
-        }
-        if self.template_modal {
-            self.draw_template_modal(f, rows[2]);
-        }
-        // Above the content, and above each other in answer order: the picker
-        // can open the directory prompt, and the hand-back question is asked
-        // over whichever pane the operator is releasing.
-        if self.harness_picker.is_some() {
-            self.draw_harness_picker(f, rows[2]);
-        }
-        if self.handback_prompt.is_some() {
-            self.draw_handback_prompt(f, rows[2]);
-        }
-        if has_prompt {
-            self.draw_prompt(f, rows[3]);
-        } else if picking {
-            self.draw_resume(f, rows[3]);
+        // Painted from the one list of what is in front of the content, back to
+        // front — the picker can open the directory prompt, and the hand-back
+        // question is asked over whichever pane the operator is releasing. The
+        // same list answers who owns the keyboard and the clipboard, so an
+        // overlay drawn over a composer can never leave that composer quietly
+        // taking input behind it.
+        for overlay in self.visible_overlays() {
+            match overlay {
+                Overlay::Decisions => self.draw_decisions(f, rows[2]),
+                Overlay::TemplatePopup => self.draw_template_modal(f, rows[2]),
+                Overlay::HarnessPicker => self.draw_harness_picker(f, rows[2]),
+                Overlay::HandbackPrompt => self.draw_handback_prompt(f, rows[2]),
+                Overlay::InlinePrompt => self.draw_prompt(f, rows[3]),
+                Overlay::ResumePicker => self.draw_resume(f, rows[3]),
+            }
         }
         self.draw_status_line(f, rows[4]);
         // Last: the pointer selection paints over whatever the tabs drew, and

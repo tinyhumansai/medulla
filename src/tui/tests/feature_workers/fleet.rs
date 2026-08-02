@@ -102,6 +102,31 @@ fn the_catalog_carries_the_built_in_coding_roles_beside_the_declared_ones() {
 }
 
 #[test]
+fn the_template_popup_does_not_follow_you_off_the_page_that_owns_it() {
+    // `Tab` still switches tabs while the popup is up — the popup binds only
+    // Esc, Enter and the page keys, and only on this page. It used to keep
+    // drawing over whatever tab you landed on, where none of its dismissal keys
+    // are bound, so the pane behind it took every keystroke and every paste
+    // while being invisible.
+    let mut app = app_with_workers(None);
+    app.focus_routing_subpage("Agent Templates");
+    let _ = app.on_event(key(KeyCode::Enter));
+    let open = render(&mut app, 160, 44);
+    assert!(
+        open.contains("agent template ·"),
+        "the popup is open on its own page: {open}"
+    );
+
+    tab(&mut app, "Agents");
+
+    let elsewhere = render(&mut app, 160, 44);
+    assert!(
+        !elsewhere.contains("agent template ·"),
+        "the popup belongs to Agent Templates, not to every tab: {elsewhere}"
+    );
+}
+
+#[test]
 fn a_declared_template_replaces_the_built_in_of_the_same_id() {
     // The mock declares `implementer`, which is also a built-in id: the
     // declared record wins, so the catalog lists it once.

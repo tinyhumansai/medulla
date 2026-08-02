@@ -290,6 +290,33 @@ mod copilot {
     }
 
     #[test]
+    fn a_popup_left_open_on_another_tab_neither_covers_nor_swallows() {
+        // The agent-template popup is a Hosts › Agent Templates detail view, but
+        // `Tab` switches tabs while it is up and nothing cleared the flag, so it
+        // kept drawing over whatever tab you landed on — including this one,
+        // where none of its keys are bound. It is now scoped to its own page, so
+        // the copilot here is genuinely visible and the paste belongs to it.
+        let home = tempfile::tempdir().expect("temp home");
+        let mut app = workflows_app(home.path());
+        app.focus_routing_subpage("Agent Templates");
+        let _ = app.on_event(key(KeyCode::Enter));
+        app.tab_index = tab_index("Workflows");
+        key_press(&mut app, KeyCode::Char('c'));
+
+        assert!(paste(&mut app, "add a notify step").is_none());
+
+        let screen = rendered(&mut app);
+        assert!(
+            !screen.contains("agent template ·"),
+            "the popup does not follow the operator off its page: {screen}"
+        );
+        assert!(
+            screen.contains("add a notify step"),
+            "and the paste reached the composer it can see: {screen}"
+        );
+    }
+
+    #[test]
     fn a_modal_over_the_copilot_swallows_the_paste_it_is_covering() {
         // `/resume` answers asynchronously, so its picker opens over whichever
         // tab the operator has moved to in the meantime — the copilot included.

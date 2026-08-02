@@ -311,6 +311,7 @@ impl TaskRunner {
             self.waiters.lock().await.insert(
                 cid.clone(),
                 Waiter {
+                    task_id: req.task_id.clone(),
                     from: req.worker_address.clone(),
                     reply: tx,
                     status: status.clone(),

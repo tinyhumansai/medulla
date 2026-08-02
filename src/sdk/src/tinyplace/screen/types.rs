@@ -203,6 +203,9 @@ pub enum ScreenMessage {
     Kill {
         /// The task whose harness should be killed.
         task_id: String,
+        /// The unique dispatch receipt, preventing a delayed kill from matching
+        /// a later dispatch that reused the task id.
+        correlation_id: String,
     },
     /// Viewer → sender: the highest sequence the viewer holds, which the next
     /// diff may be taken from.

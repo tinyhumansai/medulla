@@ -27,13 +27,17 @@ pub(super) fn resolve_baseline(root: &Path) -> Result<String, String> {
 
 /// Load commits and files changed from `baseline` through the current worktree.
 pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<ChangedFile>), String> {
-    let commits = git(
-        root,
-        &["log", "--format=%h %s", &format!("{baseline}..HEAD")],
-    )?
-    .lines()
-    .map(str::to_owned)
-    .collect();
+    let commits = if has_head(root)? {
+        git(
+            root,
+            &["log", "--format=%h %s", &format!("{baseline}..HEAD")],
+        )?
+        .lines()
+        .map(str::to_owned)
+        .collect()
+    } else {
+        Vec::new()
+    };
     let mut files = parse_name_status(&git_bytes(
         root,
         &["diff", "--name-status", "-z", baseline],
@@ -56,6 +60,7 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
 pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<String>, String> {
     let baseline_check = Command::new("git")
         .current_dir(root)
+        .env("GIT_LITERAL_PATHSPECS", "1")
         .args(["diff", "--quiet", baseline, "--"])
         .arg(path)
         .output()
@@ -68,6 +73,7 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
     let output = if changed_at_baseline {
         let result = Command::new("git")
             .current_dir(root)
+            .env("GIT_LITERAL_PATHSPECS", "1")
             .args(["diff", "--no-ext-diff", "--unified=3", baseline, "--"])
             .arg(path)
             .output()
@@ -95,6 +101,7 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
 fn tracked(root: &Path, path: &Path) -> Result<bool, String> {
     let result = Command::new("git")
         .current_dir(root)
+        .env("GIT_LITERAL_PATHSPECS", "1")
         .args(["ls-files", "--error-unmatch", "--"])
         .arg(path)
         .output()
@@ -102,6 +109,20 @@ fn tracked(root: &Path, path: &Path) -> Result<bool, String> {
     match result.status.code() {
         Some(0) => Ok(true),
         Some(1) => Ok(false),
+        _ => Err(command_error(&result)),
+    }
+}
+
+/// Whether the repository has a commit that can be used as the log range tip.
+fn has_head(root: &Path) -> Result<bool, String> {
+    let result = Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .map_err(|error| format!("Cannot run git: {error}"))?;
+    match result.status.code() {
+        Some(0) => Ok(true),
+        Some(128) => Ok(false),
         _ => Err(command_error(&result)),
     }
 }

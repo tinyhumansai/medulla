@@ -121,7 +121,7 @@ impl App {
             .changes
             .comments
             .for_path(path)
-            .filter(|comment| comment.anchor == CommentAnchor::File)
+            .filter(|comment| comment.anchor == CommentAnchor::File && !comment.outdated)
         {
             lines.push(comment_line("file", &comment.body));
         }
@@ -151,7 +151,7 @@ impl App {
                     CommentAnchor::Hunk(at) => Some(at) == hunk,
                     CommentAnchor::File => false,
                 };
-                if here {
+                if here && !comment.outdated {
                     lines.push(comment_line(&comment.anchor.describe(), &comment.body));
                 }
             }

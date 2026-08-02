@@ -49,6 +49,7 @@ impl ReviewComments {
             (Some(index), false) => {
                 self.items[index].body = body.to_owned();
                 self.items[index].anchor_context = context.to_owned();
+                self.items[index].outdated = false;
                 true
             }
             (None, true) => false,

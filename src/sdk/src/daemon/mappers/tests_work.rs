@@ -154,34 +154,6 @@ fn claude_worktree_report_survives_a_later_command_failure() {
 }
 
 #[test]
-fn text_worktree_report_ignores_fields_before_its_ready_marker() {
-    let events = map_all(
-        "claude",
-        &[json!({
-            "type": "user",
-            "message": { "role": "user", "content": [{
-                "type": "tool_result",
-                "tool_use_id": "worktree-1",
-                "content": concat!(
-                    "path: /unrelated\nbranch: stale\n",
-                    "[PASS] WORKTREE_READY\n",
-                    "  path: /repo/worktrees/fix-label\n",
-                    "  branch: fix-label\n",
-                    "  head: abc1234\n",
-                    "later output"
-                )
-            }]}
-        })],
-    );
-    let snapshot = fold(&events);
-    assert_eq!(
-        snapshot.info.cwd.as_deref(),
-        Some("/repo/worktrees/fix-label")
-    );
-    assert_eq!(snapshot.info.branch.as_deref(), Some("fix-label"));
-}
-
-#[test]
 fn claude_exit_plan_mode_becomes_a_goal_and_steps() {
     let events = map_all(
         "claude",

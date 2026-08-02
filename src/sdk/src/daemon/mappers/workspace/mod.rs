@@ -12,6 +12,9 @@ use crate::harness_work::kinds;
 use super::events::semantic;
 use super::types::HarnessSemanticEvent;
 
+#[cfg(test)]
+mod tests;
+
 /// Turn a successful `worktree` report embedded in tool output into updated
 /// session facts. Unrelated output and incomplete reports produce no event.
 pub(super) fn workspace_event_from_output(

@@ -1,15 +1,13 @@
-//! Event routing and pointer input for [`App`]: the top-level [`App::on_event`]
-//! dispatch, mouse scroll/click handling, tab hit-testing, and the small
-//! navigation helpers (rail movement, prompt-history recall, mouse toggle).
-//! Keyboard handling proper lives in [`super::keys`].
+//! Pointer input for [`App`]: wheel scrolling, click hit-testing, drag
+//! selection, and the reports forwarded to an embedded harness.
+//!
+//! Split from [`super`] because the pointer answers a different question from
+//! the keyboard: a mouse event carries a position, so nearly everything here is
+//! resolved by *what is under it* rather than by what has focus.
 
-use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
+use crossterm::event::{MouseButton, MouseEventKind};
 
-use super::rail::RailRow;
-use crate::ui::agents::{agent_row_model, AgentRole, AgentRow};
-use crate::ui::composer::{insert_at, normalize_paste, Draft};
-
-use super::types::{App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_SUBPAGES};
+use super::super::types::{App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_SUBPAGES};
 
 /// Rows one wheel notch moves, matching the transcript's own step so the two
 /// panes feel like one surface. Only used for a harness we scroll ourselves —
@@ -43,64 +41,8 @@ fn pointer_report(
 }
 
 impl App {
-    /// Route a terminal event to the key or mouse handler, producing any command
-    /// the event loop must run.
-    pub fn on_event(&mut self, ev: Event) -> Option<Cmd> {
-        match ev {
-            Event::Key(k) if matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-                self.on_key(k)
-            }
-            Event::Mouse(m) => self.on_mouse(m),
-            Event::Paste(text) => {
-                self.on_paste(&text);
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Insert a bracketed-paste payload into whatever text field has the caret.
-    ///
-    /// The point of routing paste as its own event is that the payload is never
-    /// re-read as key presses: a newline inside it lands in the draft instead of
-    /// reaching the `Enter` bindings, so a multi-line paste no longer submits
-    /// itself — once per line, at that — and a `/`-prefixed paste no longer runs
-    /// the command the peek happens to be highlighting. Only an explicit `Enter`
-    /// submits.
-    ///
-    /// Who takes it follows [`App::on_key`]'s precedence exactly, because a
-    /// paste that landed somewhere the keyboard is not would be a payload the
-    /// operator never sees again. So: the hand-back question first, since it is
-    /// asked while still attached and the chrome holds the keyboard until it is
-    /// answered; then the attached harness, which owns the keyboard outright and
-    /// therefore owns the paste; then an open inline prompt, flattened to one
-    /// line because that is all it can draw. Otherwise the Agents composer takes
-    /// it, with `\r\n` and bare `\r` normalised to `\n`. Modals that own no text
-    /// field (the harness and resume pickers, the decisions overlay) swallow the
-    /// paste for the same reason they swallow the keyboard.
-    fn on_paste(&mut self, text: &str) {
-        if self.handback_prompt.is_some() {
-            return;
-        }
-        if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
-            self.paste_into_harness(&session, text);
-            return;
-        }
-        if let Some(prompt) = self.prompt.as_mut() {
-            prompt.paste(text);
-            return;
-        }
-        if self.tab() != "Agents" || self.overlay_owns_keys() {
-            return;
-        }
-        self.draft = insert_at(&self.draft.text, self.draft.cursor, &normalize_paste(text));
-        // Narrowing the command peek invalidates where its cursor pointed,
-        // exactly as typing a character does.
-        self.command_index = 0;
-    }
-
     /// Handle scroll and left-click mouse events for the active tab.
-    pub(super) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
+    pub(in crate::ui::app) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
         // A modal swallows the mouse, the same way it swallows the keyboard.
         // The harness picker is one: a click that navigated the rail behind it
         // left an overlay on screen describing a row nobody was pointing at.
@@ -206,7 +148,7 @@ impl App {
     /// scrolling the rail while the pointer sits on the transcript is the kind of
     /// thing that makes a mouse feel bolted on. Focus is left alone: the wheel
     /// looks around, it does not move where typing goes.
-    pub(super) fn scroll_at(&mut self, x: u16, y: u16, up: bool) {
+    pub(in crate::ui::app) fn scroll_at(&mut self, x: u16, y: u16, up: bool) {
         // An embedded harness is a terminal, so the wheel over it belongs to it
         // — before the subpage menu, before the tab. Deliberately *not* gated on
         // being attached: reading back through a harness's output is the most
@@ -304,7 +246,7 @@ impl App {
     /// as the same drag made in reverse, and clamped to the pane the drag
     /// started in: panes sit side by side, so an unclamped block would splice
     /// the rail's labels into every line of the transcript beside it.
-    pub(super) fn extend_selection(&mut self, x: u16, y: u16) {
+    pub(in crate::ui::app) fn extend_selection(&mut self, x: u16, y: u16) {
         let Some((ax, ay)) = self.drag_anchor else {
             return;
         };
@@ -317,7 +259,7 @@ impl App {
 
     /// Resolve a left click at `(x, y)` to a tab switch or a row selection in the
     /// Agents, Context, or Chat panes.
-    pub(super) fn handle_click(&mut self, x: u16, y: u16) -> Option<Cmd> {
+    pub(in crate::ui::app) fn handle_click(&mut self, x: u16, y: u16) -> Option<Cmd> {
         // Tab bar.
         if y == self.hit_tabs_row {
             for (i, (start, end)) in self.hit_tabs.clone().into_iter().enumerate() {
@@ -420,171 +362,5 @@ impl App {
             }
         }
         None
-    }
-
-    /// The current Agents-list rows (lanes flattened with a hidden-row cap).
-    pub(super) fn agent_rows(&self) -> Vec<AgentRow> {
-        agent_row_model(&self.lanes(), 8)
-    }
-
-    /// The number of body rows a list pane can show for the current terminal
-    /// height.
-    pub(super) fn visible_count(&self) -> usize {
-        (self.area.height as usize).saturating_sub(13).max(5)
-    }
-
-    /// Move the Agents-rail cursor to the next/previous selectable row.
-    ///
-    /// Not every row can hold the cursor: the `── functions ──` separator and
-    /// the `+N more` counter are labels, not destinations. So this steps over
-    /// them to the next lane or task rather than stopping on one, and a cursor
-    /// that would leave the list stays where it was.
-    pub(super) fn move_agent_index(&mut self, up: bool) {
-        let rows = self.rail_rows();
-        if rows.is_empty() {
-            return;
-        }
-        let clamped = self.agent_index.min(rows.len() - 1);
-        let step: i64 = if up { -1 } else { 1 };
-        let mut next = clamped as i64 + step;
-        while next >= 0 && (next as usize) < rows.len() && !rows[next as usize].selectable() {
-            next += step;
-        }
-        self.agent_index = if next < 0 || next as usize >= rows.len() {
-            clamped
-        } else {
-            next as usize
-        };
-    }
-
-    /// Open a new thread and focus the conversation.
-    ///
-    /// A thread is opened, not reset: several conversations can be in flight at
-    /// once, and clearing the one you were in would throw away the transcript
-    /// you were keeping. Nothing is inherited from the current thread — that is
-    /// the whole difference from the fork this replaced.
-    pub(super) fn new_thread(&mut self) {
-        self.runtime.new_session();
-        self.draft = crate::ui::composer::Draft::new();
-        self.chat_scroll = 0;
-        self.agent_scroll = 0;
-        self.agent_index = 0;
-        self.tab_index = super::types::tab_pos("Agents");
-        self.refresh_snapshot();
-        let name = self
-            .snapshot
-            .threads
-            .get(self.active_thread_idx())
-            .map(|t| t.name.clone())
-            .unwrap_or_else(|| "main".into());
-        self.set_status(format!("Opened {name} · ^↑↓ switches threads"));
-    }
-
-    /// Recall an older prompt from history into the composer.
-    pub(super) fn recall_older(&mut self) {
-        let next = (self.history.len() as i64 - 1).min(self.history_index + 1);
-        if next >= 0 {
-            self.history_index = next;
-            let recalled = self
-                .history
-                .get(self.history.len() - 1 - next as usize)
-                .cloned()
-                .unwrap_or_default();
-            self.draft = Draft {
-                cursor: recalled.chars().count(),
-                text: recalled,
-            };
-        }
-    }
-
-    /// Recall a newer prompt from history (or clear back to an empty draft).
-    pub(super) fn recall_newer(&mut self) {
-        if self.history_index >= 0 {
-            let next = self.history_index - 1;
-            self.history_index = next;
-            let recalled = if next >= 0 {
-                self.history
-                    .get(self.history.len() - 1 - next as usize)
-                    .cloned()
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-            self.draft = Draft {
-                cursor: recalled.chars().count(),
-                text: recalled,
-            };
-        }
-    }
-
-    /// Toggle mouse capture and note the new mode in the status line.
-    pub(super) fn toggle_mouse(&mut self) {
-        self.mouse_capture = !self.mouse_capture;
-        self.set_status(if self.mouse_capture {
-            "Mouse captured — click tabs/pages/lanes, wheel scrolls, drag to select and copy"
-        } else {
-            "Mouse released — native click-drag selection & copy restored"
-        });
-    }
-}
-
-impl App {
-    /// Point the live screen subscription at whatever is selected now.
-    ///
-    /// Returns a command only when the target changed, so this is safe to call
-    /// after every selection move: every subscribe carries `resync: true`, and
-    /// re-issuing one per keystroke would make the worker resend a full frame
-    /// each time — the expensive thing the protocol exists to avoid.
-    ///
-    /// Only a selected *task* subscribes. A worker lane names no task, and
-    /// streams are addressed by task: there is nothing to ask for, and guessing
-    /// one of a worker's tasks would watch work the operator did not point at.
-    pub(super) fn retarget_watch(&mut self) -> Option<Cmd> {
-        let desired = self.watch_target();
-        if desired == self.watching {
-            return None;
-        }
-        let stop = self.watching.take();
-        self.watching = desired.clone();
-        Some(Cmd::WatchTask {
-            stop,
-            start: desired,
-        })
-    }
-
-    /// The `(worker address, task id)` the current selection asks to watch.
-    fn watch_target(&self) -> Option<(String, String)> {
-        // Only on the Agents tab: leaving it releases the subscription.
-        if self.tab() != "Agents" {
-            return None;
-        }
-        let rows = self.rail_rows();
-        let row = rows.get(self.agent_index.min(rows.len().saturating_sub(1)))?;
-        let RailRow::Agent(AgentRow::Sub {
-            task, lane_index, ..
-        }) = row
-        else {
-            return None;
-        };
-        let lanes = self.lanes();
-        let lane = lanes.get(*lane_index)?;
-        // `Agent` is main's name for a roster agent / delegated task / peer
-        // session — the tiers above it (orchestrator, reasoning, compress) run
-        // no watchable harness.
-        if lane.role != AgentRole::Agent {
-            return None;
-        }
-        let agent_id = lane.agent_id.as_deref()?;
-        // Streams are addressed to the worker's tiny.place address; a lane
-        // carries its roster id. A worker added by address is registered under
-        // it, so that is the fallback.
-        let address = self
-            .runtime
-            .workers()
-            .into_iter()
-            .find(|w| w.id == agent_id)
-            .map(|w| w.address)
-            .unwrap_or_else(|| agent_id.to_string());
-        Some((address, task.task_id.clone()))
     }
 }

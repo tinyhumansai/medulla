@@ -22,6 +22,23 @@ fn app() -> App {
     App::new(rt, loaded)
 }
 
+fn app_with_running_task() -> App {
+    let rt = MockRuntime::demo();
+    rt.script_event(crate::ui::TuiEvent::TaskStart {
+        task_id: "task-1".into(),
+        instruction: "Continue the auth refactor.".into(),
+        depth: 2,
+        agent_id: Some("dev-1".into()),
+        contract: None,
+    });
+    let loaded = {
+        let mut loaded = LoadedConfig::defaults("medulla.tui.json".into());
+        loaded.config.tinyplace = Some(medulla::config::TinyplaceConfig::default());
+        loaded
+    };
+    App::new(Arc::new(rt), loaded)
+}
+
 /// The index of the tab named `name`. Looked up rather than written down: the
 /// tab bar's order is a product decision that has changed before.
 fn tab(name: &str) -> usize {
@@ -294,7 +311,7 @@ fn selecting_a_task_asks_to_watch_it() {
 
 #[test]
 fn killing_a_watched_harness_requires_confirmation() {
-    let mut app = app();
+    let mut app = app_with_running_task();
     select_first_task(&mut app).expect("the fixture has a selectable task");
     app.focus_agents_rail();
 
@@ -310,7 +327,7 @@ fn killing_a_watched_harness_requires_confirmation() {
 
 #[test]
 fn killing_resolves_the_current_rail_selection_instead_of_the_cached_watch() {
-    let mut app = app();
+    let mut app = app_with_running_task();
     select_first_task(&mut app).expect("the fixture has a selectable task");
     let selected = app.watch_target().expect("the selected task is watchable");
     app.watching = Some(("stale-worker".into(), "stale-task".into()));
@@ -328,7 +345,7 @@ fn killing_resolves_the_current_rail_selection_instead_of_the_cached_watch() {
 
 #[test]
 fn any_other_key_cancels_a_harness_kill() {
-    let mut app = app();
+    let mut app = app_with_running_task();
     select_first_task(&mut app).expect("the fixture has a selectable task");
     app.focus_agents_rail();
     app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));

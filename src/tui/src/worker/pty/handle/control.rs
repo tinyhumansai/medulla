@@ -2,6 +2,7 @@
 
 use std::sync::atomic::Ordering;
 
+use super::super::attention;
 use super::super::sync::lock;
 use super::super::types::HarnessControl;
 use super::super::AttentionKind;
@@ -125,15 +126,17 @@ impl SessionHandle {
 
     /// Mark a submitted turn complete and consume its completion chime.
     pub(in super::super) fn settle_turn(&self) {
-        let bells = self.bell_count();
+        let (contents, bells) = self.attention_sample();
         let mut attention = lock(&self.attention);
         let unseen_bells = bells.saturating_sub(attention.seen_bells);
         let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
         attention.pending_completion_bells -= consumed_pending;
-        let completion_bell_already_accounted_for = attention
-            .cue
-            .as_ref()
-            .is_some_and(|cue| cue.kind == AttentionKind::Bell);
+        let completion_bell_already_accounted_for = (unseen_bells > consumed_pending
+            && !attention::is_working(&contents))
+            || attention
+                .cue
+                .as_ref()
+                .is_some_and(|cue| cue.kind == AttentionKind::Bell);
         attention.seen_bells = attention.seen_bells.max(bells);
         attention.generation = attention.generation.wrapping_add(1);
         // A bell already represented by the current cue is consumed. Otherwise

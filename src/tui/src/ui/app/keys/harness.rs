@@ -30,6 +30,14 @@ impl App {
     /// Safe to call when nothing is attached; that is the common case on the
     /// render path, which calls this whenever the selection moves.
     pub(crate) fn release_harness(&mut self) {
+        // The operator has been looking at and handling this pane. Consume any
+        // completion bell observed while it was attached so detaching cannot
+        // reveal a stale alert that the hidden rail deliberately suppressed.
+        if let (Some(session), Some(harnesses)) =
+            (self.harness_focus.attached_to(), self.harnesses.as_ref())
+        {
+            harnesses.sessions.acknowledge(session);
+        }
         self.harness_focus = HarnessFocus::Chrome;
     }
 

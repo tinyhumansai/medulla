@@ -487,5 +487,7 @@ fn an_explicit_empty_template_catalog_opts_out_of_coding_defaults() {
     assert!(cfg.fleet.is_empty());
     assert!(cfg.fleet.declares_only_templates());
     assert!(cfg.fleet.capacity().is_empty());
-    assert!(!serde_json::to_string(&cfg).unwrap().contains("fleet"));
+    // The key, not a bare substring: `[mcp]` carries a `fleetTools` flag, and a
+    // substring match would read that as the `fleet` section coming back.
+    assert!(!serde_json::to_string(&cfg).unwrap().contains("\"fleet\""));
 }

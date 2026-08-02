@@ -18,6 +18,50 @@ use crate::daemon::embedded::{EmbeddedDaemon, EmbeddedDaemonOptions};
 use crate::flow_engine::caps::dispatch::{HarnessDispatch, TaskRunnerDispatch};
 use crate::hub::{RunError, TaskOutcome, TaskRequest, TaskRunner};
 
+/// Turn an MCP subprocess's grant into a provider-only parent handoff.
+///
+/// The embedded daemon may spawn several ACP sessions for one workflow. Each
+/// session exchanges this parent capability for its own child grant immediately
+/// before attaching the MCP server; none may inherit or share the parent token.
+async fn nested_harness_env(
+    env: &std::collections::HashMap<String, String>,
+) -> Result<(std::collections::HashMap<String, String>, u8), crate::workflows::WorkflowError> {
+    let mut nested = env.clone();
+    nested.remove(crate::control_socket::MCP_PARENT_SOCKET_ENV);
+    nested.remove(crate::control_socket::MCP_PARENT_GRANT_ENV);
+    let Some((socket, token)) = crate::control_socket::grant_from_env(env) else {
+        return Ok((nested, 0));
+    };
+    nested.remove(crate::control_socket::MCP_SOCKET_ENV);
+    nested.remove(crate::control_socket::MCP_GRANT_ENV);
+
+    #[cfg(unix)]
+    {
+        let client = crate::control_socket::ControlClient::connect(&socket, &token)
+            .await
+            .map_err(|error| {
+                crate::workflows::WorkflowError::Engine(format!(
+                    "cannot prepare nested fleet access: {error}"
+                ))
+            })?;
+        let depth = client.hello().depth.saturating_add(1);
+        nested.insert(
+            crate::control_socket::MCP_PARENT_SOCKET_ENV.to_string(),
+            socket.to_string_lossy().into_owned(),
+        );
+        nested.insert(
+            crate::control_socket::MCP_PARENT_GRANT_ENV.to_string(),
+            token,
+        );
+        Ok((nested, depth))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (socket, token);
+        Ok((nested, 0))
+    }
+}
+
 /// How often the loopback bridge is drained. Short, because both ends are in
 /// this process and the only cost is a poll on an in-memory queue.
 const LOCAL_POLL: Duration = Duration::from_millis(20);
@@ -134,6 +178,8 @@ pub async fn run_here(
     if settings.default_worker_address.trim().is_empty() {
         settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
     }
+    let (host_env, fleet_depth) = nested_harness_env(env).await?;
+    settings.fleet_depth = fleet_depth;
 
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
@@ -144,6 +190,7 @@ pub async fn run_here(
         // preset list and be refused as "not configured on this host" even
         // though the operator has it configured right here.
         custom_harnesses: custom_harnesses.to_vec(),
+        env: host_env,
         ..Default::default()
     })
     .map_err(crate::workflows::WorkflowError::Engine)?;
@@ -215,7 +262,7 @@ pub async fn evolve_here(
         crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
         "acp".to_string(),
     );
-    crate::workflows::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
+    crate::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
 
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),

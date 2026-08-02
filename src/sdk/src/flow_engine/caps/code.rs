@@ -21,7 +21,7 @@ use serde_json::Value;
 use tinyflows::caps::{CodeLanguage, CodeRunner};
 use tinyflows::error::{EngineError, Result};
 
-use super::script::{run_script, ScriptLanguage};
+use super::script::{run_script, ScriptLanguage, ScriptRequest};
 
 /// A [`CodeRunner`] that refuses every request, explaining the missing sandbox.
 pub struct DeniedCodeRunner;
@@ -67,13 +67,13 @@ impl CodeRunner for ProcessCodeRunner {
         // project: the engine's own contract for the kind is a computation over
         // its input, and a step that means to touch the repo is a
         // `medulla:shell` call, which says so in the graph.
-        run_script(
+        run_script(ScriptRequest::plain(
             ScriptLanguage::from(language),
             source,
             &input,
             self.timeout,
-            None,
-        )
+            &std::collections::BTreeMap::new(),
+        ))
         .await
         .map(|output| output.value)
     }

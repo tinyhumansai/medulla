@@ -9,6 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::agents::Line as StyledLine;
 use crate::ui::chat::tool_call;
@@ -19,6 +20,7 @@ use crate::worker::pty::ATTENTION_GLYPH;
 use super::types::{App, TABS};
 
 mod agents;
+mod changes;
 mod decisions;
 mod feedback;
 mod harness_modals;
@@ -381,10 +383,6 @@ impl App {
     /// status bar that opens by telling you which program you are running spends
     /// its first columns on the one thing you cannot be unsure of.
     pub(super) fn draw_status_line(&mut self, f: &mut Frame, area: Rect) {
-        let halves = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(area);
         let (dot, dot_color) = self.connection_dot();
         let mut spans = vec![
             Span::styled(format!("{dot} "), Style::default().fg(dot_color)),
@@ -406,6 +404,54 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ));
         }
+        // Operational messages must remain readable when resource indicators
+        // are enabled. Reserve up to a third of the row for a non-empty status;
+        // an idle status yields the whole row back to the indicators.
+        let status_width = UnicodeWidthStr::width(self.status.as_str());
+        let reserved_status_width = status_width.min(usize::from(area.width / 3));
+        let available_left_width = usize::from(area.width).saturating_sub(reserved_status_width);
+        let base_left_width = spans
+            .iter()
+            .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+            .sum::<usize>();
+
+        let mut resource_config = self.loaded.config.appearance.clone();
+        let sample = self.resource_monitor.sample();
+        let mut resource_segments = crate::ui::resources::segments(&resource_config, sample);
+        let resource_width = resource_segments.join(" · ").width() + 2;
+        if base_left_width + resource_width > available_left_width {
+            // Bars are the widest representation. Retain every enabled metric
+            // at narrow widths by degrading bars to their compact percentage
+            // form before the pane itself has to clip content.
+            for display in [
+                &mut resource_config.cpu,
+                &mut resource_config.ram,
+                &mut resource_config.disk_io,
+            ] {
+                if *display == medulla::config::ResourceDisplay::Bar {
+                    *display = medulla::config::ResourceDisplay::Percent;
+                }
+            }
+            resource_segments = crate::ui::resources::segments(&resource_config, sample);
+        }
+        if !resource_segments.is_empty() {
+            spans.push(Span::styled(
+                format!("  {}", resource_segments.join(" · ")),
+                Style::default().fg(self.theme.accent),
+            ));
+        }
+        let desired_left_width = spans
+            .iter()
+            .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+            .sum::<usize>();
+        let left_width = desired_left_width.min(available_left_width) as u16;
+        let halves = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(left_width),
+                Constraint::Min(reserved_status_width as u16),
+            ])
+            .split(area);
         f.render_widget(Paragraph::new(TLine::from(spans)), halves[0]);
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(
@@ -473,7 +519,17 @@ impl App {
         } else {
             ""
         };
+        let compact = TABS
+            .iter()
+            .zip(&badges)
+            .map(|(tab, badge)| tab.chars().count() + badge.chars().count() + 1)
+            .sum::<usize>()
+            > area.width as usize;
         for (i, name) in TABS.iter().enumerate() {
+            // Every compact spelling is an actual destination and stays
+            // recognizable beside its page title, keeping the whole ring and
+            // its mouse hit boxes inside narrow terminals.
+            let name = compact_tab_label(name, compact);
             let badge = &badges[i];
             let label = if gap.is_empty() {
                 format!("{name}{badge} ")
@@ -535,6 +591,8 @@ impl App {
             "Tab views · ↑↓ pages · ⏎ open · Esc menu · 1-3 jump"
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
+        } else if self.tab() == "Changes" {
+            "Tab views · ↑↓ files · PageUp/PageDown diff · c comment · r refresh"
         } else {
             "Tab views · Esc/↑↓ rail · ⏎/^] harness · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
         };
@@ -558,6 +616,7 @@ impl App {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
             "Agents" => self.draw_agents(f, area),
+            "Changes" => self.draw_changes(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),
@@ -586,6 +645,22 @@ impl App {
             clip(&describe_event(&env.event), width.saturating_sub(11))
         );
         TLine::from(Span::styled(text, style))
+    }
+}
+
+/// Shorten current tab names when their one-space labels cannot all fit.
+fn compact_tab_label(name: &str, compact: bool) -> &str {
+    if !compact {
+        return name;
+    }
+    match name {
+        "Overview" => "Over",
+        "Agents" => "Agts",
+        "Workflows" => "Flows",
+        "Changes" => "Diff",
+        "Feedback" => "Feed",
+        "Settings" => "Set",
+        _ => name,
     }
 }
 

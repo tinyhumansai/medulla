@@ -37,6 +37,30 @@ impl App {
             ]));
         }
         lines.push(TLine::from(""));
+        for (offset, (label, value)) in [
+            ("CPU indicator", self.loaded.config.appearance.cpu),
+            ("RAM indicator", self.loaded.config.appearance.ram),
+            ("Disk I/O indicator", self.loaded.config.appearance.disk_io),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let index = THEME_ROLES.len() + offset;
+            let style = if index == sel {
+                self.theme.selection()
+            } else {
+                Style::default()
+            };
+            let marker = if index == sel { "▸ " } else { "  " };
+            lines.push(TLine::from(Span::styled(
+                format!(
+                    "{marker}{label:<20} {}",
+                    format!("{value:?}").to_ascii_lowercase()
+                ),
+                style,
+            )));
+        }
+        lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
             "j/k select · ←/→ or Enter change · applies live",
             Style::default().add_modifier(Modifier::DIM),

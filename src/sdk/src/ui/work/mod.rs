@@ -229,6 +229,9 @@ fn info_section(work: &WorkSnapshot, cols: usize, lines: &mut Vec<Line>) {
     if let Some(mode) = &info.permission_mode {
         parts.push(mode.clone());
     }
+    if let Some(branch) = &info.branch {
+        parts.push(format!("branch {branch}"));
+    }
     if !info.mcp_servers.is_empty() {
         parts.push(format!("mcp {}", info.mcp_servers.join(", ")));
     }

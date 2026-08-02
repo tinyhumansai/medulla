@@ -13,7 +13,7 @@ use ratatui::buffer::Buffer;
 use ratatui::style::Color;
 use ratatui::Terminal;
 
-use medulla::config::{LoadedConfig, TinyplaceConfig};
+use medulla::config::{AppearanceConfig, LoadedConfig, ResourceDisplay, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
 use medulla_tui::ui::app::{App, Cmd, TABS};
 
@@ -109,7 +109,9 @@ fn arrow_keys_move_subpage_selector() {
 fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
     let mut app = settings_app();
     let _ = key(&mut app, KeyCode::Char('3'));
-    for _ in 0..12 {
+    // Walk to the final path-style qualifier. Thread name adds two rows ahead
+    // of the path group, so this must cover the complete status-line catalog.
+    for _ in 0..14 {
         let _ = key(&mut app, KeyCode::Down);
     }
 
@@ -170,6 +172,63 @@ fn appearance_persists_theme_to_injected_path() {
         "status note: {}",
         app.status()
     );
+}
+
+#[test]
+fn appearance_cycles_and_persists_process_indicators() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    for _ in 0..4 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Right);
+
+    let out = text_of(&draw(&mut app, 180, 45));
+    assert!(out.contains("CPU indicator        percent"), "{out}");
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("[appearance]"), "{saved}");
+    assert!(saved.contains("cpu = \"percent\""), "{saved}");
+    assert!(saved.contains("diskIo = \"off\""), "{saved}");
+}
+
+#[test]
+fn appearance_persists_process_indicators_to_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("medulla.tui.json");
+    std::fs::write(&path, r#"{"unrelated":{"kept":true}}"#).unwrap();
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    for _ in 0..4 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Right);
+
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["appearance"]["cpu"], "percent");
+    assert_eq!(saved["appearance"]["diskIo"], "off");
+    assert_eq!(saved["unrelated"]["kept"], true);
+}
+
+#[test]
+fn enabled_process_indicators_render_on_the_status_line() {
+    let mut config = loaded();
+    config.config.appearance = AppearanceConfig {
+        cpu: ResourceDisplay::Bar,
+        ram: ResourceDisplay::Bar,
+        disk_io: ResourceDisplay::Bar,
+        ..AppearanceConfig::default()
+    };
+    let runtime = Arc::new(MockRuntime::demo());
+    let mut app = App::new(runtime, config);
+    let out = text_of(&draw(&mut app, 80, 40));
+    for label in ["CPU", "RAM", "IO"] {
+        assert!(out.contains(label), "missing {label}: {out}");
+    }
 }
 
 #[test]

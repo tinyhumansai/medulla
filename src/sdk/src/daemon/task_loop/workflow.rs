@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
-use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert};
+use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert};
 // `trigger_input` is shared with the cloud plane's adapter
 // ([`crate::workflows::bridge`]) rather than defined twice: a frame's text must
 // become the same trigger payload whether it arrived over tiny.place or over the
@@ -26,7 +26,8 @@ use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert};
 use crate::workflows::bridge::trigger_input;
 use crate::workflows::evolve::{EvolveConfig, EvolveSession, EvolveTrigger};
 use crate::workflows::{
-    run_workflow, FileWorkflowStore, RunContext, RunStatus, StoreWorkflowResolver, WorkflowStore,
+    run_workflow_versioned, FileWorkflowStore, RunContext, RunStatus, StoreWorkflowResolver,
+    WorkflowStore,
 };
 
 use super::super::providers::{Abort, RunTaskOptions};
@@ -78,7 +79,11 @@ impl HarnessDispatch for RuntimeDispatch {
             provider,
             prompt: request.instruction,
             cwd: inner.config.workspace.clone(),
-            env: super::with_tool_mode(inner.config.env.clone(), request.tool_mode.as_deref()),
+            env: super::with_tool_mode_at_depth(
+                inner.config.env.clone(),
+                request.tool_mode.as_deref(),
+                request.fleet_depth,
+            ),
             timeout_ms: inner.config.task_timeout_ms,
             model: request.model.or_else(|| inner.config.model.clone()),
             agent: inner.config.agent.clone(),
@@ -127,15 +132,32 @@ impl DaemonRuntime {
         if !self.workflow_settings().enabled {
             return Vec::new();
         }
-        self.workflow_store()
+        let store = self.workflow_store();
+        store
             .list()
             .unwrap_or_default()
             .into_iter()
-            .map(|summary| WorkflowAdvert {
-                id: summary.id,
-                name: summary.name,
-                description: summary.description,
-                node_count: summary.node_count,
+            .filter(|summary| summary.enabled)
+            .filter_map(|summary| {
+                let record = store.get(&summary.id).ok().flatten()?;
+                Some(WorkflowAdvert {
+                    id: summary.id,
+                    name: summary.name,
+                    description: summary.description,
+                    node_count: summary.node_count,
+                    fingerprint: crate::workflows::record_fingerprint(&record),
+                    inputs: summary
+                        .inputs
+                        .into_iter()
+                        .map(|input| WorkflowInputAdvert {
+                            name: input.name,
+                            ty: input.ty.as_str().to_string(),
+                            description: input.description.unwrap_or_default(),
+                            required: input.required,
+                            default: input.default,
+                        })
+                        .collect(),
+                })
             })
             .collect()
     }
@@ -152,7 +174,9 @@ impl DaemonRuntime {
     pub(super) async fn handle_workflow_task(&self, from: String, frame: TaskFrame, id: String) {
         let correlation = frame.correlation_id.clone();
 
-        let settings = self.workflow_settings();
+        let mut settings = CapabilitySettings::clone(&self.workflow_settings());
+        settings.fleet_depth = frame.fleet_depth;
+        let settings = Arc::new(settings);
         if !settings.enabled {
             self.reply(
                 &from,
@@ -256,13 +280,25 @@ impl DaemonRuntime {
 
         // The frame's task id becomes the run id, so the orchestrator's existing
         // `abort` for that task is exactly what cancels the run.
-        // Empty declared inputs — see `workflows::bridge::run_task_workflow`.
-        let outcome = run_workflow(
+        let Some(fingerprint) = frame.workflow_fingerprint.clone() else {
+            self.reply(
+                &from,
+                TaskFrameKind::Error,
+                &frame.task_id,
+                "workflow dispatch is missing its definition fingerprint; refresh the worker catalog",
+                correlation.as_deref(),
+                None,
+            )
+            .await;
+            return;
+        };
+        let outcome = run_workflow_versioned(
             context,
             &id,
             &frame.task_id,
             trigger_input(&frame.text),
-            serde_json::Map::new(),
+            frame.workflow_inputs,
+            &fingerprint,
         )
         .await;
 

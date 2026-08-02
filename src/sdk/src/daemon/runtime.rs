@@ -300,10 +300,13 @@ impl DaemonRuntime {
                 model: None,
                 tool_mode: None,
                 workflow: None,
+                workflow_fingerprint: None,
+                workflow_inputs: Default::default(),
                 // Inbound-only, like `provider`, `model`, and `workflow`: this
                 // builds the worker's *responses*, and continuity is the
                 // sender's decision, not something a reply restates.
                 conversation: None,
+                fleet_depth: 0,
             },
             attachments.usage,
             attachments.work,

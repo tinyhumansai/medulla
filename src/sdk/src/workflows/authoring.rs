@@ -29,19 +29,57 @@ pub fn apply_workflow_ops(
     id: &str,
     ops: &[GraphOp],
 ) -> Result<WorkflowRecord, WorkflowError> {
-    let mut record = require(store.as_ref(), id)?;
-    record.graph = apply_ops(&record.graph, ops).map_err(|err| {
-        // The engine's error names the op index and kind, which is what an
-        // author needs to know which of a batch of edits went wrong.
-        WorkflowError::Engine(format!("workflow '{id}': {err}"))
-    })?;
-    validate_graph(id, &record.graph)?;
-    // The engine's validation answers "would this compile". The gates answer
-    // "would this do anything" — a binding that resolves null at run time
-    // compiles fine and quietly does nothing.
-    crate::workflows::gates::check(id, &record.graph)?;
-    store.save(&record)?;
-    Ok(record)
+    // A copilot, CLI, and another MCP process may all edit the same file through
+    // independent store instances. Rebase the patch when another writer wins
+    // between read and save instead of reporting two successes while silently
+    // discarding the earlier edit.
+    apply_workflow_ops_observed(store, id, ops, |_| {}).map(|(record, _)| record)
+}
+
+/// Apply graph operations while observing each freshly read save attempt.
+///
+/// The observer is used by concurrency tests to synchronize both writers after
+/// their first read without relying on scheduler timing. Production callers use
+/// [`apply_workflow_ops`], whose observer is a no-op.
+pub(crate) fn apply_workflow_ops_observed(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    ops: &[GraphOp],
+    observer: impl FnMut(usize),
+) -> Result<(WorkflowRecord, usize), WorkflowError> {
+    mutate_workflow_record(
+        store,
+        id,
+        |record| {
+            record.graph = apply_ops(&record.graph, ops)
+                .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
+            validate_graph(id, &record.graph)?;
+            crate::workflows::gates::check(id, &record.graph)
+        },
+        observer,
+        "kept changing while the edit was being saved; retry the edit",
+    )
+}
+
+/// Mutate and atomically save a workflow record, rebasing after CAS conflicts.
+pub(crate) fn mutate_workflow_record(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    mut mutate: impl FnMut(&mut WorkflowRecord) -> Result<(), WorkflowError>,
+    mut observer: impl FnMut(usize),
+    failure: &str,
+) -> Result<(WorkflowRecord, usize), WorkflowError> {
+    const MAX_RETRIES: usize = 16;
+    for attempt in 1..=MAX_RETRIES {
+        let mut record = require(store.as_ref(), id)?;
+        let expected = crate::workflows::record_fingerprint(&record);
+        mutate(&mut record)?;
+        observer(attempt);
+        if store.save_if_record_fingerprint(&record, &expected)? {
+            return Ok((record, attempt));
+        }
+    }
+    Err(WorkflowError::Engine(format!("workflow '{id}' {failure}")))
 }
 
 /// Apply `ops` only if the graph still matches `expected_fingerprint`.

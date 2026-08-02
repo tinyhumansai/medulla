@@ -62,7 +62,7 @@ fn every_tool_the_prompt_names_is_one_the_server_actually_serves() {
     // them drifting. A prompt that teaches a tool the server does not serve
     // costs a failed call on every turn that believes it.
     let prompt = revise(&record(1), "go");
-    let served = crate::workflows::mcp::TOOL_NAMES;
+    let served = crate::mcp::TOOL_NAMES;
 
     for word in prompt.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
         if word.starts_with("workflow_") {

@@ -202,6 +202,20 @@ impl HubHandle {
         self.roster.lock().expect("roster lock").clone()
     }
 
+    /// The dispatcher behind this hub.
+    ///
+    /// For a caller that needs to *run* a task rather than manage the roster —
+    /// the control plane, which serves the harnesses Medulla spawns. Handed out
+    /// as the runner rather than as a
+    /// [`HarnessDispatch`](crate::flow_engine::caps::HarnessDispatch) because
+    /// that trait's only cancellation is all-or-nothing
+    /// ([`abort_all`](super::TaskRunner::abort_all)), and a caller holding
+    /// several concurrent dispatches on behalf of one harness needs to stop
+    /// exactly one of them.
+    pub fn task_runner(&self) -> Arc<super::TaskRunner> {
+        self.runner.clone()
+    }
+
     /// Latest captured system details for a worker, if it has been refreshed.
     pub fn system_info(&self, id: &str) -> Option<crate::tinyplace::WorkerSystemInfo> {
         self.system_info

@@ -70,12 +70,22 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
                  slug must be listed in `workflows.toolAllowlist`, and is refused otherwise.",
                 NATIVE_TOOLS.join(", ")
             ),
-            "`medulla:shell` runs a script in the operator's project directory. \
-             `args.script` is the source (required); `args.language` picks the interpreter — \
+            "`medulla:shell` runs a script in the operator's project directory. `args.script` \
+             is an inline script and `args.script_path` runs a file the repository already has \
+             — exactly one of the two, never both. `args.language` picks the interpreter — \
              `shell` (the default, run with bash), `javascript`, or `python`; `args.input` is \
              handed to it on stdin as JSON. It returns `{ output, stderr }`, where `output` is \
              the script's stdout parsed as JSON when it is JSON. Gated on \
              `workflows.allowCode` for the same reason `code` nodes are — check `workflow_host`."
+                .to_string(),
+            "`args.cwd` narrows where a step runs (the workspace root by default) and \
+             `args.env` adds variables to the inherited environment, as an object of strings. \
+             Reach for `script_path` when the script is something the repository maintains: a \
+             copy pasted into the graph drifts from the one that is actually kept up to date."
+                .to_string(),
+            "`args.script_path` and `args.cwd` are resolved inside the workspace and refused \
+             anywhere else — relative only, no `..`, and re-checked after symlinks are followed. \
+             A host with no configured workspace refuses both, and `args.script` is the way in."
                 .to_string(),
             "`language: shell` requires a unix host: there is no portable POSIX shell on \
              Windows, and this host refuses rather than emulating one, so a `shell` step run \

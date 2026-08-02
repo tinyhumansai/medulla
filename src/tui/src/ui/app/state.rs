@@ -55,6 +55,7 @@ impl App {
             loaded,
             snapshot,
             tab_index: 0,
+            changes: super::changes::GitChangesState::capture(),
             draft: Draft::new(),
             history: Vec::new(),
             history_index: -1,
@@ -118,6 +119,7 @@ impl App {
             settings_index: 0,
             settings_focused: false,
             appearance_index: 0,
+            resource_monitor: Default::default(),
             status_line_index: 0,
             status_line_promotion_pending,
             config_index: 0,
@@ -409,6 +411,9 @@ impl App {
         // two-item menu, Agents on the composer — so the first arrow press did
         // nothing visible and the list had to be clicked before it would move.
         match self.tab() {
+            "Changes" => {
+                self.refresh_changes();
+            }
             // The list is the page; the menu is two rows and reachable with `1`
             // and `2`, or with Esc.
             "Hosts" => self.routing_focused = true,

@@ -15,8 +15,8 @@ use super::registry::EvolveGuard;
 use super::types::{EvolveConfig, EvolveOutcome, EvolveTrigger};
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::hub::TaskRequest;
+use crate::mcp::ToolMode;
 use crate::workflows::copilot::{CopilotRequest, FailedRun, Mode};
-use crate::workflows::mcp::ToolMode;
 use crate::workflows::{
     current_notes, require, NoteKind, NoteSource, RunRecord, RunStatus, WorkflowError,
     WorkflowNote, WorkflowStore,
@@ -143,7 +143,10 @@ impl EvolveSession {
             // graph the pass is reviewing, which for a failure-triggered pass
             // would be the run that triggered it, again.
             workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
             conversation: Some(self.conversation.clone()),
+            fleet_depth: 0,
         };
         let outcome = self.dispatch.dispatch_with_status(request, status).await?;
 

@@ -1,0 +1,31 @@
+[package]
+name = "medulla-link"
+description = "Host link transport: mosh-style state synchronisation over a blind UDP forwarder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "medulla_link"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+sha2 = { workspace = true }
+fs2 = { workspace = true }
+# AEAD for the payload. ChaCha20-Poly1305 rather than mosh's OCB-AES128: same
+# role, first-class in Rust, no OCB dependency.
+chacha20poly1305 = "0.10"
+# Outer-header authentication for the forwarder (HMAC-SHA256, truncated to 16).
+hmac = "0.12"
+# Constant-time tag comparison.
+subtle = "2"
+# Key material: pair key, forwarder key, node id.
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -120,7 +120,7 @@ pub(super) async fn route_frame(
     if frame.kind == TaskFrameKind::CapabilitiesResult {
         let result = parse_agent_capabilities(&frame.text)
             .ok_or_else(|| "invalid worker capabilities payload".to_string());
-        if let Some(probe) = capabilities_waiters.lock().await.remove(&key) {
+        if let Some(probe) = capabilities_waiters.lock().unwrap().remove(&key) {
             let _ = probe.tx.send(result);
         }
         return;
@@ -189,7 +189,7 @@ async fn expected_sender(
     }
     capabilities_waiters
         .lock()
-        .await
+        .unwrap()
         .get(key)
         .map(|probe| probe.from.clone())
 }

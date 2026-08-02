@@ -63,6 +63,12 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    let workflow_fingerprint = obj
+        .get("workflowFingerprint")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|fingerprint| !fingerprint.is_empty())
+        .map(str::to_string);
     let custom_harness = obj
         .get("customHarness")
         .and_then(|value| value.as_str())
@@ -99,6 +105,18 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    // Missing means operator-started work for compatibility with older peers.
+    // A present value must fit exactly; narrowing with `as` would turn 256 into
+    // root depth zero and let a malformed frame widen delegated capabilities.
+    let fleet_depth = match obj.get("fleet_depth") {
+        None => 0,
+        Some(value) => u8::try_from(value.as_u64()?).ok()?,
+    };
+    let workflow_inputs = match obj.get("inputs") {
+        None => serde_json::Map::new(),
+        Some(serde_json::Value::Object(inputs)) => inputs.clone(),
+        Some(_) => return None,
+    };
 
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
@@ -113,7 +131,10 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         model,
         tool_mode,
         workflow,
+        workflow_fingerprint,
+        workflow_inputs,
         conversation,
+        fleet_depth,
         usage,
         work,
     })

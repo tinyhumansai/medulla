@@ -11,6 +11,15 @@ use super::SessionHandle;
 const BLANK: CellText = CellText::blank();
 
 impl SessionHandle {
+    /// The harness's current human-facing thread name, when it advertises one.
+    ///
+    /// Codex and Claude Code update the terminal window title after `/rename`.
+    /// Reading that standard PTY signal keeps the rail live without coupling it
+    /// to either provider's private transcript format.
+    pub fn thread_name(&self) -> Option<String> {
+        lock(&self.cold).thread_name.clone()
+    }
+
     /// Sample the live screen text and audible-bell counter for classification.
     ///
     /// Restores the operator's scrollback offset before returning, so a
@@ -51,7 +60,13 @@ impl SessionHandle {
 
     /// Feed bytes from the pty into the emulator.
     pub(in super::super) fn process(&self, bytes: &[u8]) {
-        lock(&self.screen).process(bytes);
+        let thread_name = {
+            let mut parser = lock(&self.screen);
+            parser.process(bytes);
+            let title = parser.screen().title().trim().to_string();
+            (!title.is_empty()).then_some(title)
+        };
+        lock(&self.cold).thread_name = thread_name;
     }
 
     /// Move the emulator's scrollback by `rows`, towards the history when `up`.

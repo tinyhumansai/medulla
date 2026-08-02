@@ -30,6 +30,8 @@ pub(super) enum Field {
     Harness,
     /// Who holds the session.
     Control,
+    /// The name assigned to the harness conversation with `/rename`.
+    Thread,
     /// The Git branch of the working directory.
     Branch,
     /// The working directory.

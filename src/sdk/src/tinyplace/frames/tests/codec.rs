@@ -22,7 +22,10 @@ fn encodes_a_minimal_frame() {
         model: None,
         tool_mode: None,
         workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
         conversation: None,
+        fleet_depth: 0,
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["proto"], TINYPLACE_PROTO);
@@ -35,6 +38,21 @@ fn encodes_a_minimal_frame() {
     assert!(value.get("harness").is_none());
     assert!(value.get("provider").is_none());
     assert!(value.get("model").is_none());
+}
+
+#[test]
+fn rejects_a_fleet_depth_that_cannot_fit_the_protocol_type() {
+    let body = json!({
+        "proto": TINYPLACE_PROTO,
+        "kind": "task",
+        "taskId": "cycle-1",
+        "text": "do the thing",
+        "ts": "2026-07-18T00:00:00.000Z",
+        "fleet_depth": 256,
+    })
+    .to_string();
+
+    assert!(decode_task_frame(&body).is_none());
 }
 
 #[test]
@@ -51,7 +69,13 @@ fn encodes_optional_fields_when_present() {
         model: Some("anthropic/claude-opus-4.8".to_string()),
         tool_mode: None,
         workflow: Some("nightly-sweep".to_string()),
+        workflow_fingerprint: Some("nightly-fingerprint".to_string()),
+        workflow_inputs: json!({ "repo": "acme/api", "depth": 3 })
+            .as_object()
+            .unwrap()
+            .clone(),
         conversation: None,
+        fleet_depth: 0,
     });
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["kind"], "capabilities_result");
@@ -60,6 +84,14 @@ fn encodes_optional_fields_when_present() {
     assert_eq!(value["provider"], "claude");
     assert_eq!(value["model"], "anthropic/claude-opus-4.8");
     assert_eq!(value["workflow"], "nightly-sweep");
+    assert_eq!(value["workflowFingerprint"], "nightly-fingerprint");
+    assert_eq!(value["inputs"]["repo"], "acme/api");
+    let decoded = decode_task_frame(&body).expect("the full frame decodes");
+    assert_eq!(
+        decoded.workflow_fingerprint.as_deref(),
+        Some("nightly-fingerprint")
+    );
+    assert_eq!(decoded.workflow_inputs["depth"], json!(3));
 }
 
 #[test]
@@ -88,7 +120,10 @@ fn round_trips_every_kind() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
             conversation: None,
+            fleet_depth: 0,
         });
         let decoded = decode_task_frame(&body).expect("valid frame decodes");
         assert_eq!(decoded.kind, kind);
@@ -131,7 +166,10 @@ fn carries_a_model_hint_through_encode_and_decode() {
         model: Some("openrouter/some-model".to_string()),
         tool_mode: None,
         workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
         conversation: None,
+        fleet_depth: 0,
     });
     let decoded = decode_task_frame(&body).unwrap();
     assert_eq!(decoded.model.as_deref(), Some("openrouter/some-model"));
@@ -462,7 +500,10 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
             conversation: None,
+            fleet_depth: 0,
         },
         None,
         Some(snapshot.clone()),
@@ -486,7 +527,10 @@ fn an_empty_work_snapshot_is_left_off_the_wire() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
             conversation: None,
+            fleet_depth: 0,
         },
         None,
         Some(crate::harness_work::WorkSnapshot::default()),

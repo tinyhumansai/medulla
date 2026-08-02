@@ -62,7 +62,7 @@ const BASE_PARAMETERS_KEY: &str = "MEDULLA_GIT_CONFIG_BASE_PARAMETERS";
 /// are omitted: they run in the receiving repository, never in a harness's
 /// working clone.
 #[cfg(unix)]
-const CLIENT_HOOKS: &[&str] = &[
+pub(super) const CLIENT_HOOKS: &[&str] = &[
     "applypatch-msg",
     "pre-applypatch",
     "post-applypatch",
@@ -86,7 +86,7 @@ const CLIENT_HOOKS: &[&str] = &[
 /// The shim script. One copy is written under each name in [`CLIENT_HOOKS`] and
 /// branches on `basename "$0"`, so all hooks share a single implementation.
 #[cfg(unix)]
-const HOOK_SHIM: &str = r#"#!/bin/sh
+pub(super) const HOOK_SHIM: &str = r#"#!/bin/sh
 # Medulla hook shim. Runs the repository's own hook of this name, then adds the
 # Medulla Co-authored-by trailer (prepare-commit-msg only).
 

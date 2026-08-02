@@ -130,6 +130,8 @@ pub struct DaemonConfig {
 pub(super) struct RunningTask {
     /// Provider selected for this task.
     pub(super) provider: HarnessProvider,
+    /// Whether this task's selected transport will register a stdin sink.
+    pub(super) accepts_stdin: bool,
     /// Correlation id that scopes follow-up `input` frames to this dispatch.
     pub(super) correlation_id: Option<String>,
     /// Live stdin sender once the child accepts input.

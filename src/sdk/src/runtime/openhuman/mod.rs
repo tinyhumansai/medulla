@@ -417,6 +417,17 @@ impl Runtime for OpenHumanRuntime {
             .collect()
     }
 
+    fn cancel_task(&self, cycle_id: String, task_id: String) {
+        // Control-plane activity uses its server-minted abort handle as the
+        // task half of the row key. It never went through the backend steering
+        // API, so cancel it on the same local runner that admitted it.
+        if cycle_id.starts_with("mcp:") {
+            if let Some(hub) = self.hub() {
+                hub.task_runner().abort_task(&task_id);
+            }
+        }
+    }
+
     fn worker_activity(&self) -> Vec<crate::hub::WorkerActivity> {
         self.hub()
             .map(|hub| hub.activity().snapshot())

@@ -312,7 +312,7 @@ async fn copilot_turn(
     // tools fail to arrive leaves a session that starts fine and can change
     // nothing — the operator would get a confident reply and an unchanged
     // graph, which is the one failure mode that looks like success.
-    medulla::workflows::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
+    medulla::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
 
     let host = super::copilot_hosts::host_for(thread, || EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
@@ -491,7 +491,7 @@ async fn evolve_turn(
         medulla::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
         "acp".to_string(),
     );
-    medulla::workflows::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
+    medulla::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
     let store = medulla::workflows::discover_store(&env, &cwd);
     let host = super::copilot_hosts::host_for(workflow, || EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),

@@ -15,6 +15,7 @@ pub mod dispatch;
 pub mod http;
 pub mod mocks;
 pub mod script;
+pub mod script_policy;
 pub mod state;
 pub mod tools;
 

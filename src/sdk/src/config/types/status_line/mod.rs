@@ -186,6 +186,8 @@ impl Default for StatusLineConfig {
             control: FieldPlacement::Line1,
             control_when: FieldVisibility::Always,
             control_style: ControlStyle::Text,
+            thread: FieldPlacement::Line2,
+            thread_when: FieldVisibility::Always,
             branch: FieldPlacement::Line1,
             branch_when: FieldVisibility::Always,
             path: FieldPlacement::Line1,

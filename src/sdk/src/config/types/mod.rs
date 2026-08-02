@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
+use super::AppearanceConfig;
 use crate::runtime::fleet::{
     AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor, WorkspaceDescriptor,
 };
@@ -64,6 +65,9 @@ fn d_task_protocol() -> String {
 mod connections;
 mod document;
 mod fleet;
+mod mcp;
+#[cfg(test)]
+mod mcp_tests;
 mod orchestration;
 mod presentation;
 mod status_line;
@@ -71,6 +75,7 @@ mod status_line;
 pub use connections::*;
 pub use document::*;
 pub use fleet::*;
+pub use mcp::*;
 pub use orchestration::*;
 pub use presentation::*;
 pub use status_line::*;

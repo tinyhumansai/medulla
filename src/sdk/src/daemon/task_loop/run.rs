@@ -92,6 +92,20 @@ impl DaemonRuntime {
             }
         };
 
+        let mut run_env = self.inner.config.env.clone();
+        if let Some(harness) = &custom_harness {
+            run_env.extend(harness.harness_env());
+        }
+        let run_env =
+            super::with_tool_mode_at_depth(run_env, frame.tool_mode.as_deref(), frame.fleet_depth);
+        // ACP currently has no follow-up-input operation. Record the effective
+        // transport before acknowledging the task so an input frame racing the
+        // harness startup is rejected instead of buffered forever.
+        let accepts_stdin = super::super::providers::supports_stdin(provider)
+            && !run_env
+                .get(super::super::providers::HARNESS_PROTOCOL_ENV)
+                .is_some_and(|value| value.eq_ignore_ascii_case("acp"));
+
         // Admission is RAII: the guard releases the slot on every exit from this
         // function, including an unwind, and carries the `running` record and
         // controller registration with it.
@@ -131,6 +145,7 @@ impl DaemonRuntime {
             key.clone(),
             RunningTask {
                 provider,
+                accepts_stdin,
                 abort: abort.clone(),
                 correlation_id: correlation.clone(),
                 stdin: None,
@@ -352,11 +367,6 @@ impl DaemonRuntime {
             }) as Box<dyn FnOnce(String) + Send>
         };
 
-        let mut run_env = self.inner.config.env.clone();
-        if let Some(harness) = &custom_harness {
-            run_env.extend(harness.harness_env());
-        }
-
         let options = RunTaskOptions {
             // The *authenticated* sender, never anything from the frame body: a
             // frame cannot be trusted to name its own author. This says *whose*
@@ -379,7 +389,7 @@ impl DaemonRuntime {
             // Per-task, like the model and provider hints below. A review turn
             // asks for the restricted workflow tools here, which is the only
             // channel that reaches the MCP server the harness spawns.
-            env: super::with_tool_mode(run_env, frame.tool_mode.as_deref()),
+            env: run_env,
             timeout_ms: self.inner.config.task_timeout_ms,
             // Per-task model hint (parallels the per-task `provider`): honor the
             // orchestrator's requested model, falling back to the daemon default

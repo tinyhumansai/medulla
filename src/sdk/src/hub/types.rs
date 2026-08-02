@@ -1,6 +1,8 @@
 //! Data types for the bridge-independent task sender: a dispatch request, its
 //! terminal outcome, and the error a dispatch can fail with.
 
+use serde_json::{Map, Value};
+
 use crate::tinyplace::{HarnessProvider, TokenUsage};
 
 /// A line sink for hub diagnostics.
@@ -69,6 +71,15 @@ pub struct TaskRequest {
     /// This is what lets one dispatch be a whole plan. The instruction becomes
     /// the workflow's trigger payload.
     pub workflow: Option<String>,
+    /// Fingerprint of the exact workflow definition the caller selected.
+    ///
+    /// Carried to the worker so it can compare the record it is about to run,
+    /// closing the gap between a capability probe and actual execution.
+    pub workflow_fingerprint: Option<String>,
+    /// Values for the selected workflow's declared inputs, keyed by name.
+    ///
+    /// Empty for ordinary harness tasks and workflows with no declared inputs.
+    pub workflow_inputs: Map<String, Value>,
     /// Opt into session continuity: successive dispatches naming the same
     /// conversation resume one harness session.
     ///
@@ -80,6 +91,18 @@ pub struct TaskRequest {
     /// (`opencode`) runs every turn fresh, which loses context but never
     /// correctness, so a caller may always ask.
     pub conversation: Option<String>,
+    /// How deep in a dispatch tree the harness running this task will sit.
+    ///
+    /// `0` for work an operator started. A task dispatched *by* a harness
+    /// through the fleet tools carries its dispatcher's depth plus one, which is
+    /// what stops a tree from fanning out forever with nobody watching.
+    ///
+    /// Carried on the request rather than read from the ambient environment for
+    /// the reason [`tool_mode`](Self::tool_mode) is: one process dispatches at
+    /// several depths, so a process-wide value could only ever be right for one
+    /// of them. It is set by the control plane from the *grant* the dispatcher
+    /// presented, never from anything that dispatcher said about itself.
+    pub fleet_depth: u8,
 }
 
 /// The terminal result of a dispatched task.

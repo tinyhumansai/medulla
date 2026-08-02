@@ -41,7 +41,7 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
     // The MCP server owns stdout for the whole session, so it returns straight
     // from here rather than falling through to the JSON print below.
     if matches!(parsed.action, WorkflowAction::Mcp) {
-        return medulla::workflows::mcp::serve_stdio(&env, &cwd)
+        return medulla::mcp::serve_stdio(&env, &cwd)
             .await
             .map_err(anyhow::Error::from);
     }

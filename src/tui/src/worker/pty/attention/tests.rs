@@ -96,10 +96,32 @@ fn an_ordinary_question_does_not_interrupt_a_working_claude() {
 fn a_startup_dialog_outranks_a_prompt() {
     // Codex's trust dialog, which `dialog` also recognises: the cue must carry
     // that module's wording rather than the generic approval one.
-    let screen = "Do you trust the contents of this directory?\n› 1. Yes, continue";
+    let screen = "Do you trust the contents of this directory?\n\
+                  › 1. Yes, continue\n\
+                    2. No, quit\n\n\
+                  Press enter to continue";
     let (kind, what) = detect(HarnessProvider::Codex, screen).expect("a cue");
     assert_eq!(kind, AttentionKind::Dialog);
     assert!(what.contains("trust"), "{what}");
+}
+
+#[test]
+fn retained_startup_dialog_words_do_not_interrupt_active_work() {
+    for screen in [
+        "Assistant: trust the contents of this directory\nWorking… (esc to interrupt)",
+        "Assistant: choose skip until next version\nWorking… (esc to interrupt)",
+    ] {
+        assert!(detect(HarnessProvider::Codex, screen).is_none());
+    }
+}
+
+#[test]
+fn retained_startup_dialog_above_a_composer_is_not_active() {
+    let screen = "Earlier: Do you trust the contents of this directory?\n\
+                  › 1. Yes, continue\n\
+                  Press enter to continue\n\n\
+                  > ";
+    assert!(detect(HarnessProvider::Codex, screen).is_none());
 }
 
 #[test]

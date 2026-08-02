@@ -2,7 +2,7 @@
 
 use medulla::tinyplace::HarnessProvider;
 
-use super::super::dialog::blocking_dialog;
+use super::super::dialog::blocking_dialog_for;
 use super::AttentionKind;
 
 /// Phrases that mean the harness is *working*, not waiting.
@@ -151,6 +151,50 @@ fn is_composer(line: &str) -> bool {
         && !is_selected_option(line)
 }
 
+/// Whether the live screen tail has the controls of a startup modal.
+///
+/// Dialog phrases can remain in conversation history. The numbered selection
+/// and confirmation footer distinguish a modal the operator can act on from
+/// retained prose, while the composer check rejects an already-dismissed modal.
+fn has_active_dialog_context(screen: &str) -> bool {
+    let lines: Vec<&str> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if lines.last().is_some_and(|line| is_composer(line)) {
+        return false;
+    }
+    let tail_start = lines.len().saturating_sub(8);
+    let tail = &lines[tail_start..];
+    let footer = squash(&tail.join("\n"));
+    let has_confirmation =
+        footer.contains("entertoconfirm") || footer.contains("pressentertocontinue");
+    has_confirmation && tail.iter().any(|line| is_dialog_selected_option(line))
+}
+
+/// Whether `line` is the selected numbered row of a startup modal.
+///
+/// Startup dialogs use ASCII `>` as well as the harness-specific carets. This
+/// stricter helper is safe because callers also require the modal footer.
+fn is_dialog_selected_option(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    let mut chars = trimmed.chars();
+    if !chars
+        .next()
+        .is_some_and(|first| first == '>' || CARETS.contains(&first))
+    {
+        return false;
+    }
+    let rest = chars.as_str().trim_start();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return false;
+    }
+    let after = &rest[digits.len()..];
+    matches!(after.chars().next(), Some('.') | Some(')'))
+        && after[1..].trim_start().chars().next().is_some()
+}
+
 /// Whether the screen carries a bare yes/no confirmation.
 ///
 /// Matched on punctuation, so it is checked against the raw text rather than
@@ -180,7 +224,10 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     // A recognised startup dialog outranks everything: it is the one case where
     // the harness will not take work at all, and it already has wording written
     // for an operator.
-    if let Some(dialog) = blocking_dialog(screen) {
+    let dialog = (!is_working(screen) && has_active_dialog_context(screen))
+        .then(|| blocking_dialog_for(provider, screen))
+        .flatten();
+    if let Some(dialog) = dialog {
         return Some((AttentionKind::Dialog, dialog.what.to_string()));
     }
 

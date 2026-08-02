@@ -483,7 +483,11 @@ pub struct AgentCapabilities {
     ///
     /// Older workers omit the field and therefore deserialize as `false`, so an
     /// upgraded controller never sends them an unknown screen control message.
-    #[serde(rename = "screenKill", default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(
+        rename = "screenKill",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
     pub screen_kill: bool,
 }
 

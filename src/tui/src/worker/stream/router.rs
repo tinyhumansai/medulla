@@ -100,10 +100,7 @@ impl ScreenRouter {
                 task_id,
                 correlation_id,
             } => {
-                if !self
-                    .runtime
-                    .terminate_task(from, &task_id, &correlation_id)
-                {
+                if !self.runtime.terminate_task(from, &task_id, &correlation_id) {
                     self.log(&format!(
                         "screen: refused kill from {from} on {task_id} — no such running task for this sender"
                     ));

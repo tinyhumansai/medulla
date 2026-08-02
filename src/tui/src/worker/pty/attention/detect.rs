@@ -161,15 +161,15 @@ fn has_active_dialog_context(screen: &str) -> bool {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .collect();
-    if lines.last().is_some_and(|line| is_composer(line)) {
-        return false;
-    }
     let tail_start = lines.len().saturating_sub(8);
     let tail = &lines[tail_start..];
+    let Some(selected) = tail.iter().position(|line| is_dialog_selected_option(line)) else {
+        return false;
+    };
     let footer = squash(&tail.join("\n"));
     let has_confirmation =
         footer.contains("entertoconfirm") || footer.contains("pressentertocontinue");
-    has_confirmation && tail.iter().any(|line| is_dialog_selected_option(line))
+    has_confirmation && !tail[selected + 1..].iter().any(|line| is_composer(line))
 }
 
 /// Whether `line` is the selected numbered row of a startup modal.

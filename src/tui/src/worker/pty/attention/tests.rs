@@ -120,7 +120,8 @@ fn retained_startup_dialog_above_a_composer_is_not_active() {
     let screen = "Earlier: Do you trust the contents of this directory?\n\
                   › 1. Yes, continue\n\
                   Press enter to continue\n\n\
-                  > ";
+                  > Try \"fix the failing test\"\n\
+                  ? for shortcuts";
     assert!(detect(HarnessProvider::Codex, screen).is_none());
 }
 

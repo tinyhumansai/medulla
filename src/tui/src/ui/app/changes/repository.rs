@@ -11,8 +11,17 @@ use super::types::ChangedFile;
 pub(super) fn discover() -> Result<(PathBuf, String), String> {
     let cwd = std::env::current_dir().map_err(|error| format!("Cannot read directory: {error}"))?;
     let root = git_path(&cwd, &["rev-parse", "--show-toplevel"])?;
-    let baseline = git(&root, &["rev-parse", "HEAD"])?;
-    Ok((root, baseline.trim().to_owned()))
+    let baseline = resolve_baseline(&root)?;
+    Ok((root, baseline))
+}
+
+/// Resolve HEAD, using Git's empty tree for a repository with no first commit.
+fn resolve_baseline(root: &Path) -> Result<String, String> {
+    match git(root, &["rev-parse", "--verify", "HEAD"]) {
+        Ok(head) => Ok(head.trim().to_owned()),
+        Err(_) => git(root, &["hash-object", "-t", "tree", "--stdin"])
+            .map(|tree| tree.trim().to_owned()),
+    }
 }
 
 /// Load commits and files changed from `baseline` through the current worktree.
@@ -63,6 +72,8 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
             .output()
             .map_err(|error| format!("Cannot run git: {error}"))?;
         command_stdout(result)?
+    } else if tracked(root, path)? {
+        String::new()
     } else {
         let result = Command::new("git")
             .current_dir(root)
@@ -77,6 +88,21 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
         String::from_utf8_lossy(&result.stdout).into_owned()
     };
     Ok(output.lines().map(str::to_owned).collect())
+}
+
+/// Whether Git currently tracks `path`, independent of its diff state.
+fn tracked(root: &Path, path: &Path) -> Result<bool, String> {
+    let result = Command::new("git")
+        .current_dir(root)
+        .args(["ls-files", "--error-unmatch", "--"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("Cannot run git: {error}"))?;
+    match result.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(command_error(&result)),
+    }
 }
 
 /// Parse Git's NUL-delimited name-status output, retaining rename destinations.

@@ -476,7 +476,8 @@ impl App {
         };
         let compact = TABS
             .iter()
-            .map(|tab| tab.chars().count() + 1)
+            .zip(&badges)
+            .map(|(tab, badge)| tab.chars().count() + badge.chars().count() + 1)
             .sum::<usize>()
             > area.width as usize;
         for (i, name) in TABS.iter().enumerate() {

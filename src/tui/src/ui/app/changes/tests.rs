@@ -75,6 +75,39 @@ fn patch_uses_the_baseline_for_deleted_files() {
 }
 
 #[test]
+fn a_reverted_tracked_file_does_not_become_an_untracked_patch() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("tracked.txt"), "baseline\n").expect("write tracked");
+    git(directory.path(), &["add", "tracked.txt"]);
+    git(directory.path(), &["commit", "-m", "tracked baseline"]);
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    let patch = repository::patch(
+        directory.path(),
+        baseline.trim(),
+        std::path::Path::new("tracked.txt"),
+    )
+    .expect("reverted tracked patch");
+
+    assert!(patch.is_empty());
+}
+
+#[test]
+fn an_unborn_repository_uses_the_empty_tree_as_its_baseline() {
+    let directory = tempdir().expect("temp repo");
+    git(directory.path(), &["init"]);
+
+    let baseline = repository::resolve_baseline(directory.path()).expect("empty-tree baseline");
+    let expected = output(
+        directory.path(),
+        &["hash-object", "-t", "tree", "--stdin"],
+    );
+
+    assert_eq!(baseline, expected.trim());
+}
+
+#[test]
 fn load_preserves_paths_that_git_would_quote() {
     let directory = tempdir().expect("temp repo");
     init_repo(directory.path());

@@ -430,6 +430,7 @@ async fn a_kill_for_a_task_this_sender_never_dispatched_is_refused() {
         "peerA",
         medulla::tinyplace::ScreenMessage::Kill {
             task_id: "t1".into(),
+            correlation_id: "cyc/t1/0".into(),
         },
     );
     assert_eq!(router.active(), 0);

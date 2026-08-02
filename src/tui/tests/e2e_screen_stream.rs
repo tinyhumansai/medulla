@@ -330,6 +330,7 @@ async fn an_owned_task_kill_stops_its_real_harness() {
         peer,
         ScreenMessage::Kill {
             task_id: task_id.to_string(),
+            correlation_id: format!("cyc/{task_id}/0"),
         },
     );
 

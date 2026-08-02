@@ -113,6 +113,30 @@ impl ActivityLog {
             .collect()
     }
 
+    /// Whether a reply or error has already settled the named task.
+    ///
+    /// Accepts the worker-facing id and resolves it through the same attribution
+    /// map as [`observed`](Self::observed), so fallback producers cannot append
+    /// a second terminal frame to an operator-visible alias.
+    pub fn has_terminal(&self, observed_task_id: &str) -> bool {
+        let task_id = self
+            .attribution
+            .lock()
+            .expect("attribution lock")
+            .iter()
+            .rev()
+            .find(|entry| entry.observed_task_id == observed_task_id)
+            .map(|entry| entry.activity_task_id.clone())
+            .unwrap_or_else(|| observed_task_id.to_string());
+        self.entries
+            .lock()
+            .expect("activity lock")
+            .iter()
+            .any(|entry| {
+                entry.task_id == task_id && matches!(entry.kind.as_str(), "reply" | "error")
+            })
+    }
+
     /// How many distinct tasks are still running per worker.
     ///
     /// A task counts as running once dispatched and stops the moment a terminal

@@ -30,13 +30,11 @@ use super::types::FoldState;
 /// tools exclusive: the token is the authority, it is never written to disk, and
 /// a process Medulla did not spawn has no way to obtain one.
 ///
-/// A process with no control plane mints nothing, and the child is never shown
-/// the fleet verbs. That is the ordinary case on a remote worker, whose daemon
-/// runs dispatched tasks but has no hub of its own — so the same instruction
-/// reaches a harness with the fleet tools locally and without them remotely.
-/// Withheld rather than advertised-and-failing, so a model plans around what it
-/// has instead of retrying something structurally unavailable.
-fn medulla_mcp_servers(
+/// A process with no local control plane can still receive a verified parent
+/// handoff from a workflow MCP subprocess. It exchanges that capability for a
+/// child grant at the next depth immediately before spawning this session.
+/// Ordinary remote workers receive neither source and expose no fleet verbs.
+pub(super) async fn medulla_mcp_servers(
     tool_mode: Option<&str>,
     session: &str,
     task_env: &HashMap<String, String>,
@@ -65,10 +63,11 @@ fn medulla_mcp_servers(
         .map(|loaded| loaded.config.workflows.enabled)
         .unwrap_or(true);
         let active_plane = crate::control_socket::active();
+        let parent_grant = crate::control_socket::parent_grant_from_env(task_env);
         // With neither family available there is no server worth attaching.
         // A host running a fleet still attaches it when workflow authoring is
         // disabled; the grant below withholds only the workflow family.
-        if !workflows_enabled && active_plane.is_none() {
+        if !workflows_enabled && active_plane.is_none() && parent_grant.is_none() {
             return Vec::new();
         }
         let Ok(binary) = std::env::current_exe() else {
@@ -90,7 +89,7 @@ fn medulla_mcp_servers(
         // against. Pushed explicitly rather than inherited for the same reason
         // the tool mode is: it is minted per session, and an inherited one would
         // hand a second harness the first one's capability.
-        if let Some(plane) = active_plane {
+        let fleet_grant = if let Some(plane) = active_plane {
             // The depth this task was dispatched at, written into the harness
             // environment by the daemon from the task frame. Read here and
             // recorded in the grant, so every later check consults the grant
@@ -103,17 +102,40 @@ fn medulla_mcp_servers(
                 plane.max_depth,
                 plane.max_in_flight,
             );
+            Some((plane.socket.clone(), plane.grants.mint(grant)))
+        } else if let Some((socket, token)) = parent_grant {
+            match crate::control_socket::ControlClient::connect(&socket, &token).await {
+                Ok(mut client) => client
+                    .call_until(
+                        "grant.child",
+                        serde_json::json!({}),
+                        tokio::time::Instant::now() + Duration::from_secs(5),
+                    )
+                    .await
+                    .ok()
+                    .and_then(|result| {
+                        result
+                            .get("token")
+                            .and_then(serde_json::Value::as_str)
+                            .map(|token| (socket, token.to_string()))
+                    }),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+        if let Some((socket, token)) = fleet_grant {
             server
                 .env
                 .push(agent_client_protocol::schema::v1::EnvVariable::new(
                     crate::control_socket::MCP_SOCKET_ENV,
-                    plane.socket.to_string_lossy().as_ref(),
+                    socket.to_string_lossy().as_ref(),
                 ));
             server
                 .env
                 .push(agent_client_protocol::schema::v1::EnvVariable::new(
                     crate::control_socket::MCP_GRANT_ENV,
-                    plane.grants.mint(grant),
+                    token,
                 ));
         }
         if let Some(mode) = tool_mode {
@@ -252,7 +274,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // it, and it would fail silently: the model would explain
                     // what it would have done.
                     request.mcp_servers =
-                        medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env);
+                        medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env).await;
                     connection.send_request(request).block_task().await?;
                     id.into()
                 }
@@ -263,7 +285,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // harness anything to call — and it is what lets a coding
                     // agent author a workflow rather than only run one.
                     request.mcp_servers =
-                        medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env);
+                        medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env).await;
                     connection
                         .send_request(request)
                         .block_task()
@@ -374,6 +396,8 @@ pub(super) fn acp_env(options: &RunTaskOptions) -> HashMap<String, String> {
     // would let it redeem a grant minted for another process or session.
     env.remove(crate::control_socket::MCP_SOCKET_ENV);
     env.remove(crate::control_socket::MCP_GRANT_ENV);
+    env.remove(crate::control_socket::MCP_PARENT_SOCKET_ENV);
+    env.remove(crate::control_socket::MCP_PARENT_GRANT_ENV);
     let attribution_env = crate::attribution::attribution_env(options.attribution, &env);
     env.extend(attribution_env);
     if let Some(router) = &options.router {

@@ -76,6 +76,23 @@ async fn several_calls_on_one_connection_stay_correlated() {
 }
 
 #[tokio::test]
+async fn a_child_grant_round_trips_at_the_next_depth() {
+    let (_dir, server, token) = serve(FakeFleet::new()).await;
+    let mut parent = ControlClient::connect(server.path(), &token).await.unwrap();
+
+    let exchanged = parent.call("grant.child", json!({})).await.unwrap();
+    let child_token = exchanged["token"].as_str().unwrap();
+    let child = ControlClient::connect(server.path(), child_token)
+        .await
+        .unwrap();
+
+    assert_ne!(child_token, token);
+    assert_eq!(exchanged["depth"], json!(1));
+    assert_eq!(child.hello().depth, 1);
+    assert_eq!(child.hello().max_depth, parent.hello().max_depth);
+}
+
+#[tokio::test]
 async fn a_hanging_task_can_be_aborted_over_the_wire() {
     let (_dir, server, token) = serve(FakeFleet::new().with_outcome(FakeOutcome::Hang)).await;
     let mut client = ControlClient::connect(server.path(), &token).await.unwrap();

@@ -277,6 +277,7 @@ pub async fn handle_control(
     };
 
     let result = match op {
+        "grant.child" => grant_child(grants, &grant),
         "worker.list" => worker_list(ops),
         "task.dispatch" => task_dispatch(ops, registry, &token, &grant, &params).await,
         "task.get" => task_get(registry, &token, &params).await,
@@ -296,6 +297,21 @@ pub async fn handle_control(
         Ok(result) => ok(&id, result),
         Err(failure) => fail(&id, failure.kind, failure.message),
     }
+}
+
+/// Mint a child capability whose authority can only narrow with depth.
+fn grant_child(grants: &GrantRegistry, parent: &Grant) -> Result<Value, ControlFailure> {
+    let child = Grant::new(
+        parent.session.clone(),
+        parent.child_depth(),
+        parent.max_depth,
+    )
+    .with_families(parent.families)
+    .with_max_in_flight(parent.max_in_flight)
+    .with_tool_mode(parent.tool_mode.as_deref());
+    let depth = child.depth;
+    let token = grants.mint(child);
+    Ok(json!({ "token": token, "depth": depth }))
 }
 
 /// Redeem a grant and describe the fleet it reaches.

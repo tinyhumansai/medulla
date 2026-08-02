@@ -9,6 +9,74 @@ use crate::tinyplace::HarnessProvider;
 
 use super::types::FoldState;
 
+#[cfg(all(feature = "workflows", unix))]
+struct NoFleet;
+
+#[cfg(all(feature = "workflows", unix))]
+#[async_trait::async_trait]
+impl crate::control_socket::FleetOps for NoFleet {
+    fn workers(&self) -> Option<Vec<crate::control_socket::FleetWorker>> {
+        Some(Vec::new())
+    }
+
+    fn default_worker(&self) -> Option<String> {
+        None
+    }
+
+    async fn dispatch(
+        &self,
+        _request: crate::hub::TaskRequest,
+        _status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ) -> Result<crate::hub::TaskOutcome, crate::hub::RunError> {
+        unreachable!("grant exchange never dispatches")
+    }
+
+    fn abort(&self, _abort_id: &str) -> bool {
+        false
+    }
+}
+
+#[cfg(all(feature = "workflows", unix))]
+#[tokio::test]
+async fn a_parent_handoff_is_exchanged_before_the_mcp_server_is_attached() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("control.sock");
+    let grants = crate::control_socket::GrantRegistry::new();
+    let parent_token = grants.mint(crate::control_socket::Grant::new("parent", 1, 3));
+    let ops: Arc<dyn crate::control_socket::FleetOps> = Arc::new(NoFleet);
+    let _server = crate::control_socket::ControlServer::bind(&path, ops, grants, false)
+        .await
+        .unwrap();
+    let env = HashMap::from([
+        (
+            crate::control_socket::MCP_PARENT_SOCKET_ENV.to_string(),
+            path.to_string_lossy().into_owned(),
+        ),
+        (
+            crate::control_socket::MCP_PARENT_GRANT_ENV.to_string(),
+            parent_token.clone(),
+        ),
+    ]);
+
+    let servers = super::execution::medulla_mcp_servers(None, "child", &env).await;
+    let agent_client_protocol::schema::v1::McpServer::Stdio(server) = &servers[0] else {
+        panic!("Medulla MCP server must use stdio");
+    };
+    let child_token = server
+        .env
+        .iter()
+        .find(|var| var.name == crate::control_socket::MCP_GRANT_ENV)
+        .map(|var| var.value.clone())
+        .expect("child grant attached");
+    let child = crate::control_socket::ControlClient::connect(&path, &child_token)
+        .await
+        .unwrap();
+
+    assert_ne!(child_token, parent_token);
+    assert_eq!(child.hello().depth, 2);
+    assert_eq!(child.hello().max_depth, 3);
+}
+
 #[cfg(feature = "workflows")]
 #[test]
 fn session_grants_read_depth_from_the_task_environment() {

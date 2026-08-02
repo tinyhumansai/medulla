@@ -94,6 +94,7 @@ pub(super) fn with_tool_mode_at_depth(
     // session isolation, including on the direct-provider transport.
     env.remove(crate::control_socket::MCP_SOCKET_ENV);
     env.remove(crate::control_socket::MCP_GRANT_ENV);
+    let has_parent_grant = crate::control_socket::parent_grant_from_env(&env).is_some();
     env.insert(
         crate::control_socket::FLEET_DEPTH_ENV.to_string(),
         depth.to_string(),
@@ -105,7 +106,10 @@ pub(super) fn with_tool_mode_at_depth(
         if let Some(mode) = mode {
             env.insert(crate::mcp::TOOL_MODE_ENV.to_string(), mode.to_string());
         }
-        if mode.is_some() || task_can_reach_fleet(crate::control_socket::active().is_some()) {
+        if mode.is_some()
+            || has_parent_grant
+            || task_can_reach_fleet(crate::control_socket::active().is_some())
+        {
             // Medulla tools are attached through ACP; legacy provider JSONL
             // cannot expose the MCP server. Restricted workflow turns need it
             // for authoring. Every task on the process that owns the control

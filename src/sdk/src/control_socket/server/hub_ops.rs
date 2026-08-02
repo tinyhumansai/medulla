@@ -54,6 +54,12 @@ pub(super) fn record_outcome(
     task_id: &str,
     outcome: &Result<TaskOutcome, RunError>,
 ) {
+    // Normal worker replies and errors are recorded by the hub pump before the
+    // runner settles. This is only the fallback for locally generated outcomes
+    // such as transport failures, aborts, and timeouts that produced no frame.
+    if activity.has_terminal(task_id) {
+        return;
+    }
     let (kind, content) = match outcome {
         Ok(result) => ("reply", result.reply.clone()),
         Err(error) => ("error", error.to_string()),

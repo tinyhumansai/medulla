@@ -150,6 +150,23 @@ fn a_settled_dispatch_is_recorded_as_a_reply() {
 }
 
 #[test]
+fn an_inbound_terminal_frame_is_not_recorded_again_by_the_fallback() {
+    let activity = ActivityLog::new();
+    activity.dispatched_as("mcp-wire-1", "mcp-visible-1", "alpha");
+    activity.observed("mcp-wire-1", "reply", "the work is done", 1);
+
+    record_outcome(&activity, "mcp-wire-1", &done("the work is done"));
+
+    let terminal: Vec<_> = activity
+        .snapshot()
+        .into_iter()
+        .filter(|entry| matches!(entry.kind.as_str(), "reply" | "error"))
+        .collect();
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(terminal[0].task_id, "mcp-visible-1");
+}
+
+#[test]
 fn a_failed_dispatch_is_recorded_as_an_error_the_operator_can_read() {
     let activity = ActivityLog::new();
     activity.dispatched("mcp-wire-1", "alpha");

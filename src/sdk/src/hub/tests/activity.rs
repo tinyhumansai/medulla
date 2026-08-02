@@ -112,6 +112,16 @@ fn a_wire_id_can_feed_an_operator_visible_cancellable_task() {
 }
 
 #[test]
+fn terminal_lookup_resolves_the_worker_id_to_its_visible_alias() {
+    let log = ActivityLog::new();
+    log.dispatched_as("wire-1", "cycle/t:abort-1", "worker-a");
+    log.observed("wire-1", "reply", "done", 42);
+
+    assert!(log.has_terminal("wire-1"));
+    assert!(log.has_terminal("cycle/t:abort-1"));
+}
+
+#[test]
 fn a_task_with_only_non_terminal_frames_counts_as_running() {
     let log = ActivityLog::new();
     log.dispatched("task-1", "worker-a");

@@ -55,6 +55,7 @@ pub use types::{
     depth_from_env, grant_from_env, ControlError, ControlFailure, ErrorKind, FleetOps, FleetWorker,
     Hello, ToolFamilies, FLEET_DEPTH_ENV, MCP_GRANT_ENV, MCP_SOCKET_ENV, PROTOCOL_VERSION,
 };
+pub(crate) use types::{parent_grant_from_env, MCP_PARENT_GRANT_ENV, MCP_PARENT_SOCKET_ENV};
 
 #[cfg(unix)]
 pub use client::ControlClient;

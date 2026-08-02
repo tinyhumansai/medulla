@@ -319,6 +319,16 @@ pub const MCP_SOCKET_ENV: &str = "MEDULLA_MCP_SOCKET";
 /// permissions, only present one that means nothing.
 pub const MCP_GRANT_ENV: &str = "MEDULLA_MCP_GRANT";
 
+/// Internal handoff naming the parent control socket for a nested ACP session.
+///
+/// Unlike [`MCP_SOCKET_ENV`], this is never attached to the MCP subprocess. It
+/// reaches the provider setup just long enough to exchange the parent's grant
+/// for a depth-scoped child capability.
+pub(crate) const MCP_PARENT_SOCKET_ENV: &str = "MEDULLA_MCP_PARENT_SOCKET";
+
+/// Internal handoff carrying the parent grant used for a child exchange.
+pub(crate) const MCP_PARENT_GRANT_ENV: &str = "MEDULLA_MCP_PARENT_GRANT";
+
 /// Environment variable carrying a task's depth in the dispatch tree.
 ///
 /// Set by the daemon from [`TaskRequest::fleet_depth`](crate::hub::TaskRequest),
@@ -349,6 +359,21 @@ pub fn grant_from_env(env: &HashMap<String, String>) -> Option<(std::path::PathB
         .filter(|s| !s.is_empty())?;
     let token = env
         .get(MCP_GRANT_ENV)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())?;
+    Some((std::path::PathBuf::from(socket), token.to_string()))
+}
+
+/// Read the parent capability prepared for a nested harness session.
+pub(crate) fn parent_grant_from_env(
+    env: &HashMap<String, String>,
+) -> Option<(std::path::PathBuf, String)> {
+    let socket = env
+        .get(MCP_PARENT_SOCKET_ENV)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())?;
+    let token = env
+        .get(MCP_PARENT_GRANT_ENV)
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())?;
     Some((std::path::PathBuf::from(socket), token.to_string()))

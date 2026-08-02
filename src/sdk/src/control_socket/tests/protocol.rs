@@ -96,6 +96,27 @@ async fn a_handshake_reports_the_fleet_and_the_grant() {
 }
 
 #[tokio::test]
+async fn a_child_grant_inherits_authority_at_the_next_depth() {
+    let parent = Grant::new("nested", 1, 3)
+        .with_families(ToolFamilies::workflows_only())
+        .with_max_in_flight(2)
+        .with_tool_mode(Some("propose:workflow-a"));
+    let mut harness = Harness::with(FakeFleet::new(), parent.clone());
+
+    let response = harness.call("grant.child", json!({})).await;
+    let token = response["result"]["token"].as_str().unwrap();
+    let child = harness.grants.redeem(token).expect("minted child grant");
+
+    assert_eq!(response["result"]["depth"], json!(2));
+    assert_eq!(child.session, parent.session);
+    assert_eq!(child.depth, 2);
+    assert_eq!(child.max_depth, parent.max_depth);
+    assert_eq!(child.families, parent.families);
+    assert_eq!(child.max_in_flight, parent.max_in_flight);
+    assert_eq!(child.tool_mode, parent.tool_mode);
+}
+
+#[tokio::test]
 async fn nothing_is_answered_before_a_handshake() {
     // The whole surface is scoped by grant, so an op that arrives without one
     // has no scope to be answered within — including a read as harmless-looking

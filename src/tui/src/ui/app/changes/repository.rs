@@ -66,13 +66,7 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
     } else {
         let result = Command::new("git")
             .current_dir(root)
-            .args([
-                "diff",
-                "--no-index",
-                "--no-ext-diff",
-                "--unified=3",
-                "--",
-            ])
+            .args(["diff", "--no-index", "--no-ext-diff", "--unified=3", "--"])
             .arg("/dev/null")
             .arg(path)
             .output()

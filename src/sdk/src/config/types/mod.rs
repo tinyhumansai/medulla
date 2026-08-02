@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::AppearanceConfig;
 use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
 use crate::runtime::fleet::{
     AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor, WorkspaceDescriptor,

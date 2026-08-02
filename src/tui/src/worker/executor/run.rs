@@ -481,9 +481,14 @@ impl PtySessionExecutor {
                 ));
             }
             if abort.is_aborted() {
-                // A real interrupt, not a kill: Ctrl-C reaches the harness the
-                // same way the operator's would, and the session survives it.
-                let _ = self.sessions.write(id, &[0x03]);
+                if abort.is_terminated() {
+                    self.stop_turn(id);
+                } else {
+                    // A requester abort is an interrupt: Ctrl-C reaches the
+                    // harness the same way the operator's would, and the
+                    // reusable session survives it.
+                    let _ = self.sessions.write(id, &[0x03]);
+                }
                 return Err(format!("{} task aborted", provider.as_str()));
             }
             if !self

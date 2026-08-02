@@ -69,7 +69,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
 /// The runtime is the piece under test here as much as the sampler: it owns the
 /// running-task record keyed by `(sender, task id)`, and that record is the only
 /// thing that lets a subscription resolve.
-fn runtime_serving(session_id: String) -> DaemonRuntime {
+fn runtime_serving(sessions: PtyManager, session_id: String) -> DaemonRuntime {
     let config = DaemonConfig {
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
@@ -92,13 +92,17 @@ fn runtime_serving(session_id: String) -> DaemonRuntime {
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
         let session_id = session_id.clone();
+        let sessions = sessions.clone();
         Box::pin(async move {
             if let Some(report) = options.on_session {
                 report(session_id);
             }
             // Hold the task open so its record — and therefore the subscription
             // resolving through it — stays live for the duration of the test.
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            options.abort.cancelled().await;
+            if options.abort.is_terminated() {
+                sessions.close(&session_id);
+            }
             Err("never settles".to_string())
         }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
     }) as medulla::daemon::providers::RunTaskFn;
@@ -155,7 +159,7 @@ async fn a_watched_task_streams_its_real_terminal_to_the_hubs_store() {
         ))
         .expect("a pty session");
 
-    let runtime = runtime_serving(session_id.clone());
+    let runtime = runtime_serving(sessions.clone(), session_id.clone());
     start_task(&runtime, peer, task_id).await;
 
     let outbox: Outbox = Arc::new(Mutex::new(Vec::new()));

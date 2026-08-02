@@ -97,7 +97,7 @@ impl ScreenRouter {
                 }
             }
             ScreenMessage::Kill { task_id } => {
-                if !self.runtime.abort_task(from, &task_id) {
+                if !self.runtime.terminate_task(from, &task_id) {
                     self.log(&format!(
                         "screen: refused kill from {from} on {task_id} — no such running task for this sender"
                     ));

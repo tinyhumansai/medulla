@@ -280,7 +280,8 @@ pub(super) async fn handle_task_run(
         fleet_depth: 0,
     };
 
-    let outcome = runner.run(req, Some(tx)).await;
+    let screen_kill = capabilities.is_some_and(|capabilities| capabilities.screen_kill);
+    let outcome = runner.run_negotiated(req, Some(tx), screen_kill).await;
     match &outcome {
         Ok(o) => log(&format!(
             "hub: task {} ok ({} chars)",

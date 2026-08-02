@@ -284,6 +284,26 @@ impl TaskRunner {
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<TaskOutcome, RunError> {
+        self.run_with_screen_kill(req, status, false).await
+    }
+
+    /// Run a dispatch with the screen-control support negotiated specifically
+    /// for this request.
+    pub async fn run_negotiated(
+        &self,
+        req: TaskRequest,
+        status: Option<mpsc::UnboundedSender<String>>,
+        screen_kill: bool,
+    ) -> Result<TaskOutcome, RunError> {
+        self.run_with_screen_kill(req, status, screen_kill).await
+    }
+
+    async fn run_with_screen_kill(
+        &self,
+        req: TaskRequest,
+        status: Option<mpsc::UnboundedSender<String>>,
+        screen_kill: bool,
+    ) -> Result<TaskOutcome, RunError> {
         // Register this dispatch's abort signal FIRST — before the contact wait —
         // so a `task_abort` that arrives during contact negotiation (up to
         // `CONTACT_WAIT` for a first-time worker) is honored, not silently dropped
@@ -325,12 +345,6 @@ impl TaskRunner {
         }
 
         let mut attempt = 0u32;
-        let screen_kill = self
-            .capabilities
-            .lock()
-            .await
-            .get(&req.worker_address)
-            .is_some_and(|capabilities| capabilities.screen_kill);
         loop {
             let cid = format!(
                 "{}/{}/{}",

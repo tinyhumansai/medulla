@@ -35,8 +35,8 @@ impl DeviceFooter {
             .into_iter()
             .filter(|display| *display != ResourceDisplay::Off)
             .count();
-        let disk_visible = appearance.device_disk != ResourceDisplay::Off
-            && budget > metrics_before_disk;
+        let disk_visible =
+            appearance.device_disk != ResourceDisplay::Off && budget > metrics_before_disk;
         let snapshot = if enabled {
             app.device_monitor.sample_for(disk_visible)
         } else {

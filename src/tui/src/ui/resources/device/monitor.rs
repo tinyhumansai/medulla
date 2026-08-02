@@ -39,8 +39,7 @@ impl DeviceMonitor {
         if self.last_refresh.is_some_and(|last| {
             now.duration_since(last) < REFRESH_INTERVAL
                 && (self.last_refresh_included_disk || !include_disk)
-        })
-        {
+        }) {
             return self.snapshot;
         }
         self.last_refresh = Some(now);

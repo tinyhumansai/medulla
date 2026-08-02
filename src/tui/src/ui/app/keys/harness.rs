@@ -74,6 +74,14 @@ impl App {
             self.type_into_harness(&session, key);
             return true;
         }
+        // *Attaching* is a chrome binding, not a mode, so it yields to whatever
+        // overlay is on top of the chrome. The pane behind an open picker is
+        // still drawn — and so still resolves a harness session — which is how
+        // Enter in the "start a harness" modal used to attach to the harness
+        // already selected underneath it instead of launching the chosen one.
+        if self.overlay_owns_keys() {
+            return false;
+        }
         let enter_on_harness = key.code == KeyCode::Enter
             && key.modifiers == KeyModifiers::NONE
             && self.harness_pane_session.is_some();

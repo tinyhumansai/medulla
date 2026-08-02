@@ -78,14 +78,43 @@ fn patch_uses_the_baseline_for_deleted_files() {
 fn load_preserves_paths_that_git_would_quote() {
     let directory = tempdir().expect("temp repo");
     init_repo(directory.path());
-    fs::write(directory.path().join("café\tfile.txt"), "new\n").expect("write unusual path");
+    fs::write(directory.path().join("café file.txt"), "new\n").expect("write unusual path");
     let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
 
     let (_, files) = repository::load(directory.path(), baseline.trim()).expect("load");
-    assert_eq!(files[0].path, std::path::Path::new("café\tfile.txt"));
+    assert_eq!(files[0].path, std::path::Path::new("café file.txt"));
     let patch = repository::patch(directory.path(), baseline.trim(), &files[0].path)
         .expect("untracked patch");
     assert!(patch.iter().any(|line| line == "+new"));
+}
+
+#[test]
+fn patch_accepts_an_untracked_path_that_starts_with_a_dash() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("-new.txt"), "new\n").expect("write dash path");
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    let patch = repository::patch(
+        directory.path(),
+        baseline.trim(),
+        std::path::Path::new("-new.txt"),
+    )
+    .expect("dash-prefixed patch");
+
+    assert!(patch.iter().any(|line| line == "+new"));
+}
+
+#[test]
+fn git_path_removes_only_the_command_terminator() {
+    assert_eq!(
+        repository::path_from_line(b"/repo/with space \n".to_vec()),
+        std::path::Path::new("/repo/with space ")
+    );
+    assert_eq!(
+        repository::path_from_line(b"C:\\repo\r\n".to_vec()),
+        std::path::Path::new("C:\\repo")
+    );
 }
 
 /// Initialize a repository with one empty baseline commit.

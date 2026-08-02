@@ -11,6 +11,8 @@ mod repository;
 pub(super) mod types;
 
 #[cfg(test)]
+mod comment_tests;
+#[cfg(test)]
 mod tests;
 
 use std::path::Path;
@@ -37,7 +39,15 @@ impl App {
 
     /// Open a comment prompt bound to the selected file as a whole.
     pub(super) fn comment_on_change_file(&mut self) {
-        self.open_change_comment(CommentAnchor::File);
+        let existing = self
+            .changes
+            .selected_path()
+            .and_then(|path| self.changes.comments.body(path, CommentAnchor::File))
+            .map(str::to_owned);
+        match existing {
+            Some(body) => self.open_change_comment_with(CommentAnchor::File, body),
+            None => self.open_change_comment(CommentAnchor::File),
+        }
     }
 
     /// Open a comment prompt seeded with the note already at the cursor.

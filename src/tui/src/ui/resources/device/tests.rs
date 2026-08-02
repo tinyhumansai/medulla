@@ -127,6 +127,19 @@ fn an_injected_reading_is_returned_verbatim() {
     assert_eq!(monitor.sample(), sample());
 }
 
+#[test]
+fn a_diskless_sample_can_be_upgraded_within_the_refresh_interval() {
+    let mut monitor = DeviceMonitor::default();
+    let without_disk = monitor.sample_for(false);
+    assert_eq!(without_disk.disk_used_bytes, None);
+    assert_eq!(without_disk.disk_total_bytes, None);
+
+    // Requesting disk immediately afterwards must not reuse the intentionally
+    // diskless cached sample.
+    let with_disk = monitor.sample_for(true);
+    assert_eq!(with_disk.disk_used_bytes.is_some(), with_disk.disk_total_bytes.is_some());
+}
+
 /// A smoke test over real sampling, asserting only invariants that hold on any
 /// host: nothing panics, CPU is withheld until there are two refreshes to
 /// compare, and any reported figures are internally consistent. Values are

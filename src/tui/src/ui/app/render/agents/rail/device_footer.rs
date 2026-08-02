@@ -31,8 +31,14 @@ impl DeviceFooter {
         let enabled = appearance.device_cpu != ResourceDisplay::Off
             || appearance.device_ram != ResourceDisplay::Off
             || appearance.device_disk != ResourceDisplay::Off;
+        let metrics_before_disk = [appearance.device_cpu, appearance.device_ram]
+            .into_iter()
+            .filter(|display| *display != ResourceDisplay::Off)
+            .count();
+        let disk_visible = appearance.device_disk != ResourceDisplay::Off
+            && budget > metrics_before_disk;
         let snapshot = if enabled {
-            app.device_monitor.sample()
+            app.device_monitor.sample_for(disk_visible)
         } else {
             Default::default()
         };

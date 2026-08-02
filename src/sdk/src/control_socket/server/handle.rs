@@ -190,6 +190,15 @@ fn build_request(
              workflow through the fleet",
         ));
     }
+    if workflow.is_some()
+        && (optional_str(params, "harness").is_some() || optional_str(params, "model").is_some())
+    {
+        return Err(ControlFailure::new(
+            ErrorKind::BadRequest,
+            "`harness` and `model` apply to direct harness tasks, not saved workflows; configure \
+             routing on the workflow or its agent nodes",
+        ));
+    }
     let provider = match optional_str(params, "harness") {
         Some(name) => Some(HarnessProvider::from_wire(&name).ok_or_else(|| {
             ControlFailure::new(
@@ -400,6 +409,15 @@ async fn task_dispatch(
                 ),
             ));
         }
+        Err(SpawnError::GlobalAtCapacity(in_flight)) => {
+            return Err(ControlFailure::new(
+                ErrorKind::TooManyInFlight,
+                format!(
+                    "this Medulla instance already has {in_flight} fleet tasks running; wait for \
+                     one to finish before dispatching another"
+                ),
+            ));
+        }
         Err(SpawnError::Unavailable) => {
             return Err(ControlFailure::new(
                 ErrorKind::Internal,
@@ -450,12 +468,25 @@ fn task_abort(
     // Resolved through the registry so a caller can only abort ids minted for
     // its own grant; passing the requested id straight to the runner would let
     // any holder cancel any dispatch on the machine.
-    let abort_id = registry.abort_id_for(token, &task_id).ok_or_else(|| {
+    let entry = registry.get(token, &task_id).ok_or_else(|| {
         ControlFailure::new(
             ErrorKind::NoSuchTask,
             format!("no task {task_id} was dispatched from this session"),
         )
     })?;
-    ops.abort(&abort_id);
-    Ok(json!({ "aborted": true, "taskId": task_id }))
+    if entry.state.is_settled() {
+        return Ok(json!({
+            "aborted": false,
+            "taskId": task_id,
+            "status": entry.state.status(),
+        }));
+    }
+    if ops.abort(&entry.task_id) {
+        Ok(json!({ "aborted": true, "taskId": task_id }))
+    } else {
+        let status = registry
+            .get(token, &task_id)
+            .map_or("settled", |current| current.state.status());
+        Ok(json!({ "aborted": false, "taskId": task_id, "status": status }))
+    }
 }

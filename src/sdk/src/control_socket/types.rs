@@ -269,9 +269,10 @@ pub trait FleetOps: Send + Sync + 'static {
 
     /// Stop the dispatch registered under `abort_id`.
     ///
-    /// Best-effort, matching [`crate::hub::TaskRunner::abort_task`]: a task that
-    /// already settled is a no-op rather than an error.
-    fn abort(&self, abort_id: &str);
+    /// Returns whether a live dispatch was found and signalled. A task that
+    /// already settled returns false so callers never claim cancellation
+    /// succeeded after the result became final.
+    fn abort(&self, abort_id: &str) -> bool;
 }
 
 /// What a successful `hello` tells the shim about the fleet it just reached.

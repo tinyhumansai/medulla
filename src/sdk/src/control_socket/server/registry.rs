@@ -36,7 +36,7 @@ const STATUS_TAIL_MAX: usize = 200;
 const RESULT_TTL: Duration = Duration::from_secs(30 * 60);
 
 /// The most tasks tracked at once, across every grant.
-const MAX_ENTRIES: usize = 256;
+pub(super) const MAX_ENTRIES: usize = 256;
 
 /// Translate a dispatch failure into a state a model can reason about.
 ///
@@ -120,6 +120,13 @@ impl TaskRegistry {
         {
             let mut tasks = self.inner.lock().map_err(|_| SpawnError::Unavailable)?;
             Self::evict(&mut tasks);
+            let global_in_flight = tasks
+                .values()
+                .filter(|tracked| !tracked.entry.state.is_settled())
+                .count();
+            if global_in_flight >= MAX_ENTRIES {
+                return Err(SpawnError::GlobalAtCapacity(global_in_flight));
+            }
             let in_flight = tasks
                 .values()
                 .filter(|tracked| {

@@ -190,9 +190,11 @@ impl FleetOps for HubFleetOps {
         outcome
     }
 
-    fn abort(&self, abort_id: &str) {
+    fn abort(&self, abort_id: &str) -> bool {
         if let Some(handle) = self.handle() {
-            handle.task_runner().abort_task(abort_id);
+            handle.task_runner().abort_task(abort_id)
+        } else {
+            false
         }
     }
 }

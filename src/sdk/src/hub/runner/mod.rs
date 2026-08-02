@@ -198,8 +198,9 @@ impl TaskRunner {
     /// reaps its correlation entry, and returns [`RunError::Aborted`]. A no-op if
     /// no dispatch is in flight for that id — it already settled, or was never
     /// dispatched here. Best-effort: a lost signal (poisoned lock) just leaves the
-    /// dispatch to its own liveness bound.
-    pub fn abort_task(&self, task_id: &str) {
+    /// dispatch to its own liveness bound. Returns whether a live dispatch was
+    /// found and signalled.
+    pub fn abort_task(&self, task_id: &str) -> bool {
         let signal = self
             .aborts
             .lock()
@@ -207,6 +208,9 @@ impl TaskRunner {
             .and_then(|map| map.get(task_id).cloned());
         if let Some(signal) = signal {
             signal.notify_one();
+            true
+        } else {
+            false
         }
     }
 

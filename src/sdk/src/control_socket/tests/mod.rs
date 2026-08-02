@@ -137,8 +137,9 @@ impl FleetOps for FakeFleet {
         }
     }
 
-    fn abort(&self, abort_id: &str) {
+    fn abort(&self, abort_id: &str) -> bool {
         self.aborted.lock().unwrap().push(abort_id.to_string());
         self.hang_release.send_replace(true);
+        matches!(*self.outcome.lock().unwrap(), FakeOutcome::Hang)
     }
 }

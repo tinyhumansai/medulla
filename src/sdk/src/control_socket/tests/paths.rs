@@ -169,7 +169,7 @@ fn without_a_runtime_dir_the_fallback_uses_the_temp_dir() {
 
 #[cfg(unix)]
 mod bind {
-    use super::super::super::path::{prepare_bind, trusted_sticky_owner};
+    use super::super::super::path::{prepare_bind, trusted_lock_owner, trusted_sticky_owner};
     use super::*;
 
     #[tokio::test]
@@ -231,6 +231,22 @@ mod bind {
     }
 
     #[tokio::test]
+    async fn a_stuck_bind_lock_is_bounded_instead_of_hanging_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control.sock");
+        let _held = prepare_bind(&path, false).await.unwrap();
+        let started = std::time::Instant::now();
+
+        let result = prepare_bind(&path, false).await;
+
+        assert!(matches!(result, Err(ControlSocketError::AlreadyBound(_))));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "bind-lock contention must not hang startup"
+        );
+    }
+
+    #[tokio::test]
     async fn a_live_socket_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("control.sock");
@@ -280,6 +296,13 @@ mod bind {
         assert!(trusted_sticky_owner(0, 1000));
         assert!(!trusted_sticky_owner(2000, 1000));
         assert!(!trusted_sticky_owner(2000, 0));
+    }
+
+    #[test]
+    fn an_existing_bind_lock_is_trusted_only_for_this_user() {
+        assert!(trusted_lock_owner(1000, 1000));
+        assert!(!trusted_lock_owner(2000, 1000));
+        assert!(!trusted_lock_owner(0, 1000));
     }
 
     #[tokio::test]

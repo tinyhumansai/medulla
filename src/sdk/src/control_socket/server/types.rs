@@ -80,9 +80,12 @@ pub(super) struct Tracked {
 }
 
 /// Why a task could not be recorded for dispatch.
+#[derive(Debug)]
 pub(super) enum SpawnError {
     /// This grant already owns the reported number of running tasks.
     AtCapacity(usize),
+    /// The process already owns the reported number of running tasks.
+    GlobalAtCapacity(usize),
     /// The shared task table is unavailable after an internal panic.
     Unavailable,
 }

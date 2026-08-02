@@ -11,6 +11,8 @@ mod hub_ops;
 mod hub_ops_tests;
 mod registry;
 #[cfg(test)]
+mod registry_tests;
+#[cfg(test)]
 mod tests;
 mod types;
 

@@ -44,6 +44,16 @@ impl Drop for BindGuard {
 /// surprise failure on a colleague's laptop.
 const MAX_SOCKET_PATH_BYTES: usize = 103;
 
+/// How long startup waits for another process preparing the same socket.
+#[cfg(unix)]
+const BIND_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Whether an existing bind lock belongs to this OS user.
+#[cfg(unix)]
+pub(super) fn trusted_lock_owner(owner_uid: u32, effective_uid: u32) -> bool {
+    owner_uid == effective_uid
+}
+
 /// Environment variable naming an explicit control socket path.
 pub const CONTROL_SOCKET_ENV: &str = "MEDULLA_CONTROL_SOCKET";
 
@@ -402,7 +412,7 @@ pub async fn prepare_bind(
 #[cfg(unix)]
 async fn acquire_bind_guard(path: &Path) -> Result<BindGuard, ControlSocketError> {
     use fs2::FileExt;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
     let Some(parent) = path.parent() else {
         return Err(ControlSocketError::Io(
@@ -426,19 +436,41 @@ async fn acquire_bind_guard(path: &Path) -> Result<BindGuard, ControlSocketError
             .custom_flags(libc::O_NOFOLLOW)
             .open(&opened_path)
             .map_err(|error| ControlSocketError::Io(error.to_string()))?;
-        if !file
+        let metadata = file
             .metadata()
-            .map_err(|error| ControlSocketError::Io(error.to_string()))?
-            .file_type()
-            .is_file()
-        {
+            .map_err(|error| ControlSocketError::Io(error.to_string()))?;
+        if !metadata.file_type().is_file() {
             return Err(ControlSocketError::Io(format!(
                 "{} is not a regular bind lock",
                 opened_path.display()
             )));
         }
-        file.lock_exclusive()
-            .map_err(|error| ControlSocketError::Io(error.to_string()))?;
+        // A lock beside an explicit socket may live in a shared sticky
+        // directory. Another user can create the predictable sibling first;
+        // never wait on or trust their inode.
+        let effective_uid = unsafe { libc::geteuid() };
+        if !trusted_lock_owner(metadata.uid(), effective_uid) {
+            return Err(ControlSocketError::Io(format!(
+                "{} belongs to another user",
+                opened_path.display()
+            )));
+        }
+        let deadline = std::time::Instant::now() + BIND_LOCK_TIMEOUT;
+        loop {
+            match file.try_lock_exclusive() {
+                Ok(()) => break,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    return Err(ControlSocketError::AlreadyBound(opened_path));
+                }
+                Err(error) => return Err(ControlSocketError::Io(error.to_string())),
+            }
+        }
         Ok(file)
     })
     .await

@@ -248,6 +248,24 @@ async fn workflow_inputs_must_be_an_object_and_name_a_workflow() {
 }
 
 #[tokio::test]
+async fn a_workflow_dispatch_rejects_direct_harness_routing_hints() {
+    for hint in [json!({ "harness": "claude" }), json!({ "model": "opus" })] {
+        let mut params = json!({ "instruction": "x", "workflow": "release" });
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(hint.as_object().unwrap().clone());
+        let response = Harness::new().call("task.dispatch", params).await;
+
+        assert_eq!(kind(&response), "badRequest");
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("saved workflows"));
+    }
+}
+
+#[tokio::test]
 async fn a_dispatch_without_an_instruction_is_a_bad_request() {
     let response = Harness::new().call("task.dispatch", json!({})).await;
 
@@ -498,6 +516,22 @@ async fn aborting_settles_a_hanging_task() {
         .call("task.get", json!({ "taskId": task_id, "waitSeconds": 5 }))
         .await;
     assert_eq!(response["result"]["status"], json!("aborted"));
+}
+
+#[tokio::test]
+async fn aborting_a_task_that_already_settled_reports_that_nothing_was_cancelled() {
+    let mut harness = Harness::new();
+    let dispatched = harness
+        .call("task.dispatch", json!({ "instruction": "x" }))
+        .await;
+    let task_id = dispatched["result"]["taskId"].as_str().unwrap().to_string();
+
+    let response = harness
+        .call("task.abort", json!({ "taskId": task_id }))
+        .await;
+
+    assert_eq!(response["result"]["aborted"], json!(false));
+    assert_eq!(response["result"]["status"], json!("done"));
 }
 
 #[tokio::test]

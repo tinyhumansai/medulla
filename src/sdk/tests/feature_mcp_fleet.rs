@@ -58,7 +58,9 @@ impl FleetOps for RecordingFleet {
         })
     }
 
-    fn abort(&self, _abort_id: &str) {}
+    fn abort(&self, _abort_id: &str) -> bool {
+        false
+    }
 }
 
 /// Bring up a server and an MCP session talking to it over a real socket.

@@ -480,15 +480,10 @@ impl App {
             .sum::<usize>()
             > area.width as usize;
         for (i, name) in TABS.iter().enumerate() {
-            // Keep every destination visible on narrow terminals. The full
-            // TokenMaxxxing word is repeated as the page title immediately
-            // below, so it is the least lossy label to compact when the ring's
-            // minimum one-space-per-tab form is still wider than the screen.
-            let name = if compact && *name == "TokenMaxxxing" {
-                "TokenMx"
-            } else {
-                name
-            };
+            // Every compact spelling is an actual destination and stays
+            // recognizable beside its page title, keeping the whole ring and
+            // its mouse hit boxes inside narrow terminals.
+            let name = compact_tab_label(name, compact);
             let badge = &badges[i];
             let label = if gap.is_empty() {
                 format!("{name}{badge} ")
@@ -604,6 +599,22 @@ impl App {
             clip(&describe_event(&env.event), width.saturating_sub(11))
         );
         TLine::from(Span::styled(text, style))
+    }
+}
+
+/// Shorten current tab names when their one-space labels cannot all fit.
+fn compact_tab_label(name: &str, compact: bool) -> &str {
+    if !compact {
+        return name;
+    }
+    match name {
+        "Overview" => "Over",
+        "Agents" => "Agts",
+        "Workflows" => "Flows",
+        "Changes" => "Diff",
+        "Feedback" => "Feed",
+        "Settings" => "Set",
+        _ => name,
     }
 }
 

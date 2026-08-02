@@ -128,7 +128,29 @@ impl App {
                 // Comments are session state only: this writes into the review
                 // store and never back into the repository, so the working tree
                 // the operator is reading stays exactly as Git reported it.
-                let kept = self.changes.comments.upsert(&path, anchor, &text);
+                // Capture the anchored content as context for drift detection.
+                let context = match anchor {
+                    medulla::ui::git_review::CommentAnchor::Line(index) => self
+                        .changes
+                        .patch
+                        .get(index)
+                        .map(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_owned(),
+                    medulla::ui::git_review::CommentAnchor::Hunk(index) => self
+                        .changes
+                        .hunks
+                        .get(index)
+                        .and_then(|hunk| self.changes.patch.get(hunk.header))
+                        .map(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_owned(),
+                    medulla::ui::git_review::CommentAnchor::File => String::new(),
+                };
+                let kept = self
+                    .changes
+                    .comments
+                    .upsert_with_context(&path, anchor, &text, &context);
                 self.set_status(if kept {
                     format!(
                         "Comment saved on {} · {}",

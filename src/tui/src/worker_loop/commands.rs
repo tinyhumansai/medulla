@@ -90,6 +90,7 @@ fn start_worker(
         )
     });
     let daemon = worker_runtime(start, mode, provider, &transport);
+    daemon.enable_screen_kill();
     // Screens are only worth streaming when there are screens: the headless
     // executor runs harnesses without a pty, so a subscriber finds nothing.
     let screens =

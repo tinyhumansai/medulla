@@ -20,6 +20,13 @@ use super::types::{
 };
 
 impl DaemonRuntime {
+    /// Advertise screen termination support for an embedding that installs the
+    /// authenticated screen-message router.
+    pub fn enable_screen_kill(&self) {
+        self.inner
+            .screen_kill
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     /// Build a runtime from `config`, an executor (`run_task`), and a
     /// lock-serialized `send`.
     pub fn new(config: DaemonConfig, run_task: RunTaskFn, send: SendFn) -> Self {
@@ -40,6 +47,7 @@ impl DaemonRuntime {
                 inflight_count: AtomicUsize::new(0),
                 inflight_idle: Notify::new(),
                 capabilities: TokioMutex::new(None),
+                screen_kill: AtomicBool::new(false),
                 accessible_dirs: StdMutex::new(accessible_dirs),
                 sessions: crate::sessions::SessionRegistry::default(),
             }),

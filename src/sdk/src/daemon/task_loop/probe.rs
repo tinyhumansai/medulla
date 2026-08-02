@@ -11,6 +11,10 @@ impl DaemonRuntime {
     pub(super) async fn handle_capabilities(&self, from: String, frame: TaskFrame) {
         #[cfg_attr(not(feature = "workflows"), allow(unused_mut))]
         let mut capabilities = self.get_capabilities().await;
+        capabilities.screen_kill = self
+            .inner
+            .screen_kill
+            .load(std::sync::atomic::Ordering::Relaxed);
         // Read fresh rather than cached: the harness probe is expensive and
         // worth caching, but an operator who just installed a workflow expects
         // the next probe to advertise it.

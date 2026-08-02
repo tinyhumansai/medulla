@@ -165,7 +165,20 @@ pub(super) async fn handle_task_run(
     // Negotiate once before dispatch. Besides informing automatic provider
     // selection, this records static control-plane support so an emergency kill
     // never waits behind a fresh probe of a wedged worker.
-    let capabilities = runner.capabilities(&worker_address).await.ok();
+    let capabilities = match runner
+        .capabilities_for_dispatch(&worker_address, &task_id)
+        .await
+    {
+        Ok(capabilities) => Some(capabilities),
+        Err(crate::hub::RunError::Aborted) => {
+            let outcome = Err(crate::hub::RunError::Aborted);
+            let _ = socket
+                .emit("medulla:task_result", result_frame(&task_id, &outcome))
+                .await;
+            return;
+        }
+        Err(_) => None,
+    };
 
     // An explicit provider is authoritative. Only an untargeted task consults
     // the subscription strategy, and a failed/unknown budget probe falls open

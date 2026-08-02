@@ -17,6 +17,9 @@ impl TaskRunner {
     /// (the hub's socket-plane `capabilities_result`) treats any error as "no
     /// budgets to advertise" and falls open to the static facts.
     pub async fn capabilities(&self, address: &str) -> Result<AgentCapabilities, RunError> {
+        // A failed refresh must not leave support advertised by an older worker
+        // that previously occupied this address.
+        self.capabilities.lock().await.remove(address);
         if !self.relay.contact_accepted(address).await {
             let _ = self.relay.request_contact(address).await;
             return Err(RunError::Worker(
@@ -85,6 +88,28 @@ impl TaskRunner {
                     self.relay.reset_session(address).await;
                 }
             }
+        }
+    }
+
+    /// Negotiate capabilities while making a backend abort effective before
+    /// the task itself is registered and sent.
+    pub async fn capabilities_for_dispatch(
+        &self,
+        address: &str,
+        abort_id: &str,
+    ) -> Result<AgentCapabilities, RunError> {
+        let abort = std::sync::Arc::new(tokio::sync::Notify::new());
+        self.aborts
+            .lock()
+            .expect("aborts lock")
+            .insert(abort_id.to_string(), abort.clone());
+        tokio::select! {
+            biased;
+            _ = abort.notified() => {
+                self.aborts.lock().expect("aborts lock").remove(abort_id);
+                Err(RunError::Aborted)
+            }
+            result = self.capabilities(address) => result,
         }
     }
 }

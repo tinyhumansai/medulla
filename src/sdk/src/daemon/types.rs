@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, Mutex as TokioMutex, Notify, Semaphore};
@@ -260,6 +260,8 @@ pub(super) struct Inner {
     pub(super) inflight_idle: Notify,
     /// Cached capability probe result.
     pub(super) capabilities: TokioMutex<Option<AgentCapabilities>>,
+    /// Whether this embedding routes authenticated screen kill messages.
+    pub(super) screen_kill: AtomicBool,
     /// Workspace roots currently approved for capability advertisement.
     ///
     /// Kept outside the immutable config so the daemon TUI can change the

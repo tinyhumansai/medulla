@@ -288,11 +288,13 @@ impl TaskRunner {
         // the backend aborts by, and held for the whole call (spanning any
         // reset+resend retries). The guard removes it on every return path, so a
         // settled dispatch leaves nothing for a later `task_abort` to match.
-        let abort = Arc::new(Notify::new());
-        self.aborts
+        let abort = self
+            .aborts
             .lock()
             .expect("aborts lock")
-            .insert(req.abort_id.clone(), abort.clone());
+            .entry(req.abort_id.clone())
+            .or_insert_with(|| Arc::new(Notify::new()))
+            .clone();
         let _abort_guard = AbortGuard {
             aborts: self.aborts.clone(),
             key: req.abort_id.clone(),

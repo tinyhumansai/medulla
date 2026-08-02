@@ -16,7 +16,7 @@ pub(super) fn discover() -> Result<(PathBuf, String), String> {
 }
 
 /// Resolve HEAD, using Git's empty tree for a repository with no first commit.
-fn resolve_baseline(root: &Path) -> Result<String, String> {
+pub(super) fn resolve_baseline(root: &Path) -> Result<String, String> {
     match git(root, &["rev-parse", "--verify", "HEAD"]) {
         Ok(head) => Ok(head.trim().to_owned()),
         Err(_) => git(root, &["hash-object", "-t", "tree", "--stdin"])

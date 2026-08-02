@@ -202,13 +202,7 @@ impl FleetOps for HubFleetOps {
             Err(_) => false,
         };
         let outcome = runner
-            .run_negotiated(
-                request,
-                Some(tee),
-                screen_kill,
-                Some(abort),
-                Some(task_id),
-            )
+            .run_negotiated(request, Some(tee), screen_kill, Some(abort), Some(task_id))
             .await;
         record_outcome(&activity, &wire_task_id, &outcome);
         outcome

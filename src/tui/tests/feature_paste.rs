@@ -360,7 +360,11 @@ mod picker {
 
         assert!(paste(&mut app, "stray text").is_none());
 
-        assert_eq!(app.draft_text(), "", "nothing reached the composer behind it");
+        assert_eq!(
+            app.draft_text(),
+            "",
+            "nothing reached the composer behind it"
+        );
         let screen = rendered(&mut app);
         assert!(
             !screen.contains("stray text"),
@@ -596,6 +600,51 @@ mod attached {
             app.draft_text(),
             "",
             "and the composer behind the question stayed empty"
+        );
+
+        sessions.shutdown();
+    }
+
+    #[test]
+    fn the_handback_note_takes_a_paste_once_it_is_being_typed() {
+        let sessions = PtyManager::new();
+        let id = shell_session(&sessions, READ_A_LINE);
+        let mut app = attached_app(sessions.clone(), &id);
+        let _ = app.on_event(Event::Key(KeyEvent::new(
+            KeyCode::Char(']'),
+            KeyModifiers::CONTROL,
+        )));
+
+        // `E` turns the note into a text input — every key is text from here,
+        // which is why `y` and `n` stop answering the question. A paste is text
+        // too, and pasting what you were doing into the brief is exactly what
+        // the note is for.
+        let _ = app.on_event(key(KeyCode::Char('E')));
+        assert!(paste(&mut app, "was mid-migration\non the auth tables\n").is_none());
+
+        let mut terminal = Terminal::new(TestBackend::new(140, 44)).expect("test terminal");
+        terminal.draw(|f| app.draw(f)).expect("draws");
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        // One line, so the breaks flatten to spaces: the note row has no second
+        // row to draw them on.
+        assert!(
+            screen.contains("Note: was mid-migration on the auth tables"),
+            "the pasted note is in the field: {screen}"
+        );
+
+        // And it is the note that was pasted into, not the harness behind it:
+        // the shell is still waiting on its `read`.
+        let mut pane = String::new();
+        sessions.screen_text_into(&id, &mut pane);
+        assert!(
+            !pane.contains("typed:"),
+            "the harness was untouched: {pane}"
         );
 
         sessions.shutdown();

@@ -293,6 +293,33 @@ impl App {
         }
     }
 
+    /// Take a bracketed-paste payload into the hand-back note.
+    ///
+    /// The question itself owns the keyboard and holds no field — `y`, `n` and
+    /// `E` are answers, not text — so a paste made while it is up belongs to
+    /// neither the harness behind it nor the composer, and is dropped. After `E`
+    /// the note *is* a text input, and pasting what you were doing into the
+    /// brief the orchestrator receives is exactly what the note is for.
+    ///
+    /// Flattened to one line and inserted at the caret, matching
+    /// [`edit_handback_note`](Self::edit_handback_note): the note is drawn as a
+    /// single row, and `Enter` there hands the harness back rather than breaking
+    /// the line.
+    pub(super) fn paste_into_handback_note(&mut self, text: &str) {
+        let Some(prompt) = self.handback_prompt.as_mut() else {
+            return;
+        };
+        if !prompt.editing_note {
+            return;
+        }
+        let draft = &mut prompt.note;
+        *draft = crate::ui::composer::insert_at(
+            &draft.text,
+            draft.cursor,
+            &crate::ui::composer::flatten_paste(text),
+        );
+    }
+
     /// Hand `session` back and queue its brief. Every handback path ends here.
     ///
     /// The order matters. The transcript is read while the harness is still

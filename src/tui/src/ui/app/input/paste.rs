@@ -24,16 +24,35 @@ impl App {
     ///
     /// Who takes it follows [`App::on_key`]'s precedence exactly, because a
     /// paste that landed somewhere the keyboard is not would be a payload the
-    /// operator never sees again. So: the hand-back question first, since it is
-    /// asked while still attached and the chrome holds the keyboard until it is
-    /// answered; then the attached harness, which owns the keyboard outright and
-    /// therefore owns the paste; then an open inline prompt, flattened to one
-    /// line because that is all it can draw. Otherwise the Agents composer takes
-    /// it, with `\r\n` and bare `\r` normalised to `\n`. Modals that own no text
-    /// field (the harness and resume pickers, the decisions overlay) swallow the
-    /// paste for the same reason they swallow the keyboard.
+    /// operator never sees again. In order:
+    ///
+    /// 1. the hand-back question, asked while still attached — the chrome holds
+    ///    the keyboard until it is answered, and its note takes the paste once
+    ///    `E` has made that a text input;
+    /// 2. the attached harness, which owns the keyboard outright and therefore
+    ///    owns the paste, delivered to the child as a paste rather than as the
+    ///    keystrokes it happens to spell;
+    /// 3. an open inline prompt, flattened to one line because that is all it
+    ///    can draw;
+    /// 4. the harness picker, whose workspace step is a path box and whose
+    ///    harness step is a list;
+    /// 5. the Workflows copilot, when it is the focused pane;
+    /// 6. the Agents composer, when one is actually on screen, with `\r\n` and
+    ///    bare `\r` normalised to `\n`.
+    ///
+    /// Anything else drops the payload, and does so from an explicit arm: a
+    /// surface that owns the keyboard and holds no visible field must swallow a
+    /// paste rather than let it land in a draft behind it, because text retained
+    /// out of sight is text the operator submits by accident later.
+    ///
+    /// Every arm is a `return`, so adding a surface here means deciding what it
+    /// does with a paste rather than inheriting whatever the next branch does.
     pub(super) fn on_paste(&mut self, text: &str) {
+        // The hand-back question is asked while still attached, so it outranks
+        // even the harness. It swallows a paste on the question itself and takes
+        // one into the note once `E` has made that a text input.
         if self.handback_prompt.is_some() {
+            self.paste_into_handback_note(text);
             return;
         }
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {

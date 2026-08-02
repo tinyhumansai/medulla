@@ -71,6 +71,11 @@ pub struct TaskRequest {
     /// This is what lets one dispatch be a whole plan. The instruction becomes
     /// the workflow's trigger payload.
     pub workflow: Option<String>,
+    /// Fingerprint of the exact workflow definition the caller selected.
+    ///
+    /// Carried to the worker so it can compare the record it is about to run,
+    /// closing the gap between a capability probe and actual execution.
+    pub workflow_fingerprint: Option<String>,
     /// Values for the selected workflow's declared inputs, keyed by name.
     ///
     /// Empty for ordinary harness tasks and workflows with no declared inputs.

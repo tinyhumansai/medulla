@@ -143,6 +143,7 @@ impl EvolveSession {
             // graph the pass is reviewing, which for a failure-triggered pass
             // would be the run that triggered it, again.
             workflow: None,
+            workflow_fingerprint: None,
             workflow_inputs: Default::default(),
             conversation: Some(self.conversation.clone()),
             fleet_depth: 0,

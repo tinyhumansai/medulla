@@ -165,6 +165,7 @@ impl CopilotSession {
             // setting this would run the graph the operator is trying to edit.
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
             workflow_inputs: Default::default(),
             conversation: Some(self.conversation.clone()),
             fleet_depth: 0,
@@ -239,6 +240,7 @@ impl CopilotSession {
             // authoring turn, not a run.
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
             workflow_inputs: Default::default(),
             conversation: Some(self.conversation.clone()),
             fleet_depth: 0,

@@ -155,8 +155,19 @@ fn worker(home: &std::path::Path, run_task: RunTaskFn) -> (EmbeddedDaemon, Local
 
 /// A frame the orchestrator sends. `workflow` names an installed graph; `None`
 /// is an ordinary instruction.
-fn frame(task_id: &str, text: &str, workflow: Option<&str>) -> String {
-    frame_with_inputs(task_id, text, workflow, Default::default())
+fn frame(
+    task_id: &str,
+    text: &str,
+    workflow: Option<&str>,
+    workflow_fingerprint: Option<&str>,
+) -> String {
+    frame_with_inputs(
+        task_id,
+        text,
+        workflow,
+        workflow_fingerprint,
+        Default::default(),
+    )
 }
 
 /// A workflow frame carrying values for its declared inputs.
@@ -164,6 +175,7 @@ fn frame_with_inputs(
     task_id: &str,
     text: &str,
     workflow: Option<&str>,
+    workflow_fingerprint: Option<&str>,
     workflow_inputs: serde_json::Map<String, serde_json::Value>,
 ) -> String {
     encode_task_frame(EncodeFrameInput {
@@ -178,10 +190,22 @@ fn frame_with_inputs(
         model: None,
         tool_mode: None,
         workflow: workflow.map(str::to_string),
+        workflow_fingerprint: workflow_fingerprint.map(str::to_string),
         workflow_inputs,
         conversation: None,
         fleet_depth: 0,
     })
+}
+
+/// Fingerprint the exact installed record a simulated orchestrator selected.
+fn installed_fingerprint(home: &std::path::Path, id: &str) -> String {
+    let home = home.join("local");
+    let store = FileWorkflowStore::new(
+        vec![home.join("workflows")],
+        home.join("state").join("workflows").join("runs"),
+    );
+    let record = store.get(id).unwrap().expect("installed workflow");
+    medulla::workflows::record_fingerprint(&record)
 }
 
 /// Drain the peer's inbox until a frame of `kind` shows up.
@@ -215,9 +239,13 @@ async fn a_frame_naming_a_workflow_runs_the_whole_graph_on_the_worker() {
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
 
-    peer.send("host", &frame("w1", "", Some("two-step")))
-        .await
-        .unwrap();
+    let fingerprint = installed_fingerprint(home.path(), "two-step");
+    peer.send(
+        "host",
+        &frame("w1", "", Some("two-step"), Some(&fingerprint)),
+    )
+    .await
+    .unwrap();
 
     let ack = wait_for(&peer, TaskFrameKind::Ack).await;
     assert_eq!(ack.task_id, "w1");
@@ -247,10 +275,17 @@ async fn a_frame_supplies_the_selected_workflows_declared_inputs() {
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
     let inputs = json!({ "repo": "acme/api" }).as_object().unwrap().clone();
+    let fingerprint = installed_fingerprint(home.path(), "parameterized");
 
     peer.send(
         "host",
-        &frame_with_inputs("w-input", "", Some("parameterized"), inputs),
+        &frame_with_inputs(
+            "w-input",
+            "",
+            Some("parameterized"),
+            Some(&fingerprint),
+            inputs,
+        ),
     )
     .await
     .unwrap();
@@ -258,6 +293,38 @@ async fn a_frame_supplies_the_selected_workflows_declared_inputs() {
     let reply = wait_for(&peer, TaskFrameKind::Reply).await;
     assert!(reply.text.contains("completed 1 step"), "{}", reply.text);
     assert_eq!(prompts.lock().unwrap().as_slice(), ["acme/api"]);
+}
+
+#[tokio::test]
+async fn a_worker_refuses_a_workflow_changed_after_capability_discovery() {
+    let home = tempfile::tempdir().unwrap();
+    install_workflow(home.path(), "two-step");
+    let selected_fingerprint = installed_fingerprint(home.path(), "two-step");
+
+    let account_home = home.path().join("local");
+    let store = FileWorkflowStore::new(
+        vec![account_home.join("workflows")],
+        account_home.join("state").join("workflows").join("runs"),
+    );
+    let mut changed = store.get("two-step").unwrap().expect("installed workflow");
+    changed.description = "a different definition".into();
+    store.save(&changed).unwrap();
+
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
+    peer.send(
+        "host",
+        &frame("w-stale", "", Some("two-step"), Some(&selected_fingerprint)),
+    )
+    .await
+    .unwrap();
+
+    let error = wait_for(&peer, TaskFrameKind::Error).await;
+    assert!(
+        error.text.contains("changed after it was selected"),
+        "{error:?}"
+    );
+    assert!(prompts.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -269,9 +336,13 @@ async fn the_reply_carries_the_run_as_a_work_snapshot_the_orchestrator_can_rende
         recording_executor(Arc::new(Mutex::new(Vec::new()))),
     );
 
-    peer.send("host", &frame("w2", "", Some("two-step")))
-        .await
-        .unwrap();
+    let fingerprint = installed_fingerprint(home.path(), "two-step");
+    peer.send(
+        "host",
+        &frame("w2", "", Some("two-step"), Some(&fingerprint)),
+    )
+    .await
+    .unwrap();
     let reply = wait_for(&peer, TaskFrameKind::Reply).await;
 
     // The same attachment an ordinary task's reply carries, so the existing
@@ -294,9 +365,13 @@ async fn naming_a_workflow_the_worker_does_not_have_says_what_it_does_have() {
         recording_executor(Arc::new(Mutex::new(Vec::new()))),
     );
 
-    peer.send("host", &frame("w3", "", Some("nonexistent")))
-        .await
-        .unwrap();
+    let fingerprint = installed_fingerprint(home.path(), "two-step");
+    peer.send(
+        "host",
+        &frame("w3", "", Some("nonexistent"), Some(&fingerprint)),
+    )
+    .await
+    .unwrap();
 
     let error = wait_for(&peer, TaskFrameKind::Error).await;
     assert!(
@@ -329,6 +404,7 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
             workflow_inputs: Default::default(),
             conversation: None,
             fleet_depth: 0,
@@ -363,7 +439,7 @@ async fn an_ordinary_instruction_still_goes_straight_to_a_harness() {
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
 
-    peer.send("host", &frame("t1", "just do this", None))
+    peer.send("host", &frame("t1", "just do this", None, None))
         .await
         .unwrap();
     let reply = wait_for(&peer, TaskFrameKind::Reply).await;

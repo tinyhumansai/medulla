@@ -26,7 +26,8 @@ use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, Wor
 use crate::workflows::bridge::trigger_input;
 use crate::workflows::evolve::{EvolveConfig, EvolveSession, EvolveTrigger};
 use crate::workflows::{
-    run_workflow, FileWorkflowStore, RunContext, RunStatus, StoreWorkflowResolver, WorkflowStore,
+    run_workflow_versioned, FileWorkflowStore, RunContext, RunStatus, StoreWorkflowResolver,
+    WorkflowStore,
 };
 
 use super::super::providers::{Abort, RunTaskOptions};
@@ -278,12 +279,25 @@ impl DaemonRuntime {
 
         // The frame's task id becomes the run id, so the orchestrator's existing
         // `abort` for that task is exactly what cancels the run.
-        let outcome = run_workflow(
+        let Some(fingerprint) = frame.workflow_fingerprint.clone() else {
+            self.reply(
+                &from,
+                TaskFrameKind::Error,
+                &frame.task_id,
+                "workflow dispatch is missing its definition fingerprint; refresh the worker catalog",
+                correlation.as_deref(),
+                None,
+            )
+            .await;
+            return;
+        };
+        let outcome = run_workflow_versioned(
             context,
             &id,
             &frame.task_id,
             trigger_input(&frame.text),
             frame.workflow_inputs,
+            &fingerprint,
         )
         .await;
 

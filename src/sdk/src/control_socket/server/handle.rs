@@ -10,6 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::join_all;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -22,6 +23,10 @@ use super::types::{SessionState, SpawnError, TaskEntry, TaskRegistry, TaskState}
 
 /// The longest a `task.get` may block before answering "still running".
 pub const MAX_WAIT: Duration = Duration::from_secs(120);
+
+/// Keep best-effort capability discovery inside the control client's five-second
+/// deadline, even when a worker is offline or speaks an older protocol.
+const WORKFLOW_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A successful reply.
 fn ok(id: &Value, result: Value) -> Value {
@@ -222,6 +227,7 @@ fn build_request(
         // the caller can neither widen nor forge the workflow scope.
         tool_mode: grant.tool_mode.clone(),
         workflow,
+        workflow_fingerprint: optional_str(params, "workflowFingerprint"),
         workflow_inputs,
         // Context-free by default, which the field's own documentation calls
         // the invariant that lets two tasks run concurrently without seeing
@@ -369,16 +375,29 @@ async fn worker_list(ops: &Arc<dyn FleetOps>) -> Result<Value, ControlFailure> {
             "the fleet is still connecting; try again in a moment",
         )
     })?;
-    for worker in &mut workers {
-        worker.workflows = ops
-            .worker_workflows(&worker.address)
-            .await
-            .unwrap_or_default();
+    let catalogs = join_all(
+        workers
+            .iter()
+            .map(|worker| probe_worker_workflows(ops, &worker.address)),
+    )
+    .await;
+    for (worker, catalog) in workers.iter_mut().zip(catalogs) {
+        worker.workflows = catalog.unwrap_or_default();
     }
     Ok(json!({
         "workers": workers,
         "defaultWorker": ops.default_worker(),
     }))
+}
+
+/// Probe one worker without letting its retry window consume the MCP call.
+async fn probe_worker_workflows(
+    ops: &Arc<dyn FleetOps>,
+    worker: &str,
+) -> Result<Vec<crate::tinyplace::WorkflowAdvert>, crate::hub::RunError> {
+    tokio::time::timeout(WORKFLOW_PROBE_TIMEOUT, ops.worker_workflows(worker))
+        .await
+        .map_err(|_| crate::hub::RunError::Timeout)?
 }
 
 /// Accept a dispatch and hand back its handle.
@@ -475,7 +494,7 @@ async fn validate_worker_workflow(
              entry in `fleet_workers`; local workflow ids are not portable across machines",
         )
     })?;
-    let catalog = ops.worker_workflows(worker).await.map_err(|error| {
+    let catalog = probe_worker_workflows(ops, worker).await.map_err(|error| {
         ControlFailure::new(
             ErrorKind::DispatchFailed,
             format!("could not verify workflows on worker {worker}: {error}"),

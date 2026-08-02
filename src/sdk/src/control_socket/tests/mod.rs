@@ -50,6 +50,7 @@ pub(super) struct FakeFleet {
     default_worker: Mutex<Option<String>>,
     outcome: Mutex<FakeOutcome>,
     workflows: Mutex<Vec<WorkflowAdvert>>,
+    unresponsive_workflow_worker: Mutex<Option<String>>,
     /// Every request that reached `dispatch`, for asserting on what was built.
     pub(super) dispatched: Mutex<Vec<TaskRequest>>,
     /// Every abort id that reached `abort`.
@@ -83,6 +84,7 @@ impl FakeFleet {
                 fingerprint: "release-fingerprint".into(),
                 ..WorkflowAdvert::default()
             }]),
+            unresponsive_workflow_worker: Mutex::new(None),
             dispatched: Mutex::new(Vec::new()),
             aborted: Mutex::new(Vec::new()),
             hang_release: tokio::sync::watch::channel(false).0,
@@ -108,6 +110,12 @@ impl FakeFleet {
         *self.outcome.lock().unwrap() = outcome;
         self
     }
+
+    /// Make one worker's capability probe never answer.
+    pub(super) fn with_unresponsive_workflow_worker(self, worker: &str) -> Self {
+        *self.unresponsive_workflow_worker.lock().unwrap() = Some(worker.to_string());
+        self
+    }
 }
 
 #[cfg(unix)]
@@ -121,7 +129,11 @@ impl FleetOps for FakeFleet {
         self.default_worker.lock().unwrap().clone()
     }
 
-    async fn worker_workflows(&self, _worker: &str) -> Result<Vec<WorkflowAdvert>, RunError> {
+    async fn worker_workflows(&self, worker: &str) -> Result<Vec<WorkflowAdvert>, RunError> {
+        let unresponsive = self.unresponsive_workflow_worker.lock().unwrap().clone();
+        if unresponsive.as_deref() == Some(worker) {
+            return std::future::pending().await;
+        }
         Ok(self.workflows.lock().unwrap().clone())
     }
 

@@ -47,7 +47,7 @@ pub use local::{LocalCopilotDispatch, LocalWorkflowHost, LOCAL_WORKER_ADDRESS};
 pub use node_contracts::{all_node_kind_contracts, node_kind_contract};
 pub use ops::discover_store;
 pub use registry::StoreWorkflowResolver;
-pub use run::{dry_run, resume_workflow, run_workflow, RunContext};
+pub use run::{dry_run, resume_workflow, run_workflow, run_workflow_versioned, RunContext};
 pub use store::{
     current_notes, mint_note_id, mint_proposal_id, new_run_record, parse_workflow, require,
     require_proposal, require_run, rollback, undo_last, validate_graph, FileWorkflowStore,

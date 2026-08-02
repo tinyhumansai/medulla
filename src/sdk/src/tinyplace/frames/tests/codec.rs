@@ -22,6 +22,7 @@ fn encodes_a_minimal_frame() {
         model: None,
         tool_mode: None,
         workflow: None,
+        workflow_fingerprint: None,
         workflow_inputs: Default::default(),
         conversation: None,
         fleet_depth: 0,
@@ -68,6 +69,7 @@ fn encodes_optional_fields_when_present() {
         model: Some("anthropic/claude-opus-4.8".to_string()),
         tool_mode: None,
         workflow: Some("nightly-sweep".to_string()),
+        workflow_fingerprint: Some("nightly-fingerprint".to_string()),
         workflow_inputs: json!({ "repo": "acme/api", "depth": 3 })
             .as_object()
             .unwrap()
@@ -82,8 +84,13 @@ fn encodes_optional_fields_when_present() {
     assert_eq!(value["provider"], "claude");
     assert_eq!(value["model"], "anthropic/claude-opus-4.8");
     assert_eq!(value["workflow"], "nightly-sweep");
+    assert_eq!(value["workflowFingerprint"], "nightly-fingerprint");
     assert_eq!(value["inputs"]["repo"], "acme/api");
     let decoded = decode_task_frame(&body).expect("the full frame decodes");
+    assert_eq!(
+        decoded.workflow_fingerprint.as_deref(),
+        Some("nightly-fingerprint")
+    );
     assert_eq!(decoded.workflow_inputs["depth"], json!(3));
 }
 
@@ -113,6 +120,7 @@ fn round_trips_every_kind() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
             workflow_inputs: Default::default(),
             conversation: None,
             fleet_depth: 0,
@@ -158,6 +166,7 @@ fn carries_a_model_hint_through_encode_and_decode() {
         model: Some("openrouter/some-model".to_string()),
         tool_mode: None,
         workflow: None,
+        workflow_fingerprint: None,
         workflow_inputs: Default::default(),
         conversation: None,
         fleet_depth: 0,
@@ -477,6 +486,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
             workflow_inputs: Default::default(),
             conversation: None,
             fleet_depth: 0,
@@ -503,6 +513,7 @@ fn an_empty_work_snapshot_is_left_off_the_wire() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
             workflow_inputs: Default::default(),
             conversation: None,
             fleet_depth: 0,

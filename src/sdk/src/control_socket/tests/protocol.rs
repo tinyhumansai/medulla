@@ -24,7 +24,7 @@ pub(super) struct Harness {
 
 impl Harness {
     /// Build a harness over `fleet` whose grant is `grant`.
-    fn with(fleet: FakeFleet, grant: Grant) -> Self {
+    pub(super) fn with(fleet: FakeFleet, grant: Grant) -> Self {
         let grants = GrantRegistry::new();
         let token = grants.mint(grant);
         let fake = Arc::new(fleet);
@@ -182,11 +182,6 @@ async fn a_roster_read_returns_the_workers_and_the_default() {
 
     let result = &response["result"];
     assert_eq!(result["workers"][0]["id"], json!("alpha"));
-    assert_eq!(result["workers"][0]["workflows"][0]["id"], json!("release"));
-    assert_eq!(
-        result["workers"][0]["workflows"][0]["fingerprint"],
-        json!("release-fingerprint")
-    );
     assert_eq!(result["defaultWorker"], json!("alpha-address"));
 }
 
@@ -246,6 +241,10 @@ async fn a_workflow_dispatch_carries_its_declared_inputs_to_the_runner() {
     let requests = harness.fake.dispatched.lock().unwrap();
     let request = requests.first().expect("the dispatch reached the fleet");
     assert_eq!(request.workflow.as_deref(), Some("release"));
+    assert_eq!(
+        request.workflow_fingerprint.as_deref(),
+        Some("release-fingerprint")
+    );
     assert_eq!(
         request.workflow_inputs,
         json!({ "environment": "staging", "retries": 2 })

@@ -114,6 +114,7 @@ pub fn frame(
         model: None,
         tool_mode: None,
         workflow: None,
+        workflow_fingerprint: None,
         workflow_inputs: Default::default(),
         conversation: None,
         fleet_depth: 0,

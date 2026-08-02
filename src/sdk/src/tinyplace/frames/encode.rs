@@ -45,6 +45,7 @@ fn build(
         model: input.model,
         tool_mode: input.tool_mode,
         workflow: input.workflow,
+        workflow_fingerprint: input.workflow_fingerprint,
         workflow_inputs: input.workflow_inputs,
         conversation: input.conversation,
         fleet_depth: input.fleet_depth,

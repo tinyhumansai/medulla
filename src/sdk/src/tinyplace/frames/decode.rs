@@ -63,6 +63,12 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    let workflow_fingerprint = obj
+        .get("workflowFingerprint")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|fingerprint| !fingerprint.is_empty())
+        .map(str::to_string);
     let custom_harness = obj
         .get("customHarness")
         .and_then(|value| value.as_str())
@@ -125,6 +131,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         model,
         tool_mode,
         workflow,
+        workflow_fingerprint,
         workflow_inputs,
         conversation,
         fleet_depth,

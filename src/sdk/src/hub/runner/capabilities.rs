@@ -123,7 +123,15 @@ impl TaskRunner {
             {
                 tokio::select! {
                     biased;
-                    _ = abort.notified() => return Err(RunError::Aborted),
+                    _ = abort.notified() => {
+                        let mut aborts = self.aborts.lock().expect("aborts lock");
+                        if aborts.get(abort_id).is_some_and(|current| {
+                            std::sync::Arc::ptr_eq(current, &abort)
+                        }) {
+                            aborts.remove(abort_id);
+                        }
+                        return Err(RunError::Aborted);
+                    },
                     _ = tokio::time::sleep(CONTACT_POLL) => {}
                 }
             }

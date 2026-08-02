@@ -284,7 +284,7 @@ impl TaskRunner {
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<TaskOutcome, RunError> {
-        self.run_with_screen_kill(req, status, false).await
+        self.run_inner(req, status, false, None).await
     }
 
     /// Run a dispatch with the screen-control support negotiated specifically

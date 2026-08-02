@@ -136,7 +136,7 @@ pub fn control_socket_path(
         return absolute_override(explicit);
     }
 
-    let home = crate::home::medulla_home(env);
+    let home = absolute_path(crate::home::medulla_home(env))?;
     let preferred = home.join("control.sock");
     if fits(&preferred) {
         return Ok(preferred);
@@ -148,10 +148,12 @@ pub fn control_socket_path(
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
     {
-        let candidate = PathBuf::from(xdg)
-            .join("medulla")
-            .join(&token)
-            .join("control.sock");
+        let candidate = absolute_path(
+            PathBuf::from(xdg)
+                .join("medulla")
+                .join(&token)
+                .join("control.sock"),
+        )?;
         if fits(&candidate) {
             return Ok(candidate);
         }
@@ -162,9 +164,11 @@ pub fn control_socket_path(
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .unwrap_or("/tmp");
-    let candidate = PathBuf::from(tmp)
-        .join(format!("medulla-{token}"))
-        .join("control.sock");
+    let candidate = absolute_path(
+        PathBuf::from(tmp)
+            .join(format!("medulla-{token}"))
+            .join("control.sock"),
+    )?;
     if fits(&candidate) {
         return Ok(candidate);
     }
@@ -174,7 +178,11 @@ pub fn control_socket_path(
 
 /// Anchor an operator-supplied relative path before it crosses a process boundary.
 fn absolute_override(explicit: &str) -> Result<PathBuf, ControlSocketError> {
-    let path = PathBuf::from(explicit);
+    absolute_path(PathBuf::from(explicit))
+}
+
+/// Anchor any relative socket path before it crosses a process boundary.
+fn absolute_path(path: PathBuf) -> Result<PathBuf, ControlSocketError> {
     // A rooted slash path is the Unix spelling accepted by the runtime. Treat
     // it as anchored in cross-platform unit tests too, even though Windows
     // requires a drive prefix for `is_absolute` to return true.
@@ -194,7 +202,10 @@ fn absolute_override(explicit: &str) -> Result<PathBuf, ControlSocketError> {
 /// still private. Existing explicit parents are validated separately after
 /// this function returns.
 #[cfg(unix)]
-fn ensure_private_parent(path: &Path, trusted_path: bool) -> Result<(), ControlSocketError> {
+fn ensure_private_parent(
+    path: &Path,
+    preserve_existing_parent: bool,
+) -> Result<(), ControlSocketError> {
     use std::os::unix::fs::PermissionsExt;
 
     let Some(parent) = path.parent() else {
@@ -205,7 +216,7 @@ fn ensure_private_parent(path: &Path, trusted_path: bool) -> Result<(), ControlS
     // An explicitly named path may deliberately live in a shared directory.
     // Never mutate permissions on a directory Medulla did not create and does
     // not own merely because the operator placed a socket beneath it.
-    if trusted_path && existed {
+    if preserve_existing_parent && existed {
         return Ok(());
     }
     let mut perms = std::fs::metadata(parent)
@@ -296,10 +307,13 @@ fn socket_identity(meta: &std::fs::Metadata) -> (u64, u64) {
 /// entry in the parent directory. Explicit paths preserve existing directory
 /// modes, but do not bypass this validation.
 #[cfg(unix)]
-pub async fn prepare_bind(path: &Path, trusted_path: bool) -> Result<(), ControlSocketError> {
+pub async fn prepare_bind(
+    path: &Path,
+    preserve_existing_parent: bool,
+) -> Result<(), ControlSocketError> {
     use std::os::unix::fs::FileTypeExt;
 
-    ensure_private_parent(path, trusted_path)?;
+    ensure_private_parent(path, preserve_existing_parent)?;
     if let Some(ancestor) = insecure_ancestor(path)? {
         return Err(ControlSocketError::InsecureParent(ancestor));
     }

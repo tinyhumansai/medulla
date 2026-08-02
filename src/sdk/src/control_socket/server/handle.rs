@@ -19,28 +19,10 @@ use crate::tinyplace::HarnessProvider;
 use super::super::grants::{Grant, GrantRegistry};
 use super::super::types::{ControlFailure, ErrorKind, FleetOps, Hello, PROTOCOL_VERSION};
 use super::registry::{TaskEntry, TaskRegistry};
+use super::types::SessionState;
 
 /// The longest a `task.get` may block before answering "still running".
 const MAX_WAIT: Duration = Duration::from_secs(120);
-
-/// What one connection has established about itself.
-///
-/// A connection starts unauthenticated and stays that way until a successful
-/// `hello`. Nothing else is answered before then — not even a roster read —
-/// because a caller that has not proved which grant it holds has no scope to
-/// read within.
-#[derive(Default)]
-pub struct SessionState {
-    /// The redeemed grant and the token it came from, once `hello` succeeded.
-    authenticated: Option<(String, Grant)>,
-}
-
-impl SessionState {
-    /// The grant this connection holds, if it has completed `hello`.
-    pub fn grant(&self) -> Option<&Grant> {
-        self.authenticated.as_ref().map(|(_, grant)| grant)
-    }
-}
 
 /// A successful reply.
 fn ok(id: &Value, result: Value) -> Value {

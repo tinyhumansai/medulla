@@ -86,7 +86,7 @@ const CLIENT_HOOKS: &[&str] = &[
 /// The shim script. One copy is written under each name in [`CLIENT_HOOKS`] and
 /// branches on `basename "$0"`, so all hooks share a single implementation.
 #[cfg(unix)]
-const HOOK_SHIM: &str = r#"#!/bin/sh
+pub(super) const HOOK_SHIM: &str = r#"#!/bin/sh
 # Medulla hook shim. Runs the repository's own hook of this name, then adds the
 # Medulla Co-authored-by trailer (prepare-commit-msg only).
 

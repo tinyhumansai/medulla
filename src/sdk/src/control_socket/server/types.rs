@@ -2,7 +2,24 @@
 
 use std::path::PathBuf;
 
-use super::super::grants::GrantRegistry;
+use super::super::grants::{Grant, GrantRegistry};
+
+/// What one control-socket connection has established about itself.
+///
+/// A connection starts unauthenticated and stays that way until a successful
+/// `hello`; no other operation is answered before then.
+#[derive(Default)]
+pub struct SessionState {
+    /// The redeemed grant and the token it came from, once `hello` succeeded.
+    pub(super) authenticated: Option<(String, Grant)>,
+}
+
+impl SessionState {
+    /// The grant this connection holds, if it has completed `hello`.
+    pub fn grant(&self) -> Option<&Grant> {
+        self.authenticated.as_ref().map(|(_, grant)| grant)
+    }
+}
 
 /// A bound control socket, serving until dropped.
 ///

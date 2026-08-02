@@ -1,13 +1,20 @@
-# Mcp
+# MCP
 
-A Model Context Protocol server exposing the workflow operations.
+A Model Context Protocol server exposing workflow and session-scoped `fleet_*`
+operations to spawned harnesses.
 
 ## Contents
 
-- [`mod.rs`](./mod.rs) — A Model Context Protocol server exposing the workflow operations.
-- [`tests.rs`](./tests.rs) — Tests for the workflow MCP server.
-- [`tools.rs`](./tools.rs) — The tools a harness sees, and the dispatch behind them.
+- [`mod.rs`](./mod.rs) — JSON-RPC handling and the concurrent stdio server.
+- [`types.rs`](./types.rs) — Shared MCP session state and policy types.
+- [`backend/`](./backend/) — Offline and control-socket fleet backends.
+- [`tools/`](./tools/) — Tool definitions and dispatch, including the
+  session-scoped `fleet_*` family.
+- [`tests/`](./tests/) — Protocol, policy, and workflow-tool unit tests.
 
 ## Maintenance
 
-Keep this index synchronized when responsibilities move. Put shared data structures in `types.rs`, focused unit tests in `tests.rs` or a sibling `_tests.rs`, and preserve the module-level Rust documentation as the API source of truth.
+Keep this index synchronized when responsibilities move. Put shared data
+structures in `types.rs`, focused unit tests in the owning directory module's
+`tests.rs`, and preserve module-level Rust documentation as the API source of
+truth. Cross-module MCP fleet behavior belongs in `src/sdk/tests/`.

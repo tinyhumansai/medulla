@@ -52,6 +52,13 @@ fn a_relative_override_is_anchored_before_child_processes_receive_it() {
 }
 
 #[test]
+fn a_relative_home_also_produces_an_anchored_socket_path() {
+    let resolved = control_socket_path(&env(&[("MEDULLA_HOME", "relative-home")]), None).unwrap();
+
+    assert!(resolved.is_absolute());
+}
+
+#[test]
 fn a_blank_override_does_not_mask_the_next_source() {
     // An exported-but-empty variable is the shape a shell script leaves behind,
     // and treating it as a real path would resolve the socket to "".

@@ -60,6 +60,7 @@ pub use types::McpSession;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use serde_json::{json, Value};
 
@@ -241,29 +242,51 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // asked. A host with no grant in its environment — a remote worker, or one
     // with fleet tools turned off — gets the offline stand-in and serves the
     // workflow tools alone rather than failing to start.
-    let session = McpSession::local(store, policy, mode)
-        .with_workflows_enabled(workflows_enabled)
-        .with_fleet(backend::from_env(env).await);
+    let session = Arc::new(
+        McpSession::local(store, policy, mode)
+            .with_workflows_enabled(workflows_enabled)
+            .with_fleet(backend::from_env(env).await),
+    );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    let mut stdout = tokio::io::stdout();
+    let (responses, mut pending_responses) = tokio::sync::mpsc::unbounded_channel::<Value>();
+    let writer = tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(response) = pending_responses.recv().await {
+            stdout.write_all(format!("{response}\n").as_bytes()).await?;
+            stdout.flush().await?;
+        }
+        Ok::<(), std::io::Error>(())
+    });
+    let mut requests = tokio::task::JoinSet::new();
 
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
             continue;
         }
-        let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_request(&session, &request).await,
-            Err(err) => Some(json!({
+        match serde_json::from_str::<Value>(&line) {
+            Ok(request) => {
+                let session = Arc::clone(&session);
+                let responses = responses.clone();
+                requests.spawn(async move {
+                    if let Some(response) = handle_request(&session, &request).await {
+                        let _ = responses.send(response);
+                    }
+                });
+            }
+            Err(err) => {
+                let _ = responses.send(json!({
                 "jsonrpc": "2.0",
                 "id": Value::Null,
                 "error": { "code": -32700, "message": format!("parse error: {err}") },
-            })),
-        };
-        if let Some(response) = response {
-            stdout.write_all(format!("{response}\n").as_bytes()).await?;
-            stdout.flush().await?;
+                }));
+            }
         }
     }
+    while let Some(result) = requests.join_next().await {
+        result.map_err(std::io::Error::other)?;
+    }
+    drop(responses);
+    writer.await.map_err(std::io::Error::other)??;
     Ok(())
 }
 

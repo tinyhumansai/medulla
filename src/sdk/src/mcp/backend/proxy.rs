@@ -1,32 +1,28 @@
 //! The fleet reached over the control socket.
 //!
-//! One connection serves the whole harness session. It is held behind a mutex
-//! because the control protocol correlates replies per connection and every op
-//! is short — a dispatch returns a handle rather than waiting for the task, so
-//! serialising calls costs nothing worth the complexity of a second connection.
+//! Each call uses its own authenticated connection. A long `task.get` poll must
+//! not hold the route an urgent `task.abort` needs to reach the same server.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 use crate::control_socket::{ControlClient, ControlError, Hello};
 
 use super::FleetBackend;
 
-/// Ops that may safely be sent again after a dropped connection.
-///
-/// `task.dispatch` is deliberately absent. A retried dispatch whose first
-/// attempt was accepted runs the work twice, and the caller cannot tell — so it
-/// is reported honestly instead, and the caller checks `fleet_tasks`.
-const IDEMPOTENT_OPS: [&str; 3] = ["worker.list", "task.get", "task.list"];
+/// Margin above a server-side long poll before the client gives up.
+const REPLY_MARGIN: Duration = Duration::from_secs(5);
+/// Deadline for operations that do not intentionally wait on task progress.
+const SHORT_REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A fleet reached through a running Medulla's control socket.
 pub struct ProxyFleet {
     path: PathBuf,
     token: String,
     hello: Hello,
-    client: Mutex<Option<ControlClient>>,
 }
 
 impl ProxyFleet {
@@ -44,8 +40,35 @@ impl ProxyFleet {
             path: path.to_path_buf(),
             token: token.to_string(),
             hello: client.hello().clone(),
-            client: Mutex::new(Some(client)),
         })
+    }
+
+    /// Choose a response deadline that preserves the requested server wait.
+    fn deadline(op: &str, params: &Value) -> Instant {
+        let timeout = if op == "task.get" {
+            params
+                .get("waitSeconds")
+                .and_then(Value::as_u64)
+                .map(Duration::from_secs)
+                .unwrap_or_default()
+                .saturating_add(REPLY_MARGIN)
+                .max(SHORT_REPLY_TIMEOUT)
+        } else {
+            SHORT_REPLY_TIMEOUT
+        };
+        Instant::now() + timeout
+    }
+
+    /// Preserve the ambiguity of a disconnected mutating request.
+    fn disconnected(op: &str, reason: String) -> ControlError {
+        if matches!(op, "worker.list" | "task.get" | "task.list") {
+            ControlError::Disconnected(reason)
+        } else {
+            ControlError::Disconnected(format!(
+                "{reason} — this request may or may not have been accepted; \
+                 call fleet_tasks to see what is running before retrying"
+            ))
+        }
     }
 }
 
@@ -57,30 +80,14 @@ impl FleetBackend for ProxyFleet {
 
     #[cfg(unix)]
     async fn call(&self, op: &str, params: Value) -> Result<Value, ControlError> {
-        let mut slot = self.client.lock().await;
-
-        if let Some(client) = slot.as_mut() {
-            match client.call(op, params.clone()).await {
-                Ok(result) => return Ok(result),
-                Err(ControlError::Disconnected(reason)) => {
-                    // The connection is unusable either way; drop it so the
-                    // reconnect below is the only path forward.
-                    *slot = None;
-                    if !IDEMPOTENT_OPS.contains(&op) {
-                        return Err(ControlError::Disconnected(format!(
-                            "{reason} — this request may or may not have been accepted; \
-                             call fleet_tasks to see what is running before retrying"
-                        )));
-                    }
-                }
-                Err(other) => return Err(other),
-            }
-        }
-
         let mut client = ControlClient::connect(&self.path, &self.token).await?;
-        let result = client.call(op, params).await;
-        *slot = Some(client);
-        result
+        client
+            .call_until(op, params.clone(), Self::deadline(op, &params))
+            .await
+            .map_err(|error| match error {
+                ControlError::Disconnected(reason) => Self::disconnected(op, reason),
+                other => other,
+            })
     }
 
     #[cfg(not(unix))]

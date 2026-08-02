@@ -203,7 +203,7 @@ async fn a_workflows_only_grant_gets_no_fleet_surface_at_all() {
 }
 
 #[tokio::test]
-async fn the_concurrency_ceiling_is_enforced_across_the_socket() {
+async fn a_settled_dispatch_frees_its_in_flight_slot_across_the_socket() {
     let (_dir, _server, _fleet, session) =
         wired(Grant::new("session", 0, 2).with_max_in_flight(1)).await;
 

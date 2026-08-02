@@ -6,11 +6,13 @@
 //! caller can turn into a readable tool refusal rather than a reason to die.
 
 use std::path::Path;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::UnixStream;
+use tokio::time::{timeout_at, Instant};
 
 use super::types::{ControlError, ControlFailure, ErrorKind, Hello, PROTOCOL_VERSION};
 
@@ -32,8 +34,10 @@ impl ControlClient {
     /// session over. [`ControlError::Refused`] when the grant is not valid.
     #[cfg(unix)]
     pub async fn connect(path: &Path, token: &str) -> Result<Self, ControlError> {
-        let stream = UnixStream::connect(path)
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let stream = timeout_at(deadline, UnixStream::connect(path))
             .await
+            .map_err(|_| ControlError::Transport("timed out connecting to Medulla".into()))?
             .map_err(|err| match err.kind() {
                 std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
                     ControlError::NoInstance
@@ -61,9 +65,10 @@ impl ControlClient {
             },
         };
         let result = client
-            .call(
+            .call_until(
                 "hello",
                 json!({ "protocol": PROTOCOL_VERSION, "token": token }),
+                deadline,
             )
             .await?;
         client.hello = serde_json::from_value(result)
@@ -84,24 +89,49 @@ impl ControlClient {
     /// caller distinguishes from a refusal because it is the one failure worth
     /// reconnecting for.
     pub async fn call(&mut self, op: &str, params: Value) -> Result<Value, ControlError> {
+        self.call_until(op, params, Instant::now() + Duration::from_secs(125))
+            .await
+    }
+
+    /// Issue one op, refusing to wait past the caller's deadline.
+    ///
+    /// Fleet polling supplies a deadline derived from its requested wait;
+    /// shorter operations use a small fixed budget. This keeps a silent peer
+    /// from wedging the MCP server while still permitting deliberate long
+    /// polls.
+    ///
+    /// # Errors
+    ///
+    /// [`ControlError::Disconnected`] when the deadline expires or the stream
+    /// ends mid-call.
+    pub async fn call_until(
+        &mut self,
+        op: &str,
+        params: Value,
+        deadline: Instant,
+    ) -> Result<Value, ControlError> {
         let id = self.next_id;
         self.next_id += 1;
         let frame = json!({ "v": PROTOCOL_VERSION, "id": id, "op": op, "params": params });
 
-        self.write
-            .write_all(format!("{frame}\n").as_bytes())
+        timeout_at(
+            deadline,
+            self.write.write_all(format!("{frame}\n").as_bytes()),
+        )
+        .await
+        .map_err(|_| ControlError::Disconnected("timed out writing the request".into()))?
+        .map_err(|err| ControlError::Disconnected(err.to_string()))?;
+        timeout_at(deadline, self.write.flush())
             .await
-            .map_err(|err| ControlError::Disconnected(err.to_string()))?;
-        self.write
-            .flush()
-            .await
+            .map_err(|_| ControlError::Disconnected("timed out flushing the request".into()))?
             .map_err(|err| ControlError::Disconnected(err.to_string()))?;
 
         loop {
-            let line = self
-                .lines
-                .next_line()
+            let line = timeout_at(deadline, self.lines.next_line())
                 .await
+                .map_err(|_| {
+                    ControlError::Disconnected("timed out waiting for Medulla's reply".into())
+                })?
                 .map_err(|err| ControlError::Disconnected(err.to_string()))?
                 .ok_or_else(|| {
                     ControlError::Disconnected("the server closed the connection".to_string())

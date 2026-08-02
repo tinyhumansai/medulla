@@ -10,9 +10,42 @@ use std::os::fd::FromRawFd;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Output, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
+
+/// Wait for a child without allowing a broken subprocess to wedge the suite.
+fn wait_with_output_bounded(mut child: std::process::Child) -> Output {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut pipe) = child.stdout.take() {
+                    pipe.read_to_end(&mut stdout).expect("read child stdout");
+                }
+                if let Some(mut pipe) = child.stderr.take() {
+                    pipe.read_to_end(&mut stderr).expect("read child stderr");
+                }
+                return Output {
+                    status,
+                    stdout,
+                    stderr,
+                };
+            }
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("the medulla child did not exit within 10 seconds");
+            }
+            Err(error) => panic!("failed waiting for medulla child: {error}"),
+        }
+    }
+}
 
 /// Run the workspace binary with a private Medulla home and no inherited
 /// credentials or model keys that could make an offline command contact a
@@ -328,7 +361,7 @@ fn run_mcp(
     // session; the server must exit rather than hang on it.
     drop(child.stdin.take());
 
-    let output = child.wait_with_output().expect("the server should exit");
+    let output = wait_with_output_bounded(child);
     let replies = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -400,6 +433,9 @@ fn mcp_answers_a_malformed_frame_and_keeps_going() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
         .arg("mcp")
         .env("MEDULLA_HOME", home.path())
+        .env_remove("MEDULLA_TOKEN")
+        .env_remove("MEDULLA_MCP_SOCKET")
+        .env_remove("MEDULLA_MCP_GRANT")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -417,7 +453,7 @@ fn mcp_answers_a_malformed_frame_and_keeps_going() {
     }
     drop(child.stdin.take());
 
-    let output = child.wait_with_output().expect("exit");
+    let output = wait_with_output_bounded(child);
     let replies: Vec<serde_json::Value> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter(|line| !line.trim().is_empty())

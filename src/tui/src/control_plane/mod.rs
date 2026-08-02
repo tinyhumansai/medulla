@@ -59,14 +59,16 @@ pub(crate) async fn start(
         worker_address: local_default_worker,
     };
     let ops: Arc<dyn FleetOps> = Arc::new(HubFleetOps::new(hub, defaults));
-    // An operator who named an explicit path in config or the environment
-    // may have their reasons for an unusual directory; the default path is
-    // ours, and is checked.
-    let trusted_path = configured.is_some()
-        || env
-            .get(CONTROL_SOCKET_ENV)
-            .is_some_and(|value| !value.trim().is_empty());
-    match ControlServer::bind(&path, ops, Default::default(), trusted_path).await {
+    // Both explicit sources may name an existing directory Medulla does not
+    // own, so preserve its mode. This does not trust the path: bind still
+    // rejects every replaceable ancestor after preserving permissions. The
+    // environment override takes precedence over config.
+    let env_override = env
+        .get(CONTROL_SOCKET_ENV)
+        .is_some_and(|value| !value.trim().is_empty());
+    let preserve_existing_parent =
+        env_override || configured.is_some_and(|value| !value.trim().is_empty());
+    match ControlServer::bind(&path, ops, Default::default(), preserve_existing_parent).await {
         Ok(server) => {
             // Recorded process-wide so the ACP spawn path can mint a grant
             // per session without the registry being threaded through the

@@ -13,10 +13,10 @@ mod registry;
 mod tests;
 mod types;
 
-pub use handle::{handle_control, SessionState};
+pub use handle::handle_control;
 pub use hub_ops::{FleetDefaults, HubFleetOps, HubSlot};
 pub use registry::{TaskEntry, TaskRegistry, TaskState};
-pub use types::ControlServer;
+pub use types::{ControlServer, SessionState};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -45,9 +45,10 @@ const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5)
 impl ControlServer {
     /// Bind `path` and start serving `ops`.
     ///
-    /// `trusted_path` relaxes the private-parent requirement for a path an
-    /// operator named explicitly; the default account-scoped path is ours and is
-    /// always checked.
+    /// `preserve_existing_parent` prevents Medulla from changing permissions on
+    /// an existing directory named explicitly. Every path is still checked for
+    /// insecure ancestors before bind; the default account-scoped directory is
+    /// ours, so Medulla may tighten it first.
     ///
     /// # Errors
     ///
@@ -59,9 +60,9 @@ impl ControlServer {
         path: &Path,
         ops: Arc<dyn FleetOps>,
         grants: GrantRegistry,
-        trusted_path: bool,
+        preserve_existing_parent: bool,
     ) -> Result<Self, ControlSocketError> {
-        prepare_bind(path, trusted_path).await?;
+        prepare_bind(path, preserve_existing_parent).await?;
         let listener = tokio::net::UnixListener::bind(path)
             .map_err(|e| ControlSocketError::Io(e.to_string()))?;
         restrict_socket(path)?;

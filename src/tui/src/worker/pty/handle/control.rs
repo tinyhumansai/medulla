@@ -109,6 +109,9 @@ impl SessionHandle {
         let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
         attention.pending_completion_bells -= consumed_pending;
         attention.seen_bells = attention.seen_bells.max(bells);
+        // Invalidate any classifier that sampled the old pending count before
+        // this claim closed the grace window.
+        attention.generation = attention.generation.wrapping_add(1);
         // The grace window is over. Missing chimes must not become debt carried
         // into the turn this claim is about.
         attention.pending_completion_bells = 0;

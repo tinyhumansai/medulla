@@ -74,6 +74,17 @@ fn refresh(session: &SessionHandle, now: i64) {
         if now.saturating_sub(state.checked_at) < ATTENTION_INTERVAL_MS {
             return;
         }
+        if state
+            .completion_deadline
+            .is_some_and(|deadline| deadline <= std::time::Instant::now())
+        {
+            // Operator-entered turns bypass `try_claim`, so the poller also
+            // closes expired debt. Bump the revision before sampling so any
+            // older in-flight classifier cannot apply the retired count.
+            state.pending_completion_bells = 0;
+            state.completion_deadline = None;
+            state.generation = state.generation.wrapping_add(1);
+        }
         state.checked_at = now;
         (
             state.seen_bells,

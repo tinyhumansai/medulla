@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use super::super::attention::AttentionKind;
-use super::{sh, wait_for, PtyManager};
+use super::{sh, wait_for, HarnessControl, PtyManager};
 
 /// Codex's approval prompt, printed by `/bin/sh` and then held on screen.
 ///
@@ -470,6 +470,30 @@ fn a_silent_completion_does_not_hide_the_next_turns_bell() {
 
     now.store(200, Ordering::SeqCst);
     wait_for("the next turn's bell to remain eligible", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.shutdown();
+}
+
+#[test]
+fn expired_completion_debt_does_not_hide_an_operators_next_bell() {
+    let manager = PtyManager::new();
+    let id = manager
+        .open(sh("read line; printf 'operator request\\a\\n'; sleep 30"))
+        .expect("a session");
+
+    manager.settle_turn(&id);
+    manager.set_control(&id, HarnessControl::User);
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    manager
+        .write(&id, b"\r")
+        .expect("the operator submits a turn");
+    wait_for("the operator request to paint", || {
+        super::screen_text(&manager, &id).contains("operator request")
+    });
+    wait_for("the expired debt to leave the bell eligible", || {
         manager
             .attention(&id)
             .is_some_and(|cue| cue.kind == AttentionKind::Bell)

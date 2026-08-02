@@ -47,6 +47,13 @@ pub(in crate::ui::app) const RAIL_MAX_CONTENT: usize = 36;
 /// two lines still reads as one row rather than as two entries.
 const CONT_INDENT: usize = 5;
 
+/// Navigation lines the device footer may never take from the rail. Below this
+/// the rail stops being navigable, which no ambient readout is worth.
+const MIN_RAIL_LINES: usize = 3;
+
+/// Device readings the footer can show at most: CPU, RAM, and disk.
+const DEVICE_METRICS: usize = 3;
+
 /// Build the rail title from the lane inventory and one attention snapshot.
 fn rail_title(lanes: &[AgentLane], waiting: usize) -> String {
     let running_tasks: usize = lanes
@@ -166,14 +173,60 @@ impl App {
             }
         }
 
-        let capacity = (inner.height as usize).max(1);
+        // Device health sits under the rail as a footer, not as more selectable
+        // rows: it is ambient context, and putting it on the cursor's path would
+        // place three unactionable stops between the operator and their agents.
+        // It is given only the height the list can spare — `MIN_RAIL_LINES` and
+        // the blank separator are reserved first — so a short terminal drops
+        // disk, then RAM, then the footer entirely rather than pushing lanes
+        // off-screen.
+        let device_budget = (inner.height as usize)
+            .saturating_sub(MIN_RAIL_LINES + 1)
+            .min(DEVICE_METRICS);
+        let device = crate::ui::resources::device_lines(
+            &self.loaded.config.appearance,
+            self.device_monitor.sample(),
+            width,
+            device_budget,
+        );
+        // The separator only earns its row when there is something to separate.
+        let footer_height = if device.is_empty() {
+            0
+        } else {
+            device.len() + 1
+        };
+
+        let capacity = (inner.height as usize).saturating_sub(footer_height).max(1);
         let start =
             selected_row_viewport_start(active_line, active_line_end, lines.len(), capacity);
+        // Clicks map against the navigation lines alone. Handing the footer's
+        // rows to the hit test would turn a click on "Device RAM" into a
+        // selection of whichever lane happened to share its offset.
+        let nav_area = Rect {
+            height: capacity.min(inner.height as usize) as u16,
+            ..inner
+        };
         self.hit_agents = Some((
-            inner,
+            nav_area,
             owners.iter().skip(start).take(capacity).copied().collect(),
         ));
-        let view: Vec<TLine> = lines.into_iter().skip(start).take(capacity).collect();
+        let mut view: Vec<TLine> = lines.into_iter().skip(start).take(capacity).collect();
+        if !device.is_empty() {
+            // Pad to the footer's slot so the readings stay pinned to the bottom
+            // of the rail instead of drifting up with a short lane list.
+            while view.len() + footer_height < inner.height as usize {
+                view.push(TLine::from(""));
+            }
+            view.push(TLine::from(""));
+            let style = Style::default()
+                .fg(self.theme.accent)
+                .add_modifier(Modifier::DIM);
+            view.extend(
+                device
+                    .into_iter()
+                    .map(|line| TLine::from(Span::styled(line, style))),
+            );
+        }
         f.render_widget(Paragraph::new(Text::from(view)), inner);
     }
 

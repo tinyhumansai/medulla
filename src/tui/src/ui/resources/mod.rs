@@ -1,16 +1,26 @@
-//! Sampling and formatting of the Medulla process's CPU, memory, and disk I/O.
+//! Sampling and formatting of resource usage, at two scales.
 //!
-//! Sampling is throttled so frequent ratatui redraws do not turn the status line
-//! into a source of measurable load itself. The monitor refreshes only the
-//! current PID and keeps a decaying disk-throughput peak for relative bars.
+//! This module owns the Medulla process's own CPU, memory, and disk I/O, shown
+//! as status-line segments; the [`device`] submodule owns whole-device CPU,
+//! memory, and disk capacity, shown as a footer under the Agents rail. The two
+//! are kept visually and textually distinct — process segments are bare
+//! (`CPU 25%`), device lines are prefixed (`Device CPU 25%`) — so a reader is
+//! never left guessing whose usage a number describes.
+//!
+//! Sampling is throttled at both scales so frequent ratatui redraws do not turn
+//! the chrome into a source of measurable load itself. The process monitor
+//! refreshes only the current PID and keeps a decaying disk-throughput peak for
+//! relative bars.
 
 use std::time::{Duration, Instant};
 
 use medulla::config::{AppearanceConfig, ResourceDisplay};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
-pub use types::ResourceSnapshot;
+pub use device::{device_lines, DeviceMonitor};
+pub use types::{DeviceSnapshot, ResourceSnapshot};
 
+mod device;
 mod types;
 
 #[cfg(test)]

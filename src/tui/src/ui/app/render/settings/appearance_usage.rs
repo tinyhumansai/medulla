@@ -37,14 +37,36 @@ impl App {
             ]));
         }
         lines.push(TLine::from(""));
+        // Headers, not rows: the cursor indexes the indicators alone, so these
+        // are drawn between them purely to say whose usage each group reports.
+        // Without the split, "CPU" above "CPU" invites reading the device's
+        // load as Medulla's own.
+        let header = Style::default().add_modifier(Modifier::DIM);
         for (offset, (label, value)) in [
-            ("CPU indicator", self.loaded.config.appearance.cpu),
-            ("RAM indicator", self.loaded.config.appearance.ram),
-            ("Disk I/O indicator", self.loaded.config.appearance.disk_io),
+            ("Process CPU", self.loaded.config.appearance.cpu),
+            ("Process RAM", self.loaded.config.appearance.ram),
+            ("Process disk I/O", self.loaded.config.appearance.disk_io),
+            ("Device CPU", self.loaded.config.appearance.device_cpu),
+            ("Device RAM", self.loaded.config.appearance.device_ram),
+            ("Device disk", self.loaded.config.appearance.device_disk),
         ]
         .into_iter()
         .enumerate()
         {
+            match offset {
+                0 => lines.push(TLine::from(Span::styled(
+                    "  Medulla process — status line",
+                    header,
+                ))),
+                3 => {
+                    lines.push(TLine::from(""));
+                    lines.push(TLine::from(Span::styled(
+                        "  This device — Agents sidebar",
+                        header,
+                    )));
+                }
+                _ => {}
+            }
             let index = THEME_ROLES.len() + offset;
             let style = if index == sel {
                 self.theme.selection()

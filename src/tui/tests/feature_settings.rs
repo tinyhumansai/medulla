@@ -16,6 +16,7 @@ use ratatui::Terminal;
 use medulla::config::{AppearanceConfig, LoadedConfig, ResourceDisplay, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
 use medulla_tui::ui::app::{App, Cmd, TABS};
+use medulla_tui::ui::resources::DeviceSnapshot;
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
@@ -185,7 +186,7 @@ fn appearance_cycles_and_persists_process_indicators() {
     let _ = key(&mut app, KeyCode::Right);
 
     let out = text_of(&draw(&mut app, 180, 45));
-    assert!(out.contains("CPU indicator        percent"), "{out}");
+    assert!(out.contains("Process CPU          percent"), "{out}");
     let saved = std::fs::read_to_string(path).unwrap();
     assert!(saved.contains("[appearance]"), "{saved}");
     assert!(saved.contains("cpu = \"percent\""), "{saved}");
@@ -210,6 +211,88 @@ fn appearance_persists_process_indicators_to_json() {
     assert_eq!(saved["appearance"]["cpu"], "percent");
     assert_eq!(saved["appearance"]["diskIo"], "off");
     assert_eq!(saved["unrelated"]["kept"], true);
+}
+
+/// A fixed reading, so the sidebar says the same thing on every machine.
+fn device_sample() -> DeviceSnapshot {
+    DeviceSnapshot {
+        cpu_fraction: Some(0.42),
+        memory_used_bytes: Some(8 * 1024 * 1024 * 1024),
+        memory_total_bytes: Some(32 * 1024 * 1024 * 1024),
+        disk_used_bytes: Some(300 * 1024 * 1024 * 1024),
+        disk_total_bytes: Some(400 * 1024 * 1024 * 1024),
+    }
+}
+
+/// Open the Agents tab with the given appearance and an injected device sample.
+fn agents_app(appearance: AppearanceConfig) -> App {
+    let mut config = loaded();
+    config.config.appearance = appearance;
+    let runtime = Arc::new(MockRuntime::demo());
+    let mut app = App::new(runtime, config);
+    app.set_device_snapshot(device_sample());
+    app.tab_index = TABS.iter().position(|tab| *tab == "Agents").unwrap();
+    app
+}
+
+#[test]
+fn enabled_device_indicators_render_in_the_agents_sidebar() {
+    let mut app = agents_app(AppearanceConfig {
+        device_cpu: ResourceDisplay::Percent,
+        device_ram: ResourceDisplay::Value,
+        device_disk: ResourceDisplay::Percent,
+        ..AppearanceConfig::default()
+    });
+    let out = text_of(&draw(&mut app, 140, 40));
+    for label in ["Device CPU 42%", "Device RAM 8G/32G", "Device disk 75%"] {
+        assert!(out.contains(label), "missing {label}: {out}");
+    }
+}
+
+#[test]
+fn device_indicators_stay_off_by_default() {
+    let mut app = agents_app(AppearanceConfig::default());
+    let out = text_of(&draw(&mut app, 140, 40));
+    assert!(!out.contains("Device"), "{out}");
+}
+
+#[test]
+fn a_narrow_sidebar_keeps_navigation_and_drops_device_detail() {
+    let mut app = agents_app(AppearanceConfig {
+        device_cpu: ResourceDisplay::Bar,
+        device_ram: ResourceDisplay::Value,
+        device_disk: ResourceDisplay::Value,
+        ..AppearanceConfig::default()
+    });
+    let out = text_of(&draw(&mut app, 56, 20));
+    // A narrow rail fits a bar but not a `used/total` pair, so the byte counts
+    // collapse to percentages rather than spilling past the border.
+    assert!(out.contains("Device CPU"), "{out}");
+    assert!(out.contains("Device RAM 25%"), "{out}");
+    // Navigation survives: the lane rows are still on screen above the footer.
+    assert!(out.contains("orchestrator"), "{out}");
+}
+
+#[test]
+fn appearance_cycles_and_persists_device_indicators_independently() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    // Four theme roles, then three process indicators, lands on Device CPU.
+    for _ in 0..7 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Right);
+
+    let out = text_of(&draw(&mut app, 180, 45));
+    assert!(out.contains("Device CPU           percent"), "{out}");
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("deviceCpu = \"percent\""), "{saved}");
+    // The process indicators are untouched by a device row moving.
+    assert!(saved.contains("cpu = \"off\""), "{saved}");
+    assert!(saved.contains("deviceRam = \"off\""), "{saved}");
 }
 
 #[test]

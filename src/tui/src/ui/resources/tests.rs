@@ -2,7 +2,7 @@
 
 use medulla::config::{AppearanceConfig, ResourceDisplay};
 
-use super::{segments, ResourceSnapshot};
+use super::{disk_rates, segments, ResourceSnapshot};
 
 fn sample() -> ResourceSnapshot {
     ResourceSnapshot {
@@ -18,6 +18,12 @@ fn sample() -> ResourceSnapshot {
 #[test]
 fn disabled_resources_draw_nothing() {
     assert!(segments(&AppearanceConfig::default(), sample()).is_empty());
+}
+
+#[test]
+fn first_disk_delta_only_primes_the_counter_baseline() {
+    assert_eq!(disk_rates(8_192, 4_096, 1.0, false), (0.0, 0.0));
+    assert_eq!(disk_rates(8_192, 4_096, 2.0, true), (4_096.0, 2_048.0));
 }
 
 #[test]

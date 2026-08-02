@@ -231,11 +231,14 @@ impl HarnessAgentRunner {
             // behaviour depend on the order its branches happened to run in —
             // the same reason a task frame routes `Bounded` by default.
             conversation: None,
+            fleet_depth: self.settings.fleet_depth,
             // A node dispatches an instruction, never another workflow: nesting
             // is expressed with a `sub_workflow` node, which the engine expands
             // itself and applies its own depth limit to.
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
         }
     }
 

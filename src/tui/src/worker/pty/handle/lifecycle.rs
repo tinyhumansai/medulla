@@ -51,6 +51,7 @@ impl SessionHandle {
             cold: Mutex::new(ColdFields {
                 label,
                 session_id,
+                thread_name: None,
                 last_error: None,
             }),
             attention: Mutex::new(AttentionState {

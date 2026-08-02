@@ -23,6 +23,8 @@ use super::super::super::types::App;
 use super::super::color;
 use super::types::{AgentsPanes, Selection};
 
+#[cfg(test)]
+mod attention_tests;
 mod harness_line;
 mod rows;
 mod state;

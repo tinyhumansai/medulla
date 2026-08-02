@@ -4,7 +4,16 @@ use tokio::sync::oneshot;
 
 use crate::tinyplace::{encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind};
 
+use super::types::CapabilityProbeGuard;
 use super::{RunError, TaskRunner, MAX_RESETS};
+
+impl Drop for CapabilityProbeGuard {
+    fn drop(&mut self) {
+        if let Ok(mut waiters) = self.waiters.lock() {
+            waiters.remove(&self.key);
+        }
+    }
+}
 
 impl TaskRunner {
     /// Ask one worker to self-report its [`AgentCapabilities`] — the same
@@ -31,13 +40,20 @@ impl TaskRunner {
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
             let (sender, receiver) = oneshot::channel();
-            self.capabilities_waiters.lock().await.insert(
+            self.capabilities_waiters.lock().unwrap().insert(
                 correlation_id.clone(),
                 super::Probe {
                     from: address.to_string(),
                     tx: sender,
                 },
             );
+            // The control-plane roster wraps this future in a shorter timeout
+            // than the runner's retry window. Synchronous Drop cleanup makes
+            // that external cancellation reap the registered sender too.
+            let waiter_guard = CapabilityProbeGuard {
+                waiters: self.capabilities_waiters.clone(),
+                key: correlation_id.clone(),
+            };
             let body = encode_task_frame(EncodeFrameInput {
                 kind: TaskFrameKind::Capabilities,
                 task_id: correlation_id.clone(),
@@ -50,13 +66,12 @@ impl TaskRunner {
                 model: None,
                 tool_mode: None,
                 workflow: None,
+                workflow_fingerprint: None,
+                workflow_inputs: Default::default(),
                 conversation: None,
+                fleet_depth: 0,
             });
             if let Err(error) = self.relay.send(address, &body).await {
-                self.capabilities_waiters
-                    .lock()
-                    .await
-                    .remove(&correlation_id);
                 return Err(RunError::Transport(error));
             }
             match tokio::time::timeout(self.ack_window, receiver).await {
@@ -68,13 +83,10 @@ impl TaskRunner {
                     ));
                 }
                 Err(_) => {
-                    self.capabilities_waiters
-                        .lock()
-                        .await
-                        .remove(&correlation_id);
                     if attempt >= MAX_RESETS {
                         return Err(RunError::Timeout);
                     }
+                    drop(waiter_guard);
                     attempt += 1;
                     self.relay.reset_session(address).await;
                 }

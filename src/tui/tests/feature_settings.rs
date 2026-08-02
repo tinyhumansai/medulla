@@ -110,7 +110,9 @@ fn arrow_keys_move_subpage_selector() {
 fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
     let mut app = settings_app();
     let _ = key(&mut app, KeyCode::Char('3'));
-    for _ in 0..12 {
+    // Walk to the final path-style qualifier. Thread name adds two rows ahead
+    // of the path group, so this must cover the complete status-line catalog.
+    for _ in 0..14 {
         let _ = key(&mut app, KeyCode::Down);
     }
 
@@ -299,15 +301,15 @@ fn appearance_cycles_and_persists_device_indicators_independently() {
 fn enabled_process_indicators_render_on_the_status_line() {
     let mut config = loaded();
     config.config.appearance = AppearanceConfig {
-        cpu: ResourceDisplay::Percent,
-        ram: ResourceDisplay::Value,
-        disk_io: ResourceDisplay::Value,
+        cpu: ResourceDisplay::Bar,
+        ram: ResourceDisplay::Bar,
+        disk_io: ResourceDisplay::Bar,
         ..AppearanceConfig::default()
     };
     let runtime = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, config);
-    let out = text_of(&draw(&mut app, 220, 40));
-    for label in ["CPU", "RAM", "IO R"] {
+    let out = text_of(&draw(&mut app, 80, 40));
+    for label in ["CPU", "RAM", "IO"] {
         assert!(out.contains(label), "missing {label}: {out}");
     }
 }

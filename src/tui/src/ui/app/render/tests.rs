@@ -20,6 +20,16 @@ fn app() -> App {
 }
 
 #[test]
+fn compact_tab_labels_shorten_the_current_wide_destinations() {
+    assert_eq!(super::compact_tab_label("Workflows", true), "Flows");
+    assert_eq!(super::compact_tab_label("Changes", true), "Diff");
+    assert_eq!(super::compact_tab_label("Feedback", true), "Feed");
+    assert_eq!(super::compact_tab_label("Settings", true), "Set");
+    assert_eq!(super::compact_tab_label("Hosts", true), "Hosts");
+    assert_eq!(super::compact_tab_label("Changes", false), "Changes");
+}
+
+#[test]
 fn harness_choice_window_keeps_the_selection_visible() {
     assert_eq!(
         super::harness_modals::harness_choice_window(20, 0, 13),

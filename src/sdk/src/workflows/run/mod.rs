@@ -123,12 +123,55 @@ pub async fn run_workflow(
     input: Value,
     inputs: Map<String, Value>,
 ) -> Result<RunRecord, WorkflowError> {
+    run_workflow_inner(context, workflow_id, run_id, input, inputs, None).await
+}
+
+/// Run a workflow only when its persisted definition still has `fingerprint`.
+///
+/// Remote fleet dispatches use this after selecting a worker capability advert.
+/// The comparison happens against the same loaded record the engine compiles,
+/// so a same-id workflow changed after discovery is refused rather than run.
+pub async fn run_workflow_versioned(
+    context: RunContext,
+    workflow_id: &str,
+    run_id: &str,
+    input: Value,
+    inputs: Map<String, Value>,
+    fingerprint: &str,
+) -> Result<RunRecord, WorkflowError> {
+    run_workflow_inner(
+        context,
+        workflow_id,
+        run_id,
+        input,
+        inputs,
+        Some(fingerprint),
+    )
+    .await
+}
+
+/// Shared execution body for local and definition-bound remote runs.
+async fn run_workflow_inner(
+    context: RunContext,
+    workflow_id: &str,
+    run_id: &str,
+    input: Value,
+    inputs: Map<String, Value>,
+    expected_fingerprint: Option<&str>,
+) -> Result<RunRecord, WorkflowError> {
     if !context.settings.enabled {
         return Err(WorkflowError::Engine(
             "workflows are disabled on this host (workflows.enabled = false)".to_string(),
         ));
     }
     let workflow = require(context.store.as_ref(), workflow_id)?;
+    if expected_fingerprint
+        .is_some_and(|expected| crate::workflows::record_fingerprint(&workflow) != expected)
+    {
+        return Err(WorkflowError::Engine(format!(
+            "workflow '{workflow_id}' changed after it was selected; refresh the worker catalog"
+        )));
+    }
     if !workflow.enabled {
         return Err(WorkflowError::Engine(format!(
             "workflow '{workflow_id}' is disabled"

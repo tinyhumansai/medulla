@@ -31,12 +31,17 @@ impl App {
     ) -> Vec<TLine<'static>> {
         let waiting = self.harness_attention(row);
         let alerting = waiting.is_some();
-        let style = if active {
-            self.theme.selection()
-        } else if waiting.is_some() {
-            Style::default()
+        let style = if waiting.is_some() {
+            let attention = Style::default()
                 .fg(HarnessVisualState::NeedsInput.color())
-                .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
+                .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
+            if active {
+                attention.add_modifier(Modifier::REVERSED)
+            } else {
+                attention
+            }
+        } else if active {
+            self.theme.selection()
         } else if row.control == HarnessControl::User {
             Style::default().fg(color("cyan"))
         } else {

@@ -8,7 +8,7 @@ pub struct WorkerActivity {
     /// was seen. Empty when a frame arrives for a task this hub never sent —
     /// which is possible, because the backend broadcasts to every harness.
     pub agent_id: String,
-    /// The wire task id.
+    /// The operator-facing task id used to render and cancel this activity.
     pub task_id: String,
     /// The frame kind: `ack`, `status`, `reply`, `error`.
     pub kind: String,
@@ -23,13 +23,25 @@ pub struct WorkerActivity {
     /// no work panel rather than an empty one.
     pub work: Option<Box<crate::harness_work::WorkSnapshot>>,
 }
+
+/// Correlates an inbound wire id with the task row the operator controls.
+#[derive(Clone)]
+pub(super) struct ActivityAttribution {
+    /// Task id echoed by the worker in its frames.
+    pub(super) observed_task_id: String,
+    /// Task id displayed in the UI and accepted by its abort action.
+    pub(super) activity_task_id: String,
+    /// Roster id of the worker running the task.
+    pub(super) agent_id: String,
+}
+
 /// A bounded, shared record of worker activity.
 ///
 /// Cheap to clone; every clone reads and writes the same ring.
 #[derive(Clone, Default)]
 pub struct ActivityLog {
     pub(super) entries: Arc<Mutex<VecDeque<WorkerActivity>>>,
-    /// Which worker each task was dispatched to. Written at dispatch, read when
-    /// its frames come back.
-    pub(super) attribution: Arc<Mutex<VecDeque<(String, String)>>>,
+    /// How inbound wire ids map to operator-visible task ids and workers.
+    /// Written at dispatch and read when frames come back.
+    pub(super) attribution: Arc<Mutex<VecDeque<ActivityAttribution>>>,
 }

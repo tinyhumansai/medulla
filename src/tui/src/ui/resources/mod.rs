@@ -57,6 +57,7 @@ impl ResourceMonitor {
         {
             return self.snapshot;
         }
+        let baseline_ready = self.last_refresh.is_some();
         let elapsed = self
             .last_refresh
             .map(|last| now.duration_since(last).as_secs_f64())
@@ -83,8 +84,8 @@ impl ResourceMonitor {
             .map(|count| count.get() as f64)
             .unwrap_or(1.0);
         let disk = process.disk_usage();
-        let read_rate = disk.read_bytes as f64 / elapsed;
-        let write_rate = disk.written_bytes as f64 / elapsed;
+        let (read_rate, write_rate) =
+            disk_rates(disk.read_bytes, disk.written_bytes, elapsed, baseline_ready);
         self.disk_peak_bytes_per_second = (self.disk_peak_bytes_per_second * 0.9)
             .max(read_rate)
             .max(write_rate)
@@ -99,6 +100,23 @@ impl ResourceMonitor {
         };
         self.snapshot
     }
+}
+
+/// Convert sysinfo's deltas to rates only after an initial counter baseline.
+///
+/// A process's first refresh can report accumulated startup I/O as its delta.
+/// Ignoring that reading prevents it from inflating the decaying peak used by
+/// subsequent disk bars.
+fn disk_rates(
+    read_bytes: u64,
+    written_bytes: u64,
+    elapsed: f64,
+    baseline_ready: bool,
+) -> (f64, f64) {
+    if !baseline_ready {
+        return (0.0, 0.0);
+    }
+    (read_bytes as f64 / elapsed, written_bytes as f64 / elapsed)
 }
 
 /// Format every enabled resource as compact status-line segments.
@@ -126,6 +144,11 @@ fn cpu_segment(display: ResourceDisplay, fraction: f64) -> Option<String> {
     }
 }
 
+/// Formats process RSS relative to the machine's total physical memory.
+///
+/// Using total memory makes the percentage meaningful alongside the absolute
+/// RSS value. A platform that reports no total memory renders `0%` instead of
+/// hiding an explicitly enabled metric or dividing by zero.
 fn ram_segment(display: ResourceDisplay, used: u64, total: u64) -> Option<String> {
     let fraction = if total == 0 {
         0.0
@@ -140,6 +163,10 @@ fn ram_segment(display: ResourceDisplay, used: u64, total: u64) -> Option<String
     }
 }
 
+/// Formats disk throughput relative to its recent decaying peak.
+///
+/// The busier read/write direction determines the bar fill. Flooring the peak
+/// at one byte per second avoids division by zero before any disk activity.
 fn disk_segment(display: ResourceDisplay, sample: ResourceSnapshot) -> Option<String> {
     let peak = sample.disk_peak_bytes_per_second.max(1.0);
     let busiest = sample
@@ -158,12 +185,22 @@ fn disk_segment(display: ResourceDisplay, sample: ResourceSnapshot) -> Option<St
     }
 }
 
+/// Renders a compact five-cell utilization bar for the one-line status area.
+///
+/// Five cells balance useful resolution with scarce horizontal space. Values
+/// are clamped to protect the fixed width, then rounded so the closest visual
+/// level is shown instead of systematically understating utilization.
 fn bar(fraction: f64) -> String {
     const WIDTH: usize = 5;
     let filled = (fraction.clamp(0.0, 1.0) * WIDTH as f64).round() as usize;
     format!("{}{}", "█".repeat(filled), "░".repeat(WIDTH - filled))
 }
 
+/// Formats byte quantities compactly for the single-line status display.
+///
+/// Binary thresholds match memory and I/O accounting, while short `K`, `M`,
+/// and `G` suffixes conserve columns. One decimal retains useful precision
+/// without making rapidly changing resource values visually noisy.
 fn bytes(value: f64) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;

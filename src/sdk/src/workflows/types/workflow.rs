@@ -140,6 +140,21 @@ impl WorkflowRecord {
     }
 }
 
+/// Fingerprint every persisted field in a workflow record.
+///
+/// The source path is a property of the store read, not part of the workflow
+/// document, so it is deliberately excluded. Definition compare-and-swap
+/// writes use this fingerprint because a graph-only comparison would miss
+/// concurrent changes to defaults or other workflow metadata.
+pub fn record_fingerprint(record: &WorkflowRecord) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut persisted = record.clone();
+    persisted.source_path = None;
+    let canonical = serde_json::to_vec(&persisted).unwrap_or_default();
+    format!("{:x}", Sha256::digest(&canonical))
+}
+
 /// A workflow reduced to what a list needs — the shape advertised to the
 /// orchestrator and rendered in the TUI, so neither has to hold whole graphs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

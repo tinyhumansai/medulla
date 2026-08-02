@@ -23,7 +23,7 @@ mod tests;
 pub(super) use types::*;
 
 /// The page's rows, in display order. A field's qualifiers follow it.
-pub(super) const STATUS_LINE_ROWS: [StatusLineRow; 13] = [
+pub(super) const STATUS_LINE_ROWS: [StatusLineRow; 15] = [
     row("State glyph", StatusLineField::State, false),
     row("shown", StatusLineField::StateWhen, true),
     row("Harness name", StatusLineField::Harness, false),
@@ -32,6 +32,8 @@ pub(super) const STATUS_LINE_ROWS: [StatusLineRow; 13] = [
     row("Managed / unmanaged", StatusLineField::Control, false),
     row("shown", StatusLineField::ControlWhen, true),
     row("spelled", StatusLineField::ControlStyle, true),
+    row("Thread name", StatusLineField::Thread, false),
+    row("shown", StatusLineField::ThreadWhen, true),
     row("Git branch", StatusLineField::Branch, false),
     row("shown", StatusLineField::BranchWhen, true),
     row("Working path", StatusLineField::Path, false),
@@ -64,6 +66,8 @@ impl StatusLineField {
             StatusLineField::Control => "control",
             StatusLineField::ControlWhen => "controlWhen",
             StatusLineField::ControlStyle => "controlStyle",
+            StatusLineField::Thread => "thread",
+            StatusLineField::ThreadWhen => "threadWhen",
             StatusLineField::Branch => "branch",
             StatusLineField::BranchWhen => "branchWhen",
             StatusLineField::Path => "path",
@@ -88,6 +92,8 @@ impl StatusLineField {
             StatusLineField::Control => "managed / unmanaged",
             StatusLineField::ControlWhen => "managed / unmanaged shown",
             StatusLineField::ControlStyle => "managed / unmanaged spelled",
+            StatusLineField::Thread => "thread name",
+            StatusLineField::ThreadWhen => "thread name shown",
             StatusLineField::Branch => "git branch",
             StatusLineField::BranchWhen => "git branch shown",
             StatusLineField::Path => "working path",
@@ -116,6 +122,8 @@ impl StatusLineField {
             StatusLineField::ControlStyle => {
                 (cfg.control_style.label(), wire_value(&cfg.control_style))
             }
+            StatusLineField::Thread => (cfg.thread.label(), wire_value(&cfg.thread)),
+            StatusLineField::ThreadWhen => (cfg.thread_when.label(), wire_value(&cfg.thread_when)),
             StatusLineField::Branch => (cfg.branch.label(), wire_value(&cfg.branch)),
             StatusLineField::BranchWhen => (cfg.branch_when.label(), wire_value(&cfg.branch_when)),
             StatusLineField::Path => (cfg.path.label(), wire_value(&cfg.path)),
@@ -139,6 +147,8 @@ impl StatusLineField {
             StatusLineField::ControlStyle => {
                 cfg.control_style = cfg.control_style.cycled(forward);
             }
+            StatusLineField::Thread => cfg.thread = cfg.thread.cycled(forward),
+            StatusLineField::ThreadWhen => cfg.thread_when = cfg.thread_when.cycled(forward),
             StatusLineField::Branch => cfg.branch = cfg.branch.cycled(forward),
             StatusLineField::BranchWhen => cfg.branch_when = cfg.branch_when.cycled(forward),
             StatusLineField::Path => cfg.path = cfg.path.cycled(forward),

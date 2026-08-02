@@ -65,6 +65,11 @@ pub struct CapabilitySettings {
     /// node's `concurrency` past this slows the run down instead of breaking
     /// it.
     pub max_parallel_agents: usize,
+    /// The fleet depth inherited by every harness node in this run.
+    ///
+    /// A workflow received through `fleet_dispatch` is already delegated work;
+    /// its child nodes must stay at that depth rather than becoming new roots.
+    pub fleet_depth: u8,
     /// The directory a `medulla:shell` script runs in.
     ///
     /// The operator's project, normally: a step that shells out almost always
@@ -107,6 +112,7 @@ impl CapabilitySettings {
             http_allowlist: Vec::new(),
             run_timeout_secs: DEFAULT_RUN_TIMEOUT_SECS,
             max_parallel_agents: DEFAULT_MAX_PARALLEL_AGENTS,
+            fleet_depth: 0,
             workspace: String::new(),
         }
     }

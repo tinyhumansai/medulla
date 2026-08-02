@@ -563,3 +563,17 @@ fn the_mcp_verb_is_parsed_so_an_acp_session_can_launch_the_tool_server() {
         WorkflowAction::Mcp
     );
 }
+
+#[test]
+fn mcp_is_a_top_level_command() {
+    // What Medulla spawns for a harness. It must not fall through to the TUI:
+    // an unrecognised subcommand starts the interactive app, and a harness that
+    // got a ratatui screen on its stdio would hang rather than fail.
+    assert_eq!(parse_command(&argv(&["mcp"])), Command::Mcp);
+}
+
+#[test]
+fn help_text_documents_the_mcp_command() {
+    let help = help_text();
+    assert!(help.contains("medulla mcp"));
+}

@@ -23,6 +23,7 @@ fn conversation_frame(
 ) -> crate::tinyplace::TaskFrame {
     crate::tinyplace::TaskFrame {
         conversation: Some(conversation.to_string()),
+        fleet_depth: 0,
         ..task_frame(task_id, text, None)
     }
 }

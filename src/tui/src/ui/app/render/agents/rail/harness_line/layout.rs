@@ -63,10 +63,11 @@ const PATH_RESERVE: usize = 7;
 const PATH_MIN: usize = 4;
 
 /// Every field, in draw order.
-const ORDER: [Field; 5] = [
+const ORDER: [Field; 6] = [
     Field::State,
     Field::Harness,
     Field::Control,
+    Field::Thread,
     Field::Branch,
     Field::Path,
 ];
@@ -78,6 +79,7 @@ impl Field {
             Field::State => cfg.state,
             Field::Harness => cfg.harness,
             Field::Control => cfg.control,
+            Field::Thread => cfg.thread,
             Field::Branch => cfg.branch,
             Field::Path => cfg.path,
         }
@@ -89,6 +91,7 @@ impl Field {
             Field::State => cfg.state_when,
             Field::Harness => cfg.harness_when,
             Field::Control => cfg.control_when,
+            Field::Thread => cfg.thread_when,
             Field::Branch => cfg.branch_when,
             Field::Path => cfg.path_when,
         }
@@ -100,7 +103,7 @@ impl Field {
     /// branch and path say where it is pointed. Dimming the latter is what lets
     /// a column of harness rows be scanned for the former.
     fn is_detail(self) -> bool {
-        matches!(self, Field::Branch | Field::Path)
+        matches!(self, Field::Thread | Field::Branch | Field::Path)
     }
 }
 
@@ -202,6 +205,7 @@ fn layout_line(
             Field::State => fit(&state_glyph.to_string(), room),
             Field::Harness => fit(&harness_text(row, cfg.harness_style), room),
             Field::Control => fit(&control_text(row.control, cfg.control_style), room),
+            Field::Thread => row.thread_name.as_deref().and_then(|name| fit(name, room)),
             Field::Branch => branch_text(row, room, path_shares_line),
             Field::Path => path_text(row, home, cfg.path_style, room),
         };

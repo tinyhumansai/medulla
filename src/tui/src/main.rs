@@ -9,15 +9,17 @@ use std::io::{self, IsTerminal};
 use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
-#[cfg(feature = "workflows")]
-use crate::commands::run_workflow_cmd;
 use crate::commands::{run_hub, run_init, run_login, run_logout, run_workspace};
+#[cfg(feature = "workflows")]
+use crate::commands::{run_mcp_cmd, run_workflow_cmd};
 use crate::run::run_core;
 
 mod app_loop;
 #[cfg(test)]
 mod app_loop_tests;
 mod commands;
+#[cfg(feature = "workflows")]
+mod control_plane;
 mod event_loop;
 mod hub_relay;
 mod local_host;
@@ -93,6 +95,12 @@ async fn async_main() -> anyhow::Result<()> {
         Command::Hub => run_hub(&raw[1..]).await,
         #[cfg(feature = "workflows")]
         Command::Workflow => run_workflow_cmd(&raw[1..]).await,
+        #[cfg(feature = "workflows")]
+        Command::Mcp => run_mcp_cmd(&raw[1..]).await,
+        #[cfg(not(feature = "workflows"))]
+        Command::Mcp => {
+            anyhow::bail!("this build has no MCP server (built without the `workflows` feature)")
+        }
         // Built without the workflow engine: say so rather than starting the
         // TUI, which is what an unhandled subcommand would otherwise do.
         #[cfg(not(feature = "workflows"))]

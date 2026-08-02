@@ -21,11 +21,15 @@
 //!
 //! Not a sandbox. The child inherits this process's environment and privileges,
 //! and the only boundary is a temporary working directory, which is not one.
+//! What *is* checked, at the boundary above this one, is where a script may come
+//! from and where it may run: see [`super::script_policy`].
 //! `workflows.allowCode` is on by default for locally authored workflows, but
 //! can be explicitly disabled when definitions come from an untrusted source.
 //! Everything here is about making a trusted script *work correctly*, not about
 //! containing an untrusted one.
 
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -99,25 +103,80 @@ pub struct ScriptOutput {
     pub stderr: String,
 }
 
-/// Run `source` in `language` with `input`, bounded by `timeout`.
+/// What to run: source this host stages, or a file that already exists.
+#[derive(Debug, Clone, Copy)]
+pub enum ScriptSource<'a> {
+    /// Source text, written to a temporary file before it is run.
+    Inline(&'a str),
+    /// An existing script file.
+    ///
+    /// Whether a workflow may reach this path is decided *before* it gets here,
+    /// by [`super::script_policy`]; nothing below re-checks it.
+    File(&'a Path),
+}
+
+/// Everything one script run needs.
 ///
-/// `cwd`, when given, is the directory the script runs in. `None` uses the
-/// temporary directory holding the script — right for a pure computation, wrong
-/// for anything that means to touch the operator's project.
+/// A struct rather than six positional arguments, two of which are paths and
+/// three of which are optional — an order a caller would eventually get wrong
+/// without the compiler noticing.
+#[derive(Debug, Clone, Copy)]
+pub struct ScriptRequest<'a> {
+    /// The interpreter to run under.
+    pub language: ScriptLanguage,
+    /// The script itself.
+    pub source: ScriptSource<'a>,
+    /// The JSON handed to the script on stdin, and written to `argv[1]`.
+    pub input: &'a Value,
+    /// How long the script may run before it is abandoned.
+    pub timeout: Duration,
+    /// The directory to run in. `None` uses the temporary directory holding the
+    /// staged script — right for a pure computation, wrong for anything that
+    /// means to touch the operator's project.
+    pub cwd: Option<&'a Path>,
+    /// Environment variables layered over the inherited environment.
+    pub env: &'a BTreeMap<String, String>,
+}
+
+impl<'a> ScriptRequest<'a> {
+    /// A request with no working directory and no extra environment — the shape
+    /// a pure computation over `input` wants.
+    pub fn plain(
+        language: ScriptLanguage,
+        source: &'a str,
+        input: &'a Value,
+        timeout: Duration,
+        env: &'a BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            language,
+            source: ScriptSource::Inline(source),
+            input,
+            timeout,
+            cwd: None,
+            env,
+        }
+    }
+}
+
+/// Run the script `request` describes.
 ///
 /// # Errors
 ///
 /// Fails when the interpreter is missing, the script exits non-zero, or it
-/// outlives `timeout`. The message carries the interpreter's own stderr, which
-/// is the only thing that says what actually went wrong.
-pub async fn run_script(
-    language: ScriptLanguage,
-    source: &str,
-    input: &Value,
-    timeout: Duration,
-    cwd: Option<&std::path::Path>,
-) -> Result<ScriptOutput> {
+/// outlives `request.timeout`. The message carries the interpreter's own stderr,
+/// which is the only thing that says what actually went wrong.
+pub async fn run_script(request: ScriptRequest<'_>) -> Result<ScriptOutput> {
     use tokio::io::AsyncWriteExt;
+
+    let ScriptRequest {
+        language,
+        source,
+        input,
+        timeout,
+        cwd,
+        env,
+    } = request;
 
     // Refused rather than emulated. `argv[1]` and `MEDULLA_INPUT` are real
     // filesystem paths this host wrote (`C:\...` on Windows), and Git Bash — the
@@ -139,9 +198,15 @@ pub async fn run_script(
     let dir =
         tempfile::tempdir().map_err(|err| EngineError::Capability(format!("script: {err}")))?;
 
-    let script = dir.path().join(format!("script.{extension}"));
-    std::fs::write(&script, source)
-        .map_err(|err| EngineError::Capability(format!("script: {err}")))?;
+    let script: PathBuf = match source {
+        ScriptSource::Inline(source) => {
+            let staged = dir.path().join(format!("script.{extension}"));
+            std::fs::write(&staged, source)
+                .map_err(|err| EngineError::Capability(format!("script: {err}")))?;
+            staged
+        }
+        ScriptSource::File(path) => path.to_path_buf(),
+    };
 
     // The input reaches the script two ways because the languages want
     // different ones: a pipe reads naturally in node and python, a path reads
@@ -157,6 +222,10 @@ pub async fn run_script(
         .arg(&script)
         .arg(&input_path)
         .env("MEDULLA_INPUT", &input_path)
+        // Layered after `MEDULLA_INPUT` so a workflow's own declaration wins
+        // over the inherited value of the same name — that is what declaring
+        // one is for.
+        .envs(env)
         .current_dir(cwd.unwrap_or_else(|| dir.path()))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

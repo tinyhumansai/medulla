@@ -20,32 +20,6 @@ use super::{
     recording_send, stdin_runner, task_frame, wait_ready,
 };
 
-#[cfg(feature = "workflows")]
-#[test]
-fn task_without_tool_mode_clears_an_inherited_mode() {
-    let mut env = std::collections::HashMap::from([(
-        crate::workflows::mcp::TOOL_MODE_ENV.to_string(),
-        "propose".to_string(),
-    )]);
-
-    env = crate::daemon::task_loop::with_tool_mode(env, None);
-
-    assert!(!env.contains_key(crate::workflows::mcp::TOOL_MODE_ENV));
-}
-
-#[cfg(feature = "workflows")]
-#[test]
-fn task_with_tool_mode_forces_acp_transport() {
-    let env =
-        crate::daemon::task_loop::with_tool_mode(std::collections::HashMap::new(), Some("propose"));
-
-    assert_eq!(
-        env.get(crate::daemon::providers::HARNESS_PROTOCOL_ENV)
-            .map(String::as_str),
-        Some("acp")
-    );
-}
-
 #[tokio::test]
 async fn rejects_duplicate_task_id_from_same_sender() {
     let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
@@ -118,6 +92,37 @@ async fn forwards_input_into_running_task() {
     assert!(frames
         .iter()
         .any(|f| f.kind == TaskFrameKind::Ack && f.text == "input received"));
+
+    gate.notify_waiters();
+    runtime.idle().await;
+}
+
+#[cfg(feature = "workflows")]
+#[tokio::test]
+async fn input_for_an_acp_task_is_rejected_instead_of_buffered() {
+    let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+    let gate = Arc::new(Notify::new());
+    let received = Arc::new(StdMutex::new(Vec::new()));
+    let run_task = stdin_runner(ready_tx, gate.clone(), received.clone());
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), run_task, send);
+    let mut task = task_frame("t1", "work", None);
+    task.tool_mode = Some("propose".to_string());
+
+    runtime.handle_message("peer".into(), String::new(), Some(task));
+    wait_ready(&mut ready_rx).await;
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(input_frame("t1", "extra guidance", None)),
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    assert!(received.lock().unwrap().is_empty());
+    assert!(decoded_frames(&recorded).iter().any(|frame| {
+        frame.kind == TaskFrameKind::Error
+            && frame.text == "task transport does not accept mid-run input"
+    }));
 
     gate.notify_waiters();
     runtime.idle().await;

@@ -12,6 +12,8 @@ mod control;
 mod probe;
 mod run;
 mod system_info;
+#[cfg(test)]
+mod tests;
 #[cfg(feature = "workflows")]
 pub(in crate::daemon) mod workflow;
 
@@ -76,25 +78,44 @@ impl DaemonRuntime {
     }
 }
 
-/// Add a task's workflow-tool mode to the environment its harness runs in.
+/// Add a task's workflow-tool mode and fleet depth to its harness environment.
 ///
-/// The MCP server is a subprocess the harness spawns, so the only channel from
-/// here to it is the environment the session was started with. Absent for every
-/// ordinary dispatch, which leaves the full authoring surface in place.
-pub(super) fn with_tool_mode(
+/// Always written, never inherited: one daemon serves tasks at several depths,
+/// so a value left over from its own environment could only ever be right for
+/// one of them — and being wrong here means a fan-out guard that does not bite.
+pub(super) fn with_tool_mode_at_depth(
     mut env: std::collections::HashMap<String, String>,
     mode: Option<&str>,
+    depth: u8,
 ) -> std::collections::HashMap<String, String> {
+    // These are capabilities for the MCP subprocess that received them, not
+    // ambient configuration. A nested harness must obtain its own grant at its
+    // actual depth; inheriting its parent's pair would bypass both depth and
+    // session isolation, including on the direct-provider transport.
+    env.remove(crate::control_socket::MCP_SOCKET_ENV);
+    env.remove(crate::control_socket::MCP_GRANT_ENV);
+    let has_parent_grant = crate::control_socket::parent_grant_from_env(&env).is_some();
+    env.insert(
+        crate::control_socket::FLEET_DEPTH_ENV.to_string(),
+        depth.to_string(),
+    );
     #[cfg(feature = "workflows")]
     {
-        env.remove(crate::workflows::mcp::TOOL_MODE_ENV);
+        env.remove(crate::mcp::TOOL_MODE_ENV);
         if let Some(mode) = mode {
-            env.insert(
-                crate::workflows::mcp::TOOL_MODE_ENV.to_string(),
-                mode.to_string(),
-            );
-            // Workflow tools are attached through ACP; legacy provider JSONL
-            // cannot expose the MCP server an evolution turn needs.
+            env.insert(crate::mcp::TOOL_MODE_ENV.to_string(), mode.to_string());
+        }
+        if mode.is_some()
+            || has_parent_grant
+            || task_can_reach_fleet(crate::control_socket::active().is_some())
+        {
+            // Medulla tools are attached through ACP; legacy provider JSONL
+            // cannot expose the MCP server. Restricted workflow turns need it
+            // for authoring. Every task on the process that owns the control
+            // plane needs ACP, including the root orchestrator at depth zero;
+            // a remote worker cannot mint a fleet grant, so forcing ACP there
+            // changes transport without adding any tools and can break an
+            // otherwise installed direct CLI.
             env.insert(
                 crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
                 "acp".to_string(),
@@ -106,4 +127,10 @@ pub(super) fn with_tool_mode(
     #[cfg(not(feature = "workflows"))]
     let _ = mode;
     env
+}
+
+/// Whether a full-mode task can receive fleet tools from this host.
+#[cfg(feature = "workflows")]
+pub(super) fn task_can_reach_fleet(has_active_plane: bool) -> bool {
+    has_active_plane
 }

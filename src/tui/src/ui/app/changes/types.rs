@@ -103,21 +103,34 @@ impl GitChangesState {
         self.scroll = 0;
         self.cursor = 0;
         let selected_path = self.selected_path().map(|p| p.to_path_buf());
-        self.patch = match (&self.root, &self.baseline, &selected_path) {
+        let new_patch = match (&self.root, &self.baseline, &selected_path) {
             (Some(root), Some(baseline), Some(path)) => {
-                repository::patch(root, baseline, path).unwrap_or_else(|error| vec![error])
+                match repository::patch(root, baseline, path) {
+                    Ok(p) => p,
+                    Err(error) => {
+                        // When patch loading fails, preserve the current patch and error state.
+                        // Do not mark anchors outdated on transient failures or network issues.
+                        self.error = Some(error);
+                        return;
+                    }
+                }
             }
             _ => Vec::new(),
         };
-        self.hunks = hunks(&self.patch);
 
-        // Mark anchors outdated when they no longer point to valid patch positions.
-        // When a patch changes, line and hunk indices become stale. Rather than
-        // deleting a user's written comment, we mark it outdated so it remains visible
-        // but cannot be edited or used for new anchors.
-        if let Some(path) = selected_path {
-            self.comments
-                .mark_outdated_if_invalid(&path, &self.patch, self.hunks.len());
+        // Only mark anchors outdated if the patch has actually changed.
+        // Comparing old and new patch content avoids spurious invalidation during
+        // navigation or refresh without actual changes.
+        let patch_changed = self.patch != new_patch;
+        self.patch = new_patch;
+        self.hunks = hunks(&self.patch);
+        self.error = None;
+
+        if patch_changed {
+            if let Some(path) = selected_path {
+                self.comments
+                    .mark_outdated_if_invalid(&path, &self.patch, self.hunks.len());
+            }
         }
     }
 

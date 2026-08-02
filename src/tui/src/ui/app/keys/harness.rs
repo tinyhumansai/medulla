@@ -10,7 +10,8 @@
 //! minimum that leaves a way out, and it is the traditional choice precisely
 //! because full-screen programs do not bind it. While the chrome owns the
 //! keyboard, plain Enter also attaches when the selected pane is a harness;
-//! everywhere else Enter keeps its normal meaning. Recognising the chord is
+//! everywhere else Enter keeps its normal meaning — including under an open
+//! overlay, which owns the keyboard until it is answered. Recognising the chord is
 //! [`is_focus_chord`](crate::ui::harness_pane::keys::is_focus_chord) rather than
 //! a character comparison — terminals do not deliver it the way it is written.
 
@@ -74,6 +75,14 @@ impl App {
             self.type_into_harness(&session, key);
             return true;
         }
+        // *Attaching* is a chrome binding, not a mode, so it yields to whatever
+        // overlay is on top of the chrome. The pane behind an open picker is
+        // still drawn — and so still resolves a harness session — which is how
+        // Enter in the "start a harness" modal used to attach to the harness
+        // already selected underneath it instead of launching the chosen one.
+        if self.overlay_owns_keys() {
+            return false;
+        }
         let enter_on_harness = key.code == KeyCode::Enter
             && key.modifiers == KeyModifiers::NONE
             && self.harness_pane_session.is_some();
@@ -85,6 +94,19 @@ impl App {
             return true;
         }
         false
+    }
+
+    /// Whether a modal overlay is up and owns the keyboard.
+    ///
+    /// The handback prompt is included for completeness even though
+    /// [`App::on_key`] answers it before anything else gets a look in — a later
+    /// reordering should not quietly reopen the hole this closes.
+    fn overlay_owns_keys(&self) -> bool {
+        self.handback_prompt.is_some()
+            || self.prompt.is_some()
+            || self.harness_picker.is_some()
+            || self.resume_picker.is_some()
+            || self.decision_open
     }
 
     /// Attach to the harness the Agents pane resolved on the last draw.

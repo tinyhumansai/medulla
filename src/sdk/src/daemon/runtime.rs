@@ -4,7 +4,7 @@
 //! machine lives in [`super::task_loop`].
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{Mutex as TokioMutex, Notify, Semaphore};
@@ -20,6 +20,13 @@ use super::types::{
 };
 
 impl DaemonRuntime {
+    /// Advertise screen termination support for an embedding that installs the
+    /// authenticated screen-message router.
+    pub fn enable_screen_kill(&self) {
+        self.inner
+            .screen_kill
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     /// Build a runtime from `config`, an executor (`run_task`), and a
     /// lock-serialized `send`.
     pub fn new(config: DaemonConfig, run_task: RunTaskFn, send: SendFn) -> Self {
@@ -40,6 +47,7 @@ impl DaemonRuntime {
                 inflight_count: AtomicUsize::new(0),
                 inflight_idle: Notify::new(),
                 capabilities: TokioMutex::new(None),
+                screen_kill: AtomicBool::new(false),
                 accessible_dirs: StdMutex::new(accessible_dirs),
                 sessions: crate::sessions::SessionRegistry::default(),
             }),
@@ -183,6 +191,23 @@ impl DaemonRuntime {
             .unwrap()
             .get(&Self::task_key(from, task_id))
             .and_then(|task| task.session_id.clone())
+    }
+
+    /// Terminate the running task identified by sender, id, and dispatch receipt.
+    ///
+    /// The signal remains bound to the task record while the map is locked. The
+    /// correlation check prevents a delayed request from terminating a later
+    /// dispatch that reused the same task id.
+    pub fn terminate_task(&self, from: &str, task_id: &str, correlation_id: &str) -> bool {
+        let running = self.inner.running.lock().unwrap();
+        let Some(task) = running.get(&Self::task_key(from, task_id)) else {
+            return false;
+        };
+        if task.correlation_id.as_deref() != Some(correlation_id) {
+            return false;
+        }
+        task.abort.terminate();
+        true
     }
 
     /// Record the session an executor opened for a running task.

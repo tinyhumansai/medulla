@@ -44,6 +44,17 @@ impl App {
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
 
+        // Killing a harness can lose in-progress work. Once armed, the prompt
+        // owns exactly one keypress: only a deliberate `y` proceeds.
+        if let Some((worker, task_id)) = self.kill_armed.take() {
+            if k.code == KeyCode::Char('y') && k.modifiers.is_empty() {
+                self.set_status(format!("Killing harness for {task_id}…"));
+                return Some(Cmd::KillTask { worker, task_id });
+            }
+            self.set_status("Harness kill cancelled");
+            return None;
+        }
+
         // The hand-back question outranks even the attached harness, and has to:
         // it is asked *while still attached*, because releasing the keyboard
         // before it is answered would hide the pane the question is about. So

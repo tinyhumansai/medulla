@@ -130,6 +130,27 @@ impl HubHandle {
         sent
     }
 
+    /// Ask `worker` to kill the harness serving `task_id`.
+    ///
+    /// The worker resolves the task against the authenticated sender before it
+    /// touches a PTY, so this cannot be used to kill another controller's work.
+    pub async fn kill(&self, worker: &str, task_id: &str) -> Result<(), String> {
+        let (correlation_id, wire_task_id) = self
+            .runner
+            .kill_correlation_for(worker, task_id)
+            .await
+            .ok_or_else(|| {
+                format!("task {task_id} is not running with termination support on {worker}")
+            })?;
+        let body =
+            crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Kill {
+                task_id: wire_task_id,
+                correlation_id,
+            });
+        (self.log)(&format!("hub: killing task {task_id} on {worker}"));
+        self.relay.send(worker, &body).await
+    }
+
     /// Build a handle from its wiring.
     pub(super) fn new(wiring: HandleWiring) -> Self {
         HubHandle {

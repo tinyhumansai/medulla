@@ -504,6 +504,18 @@ impl Runtime for OpenHumanRuntime {
         })
     }
 
+    fn kill_task(&self, worker: String, task_id: String) -> BoxFuture<'static, anyhow::Result<()>> {
+        let hub = self.hub();
+        Box::pin(async move {
+            let Some(hub) = hub else {
+                return Ok(());
+            };
+            hub.kill(&worker, &task_id)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))
+        })
+    }
+
     fn worker_op(&self, op: crate::runtime::WorkerOp) -> BoxFuture<'static, anyhow::Result<()>> {
         let hub = self.hub();
         Box::pin(async move {

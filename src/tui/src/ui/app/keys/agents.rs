@@ -82,6 +82,14 @@ impl App {
         let alt = k.modifiers.contains(KeyModifiers::ALT);
 
         match k.code {
+            KeyCode::Char('K') => {
+                if let Some(target) = self.kill_target() {
+                    self.arm_kill(target);
+                } else {
+                    self.set_status("Select a running harness task first");
+                }
+                AgentsKey::Handled(None)
+            }
             // The bare arrows are the point of having focus at all.
             KeyCode::Up | KeyCode::Down => {
                 self.agent_scroll = 0;

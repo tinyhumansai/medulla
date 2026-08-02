@@ -424,6 +424,19 @@ async fn an_unsubscribe_for_a_task_nobody_streams_does_nothing() {
 }
 
 #[tokio::test]
+async fn a_kill_for_a_task_this_sender_never_dispatched_is_refused() {
+    let mut router = empty_router();
+    router.handle(
+        "peerA",
+        medulla::tinyplace::ScreenMessage::Kill {
+            task_id: "t1".into(),
+            correlation_id: "cyc/t1/0".into(),
+        },
+    );
+    assert_eq!(router.active(), 0);
+}
+
+#[tokio::test]
 async fn only_the_peer_a_stream_was_opened_for_can_stop_it() {
     let sessions = super::super::pty::PtyManager::new();
     let send = send_fn(|_, _| async {});

@@ -40,6 +40,7 @@ pub type ExistsOnPath = Box<dyn Fn(&str) -> bool + Send + Sync>;
 #[derive(Clone, Default)]
 pub struct Abort {
     flag: Arc<AtomicBool>,
+    terminate: Arc<AtomicBool>,
     notify: Arc<Notify>,
 }
 
@@ -53,6 +54,17 @@ impl Abort {
     pub fn abort(&self) {
         self.flag.store(true, Ordering::SeqCst);
         self.notify.notify_waiters();
+    }
+
+    /// Signal cancellation that must also terminate the serving harness.
+    pub fn terminate(&self) {
+        self.terminate.store(true, Ordering::SeqCst);
+        self.abort();
+    }
+
+    /// Whether cancellation requested termination of the serving harness.
+    pub fn is_terminated(&self) -> bool {
+        self.terminate.load(Ordering::SeqCst)
     }
 
     /// Whether cancellation has been signalled.

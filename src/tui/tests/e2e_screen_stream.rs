@@ -69,7 +69,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
 /// The runtime is the piece under test here as much as the sampler: it owns the
 /// running-task record keyed by `(sender, task id)`, and that record is the only
 /// thing that lets a subscription resolve.
-fn runtime_serving(session_id: String) -> DaemonRuntime {
+fn runtime_serving(sessions: PtyManager, session_id: String) -> DaemonRuntime {
     let config = DaemonConfig {
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
@@ -92,13 +92,17 @@ fn runtime_serving(session_id: String) -> DaemonRuntime {
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
         let session_id = session_id.clone();
+        let sessions = sessions.clone();
         Box::pin(async move {
             if let Some(report) = options.on_session {
-                report(session_id);
+                report(session_id.clone());
             }
             // Hold the task open so its record — and therefore the subscription
             // resolving through it — stays live for the duration of the test.
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            options.abort.cancelled().await;
+            if options.abort.is_terminated() {
+                sessions.close(&session_id);
+            }
             Err("never settles".to_string())
         }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
     }) as medulla::daemon::providers::RunTaskFn;
@@ -158,7 +162,7 @@ async fn a_watched_task_streams_its_real_terminal_to_the_hubs_store() {
         ))
         .expect("a pty session");
 
-    let runtime = runtime_serving(session_id.clone());
+    let runtime = runtime_serving(sessions.clone(), session_id.clone());
     start_task(&runtime, peer, task_id).await;
 
     let outbox: Outbox = Arc::new(Mutex::new(Vec::new()));
@@ -273,7 +277,7 @@ async fn an_unchanged_screen_costs_nothing_after_the_first_frame() {
     let session_id = sessions
         .open(sh("printf 'STILL\\n'; sleep 30", peer))
         .expect("a pty session");
-    let runtime = runtime_serving(session_id);
+    let runtime = runtime_serving(sessions.clone(), session_id);
     start_task(&runtime, peer, task_id).await;
 
     let outbox: Outbox = Arc::new(Mutex::new(Vec::new()));
@@ -312,5 +316,56 @@ async fn an_unchanged_screen_costs_nothing_after_the_first_frame() {
         after - settled
     );
 
+    sessions.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_owned_task_kill_stops_its_real_harness() {
+    let peer = "peerA";
+    let task_id = "t3#0";
+    let sessions = PtyManager::new();
+    let session_id = sessions.open(sh("sleep 30", peer)).expect("a pty session");
+    let runtime = runtime_serving(sessions.clone(), session_id.clone());
+    start_task(&runtime, peer, task_id).await;
+    let mut router = ScreenRouter::new(sessions.clone(), runtime, send_fn(|_, _| async {}));
+
+    router.handle(
+        peer,
+        ScreenMessage::Kill {
+            task_id: task_id.to_string(),
+            correlation_id: "stale-dispatch".to_string(),
+        },
+    );
+    assert!(
+        sessions
+            .row(&session_id)
+            .expect("the live session remains inspectable")
+            .state
+            .is_running(),
+        "a stale dispatch receipt must not kill a reused task id"
+    );
+
+    router.handle(
+        peer,
+        ScreenMessage::Kill {
+            task_id: task_id.to_string(),
+            correlation_id: format!("cyc/{task_id}/0"),
+        },
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    while sessions
+        .row(&session_id)
+        .expect("the killed session remains inspectable")
+        .state
+        .is_running()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the task-scoped kill must stop the harness process"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(router.active(), 0, "its screen stream is also stopped");
     sessions.shutdown();
 }

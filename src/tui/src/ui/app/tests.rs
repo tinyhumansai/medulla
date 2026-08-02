@@ -22,6 +22,24 @@ fn app() -> App {
     App::new(rt, loaded)
 }
 
+fn app_with_running_task() -> App {
+    let rt = MockRuntime::demo();
+    let loaded = {
+        let mut loaded = LoadedConfig::defaults("medulla.tui.json".into());
+        loaded.config.tinyplace = Some(medulla::config::TinyplaceConfig::default());
+        loaded
+    };
+    let mut app = App::new(Arc::new(rt), loaded);
+    app.snapshot.events.retain(|envelope| {
+        !matches!(
+            &envelope.event,
+            crate::ui::events::TuiEvent::TaskComplete { digest }
+                if digest.task_id == "task-1"
+        )
+    });
+    app
+}
+
 /// The index of the tab named `name`. Looked up rather than written down: the
 /// tab bar's order is a product decision that has changed before.
 fn tab(name: &str) -> usize {
@@ -290,6 +308,53 @@ fn selecting_a_task_asks_to_watch_it() {
     let (_, task_id) = start.expect("a task to start watching");
     assert!(!task_id.is_empty());
     assert!(app.watching.is_some(), "the target is remembered");
+}
+
+#[test]
+fn killing_a_watched_harness_requires_confirmation() {
+    let mut app = app_with_running_task();
+    select_first_task(&mut app).expect("the fixture has a selectable task");
+    app.focus_agents_rail();
+
+    let armed = app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+    assert!(armed.is_none(), "arming must not kill the harness");
+    assert!(app.kill_armed.is_some());
+    assert!(app.status().contains("y confirm"));
+
+    let cmd = app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    assert!(matches!(cmd, Some(Cmd::KillTask { .. })));
+    assert!(app.kill_armed.is_none());
+}
+
+#[test]
+fn killing_resolves_the_current_rail_selection_instead_of_the_cached_watch() {
+    let mut app = app_with_running_task();
+    select_first_task(&mut app).expect("the fixture has a selectable task");
+    let selected = app.watch_target().expect("the selected task is watchable");
+    app.watching = Some(("stale-worker".into(), "stale-task".into()));
+    app.focus_agents_rail();
+
+    app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+    assert_eq!(app.kill_armed.as_ref(), Some(&selected));
+
+    let cmd = app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    let Some(Cmd::KillTask { worker, task_id }) = cmd else {
+        panic!("confirming should kill the selected task");
+    };
+    assert_eq!((worker, task_id), selected);
+}
+
+#[test]
+fn any_other_key_cancels_a_harness_kill() {
+    let mut app = app_with_running_task();
+    select_first_task(&mut app).expect("the fixture has a selectable task");
+    app.focus_agents_rail();
+    app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+
+    let cmd = app.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+    assert!(cmd.is_none());
+    assert!(app.kill_armed.is_none());
+    assert!(app.status().contains("cancelled"));
 }
 
 #[test]

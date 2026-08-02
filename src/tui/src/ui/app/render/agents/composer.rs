@@ -72,7 +72,7 @@ impl App {
         // that cannot send it leaves the rail unreachable, so the key that
         // always works is named right where the cursor is.
         let caption = if self.agents_rail_focused() {
-            "↑↓ walk agents · Enter or type to write".to_string()
+            "↑↓ walk agents · K kill harness · Enter or type to write".to_string()
         } else {
             format!("› {target}   ·  Esc to pick an agent")
         };

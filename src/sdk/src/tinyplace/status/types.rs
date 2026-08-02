@@ -6,7 +6,9 @@ use super::*;
 pub struct SessionStatusState {
     /// `HarnessSessionState` wire string (see the `STATE_*` constants).
     pub state: String,
+    /// Human-readable detail associated with the state.
     pub detail: String,
+    /// Tool call or approval request currently blocking the session.
     pub active_call_id: Option<String>,
     /// Timestamp of the last event that moved the machine (ms since epoch).
     pub last_event_at_ms: i64,
@@ -15,7 +17,9 @@ pub struct SessionStatusState {
 /// published, the payload to emit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusStep {
+    /// State after applying the event or tick.
     pub next: SessionStatusState,
+    /// Payload to publish when the externally visible status changed.
     pub emit: Option<StatusPayload>,
 }
 /// A semantic event fed to [`reduce_status`]: the typed event kind plus the
@@ -23,7 +27,9 @@ pub struct StatusStep {
 /// time", which falls back to the machine's last activity clock.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticEvent {
+    /// Event time in milliseconds since the Unix epoch.
     pub timestamp_ms: Option<i64>,
+    /// Typed harness event to fold.
     pub event: HarnessEventKind,
 }
 pub(super) struct Derived {

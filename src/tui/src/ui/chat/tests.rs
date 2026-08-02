@@ -45,14 +45,69 @@ fn draft(text: &str) -> Draft {
     }
 }
 
+/// A width wide enough that nothing in these tests wraps on it.
+const WIDE: u16 = 80;
+
 #[test]
 fn a_composer_grows_with_its_draft_rather_than_capping_it() {
-    assert_eq!(composer_height(""), 3);
-    assert_eq!(composer_height("one line"), 3);
-    assert_eq!(composer_height("one\ntwo\nthree"), 5);
+    assert_eq!(composer_height("", WIDE), 3);
+    assert_eq!(composer_height("one line", WIDE), 3);
+    assert_eq!(composer_height("one\ntwo\nthree", WIDE), 5);
     // Well past any pane's own cap: the height is the caller's to clamp, and a
     // widget that lied about it would hide the end of what is being typed.
-    assert_eq!(composer_height(&"x\n".repeat(20)), 23);
+    assert_eq!(composer_height(&"x\n".repeat(20), WIDE), 23);
+}
+
+#[test]
+fn a_composer_grows_for_text_that_wraps_without_a_newline_in_it() {
+    // 24 columns: two borders and the `❯ ` gutter leave 20 for text.
+    assert_eq!(composer_height(&"a".repeat(20), 24), 3);
+    assert_eq!(composer_height(&"a".repeat(21), 24), 4);
+    assert_eq!(composer_height(&"a".repeat(60), 24), 5);
+    // A pane too narrow to lay text out in reports a single row rather than one
+    // row per character.
+    assert_eq!(composer_height(&"a".repeat(60), 4), 3);
+}
+
+#[test]
+fn a_long_line_wraps_instead_of_running_off_the_edge() {
+    // The bug this replaces: the widget counted hard newlines, so a paragraph
+    // with none in it drew one row and everything past the border was lost.
+    let out = rows(14, 6, |f, area| {
+        draw_composer(
+            f,
+            area,
+            &draft("alpha bravo charlie"),
+            &Theme::default(),
+            ComposerChrome::default(),
+        )
+    });
+    assert!(out[1].contains("❯ alpha"), "{out:?}");
+    assert!(out[2].contains("bravo"), "{out:?}");
+    assert!(out[3].contains("charlie"), "{out:?}");
+    // A continuation is indented, not re-prompted.
+    assert!(!out[2].contains('❯'), "{out:?}");
+}
+
+#[test]
+fn a_capped_composer_scrolls_to_keep_the_caret_visible() {
+    // What a caller with a cap (the copilot pane) gets: the draft is taller than
+    // the rows granted, so the window follows the caret to the end rather than
+    // pinning the top and hiding what is being typed.
+    let out = rows(14, 4, |f, area| {
+        draw_composer(
+            f,
+            area,
+            &draft("one\ntwo\nthree\nfour"),
+            &Theme::default(),
+            ComposerChrome {
+                focused: true,
+                ..ComposerChrome::default()
+            },
+        )
+    });
+    assert!(out[1].contains("three"), "{out:?}");
+    assert!(out[2].contains("four"), "{out:?}");
 }
 
 #[test]

@@ -4,7 +4,9 @@ use super::*;
 /// One decrypted inbound DM.
 #[derive(Debug, Clone)]
 pub struct InboundMessage {
+    /// Sender address or agent identifier.
     pub from: String,
+    /// Decrypted message body.
     pub text: String,
 }
 /// Encrypted transport bound to one machine wallet.

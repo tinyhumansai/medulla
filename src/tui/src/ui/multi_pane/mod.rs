@@ -39,12 +39,12 @@ pub(crate) fn split(area: Rect) -> (Rect, Rect) {
 /// leaves the transcript too narrow to wrap prose, and on a 200-column one it
 /// hands half the screen to a column of short labels. So the sidebar is sized to
 /// what it holds — the widest row plus the panel's own borders — and then held
-/// between a floor that keeps labels legible and a ceiling of a third of the
+/// between a floor that keeps labels legible and a ceiling of three tenths of the
 /// screen so a long workspace path can never crowd out the content beside it.
 pub(crate) fn sidebar_width(total: u16, widest_row: usize) -> u16 {
-    const FLOOR: u16 = 22;
+    const FLOOR: u16 = 18;
     const BORDERS: u16 = 2;
-    let ceiling = (total / 3).max(FLOOR);
+    let ceiling = (total.saturating_mul(3) / 10).max(FLOOR);
     let wanted = (widest_row as u16).saturating_add(BORDERS);
     wanted.clamp(FLOOR, ceiling).min(total.saturating_sub(20))
 }
@@ -204,13 +204,17 @@ pub(crate) fn draw_rows(
             hits.push((inner.y + lines.len() as u16, selectable));
             selectable += 1;
         }
+        let base = row
+            .color
+            .map(|color| Style::default().fg(color))
+            .unwrap_or_default();
         let style = match (row.selected, nav_focused, row.dim) {
             (true, true, _) => theme.selection(),
             // Bold rather than the selection highlight: the cursor is still
             // here, but the keyboard is in the content pane beside it.
-            (true, false, _) => Style::default().add_modifier(Modifier::BOLD),
-            (false, _, true) => dim,
-            _ => Style::default(),
+            (true, false, _) => base.add_modifier(Modifier::BOLD),
+            (false, _, true) => base.add_modifier(Modifier::DIM),
+            _ => base,
         };
         let marker = if row.selected && nav_focused {
             "▸"

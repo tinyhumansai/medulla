@@ -45,7 +45,8 @@ impl App {
         debug_assert_eq!(self.wf.focus, WorkflowFocus::Copilot);
         let busy = self.copilot_busy();
 
-        let composer = chat::composer_height(&self.wf.draft.text).min(MAX_COMPOSER_ROWS);
+        let composer =
+            chat::composer_height(&self.wf.draft.text, area.width).min(MAX_COMPOSER_ROWS);
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(composer)])
@@ -157,27 +158,31 @@ fn hint(busy: bool, below: usize) -> String {
         return format!("↓ {below} more line{plural} below");
     }
     if busy {
-        // Not "⌃X aborts": a busy turn runs on its own host, off the chat
-        // runtime Ctrl-X actually aborts, so promising cancellation here would
-        // be a lie the operator only discovers by waiting on it.
-        return "working…".to_string();
+        // ⌃X really does stop it now: on this tab the chord reaches the
+        // copilot's own host rather than the chat runtime. Enter still works —
+        // it queues, and the queued line shows in the transcript.
+        return "working… ⌃X stops it · ⏎ queues".to_string();
     }
     "⏎ send · Esc leave".to_string()
 }
 
 /// One transcript turn, wrapped and marked by role.
-fn turn_lines(turn: &CopilotTurn, width: usize) -> Vec<TLine<'static>> {
+pub(super) fn turn_lines(turn: &CopilotTurn, width: usize) -> Vec<TLine<'static>> {
+    if matches!(
+        turn.role,
+        TurnRole::Tool | TurnRole::ToolSuccess | TurnRole::ToolFailure
+    ) {
+        return tool_turn_lines(turn, width);
+    }
     let mut style = Style::default().fg(super::super::color(turn.role.color()));
     if turn.role.dim() {
         style = style.add_modifier(Modifier::DIM);
     }
-    // A tool call is one line: its summary is already the short form, and
-    // wrapping a call across three rows buries the reply it happened before.
-    let text = if turn.role == TurnRole::Tool {
-        clip(&turn.text, width.saturating_sub(2))
-    } else {
-        turn.text.clone()
-    };
+    // Wrapped like everything else. Tool lines used to be clipped to one row on
+    // the grounds that their summary was already short — but they now carry
+    // gate refusals and dry-run diagnostics, which name a node, a binding, and
+    // the correction. Clipping those hides the half that says what to do.
+    let text = turn.text.clone();
     let glyph = turn.role.glyph();
     wrap(&text, width.saturating_sub(2))
         .into_iter()
@@ -191,6 +196,48 @@ fn turn_lines(turn: &CopilotTurn, width: usize) -> Vec<TLine<'static>> {
             TLine::from(Span::styled(format!("{lead}{row}"), style))
         })
         .collect()
+}
+
+/// Draw a tool as one compact semantic row, with at most one detail row.
+fn tool_turn_lines(turn: &CopilotTurn, width: usize) -> Vec<TLine<'static>> {
+    let color = super::super::color(turn.role.color());
+    let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+    let detail_style = Style::default().add_modifier(Modifier::DIM);
+    let (title, detail) = split_tool_summary(&turn.text);
+    let glyph = turn.role.glyph();
+    let title = clip(title, width.saturating_sub(2));
+    let Some(detail) = detail.filter(|detail| !detail.is_empty()) else {
+        return vec![TLine::from(vec![
+            Span::styled(format!("{glyph} "), title_style),
+            Span::styled(title, title_style),
+        ])];
+    };
+
+    let inline = format!("{glyph} {title}  {detail}");
+    if inline.chars().count() <= width {
+        return vec![TLine::from(vec![
+            Span::styled(format!("{glyph} {title}"), title_style),
+            Span::styled(format!("  {detail}"), detail_style),
+        ])];
+    }
+    vec![
+        TLine::from(vec![
+            Span::styled(format!("{glyph} "), title_style),
+            Span::styled(title, title_style),
+        ]),
+        TLine::from(Span::styled(
+            format!("  {}", clip(detail, width.saturating_sub(2))),
+            detail_style,
+        )),
+    ]
+}
+
+/// Split the producer's `title · detail` summary without parsing raw input.
+fn split_tool_summary(summary: &str) -> (&str, Option<&str>) {
+    summary
+        .split_once(" · ")
+        .or_else(|| summary.split_once(": "))
+        .map_or((summary, None), |(title, detail)| (title, Some(detail)))
 }
 
 /// Which invitation the pane shows before its first instruction.

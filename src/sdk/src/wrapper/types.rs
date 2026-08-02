@@ -102,4 +102,8 @@ pub struct WrapperConfig {
     /// App-side PTY spawner. `None` (the default, and what tests use) keeps the
     /// child on inherited or piped stdio.
     pub pty_spawner: Option<PtySpawner>,
+    /// Whether commits this session's harness makes are attributed to Medulla —
+    /// the resolved `attribution.commit` config value (on by default; see
+    /// [`crate::config::AttributionConfig`]).
+    pub attribution: bool,
 }

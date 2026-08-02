@@ -21,12 +21,16 @@ use super::super::frames::TaskFrame;
 /// Errors from the runtime helpers.
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    /// Filesystem or socket I/O failed.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// Persisted runtime JSON was invalid.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    /// The tiny.place SDK returned an error.
     #[error("tinyplace sdk error: {0}")]
     Sdk(#[from] SdkError),
+    /// Runtime configuration or state violated a required invariant.
     #[error("{0}")]
     Invalid(String),
 }

@@ -3,10 +3,10 @@
 //! with a row model for the Agents list and pre-wrapped transcript lines. A port
 //! of the TS `deriveAgentLanes` / `agentRowModel` / `laneLines` essentials.
 //!
-//! Split by responsibility: [`types`] holds the lane/task/turn data model,
-//! [`lanes`] the event fold that produces lanes, [`roster`] the merge of the
-//! local worker registry into the roster the fold reads, [`rows`] the
-//! Agents-list row model, [`lines`] the transcript rendering, and [`keys`] the
+//! Split by responsibility: `types` holds the lane/task/turn data model,
+//! `lanes` the event fold that produces lanes, `roster` the merge of the
+//! local worker registry into the roster the fold reads, `rows` the
+//! Agents-list row model, `lines` the transcript rendering, and `keys` the
 //! lane-key parser. The small formatting helpers shared by the fold live in the
 //! private `fmt` submodule. All public items are re-exported here so callers use
 //! `medulla::ui::agents::*`.

@@ -116,7 +116,11 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
                 harness: w.harness.clone(),
                 label: (w.name != "tinyplace-worker").then(|| w.name.clone()),
                 selected: false,
+                // A spec describes a host this process just started; roles are
+                // an operator choice made later, on the Hosts page.
+                roles: Vec::new(),
                 workspace: w.workspace.clone(),
+                ..Default::default()
             })
             .collect(),
     ));
@@ -127,14 +131,22 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         config.backend_url,
         config.workers.len()
     ));
+    let catalog = Arc::new(config.agent_templates.clone());
     let socket = connect_harness(
         &config.backend_url,
         &config.jwt,
-        roster.clone(),
-        runner.clone(),
-        subscription_strategy.clone(),
-        config.log.clone(),
-        Some(activity.clone()),
+        super::socket::HarnessWiring {
+            roster: roster.clone(),
+            catalog: catalog.clone(),
+            runner: runner.clone(),
+            subscription_strategy: subscription_strategy.clone(),
+            log: config.log.clone(),
+            activity: Some(activity.clone()),
+            // Installed here and nowhere else: this is the one place a hub's
+            // uplink is built, so a bridge the host supplied on its config is
+            // the bridge the socket serves.
+            workflows: config.workflows.clone(),
+        },
     )
     .await?;
     (config.log)("hub: connected + registered — relaying tasks to tiny.place workers");
@@ -145,6 +157,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         address: hub_address,
         public_key: hub_public_key,
         relay,
+        catalog,
         runner: runner.clone(),
         log: config.log.clone(),
         persist: config.persist.clone(),

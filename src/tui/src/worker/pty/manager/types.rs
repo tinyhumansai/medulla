@@ -13,7 +13,15 @@ pub struct PtyManager {
 }
 pub(super) struct Inner {
     /// Sessions in open order, so the list does not reshuffle under the cursor.
-    pub(super) sessions: Mutex<Vec<PtySession>>,
+    ///
+    /// An `RwLock` over `Arc` handles rather than a `Mutex` over the session
+    /// bodies, which is the point of the split. The registry is read-mostly — it
+    /// changes only when a session is opened or forgotten — while lookups happen
+    /// on every frame, every reader wakeup and every executor poll. Readers no
+    /// longer exclude one another and, more importantly, **nobody holds this
+    /// lock while doing work**: every accessor clones the one `Arc` it wants and
+    /// releases the registry before touching the session at all.
+    pub(super) sessions: RwLock<Vec<Arc<SessionHandle>>>,
     pub(super) next_id: AtomicU64,
     pub(super) now: NowFn,
 }

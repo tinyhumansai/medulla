@@ -14,13 +14,17 @@
 //! sibling `openhuman` host, but a crate-root module of that name would collide
 //! with the `tinyflows` crate itself in every path inside this crate.)
 //!
-//! Definitions are JSON documents in the layered workflow directories
-//! (`<medulla home>/workflows`, then `<cwd>/.medulla/workflows`), the same
-//! layering agent templates use. The store is behind the [`WorkflowStore`]
-//! trait, so a remote catalog is a new implementation rather than a rewrite.
+//! Definitions are JSON documents under `<medulla home>/workflows`.
+//! Repository-provided defaults under `<cwd>/.medulla/workflows` remain
+//! readable, but user-authored changes overlay them from the home directory.
+//! The store is behind the [`WorkflowStore`] trait, so a remote catalog is a new
+//! implementation rather than a rewrite.
 
 pub mod authoring;
+pub mod bridge;
 pub mod copilot;
+pub mod evolve;
+pub mod gates;
 pub mod local;
 pub mod mcp;
 pub mod node_contracts;
@@ -34,24 +38,32 @@ mod types;
 mod tests;
 
 pub use authoring::{
-    apply_workflow_ops, create_workflow, preview_workflow_ops, validate_handle, GraphHandle,
+    apply_workflow_ops, apply_workflow_ops_if_unchanged, create_workflow, preview_workflow_ops,
+    validate_handle, GraphHandle,
 };
-pub use copilot::{CopilotOutcome, CopilotSession};
-pub use local::{LocalWorkflowHost, LOCAL_WORKER_ADDRESS};
+pub use bridge::{cancel_task_workflow, run_task_workflow, StoreWorkflowBridge};
+pub use copilot::{CopilotOutcome, CopilotRequest, CopilotSession, FailedRun};
+pub use local::{LocalCopilotDispatch, LocalWorkflowHost, LOCAL_WORKER_ADDRESS};
 pub use node_contracts::{all_node_kind_contracts, node_kind_contract};
 pub use ops::discover_store;
 pub use registry::StoreWorkflowResolver;
 pub use run::{dry_run, resume_workflow, run_workflow, RunContext};
 pub use store::{
-    new_run_record, parse_workflow, require, require_run, validate_graph, FileWorkflowStore,
-    LoadReport, WorkflowStore,
+    current_notes, mint_note_id, mint_proposal_id, new_run_record, parse_workflow, require,
+    require_proposal, require_run, rollback, undo_last, validate_graph, FileWorkflowStore,
+    LoadReport, WorkflowStore, MAX_NOTES, MAX_REVISIONS,
 };
 // The engine's own graph model, re-exported so hosts above this crate (the TUI)
 // can name a workflow's graph without taking a direct dependency on the engine.
 // The type is the shared contract, not a Medulla type, so re-exporting it is the
-// alternative to a parallel copy that would drift.
-pub use tinyflows::model::WorkflowGraph;
+// alternative to a parallel copy that would drift. `InputType`/`WorkflowInput`
+// come along for the same reason: the TUI has to render and coerce a declared
+// input, and a second declaration of that shape would be free to disagree with
+// the engine's about what a `number` accepts.
+pub use tinyflows::model::{InputType, WorkflowGraph, WorkflowInput};
+pub(crate) use types::bounded_evidence;
 pub use types::{
-    RunId, RunRecord, RunStatus, RunStep, WorkflowError, WorkflowId, WorkflowRecord,
-    WorkflowSummary,
+    fingerprint, NoteId, NoteKind, NoteSource, ProposalId, ProposalStatus, ProposalVerification,
+    RunId, RunRecord, RunStatus, RunStep, WorkflowDefaults, WorkflowError, WorkflowId,
+    WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision, WorkflowSummary,
 };

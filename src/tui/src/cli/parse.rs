@@ -1,5 +1,5 @@
 //! Argument parsing for `main`: subcommand dispatch ([`parse_command`]) and the
-//! per-subcommand flag parsers ([`parse_login_args`], [`parse_memory_args`],
+//! per-subcommand flag parsers ([`parse_login_args`],
 //! [`parse_update_args`], [`parse_tui_args`]), plus the [`help_text`] shown by
 //! `medulla help`/`--help`. Every function is pure over its input args.
 
@@ -7,8 +7,8 @@ use medulla::auth::Provider;
 use medulla::tinyplace::HarnessProvider;
 
 use super::types::{
-    Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs, UpdateArgs,
-    WorkflowAction, WorkflowArgs, WorkspaceAction, WorkspaceArgs,
+    Command, InitArgs, LoginArgs, RunArgs, TuiArgs, UpdateArgs, WorkflowAction, WorkflowArgs,
+    WorkspaceAction, WorkspaceArgs,
 };
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
@@ -26,7 +26,6 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("sessions") => Command::Sessions,
         Some("login") => Command::Login,
         Some("logout") => Command::Logout,
-        Some("memory") => Command::Memory,
         Some("update") => Command::Update,
         Some("init") => Command::Init,
         Some("workspace") | Some("workspaces") => Command::Workspace,
@@ -67,60 +66,6 @@ pub fn parse_login_args(args: &[String]) -> Result<LoginArgs, String> {
         }
     }
     Ok(out)
-}
-
-/// Parse `medulla memory <action> [flags]`. Returns a usage error on a missing
-/// or unknown action, or a `search` with no query.
-pub fn parse_memory_args(args: &[String]) -> Result<MemoryArgs, String> {
-    let action_word = args.first().map(String::as_str).ok_or_else(|| {
-        "expected a subcommand: status|ingest|backfill|compile|search".to_string()
-    })?;
-
-    let mut config: Option<String> = None;
-    let mut json = false;
-    let mut facet: Option<String> = None;
-    let mut k: usize = 5;
-    let mut query_parts: Vec<String> = Vec::new();
-
-    let mut it = args.iter().skip(1);
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--config" => config = it.next().cloned(),
-            "--json" => json = true,
-            "--facet" => facet = it.next().cloned(),
-            "--k" => {
-                if let Some(v) = it.next() {
-                    k = v
-                        .parse::<usize>()
-                        .map_err(|_| format!("invalid --k value '{v}'"))?;
-                }
-            }
-            other => query_parts.push(other.to_string()),
-        }
-    }
-
-    let action = match action_word {
-        "status" => MemoryAction::Status,
-        "ingest" => MemoryAction::Ingest,
-        "backfill" => MemoryAction::Backfill,
-        "compile" => MemoryAction::Compile,
-        "search" => {
-            let query = query_parts.join(" ");
-            if query.trim().is_empty() {
-                return Err("memory search: expected a query".to_string());
-            }
-            MemoryAction::Search(query)
-        }
-        other => return Err(format!("unknown memory subcommand '{other}'")),
-    };
-
-    Ok(MemoryArgs {
-        config,
-        json,
-        facet,
-        k,
-        action,
-    })
 }
 
 /// Parse the flags following `medulla update`.
@@ -217,7 +162,7 @@ pub fn parse_workspace_args(args: &[String]) -> WorkspaceArgs {
 pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
     let mut out = WorkflowArgs::default();
     let mut bare: Vec<String> = Vec::new();
-    let mut it = args.iter();
+    let mut it = args.iter().peekable();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--config" => {
@@ -230,9 +175,54 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
                     out.input = Some(v.clone());
                 }
             }
+            "--inputs" => {
+                if let Some(v) = it.next() {
+                    out.inputs = Some(v.clone());
+                }
+            }
+            "--set" => {
+                if let Some(v) = it.next() {
+                    out.set.push(v.clone());
+                }
+            }
             "--run-id" => {
                 if let Some(v) = it.next() {
                     out.run_id = Some(v.clone());
+                }
+            }
+            "--kind" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.kind = it.next().cloned();
+                }
+            }
+            "--text" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.text = it.next().cloned();
+                }
+            }
+            // Empty is meaningful for both — it is how an operator clears a
+            // pinned harness or model — so these accept a value that a
+            // `!starts_with('-')` guard would otherwise have to allow anyway.
+            "--harness" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.harness = it.next().cloned();
+                }
+            }
+            "--model" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.model = it.next().cloned();
+                }
+            }
+            "--reason" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.reason = it.next().cloned();
+                }
+            }
+            // Repeatable: one conclusion can replace several earlier guesses.
+            "--supersedes" => {
+                if it.peek().is_some_and(|value| !value.starts_with('-')) {
+                    out.supersedes
+                        .push(it.next().expect("peeked value exists").clone());
                 }
             }
             // Repeatable: a paused run may be holding more than one gate, and
@@ -280,6 +270,15 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
         }
         Some("get-run") => operand.map_or(WorkflowAction::List, WorkflowAction::GetRun),
         Some("catalog") | Some("kinds") => WorkflowAction::Catalog(operand),
+        Some("defaults") => operand.map_or(WorkflowAction::List, WorkflowAction::Defaults),
+        Some("notes") => operand.map_or(WorkflowAction::List, WorkflowAction::Notes),
+        Some("note") => operand.map_or(WorkflowAction::List, WorkflowAction::AddNote),
+        Some("evolve") | Some("review") => {
+            operand.map_or(WorkflowAction::List, WorkflowAction::Evolve)
+        }
+        Some("proposals") => operand.map_or(WorkflowAction::List, WorkflowAction::Proposals),
+        Some("accept") => operand.map_or(WorkflowAction::List, WorkflowAction::Accept),
+        Some("reject") => operand.map_or(WorkflowAction::List, WorkflowAction::Reject),
         Some("mcp") => WorkflowAction::Mcp,
         _ => WorkflowAction::List,
     };
@@ -297,11 +296,6 @@ pub fn parse_tui_args(args: &[String]) -> TuiArgs {
                     out.config = Some(v.clone());
                 }
             }
-            "--core-socket" => {
-                if let Some(v) = it.next() {
-                    out.core_socket = Some(v.clone());
-                }
-            }
             "--no-alt-screen" => out.alt_screen = false,
             "--mock" => out.mock = true,
             _ => {}
@@ -310,9 +304,10 @@ pub fn parse_tui_args(args: &[String]) -> TuiArgs {
     out
 }
 
-/// Parse `medulla run [flags] <instruction...>`. `--config` / `--core-socket`
-/// take a value; every other non-flag token is part of the instruction, joined
-/// by spaces. Returns a usage error when no instruction text is supplied.
+/// Parse `medulla run [flags] <instruction...>`. `--config` takes a value;
+/// every other non-flag token is part of the instruction, joined by spaces.
+/// Returns a usage error when no instruction text is supplied, or when the
+/// retired `--core-socket` flag is passed.
 pub fn parse_run_args(args: &[String]) -> Result<RunArgs, String> {
     let mut out = RunArgs::default();
     let mut instruction: Vec<String> = Vec::new();
@@ -324,10 +319,13 @@ pub fn parse_run_args(args: &[String]) -> Result<RunArgs, String> {
                     out.config = Some(v.clone());
                 }
             }
+            // Rejected rather than ignored: an unrecognized token here joins
+            // the instruction, so quietly dropping this arm would submit
+            // "--core-socket /path ..." to the agent as prompt text.
             "--core-socket" => {
-                if let Some(v) = it.next() {
-                    out.core_socket = Some(v.clone());
-                }
+                return Err(
+                    "run: --core-socket is gone; the core is embedded in this process".to_string(),
+                )
             }
             other => instruction.push(other.to_string()),
         }
@@ -345,7 +343,7 @@ pub fn help_text() -> String {
         "medulla {version}\n\n\
 Usage:\n  \
 medulla                 Start the interactive chat TUI (default)\n  \
-medulla run <text>      Submit one instruction to a local medulla-serve socket and stream events (JSON lines)\n  \
+medulla run <text>      Submit one instruction to the embedded core and stream the cycle's events (JSON lines)\n  \
 medulla daemon [flags]  Run the daemon TUI (agents, master, workspaces, requests)\n  \
 medulla daemon --headless  Run without the operator screen (automatic when piped)\n  \
                         --workspace <dir>      where peer tasks run\n  \
@@ -356,7 +354,6 @@ medulla claude [args]   Run Claude Code in your terminal, bridged to tiny.place\
 medulla opencode [args] Run OpenCode in your terminal, bridged to tiny.place\n  \
 medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
-medulla memory <cmd>    Persona memory: status|ingest|backfill|compile|search <query>\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
 medulla workspace <cmd> Workspace registry: add [dir]|list|remove <dir|id>\n  \
 medulla workflow <cmd>  Workflows: list|get|create|apply-ops|validate|dry-run|run|resume|cancel|catalog\n  \
@@ -380,6 +377,8 @@ Wrapper flags:\n  \
 --                      Pass all following arguments to the CLI verbatim\n\n\
 Workflow flags:\n  \
 --input <json>          Trigger payload for run / dry-run\n  \
+--inputs <json>         Declared workflow inputs, as an object keyed by name\n  \
+--set <name>=<value>    One declared input (repeatable; wins over --inputs)\n  \
 --run-id <id>           Id to give the run (default: a fresh one)\n  \
 --approve <node-id>     Gate to release on resume (repeatable)\n  \
 --reject <node-id>      Gate to refuse on resume (repeatable)\n\n\
@@ -389,11 +388,6 @@ Login flags:\n  \
 --no-browser            Print the login URL without launching a browser\n  \
 --token <64-hex>        Redeem a one-time login token instead (headless)\n  \
 --config <path>         Config file to read backend.baseUrl from (.toml or .json)\n\n\
-Memory flags:\n  \
---json                  Emit JSON instead of human-readable output\n  \
---facet <name>          Restrict a search to one facet\n  \
---k <n>                 Max search results (default 5)\n  \
---config <path>         Explicit config file (.toml or .json) for the memory section\n\n\
 Init flags:\n  \
 --force, -f             Overwrite an existing MEDULLA.md\n  \
 --offline               Skip the model call and write an editable stub\n  \
@@ -405,11 +399,9 @@ Workspace flags:\n  \
 --json                  Emit JSON instead of human-readable output (list)\n  \
 --config <path>         Explicit config file (.toml or .json) holding the registry\n\n\
 Run flags:\n  \
---core-socket <path>    medulla-serve unix socket to attach (else MEDULLA_CORE_SOCKET / [core] config)\n  \
---config <path>         Explicit config file (.toml or .json) for the [core] section\n\n\
+--config <path>         Explicit config file (.toml or .json)\n\n\
 TUI flags:\n  \
 --config <path>         Explicit config file (.toml or .json); bypasses layered discovery\n  \
---core-socket <path>    Attach the core medulla-serve runtime at this socket instead of the backend\n  \
 --mock                  Run the offline demo runtime (no backend, no login)\n  \
 --no-alt-screen         Do not switch to the alternate screen\n",
         version = env!("CARGO_PKG_VERSION"),

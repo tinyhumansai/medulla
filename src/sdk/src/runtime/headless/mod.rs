@@ -22,7 +22,7 @@
 //!   the wire carries one); the driver returns immediately after.
 //!
 //! Errors (attach timeout, an unavailable runtime, a rejected instruction, a
-//! stalled cycle) are returned as a typed [`HeadlessError`] for the caller to
+//! stalled cycle) are returned as a typed `HeadlessError` for the caller to
 //! surface on stderr and map to an exit code deterministically — they are never
 //! written to the transcript stream.
 
@@ -49,7 +49,7 @@ impl Default for HeadlessOptions {
 ///
 /// Preconditions: `runtime` is freshly constructed (its driver may still be
 /// mid-handshake — the function waits for it). Side effects: writes and flushes
-/// one line per event to `out`. Errors: one [`HeadlessError`] variant per
+/// one line per event to `out`. Errors: one `HeadlessError` variant per
 /// failure mode — the runtime never attaches within `ready_timeout`, latches
 /// unavailable, rejects the `submit`, the cycle does not finish within
 /// `cycle_timeout`, or `out` fails to accept a line.
@@ -223,7 +223,7 @@ async fn wait_for_change(
 /// Write one JSON value as an NDJSON line and flush so a piped consumer (a
 /// docker container reading stdout) sees each event as it lands. A serialize
 /// failure folds into `io::Error` (serde_json carries the underlying I/O
-/// error), which the caller surfaces as [`HeadlessError::Output`].
+/// error), which the caller surfaces as `HeadlessError::Output`.
 fn write_line<W: Write>(out: &mut W, value: &serde_json::Value) -> std::io::Result<()> {
     serde_json::to_writer(&mut *out, value).map_err(std::io::Error::from)?;
     out.write_all(b"\n")?;

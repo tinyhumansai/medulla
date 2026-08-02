@@ -8,6 +8,7 @@
 //! specific: turning a workflow, and the runs nested under it, into rows.
 
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::Frame;
 
 use crate::ui::multi_pane::{self, NavRow};
@@ -52,13 +53,17 @@ impl App {
                     dim: match row {
                         WorkflowRailRow::Workflow { row, .. }
                         | WorkflowRailRow::Run { row, .. } => row.degraded,
-                        WorkflowRailRow::Note(_) => true,
+                        WorkflowRailRow::Hint(_) => true,
                         // Never dim: it is the one row that is an offer rather
                         // than a record, and on an empty machine it is the only
                         // thing there is to do.
                         WorkflowRailRow::New => false,
                     },
-                    selectable: !matches!(row, WorkflowRailRow::Note(_)),
+                    color: match row {
+                        WorkflowRailRow::Run { status, .. } => Some(run_color(*status)),
+                        _ => None,
+                    },
+                    selectable: !matches!(row, WorkflowRailRow::Hint(_)),
                 })
                 .collect();
 
@@ -72,18 +77,34 @@ impl App {
 }
 
 /// The text of one rail row, without marker, digit, or indent.
-fn rail_label(row: &WorkflowRailRow) -> String {
+pub(in crate::ui::app) fn rail_label(row: &WorkflowRailRow) -> String {
     match row {
-        WorkflowRailRow::Workflow { row, .. } => format!("{} · {}", row.label, row.detail),
+        WorkflowRailRow::Workflow { row, .. } => row.label.clone(),
         // Led by enough of the run's id to find it again with
         // `medulla workflow get-run`, then by its status — which is what anyone
         // scanning the rail is actually looking for.
-        WorkflowRailRow::Run { row, .. } => format!(
-            "{} {}",
+        WorkflowRailRow::Run { row, status, .. } => format!(
+            "{} {} {}",
+            run_glyph(*status),
             medulla::ui::workflows::rows::short_run_id(&row.label),
             row.detail
         ),
-        WorkflowRailRow::Note(note) => (*note).to_string(),
+        WorkflowRailRow::Hint(hint) => hint.clone(),
         WorkflowRailRow::New => NEW_LABEL.to_string(),
     }
+}
+
+/// Compact state marker shown before a run id.
+pub(super) fn run_glyph(status: medulla::workflows::RunStatus) -> &'static str {
+    use medulla::workflows::RunStatus;
+    match status {
+        RunStatus::Succeeded => "✓",
+        RunStatus::Running | RunStatus::PendingApproval => "●",
+        RunStatus::Failed | RunStatus::Cancelled | RunStatus::Interrupted => "✗",
+    }
+}
+
+/// Semantic run colour requested by the workflow history surface.
+pub(super) fn run_color(status: medulla::workflows::RunStatus) -> Color {
+    super::super::color(medulla::ui::workflows::status_color(status))
 }

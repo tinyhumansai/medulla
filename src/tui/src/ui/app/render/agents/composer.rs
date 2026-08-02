@@ -22,11 +22,14 @@ use super::super::super::types::App;
 use super::types::Selection;
 
 impl App {
-    /// The composer's height: the peek (when open), the caption row, the
-    /// draft's lines, and the border.
-    pub(super) fn composer_height(&self) -> u16 {
+    /// The composer's height in a column `width` columns wide: the peek (when
+    /// open), the caption row, the draft's rendered rows, and the border.
+    ///
+    /// `width` is needed because the draft soft-wraps: the same text is two rows
+    /// in a narrow column and one in a wide one.
+    pub(super) fn composer_height(&self, width: u16) -> u16 {
         const CAPTION: u16 = 1;
-        crate::ui::chat::composer_height(&self.draft.text) + CAPTION + self.peek_height()
+        crate::ui::chat::composer_height(&self.draft.text, width) + CAPTION + self.peek_height()
     }
 
     /// Rows the command peek claims, or zero when it is closed.

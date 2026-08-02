@@ -71,7 +71,7 @@ fn primary_ipv4_is_always_a_string() {
 fn profile_path_is_worker_json_under_home() {
     let e = env(&[("MEDULLA_HOME", "/home/me/.medulla")]);
     let p = profile_path(&e);
-    assert!(p.ends_with(".medulla/worker.json"), "got {p:?}");
+    assert!(p.ends_with(".medulla/local/worker.json"), "got {p:?}");
 }
 
 #[test]

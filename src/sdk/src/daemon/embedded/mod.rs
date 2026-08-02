@@ -1,5 +1,5 @@
 //! The embedded host: a [`DaemonRuntime`] driven over any
-//! [`Bridge`](crate::bridge::Bridge), inside someone else's process.
+//! [`Bridge`], inside someone else's process.
 //!
 //! [`super::entry::run_daemon`] is the standalone `medulla daemon` — it owns a
 //! tiny.place identity, publishes pre-keys, registers a directory card, and
@@ -134,6 +134,8 @@ impl EmbeddedDaemon {
             extra_args: Vec::new(),
             skip_permissions: options.skip_permissions,
             router: options.router.clone(),
+            attribution: options.attribution,
+            custom_harnesses: options.custom_harnesses.clone(),
             budget: options.budget.clone(),
         };
 
@@ -215,7 +217,14 @@ impl EmbeddedDaemon {
 /// An unresolvable path is kept verbatim rather than rejected: the daemon
 /// reports a bad working directory per task, which names the failing task, and
 /// that is more useful than refusing to start the host at all.
-fn resolve_workspace(configured: &str) -> String {
+///
+/// Public because a caller supplying its own executor via
+/// [`EmbeddedDaemon::start_with_executor`] has a chicken-and-egg problem: the
+/// executor is built *before* the host, but a session-backed one needs the same
+/// resolved workspace the host will run tasks in. Exposing the resolution is
+/// what keeps the two from disagreeing — the alternative is every embedder
+/// reimplementing this and canonicalizing slightly differently.
+pub fn resolve_workspace(configured: &str) -> String {
     let path = match configured.trim() {
         "" => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         value => std::path::PathBuf::from(value),

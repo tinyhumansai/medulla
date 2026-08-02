@@ -90,7 +90,7 @@ const LOCK_FILE: &str = "daemon.lock";
 /// - The identity is pinned by `MEDULLA_HOME` / `TINYPLACE_CONFIG` /
 ///   `TINYPLACE_SECRET_KEY` and is already held by another process. This is
 ///   deliberately loud: it never falls back to a different address.
-/// - Every slot up to [`MAX_SLOTS`] is held.
+/// - Every slot up to `MAX_SLOTS` is held.
 /// - The lock file or config cannot be created, or the configured key is not a
 ///   valid 32-byte hex seed.
 pub fn acquire_identity(

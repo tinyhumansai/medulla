@@ -20,12 +20,14 @@ pub enum FeedbackType {
 }
 
 impl FeedbackType {
-    /// The wire value the backend expects when submitting.
-    pub fn as_str(self) -> &'static str {
+    /// The `type` query value the backend understands, or `None` for a variant
+    /// it does not model. `Other` only ever comes back *from* a newer backend,
+    /// so filtering by it would ask for a type this client cannot name.
+    pub fn wire(self) -> Option<&'static str> {
         match self {
-            FeedbackType::Feature => "feature",
-            FeedbackType::Bug => "bug",
-            FeedbackType::Other => "feature",
+            FeedbackType::Feature => Some("feature"),
+            FeedbackType::Bug => Some("bug"),
+            FeedbackType::Other => None,
         }
     }
 
@@ -58,6 +60,21 @@ pub enum FeedbackStatus {
 }
 
 impl FeedbackStatus {
+    /// The `status` query value the backend understands, or `None` for a
+    /// variant it does not model.
+    ///
+    /// Deliberately not [`label`](Self::label): the label is a display string
+    /// (`done`) and the wire value is the serialized enum (`completed`), so
+    /// filtering through the label would silently select nothing.
+    pub fn wire(self) -> Option<&'static str> {
+        match self {
+            FeedbackStatus::Open => Some("open"),
+            FeedbackStatus::Planned => Some("planned"),
+            FeedbackStatus::Completed => Some("completed"),
+            FeedbackStatus::Other => None,
+        }
+    }
+
     /// A short label for list rows.
     pub fn label(self) -> &'static str {
         match self {
@@ -199,7 +216,10 @@ impl FeedbackSort {
 }
 
 /// A board query: filters, ordering, and pagination.
-#[derive(Debug, Clone)]
+///
+/// Comparable so a caller with several loads in flight can tell whether a
+/// response still answers the query it is showing.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeedbackQuery {
     /// Restrict to one item type; `None` lists both.
     pub kind: Option<FeedbackType>,
@@ -223,28 +243,4 @@ impl Default for FeedbackQuery {
             limit: 50,
         }
     }
-}
-
-/// Request body for changing the caller's vote on a feedback item.
-#[derive(serde::Serialize)]
-pub(super) struct VoteFeedbackBody {
-    pub(super) value: i8,
-}
-
-/// Request body for adding a comment to a feedback item.
-#[derive(serde::Serialize)]
-pub(super) struct CommentFeedbackBody<'a> {
-    pub(super) body: &'a str,
-}
-
-/// Request body for submitting feedback through the shared hub.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct SubmitFeedbackBody<'a> {
-    #[serde(rename = "type")]
-    pub(super) kind: &'a str,
-    pub(super) title: &'a str,
-    pub(super) body: &'a str,
-    pub(super) product: &'a str,
-    pub(super) origin: &'a str,
 }

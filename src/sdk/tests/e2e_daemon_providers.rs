@@ -49,6 +49,7 @@ async fn run(
     let sink = kinds.clone();
     let options = RunTaskOptions {
         conversation: String::new(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider: harness(provider),
         prompt: prompt.to_string(),
@@ -61,6 +62,7 @@ async fn run(
         skip_permissions: false,
         abort: Abort::new(),
         router: None,
+        attribution: true,
         on_event: Some(Box::new(move |ev| {
             sink.lock().unwrap().push(ev.event.kind.clone());
         })),
@@ -167,6 +169,7 @@ async fn spawn_failure_for_missing_binary() {
     );
     let options = RunTaskOptions {
         conversation: String::new(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
@@ -179,6 +182,7 @@ async fn spawn_failure_for_missing_binary() {
         skip_permissions: false,
         abort: Abort::new(),
         router: None,
+        attribution: true,
         on_event: None,
         on_stdin: None,
         on_session: None,
@@ -198,6 +202,7 @@ async fn abort_before_start_returns_immediately() {
     abort.abort();
     let options = RunTaskOptions {
         conversation: String::new(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
@@ -210,6 +215,7 @@ async fn abort_before_start_returns_immediately() {
         skip_permissions: false,
         abort,
         router: None,
+        attribution: true,
         on_event: None,
         on_stdin: None,
         on_session: None,
@@ -233,6 +239,7 @@ async fn abort_mid_run_kills_child() {
     });
     let options = RunTaskOptions {
         conversation: String::new(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
@@ -245,6 +252,7 @@ async fn abort_mid_run_kills_child() {
         skip_permissions: false,
         abort,
         router: None,
+        attribution: true,
         on_event: None,
         on_stdin: None,
         on_session: None,
@@ -268,6 +276,7 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
         let register = stdin_tx.clone();
         let options = RunTaskOptions {
             conversation: String::new(),
+            session_class: medulla::sessions::SessionClass::Bounded,
             resume_session_id: None,
             provider: harness(provider),
             prompt: "start".to_string(),
@@ -280,6 +289,7 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
             skip_permissions: false,
             abort: Abort::new(),
             router: None,
+            attribution: true,
             on_event: None,
             on_stdin: Some(Box::new(move |tx| {
                 *register.lock().unwrap() = Some(tx);
@@ -319,6 +329,7 @@ async fn stdin_is_immediate_eof_for_batch_cli() {
         let register = registered.clone();
         let options = RunTaskOptions {
             conversation: String::new(),
+            session_class: medulla::sessions::SessionClass::Bounded,
             resume_session_id: None,
             provider: harness(provider),
             prompt: "start".to_string(),
@@ -332,6 +343,7 @@ async fn stdin_is_immediate_eof_for_batch_cli() {
             on_session: None,
             abort: Abort::new(),
             router: None,
+            attribution: true,
             on_event: None,
             on_stdin: Some(Box::new(move |_tx| {
                 *register.lock().unwrap() = true;

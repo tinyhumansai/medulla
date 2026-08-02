@@ -17,7 +17,7 @@ use super::*;
 /// A cell with text and no styling.
 fn cell(text: &str) -> ScreenCell {
     ScreenCell {
-        text: text.to_string(),
+        text: text.into(),
         ..ScreenCell::default()
     }
 }
@@ -296,10 +296,7 @@ async fn a_subscription_ends_when_its_session_does_not_exist() {
 
     let handle = spawn_session_stream(
         super::super::pty::PtyManager::new(),
-        "t1".to_string(),
-        "w_missing".to_string(),
-        "peer".to_string(),
-        10,
+        spec("t1", "w_missing", "peer", 10, always_live()),
         send,
     );
 
@@ -320,12 +317,16 @@ async fn unsubscribing_stops_the_stream() {
     let mut registry = StreamRegistry::new();
 
     assert!(registry.is_empty());
-    registry.subscribe(&sessions, "t1", "w_1", "peer", 1, send.clone());
+    registry.subscribe(
+        &sessions,
+        spec("t1", "w_1", "peer", 1, always_live()),
+        send.clone(),
+    );
     assert_eq!(registry.len(), 1);
 
     // A second subscribe replaces rather than fans out: two watchers on one
     // session would double its transport cost for no new information.
-    registry.subscribe(&sessions, "t1", "w_1", "peer", 1, send);
+    registry.subscribe(&sessions, spec("t1", "w_1", "peer", 1, always_live()), send);
     assert_eq!(registry.len(), 1);
 
     registry.unsubscribe("t1");
@@ -333,6 +334,30 @@ async fn unsubscribing_stops_the_stream() {
 }
 
 // --- the router ------------------------------------------------------------
+
+/// A liveness check that always says yes, for the tests that are about
+/// something else.
+fn always_live() -> super::sampler::LiveCheck {
+    std::sync::Arc::new(|| true)
+}
+
+/// A [`StreamSpec`] from its parts, so the tests read as call sites rather than
+/// struct literals.
+fn spec(
+    task_id: &str,
+    session_id: &str,
+    subscriber: &str,
+    max_fps: u8,
+    is_live: super::sampler::LiveCheck,
+) -> super::sampler::StreamSpec {
+    super::sampler::StreamSpec {
+        task_id: task_id.to_string(),
+        session_id: session_id.to_string(),
+        subscriber: subscriber.to_string(),
+        max_fps,
+        is_live,
+    }
+}
 
 /// A router over an empty worker: no sessions, no running tasks.
 fn empty_router() -> ScreenRouter {
@@ -353,7 +378,9 @@ fn empty_router() -> ScreenRouter {
             skip_permissions: false,
             accessible_dirs: Vec::new(),
             router: None,
+            custom_harnesses: Vec::new(),
             budget: None,
+            attribution: true,
         },
         std::sync::Arc::new(|_| Box::pin(async { Err("unused".to_string()) })),
         std::sync::Arc::new(|_, _| Box::pin(async {})),
@@ -383,7 +410,7 @@ async fn a_subscribe_for_a_task_this_sender_never_dispatched_is_refused() {
 }
 
 #[tokio::test]
-async fn an_unsubscribe_for_an_unresolvable_task_does_nothing() {
+async fn an_unsubscribe_for_a_task_nobody_streams_does_nothing() {
     // Same rule in the other direction: without it, any peer could cancel
     // another's stream by naming its task id.
     let mut router = empty_router();
@@ -394,6 +421,56 @@ async fn an_unsubscribe_for_an_unresolvable_task_does_nothing() {
         },
     );
     assert_eq!(router.active(), 0);
+}
+
+#[tokio::test]
+async fn only_the_peer_a_stream_was_opened_for_can_stop_it() {
+    let sessions = super::super::pty::PtyManager::new();
+    let send = send_fn(|_, _| async {});
+    let mut registry = StreamRegistry::new();
+    registry.subscribe(
+        &sessions,
+        spec("t1", "w_1", "peerA", 1, always_live()),
+        send,
+    );
+    assert_eq!(registry.len(), 1);
+
+    assert!(
+        !registry.unsubscribe_for("peerB", "t1"),
+        "a stranger naming the task must not stop it"
+    );
+    assert_eq!(registry.len(), 1, "and the stream survives");
+
+    assert!(registry.unsubscribe_for("peerA", "t1"));
+    assert!(registry.is_empty());
+}
+
+#[tokio::test]
+async fn a_stream_ends_when_its_task_does_even_though_the_session_lives_on() {
+    // The case the old rule got wrong. An interactive session outlives the task
+    // that ran in it and is handed to the next one, so a stream that watched
+    // only the session would carry on — labelling whatever ran next with the
+    // task id it was opened for, and sending it to the peer that asked for the
+    // *old* task.
+    let sessions = super::super::pty::PtyManager::new();
+    let send = send_fn(|_, _| async {});
+    let live = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let is_live = {
+        let live = live.clone();
+        std::sync::Arc::new(move || live.load(std::sync::atomic::Ordering::SeqCst))
+    };
+
+    let handle = spawn_session_stream(
+        sessions.clone(),
+        spec("t1", "w_1", "peer", 10, is_live),
+        send,
+    );
+
+    live.store(false, std::sync::atomic::Ordering::SeqCst);
+    tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+        .await
+        .expect("the stream ends once its task is over")
+        .expect("and ends cleanly rather than panicking");
 }
 
 #[tokio::test]

@@ -11,22 +11,26 @@
 //! gets, so an orchestrator that knows nothing about workflows still sees a
 //! task it dispatched and a task that answered.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::Value;
 
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
 use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert};
+// `trigger_input` is shared with the cloud plane's adapter
+// ([`crate::workflows::bridge`]) rather than defined twice: a frame's text must
+// become the same trigger payload whether it arrived over tiny.place or over the
+// backend socket, and two copies of that rule would eventually disagree.
+use crate::workflows::bridge::trigger_input;
+use crate::workflows::evolve::{EvolveConfig, EvolveSession, EvolveTrigger};
 use crate::workflows::{
     run_workflow, FileWorkflowStore, RunContext, RunStatus, StoreWorkflowResolver, WorkflowStore,
 };
 
 use super::super::providers::{Abort, RunTaskOptions};
-use super::super::types::{DaemonRuntime, FrameAttachments};
+use super::super::types::{DaemonRuntime, FrameAttachments, CAPACITY_REJECTION_PREFIX};
 
 /// Dispatch a workflow's `agent` nodes through this daemon's own executor.
 ///
@@ -34,11 +38,21 @@ use super::super::types::{DaemonRuntime, FrameAttachments};
 /// instruction goes straight to the executor rather than back out over a bridge
 /// to itself. The node's `agent_ref` names a provider hint when it matches one
 /// this worker offers; otherwise the worker's default runs it.
-struct RuntimeDispatch {
+pub(in crate::daemon) struct RuntimeDispatch {
     runtime: DaemonRuntime,
     /// The authenticated sender the workflow is being run for, so nodes inherit
     /// the same conversation attribution an ordinary task would get.
     conversation: String,
+}
+
+impl RuntimeDispatch {
+    /// Build a dispatch attributed to one authenticated sender.
+    pub(in crate::daemon) fn new(runtime: DaemonRuntime, conversation: String) -> Self {
+        Self {
+            runtime,
+            conversation,
+        }
+    }
 }
 
 #[async_trait]
@@ -55,17 +69,23 @@ impl HarnessDispatch for RuntimeDispatch {
 
         let options = RunTaskOptions {
             conversation: self.conversation.clone(),
+            // A workflow node is discrete work, like the task frame that
+            // started the graph — nodes share a conversation for attribution,
+            // not a harness. Two nodes of one graph running in the same session
+            // would let a later node read an earlier one's prompt as context.
+            session_class: crate::sessions::SessionClass::Bounded,
             resume_session_id: None,
             provider,
             prompt: request.instruction,
             cwd: inner.config.workspace.clone(),
-            env: inner.config.env.clone(),
+            env: super::with_tool_mode(inner.config.env.clone(), request.tool_mode.as_deref()),
             timeout_ms: inner.config.task_timeout_ms,
             model: request.model.or_else(|| inner.config.model.clone()),
             agent: inner.config.agent.clone(),
             extra_args: inner.config.extra_args.clone(),
             skip_permissions: inner.config.skip_permissions,
             router: inner.config.router.clone(),
+            attribution: inner.config.attribution,
             abort: Abort::new(),
             // The run observer already reports progress per node; forwarding a
             // harness's token-level chatter as well would double-report it.
@@ -74,6 +94,15 @@ impl HarnessDispatch for RuntimeDispatch {
             on_session: None,
         };
 
+        // Workflow nodes and detached evolution reviews run outside the inbound
+        // task handler, but they are still harness sessions on this host. Share
+        // its semaphore so a burst of failed workflows cannot exceed the
+        // operator's configured concurrency.
+        let _permit = inner
+            .slots
+            .acquire()
+            .await
+            .expect("semaphore is never closed");
         let result = (inner.run_task)(options).await.map_err(RunError::Worker)?;
         Ok(TaskOutcome {
             reply: result.reply,
@@ -137,13 +166,16 @@ impl DaemonRuntime {
             return;
         }
 
-        if self.inner.admitted.load(Ordering::SeqCst) >= self.inner.config.max_pending {
+        // Held for the rest of the call, including the validation rejections
+        // below: releasing it is the guard's job, never a hand-written
+        // decrement that an unwind can skip.
+        let Some(admission) = self.admit() else {
             self.reply(
                 &from,
                 TaskFrameKind::Error,
                 &frame.task_id,
                 &format!(
-                    "daemon at capacity ({} pending tasks); retry later",
+                    "{CAPACITY_REJECTION_PREFIX} ({} pending tasks); retry later",
                     self.inner.config.max_pending
                 ),
                 correlation.as_deref(),
@@ -151,7 +183,7 @@ impl DaemonRuntime {
             )
             .await;
             return;
-        }
+        };
 
         let store = self.workflow_store();
         if store.get(&id).ok().flatten().is_none() {
@@ -196,7 +228,6 @@ impl DaemonRuntime {
             return;
         }
 
-        self.inner.admitted.fetch_add(1, Ordering::SeqCst);
         self.reply(
             &from,
             TaskFrameKind::Ack,
@@ -209,14 +240,14 @@ impl DaemonRuntime {
         self.log(&format!("workflow {} → {id}", frame.task_id));
 
         let (sink, fold) = folding_sink();
+        // Kept past the move into the resolver: a failed run gets a review, and
+        // the review reads the same store the run wrote to.
+        let evolve_store = store.clone();
         let context = RunContext {
             store: store.clone(),
             settings,
             services: HostServices {
-                dispatch: Arc::new(RuntimeDispatch {
-                    runtime: self.clone(),
-                    conversation: from.clone(),
-                }),
+                dispatch: Arc::new(RuntimeDispatch::new(self.clone(), from.clone())),
                 resolver: Arc::new(StoreWorkflowResolver::new(store)),
                 http_credentials: Default::default(),
             },
@@ -225,14 +256,22 @@ impl DaemonRuntime {
 
         // The frame's task id becomes the run id, so the orchestrator's existing
         // `abort` for that task is exactly what cancels the run.
-        let outcome = run_workflow(context, &id, &frame.task_id, trigger_input(&frame.text)).await;
-        self.inner.admitted.fetch_sub(1, Ordering::SeqCst);
+        // Empty declared inputs — see `workflows::bridge::run_task_workflow`.
+        let outcome = run_workflow(
+            context,
+            &id,
+            &frame.task_id,
+            trigger_input(&frame.text),
+            serde_json::Map::new(),
+        )
+        .await;
 
         let work = fold.lock().ok().map(|fold| fold.snapshot().clone());
         let attachments = FrameAttachments { usage: None, work };
 
         match outcome {
             Ok(record) => {
+                let failed = record.status == RunStatus::Failed;
                 let text = summarize(&record);
                 let kind = match record.status {
                     RunStatus::Succeeded | RunStatus::PendingApproval => TaskFrameKind::Reply,
@@ -248,6 +287,9 @@ impl DaemonRuntime {
                     attachments,
                 )
                 .await;
+                if failed {
+                    self.spawn_review(evolve_store, &id, &frame.task_id, &from);
+                }
             }
             Err(err) => {
                 self.reply_with(
@@ -262,20 +304,124 @@ impl DaemonRuntime {
                 .await;
             }
         }
+
+        // After the terminal frame, never before: the slot this run occupied is
+        // only genuinely free once the requester has been told how it ended.
+        drop(admission);
+    }
+
+    /// Start a review of a workflow whose run just failed.
+    ///
+    /// Spawned rather than awaited, and only after the reply has gone out: a
+    /// review is a whole harness turn, and the orchestrator waiting on this
+    /// task should not be held for one. Nothing depends on its result here —
+    /// what it produces is a note and possibly a proposal, both of which live
+    /// in the store for an operator to find.
+    ///
+    /// The run's own failure note is *not* written here. `run_workflow` already
+    /// wrote it, synchronously, so it exists whether or not this review ever
+    /// starts.
+    fn spawn_review(
+        &self,
+        store: Arc<dyn WorkflowStore>,
+        workflow_id: &str,
+        run_id: &str,
+        from: &str,
+    ) {
+        let settings = self.evolve_settings();
+        if !settings.enabled || !settings.auto_on_failure {
+            return;
+        }
+        let session = EvolveSession {
+            store,
+            dispatch: Arc::new(RuntimeDispatch::new(self.clone(), from.to_string())),
+            worker_address: self.inner.config.default_provider.as_str().to_string(),
+            provider: Some(self.inner.config.default_provider),
+            model: self.inner.config.model.clone(),
+            // Per workflow, not per run, so the attribution of successive
+            // reviews reads as one thread. It does not buy harness continuity
+            // here: `RuntimeDispatch` runs every task `Bounded` and ignores
+            // this field. What actually carries knowledge between reviews is
+            // the journal, which is the point — a note survives a restart and a
+            // resumed session does not.
+            conversation: format!("evolve:{workflow_id}"),
+            config: settings,
+        };
+        let workflow_id = workflow_id.to_string();
+        let trigger = EvolveTrigger::Failure(run_id.to_string());
+        // `--once` waits on the same counter as inbound tasks. Register the
+        // detached review before spawning it so the daemon cannot observe an
+        // idle gap and exit between the workflow reply and this turn.
+        self.inner
+            .inflight_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let runtime = self.clone();
+        tokio::spawn(async move {
+            match session.evolve(&workflow_id, trigger, None).await {
+                Ok(outcome) if outcome.skipped => {
+                    tracing::debug!(workflow = %workflow_id, "a review is already in flight");
+                }
+                Ok(outcome) => tracing::info!(
+                    workflow = %workflow_id,
+                    notes = outcome.notes.len(),
+                    proposals = outcome.proposals.len(),
+                    "reviewed a failed run",
+                ),
+                Err(err) => {
+                    tracing::warn!(workflow = %workflow_id, "review failed: {err}")
+                }
+            }
+            if runtime
+                .inner
+                .inflight_count
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+                == 1
+            {
+                runtime.inner.inflight_idle.notify_waiters();
+            }
+        });
+    }
+
+    /// This worker's review settings, failing closed when config is unreadable.
+    fn evolve_settings(&self) -> EvolveConfig {
+        let cwd = std::path::Path::new(&self.inner.config.workspace);
+        crate::config::load_config(
+            crate::config::explicit_config_from_env(&self.inner.config.env),
+            &self.inner.config.env,
+            cwd,
+        )
+        .map(|loaded| EvolveConfig::from_config(&loaded.config.workflows))
+        .unwrap_or_else(|err| {
+            tracing::warn!("could not reload evolution policy; reviews disabled: {err}");
+            EvolveConfig {
+                enabled: false,
+                auto_on_failure: false,
+                ..EvolveConfig::default()
+            }
+        })
     }
 
     /// Capability settings for workflows run on this worker.
     ///
     /// Read from the operator's layered config so `workflows.enabled` and the
     /// allowlists mean the same thing here as they do on the CLI. A config that
-    /// cannot be loaded falls back to the safe defaults — no code execution, no
-    /// outbound HTTP, no third-party tools — rather than to permissive ones.
+    /// cannot be loaded fails closed, including code execution.
     fn workflow_settings(&self) -> Arc<CapabilitySettings> {
         let home = crate::home::medulla_home(&self.inner.config.env);
         let cwd = std::path::Path::new(&self.inner.config.workspace);
-        let mut settings = crate::config::load_config(None, &self.inner.config.env, cwd)
-            .map(|loaded| CapabilitySettings::from_config(&loaded.config.workflows, &home))
-            .unwrap_or_else(|_| CapabilitySettings::rooted_at(home));
+        let mut settings = crate::config::load_config(
+            crate::config::explicit_config_from_env(&self.inner.config.env),
+            &self.inner.config.env,
+            cwd,
+        )
+        .map(|loaded| CapabilitySettings::from_config(&loaded.config.workflows, &home))
+        .unwrap_or_else(|err| {
+            tracing::warn!("could not reload workflow policy; code execution disabled: {err}");
+            CapabilitySettings::fail_closed_at(home)
+        });
+        // The daemon's own workspace, which is the directory it serves tasks
+        // for — the same one an `agent` node's harness session runs in.
+        settings.workspace = self.inner.config.workspace.clone();
         settings.default_worker_address = self.inner.config.default_provider.as_str().to_string();
         settings.default_provider = Some(self.inner.config.default_provider);
         settings.default_model = self.inner.config.model.clone();
@@ -283,34 +429,17 @@ impl DaemonRuntime {
     }
 }
 
-/// The trigger payload for a workflow run, from a frame's text.
-///
-/// JSON when the orchestrator sent JSON, and `{ "text": … }` otherwise — so a
-/// frame carrying an ordinary instruction still gives the graph something its
-/// expressions can read.
-fn trigger_input(text: &str) -> Value {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Value::Object(Default::default());
-    }
-    serde_json::from_str(trimmed).unwrap_or_else(|_| serde_json::json!({ "text": text }))
-}
-
 /// A one-line account of how a run ended, for the reply frame's text.
+///
+/// Delegates rather than phrasing its own: a run that is described one way in
+/// the reply frame and another way in its own record is a run an operator has
+/// to reconcile by hand.
 fn summarize(record: &crate::workflows::RunRecord) -> String {
-    let steps = record.steps.len();
-    match record.status {
-        RunStatus::Succeeded => format!("workflow completed {steps} steps"),
-        RunStatus::PendingApproval => format!(
-            "workflow paused after {steps} steps, awaiting approval: {}",
-            record.pending_approvals.join(", ")
-        ),
-        RunStatus::Cancelled => format!("workflow cancelled after {steps} steps"),
-        RunStatus::Interrupted => format!("workflow interrupted after {steps} steps"),
-        RunStatus::Failed => match &record.error {
-            Some(error) => format!("workflow failed after {steps} steps: {error}"),
-            None => format!("workflow failed after {steps} steps"),
-        },
-        RunStatus::Running => format!("workflow still running after {steps} steps"),
+    if record.status == RunStatus::Failed {
+        return crate::workflows::run::summarize(record);
     }
+    record
+        .summary
+        .clone()
+        .unwrap_or_else(|| crate::workflows::run::summarize(record))
 }

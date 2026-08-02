@@ -45,10 +45,10 @@
 //!
 //! ## Module layout
 //!
-//! Split by responsibility: [`types`] holds the session data model
-//! ([`WrapperConfig`]), [`args`] parses the wrapper's own flags, [`bridge`] owns
-//! the tiny.place [`Bridge`](bridge::Bridge) and its transcript/inbox I/O, and
-//! [`run`] drives the child process and select loop. The `control`, `tail`, and
+//! Split by responsibility: `types` holds the session data model
+//! ([`WrapperConfig`]), `args` parses the wrapper's own flags, `bridge` owns
+//! the tiny.place `Bridge` and its transcript/inbox I/O, and
+//! `run` drives the child process and select loop. The `control`, `tail`, and
 //! `envelope` submodules provide frame targeting, transcript tailing, and
 //! envelope construction. All public items are re-exported here so callers use
 //! `medulla::wrapper::*`.

@@ -36,8 +36,43 @@ pub fn apply_workflow_ops(
         WorkflowError::Engine(format!("workflow '{id}': {err}"))
     })?;
     validate_graph(id, &record.graph)?;
+    // The engine's validation answers "would this compile". The gates answer
+    // "would this do anything" — a binding that resolves null at run time
+    // compiles fine and quietly does nothing.
+    crate::workflows::gates::check(id, &record.graph)?;
     store.save(&record)?;
     Ok(record)
+}
+
+/// Apply `ops` only if the graph still matches `expected_fingerprint`.
+///
+/// Returns `None` when the expected fingerprint is stale, including when the
+/// graph changes between the initial read and persistence. Returns `Some` only
+/// after applying the ops, validating the graph and host semantic gates, and
+/// durably saving the result.
+///
+/// # Errors
+///
+/// Returns an error when the workflow is missing, an op cannot be applied, the
+/// resulting graph fails validation or semantic checks, or persistence fails.
+pub fn apply_workflow_ops_if_unchanged(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    ops: &[GraphOp],
+    expected_fingerprint: &str,
+) -> Result<Option<WorkflowRecord>, WorkflowError> {
+    let mut record = require(store.as_ref(), id)?;
+    if crate::workflows::fingerprint(&record.graph) != expected_fingerprint {
+        return Ok(None);
+    }
+    record.graph = apply_ops(&record.graph, ops)
+        .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
+    validate_graph(id, &record.graph)?;
+    crate::workflows::gates::check(id, &record.graph)?;
+    if !store.save_if_fingerprint(&record, expected_fingerprint)? {
+        return Ok(None);
+    }
+    Ok(Some(record))
 }
 
 /// Preview `ops` against the workflow `id` without saving.
@@ -53,11 +88,18 @@ pub fn preview_workflow_ops(
     let graph = apply_ops(&record.graph, ops)
         .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
     validate_graph(id, &graph)?;
+    crate::workflows::gates::check(id, &graph)?;
     Ok(graph)
 }
 
 /// Create a workflow from a whole graph document, replacing any existing one of
 /// the same id.
+///
+/// Parses, then validates, then saves — the same order [`apply_workflow_ops`]
+/// uses, and for the same reason. A document that parses is not necessarily a
+/// graph the engine would compile, and a create path that skipped validation
+/// would be the one way to get an unrunnable workflow into a store whose
+/// listings are otherwise trustworthy.
 pub fn create_workflow(
     store: &Arc<dyn WorkflowStore>,
     document: &str,
@@ -65,6 +107,8 @@ pub fn create_workflow(
 ) -> Result<WorkflowRecord, WorkflowError> {
     let record = crate::workflows::store::parse_workflow(document, id_fallback)
         .map_err(WorkflowError::Malformed)?;
+    validate_graph(&record.id, &record.graph)?;
+    crate::workflows::gates::check(&record.id, &record.graph)?;
     store.save(&record)?;
     Ok(record)
 }
@@ -104,6 +148,7 @@ pub fn validate_handle(
 ) -> Result<WorkflowRecord, WorkflowError> {
     let record = handle.resolve(store)?;
     validate_graph(&record.id, &record.graph)?;
+    crate::workflows::gates::check(&record.id, &record.graph)?;
     Ok(record)
 }
 

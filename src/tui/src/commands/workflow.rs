@@ -24,7 +24,7 @@ use medulla::workflows::{
     WorkflowStore, LOCAL_WORKER_ADDRESS,
 };
 use medulla_tui::cli::{parse_workflow_args, WorkflowAction, WorkflowArgs};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 /// Run `medulla workflow <action>`.
 ///
@@ -62,13 +62,53 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
                 ops::validate(&store, &GraphHandle::Inline(&document))
             }
         },
-        WorkflowAction::DryRun(id) => ops::dry_run(&store, id, trigger_input(&parsed)?).await?,
+        WorkflowAction::DryRun(id) => {
+            let inputs = declared_inputs(&parsed, &declarations(&store, id))?;
+            ops::dry_run(&store, id, trigger_input(&parsed)?, inputs).await?
+        }
         WorkflowAction::ListRuns(id) => ops::list_runs(&store, id)?,
         WorkflowAction::GetRun(run_id) => ops::get_run(&store, run_id)?,
         WorkflowAction::Cancel(run_id) => ops::cancel_run(run_id),
         WorkflowAction::Catalog(kind) => ops::catalog(kind.as_deref())?,
         WorkflowAction::Run(id) => execute(&parsed, &store, &env, &cwd, id).await?,
         WorkflowAction::Resume(run_id) => resume(&parsed, &store, &env, &cwd, run_id).await?,
+        // Reading and writing share a verb because "what is this pinned to"
+        // and "pin it to that" are the same question asked twice, and a
+        // separate `show-defaults` would be a verb nobody remembers.
+        WorkflowAction::Defaults(id) => match (&parsed.harness, &parsed.model) {
+            (None, None) => json!({ "defaults": ops::get(&store, id)?["defaults"] }),
+            (harness, model) => {
+                ops::set_defaults(&store, id, harness.as_deref(), model.as_deref())?
+            }
+        },
+        WorkflowAction::Notes(id) => ops::notes(&store, id)?,
+        WorkflowAction::AddNote(id) => ops::add_note(
+            &store,
+            id,
+            parsed.kind.as_deref().unwrap_or("observation"),
+            parsed.text.as_deref().unwrap_or_default(),
+            parsed.run_id.clone().into_iter().collect(),
+            // Typed by a person at a terminal. Pinned as a result, so
+            // automation writing observations cannot evict it.
+            medulla::workflows::NoteSource::Operator,
+            // An operator superseding a note does it by id, and a key press
+            // cannot carry one; `--supersedes` is the CLI's way to say it.
+            parsed.supersedes.clone(),
+        )?,
+        WorkflowAction::Proposals(id) => ops::proposals(&store, id)?,
+        WorkflowAction::Accept(proposal_id) => ops::accept_proposal(&store, proposal_id)?,
+        WorkflowAction::Reject(proposal_id) => ops::reject_proposal(
+            &store,
+            proposal_id,
+            parsed.reason.as_deref().unwrap_or_default(),
+        )?,
+        WorkflowAction::Evolve(id) => {
+            if let Some(path) = parsed.config.as_deref() {
+                std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+            }
+            let config = load_workflows_config(&parsed, &env, &cwd)?;
+            ops::evolve(&store, &config, &cwd, id, parsed.run_id.as_deref()).await?
+        }
         WorkflowAction::Mcp => unreachable!("handled above, before stdout is claimed"),
     };
 
@@ -88,7 +128,8 @@ async fn execute(
     id: &str,
 ) -> anyhow::Result<Value> {
     let (context, run_id) = local_context(parsed, store, env, cwd)?;
-    let record = run_workflow(context, id, &run_id, trigger_input(parsed)?).await?;
+    let inputs = declared_inputs(parsed, &declarations(store, id))?;
+    let record = run_workflow(context, id, &run_id, trigger_input(parsed)?, inputs).await?;
     Ok(serde_json::to_value(record)?)
 }
 
@@ -124,20 +165,39 @@ fn local_context(
     env: &HashMap<String, String>,
     cwd: &std::path::Path,
 ) -> anyhow::Result<(RunContext, String)> {
+    // Recorded before `LocalWorkflowHost::start` below, which spawns an
+    // embedded daemon that may in turn spawn ACP harness subprocesses — those
+    // read this env var (see `medulla::config::CONFIG_PATH_ENV`) to resolve
+    // the same `--config` this command was given, rather than rediscovering a
+    // possibly different one from their own `cwd`.
+    if let Some(path) = parsed.config.as_deref() {
+        std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+    }
     let loaded = medulla::config::load_config(parsed.config.as_deref(), env, cwd)?;
     let home = medulla::home::medulla_home(env);
     let mut settings = CapabilitySettings::from_config(&loaded.config.workflows, &home);
+    // A `medulla:shell` step runs where the command was invoked, matching what
+    // an operator running it by hand would expect.
+    settings.workspace = cwd.to_string_lossy().to_string();
     // Nodes that name no worker go to the loopback host this command starts,
     // unless the operator pinned a different default.
     if settings.default_worker_address.trim().is_empty() {
         settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
     }
 
+    // A workflow's `agent` step may name a custom harness preset (see
+    // `flow_engine::harness_choice`); the embedded daemon this command starts
+    // must know that preset exists, or it rejects the step as not configured
+    // on this host even though the operator configured it right here. Filtered
+    // to this device's own `[host]` id, matching how the interactive TUI
+    // advertises presets to its primary host in `app_loop.rs`.
+    let custom_harnesses = local_custom_harnesses(&loaded);
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         model: (!loaded.config.workflows.default_model.is_empty())
             .then(|| loaded.config.workflows.default_model.clone()),
         default_provider: loaded.config.workflows.default_provider,
+        custom_harnesses,
         ..Default::default()
     })
     .map_err(anyhow::Error::msg)?;
@@ -179,6 +239,76 @@ fn trigger_input(parsed: &WorkflowArgs) -> anyhow::Result<Value> {
     }
 }
 
+/// The values supplied for a workflow's declared inputs, from `--inputs` and
+/// `--set`.
+///
+/// `--set name=value` is merged over `--inputs`, so the two compose: a base
+/// object plus a one-off override reads the way an operator expects.
+///
+/// A `--set` value arrives as a string, because a shell argument is one. It is
+/// coerced to the input's *declared* type — the declaration is the only thing
+/// that can say whether `3` means the number three or the string "3", and
+/// guessing from the text would make `--set version=1.0` silently become a
+/// float. An input the workflow does not declare is left as a string and
+/// resolution rejects it by name, which is the more useful error than a
+/// complaint about its type.
+fn declared_inputs(
+    parsed: &WorkflowArgs,
+    declared: &[medulla::workflows::WorkflowInput],
+) -> anyhow::Result<Map<String, Value>> {
+    use medulla::workflows::InputType;
+
+    let mut values = match &parsed.inputs {
+        Some(raw) => match serde_json::from_str::<Value>(raw) {
+            Ok(Value::Object(map)) => map,
+            Ok(_) => anyhow::bail!("--inputs must be a JSON object keyed by declared input name"),
+            Err(err) => anyhow::bail!("--inputs is not valid JSON: {err}"),
+        },
+        None => Map::new(),
+    };
+
+    for pair in &parsed.set {
+        let Some((name, raw)) = pair.split_once('=') else {
+            anyhow::bail!("--set expects <name>=<value>, got {pair:?}");
+        };
+        let ty = declared
+            .iter()
+            .find(|input| input.name == name)
+            .map(|input| input.ty);
+        let value = match ty {
+            Some(InputType::Number) => Value::Number(
+                raw.parse::<serde_json::Number>()
+                    .map_err(|_| anyhow::anyhow!("--set {name}: {raw:?} is not a number"))?,
+            ),
+            Some(InputType::Boolean) => Value::Bool(
+                raw.parse::<bool>()
+                    .map_err(|_| anyhow::anyhow!("--set {name}: {raw:?} is not true or false"))?,
+            ),
+            Some(InputType::Json) => serde_json::from_str(raw)
+                .map_err(|err| anyhow::anyhow!("--set {name}: not valid JSON: {err}"))?,
+            // Declared `string`, or undeclared — see the doc above.
+            Some(InputType::String) | None => Value::String(raw.to_string()),
+        };
+        values.insert(name.to_string(), value);
+    }
+
+    Ok(values)
+}
+
+/// The declared inputs of a saved workflow, or an empty list when it is unknown
+/// — the operation itself reports a missing workflow far better than this would.
+fn declarations(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+) -> Vec<medulla::workflows::WorkflowInput> {
+    store
+        .get(id)
+        .ok()
+        .flatten()
+        .map(|record| record.graph.inputs)
+        .unwrap_or_default()
+}
+
 /// Read stdin whole, failing with a message naming what was expected.
 fn read_stdin(what: &str) -> anyhow::Result<String> {
     let mut buffer = String::new();
@@ -193,4 +323,41 @@ fn read_stdin(what: &str) -> anyhow::Result<String> {
 fn read_stdin_json(what: &str) -> anyhow::Result<Value> {
     let body = read_stdin(what)?;
     serde_json::from_str(&body).map_err(|err| anyhow::anyhow!("{what}: invalid JSON: {err}"))
+}
+
+/// This machine's own custom-harness presets, for the one-shot embedded daemon
+/// this command starts.
+///
+/// Filtered to this device's `[host]` id, the same filter
+/// `local_host::options_from_config_with_custom` applies for the interactive
+/// TUI's primary host — a preset for another fleet machine is not this
+/// machine's to advertise or run. A load failure (a malformed presets file)
+/// is not fatal here: the run proceeds without custom harnesses rather than
+/// refusing to run a workflow that may not need one at all.
+fn local_custom_harnesses(
+    loaded: &medulla::config::LoadedConfig,
+) -> Vec<medulla::config::CustomHarnessConfig> {
+    let host_id = crate::local_host::host_address(&loaded.config.host);
+    medulla::config::load_layered_custom_harnesses(&loaded.sources)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|harness| harness.host_id == host_id)
+        .collect()
+}
+
+/// This machine's workflow settings.
+///
+/// An explicitly selected config is part of the command contract, so a read or
+/// parse failure is returned instead of silently launching a review under
+/// defaults the operator did not request.
+fn load_workflows_config(
+    parsed: &WorkflowArgs,
+    env: &HashMap<String, String>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<medulla::config::WorkflowsConfig> {
+    Ok(
+        medulla::config::load_config(parsed.config.as_deref(), env, cwd)?
+            .config
+            .workflows,
+    )
 }

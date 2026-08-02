@@ -90,6 +90,16 @@ const DIALOG_CLEAR_BUDGET: Duration = Duration::from_millis(3_000);
 /// for, waits for it to be taken, then presses Enter. Errors if the session is
 /// unknown or is no longer running.
 pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Result<(), String> {
+    // One buffer for the whole injection, reused by every poll.
+    //
+    // Every wait below re-reads the screen at [`TICK`], and this used to mean a
+    // full `ScreenSnapshot` — thousands of per-cell allocations — followed by a
+    // join, and then another whole-screen string inside each `occurrences` call.
+    // Four full-screen allocations per tick, per session, at 40 Hz, during
+    // precisely the moment a fan-out has the most sessions starting at once. The
+    // manager now projects straight into a caller-owned buffer, so the steady
+    // state is zero allocations once these have grown to a screenful.
+    let mut screen = ScreenScratch::default();
     let bracketed = await_ready(sessions, id).await?;
 
     // Modes set and screen painted does not mean "ready for a prompt". A
@@ -98,13 +108,15 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
     // answer (codex's update notice) is dismissed here; one we can only name
     // (claude's trust / bypass modals, which preflight should have cleared) is
     // reported — never typed a prompt into.
-    clear_startup_dialogs(sessions, id).await?;
+    clear_startup_dialogs(sessions, id, &mut screen).await?;
 
     if !bracketed {
         // No composer to commit to: a line-oriented reader takes the bytes and
         // the return in one go, and there is no rendering to wait on.
         sessions.write(id, text.as_bytes())?;
-        return sessions.write(id, submit_sequence());
+        sessions.write(id, submit_sequence())?;
+        sessions.acknowledge(id);
+        return Ok(());
     }
 
     // The child has a composer, so the paste must be *in* it before Enter can
@@ -115,11 +127,12 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
     // window where the paste was silently discarded and Enter submitted an
     // empty composer.
     let needle = needle_of(text);
-    let before = occurrences(&screen_text(sessions, id), &needle);
+    sessions.screen_squashed_into(id, &mut screen.squashed);
+    let before = occurrences(&screen.squashed, &needle);
     let mut landed = false;
     for _ in 0..PASTE_ATTEMPTS {
         sessions.write(id, &bracket_paste(text))?;
-        if await_paste(sessions, id, &needle, before).await {
+        if await_paste(sessions, id, &needle, before, &mut screen).await {
             landed = true;
             break;
         }
@@ -136,7 +149,28 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
     // Let the composer settle before the Return, so it is not swallowed by the
     // paste block still being committed.
     await_still(sessions, id).await;
-    sessions.write(id, submit_sequence())
+    sessions.write(id, submit_sequence())?;
+    // Only a successfully submitted turn answers the previous cue. Keeping it
+    // through every fallible readiness/dialog/paste step lets the executor hand
+    // a blocked session to the operator if injection fails.
+    sessions.acknowledge(id);
+    Ok(())
+}
+
+/// Reusable screen buffers for one injection.
+///
+/// Two forms, because the two things the injector asks of a screen want
+/// different shapes: `text` is line-by-line and readable, which is what dialog
+/// recognition matches against; `squashed` is whitespace-free and case-folded,
+/// which is what needle counting scans. Both are filled straight from the
+/// emulator, and `String::clear` keeps the capacity — so after the first tick
+/// neither allocates again.
+#[derive(Default)]
+struct ScreenScratch {
+    /// The screen as readable lines.
+    text: String,
+    /// The screen with whitespace removed and case folded.
+    squashed: String,
 }
 
 /// Clear any startup dialog standing between the session and its composer.
@@ -150,9 +184,14 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
 /// Loops so a short stack of dialogs is cleared in turn, and gives up — with the
 /// dialog named — if one it thought it could dismiss is still on screen after
 /// [`MAX_DIALOGS`] attempts.
-async fn clear_startup_dialogs(sessions: &PtyManager, id: &str) -> Result<(), String> {
+async fn clear_startup_dialogs(
+    sessions: &PtyManager,
+    id: &str,
+    screen: &mut ScreenScratch,
+) -> Result<(), String> {
     for _ in 0..MAX_DIALOGS {
-        let Some(dialog) = blocking_dialog(&screen_text(sessions, id)) else {
+        sessions.screen_text_into(id, &mut screen.text);
+        let Some(dialog) = blocking_dialog(&screen.text) else {
             return Ok(());
         };
         let Some(keys) = dialog.dismissal else {
@@ -162,11 +201,12 @@ async fn clear_startup_dialogs(sessions: &PtyManager, id: &str) -> Result<(), St
             sessions.write(id, chunk)?;
             tokio::time::sleep(KEY_PACING).await;
         }
-        await_dialog_cleared(sessions, id, dialog).await;
+        await_dialog_cleared(sessions, id, dialog, screen).await;
     }
     // Still on a dialog after the bounded attempts: the keystrokes did not clear
     // it, so name it rather than type a prompt into a modal that is still up.
-    match blocking_dialog(&screen_text(sessions, id)) {
+    sessions.screen_text_into(id, &mut screen.text);
+    match blocking_dialog(&screen.text) {
         Some(dialog) => Err(format!(
             "{} — {} (dismissal did not clear it)",
             dialog.what, dialog.remedy
@@ -180,10 +220,16 @@ async fn clear_startup_dialogs(sessions: &PtyManager, id: &str) -> Result<(), St
 /// Returns once the recognised dialog is no longer the one on screen — either it
 /// is gone, or a different dialog has taken its place, which the caller's loop
 /// then handles in the next pass. Bounded by [`DIALOG_CLEAR_BUDGET`].
-async fn await_dialog_cleared(sessions: &PtyManager, id: &str, dialog: &BlockingDialog) {
+async fn await_dialog_cleared(
+    sessions: &PtyManager,
+    id: &str,
+    dialog: &BlockingDialog,
+    screen: &mut ScreenScratch,
+) {
     let started = tokio::time::Instant::now();
     while started.elapsed() < DIALOG_CLEAR_BUDGET {
-        if blocking_dialog(&screen_text(sessions, id)) != Some(dialog) {
+        sessions.screen_text_into(id, &mut screen.text);
+        if blocking_dialog(&screen.text) != Some(dialog) {
             return;
         }
         tokio::time::sleep(TICK).await;
@@ -201,20 +247,20 @@ fn needle_of(text: &str) -> String {
         .collect()
 }
 
-/// How many times `needle` appears in `screen`.
+/// How many times `needle` appears in an already-squashed screen.
 ///
 /// Counted rather than tested, because an unbound session's screen still holds
 /// the peer's previous turns: a prompt that repeats a phrase would otherwise
 /// look like it had already landed before it was sent.
-fn occurrences(screen: &str, needle: &str) -> usize {
+///
+/// Takes the squashed form rather than producing it: the caller reads it
+/// straight out of the emulator into a buffer it reuses, where this used to
+/// build a whole new whitespace-free copy of the screen on every call — and it
+/// is called twice per 25 ms tick.
+fn occurrences(squashed: &str, needle: &str) -> usize {
     if needle.is_empty() {
         return 0;
     }
-    let squashed: String = screen
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect();
     squashed.matches(needle).count()
 }
 
@@ -225,11 +271,19 @@ fn occurrences(screen: &str, needle: &str) -> usize {
 /// multi-line paste to `[Pasted text #1 +N lines]` rather than echoing it, so
 /// looking only for the literal text would call a landed paste lost and send it
 /// again.
-async fn await_paste(sessions: &PtyManager, id: &str, needle: &str, before: usize) -> bool {
+async fn await_paste(
+    sessions: &PtyManager,
+    id: &str,
+    needle: &str,
+    before: usize,
+    screen: &mut ScreenScratch,
+) -> bool {
     let started = tokio::time::Instant::now();
     while started.elapsed() < ECHO_BUDGET {
-        let screen = screen_text(sessions, id);
-        if occurrences(&screen, needle) > before || occurrences(&screen, "pastedtext") > 0 {
+        sessions.screen_squashed_into(id, &mut screen.squashed);
+        if occurrences(&screen.squashed, needle) > before
+            || occurrences(&screen.squashed, "pastedtext") > 0
+        {
             return true;
         }
         tokio::time::sleep(TICK).await;
@@ -247,23 +301,6 @@ async fn await_still(sessions: &PtyManager, id: &str) {
         }
         tokio::time::sleep(TICK).await;
     }
-}
-
-/// A session's rendered screen as plain text, for recognising what is on it.
-fn screen_text(sessions: &PtyManager, id: &str) -> String {
-    let Some(snapshot) = sessions.screen_rows(id) else {
-        return String::new();
-    };
-    snapshot
-        .cells
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|cell| cell.text.as_str())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Wait until the session can be typed at, returning whether to bracket the

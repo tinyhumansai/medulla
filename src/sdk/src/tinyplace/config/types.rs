@@ -6,12 +6,16 @@ use serde::{Deserialize, Serialize};
 /// (camelCase for the multi-word keys).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TinyplaceFileConfig {
+    /// Optional tiny.place API endpoint override.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub endpoint: Option<String>,
+    /// Optional encoded identity secret.
     #[serde(rename = "secretKey", skip_serializing_if = "Option::is_none", default)]
     pub secret_key: Option<String>,
+    /// Optional Sign-In With Solana authentication token.
     #[serde(rename = "siwsToken", skip_serializing_if = "Option::is_none", default)]
     pub siws_token: Option<String>,
+    /// Optional OpenHuman owner identifier associated with the identity.
     #[serde(
         rename = "openHumanOwner",
         skip_serializing_if = "Option::is_none",

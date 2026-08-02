@@ -112,7 +112,12 @@ fn the_log_directory_defaults_beside_the_identity_not_in_a_repo() {
     // dropping a log file into one invites it into a commit.
     let mut env = std::collections::HashMap::new();
     env.insert("MEDULLA_HOME".to_string(), "/tmp/mh".to_string());
-    assert_eq!(default_log_dir(&env), std::path::Path::new("/tmp/mh/logs"));
+    // Inside the account directory: `MEDULLA_HOME` names the root that holds
+    // accounts, so two accounts never interleave lines in one log.
+    assert_eq!(
+        default_log_dir(&env),
+        std::path::Path::new("/tmp/mh/local/logs")
+    );
 
     env.insert("MEDULLA_LOG_DIR".to_string(), "/tmp/elsewhere".to_string());
     assert_eq!(

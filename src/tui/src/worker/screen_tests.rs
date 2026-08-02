@@ -4,7 +4,7 @@ use super::*;
 
 fn cell(text: &str) -> ScreenCell {
     ScreenCell {
-        text: text.to_string(),
+        text: text.into(),
         ..ScreenCell::default()
     }
 }

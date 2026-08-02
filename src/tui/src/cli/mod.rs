@@ -16,11 +16,11 @@ mod types;
 mod tests;
 
 pub use parse::{
-    help_text, parse_command, parse_init_args, parse_login_args, parse_memory_args, parse_run_args,
-    parse_tui_args, parse_update_args, parse_workflow_args, parse_workspace_args,
+    help_text, parse_command, parse_init_args, parse_login_args, parse_run_args, parse_tui_args,
+    parse_update_args, parse_workflow_args, parse_workspace_args,
 };
 pub use plan::sessions_json;
 pub use types::{
-    Command, InitArgs, LoginArgs, MemoryAction, MemoryArgs, RunArgs, TuiArgs, UpdateArgs,
-    WorkflowAction, WorkflowArgs, WorkspaceAction, WorkspaceArgs,
+    Command, InitArgs, LoginArgs, RunArgs, TuiArgs, UpdateArgs, WorkflowAction, WorkflowArgs,
+    WorkspaceAction, WorkspaceArgs,
 };

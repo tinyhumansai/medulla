@@ -10,12 +10,12 @@
 //! json`); the interactive opencode SSE bus mapper belongs to the PTY wrapper,
 //! which lands separately.
 //!
-//! Split by responsibility: [`types`] holds the data model
-//! ([`HarnessSemanticEvent`], [`HarnessLineMapper`]); [`mapper`] the stateful
-//! per-stream fold and dedupe; [`events`] the shared event/payload constructors;
-//! [`claude`], [`codex`], and [`opencode`] the per-provider line mappers;
-//! [`shared`] the text/tool helpers and truncation caps; [`timestamp`] the
-//! RFC3339 → epoch-ms parsing; [`usage`] the token-usage scan; and [`work`] the
+//! Split by responsibility: `types` holds the data model
+//! ([`HarnessSemanticEvent`], [`HarnessLineMapper`]); `mapper` the stateful
+//! per-stream fold and dedupe; `events` the shared event/payload constructors;
+//! `claude`, `codex`, and `opencode` the per-provider line mappers;
+//! `shared` the text/tool helpers and truncation caps; `timestamp` the
+//! RFC3339 → epoch-ms parsing; `usage` the token-usage scan; and `work` the
 //! recognizer that turns a structured tool call (a todo write, a plan, a
 //! sub-agent spawn, a file edit) into the provider-neutral work events of
 //! [`crate::harness_work`]. All public items are re-exported here so callers use

@@ -231,3 +231,28 @@ pub fn load_config(
         sources,
     })
 }
+
+/// The environment variable carrying the active `--config` path to a
+/// subprocess this process spawns.
+///
+/// A subprocess (the `medulla workflow mcp` tool server, an ACP harness) does
+/// not receive the parent's parsed CLI flags — only its environment, which
+/// [`std::process::Command`] inherits by default. Without this, every such
+/// subprocess re-ran config *discovery* from its own `cwd`, silently ignoring
+/// whatever `--config` the operator launched the parent with: a custom config
+/// with `allowCode = false` could still have scripts executed by a session that
+/// re-discovered a more permissive default config. The top-level `--config`
+/// parse sets this once at startup (see `medulla-tui`'s `run_tui`); every
+/// [`load_config`] call made on behalf of a spawned or served subprocess reads
+/// it back with [`explicit_config_from_env`] instead of passing `None`.
+pub const CONFIG_PATH_ENV: &str = "MEDULLA_CONFIG_PATH";
+
+/// The `--config` path to use for a subprocess, if the parent process recorded
+/// one via [`CONFIG_PATH_ENV`].
+///
+/// Centralised so every subprocess call site (the MCP tool server, the ACP
+/// harness's advertised MCP servers) resolves the same way rather than each
+/// re-implementing "read this one env var, else `None`".
+pub fn explicit_config_from_env(env: &HashMap<String, String>) -> Option<&str> {
+    env.get(CONFIG_PATH_ENV).map(String::as_str)
+}

@@ -170,6 +170,11 @@ fn disk_segment(display: ResourceDisplay, sample: ResourceSnapshot) -> Option<St
     }
 }
 
+/// Renders a compact five-cell utilization bar for the one-line status area.
+///
+/// Five cells balance useful resolution with scarce horizontal space. Values
+/// are clamped to protect the fixed width, then rounded so the closest visual
+/// level is shown instead of systematically understating utilization.
 fn bar(fraction: f64) -> String {
     const WIDTH: usize = 5;
     let filled = (fraction.clamp(0.0, 1.0) * WIDTH as f64).round() as usize;

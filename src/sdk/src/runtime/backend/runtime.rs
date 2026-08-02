@@ -171,6 +171,22 @@ impl Runtime for BackendRuntime {
         })
     }
 
+    fn kill_task(
+        &self,
+        worker: String,
+        task_id: String,
+    ) -> crate::runtime::BoxFuture<'static, anyhow::Result<()>> {
+        let handle = self.hub.lock().unwrap().clone();
+        Box::pin(async move {
+            let Some(hub) = handle else {
+                return Ok(());
+            };
+            hub.kill(&worker, &task_id)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))
+        })
+    }
+
     fn workers(&self) -> Vec<crate::runtime::WorkerInfo> {
         let handle = self.hub.lock().unwrap().clone();
         match handle {

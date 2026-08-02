@@ -303,3 +303,32 @@ async fn an_unchanged_screen_costs_nothing_after_the_first_frame() {
 
     sessions.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_owned_task_kill_stops_its_real_harness() {
+    let peer = "peerA";
+    let task_id = "t3#0";
+    let sessions = PtyManager::new();
+    let session_id = sessions.open(sh("sleep 30", peer)).expect("a pty session");
+    let runtime = runtime_serving(session_id.clone());
+    start_task(&runtime, peer, task_id).await;
+    let mut router = ScreenRouter::new(sessions.clone(), runtime, send_fn(|_, _| async {}));
+
+    router.handle(
+        peer,
+        ScreenMessage::Kill {
+            task_id: task_id.to_string(),
+        },
+    );
+
+    assert!(
+        !sessions
+            .row(&session_id)
+            .expect("the killed session remains inspectable")
+            .state
+            .is_running(),
+        "the task-scoped kill must stop the harness process"
+    );
+    assert_eq!(router.active(), 0, "its screen stream is also stopped");
+    sessions.shutdown();
+}

@@ -2,9 +2,10 @@
 //! subscriber may watch, and starting or stopping the stream that answers.
 //!
 //! This is the half of the protocol the worker *receives*. The vocabulary is
-//! deliberately tiny — subscribe, unsubscribe, acknowledge — because the viewer
-//! is a passive observer: there is no message here that can type into a session
-//! or resize one, so the worst a subscriber can do is read a screen.
+//! deliberately tiny — subscribe, unsubscribe, acknowledge, and an explicit kill.
+//! There is no message that can type into or resize a session. Kill is resolved
+//! through the same task ownership check as subscribe, so a controller can stop
+//! only a harness running work that controller dispatched.
 //!
 //! Which leaves one question, and the answer is structural rather than a check.
 //! A subscription names a **task**, and the daemon's running-task record is
@@ -91,6 +92,20 @@ impl ScreenRouter {
                 if self.runtime.session_for_task(from, &task_id).is_some() {
                     self.registry.unsubscribe(&task_id);
                     self.log(&format!("screen: {from} unsubscribed from {task_id}"));
+                }
+            }
+            ScreenMessage::Kill { task_id } => {
+                let Some(session_id) = self.runtime.session_for_task(from, &task_id) else {
+                    self.log(&format!(
+                        "screen: refused kill from {from} on {task_id} — no such running task for this sender"
+                    ));
+                    return;
+                };
+                if self.sessions.close(&session_id) {
+                    self.registry.unsubscribe(&task_id);
+                    self.log(&format!(
+                        "screen: {from} killed {task_id} (session {session_id})"
+                    ));
                 }
             }
             // The sampler chains from the last frame it actually sent, so an

@@ -62,6 +62,7 @@ impl App {
             context_index: 0,
             agent_index: 0,
             watching: None,
+            kill_armed: None,
             agents_focus: super::types::AgentsFocus::default(),
             agent_scroll: 0,
             chat_scroll: 0,

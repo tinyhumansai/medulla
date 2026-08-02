@@ -362,6 +362,35 @@ fn selecting_a_task_asks_to_watch_it() {
 }
 
 #[test]
+fn killing_a_watched_harness_requires_confirmation() {
+    let mut app = app();
+    select_first_task(&mut app).expect("the fixture has a selectable task");
+    app.focus_agents_rail();
+
+    let armed = app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+    assert!(armed.is_none(), "arming must not kill the harness");
+    assert!(app.kill_armed.is_some());
+    assert!(app.status().contains("y confirm"));
+
+    let cmd = app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    assert!(matches!(cmd, Some(Cmd::KillTask { .. })));
+    assert!(app.kill_armed.is_none());
+}
+
+#[test]
+fn any_other_key_cancels_a_harness_kill() {
+    let mut app = app();
+    select_first_task(&mut app).expect("the fixture has a selectable task");
+    app.focus_agents_rail();
+    app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+
+    let cmd = app.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+    assert!(cmd.is_none());
+    assert!(app.kill_armed.is_none());
+    assert!(app.status().contains("cancelled"));
+}
+
+#[test]
 fn reselecting_the_same_task_does_not_resubscribe() {
     // Every subscribe carries `resync: true`, so re-issuing one on each
     // keystroke would make the worker resend a full frame each time — the

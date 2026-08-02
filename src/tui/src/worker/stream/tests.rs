@@ -397,6 +397,18 @@ async fn an_unsubscribe_for_an_unresolvable_task_does_nothing() {
 }
 
 #[tokio::test]
+async fn a_kill_for_a_task_this_sender_never_dispatched_is_refused() {
+    let mut router = empty_router();
+    router.handle(
+        "peerA",
+        medulla::tinyplace::ScreenMessage::Kill {
+            task_id: "t1".into(),
+        },
+    );
+    assert_eq!(router.active(), 0);
+}
+
+#[tokio::test]
 async fn the_router_ignores_messages_it_is_not_the_receiver_for() {
     // An ack is accepted and does nothing; a frame arriving at the sender is a
     // peer with the protocol backwards. Neither may panic or start a stream.

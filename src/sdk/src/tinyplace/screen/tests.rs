@@ -316,6 +316,9 @@ fn messages_round_trip_through_the_envelope() {
         ScreenMessage::Unsubscribe {
             task_id: "w_1".into(),
         },
+        ScreenMessage::Kill {
+            task_id: "w_1".into(),
+        },
         ScreenMessage::Ack {
             task_id: "w_1".into(),
             seq: 418,

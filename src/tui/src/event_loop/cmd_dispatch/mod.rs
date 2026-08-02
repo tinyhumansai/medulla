@@ -196,6 +196,17 @@ pub(super) fn run_cmd(
                 }
             });
         }
+        Cmd::KillTask { worker, task_id } => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                let status = match rt.kill_task(worker, task_id.clone()).await {
+                    Ok(()) => format!("Kill requested for {task_id}"),
+                    Err(e) => format!("Cannot kill {task_id}: {e}"),
+                };
+                let _ = tx.send(AppMsg::Status(status));
+            });
+        }
         Cmd::WorkerOp(op) => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();

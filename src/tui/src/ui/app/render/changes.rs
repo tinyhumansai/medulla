@@ -36,7 +36,7 @@ impl App {
             } else {
                 format!("  💬{count}")
             };
-            ListItem::new(format!("{}  {}{suffix}", file.status, file.path))
+            ListItem::new(format!("{}  {}{suffix}", file.status, file.path.display()))
         }));
         let list = List::new(rows)
             .block(self.panel(" Changes since session start "))
@@ -49,7 +49,18 @@ impl App {
         frame.render_stateful_widget(list, panes[0], &mut state);
 
         let detail = self.change_detail_lines();
-        let title = self.changes.selected_path().unwrap_or(" Diff ").to_owned();
+        let title = self
+            .changes
+            .selected_path()
+            .map_or_else(|| " Diff ".into(), |path| path.display().to_string());
+        let content_width = panes[1].width.saturating_sub(2) as usize;
+        let viewport_height = panes[1].height.saturating_sub(2) as usize;
+        let rendered_height = detail
+            .iter()
+            .map(|line| wrapped_height(line.width(), content_width))
+            .sum::<usize>();
+        self.changes.max_scroll = rendered_height.saturating_sub(viewport_height);
+        self.changes.scroll = self.changes.scroll.min(self.changes.max_scroll);
         frame.render_widget(
             Paragraph::new(detail)
                 .block(self.panel(format!(" {title} ")))
@@ -109,4 +120,9 @@ impl App {
         }
         lines
     }
+}
+
+/// Number of terminal rows a wrapped logical line occupies.
+fn wrapped_height(width: usize, pane_width: usize) -> usize {
+    width.max(1).div_ceil(pane_width.max(1))
 }

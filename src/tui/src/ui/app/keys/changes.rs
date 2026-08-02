@@ -20,7 +20,7 @@ impl App {
             KeyCode::PageUp => self.changes.scroll = self.changes.scroll.saturating_sub(10),
             KeyCode::PageDown => {
                 self.changes.scroll =
-                    (self.changes.scroll + 10).min(self.changes.patch.len().saturating_sub(1));
+                    (self.changes.scroll + 10).min(self.changes.max_scroll);
             }
             KeyCode::Char('r') => self.refresh_changes(),
             KeyCode::Char('c') => self.comment_on_change(),

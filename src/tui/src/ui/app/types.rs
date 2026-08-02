@@ -618,7 +618,7 @@ pub(super) enum PromptKind {
     /// Attach a session-local review comment to a changed file.
     ChangesComment {
         /// Repository-relative path being reviewed.
-        path: String,
+        path: std::path::PathBuf,
     },
     /// Add a worker from an address/@handle line.
     HostAdd,

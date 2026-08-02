@@ -6,6 +6,8 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+use std::path::Path;
+
 pub(crate) use types::GitChangesState;
 
 use crate::ui::composer::{Draft, TextPrompt};
@@ -21,12 +23,12 @@ impl App {
 
     /// Open a session-local comment prompt for the selected changed file.
     pub(super) fn comment_on_change(&mut self) {
-        let Some(path) = self.changes.selected_path().map(str::to_owned) else {
+        let Some(path) = self.changes.selected_path().map(Path::to_path_buf) else {
             self.set_status("No changed file selected");
             return;
         };
         self.prompt = Some(TextPrompt {
-            title: format!("Comment on {path}"),
+            title: format!("Comment on {}", path.display()),
             draft: Draft::new(),
             kind: PromptKind::ChangesComment { path },
         });

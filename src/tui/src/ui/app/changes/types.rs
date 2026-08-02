@@ -11,7 +11,7 @@ pub(crate) struct ChangedFile {
     /// Git status code such as `M`, `A`, or `D`.
     pub(crate) status: String,
     /// Repository-relative path.
-    pub(crate) path: String,
+    pub(crate) path: PathBuf,
 }
 
 /// Cached repository data and navigation for the Changes tab.
@@ -32,7 +32,9 @@ pub(crate) struct GitChangesState {
     /// Patch text for the selected file.
     pub(crate) patch: Vec<String>,
     /// Review notes kept for the lifetime of this TUI session.
-    pub(crate) comments: BTreeMap<String, Vec<String>>,
+    pub(crate) comments: BTreeMap<PathBuf, Vec<String>>,
+    /// Largest valid vertical offset for the currently rendered detail pane.
+    pub(crate) max_scroll: usize,
     /// Last repository error, rendered instead of an empty view.
     pub(crate) error: Option<String>,
 }
@@ -86,8 +88,8 @@ impl GitChangesState {
     }
 
     /// Repository-relative selected path, if any.
-    pub(crate) fn selected_path(&self) -> Option<&str> {
-        self.files.get(self.selected).map(|file| file.path.as_str())
+    pub(crate) fn selected_path(&self) -> Option<&Path> {
+        self.files.get(self.selected).map(|file| file.path.as_path())
     }
 
     /// Concise status-line summary for a successful or failed refresh.

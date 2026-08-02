@@ -1,5 +1,6 @@
 //! Read-only Git command adapter for the Changes tab.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -23,11 +24,14 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
     .lines()
     .map(str::to_owned)
     .collect();
-    let mut files = parse_name_status(&git(root, &["diff", "--name-status", baseline])?);
-    for path in git(root, &["ls-files", "--others", "--exclude-standard"])?.lines() {
+    let mut files = parse_name_status(&git_bytes(root, &["diff", "--name-status", "-z", baseline])?);
+    for path in split_paths(git_bytes(
+        root,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+    )?) {
         files.push(ChangedFile {
             status: "?".into(),
-            path: path.into(),
+            path,
         });
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
@@ -36,24 +40,29 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
 }
 
 /// Return the unified patch for one path, including untracked files.
-pub(super) fn patch(root: &Path, baseline: &str, path: &str) -> Result<Vec<String>, String> {
-    let tracked = git(root, &["ls-files", "--error-unmatch", "--", path]).is_ok();
-    let output = if tracked {
-        git(
-            root,
-            &["diff", "--no-ext-diff", "--unified=3", baseline, "--", path],
-        )?
+pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<String>, String> {
+    let changed_at_baseline = Command::new("git")
+        .current_dir(root)
+        .args(["diff", "--quiet", baseline, "--"])
+        .arg(path)
+        .status()
+        .map_err(|error| format!("Cannot run git: {error}"))?
+        .code()
+        == Some(1);
+    let output = if changed_at_baseline {
+        let result = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--no-ext-diff", "--unified=3", baseline, "--"])
+            .arg(path)
+            .output()
+            .map_err(|error| format!("Cannot run git: {error}"))?;
+        command_stdout(result)?
     } else {
         let result = Command::new("git")
             .current_dir(root)
-            .args([
-                "diff",
-                "--no-index",
-                "--no-ext-diff",
-                "--unified=3",
-                "/dev/null",
-                path,
-            ])
+            .args(["diff", "--no-index", "--no-ext-diff", "--unified=3"])
+            .arg("/dev/null")
+            .arg(path)
             .output()
             .map_err(|error| format!("Cannot run git: {error}"))?;
         if !result.status.success() && result.status.code() != Some(1) {
@@ -64,21 +73,46 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &str) -> Result<Vec<Strin
     Ok(output.lines().map(str::to_owned).collect())
 }
 
-/// Parse Git's tab-delimited name-status output, retaining rename destinations.
-pub(super) fn parse_name_status(output: &str) -> Vec<ChangedFile> {
+/// Parse Git's NUL-delimited name-status output, retaining rename destinations.
+pub(super) fn parse_name_status(output: &[u8]) -> Vec<ChangedFile> {
+    let mut fields = output.split(|byte| *byte == 0).filter(|field| !field.is_empty());
+    let mut files = Vec::new();
+    while let Some(status) = fields.next() {
+        let Some(first) = fields.next() else { break };
+        let status_code = status.first().copied().map(char::from);
+        let path = if matches!(status_code, Some('R' | 'C')) {
+            fields.next().unwrap_or(first)
+        } else {
+            first
+        };
+        if let Some(status) = status_code {
+            files.push(ChangedFile {
+                status: status.to_string(),
+                path: bytes_to_path(path),
+            });
+        }
+    }
+    files
+}
+
+/// Split NUL-delimited path output without applying Git's display quoting.
+fn split_paths(output: Vec<u8>) -> Vec<PathBuf> {
     output
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split('\t');
-            let status = fields.next()?;
-            let first = fields.next()?;
-            let path = fields.next().unwrap_or(first);
-            Some(ChangedFile {
-                status: status.chars().next()?.to_string(),
-                path: path.to_owned(),
-            })
-        })
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(bytes_to_path)
         .collect()
+}
+
+#[cfg(unix)]
+fn bytes_to_path(path: &[u8]) -> PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+    PathBuf::from(OsString::from_vec(path.to_vec()))
+}
+
+#[cfg(not(unix))]
+fn bytes_to_path(path: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(path).into_owned())
 }
 
 /// Run a read-only Git command and return UTF-8-lossy stdout.
@@ -97,4 +131,27 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Run Git and preserve stdout bytes for path-oriented commands.
+fn git_bytes(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .map_err(|error| format!("Cannot run git: {error}"))?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
+/// Accept a successful command and decode its non-path payload.
+fn command_stdout(output: std::process::Output) -> Result<String, String> {
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
 }

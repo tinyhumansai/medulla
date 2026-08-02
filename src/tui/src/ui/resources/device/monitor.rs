@@ -2,9 +2,11 @@
 
 use std::time::{Duration, Instant};
 
-use sysinfo::{Disks, System};
+use sysinfo::Disks;
 
 use crate::ui::resources::types::DeviceSnapshot;
+
+use super::types::DeviceMonitor;
 
 /// How long a sample is reused before the device is polled again.
 ///
@@ -14,36 +16,6 @@ use crate::ui::resources::types::DeviceSnapshot;
 /// clears sysinfo's minimum CPU update interval by an order of magnitude, so
 /// consecutive CPU readings are meaningful rather than clamped to zero.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
-
-/// Stateful, low-overhead sampler for whole-device CPU, memory, and disk use.
-pub struct DeviceMonitor {
-    system: System,
-    disks: Disks,
-    last_refresh: Option<Instant>,
-    snapshot: DeviceSnapshot,
-    /// Test-injected reading. When set, [`Self::sample`] returns it
-    /// verbatim and never touches the host, which is what keeps render tests
-    /// deterministic on machines whose real readings differ.
-    injected: Option<DeviceSnapshot>,
-}
-
-impl Default for DeviceMonitor {
-    fn default() -> Self {
-        Self {
-            // `System::new()` allocates nothing platform-specific until a
-            // refresh, so an operator who leaves every device indicator off
-            // pays only for this struct.
-            system: System::new(),
-            // `Disks::new()` alone creates an empty list; `refresh(true)` will
-            // only refresh existing entries. `new_with_refreshed_list()` populates
-            // the disks on initialization so that real mounts are discovered.
-            disks: Disks::new_with_refreshed_list(),
-            last_refresh: None,
-            snapshot: DeviceSnapshot::default(),
-            injected: None,
-        }
-    }
-}
 
 impl DeviceMonitor {
     /// Return a recent whole-device sample, refreshing at most every

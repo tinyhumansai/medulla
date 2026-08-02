@@ -9,9 +9,10 @@
 
 mod format;
 mod monitor;
+mod types;
 
 #[cfg(test)]
 mod tests;
 
 pub use format::device_lines;
-pub use monitor::DeviceMonitor;
+pub use types::DeviceMonitor;

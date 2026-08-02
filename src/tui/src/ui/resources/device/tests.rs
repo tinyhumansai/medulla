@@ -182,3 +182,30 @@ fn an_oversized_value_pair_falls_back_to_the_percentage() {
         ["Device disk 8847564G/9313226G"]
     );
 }
+
+#[test]
+fn completed_value_and_bar_lines_fall_back_at_their_exact_boundaries() {
+    let value_config = AppearanceConfig {
+        device_disk: ResourceDisplay::Value,
+        ..AppearanceConfig::default()
+    };
+    let ten_tib = 10 * 1024 * 1024 * 1024 * 1024;
+    let full_disk = DeviceSnapshot {
+        disk_used_bytes: Some(ten_tib),
+        disk_total_bytes: Some(ten_tib),
+        ..DeviceSnapshot::default()
+    };
+    assert_eq!(
+        device_lines(&value_config, full_disk, 24, 3),
+        ["Device disk 100%"]
+    );
+
+    let bar_config = AppearanceConfig {
+        device_disk: ResourceDisplay::Bar,
+        ..AppearanceConfig::default()
+    };
+    assert_eq!(
+        device_lines(&bar_config, full_disk, 20, 3),
+        ["Device disk 100%"]
+    );
+}

@@ -109,7 +109,12 @@ fn metric_line(
             None => percent,
         },
         ResourceDisplay::Bar if width >= BAR_MIN_WIDTH => {
-            format!("{label} {} {:.0}%", bar(fraction), fraction * 100.0)
+            let bar = format!("{label} {} {:.0}%", bar(fraction), fraction * 100.0);
+            if bar.chars().count() <= width {
+                bar
+            } else {
+                percent
+            }
         }
         ResourceDisplay::Value | ResourceDisplay::Bar => percent,
     };

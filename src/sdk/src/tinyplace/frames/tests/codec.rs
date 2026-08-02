@@ -350,6 +350,20 @@ fn empty_budgets_and_readiness_are_omitted_on_the_wire() {
     let value = serde_json::to_value(&caps).unwrap();
     assert!(value.get("budgets").is_none());
     assert!(value.get("readiness").is_none());
+    assert!(value.get("screenKill").is_none());
+}
+
+#[test]
+fn screen_kill_support_is_additive_and_defaults_off_for_older_workers() {
+    let older = parse_agent_capabilities(r#"{"providers":["claude"]}"#).unwrap();
+    assert!(!older.screen_kill);
+
+    let current = crate::tinyplace::AgentCapabilities {
+        screen_kill: true,
+        ..Default::default()
+    };
+    let value = serde_json::to_value(&current).unwrap();
+    assert_eq!(value["screenKill"], true);
 }
 
 #[test]

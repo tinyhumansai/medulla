@@ -330,6 +330,22 @@ async fn an_owned_task_kill_stops_its_real_harness() {
         peer,
         ScreenMessage::Kill {
             task_id: task_id.to_string(),
+            correlation_id: "stale-dispatch".to_string(),
+        },
+    );
+    assert!(
+        sessions
+            .row(&session_id)
+            .expect("the live session remains inspectable")
+            .state
+            .is_running(),
+        "a stale dispatch receipt must not kill a reused task id"
+    );
+
+    router.handle(
+        peer,
+        ScreenMessage::Kill {
+            task_id: task_id.to_string(),
             correlation_id: format!("cyc/{task_id}/0"),
         },
     );

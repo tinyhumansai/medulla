@@ -7,6 +7,9 @@ use super::super::types::HarnessControl;
 use super::super::AttentionKind;
 use super::SessionHandle;
 
+/// A working-vetoed bell must be close to settlement to represent completion.
+const COMPLETION_BELL_ASSOCIATION_MS: i64 = 500;
+
 impl SessionHandle {
     /// Who holds this session right now.
     pub fn control(&self) -> HarnessControl {
@@ -94,14 +97,22 @@ impl SessionHandle {
     }
 
     /// Mark a submitted turn complete and consume its completion chime.
-    pub(in super::super) fn settle_turn(&self) {
+    pub(in super::super) fn settle_turn(&self, now: i64) {
         let bells = self.bell_count();
         let mut attention = lock(&self.attention);
         let unseen_bells = bells.saturating_sub(attention.seen_bells);
         let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
         attention.pending_completion_bells -= consumed_pending;
+        let recent_working_bell =
+            attention
+                .observed_working_bell
+                .is_some_and(|(generation, observed_at)| {
+                    generation == attention.generation
+                        && now >= observed_at
+                        && now - observed_at <= COMPLETION_BELL_ASSOCIATION_MS
+                });
         let completion_bell_already_accounted_for = unseen_bells > consumed_pending
-            || attention.observed_bell_generation == Some(attention.generation)
+            || recent_working_bell
             || attention
                 .cue
                 .as_ref()

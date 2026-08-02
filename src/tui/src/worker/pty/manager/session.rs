@@ -112,7 +112,7 @@ impl PtyManager {
     /// Mark a submitted turn complete and suppress its completion chime.
     pub fn settle_turn(&self, id: &str) {
         if let Some(session) = self.handle(id) {
-            session.settle_turn();
+            session.settle_turn((self.inner.now)());
         }
     }
 

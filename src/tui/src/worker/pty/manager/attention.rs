@@ -88,7 +88,8 @@ fn refresh(session: &SessionHandle, now: i64) {
     // the whole sample. The child can emit delayed chimes and the next turn's
     // request before this 200 ms poll runs; any additional bell remains eligible.
     let eligible_bells = unseen_bells.saturating_sub(pending_completion_bells);
-    let rang = eligible_bells > 0 && !attention::is_working(&contents);
+    let working = attention::is_working(&contents);
+    let rang = eligible_bells > 0 && !working;
     let cue = attention::detect(session.provider(), &contents)
         .or_else(|| rang.then(|| attention::bell_cue(session.provider())));
 
@@ -99,10 +100,11 @@ fn refresh(session: &SessionHandle, now: i64) {
     }
     let consumed_pending = unseen_bells.min(pending_completion_bells);
     state.pending_completion_bells -= consumed_pending;
-    if eligible_bells > 0 {
-        // Remember even a bell vetoed by the working footer. Settlement needs
-        // to know its completion chime was observed, despite there being no cue.
-        state.observed_bell_generation = Some(generation);
+    if eligible_bells > 0 && working {
+        // A working footer vetoes the cue, but a bell sampled immediately before
+        // settlement can still be that turn's completion chime. Keep its sample
+        // time so an older progress bell cannot stand in for a delayed chime.
+        state.observed_working_bell = Some((generation, now));
     }
     state.seen_bells = consumed_bell_count(state.seen_bells, bells);
     state.cue = match (cue, state.cue.take()) {

@@ -451,6 +451,37 @@ fn a_working_vetoed_completion_does_not_hide_the_next_request() {
 }
 
 #[test]
+fn an_earlier_progress_bell_does_not_stand_in_for_a_delayed_completion() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh("printf 'working (esc to interrupt)\\a\\n'; read line; printf '\\033[2J\\033[Hdone\\a\\n'; sleep 30"))
+        .expect("a session");
+
+    wait_for("the progress bell to paint", || {
+        super::screen_text(&manager, &id).contains("working")
+    });
+    now.store(200, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(manager.attention(&id), None);
+
+    // Settlement happens well after the progress chime. Its actual completion
+    // bell has not been emitted yet and must still be promised for suppression.
+    now.store(1_000, Ordering::SeqCst);
+    manager.settle_turn(&id);
+    manager.write(&id, b"\r").expect("emit the completion bell");
+    wait_for("the delayed completion bell to paint", || {
+        super::screen_text(&manager, &id).contains("done")
+    });
+
+    now.store(1_200, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(manager.attention(&id), None);
+    manager.shutdown();
+}
+
+#[test]
 fn an_ordinary_screen_asks_for_nothing() {
     let manager = PtyManager::new();
     let id = manager

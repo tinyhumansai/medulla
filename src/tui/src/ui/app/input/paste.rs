@@ -50,6 +50,16 @@ impl App {
     /// Every arm is a `return`, so adding a surface here means deciding what it
     /// does with a paste rather than inheriting whatever the next branch does.
     pub(super) fn on_paste(&mut self, text: &str) {
+        // An armed harness kill outranks everything, exactly as in [`App::on_key`]:
+        // the confirmation owns one input and only a deliberate `y` proceeds. A
+        // paste is an input, and a pasted "y" is not a deliberate one — so this
+        // cancels rather than confirms, and the payload goes no further. Leaving
+        // it out let a paste land in a composer while the question stayed armed
+        // for whatever key came next.
+        if self.kill_armed.take().is_some() {
+            self.set_status("Harness kill cancelled");
+            return;
+        }
         // The hand-back question is asked while still attached, so it outranks
         // even the harness. It swallows a paste on the question itself and takes
         // one into the note once `E` has made that a text input.

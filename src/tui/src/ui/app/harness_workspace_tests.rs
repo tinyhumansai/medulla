@@ -72,3 +72,93 @@ fn folder_completion_keeps_only_the_best_bounded_set() {
     assert_eq!(results.len(), 10);
     assert!(results.windows(2).all(|pair| pair[0] <= pair[1]));
 }
+
+/// An Agents-tab app with a picker parked on its workspace step, whose default
+/// workspace is `workspace`.
+fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
+    use super::types::{App, HarnessPicker, HarnessPickerStep};
+
+    let mut loaded = medulla::config::LoadedConfig::defaults("medulla.tui.json".into());
+    loaded.config.tinyplace = Some(medulla::config::TinyplaceConfig::default());
+    let mut app = App::new(
+        std::sync::Arc::new(medulla::runtime::mock::MockRuntime::empty()),
+        loaded,
+    );
+    app.set_local_harnesses(crate::ui::harness_pane::LocalHarnesses {
+        sessions: crate::worker::pty::PtyManager::new(),
+        runtimes: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        hub_address: "medulla-orchestrator".to_string(),
+        env: std::collections::HashMap::new(),
+        workspace: workspace.to_string_lossy().into_owned(),
+        providers: vec![medulla::tinyplace::HarnessProvider::Codex],
+        custom_harnesses: Vec::new(),
+        router: None,
+        attribution: true,
+    });
+    app.harness_picker = Some(HarnessPicker {
+        choices: Vec::new(),
+        index: 0,
+        step: HarnessPickerStep::Workspace,
+        cwd: workspace.to_string_lossy().into_owned(),
+        workspace_query: String::new(),
+        workspace_choices: Vec::new(),
+        workspace_index: 0,
+        workspace_picked: false,
+    });
+    app
+}
+
+#[test]
+fn a_pasted_directory_starts_there_rather_than_in_its_first_child() {
+    // A path copied from a file manager arrives with a trailing separator, and
+    // the completions under it are that directory's *children*. Enter used to
+    // take the highlighted completion unconditionally, so pasting `/repo/`
+    // started the harness in `/repo/first-child` — silently the wrong project.
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("alpha")).unwrap();
+    std::fs::create_dir(root.path().join("beta")).unwrap();
+    let mut app = picker_on_workspace_step(root.path());
+
+    let pasted = format!("{}{}\n", root.path().display(), std::path::MAIN_SEPARATOR);
+    app.on_event(crossterm::event::Event::Paste(pasted));
+
+    assert!(
+        !app.harness_picker
+            .as_ref()
+            .unwrap()
+            .workspace_choices
+            .is_empty(),
+        "the children are still offered as completions"
+    );
+    assert_eq!(
+        app.selected_harness_workspace()
+            .map(std::path::PathBuf::from),
+        Some(root.path().to_path_buf()),
+        "but Enter starts in the directory that was actually pasted"
+    );
+}
+
+#[test]
+fn arrowing_onto_a_completion_still_wins_over_the_typed_query() {
+    // The other half: preferring the query must not strand an operator who
+    // pasted a parent and then deliberately picked a child from the list.
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("alpha")).unwrap();
+    let mut app = picker_on_workspace_step(root.path());
+    let pasted = format!("{}{}\n", root.path().display(), std::path::MAIN_SEPARATOR);
+    app.on_event(crossterm::event::Event::Paste(pasted));
+
+    app.on_event(crossterm::event::Event::Key(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    ));
+
+    assert_eq!(
+        app.selected_harness_workspace()
+            .map(std::path::PathBuf::from),
+        Some(root.path().join("alpha")),
+        "a deliberately chosen completion is still what Enter uses"
+    );
+}

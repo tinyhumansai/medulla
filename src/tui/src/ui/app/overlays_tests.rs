@@ -16,10 +16,9 @@ use std::sync::Arc;
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 
-use super::overlays::Overlay;
 use super::types::{
-    tab_pos, App, HandbackPrompt, HarnessPicker, HarnessPickerStep, PromptKind, ResumePicker,
-    RP_TEMPLATES,
+    tab_pos, App, HandbackPrompt, HarnessPicker, HarnessPickerStep, Overlay, PromptKind,
+    ResumePicker, RP_TEMPLATES,
 };
 use crate::ui::composer::{Draft, TextPrompt};
 
@@ -48,6 +47,7 @@ fn raise(app: &mut App, overlay: Overlay) {
                 workspace_query: String::new(),
                 workspace_choices: Vec::new(),
                 workspace_index: 0,
+                workspace_picked: false,
             })
         }
         Overlay::HandbackPrompt => {

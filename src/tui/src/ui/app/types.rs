@@ -525,6 +525,30 @@ pub(super) struct ResumePicker {
     pub(super) index: usize,
 }
 
+/// An overlay the app can draw over the content pane.
+///
+/// Ordered as they stack, back to front: the two that float over the content,
+/// then the harness picker, then the question asked about a harness being
+/// released, and finally the two that claim a row of their own below it.
+///
+/// Produced by [`App::visible_overlays`], which is the single source of truth
+/// for what is in front of the content — see [`super::overlays`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Overlay {
+    /// The prepared-decision board.
+    Decisions,
+    /// The agent-template detail popup.
+    TemplatePopup,
+    /// The "start a harness" picker.
+    HarnessPicker,
+    /// The question asked when the operator lets go of a harness.
+    HandbackPrompt,
+    /// The shared single-line prompt (Workers add/edit, Agents answer).
+    InlinePrompt,
+    /// The saved-chat resume picker.
+    ResumePicker,
+}
+
 /// The modal state for the "start a harness" picker overlay.
 pub(super) struct HarnessPicker {
     /// Installed providers and registered presets, in offer order.
@@ -541,6 +565,15 @@ pub(super) struct HarnessPicker {
     pub(super) workspace_choices: Vec<WorkspaceChoice>,
     /// Highlighted workspace completion.
     pub(super) workspace_index: usize,
+    /// Whether the operator has deliberately picked one of the completions.
+    ///
+    /// Distinct from `workspace_index != 0`, which cannot express it: a query
+    /// that offers a single completion leaves the cursor on row zero however
+    /// deliberately it was moved there. Set by the arrows, cleared whenever the
+    /// query changes, and read by
+    /// [`selected_harness_workspace`](App::selected_harness_workspace) to decide
+    /// whether an entered directory outranks the completions listed under it.
+    pub(super) workspace_picked: bool,
 }
 
 /// Active stage of the manual harness launcher.

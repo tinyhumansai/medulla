@@ -60,6 +60,7 @@ impl App {
                     workspace_query: String::new(),
                     workspace_choices: Vec::new(),
                     workspace_index: 0,
+                    workspace_picked: false,
                 });
             }
         }
@@ -426,15 +427,19 @@ impl App {
                 }
                 self.set_status("Pick a harness · Enter workspace · Esc cancel");
             }
+            // Moving the cursor is the operator choosing a completion over
+            // whatever they entered, however few rows there are to move across.
             KeyCode::Up => {
                 if let Some(picker) = &mut self.harness_picker {
                     picker.workspace_index = picker.workspace_index.saturating_sub(1);
+                    picker.workspace_picked = !picker.workspace_choices.is_empty();
                 }
             }
             KeyCode::Down => {
                 if let Some(picker) = &mut self.harness_picker {
                     picker.workspace_index = (picker.workspace_index + 1)
                         .min(picker.workspace_choices.len().saturating_sub(1));
+                    picker.workspace_picked = !picker.workspace_choices.is_empty();
                 }
             }
             KeyCode::Tab => self.complete_harness_workspace(),
@@ -442,6 +447,7 @@ impl App {
                 if let Some(picker) = &mut self.harness_picker {
                     picker.workspace_query.pop();
                     picker.workspace_index = 0;
+                    picker.workspace_picked = false;
                 }
                 self.refresh_harness_workspace_choices();
             }
@@ -449,6 +455,7 @@ impl App {
                 if let Some(picker) = &mut self.harness_picker {
                     picker.workspace_query.push(character);
                     picker.workspace_index = 0;
+                    picker.workspace_picked = false;
                 }
                 self.refresh_harness_workspace_choices();
             }

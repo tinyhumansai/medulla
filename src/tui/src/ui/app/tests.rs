@@ -150,6 +150,7 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
         workspace_query: String::new(),
         workspace_choices: Vec::new(),
         workspace_index: 0,
+        workspace_picked: false,
     });
 
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -342,6 +343,38 @@ fn killing_resolves_the_current_rail_selection_instead_of_the_cached_watch() {
         panic!("confirming should kill the selected task");
     };
     assert_eq!((worker, task_id), selected);
+}
+
+#[test]
+fn a_paste_cancels_a_harness_kill_instead_of_slipping_past_it() {
+    // The confirmation owns exactly one input, and `on_key` enforces that ahead
+    // of every other target. A paste is an input too: without this it neither
+    // answered nor cancelled, so the payload was routed somewhere while the
+    // question stayed armed for whatever key came next.
+    let mut app = app_with_running_task();
+    select_first_task(&mut app).expect("the fixture has a selectable task");
+    app.focus_agents_rail();
+    app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+    assert!(app.kill_armed.is_some(), "the question is up");
+
+    let cmd = app.on_event(crossterm::event::Event::Paste("y".into()));
+
+    assert!(cmd.is_none(), "a pasted `y` is not a confirmation");
+    assert!(app.kill_armed.is_none(), "the question consumed the paste");
+    assert!(app.status().contains("cancelled"), "{}", app.status());
+    // The load-bearing half: the question must be *gone*, so the next key is an
+    // ordinary keystroke again rather than an answer to a prompt nobody can
+    // still see.
+    let after = app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    assert!(
+        !matches!(after, Some(Cmd::KillTask { .. })),
+        "a paste must not leave the kill armed for the next keypress"
+    );
+    assert_eq!(
+        app.draft_text(),
+        "",
+        "and nothing was typed into a composer"
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! The one list of things drawn in front of the content pane.
+//! Who is in front of the content pane, and therefore who owns input.
 //!
 //! Two questions have to agree about overlays: "what does [`App::draw`] paint on
 //! top?" and "who owns the keyboard and the clipboard?". They were answered by
@@ -8,32 +8,11 @@
 //!
 //! So the answer lives here once. [`App::visible_overlays`] is the single source
 //! of truth: the render iterates it to decide what to paint, and
-//! [`App::overlay_owns_keys`](crate::ui::app::App) answers from it. Adding an
-//! overlay means adding one variant and one predicate, and both surfaces pick it
-//! up — there is no second place left to forget.
+//! [`App::overlay_owns_keys`] answers from it. Adding an overlay means adding one
+//! variant to [`Overlay`] and one predicate here, and both surfaces pick it up —
+//! there is no second place left to forget.
 
-use super::types::App;
-
-/// An overlay the app can draw over the content pane.
-///
-/// Ordered as they stack, back to front: the two that float over the content,
-/// then the harness picker, then the question asked about a harness being
-/// released, and finally the two that claim a row of their own below it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::ui::app) enum Overlay {
-    /// The prepared-decision board.
-    Decisions,
-    /// The agent-template detail popup.
-    TemplatePopup,
-    /// The "start a harness" picker.
-    HarnessPicker,
-    /// The question asked when the operator lets go of a harness.
-    HandbackPrompt,
-    /// The shared single-line prompt (Workers add/edit, Agents answer).
-    InlinePrompt,
-    /// The saved-chat resume picker.
-    ResumePicker,
-}
+use super::types::{App, Overlay, RP_TEMPLATES};
 
 impl App {
     /// Every overlay currently on screen, in the order the render stacks them.
@@ -48,7 +27,7 @@ impl App {
     /// - the resume picker and the inline prompt share the row below the
     ///   content, and the prompt wins, so the picker is only on screen when no
     ///   prompt is.
-    pub(in crate::ui::app) fn visible_overlays(&self) -> Vec<Overlay> {
+    pub(super) fn visible_overlays(&self) -> Vec<Overlay> {
         [
             (Overlay::Decisions, self.decision_open),
             (Overlay::TemplatePopup, self.template_popup_open()),
@@ -78,5 +57,22 @@ impl App {
     /// this is consulted, so answering `true` for them is not a contradiction.
     pub(in crate::ui::app) fn overlay_owns_keys(&self) -> bool {
         !self.visible_overlays().is_empty()
+    }
+
+    /// Whether the agent-template popup is actually on screen.
+    ///
+    /// `template_modal` alone is not that question. The popup is a detail view
+    /// belonging to Hosts › Agent Templates, and its keys — `Esc`, `Enter`,
+    /// `PageUp`/`PageDown` — are bound only on that page, because `Tab` still
+    /// switches tabs while it is up and nothing clears the flag on the way out.
+    /// Treating the flag as "the popup is up" therefore drew it over whichever
+    /// tab the operator landed on, with no key on that tab able to dismiss it,
+    /// while the pane behind it silently took every keystroke *and* every paste.
+    ///
+    /// Keeping "is it visible?" and "does it own input?" the same question is
+    /// the whole point of this module — the disagreement between those two is
+    /// what the bug was made of.
+    pub(super) fn template_popup_open(&self) -> bool {
+        self.template_modal && self.tab() == "Hosts" && self.routing_index == RP_TEMPLATES
     }
 }

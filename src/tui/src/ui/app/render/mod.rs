@@ -16,8 +16,7 @@ use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::util::{clip, clock, wrap};
 use crate::worker::pty::ATTENTION_GLYPH;
 
-use super::overlays::Overlay;
-use super::types::{App, TABS};
+use super::types::{App, Overlay, TABS};
 
 mod agents;
 mod changes;

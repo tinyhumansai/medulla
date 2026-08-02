@@ -10,8 +10,7 @@ use super::types::ChangedFile;
 /// Find the enclosing repository root and resolve its current commit.
 pub(super) fn discover() -> Result<(PathBuf, String), String> {
     let cwd = std::env::current_dir().map_err(|error| format!("Cannot read directory: {error}"))?;
-    let root = git(&cwd, &["rev-parse", "--show-toplevel"])?;
-    let root = PathBuf::from(root.trim());
+    let root = git_path(&cwd, &["rev-parse", "--show-toplevel"])?;
     let baseline = git(&root, &["rev-parse", "HEAD"])?;
     Ok((root, baseline.trim().to_owned()))
 }
@@ -67,7 +66,13 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
     } else {
         let result = Command::new("git")
             .current_dir(root)
-            .args(["diff", "--no-index", "--no-ext-diff", "--unified=3"])
+            .args([
+                "diff",
+                "--no-index",
+                "--no-ext-diff",
+                "--unified=3",
+                "--",
+            ])
             .arg("/dev/null")
             .arg(path)
             .output()
@@ -113,6 +118,17 @@ fn split_paths(output: Vec<u8>) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Decode one path followed by Git's platform-specific line terminator.
+pub(super) fn path_from_line(mut output: Vec<u8>) -> PathBuf {
+    if output.last() == Some(&b'\n') {
+        output.pop();
+        if output.last() == Some(&b'\r') {
+            output.pop();
+        }
+    }
+    bytes_to_path(&output)
+}
+
 #[cfg(unix)]
 fn bytes_to_path(path: &[u8]) -> PathBuf {
     use std::os::unix::ffi::OsStringExt;
@@ -154,6 +170,11 @@ fn git_bytes(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
     }
+}
+
+/// Run Git for a command whose stdout is exactly one native path.
+fn git_path(root: &Path, args: &[&str]) -> Result<PathBuf, String> {
+    git_bytes(root, args).map(path_from_line)
 }
 
 /// Accept a successful command and decode its non-path payload.

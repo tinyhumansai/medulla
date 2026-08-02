@@ -16,7 +16,8 @@ This repository is a two-crate Cargo workspace: the `medulla` SDK library at `sr
 
 ## Build, Test, and Development Commands
 
-- `cargo run` starts the TUI with the mock runtime when no credentials are set.
+- `cargo run` starts the TUI on the embedded OpenHuman core; with no app session it opens the login screen first.
+- `cargo run -- --mock` runs the offline demo runtime — the only way to reach it, and what the test suites use.
 - `cargo run --release` runs an optimized build.
 - `cargo install --path src/tui` installs the `medulla` binary.
 - `cargo test` runs unit, feature, and mocked end-to-end tests for both crates without live network access.
@@ -73,7 +74,11 @@ Document generously — explain intent and non-obvious behaviour rather than res
 
 ## Testing Guidelines
 
-Place focused unit tests in a module's sibling `tests.rs` and cross-module behavior in the owning crate's `tests/` directory (`src/sdk/tests/` or `src/tui/tests/`). Name integration files by behavior, such as `e2e_core.rs` or `feature_workers.rs`. Use the mock backend, core socket, tiny.place server, and harness CLIs in `src/sdk/tests/support/`; tests must remain deterministic and offline. Maintain coverage near the documented 92% line baseline and cover new branches.
+Place focused unit tests in a module's sibling `tests.rs` and cross-module behavior in the owning crate's `tests/` directory (`src/sdk/tests/` or `src/tui/tests/`). Name integration files by behavior, such as `e2e_core.rs` or `feature_workers.rs`. Use the mock backend, core socket, tiny.place server, and harness CLIs in `src/sdk/tests/support/`; tests must remain deterministic and offline. Coverage is gated at **80% lines** (`.github/workflows/ci.yml`). Vendored code
+is excluded — `vendor/` path dependencies are *local* packages under the
+workspace root, so `cargo-llvm-cov`'s default registry filter does not drop
+them and the gate would otherwise measure the embedded OpenHuman core. Cover
+new branches.
 
 ## Commit & Pull Request Guidelines
 

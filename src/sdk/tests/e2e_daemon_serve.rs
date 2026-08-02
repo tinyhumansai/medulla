@@ -29,6 +29,12 @@ use mock_signal_server::MockSignalServer;
 /// because every holder crosses awaits while the daemon runs.
 static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
+/// The account directory inside a `MEDULLA_HOME` root. Nobody signs in here, so
+/// everything the daemon persists lands under the pre-login account.
+fn account_home(root: &TempDir) -> std::path::PathBuf {
+    root.path.join("local")
+}
+
 /// A temp dir removed on drop.
 struct TempDir {
     path: std::path::PathBuf,
@@ -123,7 +129,9 @@ async fn once_mode_serves_a_drain_cycle_and_exits() {
         .expect("--once run should succeed");
 
     // The daemon wrote a worker profile during headless onboarding.
-    assert!(home.path.join("worker.json").exists());
+    // Under the account directory, not the root: `MEDULLA_HOME` names the root
+    // that holds accounts, and this daemon signed nobody in.
+    assert!(account_home(&home).join("worker.json").exists());
     clear_touched();
 }
 
@@ -169,7 +177,7 @@ async fn once_mode_onboards_handle_and_owner() {
         .expect("--once with onboarding should succeed");
 
     // Onboarding wrote the worker profile bound to the configured owner.
-    let profile = std::fs::read_to_string(home.path.join("worker.json")).unwrap();
+    let profile = std::fs::read_to_string(account_home(&home).join("worker.json")).unwrap();
     assert!(profile.contains(&owner.agent_id()), "profile: {profile}");
     let _ = &server;
     clear_touched();

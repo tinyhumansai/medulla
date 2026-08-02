@@ -1,6 +1,6 @@
 [package]
 name = "medulla"
-description = "Medulla client SDK: backend HTTP/SSE client, runtimes, persona memory, and the coding-agent daemon"
+description = "Medulla client SDK: backend HTTP/SSE client, runtimes, and the coding-agent daemon"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -19,8 +19,27 @@ workflows = ["dep:tinyflows"]
 
 [dependencies]
 tinyplace = { workspace = true }
+# The backend transport. `client` is a typed surface over this, not a second
+# HTTP client: credential headers, the `{success,data}` envelope, path
+# percent-encoding, and the not-exposed-route gate all live in the SDK.
+tinyhumans-sdk = { workspace = true }
 tinyflows = { workspace = true, optional = true }
-tinycortex = { workspace = true }
+# default-features = false is LOAD-BEARING, not tidiness: OpenHuman's defaults
+# include its own `tui` gate on ratatui 0.30 / crossterm 0.29 against this
+# workspace's 0.29 / 0.28. Those are semver-incompatible at 0.x, so Cargo would
+# link BOTH — two raw-mode state machines and two background reader threads on
+# one tty fd. That is not a compile error; it is a wrecked terminal.
+# `default-features = false` is load-bearing (see below), but an EMPTY feature
+# list compiles a core with no Medulla domain at all — `openhuman::medulla` and
+# the `embed::Medulla` facade are both behind its `medulla` gate. Without this,
+# the embedded core builds fine and simply has nothing this host can call.
+#
+# Not optional: the embedded core IS the runtime this SDK hosts. It was behind
+# an `openhuman-core` feature while the migration was in flight, which is over —
+# a build without it has no runtime to offer but the offline mock.
+openhuman = { workspace = true, default-features = false, features = [
+    "medulla",
+] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
@@ -28,6 +47,17 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
+# The loopback inference proxy's server half. `reqwest` is the client half and
+# already links hyper 1.x, so these add no new tree — only the server feature of
+# a crate the graph resolves anyway. Deliberately NOT axum: the vendored
+# OpenHuman core's axum sits behind a feature this build disables, and pulling a
+# router framework into the workspace for one listener with two mount points
+# would link far more than it saves.
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }

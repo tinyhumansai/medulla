@@ -3,8 +3,8 @@
 //! `TuiEvent` deserializes any JSON `{kind, ...}` shape, keeping unknown kinds
 //! as a passthrough so a newer backend never drops rows on an older TUI.
 //!
-//! The module is split by responsibility: [`types`] holds the event data model
-//! ([`TuiEvent`] and its payload structs, plus [`EventEnvelope`]), [`serde_impl`]
+//! The module is split by responsibility: `types` holds the event data model
+//! ([`TuiEvent`] and its payload structs, plus [`EventEnvelope`]), `serde_impl`
 //! the custom compact-JSON `Serialize`/`Deserialize`, and [`derive`] the
 //! read-only derivations ([`TuiEvent::kind`], [`chat_transcript`],
 //! [`last_assistant_message`], [`describe_event`]). All public items are

@@ -23,12 +23,14 @@ fn capacity_details_are_cached_only_for_the_peer_that_was_probed() {
     use super::super::handle::cache_system_info_if_current;
 
     let roster = Arc::new(Mutex::new(vec![HubWorker {
+        roles: Vec::new(),
         id: "worker".to_string(),
         address: "address-new".to_string(),
         harness: "claude".to_string(),
         label: None,
         selected: false,
         workspace: None,
+        ..Default::default()
     }]));
     let cache = Mutex::new(HashMap::new());
 

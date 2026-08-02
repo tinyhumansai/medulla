@@ -152,3 +152,90 @@ fn absolute(path: &str) -> String {
         .map(|cwd| cwd.join(path).to_string_lossy().into_owned())
         .unwrap_or_else(|_| path.to_string_lossy().into_owned())
 }
+
+impl App {
+    /// Declare another host on this machine, working in `dir`.
+    ///
+    /// A blank `dir` accepts the default — the directory this process is
+    /// running in — because that is the common case and the one the operator
+    /// can see. Anything else is canonicalized so the declaration names a
+    /// place rather than whatever `medulla` happened to start in next time.
+    ///
+    /// Written to config *and* started now, so the host appears in the roster
+    /// the way a remote add does rather than waiting for the next launch. The
+    /// config write comes first and the start is only requested once it
+    /// succeeded — a host running against a declaration that was never saved
+    /// disappears on restart with nothing to explain it.
+    pub(in crate::ui::app) fn add_local_host(
+        &mut self,
+        harness: medulla::tinyplace::HarnessProvider,
+        dir: &str,
+    ) -> Option<super::types::Cmd> {
+        let dir = dir.trim();
+        let workspace = if dir.is_empty() {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        } else {
+            std::fs::canonicalize(dir)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| absolute(dir))
+        };
+        if self
+            .loaded
+            .config
+            .hosts
+            .iter()
+            .any(|h| h.workspace == workspace)
+            || self.loaded.config.host.workspace == workspace
+        {
+            self.set_status(format!("Already hosted · {workspace}"));
+            return None;
+        }
+        let name = std::path::Path::new(&workspace)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let entry = medulla::config::HostSection {
+            name,
+            // Blank so the address is derived from the name at startup rather
+            // than inheriting the primary's and failing to bind.
+            address: String::new(),
+            workspace: workspace.clone(),
+            providers: vec![harness.as_str().to_string()],
+            default_provider: harness.as_str().to_string(),
+            ..medulla::config::HostSection::default()
+        };
+        let Some(path) = self.config_path.clone() else {
+            self.set_status("No config file to save to");
+            return None;
+        };
+        // Persist a candidate list, and only adopt it once the write succeeded.
+        // Pushing first left a host in the in-process config that was never
+        // written and never started, and the duplicate check above then refused
+        // every retry for that directory — a failure the operator could not
+        // clear without restarting.
+        let mut hosts = self.loaded.config.hosts.clone();
+        hosts.push(entry);
+        if let Err(e) = medulla::config::persist_local_hosts(&path, &hosts) {
+            self.set_status(format!("Local host was not saved: {e}"));
+            return None;
+        }
+        self.loaded.config.hosts = hosts;
+        // Same landing as a remote add, so both kinds end in the same place —
+        // and the host is started now rather than at the next launch, so the row
+        // appears here the way a remote one does.
+        self.focus_routing_subpage("Hosts");
+        self.set_status(format!("Starting local host · {workspace}"));
+        let index = self.loaded.config.hosts.len().saturating_sub(1);
+        self.loaded
+            .config
+            .hosts
+            .last()
+            .cloned()
+            .map(|host| super::types::Cmd::StartLocalHost {
+                host: Box::new(host),
+                index,
+            })
+    }
+}

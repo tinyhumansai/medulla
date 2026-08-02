@@ -11,7 +11,7 @@ help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "; print "Usage: make <target>\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 init: ## Initialize submodules, Rust tooling, dependencies, and Git hooks
-	git submodule update --init --recursive
+	bash scripts/init-submodules.sh
 	rustup component add rustfmt clippy
 	cargo fetch --locked
 	git config core.hooksPath .githooks

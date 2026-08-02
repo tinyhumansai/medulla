@@ -19,10 +19,15 @@ const DETAIL_CAP: usize = 120;
 
 /// `HarnessSessionState` wire strings.
 pub const STATE_RUNNING: &str = "running";
+/// A tool call is currently executing.
 pub const STATE_RUNNING_TOOL: &str = "running_tool";
+/// Execution is blocked on operator approval.
 pub const STATE_WAITING_APPROVAL: &str = "waiting_approval";
+/// The session exists but is not actively processing.
 pub const STATE_IDLE: &str = "idle";
+/// The session ended normally.
 pub const STATE_STOPPED: &str = "stopped";
+/// The session ended because of a fatal error.
 pub const STATE_ERRORED: &str = "errored";
 
 /// Default: the session exists but nothing has happened yet.

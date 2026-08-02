@@ -35,7 +35,6 @@ fn dispatches_subcommands() {
         parse_command(&argv(&["opencode", "--foo"])),
         Command::Wrapper(HarnessProvider::Opencode)
     );
-    assert_eq!(parse_command(&argv(&["memory", "status"])), Command::Memory);
     assert_eq!(parse_command(&argv(&["update"])), Command::Update);
     assert_eq!(parse_command(&argv(&["init"])), Command::Init);
     assert_eq!(parse_command(&argv(&["init", "some/dir"])), Command::Init);
@@ -62,35 +61,6 @@ fn update_args_parse() {
 }
 
 #[test]
-fn memory_args_parse() {
-    // Simple actions.
-    assert_eq!(
-        parse_memory_args(&argv(&["status"])).unwrap().action,
-        MemoryAction::Status
-    );
-    assert_eq!(
-        parse_memory_args(&argv(&["backfill"])).unwrap().action,
-        MemoryAction::Backfill
-    );
-    // Search joins the query words and honors flags.
-    let a = parse_memory_args(&argv(&[
-        "search", "how", "to", "test", "--facet", "stack", "--k", "3", "--json", "--config",
-        "c.toml",
-    ]))
-    .unwrap();
-    assert_eq!(a.action, MemoryAction::Search("how to test".into()));
-    assert_eq!(a.facet.as_deref(), Some("stack"));
-    assert_eq!(a.k, 3);
-    assert!(a.json);
-    assert_eq!(a.config.as_deref(), Some("c.toml"));
-    // Errors: no action, empty search, unknown action, bad --k.
-    assert!(parse_memory_args(&argv(&[])).is_err());
-    assert!(parse_memory_args(&argv(&["search"])).is_err());
-    assert!(parse_memory_args(&argv(&["frobnicate"])).is_err());
-    assert!(parse_memory_args(&argv(&["search", "q", "--k", "nan"])).is_err());
-}
-
-#[test]
 fn parses_tui_flags() {
     assert_eq!(parse_tui_args(&argv(&[])), TuiArgs::default());
     let a = parse_tui_args(&argv(&["--config", "c.json", "--no-alt-screen"]));
@@ -100,16 +70,10 @@ fn parses_tui_flags() {
             config: Some("c.json".into()),
             alt_screen: false,
             mock: false,
-            core_socket: None,
         }
     );
     // A dangling --config keeps the default (None → layered discovery).
     assert_eq!(parse_tui_args(&argv(&["--config"])).config, None);
-    // `--core-socket` selects the core runtime at an explicit socket path.
-    assert_eq!(
-        parse_tui_args(&argv(&["--core-socket", "/run/serve.sock"])).core_socket,
-        Some("/run/serve.sock".into())
-    );
 }
 
 #[test]
@@ -361,17 +325,8 @@ fn worker_flag_values_parse_in_both_spellings() {
 
 #[test]
 fn run_args_join_the_instruction_and_read_flags() {
-    let a = parse_run_args(&argv(&[
-        "--core-socket",
-        "/run/serve.sock",
-        "--config",
-        "c.toml",
-        "reconcile",
-        "the",
-        "world",
-    ]))
-    .expect("a run with an instruction parses");
-    assert_eq!(a.core_socket.as_deref(), Some("/run/serve.sock"));
+    let a = parse_run_args(&argv(&["--config", "c.toml", "reconcile", "the", "world"]))
+        .expect("a run with an instruction parses");
     assert_eq!(a.config.as_deref(), Some("c.toml"));
     assert_eq!(a.instruction, "reconcile the world");
 }
@@ -379,7 +334,7 @@ fn run_args_join_the_instruction_and_read_flags() {
 #[test]
 fn run_args_require_an_instruction() {
     // Only flags, no instruction text → a usage error rather than an empty run.
-    let err = parse_run_args(&argv(&["--core-socket", "/run/serve.sock"]))
+    let err = parse_run_args(&argv(&["--config", "c.toml"]))
         .expect_err("a flags-only run is a usage error");
     assert!(err.contains("instruction"), "{err}");
     // A dangling value-flag consumes the following token, so this is empty too.
@@ -390,7 +345,15 @@ fn run_args_require_an_instruction() {
 fn help_text_documents_the_run_command() {
     let help = help_text();
     assert!(help.contains("medulla run"));
-    assert!(help.contains("--core-socket"));
+}
+
+#[test]
+fn run_rejects_the_retired_core_socket_flag() {
+    // Loudly, not silently: an unrecognized token joins the instruction, so a
+    // quiet removal would submit the flag to the agent as prompt text.
+    let err = parse_run_args(&argv(&["--core-socket", "/run/serve.sock", "hello"]))
+        .expect_err("the retired flag is a usage error");
+    assert!(err.contains("--core-socket"), "{err}");
 }
 
 #[test]
@@ -446,6 +409,40 @@ fn parses_every_workflow_verb_with_its_operand() {
             "for {args:?}"
         );
     }
+}
+
+#[test]
+fn workflow_defaults_reads_the_harness_and_model_flags() {
+    let parsed = parse_workflow_args(&argv(&[
+        "defaults",
+        "sweep",
+        "--harness",
+        "codex",
+        "--model",
+        "gpt-5-codex",
+    ]));
+
+    assert_eq!(parsed.action, WorkflowAction::Defaults("sweep".into()));
+    assert_eq!(parsed.harness.as_deref(), Some("codex"));
+    assert_eq!(parsed.model.as_deref(), Some("gpt-5-codex"));
+}
+
+#[test]
+fn workflow_defaults_with_no_flags_is_a_read() {
+    // Absent is not the same as empty: absent leaves the setting alone (so the
+    // verb prints it), empty clears it.
+    let parsed = parse_workflow_args(&argv(&["defaults", "sweep"]));
+
+    assert_eq!(parsed.action, WorkflowAction::Defaults("sweep".into()));
+    assert_eq!(parsed.harness, None);
+    assert_eq!(parsed.model, None);
+}
+
+#[test]
+fn workflow_defaults_clears_with_an_empty_string() {
+    let parsed = parse_workflow_args(&argv(&["defaults", "sweep", "--harness", ""]));
+
+    assert_eq!(parsed.harness.as_deref(), Some(""));
 }
 
 #[test]
@@ -534,6 +531,22 @@ fn workflow_flags_are_parsed_alongside_the_verb() {
     assert_eq!(parsed.input.as_deref(), Some("{\"n\":1}"));
     assert_eq!(parsed.run_id.as_deref(), Some("r9"));
     assert_eq!(parsed.config.as_deref(), Some("/tmp/c.toml"));
+
+    let missing = parse_workflow_args(&argv(&[
+        "note",
+        "sweep",
+        "--kind",
+        "--text",
+        "--reason",
+        "--supersedes",
+        "--run-id",
+        "r10",
+    ]));
+    assert_eq!(missing.kind, None);
+    assert_eq!(missing.text, None);
+    assert_eq!(missing.reason, None);
+    assert!(missing.supersedes.is_empty());
+    assert_eq!(missing.run_id.as_deref(), Some("r10"));
 }
 
 #[test]

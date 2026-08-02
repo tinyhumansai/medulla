@@ -4,25 +4,37 @@ use super::*;
 /// A conversation turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {
+    /// Message author role.
     pub role: String,
+    /// Message text.
     pub content: String,
 }
 /// An in-memory tree node (messages included on save; loaded from disk on load).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatNode {
+    /// Stable session or thread identifier.
     pub session_id: String,
+    /// Human-facing thread name.
     pub name: String,
+    /// Parent turn at which this thread forked.
     pub fork_point: Option<i64>,
+    /// Materialized messages in this thread.
     pub messages: Vec<ChatMessage>,
+    /// Threads forked from this node.
     pub children: Vec<ChatNode>,
 }
 /// One row for the `/resume` picker — from `tree.json` alone (no md reads).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MainChatSummary {
+    /// Stable top-level session identifier.
     pub session_id: String,
+    /// Human-facing chat name.
     pub name: String,
+    /// Number of turns in the main thread.
     pub turns: usize,
+    /// Total threads in the chat tree.
     pub thread_count: usize,
+    /// Most recent persisted update timestamp.
     pub updated_at: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

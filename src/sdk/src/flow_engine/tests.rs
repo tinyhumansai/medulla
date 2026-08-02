@@ -4,6 +4,12 @@
 //! real graph through the real engine into the real agent adapter, and asserts
 //! on the task frame that came out the other side — that is the claim "a
 //! workflow step is a harness session" reduced to something checkable.
+//!
+//! The `medulla:shell` tool's own cases live in the sibling `shell_tests`
+//! module, and harness/model selection in `harness_selection_tests`, both split
+//! out once they pushed this file over the 500-line ceiling. The fixtures those
+//! modules share — `settings`, `RecordingDispatch`, `empty_resolver`,
+//! `agent_graph` — are `pub(super)` for that reason.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -31,14 +37,14 @@ use crate::workflows::StoreWorkflowResolver;
 /// A dispatch that records what it was asked to run and replies with a fixed
 /// answer, so a test can assert on the frame rather than on a live worker.
 #[derive(Default)]
-struct RecordingDispatch {
+pub(super) struct RecordingDispatch {
     seen: Mutex<Vec<TaskRequest>>,
     reply: String,
     fail: Option<RunError>,
 }
 
 impl RecordingDispatch {
-    fn replying(reply: &str) -> Arc<Self> {
+    pub(super) fn replying(reply: &str) -> Arc<Self> {
         Arc::new(Self {
             seen: Mutex::new(Vec::new()),
             reply: reply.to_string(),
@@ -54,7 +60,7 @@ impl RecordingDispatch {
         })
     }
 
-    fn requests(&self) -> Vec<TaskRequest> {
+    pub(super) fn requests(&self) -> Vec<TaskRequest> {
         self.seen.lock().unwrap().clone()
     }
 }
@@ -79,13 +85,13 @@ impl HarnessDispatch for RecordingDispatch {
 
 /// A resolver over an empty store: no test here uses `sub_workflow`, but the
 /// engine requires the capability to be present.
-fn empty_resolver(root: &std::path::Path) -> Arc<StoreWorkflowResolver> {
+pub(super) fn empty_resolver(root: &std::path::Path) -> Arc<StoreWorkflowResolver> {
     Arc::new(StoreWorkflowResolver::new(Arc::new(
         crate::workflows::FileWorkflowStore::new(vec![root.join("workflows")], root.join("runs")),
     )))
 }
 
-fn settings(root: &std::path::Path) -> Arc<CapabilitySettings> {
+pub(super) fn settings(root: &std::path::Path) -> Arc<CapabilitySettings> {
     let mut settings = CapabilitySettings::rooted_at(root);
     settings.default_worker_address = "local-worker".into();
     Arc::new(settings)
@@ -93,7 +99,7 @@ fn settings(root: &std::path::Path) -> Arc<CapabilitySettings> {
 
 /// A one-agent-node graph: trigger into an agent, which is the smallest thing
 /// that exercises the dispatch path end to end.
-fn agent_graph(config: Value) -> WorkflowGraph {
+pub(super) fn agent_graph(config: Value) -> WorkflowGraph {
     serde_json::from_value(json!({
         "nodes": [
             { "id": "t", "kind": "trigger", "name": "start",

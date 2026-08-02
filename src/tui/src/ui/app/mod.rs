@@ -13,17 +13,26 @@
 
 mod account;
 mod changes;
+mod appearance;
 mod commands;
 mod credentials;
+mod custom_harnesses;
 mod decisions;
 mod feedback;
+mod harness_control;
+#[cfg(test)]
+mod harness_control_tests;
+mod harness_workspace;
+#[cfg(test)]
+mod harness_workspace_tests;
 mod input;
 mod keys;
-mod memory;
 mod rail;
 mod render;
+mod routing_options;
 mod settings_edit;
 mod state;
+mod status_line;
 mod templates;
 mod types;
 #[cfg(feature = "workflows")]

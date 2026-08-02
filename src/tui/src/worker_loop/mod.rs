@@ -64,6 +64,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         skip_permissions,
         router,
         budget,
+        attribution,
     } = config;
     let providers = medulla::daemon::providers::detect_providers(&env, None, None);
     let sessions = PtyManager::new();
@@ -77,12 +78,31 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
     // different relays both start cleanly, publish keys and report healthy — the
     // only symptom is that neither ever hears from the other. Side by side with
     // the orchestrator's own line, a mismatch is immediate.
-    if let Some(endpoint) = &endpoint {
-        logs.push(format!(
+    match &endpoint {
+        Some(endpoint) => logs.push(format!(
             "tiny.place: {} on {endpoint}",
             agent_id.as_deref().unwrap_or("(no identity)")
-        ));
+        )),
+        // Unconditional, because the silent case is the one that needs saying.
+        // A worker with no relay serves nobody, and if this line is skipped the
+        // log's last entry is from whenever the machine last had an identity —
+        // so a worker that has been up for hours doing nothing is
+        // indistinguishable from one that was never started at all.
+        None => logs.push(
+            "tiny.place: no relay configured — this worker serves local sessions only".to_string(),
+        ),
     }
+
+    // Says, in the log, that the process is up but idle. `start_worker` is what
+    // writes the next line, and it only runs once the launch step is answered —
+    // so without this the gap between "booted" and "serving" leaves no trace,
+    // and a worker parked on the launch step looks identical to a wedged one.
+    // It also explains the keyboard: the launch step owns every key until it is
+    // answered, which reads as dead navigation to anyone expecting the tabs.
+    logs.push(
+        "worker: up, waiting on the launch step — no peer work is served until it is answered"
+            .to_string(),
+    );
 
     // The contact queue narrates into the same log as everything else, so
     // "nobody asked" and "the worker never saw it" stop looking alike.
@@ -140,6 +160,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         skip_permissions,
         router,
         budget,
+        attribution,
     };
     let result = drive(&mut terminal, &mut app, &start, &mut inbox, &mut runtime).await;
 
@@ -171,6 +192,7 @@ pub(super) fn worker_runtime(
         logs,
         router,
         budget,
+        attribution,
         ..
     } = start;
     let config = DaemonConfig {
@@ -200,6 +222,10 @@ pub(super) fn worker_runtime(
         // Layered into every peer task's spawn env by the same executor the
         // headless daemon uses, so `--tui` and headless route identically.
         router: router.clone(),
+        attribution: *attribution,
+        // The standalone worker TUI does not yet expose a config editor; named
+        // presets are loaded by the orchestrator's embedded host.
+        custom_harnesses: Vec::new(),
         // Operator-declared budgets from the `[budget]` config, advertised on the
         // capability probe as `source: configured` for matching providers.
         budget: budget.clone(),

@@ -12,10 +12,11 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
-use medulla::hub::{start_hub, HubConfig, HubHandle, HubSession, WorkerSpec};
+use medulla::auth::Credentials;
+use medulla::hub::{start_hub, HubConfig, HubSession, WorkerSpec};
 
 /// Default inbox poll interval when `MEDULLA_HUB_POLL_MS` is unset.
 const DEFAULT_POLL_MS: u64 = 1500;
@@ -85,19 +86,21 @@ fn subscription_strategy_from_config(home: &Path) -> medulla::runtime::Subscript
 fn roster_sink(
     home: &Path,
     log: medulla::hub::HubLog,
-    local_address: String,
+    local_addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 ) -> medulla::hub::RosterSink {
     let path = roster_path(home);
     Arc::new(move |workers: &[medulla::hub::HubWorker]| {
+        let local_addresses = local_addresses.lock().expect("host addresses").clone();
         let rows: Vec<medulla::config::HubWorkerConfig> = workers
             .iter()
-            .filter(|w| w.address != local_address)
+            .filter(|w| !local_addresses.contains(&w.address))
             .map(|w| medulla::config::HubWorkerConfig {
                 id: w.id.clone(),
                 address: w.address.clone(),
                 harness: w.harness.clone(),
                 label: w.label.clone(),
                 selected: w.selected,
+                roles: w.roles.clone(),
             })
             .collect();
         if let Err(e) = medulla::config::persist_hub_workers(&path, &rows) {
@@ -149,6 +152,89 @@ fn workers_from_env(env: &HashMap<String, String>) -> Vec<WorkerSpec> {
     Vec::new()
 }
 
+/// The `[workflows]` policy remembered beside the roster.
+///
+/// Read straight from the file for the same reason the roster is: this module
+/// runs before (and independently of) the TUI's own config load.
+#[cfg(feature = "workflows")]
+fn workflows_config(home: &Path) -> medulla::config::WorkflowsConfig {
+    std::fs::read_to_string(roster_path(home))
+        .ok()
+        .and_then(|text| toml::from_str::<medulla::config::TuiConfig>(&text).ok())
+        .map(|config| config.workflows)
+        .unwrap_or_default()
+}
+
+/// The workflow store this hub advertises to the hosted orchestrator, or `None`
+/// when it should advertise none.
+///
+/// This is the installation the cloud workflow plane exists for: the same
+/// layered store the Workflows tab, the `medulla workflow` subcommand and the
+/// MCP tools read, handed to the hub so a `medulla:workflow_request` is answered
+/// from the one catalogue rather than a second view of it.
+///
+/// Withheld when `[workflows] enabled` is false. The bridge applies no policy of
+/// its own — the refusal lives in the run path — so advertising graphs this host
+/// would decline to run would only teach the orchestrator to delegate work that
+/// bounces.
+#[cfg(feature = "workflows")]
+fn workflow_bridge(
+    env: &HashMap<String, String>,
+    home: &Path,
+) -> Option<medulla::hub::WorkflowPlane> {
+    let config = workflows_config(home);
+    if !config.enabled {
+        return None;
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let store = medulla::workflows::discover_store(env, &cwd);
+    let model = (!config.default_model.is_empty()).then(|| config.default_model.clone());
+
+    // ACP, not the legacy provider transport, for the same reason the TUI's own
+    // copilot pane forces it: Medulla is an ACP *client*, and `session/new`'s
+    // `mcpServers` is the only channel it has for handing the harness the
+    // `medulla-workflows` tools. Without them an authoring turn is a chatbot
+    // that cannot touch the graph it was asked to edit.
+    let mut harness_env = env.clone();
+    harness_env.insert(
+        medulla::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+        "acp".to_string(),
+    );
+    let copilot = std::sync::Arc::new(medulla::workflows::LocalCopilotDispatch::new(
+        medulla::daemon::embedded::EmbeddedDaemonOptions {
+            workspace: cwd.to_string_lossy().to_string(),
+            default_provider: config.default_provider,
+            model: model.clone(),
+            env: harness_env,
+            ..Default::default()
+        },
+    ));
+
+    Some(std::sync::Arc::new(
+        medulla::workflows::StoreWorkflowBridge::new(store)
+            .with_copilot(
+                copilot,
+                medulla::workflows::LOCAL_WORKER_ADDRESS,
+                config.default_provider,
+                model,
+            )
+            // The same directory the copilot's harness runs in, which is what a
+            // capability probe means by "where does this agent work". The core
+            // reads it off the bridge, so leaving it unset would omit `cwd` from
+            // every probe this host answers.
+            .with_action_dir(cwd.to_string_lossy().to_string()),
+    ))
+}
+
+/// Without the engine compiled in this host has no workflow store to advertise.
+#[cfg(not(feature = "workflows"))]
+fn workflow_bridge(
+    _env: &HashMap<String, String>,
+    _home: &Path,
+) -> Option<medulla::hub::WorkflowPlane> {
+    None
+}
+
 /// Whether the hub should run. **On by default** in the backend runtime — a
 /// plain `medulla` login is enough, and workers are added live from the Workers
 /// tab (or pre-seeded via `MEDULLA_TINYPLACE_PEER` / `MEDULLA_HUB_WORKERS`).
@@ -165,15 +251,18 @@ fn hub_enabled(env: &HashMap<String, String>) -> bool {
     }
 }
 
-/// Build a [`HubConfig`] from the environment + saved credentials, or `None`
-/// when the hub should not run ([`hub_enabled`]) or the user is not logged in
-/// (the hub needs a backend JWT for the Socket.IO handshake).
+/// Build a [`HubConfig`] from the environment + the signed-in session, or `None`
+/// when the hub should not run ([`hub_enabled`]) or nobody is signed in (the hub
+/// needs a backend JWT for the Socket.IO handshake).
 pub(crate) fn build_hub_config_with_log(
     env: &HashMap<String, String>,
     home: &Path,
     log: medulla::hub::HubLog,
+    session: Option<&Credentials>,
 ) -> Option<HubConfig> {
-    build_hub_config_with_host(env, home, log, None)
+    // No catalog: this builder is the no-host path used by probes and tests,
+    // where nothing is advertised for a role.
+    build_hub_config_with_host(env, home, log, None, session, Vec::new())
 }
 
 /// Like [`build_hub_config_with_log`], additionally dispatching over `local` —
@@ -189,6 +278,8 @@ pub(crate) fn build_hub_config_with_host(
     home: &Path,
     log: medulla::hub::HubLog,
     local: Option<LocalDispatch>,
+    session: Option<&Credentials>,
+    agent_templates: Vec<medulla::runtime::AgentTemplate>,
 ) -> Option<HubConfig> {
     if !hub_enabled(env) {
         return None;
@@ -207,8 +298,13 @@ pub(crate) fn build_hub_config_with_host(
     // heard the name.
     let (local_network, local_address) = match &local {
         Some(dispatch) => {
-            workers.retain(|worker| worker.address != dispatch.host_address);
-            if let Some(host) = &dispatch.host {
+            {
+                let local_addresses = dispatch.host_addresses.lock().expect("host addresses");
+                workers.retain(|worker| !local_addresses.contains(&worker.address));
+            }
+            // Inserted in declaration order, so the primary leads and the
+            // extras follow it the way they read in the config.
+            for host in dispatch.hosts.iter().rev() {
                 workers.retain(|worker| worker.address != host.address);
                 workers.insert(0, host.clone());
             }
@@ -216,7 +312,10 @@ pub(crate) fn build_hub_config_with_host(
         }
         None => (None, String::new()),
     };
-    let creds = medulla::auth::CredentialStore::at_home(home).load_or_legacy()?;
+    // Passed in rather than read from disk: the embedded core holds the only
+    // session, and a second lookup here could disagree with the runtime about
+    // whether this process is signed in.
+    let creds = session?.clone();
     let identity_dir = env
         .get("MEDULLA_HUB_IDENTITY_DIR")
         .map(PathBuf::from)
@@ -225,11 +324,14 @@ pub(crate) fn build_hub_config_with_host(
         .get("MEDULLA_HUB_POLL_MS")
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_MS);
+    // The handle, not a copy of its contents: the sink reads it at save time,
+    // which is the only moment that knows which hosts this device is binding.
     let persisted_local = local
         .as_ref()
-        .map(|dispatch| dispatch.host_address.clone())
+        .map(|dispatch| dispatch.host_addresses.clone())
         .unwrap_or_default();
     Some(HubConfig {
+        agent_templates,
         persist: Some(roster_sink(home, log.clone(), persisted_local)),
         log,
         backend_url: creds.base_url,
@@ -240,6 +342,7 @@ pub(crate) fn build_hub_config_with_host(
         local_network,
         local_address,
         subscription_strategy: subscription_strategy_from_config(home),
+        workflows: workflow_bridge(env, home),
     })
 }
 
@@ -253,12 +356,15 @@ pub(crate) async fn start(
     slot: HubSlot,
     logs: medulla_tui::log::LogBuffer,
     local: Option<LocalDispatch>,
+    session: Option<&Credentials>,
+    agent_templates: Vec<medulla::runtime::AgentTemplate>,
 ) -> Option<HubSession> {
     // The hub must never write to the terminal here: the TUI owns the alternate
     // screen, and ratatui only repaints the cells it manages, so a stray line
     // lands on top of the UI and is never cleared. Capturing them keeps the
     // screen intact and the diagnostics readable.
-    let config = build_hub_config_with_host(env, home, logs.sink(), local)?;
+    let config =
+        build_hub_config_with_host(env, home, logs.sink(), local, session, agent_templates)?;
     match start_hub(config).await {
         Ok(session) => {
             *slot.lock().expect("hub slot") = Some(session.handle.clone());

@@ -9,10 +9,38 @@ use super::rail::RailRow;
 use crate::ui::agents::{agent_row_model, AgentRole, AgentRow};
 use crate::ui::composer::Draft;
 
-use super::types::{
-    App, Cmd, MEMORY_SUBPAGES, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TASKS_SUBPAGES,
-    TOKENMAXXING_SUBPAGES,
-};
+use super::types::{App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_SUBPAGES};
+
+/// Rows one wheel notch moves, matching the transcript's own step so the two
+/// panes feel like one surface. Only used for a harness we scroll ourselves —
+/// one that takes mouse reports decides what a notch means itself.
+const SCROLL_ROWS: usize = 3;
+
+/// Translate a crossterm pointer event into the button and motion a mouse
+/// report names, or `None` for one that is not a button event.
+///
+/// Bare motion with no button held (`Moved`) is excluded on purpose. Only
+/// `DECSET 1003` asks for it, almost nothing negotiates that, and forwarding it
+/// would put a report on the wire for every cell the pointer crosses the pane.
+fn pointer_report(
+    kind: MouseEventKind,
+) -> Option<(
+    crate::ui::harness_pane::mouse::Button,
+    crate::ui::harness_pane::mouse::Motion,
+)> {
+    use crate::ui::harness_pane::mouse::{Button, Motion};
+    let button = |b: MouseButton| match b {
+        MouseButton::Left => Button::Left,
+        MouseButton::Middle => Button::Middle,
+        MouseButton::Right => Button::Right,
+    };
+    match kind {
+        MouseEventKind::Down(b) => Some((button(b), Motion::Press)),
+        MouseEventKind::Up(b) => Some((button(b), Motion::Release)),
+        MouseEventKind::Drag(b) => Some((button(b), Motion::Drag)),
+        _ => None,
+    }
+}
 
 impl App {
     /// Route a terminal event to the key or mouse handler, producing any command
@@ -29,8 +57,18 @@ impl App {
 
     /// Handle scroll and left-click mouse events for the active tab.
     pub(super) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
-        if self.resume_picker.is_some() {
-            return None; // modal swallows mouse
+        // A modal swallows the mouse, the same way it swallows the keyboard.
+        // The harness picker is one: a click that navigated the rail behind it
+        // left an overlay on screen describing a row nobody was pointing at.
+        if self.resume_picker.is_some() || self.harness_picker.is_some() {
+            return None;
+        }
+        // An attached harness is a terminal, and a terminal owns the pointer
+        // over it exactly as it owns the keyboard. Placed ahead of everything
+        // else for the same reason `handle_harness_key` runs first: attached is
+        // a mode, and a mode that keeps a few gestures for itself is not one.
+        if self.forward_harness_mouse(&m) {
+            return None;
         }
         match m.kind {
             MouseEventKind::ScrollUp => self.scroll_at(m.column, m.row, true),
@@ -39,6 +77,22 @@ impl App {
             // fires here rather than on release so navigation stays immediate;
             // a drag that follows selects text without undoing it.
             MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
+                    let inside_attached_pane =
+                        self.hit_harness.as_ref().is_some_and(|(rect, id)| {
+                            id == &session && rect.contains((m.column, m.row).into())
+                        });
+                    if !inside_attached_pane {
+                        // A click that navigates away releases the same keyboard
+                        // focus as Ctrl-]. Settle the configured hand-back policy
+                        // before changing the selected tab or rail row; otherwise
+                        // an Ask prompt would refer to a pane already hidden.
+                        if !self.begin_harness_release(&session) {
+                            return None;
+                        }
+                        self.release_harness();
+                    }
+                }
                 self.drag_anchor = Some((m.column, m.row));
                 self.selection = None;
                 return self.handle_click(m.column, m.row);
@@ -56,6 +110,52 @@ impl App {
         None
     }
 
+    /// Hand a pointer event to the attached harness, if it is the harness's.
+    ///
+    /// Returns `true` when the event was consumed, so the caller must not also
+    /// route it — a click that both reached Claude Code's permission dialog and
+    /// armed our drag-selection would leave a selection nobody asked for
+    /// hanging over the pane the child just redrew.
+    ///
+    /// Three conditions, all necessary:
+    ///
+    /// - a harness holds the keyboard, so the operator has already said the
+    ///   pane is what they are working in;
+    /// - the pointer is inside *that* harness's screen, not another pane;
+    /// - the child enabled mouse reporting. A harness that never asked keeps
+    ///   our own drag-to-select-and-copy, which is the only way to get text out
+    ///   of one — and forwarding to it would type `ESC [ < 0 ; 4 ; 9 M` into
+    ///   its composer.
+    ///
+    /// The wheel is deliberately absent: [`scroll_at`](Self::scroll_at) already
+    /// forwards notches over any harness pane, attached or not, because reading
+    /// back through a harness's output should not cost a chord first.
+    fn forward_harness_mouse(&mut self, m: &crossterm::event::MouseEvent) -> bool {
+        let Some(session) = self.harness_focus.attached_to().map(str::to_string) else {
+            return false;
+        };
+        let Some((rect, id)) = self.hit_harness.clone() else {
+            return false;
+        };
+        if id != session || !rect.contains((m.column, m.row).into()) {
+            return false;
+        }
+        let Some((button, motion)) = pointer_report(m.kind) else {
+            return false;
+        };
+        let Some(harnesses) = self.harnesses.clone() else {
+            return false;
+        };
+        if !harnesses.takes_mouse(&session) {
+            return false;
+        }
+        // Pane-relative: the child believes its screen starts at its own
+        // origin, and reporting our absolute position would put the event
+        // somewhere else entirely on it.
+        harnesses.mouse_button(&session, m.column - rect.x, m.row - rect.y, button, motion);
+        true
+    }
+
     /// Scroll whatever the pointer is over, rather than whatever has focus.
     ///
     /// A wheel event carries a position, so it should act on the list under it —
@@ -63,24 +163,52 @@ impl App {
     /// thing that makes a mouse feel bolted on. Focus is left alone: the wheel
     /// looks around, it does not move where typing goes.
     pub(super) fn scroll_at(&mut self, x: u16, y: u16, up: bool) {
+        // An embedded harness is a terminal, so the wheel over it belongs to it
+        // — before the subpage menu, before the tab. Deliberately *not* gated on
+        // being attached: reading back through a harness's output is the most
+        // common thing to want from one, and making it cost a chord first would
+        // be the wrapper getting in the way.
+        if let Some((rect, session)) = self.hit_harness.clone() {
+            if rect.contains((x, y).into()) {
+                if let Some(harnesses) = self.harnesses.clone() {
+                    // Pane-relative: the child believes its screen starts at its
+                    // own origin, and reporting our absolute position would put
+                    // the event somewhere else entirely on it.
+                    harnesses.scroll(&session, x - rect.x, y - rect.y, up, SCROLL_ROWS);
+                }
+                return;
+            }
+        }
         // The subpage menu scrolls through its pages, whichever tab drew it.
         if self.hit_nav.area.contains((x, y).into()) {
             self.scroll_subpage(up);
             return;
         }
         match self.tab() {
-            // Over the rail, the wheel walks the cursor over lanes and fleet
-            // rows; anywhere else on the tab it scrolls the transcript.
-            "Agents" => match self.hit_agents {
-                Some((rail, _)) if rail.contains((x, y).into()) => self.move_agent_index(up),
-                _ => self.scroll_transcript(up, 3),
-            },
-            "Memory" if self.memory_focused => {
-                self.memory_index = if up {
-                    self.memory_index.saturating_sub(1)
+            // Over the rail, the wheel walks the cursor over the lanes and
+            // their tasks; anywhere else on the tab it scrolls the transcript.
+            "Agents" => {
+                let over_rail = self
+                    .hit_agents
+                    .as_ref()
+                    .is_some_and(|(rail, _)| rail.contains((x, y).into()));
+                if over_rail {
+                    self.move_agent_index(up);
                 } else {
-                    (self.memory_index + 1).min(self.memory_page_entries().len().saturating_sub(1))
-                };
+                    self.scroll_transcript(up, 3);
+                }
+            }
+            "Workflows" => {
+                if self
+                    .hit_workflow_preview
+                    .is_some_and(|area| area.contains((x, y).into()))
+                {
+                    self.wf.preview_scroll = if up {
+                        self.wf.preview_scroll.saturating_sub(SCROLL_ROWS)
+                    } else {
+                        self.wf.preview_scroll.saturating_add(SCROLL_ROWS)
+                    };
+                }
             }
             // Trace and Context are Settings subpages, not tabs, so they are
             // matched on the subpage rather than on the tab — which is always
@@ -116,15 +244,11 @@ impl App {
             }
         };
         match self.tab() {
-            "Tasks" => self.tasks_index = step(self.tasks_index, TASKS_SUBPAGES.len()),
             "TokenMaxxxing" => {
                 self.tokenmaxxing_index =
                     step(self.tokenmaxxing_index, TOKENMAXXING_SUBPAGES.len());
             }
-            "Routing" => self.routing_index = step(self.routing_index, ROUTING_SUBPAGES.len()),
-            "Memory" => {
-                self.memory_subpage_index = step(self.memory_subpage_index, MEMORY_SUBPAGES.len());
-            }
+            "Hosts" => self.routing_index = step(self.routing_index, ROUTING_SUBPAGES.len()),
             "Settings" => self.settings_index = step(self.settings_index, SETTINGS_SUBPAGES.len()),
             _ => {}
         }
@@ -168,12 +292,10 @@ impl App {
         // left.
         if let Some(page) = self.hit_nav.page_at(x, y) {
             match tab {
-                "Tasks" => (self.tasks_index, self.tasks_focused) = (page, true),
                 "TokenMaxxxing" => {
                     (self.tokenmaxxing_index, self.tokenmaxxing_focused) = (page, true);
                 }
-                "Routing" => (self.routing_index, self.routing_focused) = (page, true),
-                "Memory" => (self.memory_subpage_index, self.memory_focused) = (page, true),
+                "Hosts" => (self.routing_index, self.routing_focused) = (page, true),
                 "Settings" => (self.settings_index, self.settings_focused) = (page, true),
                 _ => {}
             }
@@ -195,30 +317,50 @@ impl App {
                     }
                 }
             }
-            if let Some((rect, window_start)) = self.hit_agents {
+            if let Some((rect, owners)) = self.hit_agents.clone() {
                 if rect.contains((x, y).into()) {
+                    // Each drawn line records the rail row it came from, so a
+                    // click on the second line of a wrapped harness row selects
+                    // that harness rather than whatever follows it. The map
+                    // covers the unselectable rows too — the `── functions ──`
+                    // separator and the `+N more` counter — because
+                    // `agent_index` indexes all of them.
                     let rel = (y - rect.y) as usize;
-                    // The *rail's* rows, not the lane rows: the rail also holds
-                    // the dividers, the declared fleet, and the template
-                    // catalog, and `agent_index` indexes all of it. Reading the
-                    // shorter list here meant every click below the lanes fell
-                    // off the end and silently did nothing.
                     let rows = self.rail_rows();
-                    let idx = window_start + rel;
-                    if let Some(row) = rows.get(idx) {
+                    if let Some(row) = owners.get(rel).and_then(|idx| rows.get(*idx)) {
                         if row.selectable() {
+                            let idx = owners[rel];
                             self.agent_scroll = 0;
                             self.chat_scroll = 0;
                             self.agent_index = idx;
                             // A click is a focus gesture: the arrows should now
                             // continue from the row that was just picked.
                             self.focus_agents_rail();
+                            // The action row acts on the click that lands on it;
+                            // requiring a second keystroke to confirm what was
+                            // already aimed at is the friction it exists to
+                            // remove.
+                            if row.is_new_harness() {
+                                self.open_harness_picker();
+                                return None;
+                            }
                             // Clicking a task is the request to watch it.
                             if let Some(cmd) = self.retarget_watch() {
                                 return Some(cmd);
                             }
                         }
                     }
+                }
+            }
+            // A click inside the embedded terminal means "type here", the same
+            // as `Ctrl-]`. Checked after the rail so a click that changes rows
+            // is a navigation, not an attach to whatever the last frame showed.
+            if let Some((rect, session)) = self.hit_harness.clone() {
+                if rect.contains((x, y).into())
+                    && self.harness_pane_session.as_deref() == Some(session.as_str())
+                    && !self.harness_focus.is_attached_to(&session)
+                {
+                    self.attach_to_pane_harness();
                 }
             }
         } else if tab == "Settings" && self.settings_subpage() == "Context" {
@@ -249,8 +391,10 @@ impl App {
 
     /// Move the Agents-rail cursor to the next/previous selectable row.
     ///
-    /// The rail spans the lanes and the declared fleet, so this walks straight
-    /// from the last agent into the first host rather than stopping short.
+    /// Not every row can hold the cursor: the `── functions ──` separator and
+    /// the `+N more` counter are labels, not destinations. So this steps over
+    /// them to the next lane or task rather than stopping on one, and a cursor
+    /// that would leave the list stays where it was.
     pub(super) fn move_agent_index(&mut self, up: bool) {
         let rows = self.rail_rows();
         if rows.is_empty() {

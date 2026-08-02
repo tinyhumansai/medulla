@@ -9,7 +9,7 @@ use ratatui::Frame;
 
 use medulla::contacts::{ContactRequest, RequestState};
 
-use super::super::pty::{PtyState, SessionRow};
+use super::super::pty::{PtyState, SessionRow, ATTENTION_GLYPH};
 use super::super::screen::screen_lines;
 use super::types::{
     Screen, WorkerApp, TABS, TAB_MASTER, TAB_REQUESTS, TAB_SESSIONS, TAB_WORKSPACES,
@@ -449,16 +449,29 @@ fn session_line(row: &SessionRow, selected: bool, now: i64) -> Line<'static> {
     } else {
         String::new()
     };
+    // A harness stopped on its own permission prompt takes the row over. This
+    // pane is often the only thing watching an unattended worker, and that state
+    // looks exactly like a slow turn from every other signal here — same glyph,
+    // same colour, same silence — right up until the task times out.
+    let waiting = row
+        .attention
+        .as_ref()
+        .filter(|_| row.state.is_running())
+        .map(|cue| format!(" · {ATTENTION_GLYPH} {}", cue.label(now)));
     let mut style = Style::default().fg(state_color(row.state));
+    if waiting.is_some() {
+        style = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
+    }
     if selected {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    crate::ui::agent_lane::line(
-        row.state.glyph().to_string(),
-        row.label.clone(),
-        quiet,
-        style,
-    )
+    let glyph = match &waiting {
+        Some(_) => ATTENTION_GLYPH.to_string(),
+        None => row.state.glyph().to_string(),
+    };
+    crate::ui::agent_lane::line(glyph, row.label.clone(), waiting.unwrap_or(quiet), style)
 }
 
 /// One row of the pending-request list.

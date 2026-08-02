@@ -120,12 +120,17 @@ pub fn derive_agent_lanes(
 
     // Seed one lane per connected roster agent (roster order).
     for agent in roster {
+        // The lane *key* keeps the full id — identity must stay exact, or two
+        // peers sharing four leading characters would fold into one lane. Only
+        // the label is shortened, and only when it is a bare address: a name
+        // someone chose is meaningful text and survives whole.
         let mut lane = new_agent_lane(format!("agent:{}", agent.id), {
-            if agent.name.is_empty() {
-                agent.id.clone()
+            let shown = if agent.name.is_empty() {
+                agent.id.as_str()
             } else {
-                agent.name.clone()
-            }
+                agent.name.as_str()
+            };
+            crate::ui::util::short_if_address(shown)
         });
         lane.agent_id = Some(agent.id.clone());
         lane.descriptor = Some(agent.clone());
@@ -514,11 +519,13 @@ fn ensure_lane(
     at: i64,
 ) {
     if !workers.contains(key) {
+        // The fallback is an agent id, which for a tiny.place peer *is* its
+        // address — so it gets the same treatment as one.
         let mut lane = new_agent_lane(
             key.to_string(),
             task_agent
                 .get(task_id)
-                .cloned()
+                .map(|id| crate::ui::util::short_if_address(id))
                 .unwrap_or_else(|| task_id.to_string()),
         );
         lane.last_at = at;
@@ -532,7 +539,13 @@ fn ensure_lane(
 /// Ensure a session lane exists for `key`, tagging its parent machine.
 fn ensure_session_lane(workers: &mut Lanes, key: &str, agent_id: &str, session_id: &str, at: i64) {
     if !workers.contains(key) {
-        let mut lane = new_agent_lane(key.to_string(), format!("↳ {session_id}"));
+        // A session id is a UUID — 36 characters of the same opaque noise an
+        // address is, and it sits in the same rail measuring the same sidebar.
+        // Shortened unconditionally rather than sniffed: we know what this is.
+        let mut lane = new_agent_lane(
+            key.to_string(),
+            format!("↳ {}", crate::ui::util::short_address(session_id)),
+        );
         lane.last_at = at;
         lane.session_id = Some(session_id.to_string());
         lane.parent_agent_id = Some(agent_id.to_string());

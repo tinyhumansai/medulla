@@ -216,3 +216,44 @@ async fn per_task_model_overrides_config_default() {
         "frame model wins over config; absent falls back to config"
     );
 }
+
+// 8. Liveness: a heartbeat must survive an executor that blocks its thread.
+//
+// Regression. The status consumer is spawned by the dispatcher and the executor
+// is invoked on the very next line, so the consumer lands in that worker's LIFO
+// slot — which tokio does not let other workers steal. An executor that blocked
+// its thread rather than awaiting therefore stranded it there for the whole
+// turn, and the heartbeat never fired even with idle workers to spare. A peer
+// saw an ack and then permanent silence, which its no-progress watchdog cannot
+// distinguish from a worker that died.
+//
+// Multi-threaded on purpose: the hazard is a stranded task on a *busy* worker
+// while others idle, which a current-thread runtime cannot express.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_thread_blocking_executor_still_heartbeats() {
+    let (send, recorded) = recording_send();
+    let mut cfg = config(HarnessProvider::Claude, ".".into(), HashMap::new());
+    // heartbeat = throttle * 8, so 50ms gives a 400ms beat: several within the
+    // window below, without the 32s a production throttle would impose.
+    cfg.status_throttle_ms = 50;
+    cfg.task_timeout_ms = 30_000;
+    let runtime = DaemonRuntime::new(cfg, thread_blocking_runner(Duration::from_secs(3)), send);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(frame(TaskFrameKind::Task, "hb-1", "start", Some("c1"))),
+    );
+
+    // The ack is not the point — it is sent before the executor is ever called,
+    // so it arrives even when the consumer is stranded. The heartbeat behind it
+    // is the liveness signal actually under test.
+    wait_until("a heartbeat while the executor holds its thread", T, || {
+        decoded_frames(&recorded)
+            .iter()
+            .any(|f| f.kind == TaskFrameKind::Status && f.text.contains("still working"))
+    })
+    .await;
+
+    runtime.idle().await;
+}

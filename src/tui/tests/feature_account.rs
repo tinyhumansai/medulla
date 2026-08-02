@@ -1,8 +1,10 @@
 //! Feature tests for Settings > ABOUT > Account: what the page reports about
-//! the signed-in backend, and the two-step logout.
+//! the signed-in session, and the two-step logout.
 //!
-//! Logout clears the on-disk credential store, so every test injects a temp
-//! Medulla home via `set_medulla_home` and never touches the real one.
+//! The session lives in the embedded OpenHuman core, not in a file this test can
+//! seed, so signed-in state is injected with `set_account` and the logout is
+//! observed as the [`Cmd::Logout`] the page emits. The clear itself is the
+//! runtime's job and is covered where that runtime is.
 
 use std::sync::Arc;
 
@@ -10,10 +12,10 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-use medulla::auth::{CredentialStore, Credentials};
 use medulla::config::LoadedConfig;
+use medulla::core_host::auth::AuthState;
 use medulla::runtime::mock::MockRuntime;
-use medulla_tui::ui::app::App;
+use medulla_tui::ui::app::{App, Cmd};
 
 /// An app parked on the Account subpage with `home` as its Medulla home.
 fn account_app(home: &std::path::Path) -> App {
@@ -26,20 +28,16 @@ fn account_app(home: &std::path::Path) -> App {
     app
 }
 
-/// Seed a credential store under `home` so the app looks signed in.
-fn sign_in(home: &std::path::Path) -> CredentialStore {
-    let store = CredentialStore::at_home(home);
-    store
-        .save(&Credentials {
-            base_url: "https://api.tinyhumans.ai".into(),
-            jwt: "test-token".into(),
-        })
-        .expect("seed credentials");
-    store
+/// Report the core as signed in, the way startup does.
+fn sign_in(app: &mut App) {
+    app.set_account(Some(AuthState {
+        is_authenticated: true,
+        user_id: Some("u-1".into()),
+    }));
 }
 
-fn key(app: &mut App, code: KeyCode) {
-    app.on_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+fn key(app: &mut App, code: KeyCode) -> Option<Cmd> {
+    app.on_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
 }
 
 fn render(app: &mut App, w: u16, h: u16) -> String {
@@ -78,58 +76,61 @@ fn a_signed_out_account_says_how_to_sign_in() {
 }
 
 #[test]
-fn a_signed_in_account_reports_it_without_showing_the_token() {
+fn a_signed_in_account_names_the_user_without_showing_the_token() {
     let dir = tempfile::tempdir().expect("tempdir");
-    sign_in(dir.path());
     let mut app = account_app(dir.path());
+    sign_in(&mut app);
     let out = render(&mut app, 160, 50);
-    assert!(out.contains("signed in"), "{out}");
-    assert!(
-        !out.contains("test-token"),
-        "the token must never be rendered: {out}"
-    );
+    assert!(out.contains("signed in as u-1"), "{out}");
 }
 
 #[test]
-fn logout_takes_two_presses_and_clears_the_store() {
+fn logout_takes_two_presses_before_it_commands_anything() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = sign_in(dir.path());
     let mut app = account_app(dir.path());
+    sign_in(&mut app);
 
-    // First Enter only arms it — the credentials must survive.
-    key(&mut app, KeyCode::Enter);
+    // First Enter only arms it — nothing is dispatched.
+    assert!(
+        key(&mut app, KeyCode::Enter).is_none(),
+        "arming issues no command"
+    );
     assert!(
         app.status().contains("press Enter again"),
         "asks for confirmation: {}",
         app.status()
     );
-    assert!(store.load().is_some(), "not cleared by the first press");
     let out = render(&mut app, 160, 50);
     assert!(
         out.contains("Press Enter again"),
         "armed state is visible: {out}"
     );
 
-    // Second Enter performs it.
-    key(&mut app, KeyCode::Enter);
-    assert!(store.load().is_none(), "credentials cleared");
-    assert!(app.status().contains("logged out"), "{}", app.status());
+    // Second Enter dispatches the clear.
+    assert!(
+        matches!(key(&mut app, KeyCode::Enter), Some(Cmd::Logout)),
+        "the second press commands the logout"
+    );
 }
 
 #[test]
-fn a_successful_logout_quits_back_to_the_login_screen() {
-    // The live runtime still holds the token that was just revoked, so the
-    // session must end rather than leave the user signed out on disk but signed
-    // in on screen.
+fn the_session_ends_only_once_the_clear_reports_success() {
+    // The live runtime still holds the session that was just revoked, so the
+    // app must end rather than leave the user signed out in the core but signed
+    // in on screen — and it must not do that until the clear actually landed.
     let dir = tempfile::tempdir().expect("tempdir");
-    sign_in(dir.path());
     let mut app = account_app(dir.path());
+    sign_in(&mut app);
 
     key(&mut app, KeyCode::Enter);
-    assert!(!app.should_quit, "arming must not end the session");
-    assert!(!app.relogin_requested(), "arming is not a relogin");
-
     key(&mut app, KeyCode::Enter);
+    assert!(
+        !app.should_quit,
+        "commanding the clear is not completing it"
+    );
+    assert!(!app.relogin_requested(), "nor requesting a relogin");
+
+    app.logged_out();
     assert!(app.should_quit, "the session ends");
     assert!(app.relogin_requested(), "and asks for the login screen");
 }
@@ -138,13 +139,15 @@ fn a_successful_logout_quits_back_to_the_login_screen() {
 fn a_failed_logout_leaves_the_session_running() {
     // Nothing was cleared, so there is nothing to re-authenticate for; dropping
     // the user to the login screen here would lose their session for no reason.
-    let rt = Arc::new(MockRuntime::demo());
-    let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
-    let _ = app.focus_settings_subpage("Account");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = account_app(dir.path());
+    sign_in(&mut app);
 
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Enter);
-    assert!(app.status().contains("no Medulla home"), "{}", app.status());
+    // The loop reports the failure as a plain status and never calls
+    // `logged_out`, so the session survives.
+    app.set_status("Account · logout failed: nope");
     assert!(!app.should_quit, "the session survives a failed logout");
     assert!(!app.relogin_requested(), "no relogin is requested");
 }
@@ -152,16 +155,18 @@ fn a_failed_logout_leaves_the_session_running() {
 #[test]
 fn escape_cancels_an_armed_logout() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = sign_in(dir.path());
     let mut app = account_app(dir.path());
+    sign_in(&mut app);
 
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Esc);
     assert!(app.status().contains("cancelled"), "{}", app.status());
 
     // A later Enter must arm again rather than fire immediately.
-    key(&mut app, KeyCode::Enter);
-    assert!(store.load().is_some(), "still signed in");
+    assert!(
+        key(&mut app, KeyCode::Enter).is_none(),
+        "re-arms, does not fire"
+    );
     assert!(
         app.status().contains("press Enter again"),
         "{}",
@@ -172,8 +177,8 @@ fn escape_cancels_an_armed_logout() {
 #[test]
 fn navigating_away_disarms_the_logout() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = sign_in(dir.path());
     let mut app = account_app(dir.path());
+    sign_in(&mut app);
 
     key(&mut app, KeyCode::Enter); // arm
 
@@ -188,30 +193,13 @@ fn navigating_away_disarms_the_logout() {
     key(&mut app, KeyCode::Enter); // re-enter the pane
 
     // Returning must not resume an armed logout.
-    key(&mut app, KeyCode::Enter);
     assert!(
-        store.load().is_some(),
+        key(&mut app, KeyCode::Enter).is_none(),
         "an armed logout must not survive leaving the page"
     );
     assert!(
         app.status().contains("press Enter again"),
         "{}",
-        app.status()
-    );
-}
-
-#[test]
-fn logout_without_a_medulla_home_reports_rather_than_guessing() {
-    let rt = Arc::new(MockRuntime::demo());
-    let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
-    let _ = app.focus_settings_subpage("Account");
-
-    key(&mut app, KeyCode::Enter);
-    key(&mut app, KeyCode::Enter);
-
-    assert!(
-        app.status().contains("no Medulla home"),
-        "says why it cannot act: {}",
         app.status()
     );
 }

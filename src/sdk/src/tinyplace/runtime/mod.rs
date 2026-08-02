@@ -18,11 +18,11 @@
 //!   fail-closed allowlist.
 //! - [`spawn_presence_heartbeat`] — keep the identity marked online.
 //!
-//! Split by responsibility: [`types`] holds the error/mailbox surface and the
-//! on-disk JSON shapes, [`identity`] the seed bootstrap, [`identity_pool`] the
-//! locked slot acquisition layered over it, [`session_store`] the
+//! Split by responsibility: `types` holds the error/mailbox surface and the
+//! on-disk JSON shapes, `identity` the seed bootstrap, `identity_pool` the
+//! locked slot acquisition layered over it, `session_store` the
 //! file-backed [`SessionStore`](::tinyplace::signal::store::SessionStore) adapter,
-//! and [`poll`] the background poll loops. All public items are re-exported here
+//! and `poll` the background poll loops. All public items are re-exported here
 //! so callers use `medulla::tinyplace::runtime::*`.
 
 mod identity;

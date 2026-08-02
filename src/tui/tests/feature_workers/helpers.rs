@@ -44,6 +44,10 @@ impl FleetRuntime {
 }
 
 impl Runtime for FleetRuntime {
+    fn describe(&self) -> String {
+        "FleetRuntime (test)".into()
+    }
+
     fn snapshot(&self) -> RuntimeSnapshot {
         self.inner.snapshot()
     }
@@ -90,6 +94,7 @@ impl Runtime for FleetRuntime {
 pub fn worker(id: &str, selected: bool) -> WorkerInfo {
     WorkerInfo {
         id: id.into(),
+        roles: Vec::new(),
         address: format!("{id}.example:9000"),
         handle: Some(format!("@{id}")),
         label: Some(format!("{id} label")),

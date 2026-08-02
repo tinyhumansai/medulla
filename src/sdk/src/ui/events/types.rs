@@ -109,94 +109,173 @@ pub struct NodeTrace {
 pub enum TuiEvent {
     /// An inference call began.
     InferenceStart {
+        /// Model tier selected by orchestration.
         tier: String,
+        /// Operation being performed.
         op: String,
+        /// Concrete model identifier, when known.
         model: Option<String>,
     },
     /// An inference call finished, with timing, usage, and any output.
     InferenceEnd {
+        /// Model tier selected by orchestration.
         tier: String,
+        /// Operation that completed.
         op: String,
+        /// Concrete model identifier, when known.
         model: Option<String>,
+        /// Wall-clock inference duration in milliseconds.
         duration_ms: i64,
+        /// Token accounting reported by the provider.
         usage: Option<Usage>,
+        /// Final assistant content, when produced.
         content: Option<String>,
+        /// Final reasoning content, when exposed.
         reasoning: Option<String>,
+        /// Tool calls requested by the model.
         tool_calls: Option<Vec<ToolCall>>,
     },
     /// A streamed tool call started at `index`.
-    ToolCallStart { index: i64, name: String },
+    ToolCallStart {
+        /// Position of the call in the model response.
+        index: i64,
+        /// Requested tool name.
+        name: String,
+    },
     /// A chunk of streamed tool-call arguments.
-    ToolCallDelta { index: i64, args_delta: String },
+    ToolCallDelta {
+        /// Position of the call in the model response.
+        index: i64,
+        /// Newly emitted argument JSON text.
+        args_delta: String,
+    },
     /// A chunk of streamed assistant text.
-    AssistantDelta { delta: String },
+    AssistantDelta {
+        /// Newly emitted assistant text.
+        delta: String,
+    },
     /// A chunk of streamed reasoning text.
-    ReasoningDelta { delta: String },
+    ReasoningDelta {
+        /// Newly emitted reasoning text.
+        delta: String,
+    },
     /// A task began.
     TaskStart {
+        /// Stable task identifier.
         task_id: String,
+        /// Instruction delegated to the task.
         instruction: String,
+        /// Task depth in the delegation tree.
         depth: i64,
+        /// Agent selected for the task.
         agent_id: Option<String>,
+        /// Advisory execution and verification boundaries.
         contract: Option<WorkerContract>,
     },
     /// A task emitted an event (text, status, etc.).
     TaskEvent {
+        /// Stable task identifier.
         task_id: String,
+        /// Open-vocabulary task event kind.
         event_kind: String,
+        /// Human-readable event content.
         content: String,
+        /// Harness that emitted the event.
         harness: Option<String>,
     },
     /// A task needs operator attention (e.g. a confirmation).
     TaskAttention {
+        /// Stable task identifier.
         task_id: String,
+        /// Why operator input is required.
         reason: String,
+        /// Human-readable prompt or context.
         content: String,
+        /// Question identifier used when answering.
         question_id: Option<String>,
     },
     /// A task finished; carries its [`TaskDigest`].
-    TaskComplete { digest: TaskDigest },
+    TaskComplete {
+        /// Terminal task summary.
+        digest: TaskDigest,
+    },
     /// A node-execution trace entry.
-    Trace { entry: NodeTrace },
+    Trace {
+        /// Trace entry emitted by the node.
+        entry: NodeTrace,
+    },
     /// An error surfaced by a source component.
-    Error { source: String, message: String },
+    Error {
+        /// Component that reported the error.
+        source: String,
+        /// Human-readable error detail.
+        message: String,
+    },
     /// A cycle began.
-    CycleStart { cycle_id: String },
+    CycleStart {
+        /// Stable cycle identifier.
+        cycle_id: String,
+    },
     /// A cycle finished, with its pass count and duration.
     CycleEnd {
+        /// Stable cycle identifier.
         cycle_id: String,
+        /// Number of orchestration passes consumed.
         pass_count: i64,
+        /// Wall-clock cycle duration in milliseconds.
         duration_ms: i64,
     },
     /// An agent's availability changed.
     AgentStatus {
+        /// Stable roster agent identifier.
         agent_id: String,
+        /// Open-vocabulary availability state.
         availability: String,
+        /// Optional provider-specific status detail.
         detail: Option<String>,
     },
     /// A session emitted an event on an agent.
     SessionEvent {
+        /// Agent that owns the session.
         agent_id: String,
+        /// Stable session identifier.
         session_id: String,
+        /// Open-vocabulary session event kind.
         event_kind: String,
+        /// Human-readable event content.
         content: String,
     },
     /// A peer session's state changed.
     PeerSession {
+        /// Peer agent that owns the session.
         agent_id: String,
+        /// Stable session identifier.
         session_id: String,
+        /// Open-vocabulary session state.
         state: String,
+        /// Harness serving the session.
         harness: Option<String>,
     },
     /// A user chat turn.
-    User { body: String },
+    User {
+        /// User-authored message text.
+        body: String,
+    },
     /// An assistant chat turn.
-    Assistant { body: String },
+    Assistant {
+        /// Assistant-authored message text.
+        body: String,
+    },
     /// A host effect (opaque JSON).
-    Effect { effect: Value },
+    Effect {
+        /// Opaque effect payload retained for the host.
+        effect: Value,
+    },
     /// An unrecognized event kind, preserved verbatim for forward compatibility.
     Unknown {
+        /// Unrecognized wire event kind.
         kind: String,
+        /// Remaining event fields preserved verbatim.
         data: Map<String, Value>,
     },
 }

@@ -13,17 +13,18 @@ model call.**
 
 ## Where workflows live
 
-JSON documents, one graph per file, in two layered directories — lowest
-precedence first:
+JSON documents, one graph per file. Authored workflows are saved in the Medulla
+home beside the rest of its persistent data:
 
-```
-<medulla home>/workflows/*.json     # yours, on this machine
-<cwd>/.medulla/workflows/*.json     # this repository's, checked in
+```text
+<medulla home>/workflows/*.json
 ```
 
-Same layering as `.medulla/agents`, so a workflow committed to a repository
-shadows a personal one of the same id. A malformed document costs only itself:
-the rest of the catalogue still loads and the failure is reported.
+A repository may still provide defaults under `<cwd>/.medulla/workflows`.
+Those are read first; a user-global workflow of the same id overlays the
+repository copy, so edits never have to create untracked files in the checkout.
+A malformed document costs only itself: the rest of the catalogue still loads
+and the failure is reported.
 
 Run records live under `<medulla home>/state/workflows/runs/`, and the engine's
 checkpoints — what lets a paused run survive a restart — under
@@ -64,6 +65,65 @@ Things worth knowing about `agent` nodes here:
 - The harness reply is `=item.text`. If the harness replied with JSON it is
   parsed too, so `=item.json.<field>` works without an `output_parser`.
 - `config.requires_approval: true` parks the run until someone approves it.
+- `config.harness` chooses **what** runs the step, as distinct from `agent_ref`,
+  which chooses **where**: `claude`, `codex`, `opencode`, or the id of a custom
+  harness preset the worker exposes. `config.model` is the model hint.
+
+## Choosing a harness and a model
+
+A plan is rarely one model's worth of work: triage on something cheap,
+implementation on something expensive, one step on Codex because it is better at
+that step. So the choice is stated at whichever layer actually owns it, and the
+most specific one wins:
+
+| Layer | Where it is written |
+| --- | --- |
+| the step | `config.harness` / `config.model` on an `agent` node |
+| the workflow | the document's `defaults` block |
+| the host | `workflows.defaultProvider` / `workflows.defaultModel` |
+
+```json
+{
+  "id": "triage",
+  "defaults": { "harness": "claude", "model": "claude-opus-4" },
+  "nodes": [
+    { "id": "t", "kind": "trigger", "name": "start",
+      "config": { "trigger_kind": "manual" } },
+    { "id": "sift", "kind": "agent", "name": "Sift the queue",
+      "config": { "prompt": "which of these need a human?",
+                  "model": "claude-haiku-4-5" } },
+    { "id": "fix", "kind": "agent", "name": "Fix the top one",
+      "config": { "prompt": "fix it", "harness": "codex",
+                  "model": "gpt-5-codex" } }
+  ],
+  "edges": [
+    { "from_node": "t", "to_node": "sift" },
+    { "from_node": "sift", "to_node": "fix" }
+  ]
+}
+```
+
+Resolution is **paired**, not field-by-field: whichever layer names the harness
+also supplies the model, unless a layer above it named one explicitly. A node
+that says `harness: codex` and nothing else runs Codex on Codex's own default
+model rather than inheriting a Claude model id — a model chosen for one harness
+is meaningless, or wrong, on another. Name both when you mean both.
+
+A harness that is not one of the three built-in CLIs is taken as a custom
+harness preset id — the ones this machine has configured are listed by
+`workflow_host` and in the TUI's Routing → Harnesses screen. Whether the *worker*
+that runs the step exposes that preset is only answered when it runs.
+
+`harness` must be written plainly, never as a `=`-expression. Which binary and
+which credentials run a step is a decision the graph makes, not one its data
+makes — an expression there would let upstream output, including a model's own,
+choose it. Authoring one is refused rather than saved. `model` may be an
+expression.
+
+`medulla workflow defaults <id>` reads the block, and the same verb with
+`--harness`/`--model` sets it (an empty string clears one). The copilot does the
+same over `workflow_defaults`, and `workflow_host` reports what this machine
+offers.
 
 Any config string beginning `=` is a jq expression evaluated against
 `{ item, items, run, nodes }`.
@@ -72,6 +132,9 @@ Any config string beginning `=` is a jq expression evaluated against
 
 ```sh
 medulla workflow list                 # what is installed
+medulla workflow defaults triage      # what its steps run on
+medulla workflow defaults triage --harness codex --model gpt-5-codex
+medulla workflow defaults triage --harness ''   # back to the host default
 medulla workflow dry-run triage       # simulate: no harness, no network
 medulla workflow run triage           # for real, on this machine's CLIs
 medulla workflow list-runs triage     # history
@@ -158,6 +221,55 @@ compatible:
 Aborting the task cancels the run: the frame's task id is the run id, and every
 node dispatched by that run carries it as its `abort_id`.
 
+## How the hosted orchestrator sees them
+
+The section above is the tiny.place peer contract: one hub, one worker, one task
+frame. The *cloud* plane is the other direction — the hosted brain in the backend
+asking this machine what it has, over the same Socket.IO connection the hub
+already holds for `medulla:task_run`.
+
+Four `medulla:*` events carry it:
+
+| event | direction | what it says |
+| --- | --- | --- |
+| `medulla:register_workflows` | hub → backend | `{ workflows: [...], agentId? }` — every installed graph as an advert: id, name, description, step count, whether it is enabled, what triggers it |
+| `medulla:workflow_request` | backend → hub | `{ requestId, op, workflowId?, kind?, instruction? }` where `op` is `get`, `node_kinds`, `runs`, or `copilot` |
+| `medulla:workflow_result` | hub → backend | `{ requestId, ok, data?, error? }` — `data` is this host's own JSON, passed through the backend unparsed |
+| `medulla:task_run` with `workflow` | backend → hub | the delegation itself, exactly as described above |
+
+The adverts go up on every connect *and* reconnect, beside the worker roster: the
+backend keys them to the socket that sent them and drops the whole entry when
+that socket goes, so a hub that re-registered only its agents would come back
+invisible. They are re-sent after a successful `copilot` turn, which is the one
+request that changes what this host holds.
+
+Everything is served from the same layered store the Workflows tab, the
+`medulla workflow` subcommand and the MCP tools read — a socket `get` and
+`medulla workflow get` are one implementation, so they cannot drift. `copilot` is
+not a read: it is a whole authoring turn on this machine's own harness, with the
+`medulla-workflows` tools attached, and its result is derived from re-reading the
+store afterwards rather than from what the model said it did.
+
+Three properties are load-bearing rather than incidental:
+
+- **Every request is answered.** The backend correlates by `requestId` and waits
+  on a deadline — ten seconds for a read, ten *minutes* for a copilot turn — so a
+  dropped request is not a cheap no-op, it burns that whole window. An unknown
+  `op` from a newer backend, a frame this build cannot decode (the `requestId` is
+  recovered from the raw JSON), a missing `workflowId`, an unknown workflow, a
+  store that fails, even a store that *panics*: all of them come back as
+  `ok: false` with a sentence the orchestrator can render as a tool error. The
+  only unanswerable frame is one carrying no `requestId` at all.
+- **Nothing long-running blocks the socket.** Reads run on a blocking thread and
+  a copilot turn on its own task, because awaiting either inside the Socket.IO
+  callback starves engine.io's ping/pong — the backend then drops the hub, and
+  every later delegation fails with "no harness connected" while the process
+  still looks alive.
+- **A host with workflows disabled advertises none.** The bridge is a view of the
+  store and applies no policy; the refusal lives in the run path. Advertising
+  graphs this host would decline to run would only teach the orchestrator to
+  delegate work that bounces.
+
 ## Progress
 
 A run reports itself in the *existing* `harness_work` vocabulary — a
@@ -167,10 +279,9 @@ that shows a harness's own todo list, with no rendering code of its own.
 
 ## Configuration
 
-The `workflows` section. Every capability defaults to **off**: a workflow arrives
-as a file, possibly written by an agent, and the difference between a plan and an
-exploit is whether it can reach the network, run code, or call a third-party
-tool.
+The `workflows` section. Local code execution defaults **on** so authored
+workflows run without a host bootstrap step. Outbound HTTP and third-party tools
+remain deny-by-default.
 
 ```toml
 [workflows]
@@ -178,7 +289,7 @@ enabled = true
 defaultWorker = ""        # where agent nodes with no agentRef go
 defaultProvider = ""      # claude | codex | opencode
 defaultModel = ""
-allowCode = false         # code nodes: no sandbox here, so off by default
+allowCode = true          # set false for untrusted workflows; there is no sandbox
 toolAllowlist = []        # beyond the built-in medulla:* tools
 httpAllowlist = []        # a bare domain also permits its subdomains
 runTimeoutSecs = 600
@@ -194,8 +305,9 @@ Two guards are not configurable:
   resolves to, so an allowlisted name answering `127.0.0.1` is caught. Redirects
   are not followed, since only the first URL is ever checked. A name that cannot
   be resolved is refused rather than attempted.
-- **`code` nodes have no sandbox** on this host, so enabling them grants a
-  workflow author the daemon's own privileges. The refusal message says as much.
+- **`code` nodes have no sandbox** on this host, so the default grants a
+  workflow author the daemon's own privileges. Set `allowCode = false` before
+  loading untrusted workflows; the refusal message says as much.
 
 Workflow ids and run ids both become filenames and are validated as single path
 components before use: a document's `id` overrides the caller's, and a run id can

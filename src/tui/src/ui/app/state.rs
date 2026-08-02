@@ -13,12 +13,11 @@ use crate::ui::composer::Draft;
 use crate::ui::fleet::{merge_capacity, registry_capacity};
 use crate::ui::theme::Theme;
 use medulla::config::LoadedConfig;
-use medulla::memory::{MemoryHit, MemoryStatus};
 use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
-    App, Cmd, MemoryEntry, ResumePicker, MEMORY_SUBPAGES, ROUTING_SUBPAGES, SETTINGS_SUBPAGES,
-    SP_CONTEXT, SP_FEEDBACK, SP_USAGE, TABS, TASKS_SUBPAGES,
+    App, Cmd, HandbackPolicy, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT,
+    SP_FEEDBACK, SP_USAGE, TABS,
 };
 
 impl App {
@@ -47,6 +46,10 @@ impl App {
                     .position(|option| option.strategy == strategy)
             })
             .unwrap_or(0);
+        // Read before `loaded` is moved into the struct below.
+        let handback_policy = HandbackPolicy::from_config(&loaded.config.harness.handback);
+        let harness_skip_permissions = loaded.config.harness.skip_permissions;
+        let status_line_promotion_pending = loaded.config.status_line.is_none();
         App {
             runtime,
             loaded,
@@ -67,9 +70,14 @@ impl App {
             agent_scroll: 0,
             chat_scroll: 0,
             command_index: 0,
+            add_host_provider_cache: std::cell::OnceCell::new(),
             host_index: 0,
+            host_roles_focus: false,
+            host_role_index: 0,
             workspace_index: 0,
             template_index: 0,
+            custom_harnesses: Vec::new(),
+            custom_harness_index: 0,
             template_scroll: 0,
             template_modal: false,
             #[cfg(feature = "workflows")]
@@ -81,33 +89,25 @@ impl App {
             #[cfg(feature = "workflows")]
             workflow_runs_error: None,
             #[cfg(feature = "workflows")]
+            workflow_notes: Vec::new(),
+            #[cfg(feature = "workflows")]
+            workflow_proposals: Vec::new(),
+            #[cfg(feature = "workflows")]
             wf: Default::default(),
             #[cfg(feature = "workflows")]
             workflow_store_override: None,
+            add_host_kind: 0,
+            add_host_harness: 0,
+            add_host_kind_chosen: false,
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index,
             subscription_strategy_index,
             subscription_strategy_focused: false,
             credential_status: super::credentials::detect_credential_status(),
-            tasks_index: 0,
-            tasks_focused: false,
-            task_source_index: 0,
-            tasks_detail_open: false,
             tokenmaxxing_index: 0,
             tokenmaxxing_focused: false,
-            memory_status: None,
-            memory_hits: Vec::new(),
-            memory_directives: Vec::new(),
-            memory_index: 0,
-            memory_query: None,
-            memory_service: None,
-            memory_ingesting: false,
-            memory_subpage_index: 0,
-            memory_focused: false,
-            memory_detail_open: false,
             feedback: Default::default(),
-            tasks: medulla::tasks::TaskDocument::default(),
             decision_open: false,
             decision_index: 0,
             dismissed_decisions: Default::default(),
@@ -118,9 +118,12 @@ impl App {
             settings_index: 0,
             settings_focused: false,
             appearance_index: 0,
+            status_line_index: 0,
+            status_line_promotion_pending,
             config_index: 0,
             logout_armed: false,
             relogin_requested: false,
+            account: None,
             medulla_home: None,
             theme,
             config_path: None,
@@ -130,8 +133,10 @@ impl App {
             hit_tabs: Vec::new(),
             hit_tabs_row: 0,
             hit_agents: None,
+            hit_harness: None,
             hit_threads: None,
             hit_context: None,
+            hit_workflow_preview: None,
             hit_nav: Default::default(),
             panes: Vec::new(),
             drag_anchor: None,
@@ -140,6 +145,16 @@ impl App {
             last_events_len: 0,
             tinyplace_obs: None,
             host_obs: None,
+            harnesses: None,
+            harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
+            harness_pane_session: None,
+            harness_picker: None,
+            handback_prompt: None,
+            help_scroll: 0,
+            handback_policy,
+            harness_took_control: false,
+            pending_cmds: std::collections::VecDeque::new(),
+            harness_skip_permissions,
             copy_capture: None,
         }
     }
@@ -153,52 +168,17 @@ impl App {
     /// so feature tests avoid the real home.
     pub fn set_config_path(&mut self, path: std::path::PathBuf) {
         self.config_path = Some(path);
+        self.reload_custom_harnesses();
+    }
+
+    /// Record who the core is signed in as, for the Account subpage.
+    pub fn set_account(&mut self, account: Option<medulla::core_host::auth::AuthState>) {
+        self.account = account;
     }
 
     /// Configure Account logout with a testable home; without it, logout reports no writable location.
     pub fn set_medulla_home(&mut self, home: std::path::PathBuf) {
         self.medulla_home = Some(home);
-        if let Some(home) = &self.medulla_home {
-            if let Ok(repository) = medulla::tasks::TaskRepository::in_home(home) {
-                self.tasks = repository.document().clone();
-            }
-        }
-    }
-
-    /// Replace the task document returned by background persistence/sync work.
-    pub fn set_tasks(&mut self, document: medulla::tasks::TaskDocument) {
-        self.tasks = document;
-        self.selected = self.selected.min(self.tasks.tasks.len().saturating_sub(1));
-    }
-
-    /// The active Tasks subpage name. Test/inspection seam.
-    pub fn tasks_subpage(&self) -> &'static str {
-        TASKS_SUBPAGES[self.tasks_index.min(TASKS_SUBPAGES.len() - 1)]
-    }
-
-    /// Whether Tasks focus is inside the active content pane.
-    pub fn tasks_focused(&self) -> bool {
-        self.tasks_focused
-    }
-
-    /// Whether a selected task or source is open in the detail modal.
-    pub fn tasks_detail_open(&self) -> bool {
-        self.tasks_detail_open
-    }
-
-    /// The active Memory subpage name. Test/inspection seam.
-    pub fn memory_subpage(&self) -> &'static str {
-        MEMORY_SUBPAGES[self.memory_subpage_index.min(MEMORY_SUBPAGES.len() - 1)]
-    }
-
-    /// Whether Memory focus is inside the active content pane.
-    pub fn memory_focused(&self) -> bool {
-        self.memory_focused
-    }
-
-    /// Whether a selected Memory entry is open in the detail modal.
-    pub fn memory_detail_open(&self) -> bool {
-        self.memory_detail_open
     }
 
     /// The active Settings subpage name. Test/inspection seam.
@@ -300,7 +280,7 @@ impl App {
 
     /// Focus Routing on a named subpage and enter its content pane.
     pub fn focus_routing_subpage(&mut self, name: &str) {
-        self.tab_index = super::types::tab_pos("Routing");
+        self.tab_index = super::types::tab_pos("Hosts");
         self.routing_index = ROUTING_SUBPAGES
             .iter()
             .position(|page| *page == name)
@@ -338,6 +318,33 @@ impl App {
         self.host_obs.as_ref()
     }
 
+    /// Attach the live harness sessions this device is running.
+    ///
+    /// Only called when this machine hosts: without a host nothing runs here, so
+    /// there is no screen to render and no PTY to type into.
+    pub fn set_local_harnesses(&mut self, harnesses: crate::ui::harness_pane::LocalHarnesses) {
+        self.harnesses = Some(harnesses);
+    }
+
+    /// The live harness sessions this device is running, if it hosts.
+    pub fn local_harnesses(&self) -> Option<&crate::ui::harness_pane::LocalHarnesses> {
+        self.harnesses.as_ref()
+    }
+
+    /// The harness session the last draw resolved for the rail cursor.
+    ///
+    /// Inspection seam: it is set during render, so a test that wants to act on
+    /// "the selected harness" has to be able to see when the cursor has reached
+    /// one rather than counting rows it does not control.
+    pub fn harness_pane_session_for_test(&self) -> Option<&str> {
+        self.harness_pane_session.as_deref()
+    }
+
+    /// The harness session currently receiving the operator's keystrokes.
+    pub fn attached_harness(&self) -> Option<&str> {
+        self.harness_focus.attached_to()
+    }
+
     /// Re-read the runtime snapshot and merge in the tiny.place observation.
     pub fn refresh_snapshot(&mut self) {
         self.snapshot = self.runtime.snapshot();
@@ -354,6 +361,15 @@ impl App {
     }
 
     /// Set the status-line text.
+    /// Take the next command raised by a synchronous handler, if any.
+    ///
+    /// The event loop drains this after each input event. See
+    /// [`pending_cmds`](super::types::App::pending_cmds) for why the queue
+    /// exists at all.
+    pub fn take_pending_cmd(&mut self) -> Option<Cmd> {
+        self.pending_cmds.pop_front()
+    }
+
     pub fn set_status(&mut self, s: impl Into<String>) {
         self.status = s.into();
     }
@@ -361,52 +377,6 @@ impl App {
     /// Replace the Context-tab chunks.
     pub fn set_contexts(&mut self, c: Vec<ContextItem>) {
         self.contexts = c;
-    }
-
-    /// Store the loaded persona-memory status + directives and drop back to the
-    /// directive/facet overview (no active search).
-    pub fn set_memory_loaded(&mut self, status: Option<MemoryStatus>, directives: Vec<String>) {
-        self.memory_status = status;
-        self.memory_directives = directives;
-        self.memory_query = None;
-        self.memory_index = 0;
-    }
-
-    /// Store persona-memory search results for `query` and select the first hit.
-    pub fn set_memory_results(&mut self, hits: Vec<MemoryHit>, query: String) {
-        self.memory_hits = hits;
-        self.memory_query = Some(query);
-        self.memory_index = 0;
-        self.memory_subpage_index = super::types::MP_SEARCH;
-        self.memory_focused = true;
-    }
-
-    /// The active persona-memory selection index. Test/inspection seam.
-    pub fn memory_index(&self) -> usize {
-        self.memory_index
-    }
-
-    /// Attach the persona-memory service, making the Memory tab work on every
-    /// runtime path rather than only on core.
-    pub fn set_memory_service(&mut self, service: Arc<medulla::memory::MemoryService>) {
-        self.memory_service = Some(service);
-    }
-
-    /// The attached persona-memory service, if any. The event loop prefers it
-    /// over the runtime seam when serving Memory-tab commands.
-    pub fn memory_service(&self) -> Option<Arc<medulla::memory::MemoryService>> {
-        self.memory_service.clone()
-    }
-
-    /// Whether a memory ingest is in flight. Render/test seam.
-    pub fn memory_ingesting(&self) -> bool {
-        self.memory_ingesting
-    }
-
-    /// Record that an ingest finished, and report its outcome.
-    pub fn set_memory_ingest_done(&mut self, status: String) {
-        self.memory_ingesting = false;
-        self.set_status(status);
     }
 
     /// Open the resume picker with `chats`, or report that there is nothing to
@@ -431,13 +401,25 @@ impl App {
     /// Settings subpages rather than tabs, the Settings arm dispatches on the
     /// active subpage.
     pub(super) fn tab_enter_cmd(&mut self) -> Option<Cmd> {
+        // Arriving at a tab should put the keyboard on the thing the tab is
+        // *about*. Both of these used to land it somewhere else — Hosts on its
+        // two-item menu, Agents on the composer — so the first arrow press did
+        // nothing visible and the list had to be clicked before it would move.
         match self.tab() {
             "Changes" => {
                 self.refresh_changes();
-                None
             }
-            "Memory" => Some(Cmd::LoadMemory),
-            "Tasks" => Some(Cmd::LoadTasks),
+            // The list is the page; the menu is two rows and reachable with `1`
+            // and `2`, or with Esc.
+            "Hosts" => self.routing_focused = true,
+            // Safe because the rail forwards typing: a printable key moves focus
+            // to the composer and lands the character there, so nothing is lost
+            // by not starting in it.
+            "Agents" => self.focus_agents_rail(),
+            _ => {}
+        }
+        match self.tab() {
+            "Feedback" => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
             // The workflow store is files on this machine, so entering the tab
             // reads them rather than asking the runtime for anything — which is
             // why this arm returns no command and does the work here.
@@ -541,15 +523,28 @@ impl App {
     /// That lane is the conversation with the operator, so it scrolls the chat
     /// transcript and its composer submits an instruction; every other lane
     /// shows an agent's own turns and answers its questions.
+    ///
+    /// Reads the *rail's* rows, not the lane list's: `agent_index` walks the
+    /// rail, which carries the `+ New harness` action and the operator's own
+    /// harness rows as well as the lanes. Indexing the shorter list with it
+    /// reported a lane for rows that name none, and the composer's visibility
+    /// hangs off this answer — so a harness row claimed a text box that was
+    /// never drawn, and every keystroke went into it.
     pub fn on_orchestrator_lane(&self) -> bool {
         let lanes = self.lanes();
-        let rows = self.agent_rows();
-        rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
-            .and_then(|row| row.lane_index())
-            .and_then(|index| lanes.get(index))
-            .map(|lane| lane.role == AgentRole::Orchestrator)
-            // An empty lane list means the orchestrator lane is all there is.
-            .unwrap_or(true)
+        let rows = self.rail_rows();
+        match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
+            Some(super::rail::RailRow::Agent(row)) => row
+                .lane_index()
+                .and_then(|index| lanes.get(index))
+                .map(|lane| lane.role == AgentRole::Orchestrator)
+                // An empty lane list means the orchestrator lane is all there is.
+                .unwrap_or(true),
+            // The action row and the operator's own harnesses are not lanes and
+            // have no conversation of their own.
+            Some(_) => false,
+            None => true,
+        }
     }
 
     /// Scroll whichever transcript the Agents cursor is reading.
@@ -618,6 +613,14 @@ impl App {
         self.snapshot.roster.clone()
     }
 
+    /// The agent-template catalog, which is the set of roles a host may be
+    /// offered for. Read through [`fleet_capacity`](App::fleet_capacity) so the
+    /// Hosts page and the Agent Templates page can never disagree about which
+    /// roles exist.
+    pub(super) fn agent_templates(&self) -> Vec<medulla::runtime::AgentTemplate> {
+        self.fleet_capacity().templates
+    }
+
     /// The index of the active thread in the snapshot's thread list.
     pub(super) fn active_thread_idx(&self) -> usize {
         self.snapshot
@@ -633,51 +636,5 @@ impl App {
         let changed = n != self.last_events_len;
         self.last_events_len = n;
         changed
-    }
-
-    /// Persona directives shown on the dedicated Directives page.
-    pub(super) fn memory_directive_entries(&self) -> Vec<MemoryEntry> {
-        self.memory_directives
-            .iter()
-            .cloned()
-            .map(MemoryEntry::Directive)
-            .collect()
-    }
-
-    /// Facet summaries shown on the dedicated Facets page.
-    pub(super) fn memory_facet_entries(&self) -> Vec<MemoryEntry> {
-        let mut out = Vec::new();
-        if let Some(st) = &self.memory_status {
-            for (name, count) in &st.facet_counts {
-                out.push(MemoryEntry::Facet {
-                    name: name.clone(),
-                    count: *count,
-                });
-            }
-        }
-        out
-    }
-
-    /// Entries displayed by the active Memory list page.
-    pub(super) fn memory_page_entries(&self) -> Vec<MemoryEntry> {
-        match self.memory_subpage_index {
-            super::types::MP_DIRECTIVES => self.memory_directive_entries(),
-            super::types::MP_FACETS => self.memory_facet_entries(),
-            super::types::MP_SEARCH => self
-                .memory_hits
-                .iter()
-                .cloned()
-                .map(MemoryEntry::Hit)
-                .collect(),
-            _ => Vec::new(),
-        }
-    }
-
-    /// The selected entry on the active Memory list page.
-    pub(super) fn selected_memory_entry(&self) -> Option<MemoryEntry> {
-        let entries = self.memory_page_entries();
-        entries
-            .get(self.memory_index.min(entries.len().saturating_sub(1)))
-            .cloned()
     }
 }

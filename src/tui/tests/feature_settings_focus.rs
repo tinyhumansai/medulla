@@ -176,10 +176,10 @@ fn appearance_arrows_pick_a_role_without_cycling_its_color() {
 
 #[test]
 fn an_out_of_range_digit_is_not_claimed_by_settings() {
-    // There are eight subpages; `9` names nothing, so Settings must decline it
+    // There are nine subpages; `0` names nothing, so Settings must decline it
     // rather than clamping to the last page.
     let mut app = app_on("Usage");
-    app.on_event(key(KeyCode::Char('9')));
+    app.on_event(key(KeyCode::Char('0')));
     assert_eq!(app.settings_subpage(), "Usage", "no jump happened");
 }
 

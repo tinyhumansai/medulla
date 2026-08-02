@@ -122,11 +122,9 @@ pub fn short_run_id(id: &str) -> String {
 /// theme.
 pub fn status_color(status: RunStatus) -> &'static str {
     match status {
-        RunStatus::Running => "cyan",
-        RunStatus::PendingApproval => "yellow",
+        RunStatus::Running | RunStatus::PendingApproval => "yellow",
         RunStatus::Succeeded => "green",
-        RunStatus::Failed => "red",
-        RunStatus::Cancelled | RunStatus::Interrupted => "gray",
+        RunStatus::Failed | RunStatus::Cancelled | RunStatus::Interrupted => "red",
     }
 }
 

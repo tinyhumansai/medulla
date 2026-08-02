@@ -16,7 +16,9 @@ pub const DEFAULT_UPDATE_URL: &str =
 /// One platform's downloadable asset in the manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlatformEntry {
+    /// Download URL for the platform artifact.
     pub url: String,
+    /// Expected lowercase SHA-256 digest.
     pub sha256: String,
 }
 
@@ -24,13 +26,18 @@ pub struct PlatformEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
+    /// Semantic version advertised by the release.
     pub version: String,
+    /// Git tag naming the release.
     #[serde(default)]
     pub tag: String,
+    /// Release publication timestamp.
     #[serde(default)]
     pub pub_date: String,
+    /// Human-readable release notes.
     #[serde(default)]
     pub notes: String,
+    /// Download metadata keyed by platform triple or manifest platform key.
     #[serde(default)]
     pub platforms: HashMap<String, PlatformEntry>,
 }
@@ -38,9 +45,14 @@ pub struct Manifest {
 /// A resolved, actionable update for the running platform.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateInfo {
+    /// Semantic version of the available update.
     pub version: String,
+    /// Git tag naming the release.
     pub tag: String,
+    /// Human-readable release notes.
     pub notes: String,
+    /// Download URL resolved for the current platform.
     pub url: String,
+    /// Expected lowercase SHA-256 digest.
     pub sha256: String,
 }

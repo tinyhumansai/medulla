@@ -1,10 +1,9 @@
 //! Data model for PTY-backed harness sessions: how one is launched, what the
 //! operator watches about it, and the handle the UI holds.
 
-use std::sync::{Arc, Mutex};
-
 use medulla::tinyplace::HarnessProvider;
-use portable_pty::{Child, MasterPty};
+
+use super::attention::HarnessAttention;
 
 /// Default geometry for a freshly opened session, before the UI reports the real
 /// pane size. Wide enough that a harness's first full-screen paint is not
@@ -56,6 +55,54 @@ impl PtyState {
     }
 }
 
+/// Who is allowed to drive a harness session right now.
+///
+/// Keyboard focus ([`HarnessFocus`](crate::ui::harness_pane::HarnessFocus)) says
+/// where *keystrokes* go; this says who holds *authority*. They are not the same
+/// thing, and conflating them is what let the orchestrator paste a task prompt
+/// into a composer the operator was already typing in — a harness serves one turn
+/// at a time, so two writers produce one confidently wrong answer rather than an
+/// error.
+///
+/// This is the single gate on dispatch: [`claim_idle`](super::PtyManager::claim_idle)
+/// only ever returns an orchestrator-held session. An "unmanaged" harness is not a
+/// separate kind of thing — it is one that was born [`User`](Self::User)-held and
+/// has not been handed over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HarnessControl {
+    /// The orchestrator may dispatch task frames into this session.
+    #[default]
+    Orchestrator,
+    /// The operator holds it. Dispatch skips it entirely until it is handed back.
+    User,
+}
+
+impl HarnessControl {
+    /// The display string, from the operator's point of view.
+    ///
+    /// "you" rather than "user" because it is rendered next to a harness the
+    /// person reading it is looking at.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HarnessControl::Orchestrator => "orchestrator",
+            HarnessControl::User => "you",
+        }
+    }
+
+    /// Whether the orchestrator may dispatch into a session in this state.
+    pub fn is_orchestrator(self) -> bool {
+        matches!(self, HarnessControl::Orchestrator)
+    }
+
+    /// The other side of the handover, for a toggle.
+    pub fn toggled(self) -> Self {
+        match self {
+            HarnessControl::Orchestrator => HarnessControl::User,
+            HarnessControl::User => HarnessControl::Orchestrator,
+        }
+    }
+}
+
 /// How to launch one harness session.
 #[derive(Debug, Clone)]
 pub struct LaunchSpec {
@@ -76,6 +123,13 @@ pub struct LaunchSpec {
     pub skip_permissions: bool,
     /// A label for the session list — the peer's id.
     pub label: String,
+    /// An operator- or peer-configured model override, when set.
+    ///
+    /// Threaded onto the interactive argv the same way the headless path adds
+    /// it to its one-shot invocation: without this, a `[host].model` or a
+    /// task's own model hint silently reached the harness's own default
+    /// instead, changing which model actually ran.
+    pub model: Option<String>,
     /// A session id to hand the harness, when it accepts one.
     ///
     /// Claude does (`--session-id`), and the transcript is then written under
@@ -83,6 +137,18 @@ pub struct LaunchSpec {
     /// file is newest. Codex has no such flag; its rollout records its own id on
     /// line one, which the tailer reads back instead.
     pub session_id: Option<String>,
+    /// Who holds the session the moment it opens.
+    ///
+    /// A task frame opens an [`Orchestrator`](HarnessControl::Orchestrator)
+    /// session; an operator spawning one from the TUI opens a
+    /// [`User`](HarnessControl::User) one, which is what makes it unmanaged.
+    pub control: HarnessControl,
+    /// Whether an operator asked for this session rather than a task frame.
+    ///
+    /// Display only — never gate behaviour on it. Control is the gate; this
+    /// exists so the rail can say "unmanaged" instead of the less useful
+    /// "orchestrator-spawned, currently yours".
+    pub user_spawned: bool,
 }
 
 /// The operator-facing projection of one session, for the list pane.
@@ -98,6 +164,11 @@ pub struct SessionRow {
     pub state: PtyState,
     /// The working directory the child runs in.
     pub cwd: String,
+    /// Git branch resolved from the working directory when the session opened.
+    ///
+    /// `None` means the directory is not in a repository or has a detached
+    /// `HEAD`.
+    pub branch: Option<String>,
     /// The harness session id, once known — minted for claude, read back from
     /// the rollout for codex. This is what pins the transcript tailer.
     pub session_id: Option<String>,
@@ -114,6 +185,22 @@ pub struct SessionRow {
     /// completion. So a busy session is not reusable, however idle its pty
     /// looks.
     pub busy: bool,
+    /// Who holds this session right now — see [`HarnessControl`].
+    pub control: HarnessControl,
+    /// Whether an operator spawned it rather than a task frame. Display only.
+    pub user_spawned: bool,
+    /// What this harness is waiting on the operator for, if anything.
+    ///
+    /// The one piece of session state nothing else on this row can express. A
+    /// harness stopped on a permission prompt is running, not busy in any way
+    /// the orchestrator knows about, and producing no output — so `state`,
+    /// `busy`, and `last_output_at` all read exactly as they do for a harness
+    /// thinking hard, and the operator watching a different pane never learns
+    /// it stopped. Recomputed from the screen as it paints (see
+    /// [`attention`](super::attention)), and what makes the row blink.
+    ///
+    /// `None` is the ordinary state: working, idle at a composer, or exited.
+    pub attention: Option<HarnessAttention>,
 }
 
 impl SessionRow {
@@ -121,25 +208,4 @@ impl SessionRow {
     pub fn idle_ms(&self, now: i64) -> i64 {
         now.saturating_sub(self.last_output_at).max(0)
     }
-}
-
-/// One live PTY-backed harness session.
-///
-/// The emulator screen is behind its own mutex so the reader task can feed it
-/// while the render thread reads it, without either blocking on the child.
-pub(super) struct PtySession {
-    /// The operator-facing projection.
-    pub(super) row: SessionRow,
-    /// The terminal emulator holding this session's screen + scrollback.
-    pub(super) screen: Arc<Mutex<vt100::Parser>>,
-    /// The PTY master — the write side (keystrokes in) and the resize handle.
-    pub(super) master: Box<dyn MasterPty + Send>,
-    /// A writer onto the master, kept open for input injection.
-    pub(super) writer: Box<dyn std::io::Write + Send>,
-    /// The child handle, for signalling and reaping.
-    ///
-    /// `Option` so the reaper can take it out and block on `wait()` *without*
-    /// holding the manager's lock — see [`PtyManager`](super::manager::PtyManager)'s
-    /// `mark_finished`. `None` means the child has been reaped.
-    pub(super) child: Option<Box<dyn Child + Send + Sync>>,
 }

@@ -7,12 +7,11 @@ use crate::ui::agents::{AgentRow, TaskState};
 use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform, OSC_52};
 use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::Draft;
-use crate::ui::theme::{color_to_string, THEME_ROLES};
 use medulla::runtime::{WorkerInfo, WorkerOp};
 
 use super::types::{
-    tab_pos, App, Cmd, Prompt, PromptKind, MP_OVERVIEW, MP_SEARCH, SETTINGS_SUBPAGES,
-    SP_APPEARANCE, SP_CONFIG, SP_FEEDBACK, SP_HELP, SP_USAGE,
+    tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_HELP,
+    SP_USAGE,
 };
 
 impl App {
@@ -26,10 +25,14 @@ impl App {
     }
 
     /// The task under the Agents-list cursor, when a `Sub` (task) row is selected.
+    ///
+    /// Indexes the rail's rows, which is what `agent_index` counts — the lane
+    /// list alone is shorter than the rail and reading it here would answer for
+    /// whichever row happened to share the offset.
     pub(super) fn selected_agent_task(&self) -> Option<TaskState> {
-        let rows = self.agent_rows();
-        match rows.get(self.agent_index) {
-            Some(AgentRow::Sub { task, .. }) => Some(task.clone()),
+        let rows = self.rail_rows();
+        match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
+            Some(super::rail::RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
             _ => None,
         }
     }
@@ -41,6 +44,10 @@ impl App {
                 let (cycle, task) = crate::ui::agents::parse_task_key(&t.task_id);
                 match cycle {
                     Some(c) => {
+                        if !self.runtime.steering_reaches_backend() {
+                            self.set_status("Cancelling a task is not wired to this runtime yet");
+                            return;
+                        }
                         self.runtime.cancel_task(c.to_string(), task.to_string());
                         self.set_status(format!("Cancel requested · {task}"));
                     }
@@ -68,6 +75,10 @@ impl App {
             .to_string();
         if text.trim().is_empty() {
             self.set_status("Type an answer for the pending question");
+            return Some(None);
+        }
+        if !self.runtime.steering_reaches_backend() {
+            self.set_status("Answering a question is not wired to this runtime yet");
             return Some(None);
         }
         self.runtime
@@ -117,71 +128,12 @@ impl App {
                 }
                 None
             }
-            PromptKind::TaskCreate => {
-                if text.is_empty() {
-                    self.set_status("Tasks · title is required");
-                    return None;
-                }
-                let now = medulla::tasks::now_timestamp();
-                Some(Cmd::SaveTask(Box::new(medulla::tasks::Task {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    title: text,
-                    description: String::new(),
-                    status: Default::default(),
-                    source: None,
-                    recurrence: None,
-                    created_at: now.clone(),
-                    updated_at: now,
-                    last_synced_at: None,
-                    dispatch: serde_json::Value::Null,
-                })))
-            }
-            PromptKind::TaskEdit(id) => {
-                if text.is_empty() {
-                    self.set_status("Tasks · title is required");
-                    return None;
-                }
-                let Some(mut task) = self.tasks.tasks.iter().find(|task| task.id == id).cloned()
-                else {
-                    self.set_status("Tasks · task no longer exists");
-                    return None;
-                };
-                task.title = text;
-                task.updated_at = medulla::tasks::now_timestamp();
-                Some(Cmd::SaveTask(Box::new(task)))
-            }
-            PromptKind::SourceAdd => {
-                let repository = text.trim().to_string();
-                if repository.is_empty() {
-                    self.set_status("Sources · repository is required");
-                    return None;
-                }
-                let source = medulla::tasks::SourceConfig {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    provider: "github".into(),
-                    enabled: true,
-                    repository,
-                    state: "open".into(),
-                    labels: Vec::new(),
-                    filter: None,
-                    token: std::env::var("GITHUB_TOKEN").ok(),
-                };
-                let mut document = self.tasks.clone();
-                document.sources.push(source);
-                Some(Cmd::SaveTasks(Box::new(document)))
-            }
-            PromptKind::MemorySearch => {
-                if text.is_empty() {
-                    self.set_status("Memory · search query is required");
-                    return None;
-                }
-                self.memory_subpage_index = MP_SEARCH;
-                self.memory_focused = true;
-                self.set_status(format!("Memory · searching “{text}”…"));
-                Some(Cmd::SearchMemory(text))
-            }
             PromptKind::HostAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
+                    // Land on the list the add is about. Staying on Add Host
+                    // leaves the operator on a page describing work they have
+                    // just finished, with no sight of whether it landed.
+                    self.focus_routing_subpage("Hosts");
                     self.set_status("Adding worker…");
                     Some(Cmd::WorkerOp(op))
                 }
@@ -193,6 +145,30 @@ impl App {
             PromptKind::WorkspaceAdd => {
                 self.add_workspace(&text);
                 None
+            }
+            PromptKind::CustomHarnessAdd => {
+                self.save_custom_harness(None, &text);
+                None
+            }
+            PromptKind::CustomHarnessEdit(id) => {
+                self.save_custom_harness(Some(&id), &text);
+                None
+            }
+            PromptKind::LocalHostWorkspace(harness) => self.add_local_host(harness, &text),
+            PromptKind::RejectProposal {
+                workflow,
+                proposal_id,
+            } => {
+                if text.is_empty() {
+                    self.set_status("Proposal rejection cancelled (empty)");
+                    return None;
+                }
+                self.set_status("Declining the proposed change…");
+                Some(Cmd::RejectProposal {
+                    workflow,
+                    proposal_id,
+                    reason: text,
+                })
             }
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
@@ -208,6 +184,10 @@ impl App {
                     self.set_status("Answer cancelled (empty)");
                     return None;
                 }
+                if !self.runtime.steering_reaches_backend() {
+                    self.set_status("Answering a question is not wired to this runtime yet");
+                    return None;
+                }
                 self.runtime.answer_question(cycle_id, question_id, text);
                 self.set_status("Answer sent");
                 None
@@ -219,6 +199,10 @@ impl App {
             } => {
                 if text.is_empty() {
                     self.set_status("Answer cancelled (empty)");
+                    return None;
+                }
+                if !self.runtime.steering_reaches_backend() {
+                    self.set_status("Answering a question is not wired to this runtime yet");
                     return None;
                 }
                 self.runtime.answer_question(cycle_id, question_id, text);
@@ -256,7 +240,91 @@ impl App {
                     body: text,
                 })
             }
+            #[cfg(feature = "workflows")]
+            PromptKind::WorkflowInput {
+                workflow_id,
+                dry_run,
+                mut remaining,
+                mut collected,
+            } => {
+                // `remaining` is never empty: a prompt is only opened with a
+                // field to ask about, and the last submission dispatches rather
+                // than opening another.
+                let field = remaining.remove(0);
+                let value = match coerce_workflow_input(&field, &text) {
+                    Ok(value) => value,
+                    Err(message) => {
+                        // Re-ask the same field rather than dropping the whole
+                        // set: a mistyped number should cost one retype, not
+                        // every value collected so far.
+                        self.set_status(message);
+                        remaining.insert(0, field);
+                        self.open_workflow_input_prompt(workflow_id, dry_run, remaining, collected);
+                        return None;
+                    }
+                };
+                collected.insert(field.name.clone(), value);
+
+                if !remaining.is_empty() {
+                    self.open_workflow_input_prompt(workflow_id, dry_run, remaining, collected);
+                    return None;
+                }
+                if dry_run {
+                    self.set_status("Simulating…");
+                    Some(Cmd::DryRunWorkflow {
+                        id: workflow_id,
+                        inputs: collected,
+                    })
+                } else {
+                    self.set_status("Running…");
+                    Some(Cmd::RunWorkflow {
+                        id: workflow_id,
+                        inputs: collected,
+                    })
+                }
+            }
         }
+    }
+
+    /// Open the prompt for `remaining`'s first field, carrying the rest and
+    /// what has been collected so far.
+    ///
+    /// Pre-filled with the field's declared default so the common answer is one
+    /// keypress, and titled with the field name so a chain of several prompts
+    /// says which one is on screen.
+    #[cfg(feature = "workflows")]
+    pub(super) fn open_workflow_input_prompt(
+        &mut self,
+        workflow_id: String,
+        dry_run: bool,
+        remaining: Vec<medulla::workflows::WorkflowInput>,
+        collected: serde_json::Map<String, serde_json::Value>,
+    ) {
+        let Some(field) = remaining.first() else {
+            return;
+        };
+        let title = match (&field.description, field.required) {
+            (Some(description), _) if !description.is_empty() => {
+                format!("{}: {description}", field.name)
+            }
+            (_, true) => format!("{} (required)", field.name),
+            (_, false) => field.name.clone(),
+        };
+        let prefill = field
+            .default
+            .as_ref()
+            .map(render_workflow_input_default)
+            .unwrap_or_default();
+        self.prompt = Some(Prompt::with_text(
+            PromptKind::WorkflowInput {
+                workflow_id,
+                dry_run,
+                remaining,
+                collected,
+            },
+            title,
+            prefill,
+        ));
     }
 
     /// Copy the requested chat scope to the clipboard (or the test capture sink),
@@ -364,6 +432,11 @@ impl App {
                 self.new_thread();
             }
             SlashCommand::Resume => return Some(Cmd::ListChats),
+            SlashCommand::NewHarness { provider, path } => {
+                self.start_harness_command(provider.as_deref(), path.as_deref());
+            }
+            SlashCommand::TakeControl => self.take_harness_control(),
+            SlashCommand::HandOff { note } => self.hand_harness_back(note),
             SlashCommand::Abort => {
                 self.runtime.abort();
                 self.set_status("Abort requested");
@@ -383,26 +456,9 @@ impl App {
             }
             SlashCommand::Usage => return self.set_settings_subpage(SP_USAGE),
             SlashCommand::Feedback => {
-                self.enter_settings_subpage(SP_FEEDBACK);
+                self.tab_index = tab_pos("Feedback");
                 self.set_status("Feedback · loading the board…");
                 return self.reload_feedback();
-            }
-            SlashCommand::Memory(query) => {
-                self.tab_index = tab_pos("Memory");
-                match query {
-                    None => {
-                        self.memory_subpage_index = MP_OVERVIEW;
-                        self.memory_focused = false;
-                        self.set_status("Memory · loading persona…");
-                        return Some(Cmd::LoadMemory);
-                    }
-                    Some(query) => {
-                        self.memory_subpage_index = MP_SEARCH;
-                        self.memory_focused = true;
-                        self.set_status(format!("Memory · searching “{query}”…"));
-                        return Some(Cmd::SearchMemory(query));
-                    }
-                }
             }
             SlashCommand::ToggleMouse => self.toggle_mouse(),
             SlashCommand::Copy(scope) => self.copy_chat(scope),
@@ -413,7 +469,7 @@ impl App {
     }
 
     /// Land on the Settings tab at subpage `index`, returning its lazy-load
-    /// command (Usage, Context, and Feedback each fetch on entry).
+    /// command (Usage and Context each fetch on entry).
     pub(super) fn set_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
         self.tab_index = tab_pos("Settings");
         self.settings_index = index.min(SETTINGS_SUBPAGES.len() - 1);
@@ -435,14 +491,6 @@ impl App {
         let cmd = self.set_settings_subpage(index);
         self.settings_focused = true;
         cmd
-    }
-
-    /// Cycle the selected Appearance role's color, apply it to the live theme,
-    /// and persist the `[theme]` section.
-    pub(super) fn cycle_appearance_role(&mut self, forward: bool) {
-        let role = self.appearance_index.min(THEME_ROLES.len() - 1);
-        self.theme.cycle_role(role, forward);
-        self.persist_theme_now(THEME_ROLES[role]);
     }
 
     /// Persist the operator's routing strategy to config and remember it on the
@@ -493,17 +541,60 @@ impl App {
             )),
         }
     }
+}
 
-    /// Write the current theme to the injected config path, surfacing a status
-    /// note on success or failure. A `None` path applies live but does not save.
-    pub(super) fn persist_theme_now(&mut self, role: &str) {
-        let value = color_to_string(self.theme.role(self.appearance_index));
-        match &self.config_path {
-            Some(path) => match crate::ui::theme::persist_theme(path, &self.theme) {
-                Ok(()) => self.set_status(format!("Appearance · {role} → {value} (saved)")),
-                Err(e) => self.set_status(format!("Appearance · save failed: {e}")),
-            },
-            None => self.set_status(format!("Appearance · {role} → {value} (not persisted)")),
+/// Turn what an operator typed into a value of the input's declared type.
+///
+/// A prompt yields a string because a terminal line is one. The declaration is
+/// what says whether `3` means the number three or the string `"3"`, so the
+/// coercion is driven by it rather than by guessing from the text — otherwise a
+/// version input typed as `1.0` would silently become a float.
+///
+/// An empty line means "leave it unset": the declared default applies, or the
+/// input resolves null if it is optional. A *required* input with no default
+/// cannot be left unset, and says so rather than sending an empty string that
+/// would pass the type check and fail the operator's intent.
+#[cfg(feature = "workflows")]
+fn coerce_workflow_input(
+    field: &medulla::workflows::WorkflowInput,
+    text: &str,
+) -> Result<serde_json::Value, String> {
+    use medulla::workflows::InputType;
+
+    if text.is_empty() {
+        return match (&field.default, field.required) {
+            (Some(default), _) => Ok(default.clone()),
+            (None, false) => Ok(serde_json::Value::Null),
+            (None, true) => Err(format!("{} is required", field.name)),
+        };
+    }
+
+    match field.ty {
+        InputType::String => Ok(serde_json::Value::String(text.to_string())),
+        InputType::Number => text
+            .parse::<serde_json::Number>()
+            .map(serde_json::Value::Number)
+            .map_err(|_| format!("{} expects a number, got {text:?}", field.name)),
+        InputType::Boolean => text
+            .parse::<bool>()
+            .map(serde_json::Value::Bool)
+            .map_err(|_| format!("{} expects true or false, got {text:?}", field.name)),
+        InputType::Json => {
+            serde_json::from_str(text).map_err(|err| format!("{} expects JSON: {err}", field.name))
         }
+    }
+}
+
+/// Render a declared default as the text to pre-fill its prompt with.
+///
+/// A string default is shown unquoted — the operator is editing the value, not
+/// its JSON encoding, and leaving the quotes in would make accepting the
+/// default produce a differently-quoted string.
+#[cfg(feature = "workflows")]
+fn render_workflow_input_default(default: &serde_json::Value) -> String {
+    match default {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
     }
 }

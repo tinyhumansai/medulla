@@ -38,7 +38,12 @@ pub fn config_path(env: &HashMap<String, String>, home_dir: &Path) -> PathBuf {
     {
         crate::home::medulla_home(env)
     } else {
-        home_dir.join(".medulla")
+        // Same shape as the resolver, for the same reason: the identity belongs
+        // to one account, so it lives in that account's home and not at the root
+        // where two accounts would share one wallet.
+        let root = home_dir.join(".medulla");
+        let user = crate::home::user::active_user_id(env, &root);
+        root.join(user)
     };
     home.join("tinyplace").join("config.json")
 }

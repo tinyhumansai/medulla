@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::*;
 /// One inbound stimulus, before normalization. The two variants are the two
-/// drivers named in [`SessionDriver`](super::types::SessionDriver).
+/// drivers named in [`SessionDriver`](crate::sessions::SessionDriver).
 #[derive(Debug, Clone)]
 pub enum SessionInput {
     /// A decoded `medulla-tinyplace/1` frame from an authenticated sender.
@@ -11,7 +11,12 @@ pub enum SessionInput {
         /// body — a frame cannot name its own author.
         from: String,
         /// The decoded frame.
-        frame: TaskFrame,
+        ///
+        /// Boxed for the same reason [`Envelope`](Self::Envelope) is: a
+        /// [`TaskFrame`] carries a dozen optional wire fields and dwarfs the
+        /// other variants, so inlining it would make every `SessionInput` —
+        /// including the two-string plain-text one — pay its size.
+        frame: Box<TaskFrame>,
     },
     /// A plain-text DM that carried no frame at all.
     PlainText {

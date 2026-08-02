@@ -10,7 +10,7 @@ Usage-based pricing for the orchestrator:
 | Cached input tokens | $0.10 / million |
 | Output tokens       | $6 / million    |
 
-Because Medulla keeps its reasoning surface small and offloads the bulk, you pay orchestrator rates only on the distilled slice that actually reaches it, not on the millions of tokens flowing through your fleet. For a sense of scale: our 50-source benchmark run cost $0.27 end to end, and 100 Euler problems in parallel cost $0.24.
+Because Medulla keeps its reasoning surface small and offloads the bulk, you pay orchestrator rates only on the distilled slice that actually reaches it, not on everything flowing through your fleet.
 
 ## Early Alpha, by Invitation
 

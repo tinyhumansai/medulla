@@ -6,6 +6,20 @@ pub struct Caret {
     pub row: usize,
     pub col: usize,
 }
+/// One rendered row of a soft-wrapped draft.
+///
+/// `start` is the flat char offset of the row's first char in the whole draft,
+/// so a caret offset can be turned back into a (row, column) without re-walking
+/// the text. Rows tile the draft in order and never overlap; hard newlines are
+/// the only chars that belong to no row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisualRow {
+    /// Flat char offset of this row's first char within the draft.
+    pub start: usize,
+    /// The row's chars, exactly as they should be drawn.
+    pub text: String,
+}
+
 /// A composer draft: the text plus the caret's flat char offset into it. The
 /// two travel together — an edit moving one without the other would strand the
 /// caret on a character the user did not type.

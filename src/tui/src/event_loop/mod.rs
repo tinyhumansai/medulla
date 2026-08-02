@@ -30,6 +30,7 @@ use types::AppMsg;
 pub(crate) use types::{SessionExit, SessionWiring};
 use update_checker::spawn_update_checker;
 
+pub(crate) use cmd_dispatch::clear_copilot_hosts;
 use cmd_dispatch::run_cmd;
 
 /// Drive the ratatui app: build [`App`], subscribe to the runtime, and loop over
@@ -42,26 +43,29 @@ pub(crate) async fn run(
 ) -> anyhow::Result<SessionExit> {
     let SessionWiring {
         loaded,
+        local_hosts,
         startup_status,
         tinyplace_obs,
         config_path,
         medulla_home,
-        memory_service,
+        account,
         mut sharing,
         onboarding_path,
         host,
+        harnesses,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
     app.set_medulla_home(medulla_home);
-    if let Some(svc) = memory_service {
-        app.set_memory_service(svc);
-    }
+    app.set_account(account);
     if let Some(obs) = tinyplace_obs {
         app.set_tinyplace_observation(obs);
     }
     if let Some(host) = host {
         app.set_host_observation(host);
+    }
+    if let Some(harnesses) = harnesses {
+        app.set_local_harnesses(harnesses);
     }
     if let Some(status) = startup_status {
         app.set_status(status);
@@ -92,7 +96,26 @@ pub(crate) async fn run(
             maybe_event = reader.next() => {
                 if let Some(Ok(ev)) = maybe_event {
                     if let Some(cmd) = app.on_event(ev) {
-                        run_cmd(cmd, &runtime, app.memory_service(), &app.loaded.config.workflows, &msg_tx);
+                        run_cmd(
+                            cmd,
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
+                    }
+                    // Commands raised by handlers that cannot return one — the
+                    // handback prompt, the harness key layer, the mouse path.
+                    // Drained here, in submission order, so they run against the
+                    // same state the event that produced them left behind.
+                    while let Some(cmd) = app.take_pending_cmd() {
+                        run_cmd(
+                            cmd,
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
                     }
                 }
             }
@@ -100,7 +123,13 @@ pub(crate) async fn run(
                 if recv.is_ok() {
                     app.refresh_snapshot();
                     if should_refresh_context(&mut app) {
-                        run_cmd(Cmd::InspectContext, &runtime, app.memory_service(), &app.loaded.config.workflows, &msg_tx);
+                        run_cmd(
+                            Cmd::InspectContext,
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
                     }
                 }
             }
@@ -110,18 +139,19 @@ pub(crate) async fn run(
                     AppMsg::Contexts(c) => app.set_contexts(c),
                     AppMsg::UsageLoaded(data) => app.set_account_usage(data),
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
+                    AppMsg::LoggedOut => {
+                        app.set_status("Account · logged out. Returning to the login screen…");
+                        app.logged_out();
+                    }
                     AppMsg::Resumed(s) => {
                         app.tab_index = TABS.iter().position(|t| *t == "Chat").unwrap_or(1);
                         app.refresh_snapshot();
                         app.set_status(s);
                     }
-                    AppMsg::MemoryLoaded { status, directives } => {
-                        app.set_memory_loaded(status, directives);
+                    #[cfg(feature = "workflows")]
+                    AppMsg::CopilotStarted { workflow, instruction } => {
+                        app.copilot_started(&workflow, &instruction);
                     }
-                    AppMsg::MemoryIngestDone(status) => {
-                        app.set_memory_ingest_done(status);
-                    }
-                    AppMsg::TasksLoaded(document) => app.set_tasks(document),
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotStatus { workflow, line } => {
                         app.copilot_status(&workflow, line);
@@ -132,21 +162,58 @@ pub(crate) async fn run(
                         reply,
                         changes,
                         created,
-                    } => app.copilot_finished(&workflow, reply, changes, created),
+                        removed,
+                    } => {
+                        // The conversation follows the workflow. A create turn
+                        // ran on a sentinel thread because there was no id yet;
+                        // now there is one, so the harness session moves onto it
+                        // and the operator's follow-up is turn two of the same
+                        // conversation rather than turn one of a new one.
+                        if let Some(created) = &created {
+                            cmd_dispatch::adopt_copilot_host(&workflow, created);
+                        }
+                        // Nothing left to continue, and no reason to keep a
+                        // daemon and its harness processes alive for it.
+                        if removed {
+                            cmd_dispatch::close_copilot_host(&workflow);
+                        }
+                        // A queued follow-up comes back as a command to run:
+                        // the drain happens after the catalogue refresh, so it
+                        // sees the graph this turn left behind.
+                        let queued = app.copilot_finished(&workflow, reply, changes, created);
+                        if let Some(cmd) = queued {
+                            run_cmd(
+                                cmd,
+                                &runtime,
+                                &app.loaded.config.workflows,
+                                &msg_tx,
+                                local_hosts.as_ref(),
+                            );
+                        }
+                    }
                     #[cfg(feature = "workflows")]
-                    AppMsg::CopilotFailed { workflow, error } => {
-                        app.copilot_failed(&workflow, error);
+                    AppMsg::CopilotFailed {
+                        workflow,
+                        instruction,
+                        error,
+                    } => {
+                        app.copilot_failed(&workflow, instruction, error);
                     }
-                    AppMsg::MemoryResults { hits, query } => {
-                        let n = hits.len();
-                        app.set_memory_results(hits, query);
-                        app.set_status(format!("Memory · {n} hit(s)"));
-                    }
-                    AppMsg::FeedbackLoaded(page) => {
-                        app.set_feedback_page(page);
+                    #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowsChanged => app.reload_workflows(),
+                    AppMsg::FeedbackLoaded { query, page } => {
+                        if !app.set_feedback_page(query, page) {
+                            continue;
+                        }
                         // Pull the newly selected row's comments in the same beat.
                         if let Some(cmd) = app.feedback_detail_cmd() {
-                            run_cmd(cmd, &runtime, app.memory_service(), &app.loaded.config.workflows, &msg_tx);
+                            run_cmd(
+                                cmd,
+                                &runtime,
+                                &app.loaded.config.workflows,
+                                &msg_tx,
+                                local_hosts.as_ref(),
+                            );
                         }
                     }
                     AppMsg::FeedbackComments { id, comments } => {
@@ -158,9 +225,19 @@ pub(crate) async fn run(
                     }
                     AppMsg::FeedbackChanged(status) => {
                         app.set_status(status);
+                        // The board is about to be re-read; forgetting which
+                        // item's comments are loaded is what makes the reload
+                        // fetch them again, so a just-posted comment appears.
+                        app.invalidate_feedback_detail();
                         // A comment or submission changes the board, so re-pull
                         // it rather than patching state locally.
-                        run_cmd(Cmd::LoadFeedback(app.feedback_query()), &runtime, app.memory_service(), &app.loaded.config.workflows, &msg_tx);
+                        run_cmd(
+                            Cmd::LoadFeedback(app.feedback_query()),
+                            &runtime,
+                            &app.loaded.config.workflows,
+                            &msg_tx,
+                            local_hosts.as_ref(),
+                        );
                     }
                     AppMsg::UpdateAvailable(notice) => {
                         app.set_update_notice(notice.clone());

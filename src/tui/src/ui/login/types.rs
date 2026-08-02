@@ -9,15 +9,14 @@ use medulla::auth::Provider;
 /// The terminal outcome of the login screen, consumed by the `main` pre-app loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoginOutcome {
-    /// A verified JWT — proceed into the main app with a backend runtime.
+    /// A verified JWT — sign the embedded core in and proceed into the app.
     Token(String),
-    /// Continue offline with the mock runtime.
-    ///
-    /// No longer offered on the login menu — signing in is the only way into the
-    /// app — but kept because the pre-app loop still falls back to the mock when
-    /// a verified token cannot reach the backend.
-    Mock,
     /// Quit cleanly without starting the app.
+    ///
+    /// The only alternative to signing in. There is deliberately no "continue
+    /// offline" outcome: the mock runtime is for tests and the explicit
+    /// `--mock` demo, and offering it here would let a failed sign-in land the
+    /// operator in a scripted runtime that looks like their own.
     Quit,
 }
 

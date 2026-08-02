@@ -1,19 +1,19 @@
 //! Tests for capability settings and the config that produces them.
 //!
-//! These are mostly about defaults being *closed*: a workflow arriving as a file
-//! must not be able to reach the network, run code, or call a third-party tool
-//! until an operator says so.
+//! These pin the deliberate split in defaults: local code is available, while
+//! network and third-party tools remain closed until an operator allowlists
+//! them.
 
 use std::path::Path;
 
-use super::{CapabilitySettings, DEFAULT_RUN_TIMEOUT_SECS};
+use super::{CapabilitySettings, DEFAULT_MAX_PARALLEL_AGENTS, DEFAULT_RUN_TIMEOUT_SECS};
 use crate::config::WorkflowsConfig;
 
 #[test]
-fn every_optional_capability_is_off_by_default() {
+fn code_is_on_while_external_capabilities_stay_off_by_default() {
     let settings = CapabilitySettings::rooted_at(Path::new("/home"));
 
-    assert!(!settings.allow_code, "no sandbox means no code execution");
+    assert!(settings.allow_code);
     assert!(settings.tool_allowlist.is_empty());
     assert!(settings.http_allowlist.is_empty());
     assert!(
@@ -21,6 +21,27 @@ fn every_optional_capability_is_off_by_default() {
         "an empty allowlist permits nothing, rather than everything"
     );
     assert!(!settings.tool_allowed("github.create_issue"));
+}
+
+#[test]
+fn an_explicit_config_opt_out_disables_code_execution() {
+    let config = WorkflowsConfig {
+        allow_code: false,
+        ..Default::default()
+    };
+
+    let settings = CapabilitySettings::from_config(&config, "/home");
+
+    assert!(!settings.allow_code);
+}
+
+#[test]
+fn unreadable_config_fallback_disables_code_execution() {
+    let settings = CapabilitySettings::fail_closed_at("/home");
+
+    assert!(!settings.allow_code);
+    assert!(settings.tool_allowlist.is_empty());
+    assert!(settings.http_allowlist.is_empty());
 }
 
 #[test]
@@ -68,6 +89,8 @@ fn config_becomes_settings_with_every_field_carried_across() {
         tool_allowlist: vec!["github.create_issue".into()],
         http_allowlist: vec!["api.github.com".into()],
         run_timeout_secs: 30,
+        max_parallel_agents: 6,
+        evolve: Default::default(),
     };
 
     let settings = CapabilitySettings::from_config(&config, "/home/.medulla");
@@ -78,6 +101,23 @@ fn config_becomes_settings_with_every_field_carried_across() {
     assert!(settings.tool_allowed("github.create_issue"));
     assert!(settings.http_host_allowed("api.github.com"));
     assert_eq!(settings.run_timeout_secs, 30);
+    assert_eq!(settings.max_parallel_agents, 6);
+}
+
+#[test]
+fn a_zero_agent_ceiling_falls_back_rather_than_wedging_every_agent_node() {
+    // A zero-permit semaphore would leave every agent node awaiting a permit
+    // that can never arrive, which presents as a hang rather than as a
+    // configuration mistake.
+    let config = WorkflowsConfig {
+        max_parallel_agents: 0,
+        evolve: Default::default(),
+        ..Default::default()
+    };
+
+    let settings = CapabilitySettings::from_config(&config, "/home");
+
+    assert_eq!(settings.max_parallel_agents, DEFAULT_MAX_PARALLEL_AGENTS);
 }
 
 #[test]
@@ -94,6 +134,7 @@ fn an_empty_default_model_becomes_no_hint_rather_than_an_empty_one() {
 fn a_zero_timeout_falls_back_to_the_default_rather_than_abandoning_every_run() {
     let config = WorkflowsConfig {
         run_timeout_secs: 0,
+        evolve: Default::default(),
         ..Default::default()
     };
 
@@ -108,5 +149,46 @@ fn the_shipped_config_default_matches_the_seams_own_default_timeout() {
     assert_eq!(
         WorkflowsConfig::default().run_timeout_secs,
         DEFAULT_RUN_TIMEOUT_SECS
+    );
+}
+
+#[test]
+fn a_short_run_timeout_never_gives_a_script_more_budget_than_the_run_itself() {
+    // Regression: the quarter-share floor (30s) used to apply unconditionally,
+    // so any run shorter than 120s handed its scripts a *bigger* budget than
+    // the run's own — the opposite of "a wedged script fails as a script
+    // before it can consume the run's whole budget."
+    let mut settings = CapabilitySettings::rooted_at("/home");
+    settings.run_timeout_secs = 20;
+
+    assert_eq!(
+        settings.script_timeout(),
+        std::time::Duration::from_secs(20),
+        "a script must never outlive the run that bounds it"
+    );
+}
+
+#[test]
+fn a_generous_run_timeout_still_gives_a_script_only_a_quarter_share() {
+    let mut settings = CapabilitySettings::rooted_at("/home");
+    settings.run_timeout_secs = 400;
+
+    assert_eq!(
+        settings.script_timeout(),
+        std::time::Duration::from_secs(100)
+    );
+}
+
+#[test]
+fn a_mid_sized_run_timeout_still_gets_the_thirty_second_floor() {
+    // Below 120s the quarter-share is under the 30s floor, but the floor
+    // itself must stay under the run's own budget (see the short-timeout case
+    // above) — this pins the boundary where the floor applies uncapped.
+    let mut settings = CapabilitySettings::rooted_at("/home");
+    settings.run_timeout_secs = 60;
+
+    assert_eq!(
+        settings.script_timeout(),
+        std::time::Duration::from_secs(30)
     );
 }

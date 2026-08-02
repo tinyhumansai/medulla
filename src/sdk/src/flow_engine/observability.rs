@@ -67,6 +67,19 @@ pub struct WorkflowRunObserver {
     /// Steps as the engine reports them, kept so a caller can persist the run
     /// record without observing every callback itself.
     steps: Mutex<Vec<crate::workflows::RunStep>>,
+    /// The same steps as the engine's own richer type.
+    ///
+    /// Diagnosis consumes the engine's status and diagnostic types directly.
+    /// Accumulated here rather than taken from [`Run::steps`] on finish because
+    /// a run that is cancelled or times out never reaches `on_run_finish`, and
+    /// its partial evidence is the evidence most worth keeping.
+    raw: Mutex<Vec<ExecutionStep>>,
+    /// The one-line summary built when the run settled.
+    ///
+    /// Emitted as a `run_result` event and, until now, discarded with it — so
+    /// every reader after the fact had to re-derive from `steps` a sentence the
+    /// observer had already written.
+    summary: Mutex<Option<String>>,
     /// The workflow this run belongs to, used only for event context.
     workflow_id: String,
 }
@@ -96,6 +109,8 @@ impl WorkflowRunObserver {
             sink,
             plan: Mutex::new(plan),
             steps: Mutex::new(Vec::new()),
+            raw: Mutex::new(Vec::new()),
+            summary: Mutex::new(None),
             workflow_id: workflow_id.into(),
         }
     }
@@ -103,6 +118,24 @@ impl WorkflowRunObserver {
     /// The steps recorded so far, in completion order.
     pub fn steps(&self) -> Vec<crate::workflows::RunStep> {
         self.steps.lock().expect("steps lock").clone()
+    }
+
+    /// The engine's own steps, in completion order.
+    ///
+    /// What [`crate::workflows::run::diagnose::diagnose`] needs: it reads each
+    /// step's `output` to find errors an `on_error` policy swallowed, and the
+    /// graph to find nodes that never ran at all.
+    pub fn execution_steps(&self) -> Vec<ExecutionStep> {
+        self.raw.lock().expect("raw steps lock").clone()
+    }
+
+    /// The summary the observer wrote when the run settled.
+    ///
+    /// `None` when the run never settled through the engine — cancelled, timed
+    /// out, or dropped with the process — in which case the caller has to say
+    /// what happened itself.
+    pub fn summary(&self) -> Option<String> {
+        self.summary.lock().expect("summary lock").clone()
     }
 
     /// Emit the current plan as a `todo_update`.
@@ -151,8 +184,11 @@ impl RunObserver for WorkflowRunObserver {
                     StepStatus::Error => "error".to_string(),
                 },
                 duration_ms: step.duration_ms,
+                input: None,
+                output: Some(crate::workflows::bounded_evidence(&step.output)),
                 diagnostics: diagnostics.clone(),
             });
+        self.raw.lock().expect("raw steps lock").push(step.clone());
 
         // A null-resolving expression is almost always a wiring mistake the
         // author wants to hear about, but never a reason to fail a run the
@@ -240,6 +276,10 @@ impl RunObserver for WorkflowRunObserver {
                 failed.join(", ")
             )
         };
+
+        // Keep it before emitting: the sink is host code that may do anything,
+        // and the summary is wanted whether or not the event goes anywhere.
+        *self.summary.lock().expect("summary lock") = Some(summary.clone());
 
         (self.sink)(
             kinds::RUN_RESULT,

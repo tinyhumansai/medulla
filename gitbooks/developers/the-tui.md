@@ -96,6 +96,31 @@ the prompt), or cancel a task with `Alt`+`X`, and the operation absorbs the
 change rather than restarting. `Ctrl`+`]` attaches the live harness pane for the
 selected lane.
 
+### When a harness needs you
+
+A harness stopped on its own permission prompt looks exactly like one that is
+thinking hard: still running, still holding its session, saying nothing. Medulla
+watches each harness's screen for that state and marks it — the row turns yellow
+and blinks with a `⚠`, says what it is waiting for and for how long
+("codex is asking permission · 42s"), and the Agents tab carries a `⚠2` badge so
+a stuck pane is visible from whatever tab you are on.
+
+It is recognised from what the harness paints, in order of specificity:
+
+1. **Startup dialogs** — trust and permissions that gate the whole session.
+2. **Named prompts** — distinctive phrases that each CLI writes when it is asking
+   (e.g. `claude` shows "No, and tell Claude what to do differently"; `codex`
+   shows "Allow Codex to…").
+3. **Numbered menus** — a caret resting on a numbered option, or `(y/n)`.
+4. **The terminal bell** — the universal fallback, in case a prompt is worded
+   differently or not recognised.
+
+Two things clear the mark: attaching to the pane, and the orchestrator injecting
+a prompt into that session — both mean somebody is now dealing with it. A named
+prompt comes straight back on the next sample if the harness is in fact still
+asking, so nothing is hidden; a bell does not, because a ring has no second frame
+to keep it alive.
+
 ## Read next
 
 * [CLI Reference](cli-reference.md) — every subcommand and flag.

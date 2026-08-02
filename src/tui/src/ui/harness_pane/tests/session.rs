@@ -119,7 +119,7 @@ fn picker_choices_include_every_native_provider_and_registered_preset() {
 }
 
 #[test]
-fn registered_preset_supplies_its_router_key_and_model_environment() {
+fn registered_openrouter_preset_uses_the_proxy_without_leaking_its_key() {
     let mut harnesses = harnesses(PtyManager::new());
     // This test is about the router injection, and attribution adds argv and
     // environment of its own; it has its own tests below.
@@ -127,6 +127,10 @@ fn registered_preset_supplies_its_router_key_and_model_environment() {
     harnesses
         .env
         .insert("OPENROUTER_API_KEY".into(), "secret".into());
+    harnesses.env.insert(
+        medulla::inference_proxy::UPSTREAM_URL_ENV.into(),
+        "http://127.0.0.1:1/api".into(),
+    );
     let preset = medulla::config::CustomHarnessConfig::from_editor_line(
         "deepseek | DeepSeek Claude | claude | deepseek/deepseek-chat | deepseek/fast | this-device",
     )
@@ -136,8 +140,29 @@ fn registered_preset_supplies_its_router_key_and_model_environment() {
         .spawn_env(&HarnessChoice::custom(preset))
         .expect("registered preset is launchable");
 
-    assert_eq!(env["ANTHROPIC_BASE_URL"], "https://openrouter.ai/api");
-    assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "secret");
+    let base_url = &env["ANTHROPIC_BASE_URL"];
+    assert!(
+        base_url.starts_with("http://127.0.0.1:") && base_url.ends_with("/anthropic"),
+        "Claude must use the proxy's Anthropic mount: {base_url}"
+    );
+    let token = &env["ANTHROPIC_AUTH_TOKEN"];
+    assert!(
+        token.starts_with("mdl-"),
+        "child must receive a proxy token"
+    );
+    assert_eq!(
+        env.get(medulla::inference_proxy::PROXY_TOKEN_ENV),
+        Some(token),
+        "router injection must resolve the minted proxy token"
+    );
+    assert!(
+        !env.contains_key("OPENROUTER_API_KEY"),
+        "the upstream key must not survive in the child environment"
+    );
+    assert_ne!(
+        token, "secret",
+        "the upstream key must not be passed through"
+    );
     assert_eq!(
         env["ANTHROPIC_DEFAULT_OPUS_MODEL"],
         "deepseek/deepseek-chat"

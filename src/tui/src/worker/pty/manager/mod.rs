@@ -1,12 +1,24 @@
-//! [`PtyManager`] — owns every live harness PTY and its terminal emulator.
+//! [`PtyManager`] — the registry of live harness PTYs.
 //!
 //! One session is: a real `claude`/`codex`/`opencode` child on a pseudo-terminal,
 //! a reader thread draining the master into a [`vt100::Parser`], and the write
 //! half kept open so keystrokes and injected peer prompts can reach the child.
+//! All of that belongs to [`SessionHandle`](super::handle::SessionHandle); what
+//! is here is only the collection of them.
+//!
+//! That division is the design. This used to be a `Mutex<Vec<PtySession>>` where
+//! every operation — down to a reader thread stamping a timestamp after each
+//! `read()` — took one process-wide lock and scanned the vector under it. It
+//! worked at one or two harnesses and fell over at ten, because the data being
+//! guarded was per-session and independent: the lock was doing nothing except
+//! serialising unrelated work. Now the registry is read-mostly, every accessor
+//! clones out the one `Arc` it needs and drops the lock immediately, and the
+//! hot per-session fields are atomics on the handle.
 //!
 //! Split so no file exceeds the repo's 500-line ceiling: [`open`] launches a
 //! harness on a fresh pty and drains it, [`session`] is the bookkeeping every
-//! other caller reads, and [`screen`] is the emulator surface the UI renders.
+//! other caller reads, [`screen`] is the emulator surface the UI renders, and
+//! [`attention`] keeps each row's "this harness wants you" flag current.
 //!
 //! Both halves of the master run on **blocking threads**, not tokio tasks:
 //! `portable-pty` offers only synchronous `Read`/`Write`, and parking either on
@@ -17,32 +29,31 @@
 //! The writer's thread earns its keep beyond that. A pty write blocks until the
 //! child drains its stdin, and a harness that is still loading or sitting on a
 //! startup dialog does not — so writing inline, under the one lock every reader
-//! here takes, froze the whole TUI on a single unread paste. Every method on this
-//! type is therefore expected to hold the lock for bookkeeping only: see
-//! `mark_finished`, which drops it before reaping a child, and `write`, which
-//! drops it before queueing bytes.
+//! here took, froze the whole TUI on a single unread paste. Every method on this
+//! type therefore holds the registry for a lookup and an `Arc` clone and nothing
+//! more: see [`handle`](Self::handle), which is that seam, and
+//! [`write`](Self::write), [`forget`](Self::forget), and `SessionHandle::reap`,
+//! which each act on the session with the registry already released. [`rows`](Self::rows)
+//! and [`running_count`](Self::running_count) are the deliberate exceptions —
+//! they read atomics only, never block, and run every frame.
 
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
-use super::types::PtySession;
+use super::handle::SessionHandle;
+use super::sync::{read, write};
 
-/// Read buffer for the PTY master, sized for a full-screen redraw burst.
-const BUF_LEN: usize = 8192;
-
-/// How many unwritten bytes one session's write queue may hold.
+/// Read buffer for the PTY master.
 ///
-/// The queue cannot block its sender — that is the freeze this module exists to
-/// avoid — so it is bounded by refusal instead: a write that would exceed this
-/// is rejected synchronously and the caller is told the harness is not reading.
-///
-/// Bounded by *bytes* rather than by message count, because one write is an
-/// arbitrarily long paste and a count would bound nothing. Generous enough that
-/// no real prompt or burst of keystrokes can reach it — a delegated instruction
-/// is kilobytes, and `inject_prompt` retries a paste three times at most — so in
-/// practice this is a backstop against a caller that does not yet exist rather
-/// than a limit anything legitimate will meet.
-const MAX_QUEUED_WRITE_BYTES: usize = 1024 * 1024;
+/// Sized to swallow a whole burst rather than a screenful. The emulator's lock
+/// is taken once per read, so the buffer sets how often a flooding child makes
+/// the render pass wait: at 8 KB a harness streaming at pipe speed reacquired
+/// the lock hundreds of times a second, in a loop tight enough that a waiting
+/// snapshot could be starved for tens of milliseconds — a visible stutter, and
+/// one that only appeared once the old global lock stopped accidentally pacing
+/// the reader. Amortising the wakeup is the same trick NAPI plays on a network
+/// device: take more per turn so you take fewer turns.
+const BUF_LEN: usize = 65536;
 
 /// How many times to retry a failed `openpty` before giving up.
 ///
@@ -51,9 +62,20 @@ const MAX_QUEUED_WRITE_BYTES: usize = 1024 * 1024;
 /// machine, or simply when a peer's tasks arrive in a burst. Mirrors the
 /// ETXTBSY spawn retry the headless executor already carries for the same class
 /// of momentary failure.
+///
+/// Only *transient* failures are retried; see `open::is_transient`. Descriptor
+/// exhaustion is a capacity signal, not a race, and retrying it merely burns the
+/// whole budget before failing with the same error.
 const OPENPTY_ATTEMPTS: u32 = 20;
-/// Pause between `openpty` retries.
+/// Base pause between `openpty` retries, scaled by attempt number and capped by
+/// [`OPENPTY_RETRY_CAP`].
+///
+/// Backed off rather than fixed: a burst of sessions opening together would
+/// otherwise retry in lockstep, colliding on every attempt for the same reason
+/// they collided on the first.
 const OPENPTY_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_millis(25);
+/// Ceiling on the backoff, so twenty attempts stay inside a sensible budget.
+const OPENPTY_RETRY_CAP: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Kill every surviving child when the last handle goes away.
 ///
@@ -64,16 +86,18 @@ const OPENPTY_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_milli
 /// has a fixed supply of.
 impl Drop for Inner {
     fn drop(&mut self) {
-        let Ok(mut sessions) = self.sessions.lock() else {
-            return; // poisoned: another thread panicked, nothing safe to do here
-        };
-        for session in sessions.iter_mut() {
-            if let Some(child) = session.child.as_mut() {
-                let _ = child.kill();
-                // Reap it: a killed child left unwaited is a zombie holding its
-                // slot until this process exits.
-                let _ = child.wait();
-            }
+        // Take the handles out and release the registry before waiting on
+        // anything: `reap` blocks, and nothing about shutdown should hold a lock
+        // across it.
+        let sessions = std::mem::take(&mut *write(&self.sessions));
+        for session in &sessions {
+            session.kill();
+        }
+        let now = (self.now)();
+        for session in &sessions {
+            // Reap it: a killed child left unwaited is a zombie holding its slot
+            // until this process exits.
+            session.reap(now);
         }
     }
 }
@@ -87,20 +111,14 @@ impl Default for PtyManager {
 impl PtyManager {
     /// Build an empty manager on the system clock.
     pub fn new() -> Self {
-        PtyManager {
-            inner: Arc::new(Inner {
-                sessions: Mutex::new(Vec::new()),
-                next_id: AtomicU64::new(1),
-                now: Arc::new(medulla::clock::now_millis),
-            }),
-        }
+        PtyManager::with_now(Arc::new(medulla::clock::now_millis))
     }
 
     /// Override the clock (tests).
     pub fn with_now(now: NowFn) -> Self {
         PtyManager {
             inner: Arc::new(Inner {
-                sessions: Mutex::new(Vec::new()),
+                sessions: RwLock::new(Vec::new()),
                 next_id: AtomicU64::new(1),
                 now,
             }),
@@ -110,11 +128,32 @@ impl PtyManager {
     fn now(&self) -> i64 {
         (self.inner.now)()
     }
+
+    /// The handle for `id`, if there is one.
+    ///
+    /// The registry lock is held only for the lookup and the `Arc` clone; every
+    /// caller then works against the session alone. This is the seam that stops
+    /// a blocking write, a slow `wait()`, or a large snapshot on one session
+    /// from stalling all the others.
+    pub(super) fn handle(&self, id: &str) -> Option<Arc<SessionHandle>> {
+        read(&self.inner.sessions)
+            .iter()
+            .find(|session| session.id() == id)
+            .cloned()
+    }
+
+    /// Every handle, in open order.
+    pub(super) fn handles(&self) -> Vec<Arc<SessionHandle>> {
+        read(&self.inner.sessions).clone()
+    }
 }
 
+mod attention;
 mod open;
 mod screen;
 mod session;
+#[cfg(test)]
+mod tests;
 
 pub use screen::{ScreenCell, ScreenSnapshot};
 

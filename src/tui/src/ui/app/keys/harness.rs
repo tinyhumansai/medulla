@@ -30,6 +30,14 @@ impl App {
     /// Safe to call when nothing is attached; that is the common case on the
     /// render path, which calls this whenever the selection moves.
     pub(crate) fn release_harness(&mut self) {
+        // The operator has been looking at and handling this pane. Consume any
+        // completion bell observed while it was attached so detaching cannot
+        // reveal a stale alert that the hidden rail deliberately suppressed.
+        if let (Some(session), Some(harnesses)) =
+            (self.harness_focus.attached_to(), self.harnesses.as_ref())
+        {
+            harnesses.sessions.acknowledge(session);
+        }
         self.harness_focus = HarnessFocus::Chrome;
     }
 
@@ -117,6 +125,14 @@ impl App {
                 harnesses.set_control(&session, HarnessControl::User);
             }
             self.harness_took_control = true;
+        }
+        // Attaching answers whatever the harness was blinking about: the
+        // operator is now looking at the screen that was asking. A named prompt
+        // that is still up returns on the next refresh, so nothing is lost by
+        // clearing it here — and a rail that keeps blinking at the pane you are
+        // already typing in is how an indicator becomes furniture.
+        if let Some(harnesses) = self.harnesses.as_ref() {
+            harnesses.sessions.acknowledge(&session);
         }
         self.harness_focus = HarnessFocus::Attached(session);
         self.set_status(format!(

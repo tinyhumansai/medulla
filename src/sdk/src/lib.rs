@@ -21,6 +21,7 @@ pub mod harness_work;
 pub mod history_upload;
 pub mod home;
 pub mod hub;
+pub mod inference_proxy;
 pub mod init;
 pub mod logging;
 pub mod onboarding;

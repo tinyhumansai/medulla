@@ -30,7 +30,7 @@ use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
 
 use super::super::wrap::{short_home, wrap_path};
 
-use super::types::Field;
+use super::types::{Field, HarnessLineStyle};
 
 /// The most lines one harness row may occupy.
 ///
@@ -119,12 +119,13 @@ pub(in crate::ui::app::render::agents::rail) fn harness_lines(
     cfg: &StatusLineConfig,
     row: &SessionRow,
     home: Option<&str>,
-    active: bool,
-    width: usize,
-    style: Style,
-    detail_style: Style,
+    render: HarnessLineStyle,
 ) -> Vec<TLine<'static>> {
-    let shown = |field: Field| field.visibility(cfg).shows(active, needs_attention(row));
+    let shown = |field: Field| {
+        field
+            .visibility(cfg)
+            .shows(render.active, render.alerting || needs_attention(row))
+    };
     let mut lines: Vec<TLine<'static>> = Vec::new();
     for index in 0..MAX_LINES {
         let indent = if index == 0 { "" } else { CONT_INDENT };
@@ -134,10 +135,11 @@ pub(in crate::ui::app::render::agents::rail) fn harness_lines(
             home,
             &shown,
             index,
-            width,
+            render.width,
             indent,
-            style,
-            detail_style,
+            render.state_glyph,
+            render.primary,
+            render.detail,
         );
         // A line nothing was assigned to is closed up rather than drawn blank:
         // putting one field on line 3 and none on line 2 should cost the rail
@@ -169,6 +171,7 @@ fn layout_line(
     line: usize,
     width: usize,
     indent: &str,
+    state_glyph: char,
     style: Style,
     detail_style: Style,
 ) -> Vec<Span<'static>> {
@@ -196,7 +199,7 @@ fn layout_line(
         let room = width.saturating_sub(used + separator.width());
 
         let text = match field {
-            Field::State => fit(&row.state.glyph().to_string(), room),
+            Field::State => fit(&state_glyph.to_string(), room),
             Field::Harness => fit(&harness_text(row, cfg.harness_style), room),
             Field::Control => fit(&control_text(row.control, cfg.control_style), room),
             Field::Branch => branch_text(row, room, path_shares_line),

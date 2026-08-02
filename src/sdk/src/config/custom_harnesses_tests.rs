@@ -38,6 +38,21 @@ fn codex_uses_the_openai_endpoint_and_no_claude_tier_environment() {
 }
 
 #[test]
+fn opencode_presets_are_accepted_so_its_traffic_is_attributed_too() {
+    // OpenCode was excluded while presets were only an endpoint adapter, since it
+    // reaches OpenRouter natively. That native path is the one that bypasses
+    // Medulla's attribution proxy, so it is exactly the path that needs a preset.
+    let preset = CustomHarnessConfig::from_editor_line(
+        "deepseek-oc | DeepSeek via OpenCode | opencode | deepseek/deepseek-v4-pro | | host-3",
+    )
+    .unwrap();
+    assert_eq!(preset.base_harness, HarnessProvider::Opencode);
+    assert_eq!(preset.effective_base_url(), OPENROUTER_OPENAI_URL);
+    // Its model arrives through the `-m` argument, like Codex's.
+    assert!(preset.harness_env().is_empty());
+}
+
+#[test]
 fn invalid_presets_fail_loudly() {
     let error = CustomHarnessConfig::from_editor_line(
         "bad id! | DeepSeek | claude | deepseek/model | | this-device",
@@ -45,8 +60,10 @@ fn invalid_presets_fail_loudly() {
     .unwrap_err();
     assert!(error.contains("id must contain"));
     let error =
-        CustomHarnessConfig::from_editor_line("id | name | opencode | model | | host").unwrap_err();
-    assert!(error.contains("claude or codex"));
+        CustomHarnessConfig::from_editor_line("id | name | gemini | model | | host").unwrap_err();
+    assert!(error.contains("claude, codex or opencode"));
+    let error = CustomHarnessConfig::from_editor_line("id | name | claude | model").unwrap_err();
+    assert!(error.contains("expected:"));
 }
 
 #[test]

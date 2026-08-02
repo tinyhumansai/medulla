@@ -112,7 +112,44 @@ impl App {
         rows
     }
 
-    /// The harnesses this operator started, oldest first.
+    /// How many local harnesses are waiting on the operator right now.
+    ///
+    /// Counts every live session on this device, not only the rows on the rail:
+    /// a harness the orchestrator started and then got stuck on a permission
+    /// prompt is exactly the case an operator needs told about, and it has no
+    /// row of its own — it is somewhere inside a lane.
+    ///
+    /// The attached session is excluded. Its prompt is on screen in front of
+    /// the person the count is for, so counting it would ask them to go and
+    /// look at what they are already looking at.
+    /// Reads the waiting *ids* rather than [`rows`](crate::worker::pty::PtyManager::rows),
+    /// which clones every session's whole row. This runs on the render thread
+    /// once per frame for the tab badge, so it takes one lock and copies the
+    /// handful of ids that are actually waiting — usually none.
+    pub(in crate::ui) fn harnesses_waiting(&self) -> usize {
+        let Some(harnesses) = self.harnesses.as_ref() else {
+            return 0;
+        };
+        Self::count_waiting(&harnesses.sessions.waiting_sessions(), &self.harness_focus)
+    }
+
+    /// The same count from an already-collected waiting set.
+    ///
+    /// The rail collects that set anyway to style its lanes, so the header count
+    /// is derived from it instead of taking the lock a second time — and, more
+    /// to the point, the header and the rows beneath it are then answering from
+    /// one snapshot rather than from two taken a few microseconds apart.
+    pub(in crate::ui) fn count_waiting(
+        waiting: &std::collections::HashSet<String>,
+        focus: &crate::ui::harness_pane::HarnessFocus,
+    ) -> usize {
+        waiting
+            .iter()
+            .filter(|id| !focus.is_attached_to(id))
+            .count()
+    }
+
+    /// The harnesses this operator started or now holds, oldest first.
     ///
     /// Exited ones stay listed: the last screen is often the reason it exited,
     /// and a row that vanishes on failure is a row that hides the failure. They
@@ -125,7 +162,9 @@ impl App {
             .sessions
             .rows()
             .into_iter()
-            .filter(|row| row.user_spawned)
+            .filter(|row| {
+                row.user_spawned || row.control == crate::worker::pty::HarnessControl::User
+            })
             .collect();
         rows.sort_by_key(|row| row.started_at);
         rows

@@ -6,7 +6,7 @@
 
 use super::types::{App, Prompt, PromptKind};
 
-const EDITOR_FORMAT: &str = "id | name | claude|codex | model | fast-model | host-id";
+const EDITOR_FORMAT: &str = "id | name | claude|codex|opencode | model | fast-model | host-id";
 
 impl App {
     /// Move the custom-harness cursor one row.

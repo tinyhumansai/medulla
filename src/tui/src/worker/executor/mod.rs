@@ -133,7 +133,14 @@ impl PtySessionExecutor {
             medulla::clock::now_millis(),
         )
         .with_claims(self.claims.clone());
-        let opened = self.session_for(&options, class)?;
+        // Two steps, and the split is load-bearing: `RunTaskOptions` is `Send`
+        // but not `Sync`, so a borrow of it held across an await would make this
+        // future un-spawnable. Deciding what to run is synchronous and gives the
+        // borrow back; only the owned [`LaunchSpec`] crosses the await.
+        let opened = match self.session_for(&options, class)? {
+            SessionPlan::Reuse(opened) => opened,
+            SessionPlan::Launch(spec) => self.launch(spec).await?,
+        };
         if let Some(pinned) = &opened.harness_session_id {
             // A reused session's transcript already exists, so the fresh-session
             // rules — ignore what is already there, discount anything older than
@@ -179,7 +186,7 @@ impl PtySessionExecutor {
         // return sent in the same burst is absorbed by the paste, which leaves
         // the prompt sitting in the composer, complete and unsent.
         if let Err(err) = super::pty::inject_prompt(&self.sessions, &id, &options.prompt).await {
-            self.finish_turn(&id, class);
+            self.finish_turn(&id, class, false);
             return Err(err);
         }
 
@@ -219,7 +226,7 @@ impl PtySessionExecutor {
         let outcome = self
             .await_turn(&id, provider, tailer, abort, on_event, timeout_ms)
             .await;
-        self.finish_turn(&id, class);
+        self.finish_turn(&id, class, outcome.is_ok());
         outcome
     }
 
@@ -228,14 +235,25 @@ impl PtySessionExecutor {
     /// Bounded task sessions normally die with their reply. Operator takeover
     /// changes that lifetime: the PTY is now an interactive workspace, so the
     /// executor may release its busy claim but must not close the process.
-    fn finish_turn(&self, id: &str, class: SessionClass) {
+    fn finish_turn(&self, id: &str, class: SessionClass, settled: bool) {
         if class == SessionClass::Bounded && self.sessions.control(id) != Some(HarnessControl::User)
         {
             self.sessions.close(id);
         } else {
             // Free it for the operator or this peer's next turn. Released on
             // error too: a failed turn left busy can never be reused again.
-            self.sessions.release(id);
+            if settled {
+                self.sessions.settle_turn(id);
+            } else {
+                // A failed reusable turn can leave the harness blocked on the
+                // very prompt that caused the failure. The daemon is about to
+                // drop its task-to-session binding, so hand it to the operator
+                // unconditionally: attention sampling is asynchronous and may
+                // not have latched a brand-new cue yet. User-held sessions have
+                // a direct rail row and cannot be reclaimed behind their back.
+                self.sessions.set_control(id, HarnessControl::User);
+                self.sessions.release(id);
+            }
         }
     }
 
@@ -259,12 +277,15 @@ impl PtySessionExecutor {
         self.sessions.close(id);
     }
 
-    /// Find or open the session that serves this task.
+    /// Decide which session serves this task: reuse an idle one, or launch.
+    ///
+    /// Synchronous, and returns a plan rather than a session, because the launch
+    /// itself must not happen here — see [`PtySessionExecutor::launch`].
     fn session_for(
         &self,
         options: &RunTaskOptions,
         class: SessionClass,
-    ) -> Result<OpenedSession, String> {
+    ) -> Result<SessionPlan, String> {
         // Exclusivity, and it comes first. A workspace an operator is working in
         // is not available to the orchestrator at all — not "reuse nothing in
         // it", but "start nothing in it". Checked ahead of the reuse branch
@@ -295,11 +316,11 @@ impl PtySessionExecutor {
                 .sessions
                 .claim_idle(&options.conversation, options.provider)
             {
-                return Ok(OpenedSession {
+                return Ok(SessionPlan::Reuse(OpenedSession {
                     id: row.id.clone(),
                     harness_session_id: row.session_id.clone(),
                     reused: true,
-                });
+                }));
             }
         }
         let label = if options.conversation.is_empty() {
@@ -314,7 +335,7 @@ impl PtySessionExecutor {
         // same conversation is the same trade the headless executor's own resume
         // path accepts.
         let (env, extra_args) = self.spawn_env(options)?;
-        let id = self.sessions.open(LaunchSpec {
+        Ok(SessionPlan::Launch(LaunchSpec {
             provider: options.provider,
             bin: medulla::tinyplace::env::provider_bin(options.provider, &self.env),
             cwd: options.cwd.clone(),
@@ -329,7 +350,22 @@ impl PtySessionExecutor {
             // next frame landing in a composer they are typing in.
             control: HarnessControl::Orchestrator,
             user_spawned: false,
-        })?;
+        }))
+    }
+
+    /// Start a fresh harness on the blocking pool.
+    ///
+    /// [`PtyManager::open`] forks, execs, and may back off while a pty frees up
+    /// — all of it blocking. Calling it inline parked a tokio worker for up to
+    /// half a second per launch, and a burst of task frames could park most of
+    /// the runtime, taking the inbox drain and every screen sampler down with
+    /// it since they share one. So the launch goes to the blocking pool, which
+    /// is what it is for.
+    async fn launch(&self, spec: LaunchSpec) -> Result<OpenedSession, String> {
+        let sessions = self.sessions.clone();
+        let id = tokio::task::spawn_blocking(move || sessions.open(spec))
+            .await
+            .map_err(|err| format!("pty launch did not complete: {err}"))??;
         let harness_session_id = self.sessions.row(&id).and_then(|row| row.session_id);
         Ok(OpenedSession {
             id,
@@ -367,15 +403,29 @@ impl PtySessionExecutor {
             options.provider,
             options.attribution,
         ));
-        if let Some(router) = &options.router {
+        // OpenRouter-bound runs are re-pointed at Medulla's loopback attribution
+        // proxy, and the real key is scrubbed from `env` here, before any of it
+        // reaches the child. A no-op for every other endpoint.
+        let mut router = options.router.clone();
+        medulla::inference_proxy::route_spawn(options.provider, &mut router, &mut env)?;
+        if let Some(router) = &router {
             let injection = medulla::tinyplace::env::router_env(options.provider, router);
             for (key, value) in injection.env {
                 env.insert(key, value);
             }
             for (child_var, source_name) in injection.secret_env {
-                match options.env.get(&source_name).filter(|v| !v.is_empty()) {
+                // Resolved from `env`, not `options.env`: when the run was routed
+                // through the attribution proxy the name to resolve is the token
+                // the routing just placed there, and the original key has been
+                // scrubbed. Cloned before inserting so the read does not borrow
+                // across the write.
+                let secret = env
+                    .get(&source_name)
+                    .filter(|value| !value.is_empty())
+                    .cloned();
+                match secret {
                     Some(secret) => {
-                        env.insert(child_var, secret.clone());
+                        env.insert(child_var, secret);
                     }
                     None => {
                         return Err(format!(
@@ -547,5 +597,5 @@ pub fn agent_kind(provider: HarnessProvider) -> Option<SessionAgentKind> {
 }
 
 mod types;
-use types::OpenedSession;
 pub use types::PtySessionExecutor;
+use types::{OpenedSession, SessionPlan};

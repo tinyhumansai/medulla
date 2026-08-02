@@ -126,7 +126,7 @@ impl App {
             }
             let row = sample();
             for (offset, line) in self
-                .own_harness_lines(&row, *active, width)
+                .own_harness_lines(&row, *active, width, medulla::clock::now_millis())
                 .into_iter()
                 .enumerate()
             {
@@ -166,6 +166,7 @@ fn sample_selected() -> SessionRow {
         busy: false,
         control: HarnessControl::User,
         user_spawned: true,
+        attention: None,
     }
 }
 

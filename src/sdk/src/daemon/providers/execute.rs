@@ -55,17 +55,25 @@ pub fn with_auth_hint(message: &str) -> String {
 
 /// Run one delegated task headlessly, retrying transient opencode SQLite-lock
 /// exits with jittered exponential backoff.
-pub async fn run_provider_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
+pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskResult, String> {
+    // Ahead of the ACP branch on purpose: both transports end up talking to the
+    // same endpoint with the same credential, so both must be routed through
+    // Medulla's loopback proxy for the attribution headers on the wire to be ours
+    // and for the child to never hold the real key. A no-op for every endpoint
+    // that is not OpenRouter.
+    crate::inference_proxy::route_spawn(options.provider, &mut options.router, &mut options.env)?;
     if super::acp::uses_acp(&options) {
         return super::acp::run_acp_task(options).await;
     }
     let mut on_event = options.on_event;
     let mut on_stdin = options.on_stdin;
+    let router = options.router;
+    let env = options.env;
     let spec = RunSpec {
         provider: options.provider,
         prompt: options.prompt,
         cwd: options.cwd,
-        env: options.env,
+        env,
         timeout_ms: options.timeout_ms,
         model: options.model,
         agent: options.agent,
@@ -73,7 +81,7 @@ pub async fn run_provider_task(options: RunTaskOptions) -> Result<RunTaskResult,
         skip_permissions: options.skip_permissions,
         resume_session_id: options.resume_session_id,
         abort: options.abort,
-        router: options.router,
+        router,
         attribution: options.attribution,
     };
     let mut attempt: u32 = 1;

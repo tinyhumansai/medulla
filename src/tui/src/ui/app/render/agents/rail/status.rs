@@ -45,9 +45,17 @@ impl HarnessVisualState {
         }
     }
 
-    /// Only active work flashes; every terminal or waiting state stays solid.
+    /// Whether the row should blink.
+    ///
+    /// Active work does, because a lane that is moving reads differently from
+    /// one that has stopped. A lane waiting on the operator does too, and for a
+    /// stronger reason: it is the only state on this rail that will not resolve
+    /// itself, so it is the only one worth pulling an eye off another pane for.
+    /// The two are told apart by colour — green is moving, yellow wants you.
+    ///
+    /// Terminal states stay solid: nothing about them is waiting.
     pub(super) fn flashes(self) -> bool {
-        self == Self::Working
+        matches!(self, Self::Working | Self::NeedsInput)
     }
 }
 

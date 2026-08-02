@@ -108,6 +108,32 @@ async fn a_session_showing_a_startup_dialog_is_not_typed_at() {
 }
 
 #[tokio::test]
+async fn a_failed_injection_preserves_bell_only_attention() {
+    let manager = PtyManager::new();
+    let id = manager
+        .open(sh(
+            "stty -echo -icanon min 1; printf '\\033[?2004hblocked\\a\\r\\n'; cat > /dev/null",
+        ))
+        .unwrap();
+    wait_for("the bell-only prompt to be classified", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == super::super::AttentionKind::Bell)
+    });
+
+    super::super::inject::inject_prompt(&manager, &id, "ship the fix")
+        .await
+        .expect_err("a harness that never echoes the paste must reject injection");
+    assert!(
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == super::super::AttentionKind::Bell),
+        "failed preflight and paste attempts must not erase the only prompt cue"
+    );
+    manager.close(&id);
+}
+
+#[tokio::test]
 async fn codexs_trust_dialog_is_dismissed_so_the_prompt_lands() {
     // The end-to-end proof of the dismissal path: a session sitting on codex's
     // trust dialog must not be reported as a wall (as claude's are) but

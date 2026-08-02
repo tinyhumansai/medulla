@@ -4,3 +4,4 @@ mod layout;
 mod types;
 
 pub(super) use layout::harness_lines;
+pub(super) use types::HarnessLineStyle;

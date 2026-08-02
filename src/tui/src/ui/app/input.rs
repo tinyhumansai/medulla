@@ -509,7 +509,7 @@ impl App {
     }
 
     /// The `(worker address, task id)` the current selection asks to watch.
-    fn watch_target(&self) -> Option<(String, String)> {
+    pub(super) fn watch_target(&self) -> Option<(String, String)> {
         // Only on the Agents tab: leaving it releases the subscription.
         if self.tab() != "Agents" {
             return None;

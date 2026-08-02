@@ -309,6 +309,24 @@ fn killing_a_watched_harness_requires_confirmation() {
 }
 
 #[test]
+fn killing_resolves_the_current_rail_selection_instead_of_the_cached_watch() {
+    let mut app = app();
+    select_first_task(&mut app).expect("the fixture has a selectable task");
+    let selected = app.watch_target().expect("the selected task is watchable");
+    app.watching = Some(("stale-worker".into(), "stale-task".into()));
+    app.focus_agents_rail();
+
+    app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+    assert_eq!(app.kill_armed.as_ref(), Some(&selected));
+
+    let cmd = app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    let Some(Cmd::KillTask { worker, task_id }) = cmd else {
+        panic!("confirming should kill the selected task");
+    };
+    assert_eq!((worker, task_id), selected);
+}
+
+#[test]
 fn any_other_key_cancels_a_harness_kill() {
     let mut app = app();
     select_first_task(&mut app).expect("the fixture has a selectable task");

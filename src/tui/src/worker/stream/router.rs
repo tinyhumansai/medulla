@@ -97,18 +97,14 @@ impl ScreenRouter {
                 }
             }
             ScreenMessage::Kill { task_id } => {
-                let Some(session_id) = self.runtime.session_for_task(from, &task_id) else {
+                if !self.runtime.abort_task(from, &task_id) {
                     self.log(&format!(
                         "screen: refused kill from {from} on {task_id} — no such running task for this sender"
                     ));
                     return;
-                };
-                if self.sessions.close(&session_id) {
-                    self.registry.unsubscribe(&task_id);
-                    self.log(&format!(
-                        "screen: {from} killed {task_id} (session {session_id})"
-                    ));
                 }
+                self.registry.unsubscribe(&task_id);
+                self.log(&format!("screen: {from} killed {task_id}"));
             }
             // The sampler chains from the last frame it actually sent, so an
             // acknowledgement is not needed to decide what to send next. Kept in

@@ -185,6 +185,20 @@ impl DaemonRuntime {
             .and_then(|task| task.session_id.clone())
     }
 
+    /// Abort the running task identified by its authenticated sender and id.
+    ///
+    /// The abort remains bound to the task record while the map is locked. This
+    /// avoids resolving a reusable session id and acting on it after a later
+    /// task has claimed the same harness.
+    pub fn abort_task(&self, from: &str, task_id: &str) -> bool {
+        let running = self.inner.running.lock().unwrap();
+        let Some(task) = running.get(&Self::task_key(from, task_id)) else {
+            return false;
+        };
+        task.abort.abort();
+        true
+    }
+
     /// Record the session an executor opened for a running task.
     pub(super) fn record_task_session(&self, key: &str, session_id: String) {
         if let Some(task) = self.inner.running.lock().unwrap().get_mut(key) {

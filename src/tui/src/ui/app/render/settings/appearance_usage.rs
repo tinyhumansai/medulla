@@ -22,7 +22,11 @@ impl App {
         f.render_widget(block, area);
         let sel = self.appearance_index.min(APPEARANCE_ROWS - 1);
         let mut lines: Vec<TLine> = Vec::new();
+        let mut selected_line_index: usize = 0;
         for (i, role) in THEME_ROLES.iter().enumerate() {
+            if i == sel {
+                selected_line_index = lines.len();
+            }
             let c = self.theme.role(i);
             let text_style = if i == sel {
                 self.theme.selection()
@@ -68,6 +72,9 @@ impl App {
                 _ => {}
             }
             let index = THEME_ROLES.len() + offset;
+            if index == sel {
+                selected_line_index = lines.len();
+            }
             let style = if index == sel {
                 self.theme.selection()
             } else {
@@ -101,12 +108,14 @@ impl App {
             where_saved,
             Style::default().add_modifier(Modifier::DIM),
         )));
-        // Scroll to keep the selected row visible on short terminals.
+        // Scroll to keep the selected row visible on short terminals. The actual
+        // display line of the selected row differs from `sel` due to inserted
+        // headers and blank lines, so we track the line index as we build.
         let height = inner.height as usize;
-        let scroll = if sel < height {
+        let scroll = if selected_line_index < height {
             0
         } else {
-            sel.saturating_sub(height / 2)
+            selected_line_index.saturating_sub(height / 2)
         };
         f.render_widget(
             Paragraph::new(Text::from(lines)).scroll((scroll as u16, 0)),

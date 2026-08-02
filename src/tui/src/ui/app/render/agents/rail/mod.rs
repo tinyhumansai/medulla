@@ -15,6 +15,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::ui::agents::{AgentLane, TaskStatus};
+use crate::ui::resources::DeviceSnapshot;
 use crate::worker::pty::ATTENTION_GLYPH;
 
 use super::super::super::rail::{RailRow, NEW_HARNESS_LABEL};
@@ -183,12 +184,20 @@ impl App {
         let device_budget = (inner.height as usize)
             .saturating_sub(MIN_RAIL_LINES + 1)
             .min(DEVICE_METRICS);
-        let device = crate::ui::resources::device_lines(
-            &self.loaded.config.appearance,
-            self.device_monitor.sample(),
-            width,
-            device_budget,
-        );
+        // Skip sampling when all device metrics are disabled to avoid unnecessary
+        // host polling and mount discovery when the indicators are off.
+        let appearance = &self.loaded.config.appearance;
+        let any_device_metric_enabled = appearance.device_cpu
+            != medulla::config::ResourceDisplay::Off
+            || appearance.device_ram != medulla::config::ResourceDisplay::Off
+            || appearance.device_disk != medulla::config::ResourceDisplay::Off;
+        let device_snapshot = if any_device_metric_enabled {
+            self.device_monitor.sample()
+        } else {
+            DeviceSnapshot::default()
+        };
+        let device =
+            crate::ui::resources::device_lines(appearance, device_snapshot, width, device_budget);
         // The separator only earns its row when there is something to separate.
         let footer_height = if device.is_empty() {
             0

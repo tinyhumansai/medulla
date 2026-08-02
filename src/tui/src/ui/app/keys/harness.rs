@@ -79,7 +79,7 @@ impl App {
         // still drawn — and so still resolves a harness session — which is how
         // Enter in the "start a harness" modal used to attach to the harness
         // already selected underneath it instead of launching the chosen one.
-        if false {
+        if self.overlay_owns_keys() {
             return false;
         }
         let enter_on_harness = key.code == KeyCode::Enter

@@ -1,6 +1,11 @@
 //! Compatibility tests for additive worker capability fields.
 
-use crate::tinyplace::{parse_agent_capabilities, AgentCapabilities};
+use crate::tinyplace::{parse_agent_capabilities, AgentCapabilities, BudgetWindow};
+
+#[test]
+fn budget_window_defaults_to_unknown() {
+    assert_eq!(BudgetWindow::default(), BudgetWindow::Unknown);
+}
 
 #[test]
 fn screen_kill_support_is_additive_and_defaults_off_for_older_workers() {

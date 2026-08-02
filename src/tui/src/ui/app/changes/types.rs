@@ -134,7 +134,7 @@ impl GitChangesState {
         if patch_changed {
             if let Some(path) = selected_path {
                 self.comments
-                    .mark_outdated_if_invalid(&path, &self.patch, self.hunks.len());
+                    .mark_outdated_if_invalid(&path, &self.patch, &self.hunks);
             }
         }
     }

@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use super::types::{CommentAnchor, ReviewComment};
+use super::types::{CommentAnchor, Hunk, ReviewComment};
 
 /// Review comments held for the lifetime of one TUI session.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -113,12 +113,13 @@ impl ReviewComments {
     /// - Their stored context (line text) no longer matches at that index
     ///
     /// Hunk comments are marked outdated if:
-    /// - Their index exceeds the hunk count
+    /// - Their index exceeds the hunk count, OR
+    /// - Their stored context (hunk header) no longer matches at that index
     pub fn mark_outdated_if_invalid(
         &mut self,
         path: &Path,
         patch_lines: &[String],
-        hunk_count: usize,
+        hunks: &[Hunk],
     ) {
         for item in self.items.iter_mut() {
             if item.path != path {
@@ -140,7 +141,12 @@ impl ReviewComments {
                     }
                 }
                 CommentAnchor::Hunk(index) => {
-                    if index >= hunk_count {
+                    let is_valid = index < hunks.len()
+                        && (item.anchor_context.is_empty()
+                            || patch_lines
+                                .get(hunks[index].header)
+                                .map_or(false, |line| line == &item.anchor_context));
+                    if !is_valid {
                         item.outdated = true;
                     }
                 }

@@ -31,6 +31,7 @@ fn task_without_tool_mode_clears_an_inherited_mode() {
     env = crate::daemon::task_loop::with_tool_mode_at_depth(env, None, 0);
 
     assert!(!env.contains_key(crate::mcp::TOOL_MODE_ENV));
+    assert!(!env.contains_key(crate::daemon::providers::HARNESS_PROTOCOL_ENV));
 }
 
 #[cfg(feature = "workflows")]
@@ -47,6 +48,23 @@ fn task_with_tool_mode_forces_acp_transport() {
             .map(String::as_str),
         Some("acp")
     );
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn delegated_full_mode_task_forces_acp_transport() {
+    let env = crate::daemon::task_loop::with_tool_mode_at_depth(
+        std::collections::HashMap::new(),
+        None,
+        1,
+    );
+
+    assert_eq!(
+        env.get(crate::daemon::providers::HARNESS_PROTOCOL_ENV)
+            .map(String::as_str),
+        Some("acp")
+    );
+    assert!(!env.contains_key(crate::mcp::TOOL_MODE_ENV));
 }
 
 #[tokio::test]

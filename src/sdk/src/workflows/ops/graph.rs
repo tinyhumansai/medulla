@@ -60,22 +60,30 @@ pub fn set_defaults(
     harness: Option<&str>,
     model: Option<&str>,
 ) -> Result<Value, WorkflowError> {
-    let mut record = require(store.as_ref(), id)?;
-    if let Some(harness) = harness {
-        record.defaults.harness = Some(harness.trim().to_string()).filter(|s| !s.is_empty());
+    const MAX_RETRIES: usize = 16;
+    for _ in 0..MAX_RETRIES {
+        let mut record = require(store.as_ref(), id)?;
+        let expected = crate::workflows::record_fingerprint(&record);
+        if let Some(harness) = harness {
+            record.defaults.harness = Some(harness.trim().to_string()).filter(|s| !s.is_empty());
+        }
+        if let Some(model) = model {
+            record.defaults.model = Some(model.trim().to_string()).filter(|s| !s.is_empty());
+        }
+        record
+            .defaults
+            .preference()
+            .map_err(|message| WorkflowError::Invalid {
+                id: id.to_string(),
+                messages: vec![format!("`defaults`: {message}")],
+            })?;
+        if store.save_if_record_fingerprint(&record, &expected)? {
+            return Ok(json!({ "updated": record.id, "defaults": record.defaults }));
+        }
     }
-    if let Some(model) = model {
-        record.defaults.model = Some(model.trim().to_string()).filter(|s| !s.is_empty());
-    }
-    record
-        .defaults
-        .preference()
-        .map_err(|message| WorkflowError::Invalid {
-            id: id.to_string(),
-            messages: vec![format!("`defaults`: {message}")],
-        })?;
-    store.save(&record)?;
-    Ok(json!({ "updated": record.id, "defaults": record.defaults }))
+    Err(WorkflowError::Engine(format!(
+        "workflow '{id}' kept changing while its defaults were being saved; retry the edit"
+    )))
 }
 
 /// Remove a workflow.

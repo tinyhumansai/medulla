@@ -394,6 +394,31 @@ impl WorkflowStore for FileWorkflowStore {
         })
     }
 
+    fn save_if_record_fingerprint(
+        &self,
+        record: &WorkflowRecord,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.with_definition_lock(&record.id, || {
+            let Some(current) = self.get(&record.id)? else {
+                return Ok(false);
+            };
+            if crate::workflows::record_fingerprint(&current) != expected_fingerprint {
+                return Ok(false);
+            }
+            let path = self.definition_path(&record.id)?;
+            validate_graph(&record.id, &record.graph)?;
+            let document = to_document(record)?;
+            revisions::capture(self.write_dir(), &current)?;
+            write_atomic(&path, &document)?;
+            Ok(true)
+        })
+    }
+
     fn delete(&self, id: &str) -> Result<(), WorkflowError> {
         // See `save`'s matching guard and `write_lock`'s doc comment: this is
         // the same read (`load`/`get`), snapshot, write shape.

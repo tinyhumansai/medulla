@@ -106,6 +106,66 @@ fn concurrent_store_instances_rebase_graph_ops_instead_of_losing_one() {
 }
 
 #[test]
+fn graph_ops_and_defaults_rebase_without_reverting_each_other() {
+    let root = tempfile::tempdir().unwrap();
+    let definitions = root.path().join("workflows");
+    let runs = root.path().join("runs");
+    let graph_store: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![definitions.clone()],
+        runs.clone(),
+    ));
+    let defaults_store: Arc<dyn WorkflowStore> =
+        Arc::new(FileWorkflowStore::new(vec![definitions.clone()], runs));
+    create_workflow(&graph_store, &document("sweep"), "sweep").unwrap();
+
+    // Make both independent processes read the same original record before
+    // either compare-and-swap can win. Whichever write lands first, the loser
+    // must rebase rather than restoring its stale copy of the other fields.
+    let lock_path = definitions.join(".sweep.lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)
+        .unwrap();
+    lock.lock_exclusive().unwrap();
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+
+    let graph_barrier = barrier.clone();
+    let graph_edit = std::thread::spawn(move || {
+        graph_barrier.wait();
+        apply_workflow_ops(
+            &graph_store,
+            "sweep",
+            &[GraphOp::SetNodeName {
+                id: "work".into(),
+                name: "Renamed".into(),
+            }],
+        )
+    });
+    let defaults_barrier = barrier.clone();
+    let defaults_edit = std::thread::spawn(move || {
+        defaults_barrier.wait();
+        crate::workflows::ops::set_defaults(&defaults_store, "sweep", Some("codex"), Some("gpt-5"))
+    });
+    barrier.wait();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    FileExt::unlock(&lock).unwrap();
+
+    graph_edit.join().unwrap().unwrap();
+    defaults_edit.join().unwrap().unwrap();
+    let check: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![definitions],
+        root.path().join("check-runs"),
+    ));
+    let record = check.get("sweep").unwrap().unwrap();
+    assert_eq!(record.graph.node("work").unwrap().name, "Renamed");
+    assert_eq!(record.defaults.harness.as_deref(), Some("codex"));
+    assert_eq!(record.defaults.model.as_deref(), Some("gpt-5"));
+}
+
+#[test]
 fn a_config_patch_merges_rather_than_replacing_the_whole_config() {
     let (_root, store) = store();
     create_workflow(&store, &document("sweep"), "sweep").unwrap();

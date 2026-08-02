@@ -36,8 +36,8 @@ pub fn apply_workflow_ops(
     const MAX_RETRIES: usize = 16;
     for _ in 0..MAX_RETRIES {
         let current = require(store.as_ref(), id)?;
-        let expected = crate::workflows::fingerprint(&current.graph);
-        if let Some(record) = apply_workflow_ops_if_unchanged(store, id, ops, &expected)? {
+        let expected = crate::workflows::record_fingerprint(&current);
+        if let Some(record) = apply_workflow_ops_if_record_unchanged(store, id, ops, &expected)? {
             return Ok(record);
         }
     }
@@ -72,6 +72,27 @@ pub fn apply_workflow_ops_if_unchanged(
     validate_graph(id, &record.graph)?;
     crate::workflows::gates::check(id, &record.graph)?;
     if !store.save_if_fingerprint(&record, expected_fingerprint)? {
+        return Ok(None);
+    }
+    Ok(Some(record))
+}
+
+/// Apply graph ops only while the whole workflow record remains unchanged.
+fn apply_workflow_ops_if_record_unchanged(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    ops: &[GraphOp],
+    expected_fingerprint: &str,
+) -> Result<Option<WorkflowRecord>, WorkflowError> {
+    let mut record = require(store.as_ref(), id)?;
+    if crate::workflows::record_fingerprint(&record) != expected_fingerprint {
+        return Ok(None);
+    }
+    record.graph = apply_ops(&record.graph, ops)
+        .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
+    validate_graph(id, &record.graph)?;
+    crate::workflows::gates::check(id, &record.graph)?;
+    if !store.save_if_record_fingerprint(&record, expected_fingerprint)? {
         return Ok(None);
     }
     Ok(Some(record))

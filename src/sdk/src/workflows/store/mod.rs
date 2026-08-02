@@ -91,6 +91,26 @@ pub trait WorkflowStore: Send + Sync {
         Ok(true)
     }
 
+    /// Save only when the entire current record still has `expected_fingerprint`.
+    ///
+    /// Definition edits use this stronger comparison so a graph write cannot
+    /// silently restore stale defaults or metadata. File-backed stores override
+    /// it atomically; the default supports lightweight test stores.
+    fn save_if_record_fingerprint(
+        &self,
+        record: &WorkflowRecord,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        let Some(current) = self.get(&record.id)? else {
+            return Ok(false);
+        };
+        if crate::workflows::record_fingerprint(&current) != expected_fingerprint {
+            return Ok(false);
+        }
+        self.save(record)?;
+        Ok(true)
+    }
+
     /// Remove a workflow. Removing one that does not exist is an error, so a
     /// caller cannot mistake a typo for a successful delete.
     fn delete(&self, id: &str) -> Result<(), WorkflowError>;

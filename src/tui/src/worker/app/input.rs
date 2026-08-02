@@ -16,7 +16,24 @@ impl WorkerApp {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
             Event::Mouse(mouse) => self.on_mouse(mouse),
+            Event::Paste(text) => {
+                self.on_paste(&text);
+                None
+            }
             _ => None,
+        }
+    }
+
+    /// Insert a bracketed-paste payload into the open text prompt, if any.
+    ///
+    /// The worker shares the main TUI's terminal guard, so bracketed paste is on
+    /// here too and a pasted master address or workspace path arrives as one
+    /// event rather than as key presses. Without this arm the payload — the
+    /// whole point of the pairing prompt — would be dropped. There is no prompt
+    /// open on the plain tabs, so a paste there is simply ignored.
+    fn on_paste(&mut self, text: &str) {
+        if let Some(prompt) = self.prompt.as_mut() {
+            prompt.paste(text);
         }
     }
 

@@ -13,6 +13,17 @@ impl Draft {
     }
 }
 
+impl<K> TextPrompt<K> {
+    /// Insert a paste payload at the prompt's caret, flattened to one line.
+    ///
+    /// Prompts submit on `Enter`, so a payload that kept its line breaks would
+    /// have to be either dropped or turned into several submissions; flattening
+    /// keeps the whole paste visible and editable instead.
+    pub fn paste(&mut self, text: &str) {
+        self.draft = insert_at(&self.draft.text, self.draft.cursor, &flatten_paste(text));
+    }
+}
+
 /// Apply standard single-line prompt editing.
 ///
 /// Control and Alt character chords are consumed without inserting their
@@ -68,6 +79,29 @@ pub fn caret_row_col(text: &str, cursor: usize) -> Caret {
         None => clamped,
     };
     Caret { row, col }
+}
+
+/// Normalise a bracketed-paste payload to the composer's newline form.
+///
+/// A terminal hands the payload over verbatim, so text copied from a Windows
+/// file carries `\r\n` and text from a classic-Mac source carries a bare `\r`.
+/// The draft stores `\n` only, and the caret math here ([`caret_row_col`],
+/// [`move_caret_row`]) counts `\n` alone — an embedded `\r` would leave the
+/// caret pointing at a row the renderer never draws, and most terminals redraw
+/// a stray `\r` as a jump to column zero.
+pub fn normalize_paste(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Normalise a paste payload for a single-line field.
+///
+/// Line-oriented prompts (the login token box, the worker's pairing and
+/// workspace prompts) have no second row to put a line break on, so every break
+/// becomes a space. The common case — text copied with a trailing newline — then
+/// lands as the value plus one space, which every caller's `trim` on submit
+/// removes.
+pub fn flatten_paste(text: &str) -> String {
+    normalize_paste(text).replace('\n', " ")
 }
 
 /// Insert `value` at the caret, returning the new draft.

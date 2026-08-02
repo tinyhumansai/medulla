@@ -49,6 +49,7 @@ impl App {
         // Read before `loaded` is moved into the struct below.
         let handback_policy = HandbackPolicy::from_config(&loaded.config.harness.handback);
         let harness_skip_permissions = loaded.config.harness.skip_permissions;
+        let status_line_promotion_pending = loaded.config.status_line.is_none();
         App {
             runtime,
             loaded,
@@ -116,6 +117,8 @@ impl App {
             settings_index: 0,
             settings_focused: false,
             appearance_index: 0,
+            status_line_index: 0,
+            status_line_promotion_pending,
             config_index: 0,
             logout_armed: false,
             relogin_requested: false,

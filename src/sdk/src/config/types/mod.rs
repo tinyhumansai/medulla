@@ -69,6 +69,7 @@ mod mcp;
 mod mcp_tests;
 mod orchestration;
 mod presentation;
+mod status_line;
 
 pub use connections::*;
 pub use document::*;
@@ -76,3 +77,4 @@ pub use fleet::*;
 pub use mcp::*;
 pub use orchestration::*;
 pub use presentation::*;
+pub use status_line::*;

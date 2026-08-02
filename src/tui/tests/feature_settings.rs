@@ -56,6 +56,7 @@ fn settings_tab_renders_nav_and_default_usage_subpage() {
     for name in [
         "Usage",
         "Appearance",
+        "Status line",
         "Config",
         "Feedback",
         "Trace",
@@ -76,9 +77,11 @@ fn number_keys_jump_subpages() {
     let _ = key(&mut app, KeyCode::Char('2'));
     assert_eq!(app.settings_subpage(), "Appearance");
     let _ = key(&mut app, KeyCode::Char('3'));
+    assert_eq!(app.settings_subpage(), "Status line");
+    let _ = key(&mut app, KeyCode::Char('4'));
     assert_eq!(app.settings_subpage(), "Config");
-    // Help is the last subpage — eighth, now that Feedback is back on the nav.
-    let _ = key(&mut app, KeyCode::Char('8'));
+    // Help is the last subpage — ninth, now that Status line is on the nav.
+    let _ = key(&mut app, KeyCode::Char('9'));
     assert_eq!(app.settings_subpage(), "Help");
     let out = text_of(&draw(&mut app, 140, 40));
     assert!(out.contains("Commands"), "help subpage: {out}");
@@ -97,9 +100,25 @@ fn arrow_keys_move_subpage_selector() {
     let _ = key(&mut app, KeyCode::Down);
     assert_eq!(app.settings_subpage(), "Appearance");
     let _ = key(&mut app, KeyCode::Down);
-    assert_eq!(app.settings_subpage(), "Config");
+    assert_eq!(app.settings_subpage(), "Status line");
     let _ = key(&mut app, KeyCode::Up);
     assert_eq!(app.settings_subpage(), "Appearance");
+}
+
+#[test]
+fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
+    let mut app = settings_app();
+    let _ = key(&mut app, KeyCode::Char('3'));
+    for _ in 0..12 {
+        let _ = key(&mut app, KeyCode::Down);
+    }
+
+    let out = text_of(&draw(&mut app, 80, 24));
+
+    assert!(
+        out.contains("shortened"),
+        "the selected path-style value must remain visible: {out}"
+    );
 }
 
 #[test]
@@ -170,6 +189,7 @@ fn each_settings_subpage_renders_its_signature() {
     let signatures = [
         ("Usage", "This session"),
         ("Appearance", "Appearance"),
+        ("Status line", "Preview"),
         ("Config", "Effective configuration ·"),
         ("Trace", "Trace ·"),
         ("Context", "Environment ·"),

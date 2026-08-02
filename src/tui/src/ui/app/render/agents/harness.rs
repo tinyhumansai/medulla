@@ -18,6 +18,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::ui::harness_pane::FOCUS_CHORD_LABEL;
+use crate::worker::pty::ATTENTION_GLYPH;
 use crate::worker::screen::screen_lines;
 
 use super::super::super::types::App;
@@ -122,6 +123,14 @@ impl App {
             .harnesses
             .as_ref()
             .and_then(|harnesses| harnesses.sessions.row(session_id));
+        // What it is waiting for, before what it is: an operator who opened this
+        // pane because a row was blinking should not have to read the screen to
+        // find out why. Dropped once attached — they are in it now, and the
+        // prompt itself is a foot below the title.
+        let waiting = match (&row, attached) {
+            (Some(row), false) if row.state.is_running() => row.attention.clone(),
+            _ => None,
+        };
         let what = match &row {
             // Who holds it goes in the title because it is the fact that
             // decides whether a prompt typed here will be interleaved with the
@@ -139,6 +148,11 @@ impl App {
         };
         if attached {
             format!("{what} · typing here · {FOCUS_CHORD_LABEL} to release")
+        } else if let Some(cue) = waiting {
+            format!(
+                "{what} · {ATTENTION_GLYPH} {} · Enter or {FOCUS_CHORD_LABEL} to answer",
+                cue.label(medulla::clock::now_millis())
+            )
         } else {
             format!("{what} · Enter or {FOCUS_CHORD_LABEL} to type")
         }

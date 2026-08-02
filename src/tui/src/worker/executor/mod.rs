@@ -186,7 +186,7 @@ impl PtySessionExecutor {
         // return sent in the same burst is absorbed by the paste, which leaves
         // the prompt sitting in the composer, complete and unsent.
         if let Err(err) = super::pty::inject_prompt(&self.sessions, &id, &options.prompt).await {
-            self.finish_turn(&id, class);
+            self.finish_turn(&id, class, false);
             return Err(err);
         }
 
@@ -226,7 +226,7 @@ impl PtySessionExecutor {
         let outcome = self
             .await_turn(&id, provider, tailer, abort, on_event, timeout_ms)
             .await;
-        self.finish_turn(&id, class);
+        self.finish_turn(&id, class, outcome.is_ok());
         outcome
     }
 
@@ -235,14 +235,25 @@ impl PtySessionExecutor {
     /// Bounded task sessions normally die with their reply. Operator takeover
     /// changes that lifetime: the PTY is now an interactive workspace, so the
     /// executor may release its busy claim but must not close the process.
-    fn finish_turn(&self, id: &str, class: SessionClass) {
+    fn finish_turn(&self, id: &str, class: SessionClass, settled: bool) {
         if class == SessionClass::Bounded && self.sessions.control(id) != Some(HarnessControl::User)
         {
             self.sessions.close(id);
         } else {
             // Free it for the operator or this peer's next turn. Released on
             // error too: a failed turn left busy can never be reused again.
-            self.sessions.release(id);
+            if settled {
+                self.sessions.settle_turn(id);
+            } else {
+                // A failed reusable turn can leave the harness blocked on the
+                // very prompt that caused the failure. The daemon is about to
+                // drop its task-to-session binding, so hand it to the operator
+                // unconditionally: attention sampling is asynchronous and may
+                // not have latched a brand-new cue yet. User-held sessions have
+                // a direct rail row and cannot be reclaimed behind their back.
+                self.sessions.set_control(id, HarnessControl::User);
+                self.sessions.release(id);
+            }
         }
     }
 

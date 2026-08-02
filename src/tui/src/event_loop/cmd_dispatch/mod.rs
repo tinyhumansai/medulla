@@ -50,6 +50,9 @@ pub(crate) fn clear_copilot_hosts() {
 #[cfg(not(feature = "workflows"))]
 pub(crate) fn clear_copilot_hosts() {}
 
+#[cfg(test)]
+mod tests;
+
 /// Translate a [`Cmd`] emitted by the app into a spawned async task whose result
 /// is reported back over the [`AppMsg`] channel. Memory queries touch SQLite so
 /// they run on `spawn_blocking` off the UI thread.

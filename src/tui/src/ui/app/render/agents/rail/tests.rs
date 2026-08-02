@@ -12,13 +12,25 @@ use ratatui::text::{Line as TLine, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::App;
-use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
+use crate::worker::pty::{AttentionKind, HarnessAttention, HarnessControl, PtyState, SessionRow};
 
+use super::rail_title;
+use super::state::{classify_lane, lane_waiting_session, task_waiting_session};
+use super::status::HarnessVisualState;
 use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
 
-fn app() -> App {
+pub(super) fn app() -> App {
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()))
+}
+
+/// A fixed "now" for row rendering, so an elapsed-time suffix in an assertion
+/// does not depend on when the test ran.
+pub(super) const NOW: i64 = 10_000;
+
+/// No harness is waiting, which is what most of these rows assume.
+fn none_waiting() -> std::collections::HashSet<String> {
+    std::collections::HashSet::new()
 }
 
 fn lane() -> AgentLane {
@@ -54,7 +66,7 @@ fn task(status: TaskStatus, attention: bool, at: i64) -> TaskState {
     }
 }
 
-fn harness_row(cwd: &str) -> SessionRow {
+pub(super) fn harness_row(cwd: &str) -> SessionRow {
     SessionRow {
         id: "w_1".into(),
         label: "local".into(),
@@ -69,13 +81,22 @@ fn harness_row(cwd: &str) -> SessionRow {
         busy: false,
         control: HarnessControl::User,
         user_spawned: true,
+        attention: None,
     }
+}
+
+#[test]
+fn viewport_keeps_all_three_lines_of_the_selected_harness_visible() {
+    // One row precedes the selected three-line harness and another follows it.
+    // Centering only the selected row's first line starts at zero and clips its
+    // final line, while starting at one keeps the complete row in view.
+    assert_eq!(super::selected_row_viewport_start(1, 4, 5, 3), 1);
 }
 
 #[test]
 fn an_operator_harness_uses_one_compact_line_like_the_orchestrator() {
     let app = app();
-    let lines = app.own_harness_lines(&harness_row("/workspace/medulla"), false, 48);
+    let lines = app.own_harness_lines(&harness_row("/workspace/medulla"), false, 48, NOW);
 
     assert_eq!(lines.len(), 1, "a harness should consume one rail row");
     assert_eq!(
@@ -91,6 +112,7 @@ fn a_long_harness_path_is_shortened_instead_of_adding_rows() {
         &harness_row("/workspace/tinyhumans/products/medulla-public"),
         false,
         36,
+        NOW,
     );
 
     assert_eq!(lines.len(), 1, "a long path must still use one rail row");
@@ -105,7 +127,7 @@ fn a_long_harness_path_is_shortened_instead_of_adding_rows() {
 fn a_harness_prefix_never_exceeds_the_available_width() {
     let app = app();
     for width in [0, 1, 4, 8] {
-        let line = &app.own_harness_lines(&harness_row("/workspace/medulla"), false, width)[0];
+        let line = &app.own_harness_lines(&harness_row("/workspace/medulla"), false, width, NOW)[0];
         assert!(line.width() <= width, "width {width}: {line:?}");
     }
 }
@@ -117,14 +139,14 @@ fn harness_branch_and_path_can_be_hidden_independently() {
 
     app.loaded.config.appearance.show_harness_branch = false;
     assert_eq!(
-        app.own_harness_lines(&row, false, 48)[0].to_string(),
+        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · /workspace/medulla"
     );
 
     app.loaded.config.appearance.show_harness_branch = true;
     app.loaded.config.appearance.show_harness_path = false;
     assert_eq!(
-        app.own_harness_lines(&row, false, 48)[0].to_string(),
+        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · main"
     );
 }
@@ -136,13 +158,13 @@ fn a_non_git_harness_omits_the_branch_without_a_placeholder() {
     row.branch = None;
 
     assert_eq!(
-        app.own_harness_lines(&row, false, 48)[0].to_string(),
+        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · /workspace/medulla"
     );
 }
 
 #[test]
-fn harness_rows_color_each_lifecycle_state_and_only_working_flashes() {
+fn harness_rows_color_each_lifecycle_state_and_only_the_live_ones_flash() {
     let app = app();
     let row = AgentRow::Lane { lane_index: 0 };
     let cases = [
@@ -154,11 +176,14 @@ fn harness_rows_color_each_lifecycle_state_and_only_working_flashes() {
             true,
             " · working",
         ),
+        // Blinks, like working does, and for a stronger reason: this is the one
+        // state that will not resolve itself. Yellow rather than green is what
+        // tells the two blinks apart.
         (
             vec![task(TaskStatus::Running, true, 1)],
             1,
             Color::Yellow,
-            false,
+            true,
             " · needs input",
         ),
         (
@@ -181,7 +206,7 @@ fn harness_rows_color_each_lifecycle_state_and_only_working_flashes() {
         let mut harness = lane();
         harness.tasks = tasks;
         harness.active_tasks = active_tasks;
-        let line = app.agent_row_line(&row, std::slice::from_ref(&harness), false);
+        let line = app.agent_row_line(&row, std::slice::from_ref(&harness), false, &none_waiting());
         let style = line.spans[0].style;
         assert_eq!(style.fg, Some(color), "row: {}", line);
         assert_eq!(
@@ -190,7 +215,7 @@ fn harness_rows_color_each_lifecycle_state_and_only_working_flashes() {
             "row: {}",
             line
         );
-        assert_eq!(app.lane_state(&harness), suffix);
+        assert_eq!(app.lane_state(&harness, &none_waiting()), suffix);
     }
 }
 
@@ -208,6 +233,7 @@ fn current_harness_activity_takes_priority_over_an_old_error() {
         &AgentRow::Lane { lane_index: 0 },
         std::slice::from_ref(&harness),
         false,
+        &none_waiting(),
     );
 
     assert_eq!(line.spans[0].style.fg, Some(Color::Green));
@@ -215,7 +241,7 @@ fn current_harness_activity_takes_priority_over_an_old_error() {
         .style
         .add_modifier
         .contains(Modifier::SLOW_BLINK));
-    assert_eq!(app.lane_state(&harness), " · working");
+    assert_eq!(app.lane_state(&harness, &none_waiting()), " · working");
 }
 
 #[test]
@@ -229,6 +255,7 @@ fn selected_working_harness_keeps_its_status_color_and_flash() {
         &AgentRow::Lane { lane_index: 0 },
         std::slice::from_ref(&harness),
         true,
+        &none_waiting(),
     );
     let style = line.spans[0].style;
 
@@ -411,4 +438,143 @@ fn an_unknown_home_leaves_the_path_alone() {
     // inventing a `~` for a directory we cannot place would be a lie.
     assert_eq!(short_home("/srv/repos/auth", None), "/srv/repos/auth");
     assert_eq!(short_home("/srv/repos/auth", Some("")), "/srv/repos/auth");
+}
+
+/// A harness row carrying a cue, as the pty layer would have set it.
+fn waiting_row(cwd: &str) -> SessionRow {
+    let mut row = harness_row(cwd);
+    row.attention = Some(HarnessAttention::new(
+        AttentionKind::Approval,
+        "codex is asking permission",
+        0,
+    ));
+    row
+}
+
+#[test]
+fn a_harness_waiting_on_you_blinks_and_says_what_it_wants() {
+    let app = app();
+    let lines = app.own_harness_lines(&waiting_row("/workspace/medulla"), false, 48, NOW);
+
+    // The state glyph is replaced, not appended: "running" is not the fact this
+    // row is trying to get across.
+    assert!(lines[0].to_string().starts_with("⚠ codex"), "{}", lines[0]);
+    let style = lines[0].spans[0].style;
+    assert_eq!(style.fg, Some(Color::Yellow));
+    assert!(style.add_modifier.contains(Modifier::SLOW_BLINK));
+    // …and the reason is in words underneath, because a blink alone does not
+    // say whether to hurry.
+    assert!(
+        lines[1].to_string().contains("asking permission"),
+        "{}",
+        lines[1]
+    );
+}
+
+#[test]
+fn a_long_attention_reason_wraps_without_losing_words() {
+    let app = app();
+    let mut row = waiting_row("/workspace/medulla");
+    let reason = "claude is waiting for you to accept the bypass-permissions disclaimer";
+    row.attention = Some(HarnessAttention::new(AttentionKind::Dialog, reason, NOW));
+
+    let lines = app.own_harness_lines(&row, false, 36, NOW);
+    let rendered = lines
+        .iter()
+        .skip(1)
+        .map(|line| line.to_string().trim().to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        rendered.contains(reason),
+        "complete reason was {rendered:?}"
+    );
+}
+
+#[test]
+fn the_pane_you_are_typing_in_does_not_blink_at_you() {
+    let mut app = app();
+    let row = waiting_row("/workspace/medulla");
+    app.harness_focus = crate::ui::harness_pane::HarnessFocus::Attached(row.id.clone());
+
+    let lines = app.own_harness_lines(&row, false, 48, NOW);
+
+    assert_eq!(lines.len(), 1, "no second line: {lines:?}");
+    assert!(!lines[0].spans[0]
+        .style
+        .add_modifier
+        .contains(Modifier::SLOW_BLINK));
+}
+
+#[test]
+fn an_exited_harness_stops_asking_for_anything() {
+    let app = app();
+    let mut row = waiting_row("/workspace/medulla");
+    // Whatever it was asking, nobody can answer it now.
+    row.state = PtyState::Exited { code: Some(0) };
+
+    let lines = app.own_harness_lines(&row, false, 48, NOW);
+
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].to_string().starts_with("✓ codex"), "{}", lines[0]);
+}
+
+#[test]
+fn lane_attention_skips_the_attached_session_and_takes_the_first_waiting_one() {
+    let mut item = lane();
+    item.tasks = vec![
+        task(TaskStatus::Running, false, 1),
+        task(TaskStatus::Running, false, 2),
+        task(TaskStatus::Running, false, 3),
+    ];
+    let waiting = ["w-1".to_string(), "w-2".to_string()].into_iter().collect();
+
+    let found = lane_waiting_session(&item, Some("w-1"), &waiting, |task_id| match task_id {
+        "task-1" => Some("w-1".to_string()),
+        "task-2" => Some("not-waiting".to_string()),
+        "task-3" => Some("w-2".to_string()),
+        _ => None,
+    });
+
+    assert_eq!(found.as_deref(), Some("w-2"));
+    assert_eq!(
+        classify_lane(&item, Some("running"), found.is_some()),
+        HarnessVisualState::NeedsInput,
+        "PTY attention must outrank ordinary running state"
+    );
+}
+
+#[test]
+fn task_attention_marks_only_the_exact_waiting_session() {
+    let waiting = ["w-2".to_string()].into_iter().collect();
+    let resolve = |task_id: &str| match task_id {
+        "task-1" => Some("w-1".to_string()),
+        "task-2" => Some("w-2".to_string()),
+        _ => None,
+    };
+
+    assert_eq!(
+        task_waiting_session("task-2", None, &waiting, resolve).as_deref(),
+        Some("w-2")
+    );
+    assert_eq!(
+        task_waiting_session("task-1", None, &waiting, resolve),
+        None
+    );
+    assert_eq!(
+        task_waiting_session("task-2", Some("w-2"), &waiting, resolve),
+        None,
+        "the attached pane is already being handled"
+    );
+}
+
+#[test]
+fn rail_title_reports_the_attention_snapshot_count() {
+    let mut item = lane();
+    item.tasks = vec![task(TaskStatus::Running, false, 1)];
+
+    assert_eq!(
+        rail_title(&[item], 2),
+        "Agents · 1 · 1 running · ⚠ 2 waiting on you"
+    );
 }

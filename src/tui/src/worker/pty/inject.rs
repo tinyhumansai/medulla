@@ -114,7 +114,9 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
         // No composer to commit to: a line-oriented reader takes the bytes and
         // the return in one go, and there is no rendering to wait on.
         sessions.write(id, text.as_bytes())?;
-        return sessions.write(id, submit_sequence());
+        sessions.write(id, submit_sequence())?;
+        sessions.acknowledge(id);
+        return Ok(());
     }
 
     // The child has a composer, so the paste must be *in* it before Enter can
@@ -147,7 +149,12 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
     // Let the composer settle before the Return, so it is not swallowed by the
     // paste block still being committed.
     await_still(sessions, id).await;
-    sessions.write(id, submit_sequence())
+    sessions.write(id, submit_sequence())?;
+    // Only a successfully submitted turn answers the previous cue. Keeping it
+    // through every fallible readiness/dialog/paste step lets the executor hand
+    // a blocked session to the operator if injection fails.
+    sessions.acknowledge(id);
+    Ok(())
 }
 
 /// Reusable screen buffers for one injection.

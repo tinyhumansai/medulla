@@ -35,6 +35,8 @@ mod work_tests;
 
 use types::{AgentsPanes, Selection};
 
+pub(in crate::ui::app) use rail::RAIL_MAX_CONTENT;
+
 impl App {
     /// Draw the Agents tab: rail, transcript, composer.
     pub(super) fn draw_agents(&mut self, f: &mut Frame, area: Rect) {
@@ -136,9 +138,7 @@ impl App {
         let widest = selection
             .rows
             .iter()
-            .flat_map(|row| {
-                self.rail_row_lines(row, &selection.lanes, false, rail::RAIL_MAX_CONTENT)
-            })
+            .flat_map(|row| self.rail_row_measurement_lines(row, &selection.lanes))
             .map(|line| line.width())
             .chain(threads.iter().map(|line| line.width()))
             .max()

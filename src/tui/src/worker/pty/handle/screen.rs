@@ -11,6 +11,27 @@ use super::SessionHandle;
 const BLANK: CellText = CellText::blank();
 
 impl SessionHandle {
+    /// Sample the live screen text and audible-bell counter for classification.
+    ///
+    /// Restores the operator's scrollback offset before returning, so a
+    /// background poll never moves the pane they are reading.
+    pub(in super::super) fn attention_sample(&self) -> (String, usize) {
+        let mut parser = lock(&self.screen);
+        let held = parser.screen().scrollback();
+        parser.set_scrollback(0);
+        let sample = (
+            parser.screen().contents(),
+            parser.screen().audible_bell_count(),
+        );
+        parser.set_scrollback(held);
+        sample
+    }
+
+    /// The emulator's current audible-bell counter.
+    pub(in super::super) fn bell_count(&self) -> usize {
+        lock(&self.screen).screen().audible_bell_count()
+    }
+
     /// Whether the child has turned bracketed-paste mode on (DECSET 2004).
     pub(in super::super) fn bracketed_paste(&self) -> bool {
         lock(&self.screen).screen().bracketed_paste()

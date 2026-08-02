@@ -10,6 +10,12 @@ use medulla::tinyplace::HarnessProvider;
 use super::super::types::{HarnessControl, SessionRow};
 use super::{read, write, PtyManager};
 
+/// Advance the consumed-bell watermark without allowing a stale screen sample
+/// to move it backwards.
+pub(super) fn consumed_bell_count(seen: usize, sampled: usize) -> usize {
+    seen.max(sampled)
+}
+
 impl PtyManager {
     /// Take an idle session for `label` on `provider`, marking it busy.
     ///
@@ -93,10 +99,20 @@ impl PtyManager {
         true
     }
 
-    /// Mark a session free for the next turn.
+    /// Mark a session free without implying that a turn was submitted.
+    ///
+    /// Used for failed injection and claim rollback, where no completion chime
+    /// can be pending and the next bell must remain meaningful.
     pub fn release(&self, id: &str) {
         if let Some(session) = self.handle(id) {
             session.release();
+        }
+    }
+
+    /// Mark a submitted turn complete and suppress its completion chime.
+    pub fn settle_turn(&self, id: &str) {
+        if let Some(session) = self.handle(id) {
+            session.settle_turn();
         }
     }
 

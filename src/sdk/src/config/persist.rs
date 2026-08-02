@@ -108,14 +108,49 @@ pub fn persist_root_setting(path: &Path, key: &str, value: toml::Value) -> anyho
     write_document(path, &doc)
 }
 
-/// Replace one complete TOML section while preserving every other section.
+/// Replace one complete config section while preserving every other section.
 ///
 /// This is the reusable boundary for components such as the theme editor whose
 /// values naturally form one coherent table rather than independent settings.
 pub fn persist_section(path: &Path, section: &str, values: toml::Table) -> anyhow::Result<()> {
+    if uses_json_format(path) {
+        return persist_json_section(path, section, values);
+    }
     let mut doc = read_document(path)?;
     doc.insert(section.to_string(), toml::Value::Table(values));
     write_document(path, &doc)
+}
+
+/// Replace a complete section in a JSON config document.
+fn persist_json_section(path: &Path, section: &str, values: toml::Table) -> anyhow::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(anyhow::anyhow!("Cannot read {}: {error}", path.display()));
+        }
+    };
+    let mut doc = if text.trim().is_empty() {
+        serde_json::Map::new()
+    } else {
+        serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(|error| anyhow::anyhow!("Cannot parse {}: {error}", path.display()))?
+            .as_object()
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!("Cannot parse {}: root must be an object", path.display())
+            })?
+    };
+    doc.insert(
+        section.to_string(),
+        serde_json::to_value(values)
+            .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?,
+    );
+    let mut rendered = serde_json::to_vec_pretty(&doc)
+        .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?;
+    rendered.push(b'\n');
+    crate::persistence::write_atomic(path, &rendered)
+        .map_err(|error| anyhow::anyhow!("Cannot write {}: {error}", path.display()))
 }
 
 /// Removes `key` from the `[section]` table, leaving the section in place.

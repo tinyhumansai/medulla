@@ -47,6 +47,8 @@
 //! cleared, so meeting one means preflight failed and the fix is a config change,
 //! not a keypress.
 
+use medulla::tinyplace::HarnessProvider;
+
 /// A single Enter — confirms codex's trust dialog.
 ///
 /// Its default is already highlighted (`› 1. Yes, continue`), so Enter selects
@@ -72,8 +74,9 @@ const CODEX_SKIP_UPDATE: &[&[u8]] = &[b"\x1b[B", b"\x1b[B", b"\r"];
 /// Stored whitespace-free and lowercase so they match regardless of how the
 /// harness laid the words out — a full-screen TUI positions text with cursor
 /// moves, and where it chose to put its spaces is not something to depend on.
-const DIALOGS: &[(&[&str], BlockingDialog)] = &[
+const DIALOGS: &[(HarnessProvider, &[&str], BlockingDialog)] = &[
     (
+        HarnessProvider::Claude,
         &["itrustthisfolder", "isthisaprojectyoucreated"],
         BlockingDialog {
             what: "claude is waiting for you to approve this workspace",
@@ -84,6 +87,7 @@ const DIALOGS: &[(&[&str], BlockingDialog)] = &[
         },
     ),
     (
+        HarnessProvider::Claude,
         // `--dangerously-skip-permissions` opens this, and its default option is
         // "1. No, exit" — so of all the dialogs, this is the one where typing
         // blind is worst: the Return does not mistype a prompt, it kills the
@@ -102,6 +106,7 @@ const DIALOGS: &[(&[&str], BlockingDialog)] = &[
         },
     ),
     (
+        HarnessProvider::Codex,
         // Codex's trust prompt, shown on a fresh workspace even under
         // `--dangerously-bypass-approvals-and-sandbox`. `trustthecontentsofthis`
         // keys on its distinctive question and will not trip on claude's own
@@ -116,6 +121,7 @@ const DIALOGS: &[(&[&str], BlockingDialog)] = &[
         },
     ),
     (
+        HarnessProvider::Codex,
         // Codex's *interactive* update prompt (`1. Update now` … `3. Skip until
         // next version`). `skipuntilnextversion` is the marker: it is the Skip
         // option and appears only on this modal, never on the passive "Update
@@ -147,10 +153,22 @@ fn squash(text: &str) -> String {
 /// `screen` is the session's rendered screen as text.
 pub fn blocking_dialog(screen: &str) -> Option<&'static BlockingDialog> {
     let squashed = squash(screen);
-    DIALOGS.iter().find_map(|(markers, dialog)| {
+    DIALOGS.iter().find_map(|(_, markers, dialog)| {
         markers
             .iter()
             .any(|marker| squashed.contains(marker))
+            .then_some(dialog)
+    })
+}
+
+/// The startup dialog on `screen` when it belongs to `provider`.
+pub(crate) fn blocking_dialog_for(
+    provider: HarnessProvider,
+    screen: &str,
+) -> Option<&'static BlockingDialog> {
+    let squashed = squash(screen);
+    DIALOGS.iter().find_map(|(candidate, markers, dialog)| {
+        (*candidate == provider && markers.iter().any(|marker| squashed.contains(marker)))
             .then_some(dialog)
     })
 }

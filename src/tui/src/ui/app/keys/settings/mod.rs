@@ -22,7 +22,7 @@ use medulla::client::FeedbackType;
 use super::super::appearance::APPEARANCE_ROWS;
 use super::super::types::{
     App, Cmd, SETTINGS_SUBPAGES, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_FEEDBACK,
-    SP_HELP, SP_TRACE, SP_USAGE,
+    SP_HELP, SP_STATUS_LINE, SP_TRACE, SP_USAGE,
 };
 
 impl App {
@@ -70,6 +70,7 @@ impl App {
         match self.settings_index {
             SP_USAGE => self.usage_key(code),
             SP_APPEARANCE => self.appearance_key(code),
+            SP_STATUS_LINE => self.status_line_key(code),
             SP_CONFIG => self.config_key(code),
             SP_FEEDBACK => self.feedback_key(code),
             SP_TRACE => self.trace_key(code),
@@ -91,6 +92,10 @@ impl App {
                 } else {
                     (self.appearance_index + 1).min(APPEARANCE_ROWS - 1)
                 };
+                SettingsKey::handled(None)
+            }
+            SP_STATUS_LINE => {
+                self.move_status_line_index(up);
                 SettingsKey::handled(None)
             }
             SP_CONFIG => {
@@ -158,6 +163,22 @@ impl App {
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Enter => {
                 self.cycle_appearance_row(!matches!(code, KeyCode::Left));
+                SettingsKey::handled(None)
+            }
+            _ => SettingsKey::Unhandled,
+        }
+    }
+
+    /// Status line: pick a harness-row field and cycle where it sits or how it
+    /// is spelled. Every change redraws the preview on the same page.
+    fn status_line_key(&mut self, code: KeyCode) -> SettingsKey {
+        match code {
+            KeyCode::Char('j') | KeyCode::Char('k') => {
+                self.move_status_line_index(matches!(code, KeyCode::Char('k')));
+                SettingsKey::handled(None)
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Enter => {
+                self.cycle_status_line_row(!matches!(code, KeyCode::Left));
                 SettingsKey::handled(None)
             }
             _ => SettingsKey::Unhandled,

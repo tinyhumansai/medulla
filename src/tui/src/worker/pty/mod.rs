@@ -15,6 +15,8 @@
 //! - [`launch`] — the interactive argv and the input-injection encoding.
 //! - [`inject`] — the timing and mode choreography that gets a prompt accepted.
 //! - [`dialog`] — recognising a harness blocked on a startup dialog.
+//! - [`attention`] — recognising a harness blocked on the *operator*, which is
+//!   what makes its row blink.
 //! - [`handle`] — [`SessionHandle`], one session's own state and its own locks.
 //! - [`manager`] — [`PtyManager`], the registry of those handles.
 //! - [`cell_text`] — the inline string one screen cell's text is stored in.
@@ -28,6 +30,7 @@
 //! is read-mostly and every session owns its own state; see the two modules'
 //! docs for the details.
 
+pub mod attention;
 pub mod cell_text;
 pub mod dialog;
 pub mod handle;
@@ -43,6 +46,7 @@ pub mod types;
 #[cfg(all(test, unix))]
 mod tests;
 
+pub use attention::{AttentionKind, HarnessAttention, ATTENTION_GLYPH};
 pub use cell_text::CellText;
 pub use handle::SessionHandle;
 pub use inject::inject_prompt;

@@ -13,8 +13,6 @@
 
 mod account;
 mod appearance;
-#[cfg(test)]
-mod appearance_tests;
 mod commands;
 mod credentials;
 mod custom_harnesses;
@@ -30,8 +28,10 @@ mod input;
 mod keys;
 mod rail;
 mod render;
+mod routing_options;
 mod settings_edit;
 mod state;
+mod status_line;
 mod templates;
 mod types;
 #[cfg(feature = "workflows")]

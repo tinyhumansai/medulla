@@ -45,6 +45,21 @@ impl HarnessProvider {
         }
     }
 
+    /// A single-column glyph standing in for the provider name.
+    ///
+    /// For the status line's `icon` harness style: an operator running one
+    /// provider does not need its name spelled on every row, and the columns it
+    /// costs are the ones the working directory wants. Deliberately geometric
+    /// rather than emoji — an emoji is two columns wide on some terminals and
+    /// one on others, which would break the rail's width arithmetic.
+    pub fn icon(&self) -> &'static str {
+        match self {
+            HarnessProvider::Claude => "✳",
+            HarnessProvider::Codex => "◆",
+            HarnessProvider::Opencode => "◻",
+        }
+    }
+
     /// Parse a provider name, returning `None` for anything unrecognized.
     pub fn from_wire(value: &str) -> Option<Self> {
         match value {

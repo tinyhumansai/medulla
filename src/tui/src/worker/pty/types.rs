@@ -3,6 +3,8 @@
 
 use medulla::tinyplace::HarnessProvider;
 
+use super::attention::HarnessAttention;
+
 /// Default geometry for a freshly opened session, before the UI reports the real
 /// pane size. Wide enough that a harness's first full-screen paint is not
 /// mangled by an 80-column assumption it then has to reflow out of.
@@ -187,6 +189,18 @@ pub struct SessionRow {
     pub control: HarnessControl,
     /// Whether an operator spawned it rather than a task frame. Display only.
     pub user_spawned: bool,
+    /// What this harness is waiting on the operator for, if anything.
+    ///
+    /// The one piece of session state nothing else on this row can express. A
+    /// harness stopped on a permission prompt is running, not busy in any way
+    /// the orchestrator knows about, and producing no output — so `state`,
+    /// `busy`, and `last_output_at` all read exactly as they do for a harness
+    /// thinking hard, and the operator watching a different pane never learns
+    /// it stopped. Recomputed from the screen as it paints (see
+    /// [`attention`](super::attention)), and what makes the row blink.
+    ///
+    /// `None` is the ordinary state: working, idle at a composer, or exited.
+    pub attention: Option<HarnessAttention>,
 }
 
 impl SessionRow {

@@ -33,8 +33,11 @@ impl App {
             TLine::from("Routing: a add host · Enter/s select · e edit label · d/x remove"),
             TLine::from(" "),
             TLine::from(Span::styled("Settings", bold)),
-            TLine::from("↑↓ move between subpages · 1-8 jump straight to one"),
+            TLine::from("↑↓ move between subpages · 1-9 jump straight to one"),
             TLine::from("Appearance: j / k pick a theme role · ←/→ or Enter cycle its color (saved live)"),
+            TLine::from(
+                "Status line: j / k pick a harness-row field · ←/→ or Enter cycle it (live preview)",
+            ),
             TLine::from("Config: j / k pick a setting · ←/→ change · Enter toggle (saved to config.toml)"),
             TLine::from("Feedback: j / k browse · u/d vote · c comment · n feature · b bug · s sort · f filter"),
             TLine::from("Trace & Context (Debug): j / k page events and chunks"),

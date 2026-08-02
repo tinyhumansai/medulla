@@ -233,6 +233,28 @@ fn persist_setting_uses_json_for_extensionless_config_like_the_loader() {
 }
 
 #[test]
+fn persist_section_replaces_a_complete_json_section_and_preserves_others() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("medulla.tui.json");
+    std::fs::write(
+        &path,
+        r#"{"theme":{"primary":"cyan"},"statusLine":{"path":"hidden"}}"#,
+    )
+    .expect("seed");
+    let mut status_line = toml::Table::new();
+    status_line.insert("state".into(), toml::Value::String("line2".into()));
+    status_line.insert("path".into(), toml::Value::String("line1".into()));
+
+    super::persist_section(&path, "statusLine", status_line).expect("write");
+
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let parsed: serde_json::Value = serde_json::from_str(&saved).expect("JSON remains valid");
+    assert_eq!(parsed["theme"]["primary"], "cyan");
+    assert_eq!(parsed["statusLine"]["state"], "line2");
+    assert_eq!(parsed["statusLine"]["path"], "line1");
+}
+
+#[test]
 fn subscription_routing_strategy_persists_without_clobbering_host_strategy() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");

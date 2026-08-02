@@ -113,6 +113,7 @@ impl PtyManager {
         // before there is a session to record it against — losing the
         // `last_output_at` that idle detection reads.
         self.spawn_writer(Arc::downgrade(&handle), writer, queued, queued_bytes);
+        self.spawn_attention_poller(Arc::downgrade(&handle));
         self.spawn_reader(handle, reader);
 
         Ok(id)

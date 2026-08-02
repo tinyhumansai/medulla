@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use medulla::tinyplace::HarnessProvider;
 use portable_pty::{Child, MasterPty};
 
+use super::super::attention::HarnessAttention;
+
 /// [`SessionHandle::state`] discriminants. Kept as a `u8` so the whole liveness
 /// question is one relaxed atomic load rather than a lock.
 pub(super) const STATE_RUNNING: u8 = 0;
@@ -104,6 +106,25 @@ pub(crate) struct ColdFields {
     pub(super) last_error: Option<String>,
 }
 
+/// Mutable state used by the background attention classifier.
+///
+/// Kept behind its own mutex so sampling one terminal never takes the manager's
+/// registry lock or contends with unrelated sessions.
+pub(crate) struct AttentionState {
+    /// The cue currently shown in the rail.
+    pub(crate) cue: Option<HarnessAttention>,
+    /// The emulator bell watermark already classified.
+    pub(crate) seen_bells: usize,
+    /// Revision used to reject a sample raced by release or acknowledgement.
+    pub(crate) generation: u64,
+    /// Completion chimes promised by settled turns but not observed yet.
+    pub(crate) pending_completion_bells: usize,
+    /// Deadline before which promised chimes may arrive ahead of session reuse.
+    pub(crate) completion_deadline: Option<std::time::Instant>,
+    /// Epoch ms of the last classification attempt.
+    pub(crate) checked_at: i64,
+}
+
 /// The parts of a session that never change after it is opened.
 pub(crate) struct SessionMeta {
     /// The manager's stable local id (`w_…`).
@@ -188,6 +209,8 @@ pub struct SessionHandle {
     pub(super) queued_bytes: Arc<AtomicUsize>,
     /// The string-valued fields, which cannot be atomics.
     pub(super) cold: Mutex<ColdFields>,
+    /// Human-attention cue and its bell/race bookkeeping.
+    pub(crate) attention: Mutex<AttentionState>,
     /// The terminal emulator holding this session's screen + scrollback.
     pub(super) screen: Mutex<vt100::Parser>,
     /// The pty ends, until the session is reaped.

@@ -8,7 +8,9 @@ use portable_pty::{Child, MasterPty};
 
 use super::super::sync::lock;
 use super::super::types::HarnessControl;
-use super::types::{ColdFields, SessionIo, SessionMeta, NO_EXIT_CODE, STATE_EXITED, STATE_RUNNING};
+use super::types::{
+    AttentionState, ColdFields, SessionIo, SessionMeta, NO_EXIT_CODE, STATE_EXITED, STATE_RUNNING,
+};
 use super::SessionHandle;
 
 impl SessionHandle {
@@ -50,6 +52,14 @@ impl SessionHandle {
                 label,
                 session_id,
                 last_error: None,
+            }),
+            attention: Mutex::new(AttentionState {
+                cue: None,
+                seen_bells: 0,
+                generation: 0,
+                pending_completion_bells: 0,
+                completion_deadline: None,
+                checked_at: started_at,
             }),
             screen: Mutex::new(screen),
             io: Mutex::new(Some(SessionIo { master, writes })),

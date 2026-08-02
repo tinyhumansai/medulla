@@ -14,6 +14,7 @@ use crate::ui::agents::Line as StyledLine;
 use crate::ui::chat::tool_call;
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::util::{clip, clock, wrap};
+use crate::worker::pty::ATTENTION_GLYPH;
 
 use super::types::{App, TABS};
 
@@ -442,9 +443,30 @@ impl App {
         self.hit_tabs_row = area.y;
         let mut spans = Vec::new();
         let mut col = area.x;
+        // A harness waiting on the operator is only visible on the Agents rail,
+        // and an operator reading Workflows or Settings is exactly the person
+        // who does not know a pane has stopped. The count rides on the tab so
+        // the signal survives leaving the tab that carries it.
+        let waiting = self.harnesses_waiting();
+        // Badges are built *before* the width is measured, because they are part
+        // of what has to fit: measuring the bare names and then rendering wider
+        // labels overflows the bar on a terminal that was only just wide enough,
+        // and the tab that pushed past the edge would be the one shouting for
+        // attention.
+        let badges: Vec<String> = TABS
+            .iter()
+            .map(|name| {
+                if *name == "Agents" && waiting > 0 {
+                    format!(" {ATTENTION_GLYPH}{waiting}")
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
         let roomy_width = TABS
             .iter()
-            .map(|name| name.chars().count() + 3)
+            .zip(&badges)
+            .map(|(name, badge)| name.chars().count() + badge.chars().count() + 3)
             .sum::<usize>();
         let gap = if roomy_width <= area.width as usize {
             " "
@@ -452,16 +474,24 @@ impl App {
             ""
         };
         for (i, name) in TABS.iter().enumerate() {
+            let badge = &badges[i];
             let label = if gap.is_empty() {
-                format!("{name} ")
+                format!("{name}{badge} ")
             } else {
-                format!(" {name} ")
+                format!(" {name}{badge} ")
             };
             let w = label.chars().count() as u16;
             self.hit_tabs.push((col, col + w - 1));
             let mut style = Style::default();
             if i == self.tab_index {
                 style = self.theme.selection();
+            } else if !badge.is_empty() {
+                // Only when the tab is not the one you are on: the selection
+                // style is how "you are here" is said, and blinking over it
+                // would trade a fact for a nag.
+                style = style
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
             }
             spans.push(Span::styled(label, style));
             spans.push(Span::raw(gap));

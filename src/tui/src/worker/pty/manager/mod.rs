@@ -17,7 +17,8 @@
 //!
 //! Split so no file exceeds the repo's 500-line ceiling: [`open`] launches a
 //! harness on a fresh pty and drains it, [`session`] is the bookkeeping every
-//! other caller reads, and [`screen`] is the emulator surface the UI renders.
+//! other caller reads, [`screen`] is the emulator surface the UI renders, and
+//! [`attention`] keeps each row's "this harness wants you" flag current.
 //!
 //! Both halves of the master run on **blocking threads**, not tokio tasks:
 //! `portable-pty` offers only synchronous `Read`/`Write`, and parking either on
@@ -147,9 +148,12 @@ impl PtyManager {
     }
 }
 
+mod attention;
 mod open;
 mod screen;
 mod session;
+#[cfg(test)]
+mod tests;
 
 pub use screen::{ScreenCell, ScreenSnapshot};
 

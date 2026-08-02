@@ -29,8 +29,16 @@ pub struct TuiConfig {
     #[serde(default)]
     pub theme: ThemeConfig,
     /// TUI display preferences.
+    ///
+    /// Superseded for harness rows by [`TuiConfig::status_line`]; the two
+    /// `showHarness*` booleans here are still honoured as its starting point
+    /// for a config written before that section existed.
     #[serde(default)]
     pub appearance: AppearanceConfig,
+    /// How a harness row on the Agents rail is laid out. Absent means "derive
+    /// it from `[appearance]`" — see [`TuiConfig::status_line`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_line: Option<StatusLineConfig>,
     /// Persisted welcome-flow state.
     #[serde(default)]
     pub onboarding: OnboardingConfig,
@@ -102,6 +110,7 @@ impl Default for TuiConfig {
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),
             appearance: AppearanceConfig::default(),
+            status_line: None,
             onboarding: OnboardingConfig::default(),
             workflow: WorkflowConfig::default(),
             workflows: WorkflowsConfig::default(),
@@ -117,6 +126,20 @@ impl Default for TuiConfig {
             subscription_routing_strategy: None,
             fleet: FleetConfig::default(),
         }
+    }
+}
+
+impl TuiConfig {
+    /// The effective harness status-line layout.
+    ///
+    /// Reads the explicit `[statusLine]` section when one is present, and
+    /// otherwise derives one from the older `[appearance]` booleans so an
+    /// upgrade preserves whatever the operator had already turned off. Returned
+    /// by value — the config is small and `Copy` — so callers can hold it while
+    /// borrowing the rest of the app mutably to draw.
+    pub fn status_line(&self) -> StatusLineConfig {
+        self.status_line
+            .unwrap_or_else(|| StatusLineConfig::from_appearance(&self.appearance))
     }
 }
 

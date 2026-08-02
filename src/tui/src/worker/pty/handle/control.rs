@@ -2,9 +2,14 @@
 
 use std::sync::atomic::Ordering;
 
+use super::super::attention;
 use super::super::sync::lock;
 use super::super::types::HarnessControl;
+use super::super::AttentionKind;
 use super::SessionHandle;
+
+/// Maximum handoff delay allowed for a completion chime to reach the emulator.
+const COMPLETION_CHIME_GRACE: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl SessionHandle {
     /// Who holds this session right now.
@@ -73,6 +78,7 @@ impl SessionHandle {
         if !self.is_running() || !self.control().is_orchestrator() {
             return false;
         }
+        self.finish_completion_grace();
         if self
             .busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -87,8 +93,86 @@ impl SessionHandle {
         false
     }
 
+    /// Wait out and close the previous turn's completion-chime window.
+    ///
+    /// Reuse cannot overlap this short grace period: that is what makes a late
+    /// old chime distinguishable from the new turn's first bell. At the deadline
+    /// any missing chime is expired before the new prompt can be submitted.
+    fn finish_completion_grace(&self) {
+        let deadline = lock(&self.attention).completion_deadline;
+        if let Some(deadline) = deadline {
+            std::thread::sleep(deadline.saturating_duration_since(std::time::Instant::now()));
+        }
+
+        let bells = self.bell_count();
+        let mut attention = lock(&self.attention);
+        let unseen_bells = bells.saturating_sub(attention.seen_bells);
+        let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
+        attention.pending_completion_bells -= consumed_pending;
+        attention.seen_bells = attention.seen_bells.max(bells);
+        // Invalidate any classifier that sampled the old pending count before
+        // this claim closed the grace window.
+        attention.generation = attention.generation.wrapping_add(1);
+        // The grace window is over. Missing chimes must not become debt carried
+        // into the turn this claim is about.
+        attention.pending_completion_bells = 0;
+        attention.completion_deadline = None;
+    }
+
     /// Mark the session free for the next turn.
     pub(in super::super) fn release(&self) {
         self.busy.store(false, Ordering::Release);
+    }
+
+    /// Mark a submitted turn complete and consume its completion chime.
+    pub(in super::super) fn settle_turn(&self) {
+        let (contents, bells) = self.attention_sample();
+        let mut attention = lock(&self.attention);
+        let unseen_bells = bells.saturating_sub(attention.seen_bells);
+        let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
+        attention.pending_completion_bells -= consumed_pending;
+        let completion_bell_already_accounted_for = (unseen_bells > consumed_pending
+            && !attention::is_working(&contents))
+            || attention
+                .cue
+                .as_ref()
+                .is_some_and(|cue| cue.kind == AttentionKind::Bell);
+        attention.seen_bells = attention.seen_bells.max(bells);
+        attention.generation = attention.generation.wrapping_add(1);
+        // A bell already represented by the current cue is consumed. Otherwise
+        // promise one completion chime, even when a progress bell was sampled
+        // just before settlement. Reuse waits out the bounded grace and expires
+        // an unfulfilled promise before a new turn can begin.
+        if !completion_bell_already_accounted_for {
+            attention.pending_completion_bells =
+                attention.pending_completion_bells.saturating_add(1);
+            attention.completion_deadline =
+                Some(std::time::Instant::now() + COMPLETION_CHIME_GRACE);
+        }
+        attention.cue = attention
+            .cue
+            .take()
+            .filter(|cue| cue.kind != AttentionKind::Bell);
+        self.release();
+    }
+
+    /// Clear the current cue because a person or injected turn is handling it.
+    pub(in super::super) fn acknowledge_attention(&self) -> bool {
+        let bells = self.bell_count();
+        self.acknowledge_attention_through(bells)
+    }
+
+    /// Clear attention through a known bell watermark.
+    fn acknowledge_attention_through(&self, bells: usize) -> bool {
+        let mut attention = lock(&self.attention);
+        let unseen_bells = bells.saturating_sub(attention.seen_bells);
+        let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
+        attention.pending_completion_bells -= consumed_pending;
+        if attention.pending_completion_bells == 0 {
+            attention.completion_deadline = None;
+        }
+        attention.seen_bells = attention.seen_bells.max(bells);
+        attention.generation = attention.generation.wrapping_add(1);
+        attention.cue.take().is_some()
     }
 }

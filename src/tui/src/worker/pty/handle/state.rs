@@ -123,6 +123,7 @@ impl SessionHandle {
             busy: self.is_busy(),
             control: self.control(),
             user_spawned: self.meta.user_spawned,
+            attention: lock(&self.attention).cue.clone(),
         }
     }
 }

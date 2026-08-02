@@ -6,14 +6,14 @@
 //! — and a declaration belongs in a file the operator can open, not only in a
 //! compiled constant. So the catalog exists twice, on purpose:
 //!
-//! - [`defaults`] holds the roles every install knows without any files — as
+//! - `defaults` holds the roles every install knows without any files — as
 //!   TOML documents compiled in, in the store's own format, so the built-in
 //!   catalog and an installed one are the same documents.
-//! - [`store`] reads `<medulla home>/agents/*.toml` and the project-local
+//! - `store` reads `<medulla home>/agents/*.toml` and the project-local
 //!   `./.medulla/agents/*.toml`, one template per file. Any file at all in
 //!   those directories replaces the built-ins wholesale, so deleting a role you
 //!   do not want makes it stay deleted.
-//! - [`install`] copies those documents into the store verbatim, skipping files
+//! - `install` copies those documents into the store verbatim, skipping files
 //!   that already exist. It is explicit — nothing here writes to disk unless a
 //!   caller asks — because a tool that seeds files behind your back is a tool
 //!   you cannot trust with a directory you edit.

@@ -2,7 +2,7 @@
 //! arrow navigation, that every subpage renders, the Appearance theme editor
 //! (live-applies + persists), and the unified themed selection highlight.
 //!
-//! Settings also hosts what used to be the Trace, Context, and Feedback tabs,
+//! Settings also hosts what used to be the Trace and Context tabs,
 //! so the tab bar's shrinking is asserted here too.
 
 use std::sync::Arc;
@@ -56,6 +56,7 @@ fn settings_tab_renders_nav_and_default_usage_subpage() {
     for name in [
         "Usage",
         "Appearance",
+        "Status line",
         "Config",
         "Feedback",
         "Trace",
@@ -76,8 +77,11 @@ fn number_keys_jump_subpages() {
     let _ = key(&mut app, KeyCode::Char('2'));
     assert_eq!(app.settings_subpage(), "Appearance");
     let _ = key(&mut app, KeyCode::Char('3'));
+    assert_eq!(app.settings_subpage(), "Status line");
+    let _ = key(&mut app, KeyCode::Char('4'));
     assert_eq!(app.settings_subpage(), "Config");
-    let _ = key(&mut app, KeyCode::Char('8'));
+    // Help is the last subpage — ninth, now that Status line is on the nav.
+    let _ = key(&mut app, KeyCode::Char('9'));
     assert_eq!(app.settings_subpage(), "Help");
     let out = text_of(&draw(&mut app, 140, 40));
     assert!(out.contains("Commands"), "help subpage: {out}");
@@ -96,9 +100,27 @@ fn arrow_keys_move_subpage_selector() {
     let _ = key(&mut app, KeyCode::Down);
     assert_eq!(app.settings_subpage(), "Appearance");
     let _ = key(&mut app, KeyCode::Down);
-    assert_eq!(app.settings_subpage(), "Config");
+    assert_eq!(app.settings_subpage(), "Status line");
     let _ = key(&mut app, KeyCode::Up);
     assert_eq!(app.settings_subpage(), "Appearance");
+}
+
+#[test]
+fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
+    let mut app = settings_app();
+    let _ = key(&mut app, KeyCode::Char('3'));
+    // Walk to the final path-style qualifier. Thread name adds two rows ahead
+    // of the path group, so this must cover the complete status-line catalog.
+    for _ in 0..14 {
+        let _ = key(&mut app, KeyCode::Down);
+    }
+
+    let out = text_of(&draw(&mut app, 80, 24));
+
+    assert!(
+        out.contains("shortened"),
+        "the selected path-style value must remain visible: {out}"
+    );
 }
 
 #[test]
@@ -165,10 +187,11 @@ fn selection_rows_use_theme_primary_background() {
 
 #[test]
 fn each_settings_subpage_renders_its_signature() {
-    // Trace and Context moved under Settings > DEBUG; Feedback under GENERAL.
+    // Trace and Context moved under Settings > DEBUG.
     let signatures = [
         ("Usage", "This session"),
         ("Appearance", "Appearance"),
+        ("Status line", "Preview"),
         ("Config", "Effective configuration ·"),
         ("Trace", "Trace ·"),
         ("Context", "Environment ·"),
@@ -253,11 +276,11 @@ fn the_settings_nav_groups_its_subpages() {
 }
 
 #[test]
-fn trace_context_and_feedback_are_no_longer_top_level_tabs() {
-    for gone in ["Trace", "Context", "Feedback"] {
+fn secondary_and_paused_surfaces_are_not_top_level_tabs() {
+    for gone in ["Trace", "Context", "TokenMaxxxing"] {
         assert!(
             !TABS.contains(&gone),
-            "{gone} should live under Settings, not the tab bar"
+            "{gone} should not appear in the tab bar"
         );
     }
 }

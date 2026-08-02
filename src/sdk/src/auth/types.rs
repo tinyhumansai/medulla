@@ -14,18 +14,24 @@ pub const DEFAULT_LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// Stored login credentials: the backend they belong to and the bearer JWT.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Credentials {
+    /// Backend origin that issued the credential.
     #[serde(rename = "baseUrl")]
     pub base_url: String,
+    /// Bearer token presented to authenticated backend requests.
     pub jwt: String,
 }
 
 /// The OAuth identity providers the backend accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Provider {
+    /// Google OAuth.
     #[default]
     Google,
+    /// GitHub OAuth.
     Github,
+    /// X/Twitter OAuth.
     Twitter,
+    /// Discord OAuth.
     Discord,
 }
 

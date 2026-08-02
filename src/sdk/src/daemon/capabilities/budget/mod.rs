@@ -13,7 +13,7 @@
 //! gathered facts to a readiness/budget pair from the *environment seams*
 //! ([`BudgetSeams`]) that gather those facts from the filesystem and process
 //! environment. Tests drive the core with injected seams so nothing here reaches
-//! the real machine. The data types live in [`types`].
+//! the real machine. The data types live in `types`.
 //!
 //! Operator-configured budget numbers arrive through the [`BudgetSeams::configured`]
 //! seam. [`BudgetSeams::with_configured`] backs it with the `[budget]` config

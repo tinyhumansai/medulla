@@ -1,0 +1,9 @@
+# The vendored OpenHuman core carries a desktop app and build output that the
+# e2e image never compiles. Copying them costs image build time and context
+# transfer for nothing.
+vendor/openhuman/app
+vendor/openhuman/target
+vendor/openhuman/gitbooks
+vendor/openhuman/docs
+**/.git
+**/target

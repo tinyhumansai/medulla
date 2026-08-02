@@ -280,28 +280,13 @@ pub struct TaskSourceSyncResult {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TasksPayload {
-    pub(crate) tasks: Vec<ProgramTask>,
-}
-
-#[derive(Debug, Deserialize)]
 pub(crate) struct TaskPayload {
     pub(crate) task: ProgramTask,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TaskSourcesPayload {
-    pub(crate) sources: Vec<ProgramTaskSource>,
-}
-
-#[derive(Debug, Deserialize)]
 pub(crate) struct TaskSourcePayload {
     pub(crate) source: ProgramTaskSource,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct TaskSourceSyncPayload {
-    pub(crate) result: TaskSourceSyncResult,
 }
 
 /// Result shared by program task/source delete endpoints.

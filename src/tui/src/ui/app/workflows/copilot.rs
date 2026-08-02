@@ -55,6 +55,15 @@ impl App {
         self.copilot().is_some_and(|thread| thread.busy)
     }
 
+    /// Seed the transcript for a review started automatically after failure.
+    pub fn copilot_started(&mut self, workflow: &str, instruction: &str) {
+        self.wf
+            .copilots
+            .entry(workflow.to_string())
+            .or_insert_with(|| CopilotState::new(workflow.to_string()))
+            .ask(instruction);
+    }
+
     /// Rows one `PageUp`/`PageDown` moves the copilot transcript by.
     ///
     /// A page less one row, so the line the operator was reading stays on
@@ -76,28 +85,40 @@ impl App {
 
     /// Send the composer's draft to the copilot.
     ///
-    /// Refuses while a turn is in flight rather than queueing: the agent is
-    /// editing the graph, and a second instruction written against the pre-edit
-    /// graph is one the operator did not mean to give.
+    /// Queues rather than refusing while a turn is in flight. That reversed an
+    /// earlier decision, and the reason it reversed is that the pane became a
+    /// conversation: a follow-up now lands in a session that has seen the first
+    /// turn's edit, which is the context that makes "and the other one too"
+    /// mean anything.
     pub(in crate::ui::app) fn submit_copilot(&mut self) -> Option<Cmd> {
         let instruction = self.wf.draft.text.trim().to_string();
         if instruction.is_empty() {
             return None;
         }
         if self.copilot_busy() {
-            self.set_status("The copilot is still working — wait for it to finish");
+            self.wf.draft = crate::ui::composer::Draft::new();
+            self.copilot_mut()?.queue(&instruction);
+            self.set_status("Queued — it will go when this turn finishes");
             return None;
         }
+        self.wf.draft = crate::ui::composer::Draft::new();
+        self.dispatch_copilot(instruction)
+    }
+
+    /// Send `instruction` now, marking the thread busy.
+    ///
+    /// Shared by the composer, the queue drain, and retry, so all three record
+    /// the turn the same way — a queued instruction that skipped `ask` would
+    /// run without appearing in the transcript that is meant to be the record.
+    fn dispatch_copilot(&mut self, instruction: String) -> Option<Cmd> {
         // The New row's turn creates rather than edits, so it is a different
-        // command — but the same draft, the same thread bookkeeping, and the
-        // same refusal while one is in flight.
+        // command — but the same thread bookkeeping either way.
         let creating = self.wf.creating;
         let workflow = if creating {
             NEW_THREAD.to_string()
         } else {
             self.selected_workflow()?.id.clone()
         };
-        self.wf.draft = crate::ui::composer::Draft::new();
         self.wf.copilot_scroll = 0;
         self.copilot_mut()?.ask(&instruction);
         if creating {
@@ -111,6 +132,74 @@ impl App {
         Some(Cmd::CopilotTurn {
             workflow,
             instruction,
+        })
+    }
+
+    /// Send the last failed instruction again.
+    ///
+    /// The whole of what retry is: a timeout should cost the operator the two
+    /// minutes it took, not the sentence they wrote.
+    pub(in crate::ui::app) fn retry_copilot(&mut self) -> Option<Cmd> {
+        if self.copilot_busy() {
+            self.set_status("Copilot is still busy — wait for it to finish before retrying");
+            return None;
+        }
+        let Some(instruction) = self.copilot_mut()?.take_failed() else {
+            self.set_status("Nothing to retry");
+            return None;
+        };
+        self.dispatch_copilot(instruction)
+    }
+
+    /// Stop the turn running on this thread.
+    pub(in crate::ui::app) fn abort_copilot(&mut self) -> Option<Cmd> {
+        if !self.copilot_busy() {
+            self.set_status("The copilot is not running");
+            return None;
+        }
+        // Anything waiting behind it is dropped too: the operator is stopping
+        // this line of work, and running the follow-up they queued against it
+        // would be finishing what they just interrupted.
+        self.copilot_mut()?.take_queued();
+        Some(Cmd::AbortCopilot {
+            thread: self.copilot_key()?,
+        })
+    }
+
+    /// Ask the copilot to diagnose the selected run and fix what caused it.
+    ///
+    /// Refused rather than queued while a turn is already running: unlike a
+    /// composer submission, a repair carries a specific `run_id` the drain path
+    /// (`drain_copilot_queue`) has nowhere to hold, so queuing it would either
+    /// drop that context or dispatch two turns on the same thread at once —
+    /// whichever ran second would arrive out of order and its completion could
+    /// clear `busy` while the other turn was still in flight.
+    pub(in crate::ui::app) fn repair_selected_run(&mut self) -> Option<Cmd> {
+        let Some(run) = self.selected_run().cloned() else {
+            // Reported rather than silently swallowed: without this, `f` with
+            // no run selected is indistinguishable on screen from a stray
+            // keypress the menu absorbed on purpose.
+            self.set_status("No run selected — nothing to repair");
+            return None;
+        };
+        if run.status != medulla::workflows::RunStatus::Failed {
+            self.set_status("That run did not fail — nothing to repair");
+            return None;
+        }
+        if self.copilot_busy() {
+            self.set_status("Copilot is still busy — wait for it to finish before repairing");
+            return None;
+        }
+        let workflow = run.workflow_id.clone();
+        self.wf.copilot_scroll = 0;
+        let instruction = format!("Run {} failed. Work out why and fix it.", run.id);
+        self.copilot_mut()?.ask(&instruction);
+        self.wf.focus = super::super::types::WorkflowFocus::Copilot;
+        self.set_status(format!("Copilot · diagnosing {}", run.id));
+        Some(Cmd::RepairWorkflow {
+            workflow,
+            instruction,
+            run_id: run.id,
         })
     }
 
@@ -140,20 +229,61 @@ impl App {
         reply: String,
         changes: Vec<String>,
         created: Option<String>,
-    ) {
+    ) -> Option<Cmd> {
         let changed = !changes.is_empty();
         if let Some(thread) = self.wf.copilots.get_mut(workflow) {
             thread.changed(changes);
             thread.reply(reply);
         }
-        if !changed {
-            return;
+        // `adopt_new_workflow` can move this thread — queued instruction and
+        // all — from `NEW_THREAD` to the workflow's real id, so the queue must
+        // be drained under whatever key the thread lives at *after* that move.
+        // Draining under the original `workflow` (still `NEW_THREAD`) would
+        // silently drop a follow-up an operator queued during a create turn:
+        // `self.wf.copilots.get_mut(NEW_THREAD)` finds nothing once the thread
+        // has relocated.
+        let mut drain_key = workflow.to_string();
+        if changed {
+            self.reload_workflows();
+            match created {
+                Some(id) => {
+                    if self.adopt_new_workflow(&id) {
+                        drain_key = id;
+                    }
+                }
+                None => self.set_status(format!("{workflow} updated")),
+            }
         }
-        self.reload_workflows();
-        match created {
-            Some(id) => self.adopt_new_workflow(&id),
-            None => self.set_status(format!("{workflow} updated")),
+        if self
+            .wf
+            .copilots
+            .get(&drain_key)
+            .is_some_and(|thread| thread.busy)
+        {
+            return None;
         }
+        // Drained after the catalogue refresh, so the queued turn is dispatched
+        // against the graph this one actually left behind rather than the one
+        // on screen when it was typed.
+        self.drain_copilot_queue(&drain_key)
+    }
+
+    /// Send whatever was queued on `workflow`'s thread while it was busy.
+    fn drain_copilot_queue(&mut self, workflow: &str) -> Option<Cmd> {
+        let queued = self.wf.copilots.get_mut(workflow)?.take_queued()?;
+        // Addressed by thread rather than by selection: the operator may have
+        // moved the rail on, and the instruction belongs where it was typed.
+        self.wf.copilots.get_mut(workflow)?.ask(&queued);
+        if workflow == NEW_THREAD {
+            return Some(Cmd::CreateWorkflow {
+                thread: workflow.to_string(),
+                instruction: queued,
+            });
+        }
+        Some(Cmd::CopilotTurn {
+            workflow: workflow.to_string(),
+            instruction: queued,
+        })
     }
 
     /// Select the workflow a create turn just made, and give it the thread that
@@ -163,7 +293,12 @@ impl App {
     /// why this workflow looks the way it does, and the operator's next
     /// instruction is almost always a follow-up to it. The New row is left with
     /// a clean thread for the next workflow.
-    fn adopt_new_workflow(&mut self, id: &str) {
+    ///
+    /// Returns whether the thread actually moved to `id` — `false` when the
+    /// catalogue lookup failed and the thread is still filed under
+    /// [`NEW_THREAD`], which the caller needs to know to drain the right
+    /// thread's queue afterwards.
+    fn adopt_new_workflow(&mut self, id: &str) -> bool {
         let Some(index) = self
             .workflow_summaries()
             .iter()
@@ -172,7 +307,7 @@ impl App {
             // The store says it is not there. Reported rather than silently
             // ignored: the agent believed it created something.
             self.set_status(format!("Created {id}, but it is not in the catalogue"));
-            return;
+            return false;
         };
         if let Some(mut thread) = self.wf.copilots.remove(NEW_THREAD) {
             thread.workflow_id = id.to_string();
@@ -182,13 +317,92 @@ impl App {
         // the content pane draws its graph.
         self.select_workflow(index);
         self.set_status(format!("Created {id}"));
+        true
     }
 
     /// Record a copilot turn that failed.
-    pub fn copilot_failed(&mut self, workflow: &str, error: String) {
+    ///
+    /// Keeps the instruction that failed so `r` can send it again. Anything
+    /// queued behind it is dropped: the operator's follow-up assumed the turn
+    /// that just failed had happened.
+    pub fn copilot_failed(&mut self, workflow: &str, instruction: String, error: String) {
         if let Some(thread) = self.wf.copilots.get_mut(workflow) {
-            thread.failed(error.clone());
+            thread.failed_with(error.clone(), Some(instruction));
+            // A follow-up waits for every overlapping turn. If another turn
+            // remains, it still has a chance to establish the context the
+            // operator queued against; the final failure drops it as before.
+            if !thread.busy {
+                thread.take_queued();
+            }
         }
-        self.set_status(format!("Copilot failed: {error}"));
+        self.set_status(format!("Copilot failed: {error} · r to retry"));
+    }
+}
+
+impl App {
+    /// Review the selected workflow against its own history.
+    ///
+    /// With the cursor on a failed run the review leads with that run;
+    /// otherwise it reads the whole history. Both are the same ask — "what
+    /// should change" — so they are one key rather than two.
+    pub(in crate::ui::app) fn evolve_selected_workflow(&mut self) -> Option<Cmd> {
+        let workflow = self.selected_workflow()?.id.clone();
+        if self.copilot_busy() {
+            self.set_status("Copilot is still busy — wait for it to finish before reviewing");
+            return None;
+        }
+        let run_id = self
+            .selected_run()
+            .filter(|run| run.status == medulla::workflows::RunStatus::Failed)
+            .map(|run| run.id.clone());
+
+        self.wf.copilot_scroll = 0;
+        let instruction = match &run_id {
+            Some(run_id) => format!("Review this workflow, starting from run {run_id}."),
+            None => "Review this workflow against its history.".to_string(),
+        };
+        self.copilot_mut()?.ask(&instruction);
+        self.wf.focus = super::super::types::WorkflowFocus::Copilot;
+        self.set_status(format!("Reviewing {workflow}…"));
+        Some(Cmd::EvolveWorkflow { workflow, run_id })
+    }
+
+    /// Apply the proposed change waiting on this workflow.
+    pub(in crate::ui::app) fn accept_selected_proposal(&mut self) -> Option<Cmd> {
+        let Some(proposal) = self.actionable_proposal() else {
+            // Said rather than swallowed: `a` with nothing proposed is
+            // otherwise indistinguishable from a keypress the menu absorbed.
+            self.set_status("Nothing is proposed for this workflow");
+            return None;
+        };
+        let proposal_id = proposal.id.clone();
+        let workflow = proposal.workflow_id.clone();
+        self.set_status("Applying the proposed change…");
+        Some(Cmd::AcceptProposal {
+            workflow,
+            proposal_id,
+        })
+    }
+
+    /// Decline the proposed change waiting on this workflow.
+    ///
+    /// The reason is recorded as a note, which is what stops the next review
+    /// proposing the same thing again. Open the shared inline prompt so the
+    /// keyboard shortcut still captures that required context.
+    pub(in crate::ui::app) fn reject_selected_proposal(&mut self) -> Option<Cmd> {
+        let Some(proposal) = self.visible_proposal() else {
+            self.set_status("Nothing is proposed for this workflow");
+            return None;
+        };
+        self.prompt = Some(super::super::types::Prompt {
+            kind: super::super::types::PromptKind::RejectProposal {
+                workflow: proposal.workflow_id.clone(),
+                proposal_id: proposal.id.clone(),
+            },
+            title: "Why reject this proposal?".to_string(),
+            draft: crate::ui::composer::Draft::new(),
+        });
+        self.set_status("Explain the rejection · Enter submit · Esc cancel");
+        None
     }
 }

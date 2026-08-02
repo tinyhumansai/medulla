@@ -3,7 +3,7 @@
 //! When the TUI config carries a `[tinyplace]` section, this service loads (or
 //! mints) the machine identity, keeps it marked online, auto-accepts contact
 //! requests from configured peers, and polls peer presence — surfacing all of it
-//! into a shared [`TinyplaceObservation`] the [`App`](crate::ui::app::App) merges
+//! into a shared [`TinyplaceObservation`] the TUI's `App` merges
 //! into its render snapshot.
 //!
 //! This slice is deliberately **read-only / observational**: it does not

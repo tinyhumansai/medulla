@@ -15,14 +15,14 @@ fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
-fn ctrl(c: char) -> Event {
-    Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
-}
-
 fn type_str(app: &mut App, s: &str) {
     for ch in s.chars() {
         app.on_event(key(KeyCode::Char(ch)));
     }
+}
+
+fn ctrl(c: char) -> Event {
+    Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
 }
 
 fn chat_app() -> App {

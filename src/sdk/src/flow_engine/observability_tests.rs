@@ -112,6 +112,7 @@ fn steps_are_recorded_with_their_diagnostics_for_the_run_record() {
     let (sink, _) = recording_sink();
     let observer = WorkflowRunObserver::new("demo", &graph(), sink);
     let mut failing = step("build", StepStatus::Success);
+    failing.output = json!({ "artifact": "report.md" });
     failing.diagnostics = vec![tinyflows::expr::NullResolution {
         location: "args.to".into(),
         expression: "=nodes.missing.items[0]".into(),
@@ -123,6 +124,11 @@ fn steps_are_recorded_with_their_diagnostics_for_the_run_record() {
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].node_id, "build");
     assert_eq!(steps[0].status, "success");
+    assert_eq!(
+        steps[0].output,
+        Some(json!({ "artifact": "report.md" })),
+        "the run detail needs the step's actual result"
+    );
     assert!(
         steps[0].diagnostics[0].contains("args.to"),
         "an unresolved binding should name its location: {:?}",

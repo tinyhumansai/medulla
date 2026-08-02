@@ -29,13 +29,13 @@ fn config_path_defaults_under_medulla_home() {
     let e = env(&[]);
     assert_eq!(
         config_path(&e, Path::new("/home/me")),
-        PathBuf::from("/home/me/.medulla/tinyplace/config.json")
+        PathBuf::from("/home/me/.medulla/local/tinyplace/config.json")
     );
     // Empty override is ignored.
     let e2 = env(&[("TINYPLACE_CONFIG", "")]);
     assert_eq!(
         config_path(&e2, Path::new("/home/me")),
-        PathBuf::from("/home/me/.medulla/tinyplace/config.json")
+        PathBuf::from("/home/me/.medulla/local/tinyplace/config.json")
     );
 }
 
@@ -45,19 +45,19 @@ fn config_path_follows_the_medulla_home_resolver() {
     let e = env(&[("MEDULLA_HOME", "/explicit/home")]);
     assert_eq!(
         config_path(&e, Path::new("/home/me")),
-        PathBuf::from("/explicit/home/tinyplace/config.json")
+        PathBuf::from("/explicit/home/local/tinyplace/config.json")
     );
     // HOME from the environment is used ahead of the fallback base.
     let e2 = env(&[("HOME", "/env/home")]);
     assert_eq!(
         config_path(&e2, Path::new("/home/me")),
-        PathBuf::from("/env/home/.medulla/tinyplace/config.json")
+        PathBuf::from("/env/home/.medulla/local/tinyplace/config.json")
     );
     // The identity follows a dev home too.
     let e3 = env(&[("MEDULLA_DEV", "1")]);
     assert_eq!(
         config_path(&e3, Path::new("/home/me")),
-        PathBuf::from(".medulla/tinyplace/config.json")
+        PathBuf::from(".medulla/local/tinyplace/config.json")
     );
 }
 

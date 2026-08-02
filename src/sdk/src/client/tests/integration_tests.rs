@@ -52,13 +52,15 @@ async fn spawn_stub_capture(response: Vec<u8>) -> (String, tokio::sync::oneshot:
     (format!("http://{addr}"), rx)
 }
 
-/// A loopback address with nothing listening (bound then immediately released),
-/// so a connect attempt is refused.
-async fn dead_addr() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    format!("http://{addr}")
+/// A loopback address that cannot have a listener, so connecting is refused.
+///
+/// Reserving an ephemeral port and then releasing it races with the parallel
+/// stub tests: another listener can acquire that port before this client
+/// connects and return an unrelated response. Port zero is reserved and is
+/// never a valid TCP listener destination, avoiding that time-of-check/time-of-use
+/// window.
+fn dead_addr() -> String {
+    "http://127.0.0.1:0".to_string()
 }
 
 fn ok_envelope(status: &str, data: serde_json::Value) -> Vec<u8> {
@@ -200,11 +202,6 @@ async fn program_resource_ids_are_encoded_as_single_path_segments() {
         .await
         .unwrap()
         .starts_with("DELETE /medulla/v1/tasks/task%2Fwith%3F%23 "),);
-
-    assert_eq!(
-        super::super::urlencode("source/with?#"),
-        "source%2Fwith%3F%23"
-    );
 }
 
 #[tokio::test]
@@ -446,13 +443,15 @@ async fn http_error_without_envelope_becomes_api_error() {
 async fn success_status_with_non_json_body_is_decode_error() {
     let (base, _req) = spawn_stub_capture(http_json("HTTP/1.1 200 OK", "not json at all")).await;
     let client = MedullaClient::new(base, "jwt");
-    let err = client.me().await.unwrap_err();
+    // A typed endpoint: the SDK preserves an unparseable 2xx body as a JSON
+    // string, and decoding it into the endpoint's shape is what fails.
+    let err = client.get_session("s1").await.unwrap_err();
     assert!(matches!(err, ClientError::Decode(_)), "got {err:?}");
 }
 
 #[tokio::test]
 async fn connection_refused_surfaces_transport_error() {
-    let base = dead_addr().await;
+    let base = dead_addr();
     let client = MedullaClient::new(base, "jwt");
     let err = client.list_sessions().await.unwrap_err();
     assert!(matches!(err, ClientError::Transport(_)), "got {err:?}");

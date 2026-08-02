@@ -8,26 +8,23 @@
 //! 1. **Describe it.** A `MEDULLA.md` at the workspace root says what the
 //!    directory *is*, which files it is made of, and how to route work over it —
 //!    a short summary, a scanned file layout, and advisory preferences
-//!    (harnesses, models, routing hints). The summary is drafted by reading the
-//!    repo's own instruction files (`AGENTS.md` / `CLAUDE.md` / `README.md`) and
-//!    asking a model to distil them, then written for the operator to edit.
+//!    (harnesses, models, routing hints). The summary is a deterministic stub
+//!    for the operator to edit — the model-drafted variant went out with the
+//!    memory layer that owned the provider seam.
 //! 2. **Register it.** A profile nothing knows about is inert, so the directory
 //!    is also enrolled in the operator's config: `[workflow].workspaces`, whose
 //!    profiles ride every backend session mint, and `[fleet].workspaces`, the
 //!    declared chain the orchestrator places work onto. See [`registry`].
 //!
 //! The module is split by responsibility: [`types`] holds the data model,
-//! [`layout`] scans the tree, [`template`] renders the docs-shipped scaffold,
-//! [`draft`] owns the model call, and [`registry`] owns the config writes. This
-//! file wires them together and owns the filesystem edges (reading sources,
-//! writing the profile, reading one back for the run request).
+//! `layout` scans the tree, `template` renders the docs-shipped scaffold, and
+//! [`registry`] owns the config writes. This file wires them together and owns
+//! the filesystem edges (reading sources, writing the profile, reading one back
+//! for the run request).
 //!
-//! Offline is a first-class path: with no API key and no backend login the
-//! draft falls back to a deterministic stub, so `init` still produces a valid,
-//! hand-editable file — and the layout scan and registration are unaffected,
-//! since neither needs a model.
+//! Everything here is offline: the profile body is a stub, and the layout scan
+//! and registration never needed a model in the first place.
 
-mod draft;
 mod layout;
 pub mod registry;
 mod template;
@@ -40,9 +37,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
-use tinycortex::memory::score::extract::ChatProvider;
 
-pub use draft::{build_user_prompt, draft_profile, parse_draft};
 pub use layout::{layout_block, scan_layout};
 pub use registry::{deregister_workspace, register_workspace, workspace_id, WorkspaceRegistration};
 pub use template::render_medulla_md;
@@ -120,32 +115,6 @@ pub fn collect_profile_inputs(dirs: &[PathBuf]) -> Vec<crate::client::WorkspaceP
         .collect()
 }
 
-/// Draft and write a profile, resolving the model from memory settings.
-///
-/// This is the entry point callers outside the SDK should use: it keeps the
-/// vendor `ChatProvider` type inside this crate's boundary (per the SDK's
-/// no-vendor-types-cross-the-boundary rule). `offline` skips the model call
-/// entirely; otherwise an unavailable model degrades to the stub rather than
-/// failing, so `init` always leaves a usable file behind.
-pub async fn init_workspace_with_settings(
-    dir: &Path,
-    settings: &crate::memory::MemorySettings,
-    offline: bool,
-    force: bool,
-) -> Result<InitOutcome> {
-    let provider = if offline {
-        None
-    } else {
-        crate::memory::chat_provider(settings).ok()
-    };
-    init_workspace(
-        dir,
-        provider.as_ref().map(|p| p as &dyn ChatProvider),
-        force,
-    )
-    .await
-}
-
 /// Ensure a workspace has a profile, then register it — the whole of what
 /// `medulla workspace add` does, in one call.
 ///
@@ -169,11 +138,9 @@ pub async fn init_workspace_with_settings(
 /// written (see [`init_workspace`]).
 pub async fn init_and_register_workspace(
     dir: &Path,
-    settings: &crate::memory::MemorySettings,
     config_path: &Path,
     config: &crate::config::TuiConfig,
     harness: Option<&str>,
-    offline: bool,
     force: bool,
 ) -> Result<InitOutcome> {
     let mut outcome = match read_medulla_md(dir) {
@@ -190,7 +157,7 @@ pub async fn init_and_register_workspace(
             registration: None,
             registration_error: None,
         },
-        _ => init_workspace_with_settings(dir, settings, offline, force).await?,
+        _ => init_workspace(dir, force).await?,
     };
     match register_workspace(config_path, config, dir, harness) {
         Ok(registration) => outcome.registration = Some(registration),
@@ -199,23 +166,13 @@ pub async fn init_and_register_workspace(
     Ok(outcome)
 }
 
-/// Whether a model is reachable with these settings — lets a caller warn before
-/// falling back to the stub, without naming a vendor type.
-pub fn model_available(settings: &crate::memory::MemorySettings) -> bool {
-    crate::memory::chat_provider(settings).is_ok()
-}
-
 /// Draft a profile for `dir` and write it.
 ///
-/// With a `provider`, the body is drafted from the directory's instruction
-/// files; without one — or when the model call fails — a deterministic stub is
-/// written instead so the operator still gets a valid file to edit. The
-/// returned [`InitOutcome`] reports which happened.
-pub async fn init_workspace(
-    dir: &Path,
-    provider: Option<&dyn ChatProvider>,
-    force: bool,
-) -> Result<InitOutcome> {
+/// The body is a deterministic stub for the operator to edit; the scanned
+/// layout is the part that carries real information. [`InitOutcome::drafted`]
+/// is therefore always false — it stays on the type because a drafted body is
+/// what returns when the model seam does.
+pub async fn init_workspace(dir: &Path, force: bool) -> Result<InitOutcome> {
     // Fail before spending a model call when the file is already there.
     let path = profile_path(dir);
     if path.exists() && !force {
@@ -226,28 +183,15 @@ pub async fn init_workspace(
     }
 
     let sources = read_sources(dir);
-    // Scanned before the model call so the draft can name real paths, and kept
-    // regardless of whether that call happens — the layout is the part of the
-    // profile that needs no model at all.
+    // The layout is the part of the profile that carries real information, and
+    // it is read straight off the tree.
     let layout = scan_layout(dir);
-    let (draft, drafted) = match provider {
-        Some(provider) if !sources.is_empty() => {
-            match draft_profile(provider, &sources, &layout).await {
-                Ok(draft) => (draft, true),
-                // A provider/parse failure must not lose the operator's `init`: fall
-                // back to the stub and let the outcome report that it was not drafted.
-                Err(_) => (DraftedProfile::stub(), false),
-            }
-        }
-        _ => (DraftedProfile::stub(), false),
-    };
-
-    let contents = render_medulla_md(&draft, &layout);
+    let contents = render_medulla_md(&DraftedProfile::stub(), &layout);
     let path = write_medulla_md(dir, &contents, force)?;
     Ok(InitOutcome {
         path,
         contents,
-        drafted,
+        drafted: false,
         sources: sources.found(),
         layout,
         kept_profile: false,

@@ -22,10 +22,16 @@ use super::mappers::HarnessSemanticEvent;
 use super::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use super::*;
 
+mod admission_tests;
 mod capability_tests;
+mod custom_harness_tests;
 mod provider_tests;
 mod system_info_tests;
+mod task_attribution_tests;
+mod task_continuity_tests;
 mod task_tests;
+#[cfg(feature = "workflows")]
+mod workflow_tests;
 
 /// A [`SendFn`] that records every `(to, body)` it is handed, paired with the
 /// shared sink the test reads back.
@@ -70,6 +76,8 @@ pub(super) fn base_config() -> DaemonConfig {
         skip_permissions: false,
         budget: None,
         router: None,
+        attribution: true,
+        custom_harnesses: Vec::new(),
     }
 }
 
@@ -86,8 +94,11 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
         correlation_id: correlation.map(str::to_string),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
+        conversation: None,
     }
 }
 
@@ -186,6 +197,28 @@ pub(super) fn tool_call_event() -> HarnessSemanticEvent {
     }
 }
 
+/// A successful result paired with [`tool_call_event`].
+pub(super) fn tool_result_event() -> HarnessSemanticEvent {
+    HarnessSemanticEvent {
+        line: 1,
+        timestamp_ms: 1,
+        record_type: "assistant:tool_result".to_string(),
+        event: HarnessEvent {
+            kind: "tool_result".to_string(),
+            role: "tool".to_string(),
+            payload: json!({
+                "call_id": "c1",
+                "ok": true,
+                "exit_code": 0,
+                "is_error": false,
+                "output": "done",
+                "output_bytes": 4
+            }),
+            ..Default::default()
+        },
+    }
+}
+
 /// A runner that fires `count` tool_call events at `on_event`, then replies.
 pub(super) fn status_runner(count: usize) -> RunTaskFn {
     Arc::new(move |mut opts: RunTaskOptions| {
@@ -207,6 +240,86 @@ pub(super) fn status_runner(count: usize) -> RunTaskFn {
     })
 }
 
+/// A runner that fires `count` ordinary status events, then replies.
+pub(super) fn chatter_status_runner(count: usize) -> RunTaskFn {
+    Arc::new(move |mut opts: RunTaskOptions| {
+        Box::pin(async move {
+            if let Some(mut on_event) = opts.on_event.take() {
+                let event = HarnessSemanticEvent {
+                    line: 0,
+                    timestamp_ms: 0,
+                    record_type: "status".to_string(),
+                    event: HarnessEvent {
+                        kind: "status".to_string(),
+                        role: "system".to_string(),
+                        payload: json!({ "state": "working" }),
+                        ..Default::default()
+                    },
+                };
+                for _ in 0..count {
+                    on_event(&event);
+                }
+            }
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: opts.provider,
+                reply: "ok".to_string(),
+                events: count,
+            })
+        })
+    })
+}
+
+/// A runner that emits two cumulative thinking snapshots inside one throttle window.
+pub(super) fn quick_thinking_runner() -> RunTaskFn {
+    Arc::new(move |mut opts: RunTaskOptions| {
+        Box::pin(async move {
+            if let Some(mut on_event) = opts.on_event.take() {
+                for text in ["checking", "checking the final result"] {
+                    on_event(&HarnessSemanticEvent {
+                        line: 0,
+                        timestamp_ms: 0,
+                        record_type: "agent_thought".to_string(),
+                        event: HarnessEvent {
+                            kind: "agent_thinking".to_string(),
+                            role: "agent".to_string(),
+                            payload: json!({ "text": text }),
+                            ..Default::default()
+                        },
+                    });
+                }
+            }
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: opts.provider,
+                reply: "ok".to_string(),
+                events: 2,
+            })
+        })
+    })
+}
+
+/// A runner that completes a tool inside one throttle window.
+pub(super) fn quick_tool_runner() -> RunTaskFn {
+    Arc::new(move |mut opts: RunTaskOptions| {
+        Box::pin(async move {
+            if let Some(mut on_event) = opts.on_event.take() {
+                on_event(&tool_call_event());
+                on_event(&tool_result_event());
+            }
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: opts.provider,
+                reply: "ok".to_string(),
+                events: 2,
+            })
+        })
+    })
+}
+
 /// Await a runner's readiness signal, panicking if it never arrives.
 pub(super) async fn wait_ready(rx: &mut mpsc::UnboundedReceiver<()>) {
     tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
@@ -221,6 +334,37 @@ pub(super) fn conversation_runner(seen: Arc<StdMutex<Vec<String>>>) -> RunTaskFn
         Box::pin(async move {
             Ok(RunTaskResult {
                 session_id: None,
+                usage: None,
+                provider: opts.provider,
+                reply: "done".to_string(),
+                events: 0,
+            })
+        })
+    })
+}
+
+/// A runner that records the `resume_session_id` each run was given, and
+/// reports `session_id` as the session it opened.
+///
+/// Together those are the whole of session continuity from the daemon's side:
+/// what it was told to resume, and what it captured to resume next time.
+pub(super) fn resume_runner(
+    resumed: Arc<StdMutex<Vec<Option<String>>>>,
+    session_id: &str,
+) -> RunTaskFn {
+    let session_id = session_id.to_string();
+    Arc::new(move |opts: RunTaskOptions| {
+        resumed.lock().unwrap().push(opts.resume_session_id.clone());
+        let session_id = session_id.clone();
+        // Reported through `on_session` as a real executor does — the binding is
+        // recorded when the session opens, not when the turn settles, so a turn
+        // that later times out has still moved the conversation on.
+        if let Some(on_session) = opts.on_session {
+            on_session(session_id.clone());
+        }
+        Box::pin(async move {
+            Ok(RunTaskResult {
+                session_id: Some(session_id),
                 usage: None,
                 provider: opts.provider,
                 reply: "done".to_string(),

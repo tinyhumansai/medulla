@@ -14,6 +14,9 @@ use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 use medulla_tui::ui::app::App;
 
+// Harnesses is where the fleet is read now: PR #86 took it out of the Agents
+// rail on the grounds that this page shows the same hosts, budgets and
+// readiness, so it is the only place that information appears.
 #[test]
 fn the_stand_in_fleet_renders_when_the_runtime_declares_nothing() {
     // An empty runtime: no capacity, no roster, no registered peers — the state

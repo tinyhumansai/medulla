@@ -99,20 +99,24 @@ fn unknown_kind_passthrough_preserves_raw() {
 }
 
 // ---------------------------------------------------------------------------
-// Envelope unwrapping / error mapping
+// SDK error mapping
 // ---------------------------------------------------------------------------
+//
+// Envelope unwrapping itself now belongs to `tinyhumans-sdk`. What this crate
+// still owns is the translation of the SDK's error taxonomy into [`ClientError`],
+// which is what front ends branch on — so these cover that seam directly.
 
-#[test]
-fn unwraps_success_envelope() {
-    let body = br#"{"success":true,"data":{"sessionId":"abc"}}"#;
-    let out: SessionCreated = unwrap_envelope(201, body).unwrap();
-    assert_eq!(out.session_id, "abc");
+/// A failed non-2xx response, as the SDK reports it.
+fn sdk_status(status: u16, body: Value) -> ClientError {
+    tinyhumans_sdk::Error::Status { status, body }.into()
 }
 
 #[test]
 fn maps_error_envelope_with_code() {
-    let body = br#"{"success":false,"error":"token expired","errorCode":"TOKEN_EXPIRED"}"#;
-    let err = unwrap_envelope::<Value>(401, body).unwrap_err();
+    let err = sdk_status(
+        401,
+        json!({ "success": false, "error": "token expired", "errorCode": "TOKEN_EXPIRED" }),
+    );
     assert_eq!(err.error_code(), Some("TOKEN_EXPIRED"));
     assert!(err.is_token_expired());
     assert_eq!(err.status(), Some(401));
@@ -124,8 +128,15 @@ fn maps_error_envelope_with_code() {
 
 #[test]
 fn maps_error_envelope_with_details() {
-    let body = br#"{"success":false,"error":"bad","errorCode":"PROTOCOL_MISMATCH","details":{"min":1,"max":2}}"#;
-    let err = unwrap_envelope::<Value>(409, body).unwrap_err();
+    let err = sdk_status(
+        409,
+        json!({
+            "success": false,
+            "error": "bad",
+            "errorCode": "PROTOCOL_MISMATCH",
+            "details": { "min": 1, "max": 2 },
+        }),
+    );
     match err {
         ClientError::Api { details, .. } => {
             let d = details.unwrap();
@@ -138,9 +149,59 @@ fn maps_error_envelope_with_details() {
 
 #[test]
 fn non_json_error_body_becomes_api_error() {
-    let err = unwrap_envelope::<Value>(500, b"internal error").unwrap_err();
+    // A non-JSON body reaches the SDK error as the raw text.
+    let err = sdk_status(500, json!("internal error"));
     assert_eq!(err.status(), Some(500));
     assert_eq!(err.error_code(), None);
+    match err {
+        ClientError::Api { message, .. } => assert_eq!(message, "internal error"),
+        other => panic!("expected api error, got {other:?}"),
+    }
+}
+
+#[test]
+fn error_body_without_a_message_falls_back_to_the_status() {
+    let err = sdk_status(502, json!({ "unexpected": true }));
+    match err {
+        ClientError::Api { message, .. } => assert_eq!(message, "request failed with status 502"),
+        other => panic!("expected api error, got {other:?}"),
+    }
+}
+
+/// The backend does not always pair a failed operation with a non-2xx status.
+/// The SDK reports that case separately, and it has to classify the same way.
+#[test]
+fn unsuccessful_envelope_on_a_2xx_maps_to_an_api_error() {
+    let err: ClientError = tinyhumans_sdk::Error::Envelope {
+        error: "token expired".into(),
+        error_code: Some("TOKEN_EXPIRED".into()),
+        details: Value::Null,
+    }
+    .into();
+    assert!(err.is_token_expired());
+    assert!(err.is_auth_error());
+    // No HTTP status said so, so none is reported.
+    assert_eq!(err.status(), None);
+    match err {
+        ClientError::Api {
+            message, details, ..
+        } => {
+            assert_eq!(message, "token expired");
+            assert!(details.is_none(), "a null details payload is dropped");
+        }
+        other => panic!("expected api error, got {other:?}"),
+    }
+}
+
+/// A route the SDK intentionally does not expose fails before the network, so
+/// it carries no status to misclassify as an auth failure.
+#[test]
+fn blocked_route_maps_to_a_statusless_api_error() {
+    let err: ClientError =
+        tinyhumans_sdk::Error::RouteNotExposed("GET".into(), "/coupons/admin".into()).into();
+    assert_eq!(err.status(), None);
+    assert_eq!(err.error_code(), None);
+    assert!(!err.is_auth_error());
 }
 
 #[test]
@@ -209,25 +270,52 @@ fn decodes_loop_events() {
     assert!(matches!(pending, LoopEvent::Pending { .. }));
 }
 
+/// The SDK decides reply-vs-loop; this crate re-encodes either arm into its own
+/// [`RunResult`]. Pin that both arms survive the round-trip with their fields.
 #[test]
-fn run_result_distinguishes_reply_and_loop() {
-    let reply = parse_run_result(json!({
-        "reply": "hello",
-        "passCount": 1,
-        "sessionId": "s1",
-        "cycleId": "c1",
-    }))
-    .unwrap();
-    assert!(matches!(reply, RunResult::Reply(_)));
+fn sdk_run_result_converts_into_client_run_result() {
+    use tinyhumans_sdk::api::orchestration as sdk;
 
-    let looped = parse_run_result(json!({
-        "stop": "end",
-        "cycleId": "c1",
-        "sessionId": "s1",
-        "reply": "done",
-    }))
-    .unwrap();
-    assert!(matches!(looped, RunResult::Loop(LoopEvent::End { .. })));
+    let reply: RunResult = match sdk::RunResult::Reply(Box::new(sdk::RunReply {
+        reply: "hello".into(),
+        pass_count: Some(1),
+        compressed_history: Vec::new(),
+        escalations: Vec::new(),
+        session_id: Some("s1".into()),
+        cycle_id: Some("c1".into()),
+    })) {
+        sdk::RunResult::Reply(r) => RunResult::Reply(convert(*r).unwrap()),
+        sdk::RunResult::Loop(e) => RunResult::Loop(convert(*e).unwrap()),
+    };
+    match reply {
+        RunResult::Reply(reply) => {
+            assert_eq!(reply.reply, "hello");
+            assert_eq!(reply.pass_count, Some(1));
+            assert_eq!(reply.cycle_id.as_deref(), Some("c1"));
+        }
+        other => panic!("expected reply, got {other:?}"),
+    }
+
+    let looped: RunResult = match sdk::RunResult::Loop(Box::new(sdk::LoopEvent::End {
+        cycle_id: "c1".into(),
+        session_id: "s1".into(),
+        reply: "done".into(),
+        pass_count: Some(2),
+        compressed_history: Vec::new(),
+        escalations: Vec::new(),
+    })) {
+        sdk::RunResult::Reply(r) => RunResult::Reply(convert(*r).unwrap()),
+        sdk::RunResult::Loop(e) => RunResult::Loop(convert(*e).unwrap()),
+    };
+    match looped {
+        RunResult::Loop(LoopEvent::End {
+            reply, pass_count, ..
+        }) => {
+            assert_eq!(reply, "done");
+            assert_eq!(pass_count, Some(2));
+        }
+        other => panic!("expected loop end, got {other:?}"),
+    }
 }
 
 #[test]

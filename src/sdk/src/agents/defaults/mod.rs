@@ -45,7 +45,8 @@ const SOURCES: &[(&str, &str)] = &[
 ///
 /// A document that fails to parse is skipped rather than panicking — a library
 /// call has no business aborting a process over its own asset — and cannot
-/// reach a release: [`super::tests`] asserts every source parses and that the
+/// reach a release: the crate-level agent tests assert every source parses and
+/// that the
 /// full id list is intact.
 pub fn default_templates() -> Vec<AgentTemplate> {
     default_template_files()

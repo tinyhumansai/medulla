@@ -11,6 +11,7 @@ use crate::ui::stream;
 use crate::ui::theme::{color_to_string, THEME_ROLES};
 use crate::ui::util::clip;
 
+use super::super::super::appearance::APPEARANCE_ROWS;
 use super::super::super::types::App;
 
 impl App {
@@ -19,7 +20,7 @@ impl App {
         let block = self.panel("Appearance");
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let sel = self.appearance_index.min(THEME_ROLES.len() - 1);
+        let sel = self.appearance_index.min(APPEARANCE_ROWS - 1);
         let mut lines: Vec<TLine> = Vec::new();
         for (i, role) in THEME_ROLES.iter().enumerate() {
             let c = self.theme.role(i);
@@ -37,7 +38,13 @@ impl App {
         }
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
-            "j/k select role · ←/→ or Enter cycle color · applies live",
+            "j/k select · ←/→ or Enter change · applies live",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+        // The harness-row toggles used to sit here. Point at where they went
+        // rather than leaving an operator to find the new page by accident.
+        lines.push(TLine::from(Span::styled(
+            "harness rows are laid out on the Status line page",
             Style::default().add_modifier(Modifier::DIM),
         )));
         let where_saved = match &self.config_path {
@@ -134,7 +141,7 @@ impl App {
         }
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(
-            "r refresh · c effective config · 1-4 switch settings pages",
+            "r refresh · c effective config · 1-9 switch settings pages",
             dim,
         )));
         f.render_widget(

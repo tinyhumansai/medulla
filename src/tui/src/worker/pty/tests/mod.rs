@@ -1,7 +1,8 @@
 //! Tests for the PTY session layer, split so no file exceeds the repo's
 //! 500-line ceiling: [`session`] covers allocation, the reader thread, emulator
 //! parsing, resize, input and reaping; [`identity`] which harnesses get a minted
-//! session id and how one is learned back.
+//! session id and how one is learned back; [`attention`] a live screen becoming
+//! the flag that makes a row blink.
 //!
 //! These drive a real child on a real pseudo-terminal — `/bin/sh`, not a coding
 //! agent, so they stay fast, offline, and deterministic while still exercising
@@ -15,9 +16,12 @@ use std::time::{Duration, Instant};
 use medulla::tinyplace::HarnessProvider;
 
 use super::manager::PtyManager;
-use super::types::{LaunchSpec, PtyState};
+use super::types::{HarnessControl, LaunchSpec, PtyState};
 
+mod attention;
+mod control;
 mod identity;
+mod scrollback;
 mod session;
 
 /// A spec that runs `sh -c <script>` on a pty.
@@ -40,6 +44,9 @@ fn sh(script: &str) -> LaunchSpec {
         skip_permissions: false,
         label: "test".to_string(),
         session_id: None,
+        model: None,
+        control: HarnessControl::Orchestrator,
+        user_spawned: false,
     }
 }
 

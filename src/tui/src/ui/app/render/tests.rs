@@ -19,6 +19,23 @@ fn app() -> App {
     App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()))
 }
 
+#[test]
+fn harness_choice_window_keeps_the_selection_visible() {
+    assert_eq!(
+        super::harness_modals::harness_choice_window(20, 0, 13),
+        0..13
+    );
+    assert_eq!(
+        super::harness_modals::harness_choice_window(20, 10, 13),
+        4..17
+    );
+    assert_eq!(
+        super::harness_modals::harness_choice_window(20, 19, 13),
+        7..20
+    );
+    assert_eq!(super::harness_modals::harness_choice_window(2, 1, 13), 0..2);
+}
+
 fn lane(role: AgentRole) -> AgentLane {
     AgentLane {
         key: "k".into(),
@@ -70,7 +87,10 @@ fn an_unbacked_worker_is_unknown_and_a_roster_seeded_one_is_idle() {
     let a = app();
     // Nothing known at all.
     assert_eq!(a.lane_marker(&lane(AgentRole::Agent), false), "◆");
-    assert_eq!(a.lane_state(&lane(AgentRole::Agent)), " · idle");
+    assert_eq!(
+        a.lane_state(&lane(AgentRole::Agent), &std::collections::HashSet::new()),
+        " · inactive"
+    );
 }
 
 #[test]
@@ -123,14 +143,20 @@ fn a_session_lane_reflects_its_peer_session_state() {
     live.parent_agent_id = Some("machine-1".to_string());
     assert_eq!(a.session_state(&live).as_deref(), Some("running"));
     assert_eq!(a.lane_marker(&live, false), "●");
-    assert_eq!(a.lane_state(&live), " · running");
+    assert_eq!(
+        a.lane_state(&live, &std::collections::HashSet::new()),
+        " · working"
+    );
 
-    // An ended session is hollow and reads as inactive.
+    // An ended session is terminal and reads as completed.
     let mut done = lane(AgentRole::Agent);
     done.session_id = Some("s-done".to_string());
     done.parent_agent_id = Some("machine-1".to_string());
     assert_eq!(a.lane_marker(&done, false), "○");
-    assert_eq!(a.lane_state(&done), " · inactive");
+    assert_eq!(
+        a.lane_state(&done, &std::collections::HashSet::new()),
+        " · completed"
+    );
 
     // A session id whose parent machine is unknown resolves to nothing, and the
     // row degrades to the pending suffix instead of claiming a state.
@@ -138,7 +164,10 @@ fn a_session_lane_reflects_its_peer_session_state() {
     orphan.session_id = Some("s-live".to_string());
     orphan.parent_agent_id = Some("machine-nope".to_string());
     assert_eq!(a.session_state(&orphan), None);
-    assert_eq!(a.lane_state(&orphan), " · …");
+    assert_eq!(
+        a.lane_state(&orphan, &std::collections::HashSet::new()),
+        " · …"
+    );
 
     // No parent at all → the lookup short-circuits.
     let mut parentless = lane(AgentRole::Agent);
@@ -322,5 +351,38 @@ fn a_huge_argument_payload_is_clipped_not_dumped() {
     assert!(
         !call.contains('{') && !call.contains('}'),
         "the payload must be summarised, never dumped: {call}"
+    );
+}
+
+#[test]
+fn leaving_the_agents_tab_takes_the_keyboard_back_from_an_attached_harness() {
+    // The bug this pins: `release_harness` was only reached from
+    // `agents_selection`, which runs only while the Agents tab is being drawn.
+    // It notices the *cursor* moving off the attached session and has nothing to
+    // say once the operator has left the tab altogether — so focus stayed
+    // `Attached`, and every keystroke meant for the tab now on screen was typed
+    // into a harness pane the operator could no longer see, with `Ctrl-]` the
+    // only way out of a mode with no visible cause.
+    //
+    // Only the leaving case is asserted here. "Stays attached while the pane is
+    // on screen" needs a live pty session for the selection to resolve to, which
+    // is covered against a real child in `ui::harness_pane`; this fixture has no
+    // harnesses, so the Agents tab would release focus for the ordinary reason
+    // (nothing under the cursor) and prove nothing about the tab switch.
+    let mut app = app();
+    app.harness_focus = crate::ui::harness_pane::HarnessFocus::Attached("w_1".to_string());
+    app.tab_index = crate::ui::app::types::TABS
+        .iter()
+        .position(|t| *t != "Agents")
+        .expect("some other tab");
+
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
+    terminal.draw(|f| app.draw(f)).expect("draw");
+
+    assert_eq!(
+        app.attached_harness(),
+        None,
+        "keys must not reach a harness the operator has navigated away from"
     );
 }

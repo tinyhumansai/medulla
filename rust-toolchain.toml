@@ -1,0 +1,18 @@
+[toolchain]
+# Pinned to match the vendored OpenHuman core (`vendor/openhuman/rust-toolchain.toml`).
+#
+# This file has to exist here even though OpenHuman ships its own: `rustup`
+# resolves `rust-toolchain.toml` from the invocation directory upward, so
+# building from this workspace root never reads the one inside `vendor/`.
+# Without this pin, CI's `dtolnay/rust-toolchain@stable` would compile the
+# vendored core on whatever stable happens to be current.
+#
+# 1.96 is a hard floor, not a preference: rusqlite 0.40 / libsqlite3-sys 0.38
+# use `cfg_select!` in their build scripts, stabilized in 1.96 and unstable
+# through 1.95 (rust-lang/rust#115585). OpenHuman depends on both, so an older
+# toolchain fails to build the core at all.
+#
+# Keep this in lockstep with the vendored core's pin when the submodule advances.
+channel = "1.96.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

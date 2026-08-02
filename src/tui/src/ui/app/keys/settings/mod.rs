@@ -17,12 +17,12 @@
 use crossterm::event::KeyCode;
 
 use crate::ui::multi_pane::{self, NavAction};
-use crate::ui::theme::THEME_ROLES;
 use medulla::client::FeedbackType;
 
+use super::super::appearance::APPEARANCE_ROWS;
 use super::super::types::{
     App, Cmd, SETTINGS_SUBPAGES, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_FEEDBACK,
-    SP_TRACE, SP_USAGE,
+    SP_HELP, SP_STATUS_LINE, SP_TRACE, SP_USAGE,
 };
 
 impl App {
@@ -70,6 +70,7 @@ impl App {
         match self.settings_index {
             SP_USAGE => self.usage_key(code),
             SP_APPEARANCE => self.appearance_key(code),
+            SP_STATUS_LINE => self.status_line_key(code),
             SP_CONFIG => self.config_key(code),
             SP_FEEDBACK => self.feedback_key(code),
             SP_TRACE => self.trace_key(code),
@@ -89,8 +90,12 @@ impl App {
                 self.appearance_index = if up {
                     self.appearance_index.saturating_sub(1)
                 } else {
-                    (self.appearance_index + 1).min(THEME_ROLES.len() - 1)
+                    (self.appearance_index + 1).min(APPEARANCE_ROWS - 1)
                 };
+                SettingsKey::handled(None)
+            }
+            SP_STATUS_LINE => {
+                self.move_status_line_index(up);
                 SettingsKey::handled(None)
             }
             SP_CONFIG => {
@@ -111,6 +116,18 @@ impl App {
                     self.context_index.saturating_sub(1)
                 } else {
                     (self.context_index + 1).min(self.contexts.len().saturating_sub(1))
+                };
+                SettingsKey::handled(None)
+            }
+            // Help is a single long page rather than a list, so it scrolls by
+            // the line. It outgrew a short terminal once the harness bindings
+            // and commands landed on it, and a reference you cannot reach the
+            // bottom of is not one.
+            SP_HELP => {
+                self.help_scroll = if up {
+                    self.help_scroll.saturating_sub(1)
+                } else {
+                    self.help_scroll.saturating_add(1)
                 };
                 SettingsKey::handled(None)
             }
@@ -140,12 +157,28 @@ impl App {
                 self.appearance_index = if up {
                     self.appearance_index.saturating_sub(1)
                 } else {
-                    (self.appearance_index + 1).min(THEME_ROLES.len() - 1)
+                    (self.appearance_index + 1).min(APPEARANCE_ROWS - 1)
                 };
                 SettingsKey::handled(None)
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Enter => {
-                self.cycle_appearance_role(!matches!(code, KeyCode::Left));
+                self.cycle_appearance_row(!matches!(code, KeyCode::Left));
+                SettingsKey::handled(None)
+            }
+            _ => SettingsKey::Unhandled,
+        }
+    }
+
+    /// Status line: pick a harness-row field and cycle where it sits or how it
+    /// is spelled. Every change redraws the preview on the same page.
+    fn status_line_key(&mut self, code: KeyCode) -> SettingsKey {
+        match code {
+            KeyCode::Char('j') | KeyCode::Char('k') => {
+                self.move_status_line_index(matches!(code, KeyCode::Char('k')));
+                SettingsKey::handled(None)
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Enter => {
+                self.cycle_status_line_row(!matches!(code, KeyCode::Left));
                 SettingsKey::handled(None)
             }
             _ => SettingsKey::Unhandled,
@@ -174,10 +207,32 @@ impl App {
     }
 
     /// Feedback: browse the board, vote, comment, and submit.
-    fn feedback_key(&mut self, code: KeyCode) -> SettingsKey {
+    ///
+    /// `pub(super)` because the top-level Feedback tab routes its keys here
+    /// too — the board is the same surface in both places, and duplicating the
+    /// bindings is how the two drift apart.
+    pub(super) fn feedback_key(&mut self, code: KeyCode) -> SettingsKey {
         match code {
-            KeyCode::Char('k') => SettingsKey::handled(self.move_feedback_index(true)),
-            KeyCode::Char('j') => SettingsKey::handled(self.move_feedback_index(false)),
+            // The arrows are bound here as well as by the Settings nav wrapper,
+            // which never reaches this function with one: on the top-level tab
+            // there is no wrapper, and the board's own header advertises `↑/↓`.
+            KeyCode::Char('k') | KeyCode::Up => {
+                SettingsKey::handled(self.move_feedback_index(true))
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                SettingsKey::handled(self.move_feedback_index(false))
+            }
+            // The detail pane holds the whole body plus every comment, so it
+            // outgrows its height routinely; the list keeps the arrows, so
+            // paging keys scroll the text.
+            KeyCode::PageUp => {
+                self.scroll_feedback_detail(false);
+                SettingsKey::handled(None)
+            }
+            KeyCode::PageDown => {
+                self.scroll_feedback_detail(true);
+                SettingsKey::handled(None)
+            }
             KeyCode::Char('u') => SettingsKey::handled(self.vote_selected_feedback(1)),
             KeyCode::Char('d') => SettingsKey::handled(self.vote_selected_feedback(-1)),
             KeyCode::Char('c') => {
@@ -241,9 +296,9 @@ impl App {
     fn account_key(&mut self, code: KeyCode) -> SettingsKey {
         match code {
             KeyCode::Enter => {
-                let status = self.confirm_logout();
+                let (status, cmd) = self.confirm_logout();
                 self.set_status(status);
-                SettingsKey::handled(None)
+                SettingsKey::handled(cmd)
             }
             KeyCode::Esc => {
                 self.disarm_logout();

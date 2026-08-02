@@ -161,4 +161,7 @@ pub fn delete_before(text: &str, cursor: usize) -> Draft {
 mod tests;
 
 mod types;
-pub use types::{Caret, Draft, PromptAction, TextPrompt};
+pub use types::{Caret, Draft, PromptAction, TextPrompt, VisualRow};
+
+mod wrap;
+pub use wrap::{caret_visual, wrap_rows};

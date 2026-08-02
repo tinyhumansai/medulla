@@ -5,7 +5,15 @@
 //! and a tiny.place address, so these pin the resolution rules rather than the
 //! transport — dispatch itself is covered in [`super::super::dispatch`].
 
-use super::super::roster::{address_of, register_payload, HubWorker};
+use super::super::roster::{
+    address_of, addresses_of, register_payload, unreachable_addresses, HubWorker,
+};
+
+/// No liveness opinion — what a bridge with no presence signal reports, and
+/// what most of these tests want, since they are about payload shape.
+fn no_presence() -> std::collections::HashMap<String, bool> {
+    std::collections::HashMap::new()
+}
 use super::super::roster::{subscription_for_strategy, worker_for_strategy};
 use crate::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 use crate::tinyplace::{
@@ -15,12 +23,14 @@ use crate::tinyplace::{
 
 fn worker(id: &str, addr: &str) -> HubWorker {
     HubWorker {
+        roles: Vec::new(),
         id: id.to_string(),
         address: addr.to_string(),
         harness: "claude".to_string(),
         label: None,
         selected: false,
         workspace: None,
+        ..Default::default()
     }
 }
 
@@ -180,7 +190,7 @@ fn subscription_routing_excludes_not_ready_and_fails_open_without_numbers() {
 
 #[test]
 fn register_payload_advertises_id_address_and_harness() {
-    let payload = register_payload(&[worker("w1", "GRVaddr")]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents.len(), 1);
     assert_eq!(agents[0]["id"], "w1");
@@ -196,7 +206,7 @@ fn register_payload_advertises_id_address_and_harness() {
 fn register_payload_advertises_a_known_workspace() {
     let mut w = worker("this-device", "this-device");
     w.workspace = Some("/srv/repos/medulla".to_string());
-    let payload = register_payload(&[w]);
+    let payload = register_payload(&[w], &no_presence(), &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["metadata"]["workspace"], "/srv/repos/medulla");
 }
@@ -206,13 +216,13 @@ fn register_payload_advertises_a_known_workspace() {
 /// win that fallback and place the agent nowhere.
 #[test]
 fn register_payload_omits_an_unknown_or_blank_workspace() {
-    let payload = register_payload(&[worker("w1", "GRVaddr")]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert!(agents[0]["metadata"].get("workspace").is_none());
 
     let mut blank = worker("w2", "ADDR2");
     blank.workspace = Some("   ".to_string());
-    let payload = register_payload(&[blank]);
+    let payload = register_payload(&[blank], &no_presence(), &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert!(agents[0]["metadata"].get("workspace").is_none());
 }
@@ -258,7 +268,7 @@ fn an_advertised_worker_is_online_so_it_can_be_auto_assigned() {
     // availability is exactly "online". Advertising a blank one excluded this
     // hub's workers from every fan-out, and rendered as an empty column in
     // agent_list — which reads as a broken row, not an idle worker.
-    let payload = register_payload(&[worker("w1", "GRVaddr")]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["availability"], "online");
 }
@@ -324,12 +334,14 @@ fn adding_a_peer_requests_contact_unless_it_is_already_one() {
 
 fn hw(id: &str, address: &str) -> HubWorker {
     HubWorker {
+        roles: Vec::new(),
         id: id.to_string(),
         address: address.to_string(),
         harness: "claude".to_string(),
         label: None,
         selected: false,
         workspace: None,
+        ..Default::default()
     }
 }
 
@@ -438,7 +450,7 @@ fn an_unlabelled_worker_advertises_one_token_not_two() {
     // `agent_list` renders `id (name)`. When those differ and both read as
     // names, the model picks one and may pick the unroutable one — which is the
     // original bug. Unlabelled, they must coincide.
-    let payload = register_payload(&[worker("claude-worker", "3Hob1Fxu")]);
+    let payload = register_payload(&[worker("claude-worker", "3Hob1Fxu")], &no_presence(), &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["id"], "claude-worker");
     assert_eq!(
@@ -449,8 +461,146 @@ fn an_unlabelled_worker_advertises_one_token_not_two() {
     // A labelled one keeps its human name; the id stays a visible slug of it.
     let mut labelled = worker("sanil-laptop", "3Hob1Fxu");
     labelled.label = Some("Sanil Laptop".to_string());
-    let payload = register_payload(&[labelled]);
+    let payload = register_payload(&[labelled], &no_presence(), &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["id"], "sanil-laptop");
     assert_eq!(agents[0]["name"], "Sanil Laptop");
+}
+
+#[test]
+fn a_worker_the_relay_reports_down_is_withheld_entirely() {
+    // Not advertised as offline — withheld. Marking it down only stops the
+    // *automatic* assignment of an untargeted task; a task naming it still
+    // resolves and dispatches into the void, which is the stall being fixed.
+    let online = std::collections::HashMap::from([("GRVdead".to_string(), false)]);
+    let payload = register_payload(
+        &[worker("live", "GRVlive"), worker("dead", "GRVdead")],
+        &online,
+        &[],
+    );
+    let agents = payload["agents"].as_array().expect("an agent list");
+
+    assert_eq!(agents.len(), 1, "only the reachable one is offered");
+    assert_eq!(agents[0]["id"], "live");
+    // What survives is advertised online, because the orchestrator only
+    // auto-assigns to an agent whose availability is exactly that.
+    assert_eq!(agents[0]["availability"], "online");
+}
+
+#[test]
+fn a_worker_the_relay_reports_up_is_advertised() {
+    let online = std::collections::HashMap::from([("GRVaddr".to_string(), true)]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &online, &[]);
+    assert_eq!(payload["agents"].as_array().expect("agents").len(), 1);
+    assert_eq!(payload["agents"][0]["availability"], "online");
+}
+
+#[test]
+fn no_answer_from_the_relay_advertises_everything() {
+    // "The relay did not say" is not "the worker is down". One dropped request
+    // must not empty a live roster.
+    let payload = register_payload(
+        &[worker("w1", "GRVone"), worker("w2", "GRVtwo")],
+        &no_presence(),
+        &[],
+    );
+    assert_eq!(payload["agents"].as_array().expect("agents").len(), 2);
+}
+
+#[test]
+fn every_roster_address_is_asked_about_in_one_batch() {
+    // One request for the whole roster, not one per worker: a hub with a dozen
+    // workers should not spend a dozen round trips to redraw one column.
+    let workers = [worker("w1", "GRVone"), worker("w2", "GRVtwo")];
+    assert_eq!(addresses_of(&workers), vec!["GRVone", "GRVtwo"]);
+}
+
+#[test]
+fn the_withheld_addresses_are_reportable() {
+    // Named in the log rather than silently dropped: a roster that quietly
+    // shrinks is indistinguishable from one that was never configured.
+    let online = std::collections::HashMap::from([
+        ("GRVdead".to_string(), false),
+        ("GRVlive".to_string(), true),
+    ]);
+    let workers = [worker("live", "GRVlive"), worker("dead", "GRVdead")];
+    assert_eq!(unreachable_addresses(&workers, &online), vec!["GRVdead"]);
+}
+
+#[test]
+fn a_toggled_role_reaches_the_orchestrator_as_description_tags_and_id() {
+    // What the orchestrator can route on. The description is a prompt surface —
+    // it is the text the model reads when choosing — the tags are the coarse
+    // filter, and the id is the join key for anything that later wants the
+    // role's tools or instructions.
+    let catalog = crate::agents::default_templates();
+    let mut w = worker("claude-worker-2", "GRVaddr");
+    w.roles = vec!["code-reviewer".to_string()];
+
+    let payload = register_payload(&[w], &no_presence(), &catalog);
+    let agent = &payload["agents"][0];
+
+    assert!(
+        agent["description"]
+            .as_str()
+            .expect("a description")
+            .contains("Reviews a change"),
+        "the role's own words, not \"claude daemon\": {agent}"
+    );
+    let tags: Vec<&str> = agent["tags"]
+        .as_array()
+        .expect("tags")
+        .iter()
+        .map(|t| t.as_str().expect("a tag"))
+        .collect();
+    // `code` survives whatever else is set: every one of these runs a coding
+    // harness, and dropping it would take the worker out of code fan-outs.
+    assert!(tags.contains(&"code"), "{tags:?}");
+    assert!(tags.contains(&"review"), "{tags:?}");
+    assert_eq!(agent["metadata"]["roles"][0], "code-reviewer");
+}
+
+#[test]
+fn a_worker_with_no_roles_is_advertised_exactly_as_before() {
+    // Unspecified must stay general. Describing a worker as nothing, or tagging
+    // it out of every fan-out, would make declaring roles compulsory.
+    let payload = register_payload(
+        &[worker("w1", "GRVaddr")],
+        &no_presence(),
+        &crate::agents::default_templates(),
+    );
+    let agent = &payload["agents"][0];
+    assert_eq!(agent["description"], "claude daemon");
+    assert_eq!(agent["tags"][0], "code");
+    assert_eq!(agent["tags"].as_array().expect("tags").len(), 1);
+}
+
+#[test]
+fn a_role_the_catalog_does_not_have_is_dropped_rather_than_advertised() {
+    // A role the orchestrator cannot look up is a routing hint it cannot act
+    // on, and advertising it would describe the worker as something no template
+    // backs.
+    let mut w = worker("w1", "GRVaddr");
+    w.roles = vec!["deleted-role".to_string()];
+    let payload = register_payload(&[w], &no_presence(), &crate::agents::default_templates());
+    assert_eq!(payload["agents"][0]["description"], "claude daemon");
+    // Including from `metadata.roles`, which is the join key: an id with no
+    // template behind it hands a downstream lookup a key that resolves to
+    // nothing, which is the same unactionable hint the description drops.
+    assert!(
+        payload["agents"][0]["metadata"]["roles"].is_null(),
+        "unresolved ids must not survive in metadata: {}",
+        payload["agents"][0]["metadata"]
+    );
+}
+
+#[test]
+fn metadata_roles_carries_only_the_ids_the_catalog_resolves() {
+    let mut w = worker("w1", "GRVaddr");
+    w.roles = vec!["code-reviewer".to_string(), "deleted-role".to_string()];
+    let payload = register_payload(&[w], &no_presence(), &crate::agents::default_templates());
+    assert_eq!(
+        payload["agents"][0]["metadata"]["roles"],
+        serde_json::json!(["code-reviewer"])
+    );
 }

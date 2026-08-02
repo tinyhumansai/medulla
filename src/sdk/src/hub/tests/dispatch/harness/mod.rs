@@ -72,8 +72,11 @@ impl Relay for FakeWorker {
                         correlation_id: frame.correlation_id,
                         harness: None,
                         provider: None,
+                        custom_harness: None,
                         model: None,
+                        tool_mode: None,
                         workflow: None,
+                        conversation: None,
                     },
                     None,
                 ),
@@ -93,8 +96,11 @@ impl Relay for FakeWorker {
                             correlation_id: frame.correlation_id,
                             harness: None,
                             provider: None,
+                            custom_harness: None,
                             model: None,
+                            tool_mode: None,
                             workflow: None,
+                            conversation: None,
                         },
                         None,
                     ),
@@ -128,8 +134,11 @@ impl Relay for FakeWorker {
                     correlation_id: cid.clone(),
                     harness: None,
                     provider: None,
+                    custom_harness: None,
                     model: None,
+                    tool_mode: None,
                     workflow: None,
+                    conversation: None,
                 },
                 usage,
             ),
@@ -161,8 +170,11 @@ impl Relay for FakeWorker {
                             correlation_id: cid.clone(),
                             harness: None,
                             provider: None,
+                            custom_harness: None,
                             model: None,
+                            tool_mode: None,
                             workflow: None,
+                            conversation: None,
                         },
                         None,
                     ),
@@ -240,7 +252,7 @@ impl Relay for FakeWorker {
 
 /// A dispatch request the tests mutate per case. `abort_id` mirrors `task_id` so a
 /// test can abort by the same id it dispatched under.
-pub(super) fn req(instruction: &str) -> TaskRequest {
+pub(in crate::hub::tests) fn req(instruction: &str) -> TaskRequest {
     TaskRequest {
         task_id: "t1".to_string(),
         abort_id: "t1".to_string(),
@@ -248,8 +260,11 @@ pub(super) fn req(instruction: &str) -> TaskRequest {
         instruction: instruction.to_string(),
         worker_address: "GRV1worker".to_string(),
         provider: None,
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: None,
+        conversation: None,
     }
 }
 

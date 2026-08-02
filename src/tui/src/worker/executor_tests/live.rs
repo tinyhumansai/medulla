@@ -51,7 +51,7 @@ use medulla::daemon::providers::{Abort, RunTaskOptions};
 use medulla::tinyplace::HarnessProvider;
 
 use super::super::executor::PtySessionExecutor;
-use super::super::pty::{LaunchSpec, PtyManager};
+use super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
 
 /// Render a session's medulla-parsed screen as plain text (mirrors the private
 /// `pty::inject::screen_text`), for the paste-gap diagnostic below.
@@ -93,6 +93,7 @@ fn live_options(
 ) -> RunTaskOptions {
     RunTaskOptions {
         conversation: peer.to_string(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider: HarnessProvider::Codex,
         prompt: prompt.to_string(),
@@ -108,6 +109,7 @@ fn live_options(
         on_event: None,
         on_stdin: None,
         on_session: None,
+        attribution: true,
     }
 }
 
@@ -215,6 +217,9 @@ async fn experiment_codex_dialog_dismissal() {
             skip_permissions: true,
             label: "exp".to_string(),
             session_id: None,
+            model: None,
+            control: HarnessControl::Orchestrator,
+            user_spawned: false,
         })
         .expect("open");
 
@@ -294,6 +299,9 @@ async fn experiment_codex_startup_dialog_dismissal() {
             skip_permissions: true,
             label: "trust".to_string(),
             session_id: None,
+            model: None,
+            control: HarnessControl::Orchestrator,
+            user_spawned: false,
         })
         .expect("open");
 
@@ -364,6 +372,9 @@ async fn diagnose_codex_paste_rendering() {
             skip_permissions: true,
             label: "diag".to_string(),
             session_id: None,
+            model: None,
+            control: HarnessControl::Orchestrator,
+            user_spawned: false,
         })
         .expect("open codex session");
 

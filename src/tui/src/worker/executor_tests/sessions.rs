@@ -275,3 +275,201 @@ async fn an_unbound_task_whose_prompt_cannot_be_injected_releases_its_session() 
     );
     sessions.shutdown();
 }
+
+#[tokio::test]
+async fn sequential_task_frames_from_one_sender_do_not_share_a_session() {
+    // The regression this pins is not the concurrent case above — that one was
+    // already handled by refusing a *busy* session. This is the sequential one:
+    // task A finishes, its session is released as idle, and task B then claims
+    // it and inherits A's whole conversation.
+    //
+    // It was reachable for every locally dispatched task. `DaemonRuntime` sets
+    // `conversation` to the authenticated sender, which for an orchestrator's
+    // own host is always the hub address, so the old
+    // `conversation.is_empty() => Bounded` inference never fired: every task
+    // frame classified as unbound and reused the sender's session. Two
+    // unrelated delegated tasks then ran in one harness, the second able to
+    // read and act on the first's prompt and tool output.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
+
+    // Each session writes its own rollout, so sharing shows up as a shared
+    // transcript rather than only as a suspicious answer.
+    let task = |n: u32| {
+        let rollout = dir.path().join(format!("rollout-seq-{n}.jsonl"));
+        let script = fake_harness_script_as(
+            &rollout.to_string_lossy(),
+            &cwd,
+            &format!("answer {n}"),
+            &format!("sess-seq-{n}"),
+        );
+        // A named sender, exactly as the daemon supplies — and `Bounded`,
+        // because a task frame is discrete work however it is attributed. That
+        // pairing is the one the old inference could not express.
+        let mut options = options(&env, "peerA", &script, &cwd);
+        options.session_class = medulla::sessions::SessionClass::Bounded;
+        options
+    };
+
+    let first = tokio::time::timeout(
+        Duration::from_secs(30),
+        executor.clone().run_for_test(task(1)),
+    )
+    .await
+    .expect("the first task settles")
+    .expect("the first task must succeed");
+
+    // Sequential, not concurrent: the first session is idle and reusable by the
+    // time the second starts, which is precisely the window that leaked.
+    let second = tokio::time::timeout(
+        Duration::from_secs(30),
+        executor.clone().run_for_test(task(2)),
+    )
+    .await
+    .expect("the second task settles")
+    .expect("the second task must succeed");
+
+    assert_ne!(
+        first.reply, second.reply,
+        "each task must be answered on its own terms, not handed the other's answer"
+    );
+    // Two rows, not one. A closed session keeps its row so its last screen
+    // stays readable, so this counts sessions *opened*: one each. With the old
+    // inference the second task reclaimed the first's idle session and this was
+    // 1 — the leak, stated as a number.
+    let rows = sessions.rows();
+    assert_eq!(
+        rows.len(),
+        2,
+        "each bounded task must open its own session, not inherit the last one"
+    );
+    assert!(
+        !rows.iter().any(|row| row.state.is_running()),
+        "a bounded task closes its session when it replies: {:?}",
+        rows.iter().map(|r| r.state).collect::<Vec<_>>()
+    );
+    sessions.shutdown();
+}
+
+#[tokio::test]
+async fn a_dispatch_into_a_workspace_the_operator_holds_is_refused() {
+    // The bug this closes: taking over the only harness in a workspace did not
+    // stop the orchestrator working there — `session_for` fell through the reuse
+    // branch and simply OPENED A SECOND HARNESS in the same folder. Two agents,
+    // one working tree, no mutual exclusion. So the assertion that matters here
+    // is not just that the task is refused; it is that nothing new was spawned.
+    use super::super::pty::{HarnessControl, LaunchSpec};
+
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let rollout = dir.path().join("rollout-held.jsonl");
+    let script = fake_harness_script(&rollout.to_string_lossy(), &cwd, "unreachable");
+
+    let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
+
+    // The operator starts a harness here and keeps it.
+    let held = sessions
+        .open(LaunchSpec {
+            provider: HarnessProvider::Codex,
+            bin: "/bin/sh".to_string(),
+            cwd: cwd.clone(),
+            env: HashMap::new(),
+            extra_args: vec!["-c".to_string(), "sleep 30".to_string()],
+            skip_permissions: false,
+            label: "you:codex".to_string(),
+            model: None,
+            session_id: None,
+            control: HarnessControl::User,
+            user_spawned: true,
+        })
+        .expect("the operator's harness must start");
+    let before = sessions.rows().len();
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(30),
+        executor
+            .clone()
+            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
+    )
+    .await
+    .expect("must settle")
+    .expect_err("a workspace an operator holds must refuse the task");
+
+    assert!(
+        error.starts_with(medulla::daemon::HARNESS_HELD_PREFIX),
+        "the refusal must carry the shared prefix so the hub can settle it as \
+         Held rather than as an ordinary worker error — got: {error}"
+    );
+    assert_eq!(
+        sessions.rows().len(),
+        before,
+        "refusing the task must not leave a rival harness running in the \
+         operator's working tree"
+    );
+
+    sessions.close(&held);
+    sessions.shutdown();
+}
+
+#[tokio::test]
+async fn a_dispatch_runs_again_once_the_harness_is_handed_back() {
+    // The other half: the hold is a pause, not a wall. Handing back must make
+    // the workspace usable again without the operator restarting anything.
+    use super::super::pty::{HarnessControl, LaunchSpec};
+
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let rollout = dir.path().join("rollout-handback.jsonl");
+    let script = fake_harness_script(&rollout.to_string_lossy(), &cwd, "picked it up");
+
+    let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
+
+    // The operator's harness runs the fake agent, not a bare shell: after the
+    // handback the executor REUSES this very process, so it has to be something
+    // that can actually serve the turn.
+    let held = sessions
+        .open(LaunchSpec {
+            provider: HarnessProvider::Codex,
+            bin: "/bin/sh".to_string(),
+            cwd: cwd.clone(),
+            env: env.clone(),
+            extra_args: vec!["-c".to_string(), script.clone()],
+            skip_permissions: false,
+            label: "you:codex".to_string(),
+            model: None,
+            session_id: None,
+            control: HarnessControl::User,
+            user_spawned: true,
+        })
+        .expect("the operator's harness must start");
+
+    assert!(tokio::time::timeout(
+        Duration::from_secs(30),
+        executor
+            .clone()
+            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
+    )
+    .await
+    .expect("must settle")
+    .is_err());
+
+    // The operator hands it back.
+    assert!(sessions.set_control(&held, HarnessControl::Orchestrator));
+
+    let reply = tokio::time::timeout(
+        Duration::from_secs(30),
+        executor
+            .clone()
+            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
+    )
+    .await
+    .expect("must settle")
+    .expect("a handed-back workspace must accept work again");
+    assert!(reply.reply.contains("picked it up"), "got: {reply:?}");
+
+    sessions.shutdown();
+}

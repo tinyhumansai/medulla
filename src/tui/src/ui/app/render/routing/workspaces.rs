@@ -58,10 +58,12 @@ impl App {
                 if index == selected {
                     style = self.theme.selection();
                 }
-                lines.push(TLine::from(Span::styled(
-                    format!("{marker} {} · {}", row.label, row.path),
-                    style,
-                )));
+                let prefix = format!("{marker} {} · ", row.label);
+                let path = crate::ui::util::clip_middle(
+                    &row.path,
+                    usize::from(inner.width).saturating_sub(prefix.chars().count()),
+                );
+                lines.push(TLine::from(Span::styled(format!("{prefix}{path}"), style)));
 
                 let mut notes: Vec<String> = Vec::new();
                 notes.push(match &row.host {

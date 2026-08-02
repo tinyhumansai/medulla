@@ -27,7 +27,10 @@ fn pooled_env(root: &Path) -> HashMap<String, String> {
 
 /// The medulla home the pooled environment resolves to.
 fn medulla_home(root: &Path) -> PathBuf {
+    // The account's home, not the root: identities belong to one account, so
+    // the pool fans out inside that account's directory.
     root.join(".medulla")
+        .join(crate::home::user::PRE_LOGIN_USER_ID)
 }
 
 /// Hex-encode a seed the way the config file stores it.
@@ -177,9 +180,12 @@ fn an_explicit_home_in_use_fails_loud() {
     env.insert("MEDULLA_HOME".to_string(), explicit.display().to_string());
 
     let held = acquire_identity(&env, root.path()).expect("first acquire");
+    // `MEDULLA_HOME` pins the root; the identity still lives in the account
+    // directory inside it, because a wallet belongs to one account.
+    let pinned_home = explicit.join(crate::home::user::PRE_LOGIN_USER_ID);
     assert_eq!(
         held.config_path,
-        explicit.join("tinyplace").join("config.json")
+        pinned_home.join("tinyplace").join("config.json")
     );
 
     let err = acquire_identity(&env, root.path()).expect_err("second acquire must fail");
@@ -187,7 +193,7 @@ fn an_explicit_home_in_use_fails_loud() {
     assert!(message.contains("already in use"), "got: {message}");
     assert!(message.contains("config.json"), "got: {message}");
     // Fail loud means fail loud: no silent redirect to a fan-out slot.
-    assert!(!explicit.join("workers").exists());
+    assert!(!pinned_home.join("workers").exists());
     assert!(!medulla_home(root.path()).join("workers").exists());
 }
 

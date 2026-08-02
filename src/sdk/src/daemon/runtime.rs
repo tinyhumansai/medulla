@@ -14,7 +14,10 @@ use ::tinyplace::auth::timestamp;
 use crate::tinyplace::{EncodeFrameInput, HarnessProvider, TaskFrame, TaskFrameKind};
 
 use super::providers::{Abort, RunTaskFn};
-use super::types::{DaemonConfig, DaemonRuntime, FrameAttachments, Inner, LogFn, NowFn, SendFn};
+use super::types::{
+    AdmissionGuard, DaemonConfig, DaemonRuntime, FrameAttachments, Inner, LogFn, NowFn, SendFn,
+    HEARTBEAT_THROTTLE_WINDOWS, MAX_HEARTBEAT_MS,
+};
 
 impl DaemonRuntime {
     /// Build a runtime from `config`, an executor (`run_task`), and a
@@ -38,6 +41,7 @@ impl DaemonRuntime {
                 inflight_idle: Notify::new(),
                 capabilities: TokioMutex::new(None),
                 accessible_dirs: StdMutex::new(accessible_dirs),
+                sessions: crate::sessions::SessionRegistry::default(),
             }),
         }
     }
@@ -64,6 +68,32 @@ impl DaemonRuntime {
         }
     }
 
+    /// Claim one admitted-but-unfinished task slot, or `None` at capacity.
+    ///
+    /// The returned guard releases the slot — and any `running` record and
+    /// controller registration attached to it — when it drops, including on an
+    /// unwind. Callers must bind it for the whole handler rather than releasing
+    /// anything by hand; see [`AdmissionGuard`].
+    pub(super) fn admit(&self) -> Option<AdmissionGuard> {
+        AdmissionGuard::claim(&self.inner)
+    }
+
+    /// How long total silence may last before the task loop emits an
+    /// unconditional heartbeat frame.
+    ///
+    /// Derived from the configured status throttle (see
+    /// [`HEARTBEAT_THROTTLE_WINDOWS`]) and clamped so a slack throttle cannot
+    /// push the heartbeat past the requester's no-progress window.
+    pub(super) fn heartbeat_interval(&self) -> std::time::Duration {
+        let ms = self
+            .inner
+            .config
+            .status_throttle_ms
+            .saturating_mul(HEARTBEAT_THROTTLE_WINDOWS)
+            .clamp(1, MAX_HEARTBEAT_MS);
+        std::time::Duration::from_millis(ms as u64)
+    }
+
     /// Number of tasks currently executing.
     pub fn active_count(&self) -> usize {
         self.inner
@@ -76,6 +106,18 @@ impl DaemonRuntime {
     /// Fire-and-forget dispatch of one inbound message. Never panics to the
     /// caller; the work runs on a spawned task tracked by [`DaemonRuntime::idle`].
     pub fn handle_message(&self, from: String, text: String, frame: Option<TaskFrame>) {
+        // A screen message is never a prompt. The plain-text path types whatever
+        // it is given into a harness, so a `medulla.screen.v1` body reaching it
+        // is executed rather than ignored — a subscribe arriving as an
+        // instruction to claude. Callers that can actually serve one classify it
+        // before getting here; this refuses it for every caller that cannot, so
+        // the mistake is not one each new drain has to remember to avoid.
+        if crate::tinyplace::parse_screen_message(&text).is_some() {
+            self.log(&format!(
+                "screen: ignored a screen message from {from} — this daemon serves no watchable sessions"
+            ));
+            return;
+        }
         self.inner.inflight_count.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
         tokio::spawn(async move {
@@ -229,8 +271,14 @@ impl DaemonRuntime {
                 correlation_id: correlation.map(str::to_string),
                 harness,
                 provider: None,
+                custom_harness: None,
                 model: None,
+                tool_mode: None,
                 workflow: None,
+                // Inbound-only, like `provider`, `model`, and `workflow`: this
+                // builds the worker's *responses*, and continuity is the
+                // sender's decision, not something a reply restates.
+                conversation: None,
             },
             attachments.usage,
             attachments.work,

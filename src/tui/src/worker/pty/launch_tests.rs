@@ -6,7 +6,7 @@ use super::*;
 fn the_interactive_argv_suppresses_nothing() {
     // The headless flags exist to hide the interface we are rendering.
     for provider in [HarnessProvider::Claude, HarnessProvider::Codex] {
-        let args = interactive_args(provider, None, false, &[]);
+        let args = interactive_args(provider, None, false, None, &[]);
         assert!(args.is_empty(), "{provider:?} paints by default: {args:?}");
     }
 }
@@ -17,11 +17,11 @@ fn each_harness_gets_its_own_permission_bypass_flag() {
     // taken from the installed CLIs' `--help`. Getting one wrong means the
     // harness exits on an unknown argument, so pin the exact strings.
     assert_eq!(
-        interactive_args(HarnessProvider::Claude, None, true, &[]),
+        interactive_args(HarnessProvider::Claude, None, true, None, &[]),
         vec!["--dangerously-skip-permissions"]
     );
     assert_eq!(
-        interactive_args(HarnessProvider::Codex, None, true, &[]),
+        interactive_args(HarnessProvider::Codex, None, true, None, &[]),
         vec!["--dangerously-bypass-approvals-and-sandbox"]
     );
 }
@@ -31,7 +31,7 @@ fn the_bypass_is_off_unless_asked_for() {
     // Running someone's harness without permission checks is not something
     // to arrive at by default in this function; the caller decides.
     for provider in [HarnessProvider::Claude, HarnessProvider::Codex] {
-        let args = interactive_args(provider, Some("s1"), false, &[]);
+        let args = interactive_args(provider, Some("s1"), false, None, &[]);
         assert!(
             !args.iter().any(|a| a.starts_with("--dangerous")),
             "{provider:?}: {args:?}"
@@ -47,7 +47,8 @@ fn the_bypass_precedes_the_session_id_and_extras() {
         HarnessProvider::Claude,
         Some("abc-123"),
         true,
-        &["--model".into(), "x".into()],
+        None,
+        &["--extra".into(), "x".into()],
     );
     assert_eq!(
         args,
@@ -55,7 +56,7 @@ fn the_bypass_precedes_the_session_id_and_extras() {
             "--dangerously-skip-permissions",
             "--session-id",
             "abc-123",
-            "--model",
+            "--extra",
             "x"
         ]
     );
@@ -64,7 +65,7 @@ fn the_bypass_precedes_the_session_id_and_extras() {
 #[test]
 fn opencode_needs_its_tui_subcommand() {
     assert_eq!(
-        interactive_args(HarnessProvider::Opencode, None, false, &[]),
+        interactive_args(HarnessProvider::Opencode, None, false, None, &[]),
         vec!["tui"]
     );
 }
@@ -75,9 +76,35 @@ fn extra_args_follow_the_base() {
         HarnessProvider::Opencode,
         None,
         false,
-        &["--model".into(), "x".into()],
+        None,
+        &["--extra".into(), "x".into()],
     );
-    assert_eq!(args, vec!["tui", "--model", "x"]);
+    assert_eq!(args, vec!["tui", "--extra", "x"]);
+}
+
+#[test]
+fn model_is_encoded_with_the_flag_each_harness_expects() {
+    // claude takes the long form; codex/opencode take the short one. Matches
+    // the headless argv builder's spellings, and the model comes before any
+    // extra args so a caller's `extra_args` cannot shadow it.
+    assert_eq!(
+        interactive_args(HarnessProvider::Claude, None, false, Some("opus"), &[]),
+        vec!["--model", "opus"]
+    );
+    assert_eq!(
+        interactive_args(HarnessProvider::Codex, None, false, Some("o3"), &[]),
+        vec!["-m", "o3"]
+    );
+    assert_eq!(
+        interactive_args(HarnessProvider::Opencode, None, false, Some("gpt"), &[]),
+        vec!["tui", "-m", "gpt"]
+    );
+}
+
+#[test]
+fn an_unset_model_adds_no_flag() {
+    let args = interactive_args(HarnessProvider::Claude, None, false, None, &[]);
+    assert!(!args.iter().any(|a| a == "--model" || a == "-m"));
 }
 
 #[test]

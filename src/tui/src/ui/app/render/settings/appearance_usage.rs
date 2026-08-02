@@ -101,7 +101,17 @@ impl App {
             where_saved,
             Style::default().add_modifier(Modifier::DIM),
         )));
-        f.render_widget(Paragraph::new(Text::from(lines)), inner);
+        // Scroll to keep the selected row visible on short terminals.
+        let height = inner.height as usize;
+        let scroll = if sel < height {
+            0
+        } else {
+            sel.saturating_sub(height / 2)
+        };
+        f.render_widget(
+            Paragraph::new(Text::from(lines)).scroll((scroll as u16, 0)),
+            inner,
+        );
     }
 
     /// Draw the Usage subpage: this session's token usage and the account totals.

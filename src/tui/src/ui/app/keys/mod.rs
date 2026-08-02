@@ -47,7 +47,7 @@ impl App {
         // Killing a harness can lose in-progress work. Once armed, the prompt
         // owns exactly one keypress: only a deliberate `y` proceeds.
         if let Some((worker, task_id)) = self.kill_armed.take() {
-            if k.code == KeyCode::Char('y') {
+            if k.code == KeyCode::Char('y') && k.modifiers.is_empty() {
                 self.set_status(format!("Killing harness for {task_id}…"));
                 return Some(Cmd::KillTask { worker, task_id });
             }

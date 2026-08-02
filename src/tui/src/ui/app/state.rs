@@ -379,6 +379,13 @@ impl App {
         self.status = s.into();
     }
 
+    /// Show and arm the harness-kill confirmation as one invariant-preserving
+    /// state transition.
+    pub(super) fn arm_kill(&mut self, target: (String, String)) {
+        self.set_status("Kill this harness? y confirm · any other key cancels");
+        self.kill_armed = Some(target);
+    }
+
     /// Replace the Context-tab chunks.
     pub fn set_contexts(&mut self, c: Vec<ContextItem>) {
         self.contexts = c;

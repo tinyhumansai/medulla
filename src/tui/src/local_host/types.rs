@@ -46,4 +46,16 @@ impl LocalHost {
     pub(crate) fn spec(&self) -> &WorkerSpec {
         &self.spec
     }
+
+    /// A clone of the host's task state machine.
+    ///
+    /// The UI needs exactly one thing from it —
+    /// [`session_for_task`](medulla::daemon::DaemonRuntime::session_for_task),
+    /// which answers "which live harness session is running the task the cursor
+    /// is on". Without it the Agents tab could only guess by matching labels,
+    /// and two sessions for one peer would make that guess wrong. Cheap to
+    /// clone (an `Arc`), and a clone does *not* keep the host alive.
+    pub(crate) fn runtime(&self) -> medulla::daemon::DaemonRuntime {
+        self.daemon.runtime().clone()
+    }
 }

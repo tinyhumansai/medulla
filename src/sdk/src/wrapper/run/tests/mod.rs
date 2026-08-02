@@ -39,6 +39,7 @@ fn config(spawner: Option<crate::wrapper::PtySpawner>) -> WrapperConfig {
         no_bridge: true,
         session_id: None,
         pty_spawner: spawner,
+        attribution: true,
     }
 }
 
@@ -178,12 +179,18 @@ fn signal_exit_maps_to_shell_convention() {
 // Attribution env-merge wiring tests
 // ---------------------------------------------------------------------------
 
-/// For Codex and Opencode, the env map must be augmented with `MEDULLA_ATTRIBUTION`
-/// and the `core.hooksPath` overrides; for Claude it stays unchanged.
+/// Every provider's env map must be augmented with `MEDULLA_ATTRIBUTION` and
+/// the `core.hooksPath` overrides — including Claude, whose own
+/// `attribution.commit` setting only *asks* the model for the trailer and so
+/// cannot be relied on alone.
 #[cfg(unix)]
 #[test]
-fn attribution_env_is_merged_for_codex_and_opencode() {
-    for provider in [HarnessProvider::Codex, HarnessProvider::Opencode] {
+fn attribution_env_is_merged_for_every_provider() {
+    for provider in [
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+    ] {
         let mut config = config(None);
         config.provider = provider;
         super::merge_attribution_env_into_config(&mut config);
@@ -196,19 +203,23 @@ fn attribution_env_is_merged_for_codex_and_opencode() {
             config.env.contains_key("GIT_CONFIG_VALUE_0"),
             "{provider:?} should have hooksPath in env"
         );
-
-        // Clean up the temp dir so it doesn't race with the attribution
-        // module's own cleanup test that shares the global HOOK_DIR.
-        crate::tinyplace::attribution::cleanup_hook_tmpdir();
     }
 }
 
-/// Claude uses CLI args, so its env must not be changed by the merge.
+/// Attribution turned off in config must leave the env map untouched for every
+/// provider.
 #[test]
-fn attribution_env_not_merged_for_claude() {
-    let mut config = config(None);
-    config.provider = HarnessProvider::Claude;
-    let env_before = config.env.clone();
-    super::merge_attribution_env_into_config(&mut config);
-    assert_eq!(config.env, env_before, "Claude env must be unchanged");
+fn attribution_env_not_merged_when_config_disables_it() {
+    for provider in [
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+    ] {
+        let mut config = config(None);
+        config.provider = provider;
+        config.attribution = false;
+        let env_before = config.env.clone();
+        super::merge_attribution_env_into_config(&mut config);
+        assert_eq!(config.env, env_before, "{provider:?} env must be unchanged");
+    }
 }

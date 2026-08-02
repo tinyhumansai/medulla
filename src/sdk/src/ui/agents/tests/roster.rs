@@ -13,6 +13,7 @@ use crate::ui::agents::{host_descriptor, merge_host_roster};
 /// A registry worker at `address`, identified by `id`.
 fn worker(id: &str, address: &str) -> WorkerInfo {
     WorkerInfo {
+        roles: Vec::new(),
         id: id.into(),
         address: address.into(),
         handle: None,

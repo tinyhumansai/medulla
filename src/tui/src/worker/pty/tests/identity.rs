@@ -12,14 +12,14 @@ fn claude_is_handed_a_minted_session_id_and_codex_is_not() {
     // attribution from a guess into a fact.
     assert!(accepts_preset_session_id(HarnessProvider::Claude));
     let minted = mint_session_id(HarnessProvider::Claude).expect("claude accepts one");
-    let args = interactive_args(HarnessProvider::Claude, Some(&minted), false, &[]);
+    let args = interactive_args(HarnessProvider::Claude, Some(&minted), false, None, &[]);
     assert_eq!(args, vec!["--session-id".to_string(), minted.clone()]);
 
     // Codex has no flag to choose an id for a fresh session; handing it one
     // would be an unknown option, so it must not be offered.
     assert!(!accepts_preset_session_id(HarnessProvider::Codex));
     assert_eq!(mint_session_id(HarnessProvider::Codex), None);
-    assert!(interactive_args(HarnessProvider::Codex, Some("ignored"), false, &[]).is_empty());
+    assert!(interactive_args(HarnessProvider::Codex, Some("ignored"), false, None, &[]).is_empty());
 }
 
 #[test]
@@ -103,6 +103,32 @@ async fn a_session_showing_a_startup_dialog_is_not_typed_at() {
         !screen_text(&manager, &id).contains("TYPED:"),
         "nothing may be typed at a modal — it discards the paste and reads the \
          Return as an answer"
+    );
+    manager.close(&id);
+}
+
+#[tokio::test]
+async fn a_failed_injection_preserves_bell_only_attention() {
+    let manager = PtyManager::new();
+    let id = manager
+        .open(sh(
+            "stty -echo -icanon min 1; printf '\\033[?2004hblocked\\a\\r\\n'; cat > /dev/null",
+        ))
+        .unwrap();
+    wait_for("the bell-only prompt to be classified", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == super::super::AttentionKind::Bell)
+    });
+
+    super::super::inject::inject_prompt(&manager, &id, "ship the fix")
+        .await
+        .expect_err("a harness that never echoes the paste must reject injection");
+    assert!(
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == super::super::AttentionKind::Bell),
+        "failed preflight and paste attempts must not erase the only prompt cue"
     );
     manager.close(&id);
 }

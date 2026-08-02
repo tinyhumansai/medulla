@@ -9,8 +9,8 @@
 //! (cycle-scoped) and, when present, an opaque `correlation_id` (globally unique
 //! per dispatch) that responders echo back verbatim.
 //!
-//! Split by responsibility: [`types`] holds the frame data model and its serde
-//! helpers, [`encode`] builds and serializes frames, and [`decode`] parses
+//! Split by responsibility: `types` holds the frame data model and its serde
+//! helpers, `encode` builds and serializes frames, and `decode` parses
 //! decrypted bodies and capabilities payloads. All public items are re-exported
 //! here so callers use `medulla::tinyplace::frames::*`.
 
@@ -24,7 +24,7 @@ mod tests;
 pub use decode::{decode_task_frame, parse_agent_capabilities};
 pub use encode::{encode_task_frame, encode_task_frame_with_usage, encode_task_frame_with_work};
 pub use types::{
-    AgentCapabilities, BudgetSource, BudgetWindow, EncodeFrameInput, HarnessBudget,
-    HarnessProvider, HarnessReadiness, TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert,
-    TINYPLACE_PROTO,
+    AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert, EncodeFrameInput,
+    HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrame, TaskFrameKind, TokenUsage,
+    WorkflowAdvert, TINYPLACE_PROTO,
 };

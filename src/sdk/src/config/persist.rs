@@ -5,18 +5,20 @@
 //! preference, though, and the app owns them — the onboarding gate is written
 //! the moment the welcome flow finishes.
 //!
-//! Every writer here follows the same rule: parse the target file into a TOML
-//! table, replace only its own section, and write the whole document back.
-//! Unrelated keys — and any other file in the layered load — are preserved.
+//! Every writer here follows the same rule: parse the target file, replace only
+//! its own section, and write the whole document back. JSON is preserved for
+//! JSON targets; only `.toml` targets use TOML. Unrelated keys — and any other
+//! file in the layered load — are preserved.
 
 use std::path::Path;
 
-/// Writes a single `key` into the `[section]` table of the TOML file at `path`.
+/// Writes a single `key` into `section` in the config file at `path`.
 ///
 /// This is the generic form of the writers below: it parses the whole document,
 /// merges `value` into `section` (creating either when absent), and writes the
-/// document back, so unrelated keys and sections survive. Comments and key
-/// ordering are *not* preserved — `toml` re-renders the document.
+/// document back, so unrelated keys and sections survive. A `.toml` target is
+/// parsed and rendered as TOML; every other extension uses JSON. Comments and
+/// key ordering are *not* preserved.
 ///
 /// A missing or empty file is treated as an empty document rather than an
 /// error, matching the loader. Returns an error when the file exists but cannot
@@ -31,6 +33,9 @@ pub fn persist_setting(
     key: &str,
     value: toml::Value,
 ) -> anyhow::Result<()> {
+    if uses_json_format(path) {
+        return persist_json_setting(path, section, key, value);
+    }
     let mut doc = read_document(path)?;
     let mut table = match doc.get(section) {
         Some(toml::Value::Table(existing)) => existing.clone(),
@@ -41,14 +46,111 @@ pub fn persist_setting(
     write_document(path, &doc)
 }
 
-/// Replace one complete TOML section while preserving every other section.
+/// Merge one setting into a JSON config without changing unrelated values.
+fn persist_json_setting(
+    path: &Path,
+    section: &str,
+    key: &str,
+    value: toml::Value,
+) -> anyhow::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(anyhow::anyhow!("Cannot read {}: {error}", path.display()));
+        }
+    };
+    let mut doc = if text.trim().is_empty() {
+        serde_json::Map::new()
+    } else {
+        serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(|error| anyhow::anyhow!("Cannot parse {}: {error}", path.display()))?
+            .as_object()
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!("Cannot parse {}: root must be an object", path.display())
+            })?
+    };
+    let mut table = doc
+        .get(section)
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    table.insert(
+        key.to_string(),
+        serde_json::to_value(value)
+            .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?,
+    );
+    doc.insert(section.to_string(), serde_json::Value::Object(table));
+    let mut rendered = serde_json::to_vec_pretty(&doc)
+        .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?;
+    rendered.push(b'\n');
+    crate::persistence::write_atomic(path, &rendered)
+        .map_err(|error| anyhow::anyhow!("Cannot write {}: {error}", path.display()))
+}
+
+/// Match the loader: only `.toml` selects TOML; every other path selects JSON.
+fn uses_json_format(path: &Path) -> bool {
+    !path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("toml"))
+}
+
+/// Replace a top-level key, preserving every other key and section.
+///
+/// Distinct from [`persist_setting`], which writes *into* a `[section]`. An
+/// array-of-tables such as `[[hosts]]` is a root-level value, and nesting it
+/// under a section would silently produce a key nothing reads.
+pub fn persist_root_setting(path: &Path, key: &str, value: toml::Value) -> anyhow::Result<()> {
+    let mut doc = read_document(path)?;
+    doc.insert(key.to_string(), value);
+    write_document(path, &doc)
+}
+
+/// Replace one complete config section while preserving every other section.
 ///
 /// This is the reusable boundary for components such as the theme editor whose
 /// values naturally form one coherent table rather than independent settings.
 pub fn persist_section(path: &Path, section: &str, values: toml::Table) -> anyhow::Result<()> {
+    if uses_json_format(path) {
+        return persist_json_section(path, section, values);
+    }
     let mut doc = read_document(path)?;
     doc.insert(section.to_string(), toml::Value::Table(values));
     write_document(path, &doc)
+}
+
+/// Replace a complete section in a JSON config document.
+fn persist_json_section(path: &Path, section: &str, values: toml::Table) -> anyhow::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(anyhow::anyhow!("Cannot read {}: {error}", path.display()));
+        }
+    };
+    let mut doc = if text.trim().is_empty() {
+        serde_json::Map::new()
+    } else {
+        serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(|error| anyhow::anyhow!("Cannot parse {}: {error}", path.display()))?
+            .as_object()
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!("Cannot parse {}: root must be an object", path.display())
+            })?
+    };
+    doc.insert(
+        section.to_string(),
+        serde_json::to_value(values)
+            .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?,
+    );
+    let mut rendered = serde_json::to_vec_pretty(&doc)
+        .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?;
+    rendered.push(b'\n');
+    crate::persistence::write_atomic(path, &rendered)
+        .map_err(|error| anyhow::anyhow!("Cannot write {}: {error}", path.display()))
 }
 
 /// Removes `key` from the `[section]` table, leaving the section in place.
@@ -86,6 +188,22 @@ pub fn persist_subscription_routing_strategy(path: &Path, wire_value: &str) -> a
         "subscriptionRoutingStrategy".to_string(),
         toml::Value::String(wire_value.to_string()),
     );
+    write_document(path, &doc)
+}
+
+/// Replace the top-level `customHarnesses` array while preserving all unrelated
+/// configuration.
+///
+/// Presets contain only model routing and environment-variable names. The
+/// referenced key value never enters this function or the resulting document.
+pub fn persist_custom_harnesses(
+    path: &Path,
+    harnesses: &[crate::config::CustomHarnessConfig],
+) -> anyhow::Result<()> {
+    let mut doc = read_document(path)?;
+    let value = toml::Value::try_from(harnesses)
+        .map_err(|error| anyhow::anyhow!("Cannot serialize custom harnesses: {error}"))?;
+    doc.insert("customHarnesses".to_string(), value);
     write_document(path, &doc)
 }
 
@@ -169,6 +287,64 @@ pub fn persist_workflow_workspaces(path: &Path, workspaces: &[String]) -> anyhow
                 .collect(),
         ),
     )
+}
+
+/// Replace the extra hosts this machine runs (`[[hosts]]`).
+///
+/// Replacing rather than merging is what makes a removal durable: a merge would
+/// leave a host the operator deleted still on disk, and it would bind an address
+/// and start a harness again on the next launch.
+///
+/// Only the fields that make a host distinct are written. The rest are left to
+/// the section defaults, so a config stays readable and a later change to those
+/// defaults reaches hosts declared today.
+pub fn persist_local_hosts(
+    path: &Path,
+    hosts: &[crate::config::HostSection],
+) -> anyhow::Result<()> {
+    let rows: Vec<toml::Value> = hosts
+        .iter()
+        .map(|host| {
+            let mut row = toml::map::Map::new();
+            if !host.name.trim().is_empty() {
+                row.insert("name".into(), toml::Value::String(host.name.clone()));
+            }
+            // The section default is not a choice, so writing it back would
+            // turn "no address, derive one" into "bind the primary's address"
+            // — and every extra would collide on the next launch. Only an
+            // address the operator actually picked is persisted.
+            let address = host.address.trim();
+            if !address.is_empty() && address != crate::config::HostSection::default().address {
+                row.insert("address".into(), toml::Value::String(address.to_string()));
+            }
+            if !host.workspace.trim().is_empty() {
+                row.insert(
+                    "workspace".into(),
+                    toml::Value::String(host.workspace.clone()),
+                );
+            }
+            if !host.providers.is_empty() {
+                row.insert(
+                    "providers".into(),
+                    toml::Value::Array(
+                        host.providers
+                            .iter()
+                            .cloned()
+                            .map(toml::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+            if !host.default_provider.trim().is_empty() {
+                row.insert(
+                    "defaultProvider".into(),
+                    toml::Value::String(host.default_provider.clone()),
+                );
+            }
+            toml::Value::Table(row)
+        })
+        .collect();
+    persist_root_setting(path, "hosts", toml::Value::Array(rows))
 }
 
 /// Replace the extra directories this device advertises (`[host].workspaces`).

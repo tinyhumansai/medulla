@@ -1,7 +1,7 @@
 //! The [`Runtime`] trait implementation for [`MockRuntime`]: snapshotting,
 //! subscription, the scripted submit/abort/session lifecycle, forking, and the
-//! memory-surface reads. This is the behaviour half of the mock; the data model
-//! it drives lives in [`super::types`].
+//! scripted feedback board. This is the behaviour half of the mock; the data
+//! model it drives lives in [`super::types`].
 
 use std::collections::HashMap;
 
@@ -20,6 +20,10 @@ use super::types::{gen_id, now_millis, MockRuntime, Thread};
 use crate::runtime::event_log::ThreadEventLog;
 
 impl Runtime for MockRuntime {
+    fn describe(&self) -> String {
+        "mock (scripted)".into()
+    }
+
     fn snapshot(&self) -> RuntimeSnapshot {
         let s = self.state.lock().unwrap();
         let threads = Self::thread_summaries(&s);
@@ -125,6 +129,29 @@ impl Runtime for MockRuntime {
             let _ = tx.send(());
             Ok(())
         })
+    }
+
+    /// Record the brief instead of sending it, and succeed.
+    ///
+    /// The offline demo has no hub, but a handoff that reported failure here
+    /// would make every mocked end-to-end test assert the error path rather than
+    /// the feature.
+    fn hand_off_harness(
+        &self,
+        brief: crate::hub::HarnessHandoff,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        self.record("hand_off_harness");
+        self.record_handoff(brief);
+        Box::pin(async { Ok(()) })
+    }
+
+    fn hold_harness(
+        &self,
+        _workspace: String,
+        _reason: Option<String>,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        self.record("hold_harness");
+        Box::pin(async { Ok(()) })
     }
 
     fn abort(&self) {
@@ -282,36 +309,5 @@ impl Runtime for MockRuntime {
 
     fn shutdown(&self) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async move { Ok(()) })
-    }
-
-    fn memory_status(&self) -> Option<crate::memory::MemoryStatus> {
-        self.memory
-            .lock()
-            .unwrap()
-            .as_ref()
-            .and_then(|m| m.status.clone())
-    }
-
-    fn memory_search(
-        &self,
-        _query: String,
-        _facet: Option<String>,
-        k: usize,
-    ) -> Vec<crate::memory::MemoryHit> {
-        self.memory
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|m| m.hits.iter().take(k).cloned().collect())
-            .unwrap_or_default()
-    }
-
-    fn memory_directives(&self) -> Vec<String> {
-        self.memory
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|m| m.directives.clone())
-            .unwrap_or_default()
     }
 }

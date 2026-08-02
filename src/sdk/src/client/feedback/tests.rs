@@ -125,6 +125,50 @@ async fn list_feedback_omits_absent_filters_and_clamps_limit() {
 }
 
 #[tokio::test]
+async fn the_completed_filter_sends_the_wire_value_not_the_display_label() {
+    // The list row reads `done`; the endpoint only understands `completed`.
+    // Sending the label filtered every item out and looked like an empty board.
+    let (base, req) = stub(ok(
+        json!({ "items": [], "total": 0, "page": 1, "limit": 50 }),
+    ))
+    .await;
+    let client = MedullaClient::new(base, "jwt-abc");
+    client
+        .list_feedback(&FeedbackQuery {
+            status: Some(FeedbackStatus::Completed),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let sent = req.await.unwrap();
+    assert!(sent.contains("status=completed"), "{sent}");
+}
+
+#[tokio::test]
+async fn an_unmodelled_status_filters_by_nothing() {
+    // `Other` only ever arrives *from* a newer backend, so filtering by it must
+    // omit the parameter rather than send a value no endpoint knows.
+    let (base, req) = stub(ok(
+        json!({ "items": [], "total": 0, "page": 1, "limit": 50 }),
+    ))
+    .await;
+    let client = MedullaClient::new(base, "jwt-abc");
+    client
+        .list_feedback(&FeedbackQuery {
+            status: Some(FeedbackStatus::Other),
+            kind: Some(FeedbackType::Other),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let sent = req.await.unwrap();
+    assert!(!sent.contains("status="), "{sent}");
+    assert!(!sent.contains("type="), "{sent}");
+}
+
+#[tokio::test]
 async fn get_feedback_decodes_item_and_comments() {
     let (base, req) = stub(ok(json!({
         "feedback": item("f1"),

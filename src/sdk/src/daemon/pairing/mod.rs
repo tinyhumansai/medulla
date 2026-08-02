@@ -24,7 +24,7 @@
 //!   fragment buried in a log message.
 //!
 //! Both are pure functions over their inputs so the wording and the escape are
-//! testable without a terminal; [`super::entry`] does the writing.
+//! testable without a terminal; `super::entry` does the writing.
 
 use crate::clipboard::osc52;
 

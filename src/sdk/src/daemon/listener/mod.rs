@@ -8,7 +8,7 @@
 //! `GET /a2a/{id}/stream` upgrades to a WebSocket that opens with a snapshot of
 //! the mailbox and then tails every envelope the relay accepts for us
 //! (`PUT /messages` publishes to the same topic). So this holds that socket open
-//! and hands the envelopes it carries straight to [`SignalTransport::drain_inbox`],
+//! and hands the envelopes it carries straight to `SignalTransport::drain_inbox`,
 //! which decrypts and acknowledges them exactly as it did when it fetched them
 //! itself.
 //!

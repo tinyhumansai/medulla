@@ -52,9 +52,17 @@ fn version_help_and_sessions_are_available_without_a_tty() {
 }
 
 #[test]
-fn logout_clears_the_isolated_credential_store() {
+fn logout_sweeps_a_retired_credential_file() {
+    // The session itself lives in the embedded core, which this offline test
+    // has no way to seed. What it can pin is the migration half: a JWT left by
+    // a pre-cutover install is read by nothing, so logging out is the last
+    // chance anything has to remove it.
     let dir = TempDir::new().unwrap();
-    let credentials = dir.path().join("credentials.json");
+    // Inside the account directory, where a pre-cutover install's file would be
+    // read from: `MEDULLA_HOME` names the root that holds accounts.
+    let account_home = dir.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    let credentials = account_home.join("credentials.json");
     std::fs::write(
         &credentials,
         r#"{"baseUrl":"http://example","jwt":"secret"}"#,
@@ -64,8 +72,10 @@ fn logout_clears_the_isolated_credential_store() {
     let output = run(&["logout"], dir.path(), dir.path());
 
     assert!(output.status.success());
-    assert!(!credentials.exists());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Logged out"));
+    assert!(!credentials.exists(), "the retired file is gone");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Logged out"), "{stdout}");
+    assert!(stdout.contains("retired credential file"), "{stdout}");
 }
 
 #[test]
@@ -99,42 +109,6 @@ fn init_offline_writes_then_protects_a_workspace_profile() {
 }
 
 #[test]
-fn memory_status_search_and_compile_run_fully_offline() {
-    let dir = TempDir::new().unwrap();
-
-    let status = run(&["memory", "status", "--json"], dir.path(), dir.path());
-    assert!(
-        status.status.success(),
-        "{}",
-        String::from_utf8_lossy(&status.stderr)
-    );
-    assert!(String::from_utf8_lossy(&status.stdout).contains("entry_count"));
-
-    let overview = run(&["memory", "status"], dir.path(), dir.path());
-    assert!(overview.status.success());
-
-    let search = run(
-        &["memory", "search", "not-present", "--json"],
-        dir.path(),
-        dir.path(),
-    );
-    assert!(search.status.success());
-    assert_eq!(String::from_utf8_lossy(&search.stdout).trim(), "[]");
-
-    let empty_search = run(&["memory", "search", "not-present"], dir.path(), dir.path());
-    assert!(empty_search.status.success());
-    assert!(String::from_utf8_lossy(&empty_search.stdout).contains("no matches"));
-
-    let compile = run(&["memory", "compile"], dir.path(), dir.path());
-    assert!(
-        compile.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compile.stderr)
-    );
-    assert!(String::from_utf8_lossy(&compile.stdout).contains("files"));
-}
-
-#[test]
 fn invalid_cli_inputs_and_non_tty_tui_exit_cleanly() {
     let dir = TempDir::new().unwrap();
 
@@ -145,10 +119,6 @@ fn invalid_cli_inputs_and_non_tty_tui_exit_cleanly() {
     );
     assert_eq!(bad_login.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&bad_login.stderr).contains("unknown provider"));
-
-    let bad_memory = run(&["memory", "unknown"], dir.path(), dir.path());
-    assert_eq!(bad_memory.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&bad_memory.stderr).contains("unknown memory subcommand"));
 
     let tui = run(&[], dir.path(), dir.path());
     assert_eq!(tui.status.code(), Some(1));

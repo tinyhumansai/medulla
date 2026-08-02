@@ -19,8 +19,8 @@
 //! The pure core (parsing, semver comparison, platform selection) is separated
 //! from the thin IO (HTTP GET, download + extract + atomic replace) so it can be
 //! unit-tested without a network or a real binary swap. The module is split by
-//! responsibility: [`types`] holds the data model, [`check`] the IO-free core
-//! plus the manifest fetch, and [`install`] the download/verify/swap side
+//! responsibility: `types` holds the data model, `check` the IO-free core
+//! plus the manifest fetch, and `install` the download/verify/swap side
 //! effects and the `medulla update` entry point. All public items are
 //! re-exported here so callers use `medulla::update::*`.
 
@@ -35,5 +35,7 @@ pub use check::{
     bin_name, check_for_update, is_newer, parse_manifest, pick_platform, platform_key, sha256_hex,
     update_url,
 };
-pub use install::{backup_path, download_and_stage, exe_is_writable, install_binary, run_update};
+pub use install::{
+    backup_path, download_and_stage, exe_is_writable, install_binary, install_update, run_update,
+};
 pub use types::{Manifest, PlatformEntry, UpdateInfo, DEFAULT_UPDATE_URL};

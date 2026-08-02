@@ -1,0 +1,242 @@
+//! What *this* turn is, as data rather than as four hand-assembled strings.
+//!
+//! The standing rules live in `prompt.md` and do not change between turns. What
+//! changes is the situation: building from nothing, changing something that
+//! exists, or diagnosing a run that failed. Modelling that as a
+//! [`CopilotRequest`] rather than a pile of `format!` calls is what makes the
+//! *modes* testable — a brief either names the failing run or it does not, and
+//! that is now an assertion rather than a reading of prose.
+//!
+//! Adapted from the sibling `openhuman` host's `builder_prompt`, which arrived
+//! at the same shape for the same reason. Its four modes are propose-only
+//! because its copilot hands back a proposal card; Medulla's edits land in the
+//! store and are taken back with undo instead, so the modes here differ in what
+//! they *tell the agent to do* rather than in when they persist.
+//!
+//! Rendering the *situation* — the graph, and anything else the turn is
+//! grounded in — lives in [`context`], because those sections grow with what
+//! the host learns about a workflow while the turn structure here does not.
+
+mod context;
+
+#[cfg(test)]
+mod tests;
+
+use crate::workflows::{RunRecord, WorkflowNote, WorkflowRecord};
+
+use context::{graph_section, notes_section, runs_section, MAX_INLINE_GRAPH_BYTES};
+
+/// Which kind of authoring turn this is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Build a workflow that does not exist yet.
+    Create,
+    /// Change a workflow that does.
+    Revise,
+    /// Diagnose a run that failed and fix what caused it.
+    ///
+    /// The mode the copilot could not previously express. Without it an
+    /// operator asking "why did this fail last night?" got a turn that knew
+    /// only the graph — not the run, not the error, not which node stopped —
+    /// and the agent had to go looking for all three before it could start.
+    Repair,
+    /// Review a workflow's own history and write down what it teaches.
+    ///
+    /// The one mode that may not edit. It reads the journal and the recent
+    /// runs, records what it learns, and — if a change would help — describes
+    /// one as a proposal for an operator to accept. The restriction is enforced
+    /// by the tools it is served, not by this directive; the directive is here
+    /// so the agent is not surprised by a refusal.
+    Evolve,
+}
+
+// There is deliberately no `Explain` mode. A question is answered by a
+// [`Mode::Revise`] turn that changes nothing, which the standing rules already
+// require; a separate mode would mean classifying "is this a question?" at the
+// call site, where nothing knows better than the model does.
+
+impl Mode {
+    /// The directive that leads the brief.
+    ///
+    /// Leading rather than trailing: it frames everything the agent reads
+    /// after it, and a turn whose *kind* only became clear at the end would
+    /// have been planned wrong by then.
+    fn directive(self) -> &'static str {
+        match self {
+            Mode::Create => {
+                "Build a new workflow that does what the operator describes below. \
+                 Create exactly one, with `workflow_create`. Do not modify any workflow \
+                 that already exists — this turn only adds."
+            }
+            Mode::Revise => {
+                "Change the workflow named below, and only that one. Patch it with \
+                 `workflow_apply_ops` rather than re-creating it."
+            }
+            Mode::Repair => {
+                "A run of the workflow named below failed. Work out why and fix the \
+                 cause. Read the run first — the failure is evidence about what the \
+                 graph actually does, which is more reliable than what it looks like \
+                 it does. If the cause is not something the graph can fix (a harness \
+                 that was not installed, a host that refused the connection), say so \
+                 and change nothing."
+            }
+            Mode::Evolve => {
+                "Review the workflow named below against its own history, and write down \
+                 what you learn. Record at least one note with `workflow_note_add` even if \
+                 you conclude nothing should change — a pass that learns nothing still \
+                 rules something out, and saying so stops the next pass re-deriving it. \
+                 If a change to the graph would help, describe it with `workflow_propose`; \
+                 you cannot edit the graph in this turn, and a proposal is reviewed by an \
+                 operator before anything is applied. Prefer one well-argued proposal to \
+                 several speculative ones. Read the notes below first: a change already \
+                 rejected should not be proposed again unless you have new evidence."
+            }
+        }
+    }
+}
+
+/// One authoring turn, before it is rendered to a prompt.
+#[derive(Debug, Clone)]
+pub struct CopilotRequest<'a> {
+    /// Which kind of turn this is.
+    pub mode: Mode,
+    /// The operator's own words, passed through unaltered.
+    pub instruction: &'a str,
+    /// The workflow being edited. `None` for [`Mode::Create`], which has none
+    /// yet.
+    pub record: Option<&'a WorkflowRecord>,
+    /// The failed run this turn is about, for [`Mode::Repair`].
+    pub run: Option<FailedRun>,
+    /// What the host has already learned about this workflow.
+    ///
+    /// Empty for every mode but [`Mode::Evolve`]. A revise turn is told what to
+    /// do; an evolve turn has to work it out, and the journal is most of what
+    /// it works from.
+    pub notes: &'a [WorkflowNote],
+    /// Recent runs, newest first.
+    pub runs: &'a [RunRecord],
+}
+
+/// What is known about the run a [`Mode::Repair`] turn is fixing.
+///
+/// Carried into the brief rather than left for the agent to find, because it
+/// already exists at the call site: the operator pressed a key next to a run
+/// that is on screen. Making the agent spend a `workflow_runs` round trip to
+/// rediscover what the caller knew is a turn it starts a step behind.
+#[derive(Debug, Clone, Default)]
+pub struct FailedRun {
+    /// The run's id, so the agent can read the whole record.
+    pub id: String,
+    /// The failure message, when the run recorded one.
+    pub error: Option<String>,
+    /// Nodes implicated in the failure.
+    pub failing_nodes: Vec<String>,
+}
+
+impl CopilotRequest<'_> {
+    /// Render this turn as the text a harness is handed.
+    ///
+    /// Order is load-bearing: the directive frames the turn, the context
+    /// grounds it, and the operator's words come last because a harness weights
+    /// the end of a prompt most heavily — and their words are the part that
+    /// changes.
+    pub fn render(&self) -> String {
+        let mut prompt = String::with_capacity(MAX_INLINE_GRAPH_BYTES + 2048);
+        prompt.push_str(STANDING);
+        prompt.push_str("\n\n# This turn\n\n");
+        prompt.push_str(self.mode.directive());
+
+        if let Some(record) = self.record {
+            prompt.push_str("\n\n## The workflow\n\n");
+            prompt.push_str(&format!("id: {}\nname: {}\n", record.id, record.name));
+            if !record.description.trim().is_empty() {
+                prompt.push_str(&format!("description: {}\n", record.description.trim()));
+            }
+            if !record.enabled {
+                prompt.push_str(
+                    "This workflow is disabled, so it will not run until an operator enables it.\n",
+                );
+            }
+            // Not part of the graph, so pasting the graph does not reveal it —
+            // and a turn that cannot see the pinned harness would answer "which
+            // model runs this" from the host config, which is the wrong layer.
+            if let Some(harness) = record.defaults.harness.as_deref() {
+                prompt.push_str(&format!(
+                    "Every step runs on the `{harness}` harness unless it names its own \
+                     `config.harness`.\n"
+                ));
+            }
+            if let Some(model) = record.defaults.model.as_deref() {
+                prompt.push_str(&format!(
+                    "Every step defaults to the `{model}` model unless it names its own \
+                     `config.model`.\n"
+                ));
+            }
+            prompt.push_str(&format!(
+                "{} node{}, {} edge{}\n\n",
+                record.graph.nodes.len(),
+                if record.graph.nodes.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                record.graph.edges.len(),
+                if record.graph.edges.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+            ));
+            prompt.push_str(&graph_section(&record.graph));
+        }
+
+        if let Some(run) = &self.run {
+            prompt.push_str("\n\n## The failed run\n\n");
+            prompt.push_str(&format!(
+                // `workflow_runs` takes a *workflow* id and answers with that
+                // workflow's run history — the wrong tool for one run's own
+                // steps and diagnostics. `workflow_run_get` takes this run's
+                // own id and returns its full record.
+                "id: {}\nCall `workflow_run_get` for the full record.\n",
+                run.id
+            ));
+            if let Some(error) = run
+                .error
+                .as_deref()
+                .map(str::trim)
+                .filter(|e| !e.is_empty())
+            {
+                prompt.push_str(&format!("\nIt failed with:\n\n```\n{error}\n```\n"));
+            }
+            if !run.failing_nodes.is_empty() {
+                prompt.push_str(&format!(
+                    "\nNodes implicated: {}\n",
+                    run.failing_nodes.join(", ")
+                ));
+            }
+        }
+
+        if !self.notes.is_empty() || self.mode == Mode::Evolve {
+            prompt.push_str("\n\n## What this workflow has learned\n\n");
+            prompt.push_str(&notes_section(self.notes));
+        }
+
+        if !self.runs.is_empty() {
+            prompt.push_str("\n\n## Recent runs\n\n");
+            prompt.push_str(&runs_section(self.runs));
+        }
+
+        prompt.push_str("\n\n## The instruction\n\n");
+        prompt.push_str(self.instruction.trim());
+        prompt.push('\n');
+        prompt
+    }
+}
+
+/// The rules that do not change between turns.
+///
+/// Kept as prose in a sibling file rather than a string constant: it is long,
+/// it is edited far more often than the code around it, and a change to it
+/// should read as a change to a document in review rather than as a diff
+/// through escaped quotes.
+const STANDING: &str = include_str!("../prompt.md");

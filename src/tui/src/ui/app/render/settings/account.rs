@@ -1,5 +1,5 @@
-//! The Account subpage: which backend this session is signed in to, and the
-//! logout action.
+//! The Account subpage: which backend this session is signed in to, who it is
+//! signed in as, and the logout action.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -28,40 +28,42 @@ impl App {
             )),
         ];
 
-        // Whether a token is present, and where it came from. Never the token.
-        let store = self
-            .medulla_home
+        // Who is signed in, and where that came from. Never the token itself.
+        let signed_in = self
+            .account
             .as_ref()
-            .map(|home| medulla::auth::CredentialStore::at_home(home));
-        let stored = store.as_ref().and_then(|s| s.load());
+            .is_some_and(|state| state.is_authenticated);
         let env_token = std::env::var(&backend.token_env)
             .ok()
             .filter(|v| !v.trim().is_empty());
         lines.push(TLine::from(""));
-        lines.push(TLine::from(Span::styled("Credentials", bold)));
-        match (&stored, &env_token) {
-            (Some(_), _) => {
-                lines.push(TLine::from(Span::styled(
-                    "● signed in (stored credentials)",
-                    Style::default().fg(Color::Green),
-                )));
-                if let Some(s) = &store {
-                    lines.push(TLine::from(Span::styled(
-                        format!("stored in  {}", s.path().display()),
-                        dim,
-                    )));
-                }
-            }
-            (None, Some(_)) => lines.push(TLine::from(Span::styled(
-                format!("● signed in via ${}", backend.token_env),
+        lines.push(TLine::from(Span::styled("Session", bold)));
+        if signed_in {
+            let who = self
+                .account
+                .as_ref()
+                .and_then(|state| state.user_id.clone())
+                .unwrap_or_else(|| "this device".to_string());
+            lines.push(TLine::from(Span::styled(
+                format!("● signed in as {who}"),
                 Style::default().fg(Color::Green),
-            ))),
-            (None, None) => lines.push(TLine::from(Span::styled(
+            )));
+            lines.push(TLine::from(Span::styled(
+                "held by the embedded OpenHuman core",
+                dim,
+            )));
+        } else if env_token.is_some() {
+            lines.push(TLine::from(Span::styled(
+                format!("● backend token from ${}", backend.token_env),
+                Style::default().fg(Color::Green),
+            )));
+        } else {
+            lines.push(TLine::from(Span::styled(
                 "○ signed out · run `medulla login`",
                 dim,
-            ))),
+            )));
         }
-        if stored.is_some() && env_token.is_some() {
+        if signed_in && env_token.is_some() {
             lines.push(TLine::from(Span::styled(
                 format!("${} is also set and takes precedence", backend.token_env),
                 dim,
@@ -70,14 +72,9 @@ impl App {
 
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled("Log out", bold)));
-        if self.medulla_home.is_none() {
+        if self.logout_armed() {
             lines.push(TLine::from(Span::styled(
-                "unavailable · no Medulla home configured",
-                dim,
-            )));
-        } else if self.logout_armed() {
-            lines.push(TLine::from(Span::styled(
-                "▸ Press Enter again to clear stored credentials",
+                "▸ Press Enter again to end the session",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -86,16 +83,18 @@ impl App {
                 "Move to another setting to cancel.",
                 dim,
             )));
-        } else if stored.is_some() {
+        } else if signed_in {
             lines.push(TLine::from("▸ Enter — log out"));
             lines.push(TLine::from(Span::styled(
-                "Clears the stored credentials. This session keeps running until you quit.",
+                "Ends the session and returns to the login screen.",
                 dim,
             )));
         } else {
-            lines.push(TLine::from(Span::styled("Nothing stored to clear.", dim)));
+            // Still offered: a session the core holds but this screen could not
+            // read is exactly the state a logout is for.
+            lines.push(TLine::from(Span::styled("Not signed in.", dim)));
             lines.push(TLine::from(Span::styled(
-                "▸ Enter — clear the credential file anyway",
+                "▸ Enter — clear any stored session anyway",
                 dim,
             )));
         }

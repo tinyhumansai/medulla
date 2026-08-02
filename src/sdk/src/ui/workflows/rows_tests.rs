@@ -11,6 +11,7 @@ fn summary(id: &str, enabled: bool) -> WorkflowSummary {
         enabled,
         node_count: 3,
         trigger_kind: Some("manual".into()),
+        inputs: Vec::new(),
     }
 }
 
@@ -25,10 +26,14 @@ fn run(id: &str, status: RunStatus) -> RunRecord {
             node_id: "a".into(),
             status: "success".into(),
             duration_ms: 5,
+            input: None,
+            output: None,
             diagnostics: Vec::new(),
         }],
         pending_approvals: Vec::new(),
         error: None,
+        summary: None,
+        diagnosis: None,
     }
 }
 
@@ -112,4 +117,10 @@ fn every_status_has_a_word_and_a_colour() {
         assert!(!status_label(status).is_empty(), "{status:?}");
         assert!(!status_color(status).is_empty(), "{status:?}");
     }
+    assert_eq!(status_color(RunStatus::Succeeded), "green");
+    assert_eq!(status_color(RunStatus::Running), "yellow");
+    assert_eq!(status_color(RunStatus::PendingApproval), "yellow");
+    assert_eq!(status_color(RunStatus::Failed), "red");
+    assert_eq!(status_color(RunStatus::Cancelled), "red");
+    assert_eq!(status_color(RunStatus::Interrupted), "red");
 }

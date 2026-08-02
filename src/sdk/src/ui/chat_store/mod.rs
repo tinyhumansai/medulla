@@ -1,9 +1,9 @@
 //! On-disk chat persistence for the Chat tab's thread trees.
 //!
 //! Layout — one folder per MAIN chat (the root thread):
-//!   <chatsDir>/<mainSessionId>/
+//!   `<chatsDir>/<mainSessionId>/`
 //!     tree.json         structure (names, forkPoints, turn counts, md filenames)
-//!     <sessionId>.md    one file per thread, turns framed with HTML comments
+//!     `<sessionId>.md`  one file per thread, turns framed with HTML comments
 //!
 //! Each `.md` delimits turns with an own-line marker `<!-- turn:user -->` that
 //! renders invisibly but is unmistakable to the parser, so a reply full of

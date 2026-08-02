@@ -22,16 +22,19 @@ impl App {
     pub(in crate::ui::app) fn reload_workflow_graph(&mut self) {
         let Some(id) = self.selected_workflow().map(|workflow| workflow.id.clone()) else {
             self.wf.graph = None;
+            self.wf.defaults = Default::default();
             self.wf.layout = GraphLayout::default();
             return;
         };
         match self.workflow_store().get(&id) {
             Ok(Some(record)) => {
                 self.wf.layout = GraphLayout::build(&record.graph);
+                self.wf.defaults = record.defaults;
                 self.wf.graph = Some(Box::new(record.graph));
             }
             _ => {
                 self.wf.graph = None;
+                self.wf.defaults = Default::default();
                 self.wf.layout = GraphLayout::default();
             }
         }
@@ -59,6 +62,7 @@ impl App {
     pub(in crate::ui::app) fn move_graph_cursor(&mut self, direction: Move) {
         if let Some(next) = self.wf.layout.moved(self.wf.node_index, direction) {
             self.wf.node_index = next;
+            self.wf.preview_scroll = 0;
             self.scroll_canvas_to_cursor();
         }
     }
@@ -97,14 +101,7 @@ impl App {
     /// holds one view rather than sharing the row with a copilot column.
     pub(in crate::ui::app) fn visible_layers(&self) -> usize {
         const BORDERS: usize = 2;
-        let rail = crate::ui::multi_pane::sidebar_width(
-            self.area.width,
-            self.workflow_rail_rows()
-                .iter()
-                .map(|row| self.workflow_rail_width(row))
-                .max()
-                .unwrap_or(0),
-        );
+        let rail = self.workflow_sidebar_width(self.area.width);
         let canvas = (self.area.width as usize)
             .saturating_sub(rail as usize)
             .saturating_sub(BORDERS);
@@ -113,9 +110,13 @@ impl App {
 
     /// How many lanes the canvas can show at the current terminal height.
     pub(in crate::ui::app) fn visible_lanes(&self) -> usize {
+        if self.wf.graph_rows > 0 {
+            return (self.wf.graph_rows / super::super::render::workflows::LANE_STRIDE).max(1);
+        }
         // Header, tab bar, hint row, footer, and the panel's own borders. No
-        // inspector term: it is a view of its own now, so when it is showing
-        // there is no canvas under it to size.
+        // measured graph exists before the first frame, so this fallback keeps
+        // pre-render navigation safe. Every later move uses the exact inner
+        // graph rectangle recorded by the renderer.
         const CHROME: usize = 9;
         let rows = (self.area.height as usize).saturating_sub(CHROME);
         (rows / super::super::render::workflows::LANE_STRIDE).max(1)

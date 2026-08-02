@@ -1,4 +1,4 @@
-//! Data model for [`SessionManager`](super::SessionManager): its configuration,
+//! Data model for [`SessionManager`]: its configuration,
 //! the request to open a session, the per-session entry it stores, and the
 //! transcript line the UI renders.
 
@@ -36,6 +36,10 @@ pub struct SessionConfig {
     /// Interactive (PTY) sessions are not routed yet — `InteractiveSpec` carries
     /// no router. `None` means routing is off everywhere.
     pub router: Option<crate::config::RouterConfig>,
+    /// Whether commits made by this session's harness are attributed to Medulla
+    /// — the resolved `attribution.commit` config value (on by default; see
+    /// [`crate::config::AttributionConfig`]).
+    pub attribution: bool,
 }
 
 impl Default for SessionConfig {
@@ -51,6 +55,7 @@ impl Default for SessionConfig {
             skip_permissions: false,
             turn_timeout_ms: 300_000,
             router: None,
+            attribution: true,
         }
     }
 }

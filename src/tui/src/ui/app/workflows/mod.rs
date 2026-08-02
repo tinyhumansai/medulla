@@ -22,6 +22,10 @@ mod rail;
 pub(in crate::ui::app) use rail::{WorkflowRailRow, NEW_LABEL};
 
 #[cfg(test)]
+mod copilot_overlap_tests;
+#[cfg(test)]
+mod proposal_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;
@@ -35,9 +39,9 @@ use super::types::App;
 impl App {
     /// The workflow store this client reads.
     ///
-    /// Layered exactly as every other workflow surface resolves it: the
-    /// user-global directory, then the project-local one, so a workflow checked
-    /// into a repository shadows a personal one of the same id.
+    /// Layered exactly as every other workflow surface resolves it: checked-in
+    /// project defaults first, then the user-global directory where authored
+    /// workflows are saved.
     pub(in crate::ui::app) fn workflow_store(&self) -> Arc<dyn WorkflowStore> {
         if let Some(store) = &self.workflow_store_override {
             return store.clone();
@@ -48,12 +52,13 @@ impl App {
             // An injected home (tests, and `main` once it has resolved the real
             // one) must win over the env, or a test would read the developer's
             // own workflows.
-            Some(home) => Arc::new(medulla::workflows::FileWorkflowStore::new(
+            Some(home) => Arc::new(medulla::workflows::FileWorkflowStore::with_workspace_state(
                 vec![
-                    home.join("workflows"),
                     cwd.join(".medulla").join("workflows"),
+                    home.join("workflows"),
                 ],
-                home.join("state").join("workflows").join("runs"),
+                &home.join("state").join("workflows"),
+                &cwd,
             )),
             None => medulla::workflows::discover_store(&env, &cwd),
         }
@@ -94,8 +99,22 @@ impl App {
         let Some(workflow) = self.selected_workflow().map(|w| w.id.clone()) else {
             self.workflow_runs.clear();
             self.workflow_runs_error = None;
+            self.workflow_notes.clear();
+            self.workflow_proposals.clear();
             return;
         };
+        // Both read as "nothing learned" when the store cannot answer. Unlike
+        // the run history there is no error line for these: a journal that
+        // cannot be read is already logged where it is read, and a second
+        // error banner for something passive would crowd out the run's.
+        self.workflow_notes = self
+            .workflow_store()
+            .list_notes(&workflow)
+            .unwrap_or_default();
+        self.workflow_proposals = self
+            .workflow_store()
+            .list_proposals(&workflow)
+            .unwrap_or_default();
         match self.workflow_store().list_runs(&workflow) {
             Ok(runs) => {
                 self.workflow_runs = runs;
@@ -113,6 +132,29 @@ impl App {
             self.wf.run_index = None;
             self.wf.overlay = None;
         }
+    }
+
+    /// What the selected workflow has learned, newest first.
+    pub(in crate::ui::app) fn workflow_notes(&self) -> &[medulla::workflows::WorkflowNote] {
+        &self.workflow_notes
+    }
+
+    /// The one proposal an operator could act on right now.
+    ///
+    /// At most one exists: a review supersedes the workflow's other undecided
+    /// proposals as it stores its own, which is what lets the accept and reject
+    /// keys work without a cursor to pick between them.
+    pub(in crate::ui::app) fn actionable_proposal(
+        &self,
+    ) -> Option<&medulla::workflows::WorkflowProposal> {
+        medulla::ui::workflows::actionable(&self.workflow_proposals)
+    }
+
+    /// The newest pending proposal, including one whose checks failed.
+    pub(in crate::ui::app) fn visible_proposal(
+        &self,
+    ) -> Option<&medulla::workflows::WorkflowProposal> {
+        medulla::ui::workflows::displayed(&self.workflow_proposals)
     }
 
     /// Re-read the workflow store into the page.
@@ -154,6 +196,12 @@ impl App {
     /// The workflow under the cursor, if the page has any.
     pub(in crate::ui::app) fn selected_workflow(&self) -> Option<&WorkflowSummary> {
         self.workflows.get(self.workflow_index)
+    }
+
+    /// The run under the cursor, when the cursor is on one of a workflow's runs
+    /// rather than on the workflow itself.
+    pub(in crate::ui::app) fn selected_run(&self) -> Option<&medulla::workflows::RunRecord> {
+        self.workflow_runs().get(self.wf.run_index?)
     }
 
     /// Which of the tab's three panes has the keyboard. Test seam.

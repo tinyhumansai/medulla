@@ -10,6 +10,7 @@
 //! their workflow is selected.
 
 use medulla::ui::workflows::{run_rows, workflow_rows, WorkflowRow};
+use medulla::workflows::RunStatus;
 
 use super::super::types::App;
 
@@ -33,11 +34,18 @@ pub enum WorkflowRailRow {
     Run {
         /// Its position in the run history, newest first.
         index: usize,
+        /// Execution state, retained so the renderer can colour the row.
+        status: RunStatus,
         /// The listing row.
         row: WorkflowRow,
     },
-    /// A non-selectable line under a selected workflow that has no history.
-    Note(&'static str),
+    /// A non-selectable line under a selected workflow: what it has no history
+    /// of, or what it is waiting on.
+    ///
+    /// Named `Hint` rather than `Note` because a workflow now genuinely has
+    /// notes, and a row variant meaning "an explanatory line" beside a domain
+    /// type meaning "a durable claim" is a collision waiting to mislead.
+    Hint(String),
     /// The row that starts a new workflow: a copilot thread with nothing behind
     /// it yet. Always last, because it is an action rather than an entry and a
     /// catalogue that opened with one reads as though it were empty.
@@ -61,16 +69,25 @@ impl App {
                 // Distinct from "no runs yet": one of these is fine and the
                 // other is something an operator should go and look at.
                 let _ = error;
-                rows.push(WorkflowRailRow::Note("run history unreadable"));
+                rows.push(WorkflowRailRow::Hint("run history unreadable".into()));
                 continue;
+            }
+            // Above the runs, because it is the one thing on this workflow
+            // waiting on the operator rather than a record of what already
+            // happened.
+            if self.actionable_proposal().is_some() {
+                rows.push(WorkflowRailRow::Hint(
+                    "a change is proposed — a to apply, n to decline".into(),
+                ));
             }
             let runs = run_rows(self.workflow_runs());
             if runs.is_empty() {
-                rows.push(WorkflowRailRow::Note("no runs yet"));
+                rows.push(WorkflowRailRow::Hint("no runs yet".into()));
                 continue;
             }
             for (index, row) in runs.into_iter().enumerate() {
-                rows.push(WorkflowRailRow::Run { index, row });
+                let status = self.workflow_runs()[index].status;
+                rows.push(WorkflowRailRow::Run { index, status, row });
             }
         }
         rows.push(WorkflowRailRow::New);
@@ -88,18 +105,14 @@ impl App {
         let (text, indent) = match row {
             WorkflowRailRow::Workflow { index, row } => (
                 // The jump digit is drawn ahead of the label.
-                format!("{} {} · {}", index + 1, row.label, row.detail),
+                format!("{} {}", index + 1, row.label),
                 0,
             ),
-            WorkflowRailRow::Run { row, .. } => (
-                format!(
-                    "{} {}",
-                    medulla::ui::workflows::rows::short_run_id(&row.label),
-                    row.detail
-                ),
+            WorkflowRailRow::Run { .. } => (
+                crate::ui::app::render::workflows::rail::rail_label(row),
                 RUN_INDENT,
             ),
-            WorkflowRailRow::Note(note) => ((*note).to_string(), RUN_INDENT),
+            WorkflowRailRow::Hint(hint) => (hint.clone(), RUN_INDENT),
             WorkflowRailRow::New => (NEW_LABEL.to_string(), 0),
         };
         MARKER + indent + text.chars().count()
@@ -117,7 +130,7 @@ impl App {
                 !self.wf.creating && self.wf.run_index == Some(*index)
             }
             WorkflowRailRow::New => self.wf.creating,
-            WorkflowRailRow::Note(_) => false,
+            WorkflowRailRow::Hint(_) => false,
         }
     }
 
@@ -181,6 +194,7 @@ impl App {
                 self.select_workflow(self.workflow_index + 1);
             }
         }
+        self.wf.preview_scroll = 0;
         self.sync_workflow_overlay();
     }
 
@@ -196,6 +210,7 @@ impl App {
         self.wf.node_index = 0;
         self.wf.canvas_layer = 0;
         self.wf.canvas_lane = 0;
+        self.wf.preview_scroll = 0;
         self.wf.copilot_scroll = 0;
         self.reload_workflow_runs();
         self.reload_workflow_graph();

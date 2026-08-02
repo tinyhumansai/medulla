@@ -38,7 +38,7 @@ fn caps() -> AgentCapabilities {
 
 #[tokio::test]
 async fn capability_probe_returns_the_workers_budgets_and_readiness() {
-    let worker = FakeWorker::new(Mode::Capabilities(caps()));
+    let worker = FakeWorker::new(Mode::Capabilities(Box::new(caps())));
     let runner = TaskRunner::start_with_ack_window(
         worker.clone(),
         Duration::from_millis(5),

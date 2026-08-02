@@ -86,10 +86,12 @@ impl ScreenRouter {
                 resync,
             } => self.subscribe(from, &task_id, max_fps, resync),
             ScreenMessage::Unsubscribe { task_id } => {
-                // Resolved like a subscribe: without it, any peer could cancel
-                // another's stream by naming its task id.
-                if self.runtime.session_for_task(from, &task_id).is_some() {
-                    self.registry.unsubscribe(&task_id);
+                // Authorized against the stream's own subscriber, not against
+                // the task still running. Both stop an impostor cancelling
+                // someone else's stream, but only this one still works once the
+                // task has finished — and that is precisely when a viewer lets
+                // go of it.
+                if self.registry.unsubscribe_for(from, &task_id) {
                     self.log(&format!("screen: {from} unsubscribed from {task_id}"));
                 }
             }
@@ -126,12 +128,25 @@ impl ScreenRouter {
         if self.registry.contains(task_id) && !resync {
             return;
         }
+        // The stream's own stopping condition, resolved the same way this
+        // subscribe was: it ends when `(from, task_id)` stops naming a running
+        // task, which is what keeps it from outliving its task and sampling
+        // whatever claims the session next.
+        let is_live = {
+            let runtime = self.runtime.clone();
+            let from = from.to_string();
+            let task_id = task_id.to_string();
+            std::sync::Arc::new(move || runtime.session_for_task(&from, &task_id).is_some())
+        };
         self.registry.subscribe(
             &self.sessions,
-            task_id,
-            &session_id,
-            from,
-            max_fps,
+            super::sampler::StreamSpec {
+                task_id: task_id.to_string(),
+                session_id: session_id.clone(),
+                subscriber: from.to_string(),
+                max_fps,
+                is_live,
+            },
             self.send.clone(),
         );
         self.log(&format!(

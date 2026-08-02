@@ -83,7 +83,7 @@ fn task_priority(status: TrackedTaskStatus) -> u8 {
 /// dim header with the per-status counts, then one `glyph title` row per task
 /// (titles ellipsized to `width`). Empty board ⇒ empty `Vec` (renders nothing).
 ///
-/// The per-task rows are capped at [`MAX_BOARD_TASK_ROWS`] so a task-heavy
+/// The per-task rows are capped at `MAX_BOARD_TASK_ROWS` so a task-heavy
 /// harness cannot fill the non-scrollable transcript-pane header and hide the
 /// transcript below it. When more tasks exist, the highest-priority rows
 /// (open/active/blocked before done/cancelled) are shown and a trailing

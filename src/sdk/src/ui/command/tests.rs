@@ -23,21 +23,13 @@ fn simple_commands_and_aliases() {
     assert_eq!(parse("/clear"), Some(SlashCommand::ClearView));
     assert_eq!(parse("/settings"), Some(SlashCommand::Settings));
     assert_eq!(parse("/theme"), Some(SlashCommand::Settings));
-    assert_eq!(parse("/mem"), Some(SlashCommand::Memory(None)));
+    assert_eq!(parse("/fb"), Some(SlashCommand::Feedback));
 }
 
 #[test]
 fn command_token_is_case_insensitive() {
     assert_eq!(parse("/QUIT"), Some(SlashCommand::Quit));
     assert_eq!(parse("  /New  "), Some(SlashCommand::NewSession));
-}
-
-#[test]
-fn memory_preserves_argument_case() {
-    assert_eq!(
-        parse("/memory Find The Thing"),
-        Some(SlashCommand::Memory(Some("Find The Thing".into())))
-    );
 }
 
 #[test]
@@ -101,8 +93,8 @@ fn every_parseable_command_is_catalogued() {
     // The other direction: a command the parser knows but the catalog omits is
     // undiscoverable — it exists only for whoever read the source.
     for name in [
-        "new", "resume", "abort", "clear", "copy", "memory", "mem", "usage", "settings", "theme",
-        "config", "feedback", "fb", "mouse", "help", "quit", "exit", "q",
+        "new", "resume", "abort", "clear", "copy", "usage", "settings", "theme", "config",
+        "feedback", "fb", "mouse", "help", "quit", "exit", "q",
     ] {
         assert!(
             lookup(name).is_some(),
@@ -125,18 +117,18 @@ fn suggestions_narrow_as_the_name_is_typed() {
     assert_eq!(all.len(), COMMANDS.len());
 
     // …a prefix narrows it, by alias as well as by name…
-    let names: Vec<&str> = suggestions("/me")
+    let names: Vec<&str> = suggestions("/fb")
         .expect("still choosing")
         .iter()
         .map(|spec| spec.name)
         .collect();
-    assert_eq!(names, vec!["memory"], "matched via its `mem` alias");
+    assert_eq!(names, vec!["feedback"], "matched via its `fb` alias");
 
     // …an unknown prefix says so with an empty list rather than by vanishing…
     assert_eq!(suggestions("/zzz").expect("still a command line").len(), 0);
 
     // …and once an argument is being typed the choice is made.
-    assert!(suggestions("/memory rust").is_none());
+    assert!(suggestions("/copy last").is_none());
     assert!(suggestions("hello").is_none(), "not a command at all");
 }
 
@@ -144,4 +136,85 @@ fn suggestions_narrow_as_the_name_is_typed() {
 fn usage_renders_the_argument_hint_only_when_there_is_one() {
     assert_eq!(lookup("copy").unwrap().usage(), "/copy [all|last]");
     assert_eq!(lookup("clear").unwrap().usage(), "/clear");
+}
+
+#[test]
+fn harness_takes_an_optional_provider_and_path() {
+    // Bare: the front end opens its picker rather than guessing.
+    assert_eq!(
+        parse("/harness"),
+        Some(SlashCommand::NewHarness {
+            provider: None,
+            path: None,
+        })
+    );
+    assert_eq!(
+        parse("/harness codex"),
+        Some(SlashCommand::NewHarness {
+            provider: Some("codex".to_string()),
+            path: None,
+        })
+    );
+    assert_eq!(
+        parse("/harness Claude ~/work/foo"),
+        Some(SlashCommand::NewHarness {
+            provider: Some("claude".to_string()),
+            path: Some("~/work/foo".to_string()),
+        }),
+        "the provider is matched case-insensitively, the path is left alone"
+    );
+}
+
+#[test]
+fn an_unknown_harness_provider_is_a_usage_error_not_a_default() {
+    // Silently falling back to the default provider would start the wrong CLI
+    // in the operator's workspace, and they would not find out until it did
+    // something.
+    assert_eq!(
+        parse("/harness claud"),
+        Some(SlashCommand::BadUsage(
+            "Usage: /harness [claude|codex|opencode] [path]"
+        ))
+    );
+    assert_eq!(
+        parse("/harness ~/work/foo"),
+        Some(SlashCommand::BadUsage(
+            "Usage: /harness [claude|codex|opencode] [path]"
+        )),
+        "a bare path is ambiguous with a provider name, so it is refused"
+    );
+}
+
+#[test]
+fn control_handover_has_both_a_long_and_a_short_spelling() {
+    assert_eq!(parse("/takecontrol"), Some(SlashCommand::TakeControl));
+    assert_eq!(parse("/take"), Some(SlashCommand::TakeControl));
+    assert_eq!(
+        parse("/handoff"),
+        Some(SlashCommand::HandOff { note: None })
+    );
+    assert_eq!(parse("/hand"), Some(SlashCommand::HandOff { note: None }));
+}
+
+#[test]
+fn handoff_takes_an_optional_note() {
+    // The note is prose the orchestrator reads, so it keeps the operator's own
+    // capitalisation — unlike every flag-shaped argument, which is lowercased.
+    assert_eq!(
+        parse("/handoff Migration is half applied, tests RED"),
+        Some(SlashCommand::HandOff {
+            note: Some("Migration is half applied, tests RED".to_string())
+        })
+    );
+    assert_eq!(
+        parse("/hand take it from here"),
+        Some(SlashCommand::HandOff {
+            note: Some("take it from here".to_string())
+        })
+    );
+    // Whitespace is not a note.
+    assert_eq!(
+        parse("/handoff    "),
+        Some(SlashCommand::HandOff { note: None })
+    );
 }

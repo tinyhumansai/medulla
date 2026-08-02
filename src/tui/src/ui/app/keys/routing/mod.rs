@@ -1,10 +1,11 @@
 //! Keyboard handling for the Routing tab and its fleet-management panes.
 
+mod add_host;
+
 use crossterm::event::KeyCode;
 
 use crate::ui::composer::{insert_at, Draft};
 use crate::ui::multi_pane::{self, NavAction};
-use medulla::daemon::pairing::REMOTE_JOIN_COMMAND;
 use medulla::runtime::WorkerOp;
 
 use super::super::types::{
@@ -15,6 +16,15 @@ use super::super::types::{
 impl App {
     /// Handle Routing navigation and the active pane's actions.
     pub(super) fn on_routing_key(&mut self, code: KeyCode) -> RoutingKey {
+        // Claimed before the pane navigation, which treats Esc as "leave the
+        // content pane". Mid-wizard that is the wrong answer: a mis-picked kind
+        // should cost one step, not the whole page. Esc leaves the page as
+        // usual once the wizard is back at its first step.
+        if code == KeyCode::Esc && self.routing_index == RP_ADD_HOST && self.add_host_kind_chosen {
+            self.add_host_kind_chosen = false;
+            self.set_status("Choose a kind of host");
+            return RoutingKey::Handled(None);
+        }
         match multi_pane::navigate(
             code,
             ROUTING_SUBPAGES.len(),
@@ -64,6 +74,15 @@ impl App {
 
     /// Browse and mutate the registered host roster.
     fn hosts_key(&mut self, code: KeyCode) -> RoutingKey {
+        // The preview's role toggles are a second cursor on the same page, so
+        // they claim the arrows while focused. `→` drills in and `←` backs out,
+        // one rung below the Esc that leaves the content pane entirely — Tab is
+        // deliberately untouched, it still cycles the top-level tabs.
+        if self.host_roles_focus {
+            if let Some(handled) = self.host_roles_key(code) {
+                return handled;
+            }
+        }
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.host_index = crate::ui::selection::moved(
@@ -79,6 +98,19 @@ impl App {
                     self.runtime.workers().len(),
                     false,
                 );
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                if self.selected_host().is_none() {
+                    return RoutingKey::Handled(None);
+                }
+                if self.agent_templates().is_empty() {
+                    self.set_status("No agent templates are declared — nothing to assign");
+                    return RoutingKey::Handled(None);
+                }
+                self.host_roles_focus = true;
+                self.host_role_index = 0;
+                self.set_status("Roles · Space toggles · ← back to the host list");
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('a') => {
@@ -129,6 +161,63 @@ impl App {
                 RoutingKey::Handled(cmd)
             }
             _ => RoutingKey::Unhandled,
+        }
+    }
+
+    /// Drive the selected host's role toggles.
+    ///
+    /// `None` means the key was not a role-list key and the host roster should
+    /// see it — so `a`, `r`, `d` and the rest keep working without leaving the
+    /// preview first.
+    fn host_roles_key(&mut self, code: KeyCode) -> Option<RoutingKey> {
+        let templates = self.agent_templates();
+        // The catalog can empty out under us (a template file is deleted, a
+        // refresh lands). Focus that points at nothing must not strand the arrows.
+        if templates.is_empty() {
+            self.host_roles_focus = false;
+            return None;
+        }
+        match code {
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.host_roles_focus = false;
+                self.set_status("Hosts · → to assign roles");
+                Some(RoutingKey::Handled(None))
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.host_role_index =
+                    crate::ui::selection::moved(self.host_role_index, templates.len(), true);
+                Some(RoutingKey::Handled(None))
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.host_role_index =
+                    crate::ui::selection::moved(self.host_role_index, templates.len(), false);
+                Some(RoutingKey::Handled(None))
+            }
+            KeyCode::Char(' ') | KeyCode::Enter => {
+                let host = self.selected_host()?;
+                let role = templates.get(self.host_role_index)?.id.clone();
+                // Whole-list replacement, so the toggle reads the current set,
+                // flips one entry, and sends the result. Roles ride the hub's
+                // descriptor, so this re-registers — the point is that the
+                // orchestrator starts routing this role here.
+                let mut roles = host.roles.clone();
+                let assigned = if let Some(at) = roles.iter().position(|held| held == &role) {
+                    roles.remove(at);
+                    false
+                } else {
+                    roles.push(role.clone());
+                    true
+                };
+                self.set_status(if assigned {
+                    format!("{} now offered for {role}", host.id)
+                } else {
+                    format!("{} no longer offered for {role}", host.id)
+                });
+                Some(RoutingKey::Handled(Some(Cmd::WorkerOp(
+                    WorkerOp::SetRoles { id: host.id, roles },
+                ))))
+            }
+            _ => None,
         }
     }
 
@@ -227,26 +316,8 @@ impl App {
         }
     }
 
-    /// Open the existing host-address prompt from the dedicated Add Host pane,
-    /// or copy the line the operator has to run on the machine being added.
-    fn add_host_key(&mut self, code: KeyCode) -> RoutingKey {
-        match code {
-            KeyCode::Enter | KeyCode::Char('a') => {
-                self.open_add_host_prompt();
-                RoutingKey::Handled(None)
-            }
-            // Copying it here rather than retyping it there is the whole point:
-            // this end is a local terminal, so the copy is free.
-            KeyCode::Char('c') => {
-                self.copy_line("the worker install line", REMOTE_JOIN_COMMAND);
-                RoutingKey::Handled(None)
-            }
-            _ => RoutingKey::Unhandled,
-        }
-    }
-
     /// Build the host-add prompt shared by the list shortcut and Add Host page.
-    fn open_add_host_prompt(&mut self) {
+    pub(super) fn open_add_host_prompt(&mut self) {
         self.prompt = Some(Prompt {
             kind: PromptKind::HostAdd,
             title: "Add host — address or @handle, optional label".into(),
@@ -258,12 +329,34 @@ impl App {
     /// Re-read both halves of a harness on demand: the credentials it spends
     /// (detected locally) and the declarations it appears in (from the runtime).
     fn harnesses_key(&mut self, code: KeyCode) -> RoutingKey {
-        if code == KeyCode::Char('r') {
-            self.refresh_credential_status_if_needed();
-            self.set_status("Harnesses refreshed");
-            RoutingKey::Handled(Some(Cmd::RefreshFleet))
-        } else {
-            RoutingKey::Unhandled
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_custom_harness_selection(true);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_custom_harness_selection(false);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('a') => {
+                self.open_add_custom_harness();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('e') => {
+                self.open_edit_custom_harness();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('d') => {
+                self.delete_selected_custom_harness();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('r') => {
+                self.reload_custom_harnesses();
+                self.refresh_credential_status_if_needed();
+                self.set_status("Harnesses refreshed");
+                RoutingKey::Handled(Some(Cmd::RefreshFleet))
+            }
+            _ => RoutingKey::Unhandled,
         }
     }
 

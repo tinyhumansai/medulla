@@ -1,27 +1,32 @@
 //! Backend bearer-token resolution: pick the effective token from config, the
-//! environment, or stored credentials; describe the missing-token state; and
+//! environment, or the core's app session; describe the missing-token state; and
 //! classify one-time login tokens versus JWTs. Depends on
 //! [`crate::config::BackendConfig`] for the configured backend.
 
 use std::collections::HashMap;
 
-use super::types::Credentials;
-
 /// Resolve the backend bearer token from, in precedence order:
 ///
 /// 1. an inline `backend.token` in the loaded config,
 /// 2. the `backend.tokenEnv` environment variable (an empty value is ignored),
-/// 3. `stored` credentials saved by `medulla login` — but only when their
-///    `baseUrl` matches the configured backend after trailing-slash
-///    normalization (a mismatch is ignored so credentials for one backend never
-///    leak to another).
+/// 3. `session` — the app session the embedded core holds, read by the caller
+///    via [`crate::core_host::auth::session_token`].
 ///
 /// Returns `None` when no source yields a token. Pure over its inputs; the caller
-/// supplies the process environment and any stored credentials.
+/// supplies the process environment and the session.
+///
+/// # Why the session is no longer matched against `backend.base_url`
+///
+/// It used to be, because a Medulla-owned credential file could hold a JWT for
+/// one deployment while the config named another. There is now one session, held
+/// by the core, for the deployment the core itself resolves — a URL comparison
+/// against a *different* config value would reject a perfectly good token
+/// whenever the two spellings drifted, which is a worse failure than the one it
+/// guarded against.
 pub fn resolve_backend_token(
     env: &HashMap<String, String>,
     backend: &crate::config::BackendConfig,
-    stored: Option<&Credentials>,
+    session: Option<&str>,
 ) -> Option<String> {
     if let Some(tok) = backend.token.clone() {
         return Some(tok);
@@ -33,20 +38,7 @@ pub fn resolve_backend_token(
     {
         return Some(tok);
     }
-    let want = backend.base_url.trim_end_matches('/');
-    stored
-        .filter(|c| c.base_url.trim_end_matches('/') == want)
-        .map(|c| c.jwt.clone())
-}
-
-/// The status note shown when no backend token is available and the mock runs.
-///
-/// Names the environment variable the operator can set to supply a token.
-pub fn missing_token_note(backend: &crate::config::BackendConfig) -> String {
-    format!(
-        "backend token missing (set ${} or run `medulla login`) — running with mock runtime",
-        backend.token_env
-    )
+    session.map(str::to_string).filter(|t| !t.trim().is_empty())
 }
 
 /// Whether `s` looks like a one-time login token (64 lowercase hex characters)

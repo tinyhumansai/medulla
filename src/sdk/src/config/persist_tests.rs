@@ -138,13 +138,13 @@ fn persist_setting_creates_and_merges_sections() {
     let path = dir.path().join("nested").join("config.toml");
 
     // Writing into a file that does not exist yet creates it and its parent.
-    super::persist_setting(&path, "memory", "enabled", toml::Value::Boolean(true)).expect("write");
+    super::persist_setting(&path, "update", "check", toml::Value::Boolean(false)).expect("write");
     // A second key in the same section merges rather than replacing.
     super::persist_setting(&path, "medulla", "maxPasses", toml::Value::Integer(7)).expect("write");
 
     let parsed: TuiConfig =
         toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
-    assert_eq!(parsed.memory.and_then(|m| m.enabled), Some(true));
+    assert!(!parsed.update.check);
     assert_eq!(parsed.medulla.max_passes, Some(7));
 }
 
@@ -154,22 +154,104 @@ fn persist_setting_preserves_unrelated_sections() {
     let path = dir.path().join("config.toml");
     std::fs::write(
         &path,
-        "[theme]\nprimary = \"cyan\"\n\n[memory]\nworkspace = \"/w\"\n",
+        "[theme]\nprimary = \"cyan\"\n\n[tinyplace]\nhandle = \"me\"\n",
     )
     .expect("seed");
 
-    super::persist_setting(&path, "memory", "enabled", toml::Value::Boolean(false)).expect("write");
+    super::persist_setting(
+        &path,
+        "tinyplace",
+        "autoDiscoverPeers",
+        toml::Value::Boolean(false),
+    )
+    .expect("write");
 
     let parsed: TuiConfig =
         toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
     assert_eq!(parsed.theme.primary.as_deref(), Some("cyan"));
-    let memory = parsed.memory.expect("memory section");
-    assert_eq!(memory.enabled, Some(false));
+    let tinyplace = parsed.tinyplace.expect("tinyplace section");
+    assert!(!tinyplace.auto_discover_peers);
     assert_eq!(
-        memory.workspace.as_deref(),
-        Some("/w"),
+        tinyplace.handle.as_deref(),
+        Some("me"),
         "sibling key survives"
     );
+}
+
+#[test]
+fn persist_setting_preserves_json_format_and_unrelated_values() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("medulla.tui.json");
+    std::fs::write(
+        &path,
+        r#"{
+  "theme": {"primary": "cyan"},
+  "harness": {"skipPermissions": true}
+}"#,
+    )
+    .expect("seed");
+
+    super::persist_setting(
+        &path,
+        "harness",
+        "recentWorkspaces",
+        toml::Value::Array(vec![toml::Value::String("/work/medulla".into())]),
+    )
+    .expect("write");
+
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let parsed: serde_json::Value = serde_json::from_str(&saved).expect("JSON remains valid");
+    assert_eq!(parsed["theme"]["primary"], "cyan");
+    assert_eq!(parsed["harness"]["skipPermissions"], true);
+    assert_eq!(
+        parsed["harness"]["recentWorkspaces"],
+        serde_json::json!(["/work/medulla"])
+    );
+}
+
+#[test]
+fn persist_setting_uses_json_for_extensionless_config_like_the_loader() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("medulla-config");
+    std::fs::write(&path, r#"{"harness":{"skipPermissions":true}}"#).expect("seed");
+
+    super::persist_setting(
+        &path,
+        "harness",
+        "recentWorkspaces",
+        toml::Value::Array(vec![toml::Value::String("/work/medulla".into())]),
+    )
+    .expect("write");
+
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let parsed: serde_json::Value = serde_json::from_str(&saved).expect("JSON remains valid");
+    assert_eq!(parsed["harness"]["skipPermissions"], true);
+    assert_eq!(
+        parsed["harness"]["recentWorkspaces"],
+        serde_json::json!(["/work/medulla"])
+    );
+}
+
+#[test]
+fn persist_section_replaces_a_complete_json_section_and_preserves_others() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("medulla.tui.json");
+    std::fs::write(
+        &path,
+        r#"{"theme":{"primary":"cyan"},"statusLine":{"path":"hidden"}}"#,
+    )
+    .expect("seed");
+    let mut status_line = toml::Table::new();
+    status_line.insert("state".into(), toml::Value::String("line2".into()));
+    status_line.insert("path".into(), toml::Value::String("line1".into()));
+
+    super::persist_section(&path, "statusLine", status_line).expect("write");
+
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let parsed: serde_json::Value = serde_json::from_str(&saved).expect("JSON remains valid");
+    assert_eq!(parsed["theme"]["primary"], "cyan");
+    assert_eq!(parsed["statusLine"]["state"], "line2");
+    assert_eq!(parsed["statusLine"]["path"], "line1");
 }
 
 #[test]
@@ -247,6 +329,7 @@ fn the_hub_roster_round_trips_through_the_config_file() {
 
     let workers = vec![
         crate::config::HubWorkerConfig {
+            roles: Vec::new(),
             id: "alpha".into(),
             address: "3Hob1FxUwsy1K2rweppbmCkuPef6unAr5Amj6kQ2fM3A".into(),
             harness: "claude".into(),
@@ -254,6 +337,7 @@ fn the_hub_roster_round_trips_through_the_config_file() {
             selected: true,
         },
         crate::config::HubWorkerConfig {
+            roles: Vec::new(),
             id: "beta".into(),
             address: "@someone".into(),
             harness: "codex".into(),
@@ -284,6 +368,7 @@ fn removing_the_last_worker_is_remembered_as_removal() {
     super::persist_hub_workers(
         &path,
         &[crate::config::HubWorkerConfig {
+            roles: Vec::new(),
             id: "alpha".into(),
             address: "addr".into(),
             harness: "claude".into(),
@@ -330,6 +415,25 @@ fn daemon_workspace_allowlist_replaces_only_workflow_workspaces() {
 }
 
 #[test]
+fn custom_harnesses_persist_without_secret_values_or_unrelated_loss() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[backend]\nbaseUrl = \"https://example.test\"\n").unwrap();
+    let preset = crate::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek via Claude | claude | deepseek/model | deepseek/fast | this-device",
+    )
+    .unwrap();
+
+    super::persist_custom_harnesses(&path, &[preset]).unwrap();
+
+    let text = std::fs::read_to_string(path).unwrap();
+    assert!(text.contains("https://example.test"));
+    assert!(text.contains("deepseek/model"));
+    assert!(text.contains("OPENROUTER_API_KEY"));
+    assert!(!text.contains("sk-or-"));
+}
+
+#[test]
 fn daemon_master_roster_persists_public_peer_data_without_identity_secrets() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
@@ -366,4 +470,57 @@ fn daemon_master_roster_persists_public_peer_data_without_identity_secrets() {
     );
     assert!(!text.contains("private"));
     assert!(!text.contains("token"));
+}
+
+#[test]
+fn a_local_host_that_named_no_address_is_written_without_one() {
+    // Loading fills `address` from the section default, so persisting the
+    // in-memory value verbatim turns "derive one for me" into "bind the
+    // primary's address" — and every extra collides on the next launch.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("medulla.tui.json.toml");
+    let hosts = vec![
+        crate::config::HostSection {
+            name: "backend".to_string(),
+            workspace: "/tmp/backend".to_string(),
+            ..crate::config::HostSection::default()
+        },
+        crate::config::HostSection {
+            address: "chosen-by-hand".to_string(),
+            workspace: "/tmp/other".to_string(),
+            ..crate::config::HostSection::default()
+        },
+    ];
+
+    super::persist_local_hosts(&path, &hosts).expect("write");
+    let written = std::fs::read_to_string(&path).expect("read back");
+
+    assert!(
+        !written.contains(&crate::config::HostSection::default().address),
+        "the default address must not be written back: {written}"
+    );
+    // An address the operator actually picked still survives.
+    assert!(written.contains("chosen-by-hand"), "{written}");
+    assert!(written.contains("backend"), "{written}");
+}
+
+#[test]
+fn persisting_hosts_leaves_every_other_section_alone() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cfg.toml");
+    std::fs::write(&path, "[onboarding]\nwelcomeCompleted = true\n").expect("seed");
+
+    super::persist_local_hosts(
+        &path,
+        &[crate::config::HostSection {
+            name: "api".to_string(),
+            workspace: "/tmp/api".to_string(),
+            ..crate::config::HostSection::default()
+        }],
+    )
+    .expect("write");
+
+    let written = std::fs::read_to_string(&path).expect("read back");
+    assert!(written.contains("welcomeCompleted"), "{written}");
+    assert!(written.contains("[[hosts]]"), "{written}");
 }

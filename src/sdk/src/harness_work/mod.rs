@@ -14,7 +14,7 @@
 //! into a [`WorkSnapshot`]; and the UI renders the snapshot without knowing
 //! which harness produced it.
 //!
-//! Split by responsibility: [`types`] holds the data model, [`fold`] the
+//! Split by responsibility: `types` holds the data model, `fold` the
 //! stateful reduction. The event kinds are additive on the wire — a peer that
 //! predates them decodes them as unknown events and ignores them, which is why
 //! they can ship without a protocol version bump.

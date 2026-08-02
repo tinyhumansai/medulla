@@ -1,7 +1,7 @@
 //! Non-TUI subcommand runners and the pre-app login screen driver.
 //!
 //! Holds the CLI verbs that do not enter the ratatui app — `medulla login`,
-//! `logout`, `memory`, `init`, and `workspace` — plus the credential persistence
+//! `logout`, `init`, and `workspace` — plus the credential persistence
 //! helper and the interactive login-screen loop the TUI runs before selecting a
 //! runtime. Each runner parses its own args, loads config, performs its work,
 //! and returns an `anyhow::Result`.
@@ -9,36 +9,28 @@
 //! [`workspace`] and [`workflow`] own the registry and workflow verbs, which are
 //! large enough to warrant their own files; everything else lives here.
 
+pub(crate) mod login_screen;
 #[cfg(feature = "workflows")]
 pub(crate) mod workflow;
 pub(crate) mod workspace;
 
+pub(crate) use login_screen::run_login_screen;
 #[cfg(feature = "workflows")]
 pub(crate) use workflow::run_workflow_cmd;
 pub(crate) use workspace::run_workspace;
 
-use std::io::Stdout;
-use std::path::Path;
-use std::time::Duration;
-
-use crossterm::event::{Event, EventStream, KeyEventKind};
-use futures::StreamExt;
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
-
-use medulla::auth::{
-    describe_me, is_one_time_login_token, open_browser, run_login_flow, start_loopback,
-    CredentialStore, Credentials, LoopbackConfig, DEFAULT_LOGIN_TIMEOUT,
-};
+use medulla::auth::{open_browser, run_login_flow, Credentials, LoopbackConfig};
 use medulla::client::MedullaClient;
 use medulla::config::load_config;
-use medulla_tui::cli::{
-    parse_init_args, parse_login_args, parse_memory_args, LoginArgs, MemoryAction,
-};
-use medulla_tui::ui::login::{LoginCmd, LoginEvent, LoginOutcome, LoginScreen};
+use medulla_tui::cli::{parse_init_args, parse_login_args, LoginArgs};
 
 /// `medulla login`: obtain a JWT (loopback OAuth or a one-time token), verify it
-/// with `/auth/me`, and persist it to the credential store.
+/// with `/auth/me`, and hand it to the embedded core as its app session.
+///
+/// The core is the only credential store. This used to write a Medulla-owned
+/// `credentials.json` beside it, which meant `medulla login` could report
+/// success while the core — whose session actually drives the runtime — stayed
+/// signed out, and the TUI would still open its login screen.
 pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
     let parsed: LoginArgs = match parse_login_args(args) {
         Ok(p) => p,
@@ -74,34 +66,255 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
 
     // Verify the token and greet the user.
     let client = MedullaClient::new(base_url.clone(), jwt.clone());
-    match client.me().await {
-        Ok(me) => println!("{}", medulla::auth::describe_me(&me)),
+    let me = match client.me().await {
+        Ok(me) => {
+            println!("{}", medulla::auth::describe_me(&me));
+            me
+        }
         Err(e) => return Err(anyhow::anyhow!("token verification failed: {e}")),
-    }
+    };
 
-    let store = CredentialStore::at_home(&medulla::home::medulla_home(&env));
-    store.save(&Credentials { base_url, jwt })?;
-    println!("Credentials saved to {}", store.path().display());
+    // Record who this is *before* booting, because the id chooses the home the
+    // core is about to be pointed at. Taken from `/auth/me` rather than from the
+    // core's own auth state for the same reason: the core's state lives inside
+    // the directory this id selects.
+    //
+    // A refusal stops the login here, before a core is booted or a token
+    // written: the alternative is storing this account's bearer in a directory
+    // that belongs to somebody else.
+    adopt_account(&env, &me, &base_url).map_err(|why| anyhow::anyhow!("signed in, but {why}"))?;
+
+    // Boot last: the flow above can take minutes of browser round-trip, and a
+    // core sitting open across it buys nothing.
+    let core = auth_core(&env, parsed.config.as_deref()).await?;
+    medulla::core_host::auth::store_session(&core, &jwt)
+        .await
+        .map_err(|e| anyhow::anyhow!("the core rejected the session: {e}"))?;
+    sweep_retired_credentials(&env);
+    println!("Signed in to {base_url}.");
     Ok(())
 }
 
-/// `medulla logout`: clear stored credentials.
-pub(crate) fn run_logout() -> anyhow::Result<()> {
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let store = CredentialStore::at_home(&medulla::home::medulla_home(&env));
-    store.clear()?;
-    println!("Logged out ({} cleared).", store.path().display());
+/// Scope this install to the account named by an `/auth/me` response, and prove
+/// that the home now in effect is that account's.
+///
+/// Writes the root-level active-user marker, which is what every later launch
+/// reads to resolve its home — so this must happen before anything derives a
+/// path from [`medulla::home::medulla_home`], and certainly before the core is
+/// booted against one.
+///
+/// # Why this refuses rather than warns
+///
+/// A caller stores the session immediately after, into whichever home is in
+/// effect. So "recorded the account" is not the question — "does the home this
+/// process will use belong to the account that just authenticated" is, and three
+/// things make those differ: a response with no id, a marker that cannot be
+/// written, and `MEDULLA_USER`, which outranks the marker and therefore survives
+/// a successful write. Any of them would put one account's bearer token in
+/// another account's credential store. The comparison against
+/// [`medulla::home::medulla_home`] covers all three at once, because it asks the
+/// resolver the same question every later launch will ask it.
+///
+/// An id-less response is refused outright, including on a fresh install: the
+/// pre-login home would accept it, but nothing would ever make it an *account*,
+/// so every launch would sign in again and every such login would share one
+/// credential store.
+///
+/// # Errors
+///
+/// Returns an operator-facing sentence when the effective home is not the
+/// authenticated account's. The caller must not store a session after one.
+pub(crate) fn adopt_account(
+    env: &std::collections::HashMap<String, String>,
+    me: &serde_json::Value,
+    base_url: &str,
+) -> Result<(), String> {
+    let root = medulla::home::medulla_root(env);
+
+    let Some(user_id) = medulla::auth::user_id_from_me(me) else {
+        // No carve-out for a fresh install. Letting an id-less login settle into
+        // the pre-login home looks harmless — nothing to cross yet — but it
+        // never becomes an account: `sign_in::account_is_active` keeps reading
+        // `local` as signed out, so every launch runs the login flow again, and
+        // every id-less account on the machine shares that one credential store.
+        // The whole layout is keyed on this id, so a login without one has
+        // nowhere correct to go and should say so.
+        return Err(
+            "the backend did not say which account this token belongs to, and every account's \
+             directory is named by that id — there is nowhere correct to store this session"
+                .to_string(),
+        );
+    };
+
+    // Before the id is joined to anything. It comes from a backend response and
+    // becomes a directory name, so `..`, a separator, or an absolute path would
+    // otherwise reach `seed_account_backend` — which creates directories and
+    // merges a config file — at a path outside the root, on a login that may
+    // then be refused anyway.
+    let user_id = medulla::home::user::sanitize_account_id(&user_id).ok_or_else(|| {
+        format!("the backend named an account id that cannot be a directory name ({user_id:?})")
+    })?;
+
+    // `MEDULLA_USER` selects an account for *this process* without touching the
+    // selection every other process reads, so honouring it means not writing the
+    // marker at all — not even when the authenticated account matches, which
+    // would still overwrite a marker naming somebody else.
+    let overridden = env
+        .get(medulla::home::user::MEDULLA_USER_ENV)
+        .map(|v| v.trim())
+        .is_some_and(|v| !v.is_empty());
+
+    let expected = root.join(&user_id);
+
+    // The override is checked before anything is written. A refused login must
+    // leave no trace: seeding first would create the authenticated account's
+    // config in a home this process is not going to use, on a login that ends
+    // in an error.
+    if overridden && medulla::home::medulla_home(env) != expected {
+        return Err(format!(
+            "signed in as {user_id}, but {} pins this process to another account — unset it to \
+             use that account's own directory",
+            medulla::home::user::MEDULLA_USER_ENV,
+        ));
+    }
+
+    // Describe the account before selecting it. The other order leaves a failed
+    // login with the marker already moved: the command reports failure, stores
+    // no session, and every later launch resolves to the account whose home
+    // could not be written — skipping the first-account flow that would fix it.
+    let notice = crate::sign_in::seed_account_backend(&expected, base_url)
+        .map_err(|err| format!("this account's config could not be written ({err})"))?;
+    if let Some(notice) = notice {
+        eprintln!("{notice}");
+    }
+
+    if !overridden {
+        medulla::home::user::write_active_user_id(&root, &user_id)
+            .map_err(|err| format!("this account could not be recorded ({err})"))?;
+    }
+
+    // Final check that the resolver agrees, which is what every later launch
+    // will ask it.
+    let effective = medulla::home::medulla_home(env);
+    if effective != expected {
+        return Err(format!(
+            "signed in as {user_id}, but this process resolves its home to {} — unset \
+             {} to use that account's own directory",
+            effective.display(),
+            medulla::home::user::MEDULLA_USER_ENV,
+        ));
+    }
     Ok(())
+}
+
+/// Boot the minimal core the auth verbs need, with its workspace bound.
+///
+/// Binding first is not optional: the core resolves its state directory from
+/// `OPENHUMAN_WORKSPACE`, and an unbound run would write the session into the
+/// developer's real `~/.openhuman` instead of the one this process's
+/// `MEDULLA_HOME` implies — so `medulla login` would sign in a workspace the TUI
+/// never reads.
+/// `config` is the operator's explicit `--config`, which stays authoritative
+/// here. Rediscovering config from the account home instead would defeat the
+/// flag exactly where it matters most: `medulla login --config staging.toml`
+/// verifies a token against the file's endpoint, and an account that already
+/// declares a different `backend.baseUrl` would then have the core validate that
+/// token against *its* endpoint and reject the login.
+async fn auth_core(
+    env: &std::collections::HashMap<String, String>,
+    config: Option<&str>,
+) -> anyhow::Result<medulla::core_host::EmbeddedCore> {
+    let home = medulla::home::medulla_home(env);
+    medulla::core_host::bind_workspace(env, &home);
+    // The session must be stored against the backend this host is configured
+    // for, or `medulla login` signs into one deployment and the TUI probes
+    // another.
+    let loaded = load_config(config, env, &home)?;
+    medulla::core_host::bind_medulla_base_url(env, &loaded.config.backend.base_url);
+    // And the core's own backend client with it: storing a session validates it
+    // against `/auth/me` there, not on the Medulla base above.
+    medulla::core_host::bind_backend_api_url(env, &loaded.config.backend.base_url);
+    medulla::core_host::boot_for_auth()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to start the embedded OpenHuman core: {e}"))
+}
+
+/// The core's app session as a `(base_url, jwt)` pair, or `None` when signed out.
+///
+/// `base_url` comes from the loaded Medulla config rather than the core: the two
+/// address the same deployment by construction, and the core exposes no RPC for
+/// the URL it resolved. A failure to reach the core reads as signed out — every
+/// caller degrades to "no backend" rather than failing outright.
+async fn session_credentials(
+    env: &std::collections::HashMap<String, String>,
+    base_url: &str,
+) -> Option<Credentials> {
+    let core = auth_core(env, None).await.ok()?;
+    let jwt = medulla::core_host::auth::session_token(&core)
+        .await
+        .ok()??;
+    Some(Credentials {
+        base_url: base_url.to_string(),
+        jwt,
+    })
+}
+
+/// `medulla logout`: forget the core's app session.
+///
+/// Idempotent — logging out when already signed out succeeds, so a user who is
+/// unsure of their state can always run it.
+pub(crate) async fn run_logout() -> anyhow::Result<()> {
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let core = auth_core(&env, None).await?;
+    medulla::core_host::auth::clear_session(&core)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to clear the session: {e}"))?;
+    sweep_retired_credentials(&env);
+    // The session is cleared; the account selection is deliberately not.
+    //
+    // "Signed out" means "no session", not "no account". The account's directory
+    // stays on disk either way, and the marker is what lets the next launch
+    // *find* it — including its `config.toml`. Clearing the marker would send
+    // that launch to the pre-login home and its default backend, so an operator
+    // on staging or a self-hosted deployment would be offered a login against
+    // production, with no way back to their own endpoint short of an environment
+    // variable. The one thing logout must not do is make signing back in
+    // impossible.
+    //
+    // So logging back in as the same account lands in the same home, with the
+    // same config, logs, and workflow store. Signing in as somebody else moves
+    // the marker through the account-switch path, which is the only thing that
+    // should move it.
+    println!("Logged out.");
+    Ok(())
+}
+
+/// Delete any credential file left by a pre-cutover install, and say so.
+///
+/// Those files are no longer read, so nothing else would ever remove them —
+/// and each one holds a real bearer token that no logout could invalidate.
+fn sweep_retired_credentials(env: &std::collections::HashMap<String, String>) {
+    let home = medulla::home::medulla_home(env);
+    for path in medulla::auth::remove_retired_credentials(&home) {
+        println!("Removed a retired credential file at {}.", path.display());
+    }
 }
 
 /// `medulla hub`: run the orchestrator hub — bridge the hosted backend brain to
-/// tiny.place worker daemons. Reads the backend JWT from saved credentials and
-/// the worker roster from `MEDULLA_TINYPLACE_PEER` / `MEDULLA_HUB_WORKERS`.
+/// tiny.place worker daemons. Takes the backend JWT from the core's app session
+/// and the worker roster from `MEDULLA_TINYPLACE_PEER` / `MEDULLA_HUB_WORKERS`.
 pub(crate) async fn run_hub(_args: &[String]) -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let home = medulla::home::medulla_home(&env);
+    let loaded = load_config(None, &env, &home)?;
+    let session = session_credentials(&env, &loaded.config.backend.base_url).await;
     // The standalone `medulla hub` owns its terminal, so stderr is right there.
-    match crate::hub_relay::build_hub_config_with_log(&env, &home, medulla::hub::stderr_log()) {
+    match crate::hub_relay::build_hub_config_with_log(
+        &env,
+        &home,
+        medulla::hub::stderr_log(),
+        session.as_ref(),
+    ) {
         Some(config) => medulla::hub::run_hub(config).await,
         None => anyhow::bail!(
             "hub: nothing to run — set MEDULLA_TINYPLACE_PEER (or MEDULLA_HUB_WORKERS) and run \
@@ -110,275 +323,28 @@ pub(crate) async fn run_hub(_args: &[String]) -> anyhow::Result<()> {
     }
 }
 
-/// `medulla memory <status|ingest|backfill|compile|search <query>>`: manage the
-/// persona-memory layer from the command line.
-pub(crate) async fn run_memory(args: &[String]) -> anyhow::Result<()> {
-    let parsed = match parse_memory_args(args) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("medulla memory: {msg}");
-            std::process::exit(2);
-        }
-    };
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
-    // Summarization syncs through the backend when a token is available (an
-    // explicit OPENROUTER_API_KEY still wins inside the service).
-    let settings = medulla::memory::env::resolve_with_backend(
-        loaded.config.memory.as_ref(),
-        &loaded.config.backend,
-        &env,
-        &medulla::home::medulla_home(&env),
-    );
-    let service = medulla::memory::MemoryService::open(settings)?;
-
-    match parsed.action {
-        MemoryAction::Status => {
-            let status = service.status();
-            if parsed.json {
-                println!("{}", serde_json::to_string_pretty(&status)?);
-            } else {
-                print!("{}", service.overview());
-            }
-        }
-        MemoryAction::Search(query) => {
-            let hits = service.search(&query, parsed.facet.as_deref(), parsed.k);
-            if parsed.json {
-                println!("{}", serde_json::to_string_pretty(&hits)?);
-            } else if hits.is_empty() {
-                println!("(no matches)");
-            } else {
-                for hit in &hits {
-                    println!("[{}] ({:.3}) {}", hit.facet, hit.score, hit.text);
-                }
-            }
-        }
-        MemoryAction::Compile => {
-            let report = service.compile()?;
-            print_ingest_report(&report, parsed.json)?;
-        }
-        MemoryAction::Ingest | MemoryAction::Backfill => {
-            let mode = if matches!(parsed.action, MemoryAction::Backfill) {
-                medulla::memory::IngestMode::Backfill
-            } else {
-                medulla::memory::IngestMode::Incremental
-            };
-            let report = service.ingest(mode).await?;
-            print_ingest_report(&report, parsed.json)?;
-        }
-    }
-    Ok(())
-}
-
 /// `medulla init [dir]` — author a `MEDULLA.md` workspace profile.
 ///
 /// Reads the directory's `AGENTS.md` / `CLAUDE.md` / `README.md`, scans its file
-/// layout, and asks the configured model to distil them into a short,
-/// routing-oriented profile, then writes it for the operator to review. Falls
-/// back to an editable stub when `--offline` is set or no model is reachable, so
-/// `init` always leaves a valid file behind.
+/// layout, and writes an editable stub profile for the operator to fill in. The
+/// model-drafted body went out with the memory layer that owned the provider
+/// seam, so `--offline` is now the only behaviour there is.
 ///
 /// This authors the file and stops there. `medulla workspace add` does the same
 /// *and* enrols the directory in the registry, which is what the orchestrator
 /// reads — see [`run_workspace`].
 pub(crate) async fn run_init(args: &[String]) -> anyhow::Result<()> {
     let parsed = parse_init_args(args);
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let dir = parsed
         .dir
         .as_ref()
         .map_or_else(|| cwd.clone(), |d| cwd.join(d));
 
-    // Resolve the same backend/model settings memory ingest uses, so one login
-    // (or one OPENROUTER_API_KEY) serves both surfaces.
-    let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
-    let settings = medulla::memory::env::resolve_with_backend(
-        loaded.config.memory.as_ref(),
-        &loaded.config.backend,
-        &env,
-        &medulla::home::medulla_home(&env),
-    );
-
-    if !parsed.offline && !medulla::init::model_available(&settings) {
-        eprintln!(
-            "medulla init: no model available (run `medulla login` or set OPENROUTER_API_KEY) — writing an editable stub"
-        );
-    }
-
-    let outcome =
-        medulla::init::init_workspace_with_settings(&dir, &settings, parsed.offline, parsed.force)
-            .await?;
+    let outcome = medulla::init::init_workspace(&dir, parsed.force).await?;
     workspace::report_profile(&outcome);
     println!(
         "Not registered — run `medulla workspace add` to let the orchestrator place work here."
     );
     Ok(())
-}
-
-/// Print an ingest/compile report as JSON or a short human summary.
-fn print_ingest_report(report: &medulla::memory::IngestReport, json: bool) -> anyhow::Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
-    } else {
-        println!(
-            "{}: {} files, {} sessions, {} observations{}",
-            report.mode,
-            report.files_seen,
-            report.sessions_processed,
-            report.observations,
-            if report.budget_hit {
-                " (budget hit)"
-            } else {
-                ""
-            },
-        );
-        if let Some(path) = &report.pack_path {
-            println!("pack: {path}");
-        }
-    }
-    Ok(())
-}
-
-/// Persist a freshly-obtained JWT under the Medulla home. Returns `None` on
-/// success or a non-fatal notice string on failure (the app still proceeds).
-pub(crate) fn save_credentials(home: &Path, base_url: &str, jwt: &str) -> Option<String> {
-    let store = CredentialStore::at_home(home);
-    match store.save(&Credentials {
-        base_url: base_url.to_string(),
-        jwt: jwt.to_string(),
-    }) {
-        Ok(()) => None,
-        Err(e) => Some(format!("logged in, but saving credentials failed ({e})")),
-    }
-}
-
-/// The pre-app login loop: draw the [`LoginScreen`], route keys to async tasks,
-/// and fold their events back in until the screen reaches an outcome.
-pub(crate) async fn run_login_screen(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    base_url: String,
-) -> anyhow::Result<LoginOutcome> {
-    let mut screen = LoginScreen::new(base_url.clone());
-    let mut reader = EventStream::new();
-    let mut tick = tokio::time::interval(Duration::from_millis(90));
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoginEvent>();
-    let mut loopback_task: Option<tokio::task::JoinHandle<()>> = None;
-
-    loop {
-        terminal.draw(|f| screen.draw(f))?;
-        if let Some(outcome) = screen.outcome() {
-            if let Some(h) = loopback_task.take() {
-                h.abort();
-            }
-            return Ok(outcome);
-        }
-
-        tokio::select! {
-            maybe_event = reader.next() => {
-                if let Some(Ok(Event::Key(key))) = maybe_event {
-                    if key.kind != KeyEventKind::Release {
-                        if let Some(cmd) = screen.handle_key(key) {
-                            dispatch_login_cmd(cmd, &base_url, &tx, &mut loopback_task);
-                        }
-                    }
-                }
-            }
-            Some(ev) = rx.recv() => screen.apply(ev),
-            _ = tick.tick() => screen.tick(),
-        }
-    }
-}
-
-/// Spawn the async work a [`LoginCmd`] requires and stream results back as
-/// [`LoginEvent`]s.
-fn dispatch_login_cmd(
-    cmd: LoginCmd,
-    base_url: &str,
-    tx: &tokio::sync::mpsc::UnboundedSender<LoginEvent>,
-    loopback_task: &mut Option<tokio::task::JoinHandle<()>>,
-) {
-    match cmd {
-        LoginCmd::StartLoopback { base_url, provider } => {
-            let tx = tx.clone();
-            let handle = tokio::spawn(async move {
-                match start_loopback(&base_url, provider).await {
-                    Ok(lb) => {
-                        let _ = tx.send(LoginEvent::LoopbackStarted {
-                            url: lb.login_url().to_string(),
-                            port: lb.port(),
-                        });
-                        open_browser(lb.login_url());
-                        match lb.await_callback(DEFAULT_LOGIN_TIMEOUT).await {
-                            Ok(jwt) => {
-                                let _ = tx.send(LoginEvent::CallbackToken(jwt.clone()));
-                                verify_and_emit(&base_url, jwt, &tx).await;
-                            }
-                            Err(e) => {
-                                let _ = tx.send(LoginEvent::CallbackError(e.to_string()));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send(LoginEvent::CallbackError(e.to_string()));
-                    }
-                }
-            });
-            if let Some(old) = loopback_task.replace(handle) {
-                old.abort();
-            }
-        }
-        LoginCmd::CancelLoopback => {
-            if let Some(h) = loopback_task.take() {
-                h.abort();
-            }
-        }
-        // Best-effort, like the login-URL opener: a browser that refuses to
-        // launch must not interrupt a sign-in the user is part-way through.
-        LoginCmd::OpenUrl(url) => open_browser(&url),
-        LoginCmd::SubmitToken(token) => {
-            let base = base_url.to_string();
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                let jwt = if is_one_time_login_token(&token) {
-                    let client = MedullaClient::new(base.clone(), String::new());
-                    match client.consume_login_token(token).await {
-                        Ok(j) => j,
-                        Err(e) => {
-                            let _ = tx.send(LoginEvent::VerifyFailed(format!(
-                                "login token redemption failed: {e}"
-                            )));
-                            return;
-                        }
-                    }
-                } else {
-                    token
-                };
-                verify_and_emit(&base, jwt, &tx).await;
-            });
-        }
-    }
-}
-
-/// Verify a JWT via `me()` and emit the matching [`LoginEvent`].
-async fn verify_and_emit(
-    base_url: &str,
-    jwt: String,
-    tx: &tokio::sync::mpsc::UnboundedSender<LoginEvent>,
-) {
-    let client = MedullaClient::new(base_url.to_string(), jwt.clone());
-    match client.me().await {
-        Ok(me) => {
-            let _ = tx.send(LoginEvent::Verified {
-                who: describe_me(&me),
-                jwt,
-            });
-        }
-        Err(e) => {
-            let _ = tx.send(LoginEvent::VerifyFailed(format!(
-                "verification failed: {e}"
-            )));
-        }
-    }
 }

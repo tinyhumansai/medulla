@@ -150,6 +150,25 @@ pub fn install_binary(new_bin: &Path, target_exe: &Path) -> Result<()> {
     }
 }
 
+/// Download, verify, and install a discovered release over the current binary.
+pub async fn install_update(info: &super::types::UpdateInfo) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    if !exe_is_writable(&exe) {
+        bail!("{} is not writable", exe.display());
+    }
+    let workdir = make_workdir()?;
+    let staged = match download_and_stage(&info.url, &info.sha256, &workdir).await {
+        Ok(path) => path,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&workdir);
+            return Err(error);
+        }
+    };
+    let result = install_binary(&staged, &exe);
+    let _ = std::fs::remove_dir_all(&workdir);
+    result
+}
+
 /// The rollback path for an installed binary (`<exe>.old`).
 pub fn backup_path(target_exe: &Path) -> PathBuf {
     let mut name = target_exe
@@ -203,25 +222,9 @@ pub async fn run_update(check_only: bool) -> Result<()> {
             Ok(())
         }
         Some(info) => {
-            let exe = std::env::current_exe()?;
-            if !exe_is_writable(&exe) {
-                bail!(
-                    "{} is not writable — reinstall through your package manager or rerun with write access",
-                    exe.display()
-                );
-            }
             println!("downloading medulla {}…", info.version);
-            let workdir = make_workdir()?;
-            let staged = match download_and_stage(&info.url, &info.sha256, &workdir).await {
-                Ok(p) => p,
-                Err(e) => {
-                    let _ = std::fs::remove_dir_all(&workdir);
-                    return Err(e);
-                }
-            };
-            let result = install_binary(&staged, &exe);
-            let _ = std::fs::remove_dir_all(&workdir);
-            result?;
+            install_update(&info).await?;
+            let exe = std::env::current_exe()?;
             println!(
                 "updated to medulla {}. Restart medulla to use it.",
                 info.version

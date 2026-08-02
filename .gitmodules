@@ -1,9 +1,3 @@
-[submodule "vendor/tinyplace"]
-	path = vendor/tinyplace
-	url = https://github.com/tinyhumansai/tiny.place.git
-[submodule "vendor/tinycortex"]
-	path = vendor/tinycortex
-	url = https://github.com/tinyhumansai/tinycortex.git
-[submodule "vendor/tinyflows"]
-	path = vendor/tinyflows
-	url = https://github.com/tinyhumansai/tinyflows
+[submodule "vendor/openhuman"]
+	path = vendor/openhuman
+	url = https://github.com/tinyhumansai/openhuman.git

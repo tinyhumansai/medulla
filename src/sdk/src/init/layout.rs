@@ -80,8 +80,8 @@ fn entries(dir: &Path) -> Vec<(String, bool)> {
 /// Scan `dir` into a bounded list of layout lines, each a path relative to the
 /// workspace root (directories keep their trailing `/`).
 ///
-/// Two levels deep, at most [`MAX_ENTRIES`] lines. A directory with more than
-/// [`MAX_CHILDREN`] children contributes its named children plus a `… N more`
+/// Two levels deep, at most `MAX_ENTRIES` lines. A directory with more than
+/// `MAX_CHILDREN` children contributes its named children plus a `… N more`
 /// line, so the orchestrator can tell "small module" from "large one" without
 /// being handed the whole tree. Returns an empty vector for an unreadable or
 /// empty directory.

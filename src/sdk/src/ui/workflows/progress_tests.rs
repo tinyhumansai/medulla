@@ -34,7 +34,10 @@ fn a_tool_call_frame_is_recognised_as_the_call_it_describes() {
     };
     assert_eq!(
         round_trip(&event),
-        Progress::Tool("workflow_apply_ops: add node notify".to_string())
+        Progress::Tool {
+            call_id: Some("c1".to_string()),
+            text: "Workflow Apply Ops: add node notify".to_string(),
+        }
     );
 }
 
@@ -42,24 +45,44 @@ fn a_tool_call_frame_is_recognised_as_the_call_it_describes() {
 fn the_chatter_around_a_tool_call_stays_status() {
     // These are the frames that age out of the transcript. Misreading any of
     // them as a tool call would put permanent `⏺` lines in the scrollback.
-    for (kind, payload) in [
-        ("agent_thinking", json!({ "text": "hmm" })),
-        ("agent_message", json!({ "text": "done" })),
-        (
-            "tool_result",
-            json!({ "call_id": "c", "ok": true, "is_error": false, "output": "", "output_bytes": 0 }),
-        ),
-    ] {
-        let event = HarnessEvent {
-            kind: kind.to_string(),
-            payload,
-            ..Default::default()
-        };
-        assert!(
-            matches!(round_trip(&event), Progress::Status(_)),
-            "{kind} should not read as a tool call"
-        );
-    }
+    let message = HarnessEvent {
+        kind: "agent_message".to_string(),
+        payload: json!({ "text": "done" }),
+        ..Default::default()
+    };
+    assert!(matches!(round_trip(&message), Progress::Status(_)));
+
+    let thinking = HarnessEvent {
+        kind: "agent_thinking".to_string(),
+        payload: json!({ "text": "hmm" }),
+        ..Default::default()
+    };
+    assert_eq!(round_trip(&thinking), Progress::Thinking("hmm".to_string()));
+}
+
+#[test]
+fn tool_settlement_is_promoted_so_the_call_can_update_in_place() {
+    let event = HarnessEvent {
+        kind: "tool_result".to_string(),
+        payload: json!({
+            "call_id": "c",
+            "ok": false,
+            "is_error": true,
+            "exit_code": 2,
+            "output": "",
+            "output_bytes": 0
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        round_trip(&event),
+        Progress::ToolResult {
+            failed: true,
+            detail: "exit 2".to_string(),
+            call_id: Some("c".to_string()),
+        }
+    );
 }
 
 #[test]

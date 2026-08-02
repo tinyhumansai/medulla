@@ -20,7 +20,7 @@ const DEFAULT_SCAN_LIMIT: usize = 60;
 /// The most recent agent sessions across both harnesses, ordered
 /// **current-folder-first, then most-recent**. Cost is bounded: only the newest
 /// `scan_limit` files are opened, and only their first
-/// [`HEAD_BYTES`](super::summary::HEAD_BYTES) parsed.
+/// `HEAD_BYTES` parsed.
 pub fn list_recent_sessions(
     env: &HashMap<String, String>,
     cwd: &str,

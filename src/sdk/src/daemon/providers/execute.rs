@@ -55,17 +55,25 @@ pub fn with_auth_hint(message: &str) -> String {
 
 /// Run one delegated task headlessly, retrying transient opencode SQLite-lock
 /// exits with jittered exponential backoff.
-pub async fn run_provider_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
+pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskResult, String> {
+    // Ahead of the ACP branch on purpose: both transports end up talking to the
+    // same endpoint with the same credential, so both must be routed through
+    // Medulla's loopback proxy for the attribution headers on the wire to be ours
+    // and for the child to never hold the real key. A no-op for every endpoint
+    // that is not OpenRouter.
+    crate::inference_proxy::route_spawn(options.provider, &mut options.router, &mut options.env)?;
     if super::acp::uses_acp(&options) {
         return super::acp::run_acp_task(options).await;
     }
     let mut on_event = options.on_event;
     let mut on_stdin = options.on_stdin;
+    let router = options.router;
+    let env = options.env;
     let spec = RunSpec {
         provider: options.provider,
         prompt: options.prompt,
         cwd: options.cwd,
-        env: options.env,
+        env,
         timeout_ms: options.timeout_ms,
         model: options.model,
         agent: options.agent,
@@ -73,7 +81,8 @@ pub async fn run_provider_task(options: RunTaskOptions) -> Result<RunTaskResult,
         skip_permissions: options.skip_permissions,
         resume_session_id: options.resume_session_id,
         abort: options.abort,
-        router: options.router,
+        router,
+        attribution: options.attribution,
     };
     let mut attempt: u32 = 1;
     loop {
@@ -129,17 +138,15 @@ async fn run_provider_attempt(
     // Medulla-launched harnesses attribute their commits to Medulla via a
     // `Co-authored-by` trailer. Nothing is persisted — the flags live only on
     // this child's argv. Empty for providers with no such knob.
-    extra_args.extend(crate::tinyplace::attribution::attribution_args(
+    extra_args.extend(crate::attribution::attribution_args(
         spec.provider,
-        &spec.env,
+        spec.attribution,
     ));
     // For providers that use the git-hook path (Codex, Opencode), merge the
     // prepare-commit-msg hook env vars into the child's environment.
     let mut merged_env = spec.env.clone();
-    merged_env.extend(crate::tinyplace::attribution::attribution_env(
-        spec.provider,
-        &merged_env,
-    ));
+    let attribution_env = crate::attribution::attribution_env(spec.attribution, &merged_env);
+    merged_env.extend(attribution_env);
     // Custom OpenAI-compatible router: layer the provider's endpoint env (and,
     // when configured, its API key) into the child at the spawn seam, so headless
     // daemon, operator-TUI daemon, and interactive wrappers all route identically.
@@ -342,8 +349,6 @@ async fn run_provider_attempt(
     // child the pipe may not be drained yet, and a lost stderr tail hides the
     // transient-lock marker the retry loop keys on.
     let _ = tokio::time::timeout(Duration::from_millis(500), stderr_task).await;
-    // Clean up any git hook temp directory created by attribution_env.
-    crate::tinyplace::attribution::cleanup_hook_tmpdir();
     if spec.abort.is_aborted() {
         return Err(format!("{} task aborted", provider_name(spec.provider)));
     }

@@ -7,9 +7,9 @@
 //! the final agent message. This is the headless complement to the interactive
 //! PTY wrapper (which lands separately).
 //!
-//! Split by responsibility: [`types`] holds the data model (callback aliases,
-//! the [`Abort`] handle, and the run input/output records), [`detect`] the
-//! provider discovery / binary resolution / argv building, and [`execute`] the
+//! Split by responsibility: `types` holds the data model (callback aliases,
+//! the [`Abort`] handle, and the run input/output records), `detect` the
+//! provider discovery / binary resolution / argv building, and `execute` the
 //! spawn-and-stream run loop with its transient-lock retry. All public items are
 //! re-exported here so callers use `medulla::daemon::providers::*`.
 

@@ -49,6 +49,10 @@ impl Bridge for TinyplaceBridge {
         self.transport.wait_for_inbox(poll).await
     }
 
+    async fn presence(&self, addresses: &[String]) -> std::collections::HashMap<String, bool> {
+        self.transport.presence(addresses).await
+    }
+
     async fn request_contact(&self, peer: &str) -> Result<(), String> {
         self.transport.request_contact(peer).await
     }

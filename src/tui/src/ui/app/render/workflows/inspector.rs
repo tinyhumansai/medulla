@@ -1,10 +1,8 @@
 //! The node inspector: what the graph cursor is on, in full.
 //!
-//! A view of its own rather than a strip under the canvas. It holds a node's
-//! whole declaration plus, when a run is overlaid, how that run left it — the
-//! duration and the diagnostics, which are the reason anyone opens a finished
-//! run. That is a screenful, and it used to be shown three rows at a time under
-//! a graph it was competing with.
+//! A view of its own for the whole raw declaration and learned context. The
+//! graph also keeps a purpose-built preview beneath it; this screen is the
+//! exhaustive fallback for fields the richer presentation does not prioritize.
 //!
 //! `i` opens and closes it; the graph is what it closes back to.
 
@@ -14,7 +12,7 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use medulla::ui::workflows::{find_node_in, node_detail, RunOverlay};
+use medulla::ui::workflows::{find_node_in, node_detail, note_rows, proposal_detail, RunOverlay};
 
 use crate::ui::util::clip;
 
@@ -109,11 +107,58 @@ impl App {
                 dim,
             ))),
         }
+        self.push_learned(&mut lines, width, dim);
         // Scrolled from the top: a long config is read downward, and the
         // interesting fields (id, kind, name) are at the top of it.
         f.render_widget(
             Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
             inner,
         );
+    }
+}
+
+impl App {
+    /// Append what this workflow has learned, below the node's declaration.
+    ///
+    /// Below rather than above: the node under the cursor is what the operator
+    /// is looking at, and the journal is context for it. A pending proposal
+    /// comes first within the section, because it is the only part waiting on
+    /// them.
+    fn push_learned(&self, lines: &mut Vec<TLine<'static>>, width: usize, dim: Style) {
+        let notes = self.workflow_notes();
+        let proposal = self.visible_proposal();
+        if notes.is_empty() && proposal.is_none() {
+            return;
+        }
+        let value_width = width.saturating_sub(18);
+
+        if let Some(proposal) = proposal {
+            lines.push(TLine::from(""));
+            lines.push(TLine::from(Span::styled("  Proposed change", dim)));
+            for row in proposal_detail(proposal) {
+                lines.push(TLine::from(vec![
+                    Span::styled(format!("{:>16}  ", row.label), dim),
+                    Span::raw(clip(&row.value, value_width)),
+                ]));
+            }
+            let hint = if proposal.is_applicable() {
+                "                  a to apply · n to decline"
+            } else {
+                "                  checks failed · review diagnostics above"
+            };
+            lines.push(TLine::from(Span::styled(hint, dim)));
+        }
+
+        if notes.is_empty() {
+            return;
+        }
+        lines.push(TLine::from(""));
+        lines.push(TLine::from(Span::styled("  Learned", dim)));
+        for row in note_rows(notes) {
+            lines.push(TLine::from(vec![
+                Span::styled(format!("{:>16}  ", row.detail), dim),
+                Span::raw(clip(&row.label, value_width)),
+            ]));
+        }
     }
 }

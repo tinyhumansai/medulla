@@ -17,7 +17,7 @@ use serde_json::json;
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackPage, FeedbackStatus, FeedbackType};
 use medulla::config::{LoadedConfig, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
-use medulla_tui::ui::app::{App, Cmd};
+use medulla_tui::ui::app::{App, Cmd, TABS};
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
@@ -82,13 +82,16 @@ fn comment(body: &str, who: Option<&str>) -> FeedbackComment {
 fn board() -> App {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
     focus_feedback(&mut app);
-    app.set_feedback_page(Some(FeedbackPage {
-        items: vec![
-            item("f1", "feature", "Dark mode", 0),
-            item("f2", "bug", "Crash on resume", 1),
-        ],
-        total: 2,
-    }));
+    app.set_feedback_page(
+        app.feedback_query(),
+        Some(FeedbackPage {
+            items: vec![
+                item("f1", "feature", "Dark mode", 0),
+                item("f2", "bug", "Crash on resume", 1),
+            ],
+            total: 2,
+        }),
+    );
     app
 }
 
@@ -119,6 +122,27 @@ fn selecting_a_row_requests_its_comments_once() {
         app.feedback_detail_cmd().is_none(),
         "comments already loaded for the selected row"
     );
+}
+
+#[test]
+fn a_late_detail_response_for_another_row_is_ignored() {
+    // Detail loads race: moving the selection while one is in flight must not
+    // let the old row's comments land on the new one. If they did, `detail_id`
+    // would name the wrong item and nothing would ever re-request the right
+    // ones — the pane would sit on another item's comments for good.
+    let mut app = board();
+    app.on_event(key(KeyCode::Char('j'))); // now on f2
+    app.set_feedback_comments("f1".into(), vec![comment("stale", Some("bob"))]);
+
+    let out = render(&mut app, 120, 32);
+    assert!(
+        !out.contains("stale"),
+        "the stale answer was dropped: {out}"
+    );
+    match app.feedback_detail_cmd() {
+        Some(Cmd::LoadFeedbackDetail(id)) => assert_eq!(id, "f2", "still awaiting the right row"),
+        other => panic!("expected f2's detail load, got {other:?}"),
+    }
 }
 
 #[test]
@@ -272,10 +296,13 @@ fn the_comment_pane_distinguishes_loading_empty_and_present() {
 fn an_empty_board_still_renders() {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
     focus_feedback(&mut app);
-    app.set_feedback_page(Some(FeedbackPage {
-        items: Vec::new(),
-        total: 0,
-    }));
+    app.set_feedback_page(
+        app.feedback_query(),
+        Some(FeedbackPage {
+            items: Vec::new(),
+            total: 0,
+        }),
+    );
 
     let out = render(&mut app, 120, 32);
     assert!(!out.trim().is_empty(), "the tab renders with no items");
@@ -286,10 +313,13 @@ fn an_empty_board_still_renders() {
 fn commenting_without_a_selection_explains_itself() {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
     focus_feedback(&mut app);
-    app.set_feedback_page(Some(FeedbackPage {
-        items: Vec::new(),
-        total: 0,
-    }));
+    app.set_feedback_page(
+        app.feedback_query(),
+        Some(FeedbackPage {
+            items: Vec::new(),
+            total: 0,
+        }),
+    );
 
     app.on_event(key(KeyCode::Char('c')));
 
@@ -308,11 +338,18 @@ fn type_and_status_labels_cover_every_variant() {
     assert_eq!(FeedbackType::Bug.label(), "bug");
     assert_eq!(FeedbackType::Other.label(), "misc");
 
-    // The wire value sent on submit; an unmodelled variant falls back to
-    // "feature" so a round-tripped item is still submittable.
-    assert_eq!(FeedbackType::Feature.as_str(), "feature");
-    assert_eq!(FeedbackType::Bug.as_str(), "bug");
-    assert_eq!(FeedbackType::Other.as_str(), "feature");
+    // The query value sent when filtering; an unmodelled variant filters by
+    // nothing rather than asking the backend for a type it cannot name.
+    assert_eq!(FeedbackType::Feature.wire(), Some("feature"));
+    assert_eq!(FeedbackType::Bug.wire(), Some("bug"));
+    assert_eq!(FeedbackType::Other.wire(), None);
+
+    // The status filter's wire value is the serialized enum, not the short
+    // display label: `completed` selects items the list renders as `done`.
+    assert_eq!(FeedbackStatus::Open.wire(), Some("open"));
+    assert_eq!(FeedbackStatus::Planned.wire(), Some("planned"));
+    assert_eq!(FeedbackStatus::Completed.wire(), Some("completed"));
+    assert_eq!(FeedbackStatus::Other.wire(), None);
 
     assert_eq!(FeedbackStatus::Open.label(), "open");
     assert_eq!(FeedbackStatus::Planned.label(), "planned");
@@ -338,18 +375,88 @@ fn the_header_names_the_active_filter_and_sort() {
     );
 
     // Filtering to bugs is reflected in the header.
-    app.set_feedback_page(Some(FeedbackPage {
-        items: vec![item("f2", "bug", "Crash on resume", 0)],
-        total: 1,
-    }));
+    app.set_feedback_page(
+        app.feedback_query(),
+        Some(FeedbackPage {
+            items: vec![item("f2", "bug", "Crash on resume", 0)],
+            total: 1,
+        }),
+    );
     app.on_event(key(KeyCode::Char('f'))); // features
     app.on_event(key(KeyCode::Char('f'))); // bugs
-    app.set_feedback_page(Some(FeedbackPage {
-        items: vec![item("f2", "bug", "Crash on resume", 0)],
-        total: 1,
-    }));
+    app.set_feedback_page(
+        app.feedback_query(),
+        Some(FeedbackPage {
+            items: vec![item("f2", "bug", "Crash on resume", 0)],
+            total: 1,
+        }),
+    );
     let out = render(&mut app, 120, 32);
     assert!(out.contains("bugs"), "the bug filter is named: {out}");
+}
+
+#[test]
+fn a_superseded_board_response_is_discarded() {
+    // Sort and filter changes each fire their own load. If the first one lands
+    // last, its rows would sit under a header describing the second — so a page
+    // is only applied while its query still matches what is on screen.
+    let mut app = board();
+    let stale = app.feedback_query();
+    app.on_event(key(KeyCode::Char('f'))); // now filtering to features
+
+    let applied = app.set_feedback_page(
+        stale,
+        Some(FeedbackPage {
+            items: vec![item("f9", "bug", "From the old query", 0)],
+            total: 1,
+        }),
+    );
+    assert!(!applied, "the superseded answer is refused");
+    assert!(
+        !app.feedback_items().iter().any(|i| i.id == "f9"),
+        "and never reaches the board"
+    );
+}
+
+#[test]
+fn arrows_move_the_selection_on_the_top_level_tab() {
+    // The board header advertises `↑/↓`, and the tab has no Settings nav
+    // wrapper to translate them, so the page binds them itself.
+    let mut app = board();
+    app.tab_index = TABS.iter().position(|t| *t == "Feedback").expect("the tab");
+    assert_eq!(app.feedback_index(), 0);
+
+    app.on_event(key(KeyCode::Down));
+    assert_eq!(app.feedback_index(), 1, "Down walks the board");
+    app.on_event(key(KeyCode::Up));
+    assert_eq!(app.feedback_index(), 0, "Up walks back");
+}
+
+#[test]
+fn a_posted_comment_forces_the_detail_to_be_re_fetched() {
+    // The commented item is still on the reloaded page, so without explicitly
+    // forgetting the loaded detail the app would decide the comments were
+    // current and the operator's own comment would never appear.
+    let mut app = board();
+    app.set_feedback_comments("f1".into(), vec![comment("before", Some("bob"))]);
+    assert!(app.feedback_detail_cmd().is_none(), "comments are current");
+
+    app.invalidate_feedback_detail();
+    app.set_feedback_page(
+        app.feedback_query(),
+        Some(FeedbackPage {
+            items: vec![
+                item("f1", "feature", "Dark mode", 0),
+                item("f2", "bug", "Crash on resume", 1),
+            ],
+            total: 2,
+        }),
+    );
+
+    match app.feedback_detail_cmd() {
+        Some(Cmd::LoadFeedbackDetail(id)) => assert_eq!(id, "f1", "re-fetches the same row"),
+        other => panic!("expected a detail reload, got {other:?}"),
+    }
 }
 
 #[test]
@@ -373,10 +480,13 @@ fn an_empty_board_mid_load_says_it_is_loading() {
 fn a_settled_empty_board_invites_the_first_submission() {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
     focus_feedback(&mut app);
-    app.set_feedback_page(Some(FeedbackPage {
-        items: Vec::new(),
-        total: 0,
-    }));
+    app.set_feedback_page(
+        app.feedback_query(),
+        Some(FeedbackPage {
+            items: Vec::new(),
+            total: 0,
+        }),
+    );
 
     let out = render(&mut app, 120, 32);
     assert!(out.contains("Nothing here yet"), "empty prompt: {out}");

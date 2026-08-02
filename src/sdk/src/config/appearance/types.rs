@@ -17,14 +17,37 @@ pub enum ResourceDisplay {
     Bar,
 }
 
-/// Optional local-process resource indicators shown in the TUI status line.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+/// TUI display preferences retained under the `[appearance]` section.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppearanceConfig {
+    /// Whether an operator-started harness row shows its Git branch.
+    pub show_harness_branch: bool,
+    /// Whether an operator-started harness row shows its shortened working path.
+    pub show_harness_path: bool,
     /// How to show this process's CPU utilization.
     pub cpu: ResourceDisplay,
     /// How to show this process's resident memory.
     pub ram: ResourceDisplay,
     /// How to show this process's read/write throughput.
     pub disk_io: ResourceDisplay,
+}
+
+impl AppearanceConfig {
+    /// Defaults used when the section is absent, including legacy harness fields.
+    pub const fn with_defaults() -> Self {
+        Self {
+            show_harness_branch: true,
+            show_harness_path: true,
+            cpu: ResourceDisplay::Off,
+            ram: ResourceDisplay::Off,
+            disk_io: ResourceDisplay::Off,
+        }
+    }
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        Self::with_defaults()
+    }
 }

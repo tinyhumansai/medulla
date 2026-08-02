@@ -244,8 +244,7 @@ resumable session in its original working directory.
 Sessions are not fire-and-forget. While a fleet is running you can correct the
 plan, answer an agent's question by selecting its lane and typing (or `Alt`+`A`
 for the prompt), or cancel a task with `Alt`+`X`, and the operation absorbs the
-change rather than restarting. This is what the multi-turn steering benchmarks in
-[Benchmarks](../benchmarks.md) measure.
+change rather than restarting.
 
 Work runs detached: a delegation returns immediately and the operation continues
 while you keep going, rather than blocking until the fan-out drains. This is not
@@ -253,14 +252,16 @@ a mode — it is how delegation works.
 
 ## What you see
 
-The terminal app organizes this into six tabs: Overview, Agents, Tasks, Routing,
-Memory, and Settings — the last of which holds Usage, Appearance, Config,
-Feedback, Trace, Context, Account, and Help, grouped under General, Debug, and
-About headings. Overview is the at-a-glance panel: runtime identity and health,
-the active cycle, recent events, the last cycle's results, the task ledger, and
-any pending decision. The Tasks tab is the planning surface, covered in
-[Tasks and Sources](tasks-and-sources.md); Routing holds the fleet's management
-pages described above.
+The terminal app organizes this into Overview, Agents, Workflows,
+TokenMaxxxing, Routing, Memory, and Settings — the last of which holds Usage,
+Appearance, Status line, Config, Trace, Context, Account, and Help, grouped under General,
+Debug, and About headings. Overview is the at-a-glance panel: runtime identity
+and health, the active cycle, recent events, the last cycle's results, the task
+ledger, any pending decision, and a **This device** panel for what this machine
+is hosting. [Workflows](workflows.md) is the authored planning and execution
+surface; Routing holds the fleet's management pages described above. Memory is a
+placeholder — the persona-memory layer is out of this build, and the tab says so
+rather than disappearing.
 
 The Agents tab is where an operation becomes legible, and where you drive it:
 this is the conversation surface too. There is one lane for the orchestrator and
@@ -269,8 +270,11 @@ shows where it runs — host, harness, workspace path, and the template it was
 provisioned from — above compact meters for the machine's load and memory and for
 the lane's own context window, split into prompt, output, and the cache share
 when the provider reports one. Every reading is omitted rather than zeroed when
-it was not reported: a bar at 0% would claim a measurement nobody took. Under the lanes is the declared fleet; under the transcript
-is the composer.
+it was not reported: a bar at 0% would claim a measurement nobody took. The rail
+shows what is *running* and nothing else — the declared fleet used to hang
+underneath it, which was a third rendering of rows that already had two homes, so
+the hosts and harnesses now live only on Routing. Under the transcript is the
+composer.
 
 Selecting the orchestrator and typing is the conversation. Selecting an agent
 shows that agent's own turns, and if it has raised a question, Enter answers it

@@ -1,4 +1,4 @@
-//! Rendering a [`WorkSnapshot`](crate::harness_work::WorkSnapshot) as display
+//! Rendering a [`WorkSnapshot`] as display
 //! rows: the goal, the todo list, the sub-agents, the files touched, and how the
 //! run ended.
 //!

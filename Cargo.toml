@@ -6,15 +6,30 @@ members = ["src/sdk", "src/tui"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.5.7"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/medulla"
 
 [workspace.dependencies]
 medulla = { path = "src/sdk", default-features = false }
-tinyplace = { path = "vendor/tinyplace/sdk/rust" }
-tinycortex = { path = "vendor/tinycortex", features = ["persona", "providers-http"] }
+# The embedded OpenHuman core. A path dependency, never patched — it has no
+# registry coordinate. The package is `openhuman`; the library is `openhuman_core`.
+# Default features are heavy (whisper-rs, cpal, axum, socketioxide, sentry, and
+# its own ratatui 0.30 / crossterm 0.29 TUI), so consumers must opt in
+# explicitly — see docs/vendoring.md.
+openhuman = { path = "vendor/openhuman", default-features = false }
+# Redirected to vendor/openhuman/vendor/* by [patch.crates-io] below. Declared
+# as registry coordinates rather than path deps so each crate has exactly ONE
+# declaration style: mixing the two yields two PackageIds for one crate and an
+# E0308 where the types look identical.
+tinyplace = "2.0"
+# The shared TinyHumans backend client. A path dependency into OpenHuman's own
+# vendored copy — NOT a second checkout — so this host and the embedded core
+# link one `tinyhumans-sdk` and agree on the backend contract by construction.
+# It has no registry coordinate, so unlike the tiny* crates below it is not
+# declared-then-patched.
+tinyhumans-sdk = { path = "vendor/openhuman/vendor/tinyhumans-sdk" }
 # The workflow engine. Declared as a registry dependency and redirected to the
 # vendored submodule by `[patch.crates-io]` below, matching how the sibling
 # openhuman host consumes it — one shared pin, one shared upgrade cadence.
@@ -28,7 +43,22 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "process", "fs", "signal", "net"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
-ratatui = "0.29"
+# The server half of the loopback inference proxy. reqwest 0.12 already resolves
+# hyper 1.x, http 1.x and bytes, so these pin the same versions rather than
+# introducing a second HTTP stack. `hyper-util` supplies only the tokio IO
+# adapter (`TokioIo`) — no connection pool, no service router.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+# Depended on only to pick a TLS backend explicitly. rustls 0.23 refuses to
+# guess when more than one provider is compiled in, and this workspace has two:
+# `ring` arrives with reqwest's `rustls-tls`, `aws-lc-rs` with the vendored
+# OpenHuman core. Neither wins by default, so every TLS handshake panicked on
+# whichever tokio worker reached it first.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 portable-pty = "0.9"
 # Terminal emulator: parses a PTY's VT/ANSI stream into a screen grid so a live
@@ -51,10 +81,37 @@ fs2 = "0.4"
 regex = "1"
 sha2 = "0.10"
 tempfile = "3"
+# Terminal-cell width for wide characters (CJK, emoji), matching how ratatui's
+# own `Line::width()` measures — a char-count wrap would clip or over-wrap a
+# row containing wide glyphs.
+unicode-width = "0.2"
 
-# `tinyflows` is not published at the version we track (crates.io lags the
-# branch we pin), so the registry coordinate above is redirected to the vendored
-# submodule. Vendored code stays out of `members` via `exclude`, so it keeps its
-# own lints and tests instead of joining this workspace's CI gates.
+# `[patch.crates-io]` applies ONLY from the workspace root. Once OpenHuman is a
+# path dependency its own patch table is ignored, as is
+# vendor/openhuman/vendor/tinycortex/.cargo/config.toml (CWD-scoped). This table
+# therefore reproduces OpenHuman's, rebased onto vendor/openhuman/vendor/*, and
+# it is load-bearing: drop an entry and Cargo silently resolves the published
+# crate instead of the vendored tree rather than failing.
+#
+# Keep this list in lockstep with scripts/init-submodules.sh.
+#
+# Vendored code stays out of `members` via `exclude`, so it keeps its own lints
+# and tests instead of joining this workspace's CI gates.
 [patch.crates-io]
-tinyflows = { path = "vendor/tinyflows" }
+tinyagents = { path = "vendor/openhuman/vendor/tinyagents" }
+tinychannels = { path = "vendor/openhuman/vendor/tinychannels" }
+tinycortex = { path = "vendor/openhuman/vendor/tinycortex" }
+tinyflows = { path = "vendor/openhuman/vendor/tinyflows" }
+tinyjuice = { path = "vendor/openhuman/vendor/tinyjuice" }
+tinyplace = { path = "vendor/openhuman/vendor/tinyplace/sdk/rust" }
+# NOT copied from OpenHuman: its whisper-rs-sys git patch. Cargo fetches a git
+# patch source during resolution even when the patched crate is absent from the
+# graph, which would put a network fetch in the critical path of every
+# --offline build and of the --network none e2e image. medulla never enables
+# OpenHuman's `inference` feature, so whisper-rs is not in the graph.
+
+# Copied from vendor/openhuman/Cargo.toml, where profiles are ignored because
+# they only apply from a workspace root. The graph is now ~500 packages, so
+# dependency DWARF dominates target/ size and link time.
+[profile.dev.package."*"]
+debug = false

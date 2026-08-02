@@ -16,7 +16,7 @@ architecture detail:
 
 ```sh
 make init                       # submodules, rustfmt/clippy, locked deps, pre-push hook
-cargo run                       # debug build, starts the TUI (mock runtime)
+cargo run                       # debug build, starts the TUI (login screen if signed out)
 cargo test                      # unit + feature + e2e suites (all mocked, no network)
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check

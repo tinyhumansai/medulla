@@ -11,7 +11,7 @@
 //! survives an edge that spans several layers, because the painter tunnels
 //! behind any box in the way rather than writing over it.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Color;
 use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
@@ -41,12 +41,35 @@ const ATTACH_ROW: usize = 2;
 impl App {
     /// Draw the graph of the selected workflow.
     pub(super) fn draw_workflow_canvas(&mut self, f: &mut Frame, area: Rect) {
+        let panes = if area.height >= 16 && self.selected_graph_node().is_some() {
+            let graph_height = (self.workflow_layout().lanes as u16 * LANE_STRIDE as u16 + 2)
+                .max(8)
+                .min(area.height / 2);
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(graph_height), Constraint::Min(8)])
+                .split(area)
+        } else {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(0)])
+                .split(area)
+        };
+        self.draw_workflow_graph(f, panes[0]);
+        if panes[1].height > 0 {
+            self.draw_workflow_node_preview(f, panes[1]);
+        }
+    }
+
+    /// Draw only the graph panel, leaving pane allocation to the canvas view.
+    fn draw_workflow_graph(&mut self, f: &mut Frame, area: Rect) {
         let focused = matches!(
             self.wf.focus,
             super::super::super::types::WorkflowFocus::Canvas
         );
         let block = crate::ui::widgets::panel(&self.theme, self.canvas_title(), focused);
         let inner = block.inner(area);
+        self.wf.graph_rows = inner.height as usize;
         f.render_widget(block, area);
         if inner.width == 0 || inner.height == 0 {
             return;
@@ -97,9 +120,9 @@ impl App {
             vec![
                 "No workflows installed.",
                 "",
-                "Write one to .medulla/workflows/<id>.json. The copilot beside",
-                "this pane can then edit it — but it acts on a selected",
-                "workflow, so there must be one on disk first.",
+                "Create one with medulla workflow create. It will be saved under",
+                "your Medulla home; the copilot beside this pane can then edit",
+                "it, but it needs a selected workflow on disk first.",
                 "",
                 "r re-reads the store.",
             ]

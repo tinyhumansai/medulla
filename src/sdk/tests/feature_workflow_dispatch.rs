@@ -72,6 +72,9 @@ fn recording_executor(seen: Arc<Mutex<Vec<String>>>) -> RunTaskFn {
 /// The trigger fans out to two agent nodes, so a single dispatched frame has to
 /// produce two harness runs for the test to pass.
 fn install_workflow(home: &std::path::Path, id: &str) {
+    // `MEDULLA_HOME` names the root that holds accounts; the worker resolves its
+    // store from the account directory inside it, and nobody signs in here.
+    let home = home.join("local");
     let store = FileWorkflowStore::new(
         vec![home.join("workflows")],
         home.join("state").join("workflows").join("runs"),
@@ -129,8 +132,11 @@ fn frame(task_id: &str, text: &str, workflow: Option<&str>) -> String {
         correlation_id: Some(format!("corr-{task_id}")),
         harness: None,
         provider: None,
+        custom_harness: None,
         model: None,
+        tool_mode: None,
         workflow: workflow.map(str::to_string),
+        conversation: None,
     })
 }
 
@@ -255,8 +261,11 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
             correlation_id: Some("corr-probe".to_string()),
             harness: None,
             provider: None,
+            custom_harness: None,
             model: None,
+            tool_mode: None,
             workflow: None,
+            conversation: None,
         }),
     )
     .await

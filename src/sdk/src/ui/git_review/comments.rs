@@ -145,7 +145,7 @@ impl ReviewComments {
                         && (item.anchor_context.is_empty()
                             || patch_lines
                                 .get(hunks[index].header)
-                                .map_or(false, |line| line == &item.anchor_context));
+                                .is_some_and(|line| line == &item.anchor_context));
                     if !is_valid {
                         item.outdated = true;
                     }

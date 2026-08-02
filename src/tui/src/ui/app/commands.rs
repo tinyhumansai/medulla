@@ -124,6 +124,13 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
+            PromptKind::ChangesComment { path } => {
+                if !text.is_empty() {
+                    self.changes.comments.entry(path).or_default().push(text);
+                    self.set_status("Comment added for this session");
+                }
+                None
+            }
             PromptKind::HostAdd => match WorkerOp::parse_add(&text) {
                 Some(op) => {
                     // Land on the list the add is about. Staying on Add Host

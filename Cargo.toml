@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src/sdk", "src/tui"]
+members = ["src/link", "src/sdk", "src/tui"]
 # Vendored path deps must not become workspace members: they carry their own
 # lints/tests and would otherwise fall under the CI clippy/test gates.
 exclude = ["vendor"]
@@ -13,6 +13,9 @@ repository = "https://github.com/tinyhumansai/medulla"
 
 [workspace.dependencies]
 medulla = { path = "src/sdk", default-features = false }
+# The host-link transport (docs/host-link-protocol.md). A plain path dep: it is
+# ours, has no registry coordinate, and is not vendored.
+medulla-link = { path = "src/link" }
 # The embedded OpenHuman core. A path dependency, never patched — it has no
 # registry coordinate. The package is `openhuman`; the library is `openhuman_core`.
 # Default features are heavy (whisper-rs, cpal, axum, socketioxide, sentry, and

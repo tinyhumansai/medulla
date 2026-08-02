@@ -20,6 +20,7 @@ use crate::worker::pty::ATTENTION_GLYPH;
 use super::types::{App, TABS};
 
 mod agents;
+mod changes;
 mod decisions;
 mod feedback;
 mod harness_modals;
@@ -518,7 +519,17 @@ impl App {
         } else {
             ""
         };
+        let compact = TABS
+            .iter()
+            .zip(&badges)
+            .map(|(tab, badge)| tab.chars().count() + badge.chars().count() + 1)
+            .sum::<usize>()
+            > area.width as usize;
         for (i, name) in TABS.iter().enumerate() {
+            // Every compact spelling is an actual destination and stays
+            // recognizable beside its page title, keeping the whole ring and
+            // its mouse hit boxes inside narrow terminals.
+            let name = compact_tab_label(name, compact);
             let badge = &badges[i];
             let label = if gap.is_empty() {
                 format!("{name}{badge} ")
@@ -580,6 +591,8 @@ impl App {
             "Tab views · ↑↓ pages · ⏎ open · Esc menu · 1-3 jump"
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
+        } else if self.tab() == "Changes" {
+            "Tab views · ↑↓ files · PageUp/PageDown diff · c comment · r refresh"
         } else {
             "Tab views · Esc/↑↓ rail · ⏎/^] harness · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
         };
@@ -603,6 +616,7 @@ impl App {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
             "Agents" => self.draw_agents(f, area),
+            "Changes" => self.draw_changes(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),
@@ -631,6 +645,22 @@ impl App {
             clip(&describe_event(&env.event), width.saturating_sub(11))
         );
         TLine::from(Span::styled(text, style))
+    }
+}
+
+/// Shorten current tab names when their one-space labels cannot all fit.
+fn compact_tab_label(name: &str, compact: bool) -> &str {
+    if !compact {
+        return name;
+    }
+    match name {
+        "Overview" => "Over",
+        "Agents" => "Agts",
+        "Workflows" => "Flows",
+        "Changes" => "Diff",
+        "Feedback" => "Feed",
+        "Settings" => "Set",
+        _ => name,
     }
 }
 

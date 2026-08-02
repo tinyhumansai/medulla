@@ -269,6 +269,9 @@ pub struct HarnessSessionInfo {
     /// The working directory the harness is rooted at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// The Git branch checked out in [`Self::cwd`], when the harness moved work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     /// The harness's own session id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
@@ -291,6 +294,7 @@ impl HarnessSessionInfo {
     pub fn is_empty(&self) -> bool {
         self.model.is_none()
             && self.cwd.is_none()
+            && self.branch.is_none()
             && self.session_id.is_none()
             && self.permission_mode.is_none()
             && self.tools.is_empty()

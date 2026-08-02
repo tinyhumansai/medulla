@@ -63,14 +63,14 @@ fn has_worktree_signature(value: &Value) -> bool {
 
 /// Read the default stable `[PASS] WORKTREE_READY` report.
 fn text_report(output: &str) -> Option<(String, String)> {
-    if !output
+    let report = output
         .lines()
-        .any(|line| line.trim() == "[PASS] WORKTREE_READY")
-    {
-        return None;
-    }
+        .skip_while(|line| line.trim() != "[PASS] WORKTREE_READY")
+        .skip(1)
+        .take_while(|line| line.starts_with("  "))
+        .collect::<Vec<_>>();
     let field = |name: &str| {
-        output.lines().find_map(|line| {
+        report.iter().find_map(|line| {
             line.trim()
                 .strip_prefix(name)
                 .map(str::trim)

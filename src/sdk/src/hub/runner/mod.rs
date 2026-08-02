@@ -284,7 +284,7 @@ impl TaskRunner {
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<TaskOutcome, RunError> {
-        self.run_inner(req, status, false, None).await
+        self.run_inner(req, status, false, None, None).await
     }
 
     /// Run a dispatch with the screen-control support negotiated specifically
@@ -295,8 +295,10 @@ impl TaskRunner {
         status: Option<mpsc::UnboundedSender<String>>,
         screen_kill: bool,
         abort: Option<Arc<Notify>>,
+        visible_task_id: Option<String>,
     ) -> Result<TaskOutcome, RunError> {
-        self.run_inner(req, status, screen_kill, abort).await
+        self.run_inner(req, status, screen_kill, abort, visible_task_id)
+            .await
     }
 
     async fn run_inner(
@@ -305,6 +307,7 @@ impl TaskRunner {
         status: Option<mpsc::UnboundedSender<String>>,
         screen_kill: bool,
         prepared_abort: Option<Arc<Notify>>,
+        visible_task_id: Option<String>,
     ) -> Result<TaskOutcome, RunError> {
         // Register this dispatch's abort signal FIRST — before the contact wait —
         // so a `task_abort` that arrives during contact negotiation (up to
@@ -357,7 +360,9 @@ impl TaskRunner {
             self.waiters.lock().await.insert(
                 cid.clone(),
                 Waiter {
-                    task_id: req.task_id.clone(),
+                    task_id: visible_task_id
+                        .clone()
+                        .unwrap_or_else(|| req.task_id.clone()),
                     screen_kill,
                     from: req.worker_address.clone(),
                     reply: tx,

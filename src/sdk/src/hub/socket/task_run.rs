@@ -282,7 +282,7 @@ pub(super) async fn handle_task_run(
 
     let screen_kill = capabilities.is_some_and(|capabilities| capabilities.screen_kill);
     let outcome = runner
-        .run_negotiated(req, Some(tx), screen_kill, Some(abort))
+        .run_negotiated(req, Some(tx), screen_kill, Some(abort), None)
         .await;
     match &outcome {
         Ok(o) => log(&format!(

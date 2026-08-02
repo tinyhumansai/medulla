@@ -192,6 +192,14 @@ fn comment_line(anchor: &str, body: &str) -> Line<'static> {
 fn follow(heights: &[usize], row: usize, viewport: usize, current: usize) -> usize {
     let before: usize = heights.iter().take(row).sum();
     let span = heights.get(row).copied().unwrap_or(1);
+
+    // If the row is taller than the viewport, show the top of the row and keep
+    // it stable rather than oscillating between top and bottom on every redraw.
+    if span > viewport {
+        return before;
+    }
+
+    // For normal-sized rows, scroll to keep the whole row visible.
     if before < current {
         before
     } else if before + span > current + viewport {

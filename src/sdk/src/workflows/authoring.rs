@@ -29,19 +29,21 @@ pub fn apply_workflow_ops(
     id: &str,
     ops: &[GraphOp],
 ) -> Result<WorkflowRecord, WorkflowError> {
-    let mut record = require(store.as_ref(), id)?;
-    record.graph = apply_ops(&record.graph, ops).map_err(|err| {
-        // The engine's error names the op index and kind, which is what an
-        // author needs to know which of a batch of edits went wrong.
-        WorkflowError::Engine(format!("workflow '{id}': {err}"))
-    })?;
-    validate_graph(id, &record.graph)?;
-    // The engine's validation answers "would this compile". The gates answer
-    // "would this do anything" — a binding that resolves null at run time
-    // compiles fine and quietly does nothing.
-    crate::workflows::gates::check(id, &record.graph)?;
-    store.save(&record)?;
-    Ok(record)
+    // A copilot, CLI, and another MCP process may all edit the same file through
+    // independent store instances. Rebase the patch when another writer wins
+    // between read and save instead of reporting two successes while silently
+    // discarding the earlier edit.
+    const MAX_RETRIES: usize = 16;
+    for _ in 0..MAX_RETRIES {
+        let current = require(store.as_ref(), id)?;
+        let expected = crate::workflows::fingerprint(&current.graph);
+        if let Some(record) = apply_workflow_ops_if_unchanged(store, id, ops, &expected)? {
+            return Ok(record);
+        }
+    }
+    Err(WorkflowError::Engine(format!(
+        "workflow '{id}' kept changing while the edit was being saved; retry the edit"
+    )))
 }
 
 /// Apply `ops` only if the graph still matches `expected_fingerprint`.

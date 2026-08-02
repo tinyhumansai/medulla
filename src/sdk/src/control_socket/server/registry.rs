@@ -16,14 +16,15 @@
 //! unbounded map of finished tasks and their status transcripts is a slow leak.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{mpsc, watch};
 
-use crate::hub::{RunError, TaskOutcome, TaskRequest};
+use crate::hub::{RunError, TaskRequest};
 
 use super::super::types::FleetOps;
+use super::types::{SpawnError, TaskEntry, TaskRegistry, TaskState, Tracked};
 
 /// The most status lines kept per task.
 ///
@@ -36,40 +37,6 @@ const RESULT_TTL: Duration = Duration::from_secs(30 * 60);
 
 /// The most tasks tracked at once, across every grant.
 const MAX_ENTRIES: usize = 256;
-
-/// How a dispatched task ended, in terms a model can act on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TaskState {
-    /// Still running.
-    Running,
-    /// Settled with a reply.
-    Done(Box<TaskOutcome>),
-    /// Settled without one.
-    Failed {
-        /// The wire status: `failed`, `aborted`, `busy`, `held`, or `timeout`.
-        status: &'static str,
-        /// What went wrong, phrased for the model that has to decide what next.
-        message: String,
-        /// Whether the same dispatch a little later might succeed.
-        retryable: bool,
-    },
-}
-
-impl TaskState {
-    /// The wire status string for this state.
-    pub fn status(&self) -> &'static str {
-        match self {
-            TaskState::Running => "running",
-            TaskState::Done(_) => "done",
-            TaskState::Failed { status, .. } => status,
-        }
-    }
-
-    /// Whether the task has settled.
-    pub fn is_settled(&self) -> bool {
-        !matches!(self, TaskState::Running)
-    }
-}
 
 /// Translate a dispatch failure into a state a model can reason about.
 ///
@@ -113,60 +80,6 @@ fn state_from_error(error: RunError) -> TaskState {
         message,
         retryable,
     }
-}
-
-/// One dispatched task.
-#[derive(Debug, Clone)]
-pub struct TaskEntry {
-    /// The handle returned to the caller.
-    pub task_id: String,
-    /// The grant that dispatched it. Scopes reads, polls, and aborts.
-    pub token: String,
-    /// Where it was sent.
-    pub worker: String,
-    /// The first line of the instruction, for a listing.
-    pub instruction: String,
-    /// Epoch ms the dispatch was accepted.
-    pub started_at: i64,
-    /// Epoch ms it settled, when it has.
-    pub finished_at: Option<i64>,
-    /// Where it got to.
-    pub state: TaskState,
-    /// The tail of the worker's status lines.
-    pub status_tail: Vec<String>,
-}
-
-impl TaskEntry {
-    /// How long this task has been running, or ran for.
-    pub fn elapsed_ms(&self) -> i64 {
-        self.finished_at.unwrap_or_else(crate::clock::now_millis) - self.started_at
-    }
-}
-
-/// Internal bookkeeping for one task: the entry plus its completion signal.
-///
-/// A [`watch`] channel rather than a [`Notify`]: `notify_waiters` only wakes
-/// waiters already registered at the moment it fires, so a task settling between
-/// a poller's state check and its await would be a lost wakeup, parking that
-/// poll for its whole timeout. A watch retains the value, so a late subscriber
-/// sees the settle it missed.
-struct Tracked {
-    entry: TaskEntry,
-    settled: watch::Sender<bool>,
-}
-
-/// Why a task could not be recorded for dispatch.
-pub(super) enum SpawnError {
-    /// This grant already owns the reported number of running tasks.
-    AtCapacity(usize),
-    /// The shared task table is unavailable after an internal panic.
-    Unavailable,
-}
-
-/// Every task this control plane has dispatched.
-#[derive(Clone, Default)]
-pub struct TaskRegistry {
-    inner: Arc<Mutex<HashMap<String, Tracked>>>,
 }
 
 impl TaskRegistry {

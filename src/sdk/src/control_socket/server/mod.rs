@@ -16,8 +16,7 @@ mod types;
 
 pub use handle::{handle_control, MAX_WAIT};
 pub use hub_ops::{FleetDefaults, HubFleetOps, HubSlot};
-pub use registry::{TaskEntry, TaskRegistry, TaskState};
-pub use types::{ControlServer, SessionState};
+pub use types::{ControlServer, SessionState, TaskEntry, TaskRegistry, TaskState};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -49,7 +48,10 @@ impl ControlServer {
         grants: GrantRegistry,
         preserve_existing_parent: bool,
     ) -> Result<Self, ControlSocketError> {
-        prepare_bind(path, preserve_existing_parent).await?;
+        // Held through `bind`: check+unlink without this claim lets two
+        // starters both reclaim one stale inode and the second unlink the
+        // first starter's freshly bound socket.
+        let _bind_guard = prepare_bind(path, preserve_existing_parent).await?;
         let listener = tokio::net::UnixListener::bind(path)
             .map_err(|e| ControlSocketError::Io(e.to_string()))?;
         restrict_socket(path)?;

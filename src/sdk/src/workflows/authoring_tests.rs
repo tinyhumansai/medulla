@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use fs2::FileExt;
 use serde_json::json;
 use tinyflows::graph_ops::GraphOp;
 
@@ -35,6 +36,73 @@ fn store() -> (tempfile::TempDir, Arc<dyn WorkflowStore>) {
         root.path().join("runs"),
     ));
     (root, store)
+}
+
+#[test]
+fn concurrent_store_instances_rebase_graph_ops_instead_of_losing_one() {
+    let root = tempfile::tempdir().unwrap();
+    let definitions = root.path().join("workflows");
+    let runs = root.path().join("runs");
+    let first: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![definitions.clone()],
+        runs.clone(),
+    ));
+    let second: Arc<dyn WorkflowStore> =
+        Arc::new(FileWorkflowStore::new(vec![definitions.clone()], runs));
+    create_workflow(&first, &document("sweep"), "sweep").unwrap();
+
+    // Hold the production per-definition lock so both writers finish their
+    // initial read before either CAS can save. Without retry, the later stale
+    // save overwrites one of these independent changes.
+    let lock_path = definitions.join(".sweep.lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)
+        .unwrap();
+    lock.lock_exclusive().unwrap();
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+
+    let name_barrier = barrier.clone();
+    let name_edit = std::thread::spawn(move || {
+        name_barrier.wait();
+        apply_workflow_ops(
+            &first,
+            "sweep",
+            &[GraphOp::SetNodeName {
+                id: "work".into(),
+                name: "Renamed".into(),
+            }],
+        )
+    });
+    let config_barrier = barrier.clone();
+    let config_edit = std::thread::spawn(move || {
+        config_barrier.wait();
+        apply_workflow_ops(
+            &second,
+            "sweep",
+            &[GraphOp::UpdateNodeConfig {
+                id: "work".into(),
+                config: json!({ "prompt": "carefully" }),
+            }],
+        )
+    });
+    barrier.wait();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    FileExt::unlock(&lock).unwrap();
+
+    name_edit.join().unwrap().unwrap();
+    config_edit.join().unwrap().unwrap();
+    let check: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![definitions],
+        root.path().join("check-runs"),
+    ));
+    let record = check.get("sweep").unwrap().unwrap();
+    let node = record.graph.node("work").unwrap();
+    assert_eq!(node.name, "Renamed");
+    assert_eq!(node.config["prompt"], "carefully");
 }
 
 #[test]

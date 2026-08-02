@@ -18,8 +18,7 @@ use crate::tinyplace::HarnessProvider;
 
 use super::super::grants::{Grant, GrantRegistry};
 use super::super::types::{ControlFailure, ErrorKind, FleetOps, Hello, PROTOCOL_VERSION};
-use super::registry::{TaskEntry, TaskRegistry};
-use super::types::SessionState;
+use super::types::{SessionState, SpawnError, TaskEntry, TaskRegistry, TaskState};
 
 /// The longest a `task.get` may block before answering "still running".
 pub const MAX_WAIT: Duration = Duration::from_secs(120);
@@ -80,8 +79,8 @@ fn task_json(entry: &TaskEntry) -> Value {
         object.insert("finishedAt".into(), json!(finished));
     }
     match &entry.state {
-        super::registry::TaskState::Running => {}
-        super::registry::TaskState::Done(outcome) => {
+        TaskState::Running => {}
+        TaskState::Done(outcome) => {
             object.insert("reply".into(), json!(outcome.reply));
             object.insert(
                 "usage".into(),
@@ -94,7 +93,7 @@ fn task_json(entry: &TaskEntry) -> Value {
                 object.insert("harness".into(), json!(harness.as_str()));
             }
         }
-        super::registry::TaskState::Failed {
+        TaskState::Failed {
             message, retryable, ..
         } => {
             object.insert("error".into(), json!(message));
@@ -375,7 +374,7 @@ async fn task_dispatch(
         .await
     {
         Ok(task_id) => task_id,
-        Err(super::registry::SpawnError::AtCapacity(in_flight)) => {
+        Err(SpawnError::AtCapacity(in_flight)) => {
             return Err(ControlFailure::new(
                 ErrorKind::TooManyInFlight,
                 format!(
@@ -384,7 +383,7 @@ async fn task_dispatch(
                 ),
             ));
         }
-        Err(super::registry::SpawnError::Unavailable) => {
+        Err(SpawnError::Unavailable) => {
             return Err(ControlFailure::new(
                 ErrorKind::Internal,
                 "the task registry is unavailable",

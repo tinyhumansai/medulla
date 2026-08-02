@@ -207,6 +207,30 @@ mod bind {
     }
 
     #[tokio::test]
+    async fn bind_preparation_is_serialized_until_the_caller_binds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control.sock");
+        let first = prepare_bind(&path, false).await.unwrap();
+        let competing_path = path.clone();
+        let mut competing = tokio::spawn(async move { prepare_bind(&competing_path, false).await });
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut competing)
+                .await
+                .is_err(),
+            "a second starter must wait while reclamation can still race bind"
+        );
+        drop(first);
+
+        let second = tokio::time::timeout(std::time::Duration::from_secs(1), competing)
+            .await
+            .expect("the lock should release with its guard")
+            .expect("the competing starter should not panic")
+            .expect("the free path remains bindable");
+        drop(second);
+    }
+
+    #[tokio::test]
     async fn a_live_socket_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("control.sock");
@@ -225,7 +249,7 @@ mod bind {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("control.sock");
 
-        prepare_bind(&path, false).await.unwrap();
+        drop(prepare_bind(&path, false).await.unwrap());
 
         let mode = std::fs::metadata(path.parent().unwrap())
             .unwrap()
@@ -244,7 +268,7 @@ mod bind {
         std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let path = shared.join("control.sock");
 
-        prepare_bind(&path, true).await.unwrap();
+        drop(prepare_bind(&path, true).await.unwrap());
 
         let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
         assert_eq!(mode & 0o1777, 0o1777, "shared parent must not be chmodded");

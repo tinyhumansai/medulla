@@ -8,8 +8,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::handle::handle_control;
-use super::registry::TaskRegistry;
-use super::types::SessionState;
+use super::types::{SessionState, TaskRegistry};
 use crate::control_socket::grants::GrantRegistry;
 use crate::control_socket::types::FleetOps;
 

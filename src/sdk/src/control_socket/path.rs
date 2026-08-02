@@ -20,6 +20,23 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+/// Exclusive claim spanning stale-socket inspection, reclamation, and bind.
+///
+/// Dropping releases the advisory filesystem lock. The lock file remains as a
+/// harmless private sibling so every future starter contends on the same inode.
+#[cfg(unix)]
+#[must_use = "hold this guard until the socket has been bound"]
+pub struct BindGuard {
+    file: std::fs::File,
+}
+
+#[cfg(unix)]
+impl Drop for BindGuard {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(&self.file);
+    }
+}
+
 /// The most bytes a socket path may occupy.
 ///
 /// The smaller of the two platform limits (macOS's 104) less one for the NUL
@@ -315,22 +332,25 @@ fn socket_identity(meta: &std::fs::Metadata) -> (u64, u64) {
 /// [`ControlSocketError::NotASocket`] when something else occupies it, and
 /// [`ControlSocketError::InsecureParent`] when another user could replace an
 /// entry in the parent directory. Explicit paths preserve existing directory
-/// modes, but do not bypass this validation.
+/// modes, but do not bypass this validation. The returned [`BindGuard`] must be
+/// held until `UnixListener::bind` completes so another starter cannot reclaim
+/// the same stale path between this function and bind.
 #[cfg(unix)]
 pub async fn prepare_bind(
     path: &Path,
     preserve_existing_parent: bool,
-) -> Result<(), ControlSocketError> {
+) -> Result<BindGuard, ControlSocketError> {
     use std::os::unix::fs::FileTypeExt;
 
     ensure_private_parent(path, preserve_existing_parent)?;
     if let Some(ancestor) = insecure_ancestor(path)? {
         return Err(ControlSocketError::InsecureParent(ancestor));
     }
+    let bind_guard = acquire_bind_guard(path).await?;
 
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(bind_guard),
         Err(err) => return Err(ControlSocketError::Io(err.to_string())),
     };
     if !meta.file_type().is_socket() {
@@ -358,13 +378,17 @@ pub async fn prepare_bind(
             // actually probe.
             let current = match std::fs::symlink_metadata(path) {
                 Ok(current) => current,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(bind_guard)
+                }
                 Err(error) => return Err(ControlSocketError::Io(error.to_string())),
             };
             if !current.file_type().is_socket() || socket_identity(&current) != probed_identity {
                 return Err(ControlSocketError::AlreadyBound(path.to_path_buf()));
             }
-            std::fs::remove_file(path).map_err(|error| ControlSocketError::Io(error.to_string()))
+            std::fs::remove_file(path)
+                .map_err(|error| ControlSocketError::Io(error.to_string()))?;
+            Ok(bind_guard)
         }
         // Any other error, including a timeout, is ambiguous. Refusing to bind
         // is the safe half of that: the cost is no control plane this run, where
@@ -372,6 +396,54 @@ pub async fn prepare_bind(
         Ok(Err(err)) => Err(ControlSocketError::Io(err.to_string())),
         Err(_) => Err(ControlSocketError::AlreadyBound(path.to_path_buf())),
     }
+}
+
+/// Acquire the trusted sibling lock every starter uses for this socket path.
+#[cfg(unix)]
+async fn acquire_bind_guard(path: &Path) -> Result<BindGuard, ControlSocketError> {
+    use fs2::FileExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let Some(parent) = path.parent() else {
+        return Err(ControlSocketError::Io(
+            "control socket has no parent directory".to_string(),
+        ));
+    };
+    let mut lock_name = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("control.sock"))
+        .to_os_string();
+    lock_name.push(".bind.lock");
+    let lock_path = parent.join(lock_name);
+    let opened_path = lock_path.clone();
+    let file = tokio::task::spawn_blocking(move || {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&opened_path)
+            .map_err(|error| ControlSocketError::Io(error.to_string()))?;
+        if !file
+            .metadata()
+            .map_err(|error| ControlSocketError::Io(error.to_string()))?
+            .file_type()
+            .is_file()
+        {
+            return Err(ControlSocketError::Io(format!(
+                "{} is not a regular bind lock",
+                opened_path.display()
+            )));
+        }
+        file.lock_exclusive()
+            .map_err(|error| ControlSocketError::Io(error.to_string()))?;
+        Ok(file)
+    })
+    .await
+    .map_err(|error| ControlSocketError::Io(error.to_string()))??;
+    Ok(BindGuard { file })
 }
 
 /// Tighten a freshly bound socket to owner-only access.

@@ -141,9 +141,16 @@ of the more consequential decisions you make:
   cannot run shell at all.
 - **`tool_call` with the `medulla:shell` slug** — a script run *in the
   operator's project directory*. Use it for anything that touches the repo: run
-  the tests, build, read a file, invoke a CLI. `args.script` is the source,
-  `args.language` is `shell` (default), `javascript`, or `python`, `args.input`
-  is handed to it on stdin. It returns `{ output, stderr }`.
+  the tests, build, read a file, invoke a CLI. `args.script` is an inline
+  script, or `args.script_path` runs a file the repository already has (one or
+  the other, never both). `args.language` is `shell` (default), `javascript`, or
+  `python`, `args.input` is handed to it on stdin. `args.cwd` narrows the
+  directory it runs in and `args.env` adds environment variables as an object of
+  strings. It returns `{ output, stderr }`.
+  `script_path` and `cwd` are resolved inside the workspace and refused
+  anywhere else, so write them relative and without `..`. Prefer `script_path`
+  when the repository already maintains the script — a copy pasted into the
+  graph drifts from the one people actually update.
 - **`agent` node** — a whole coding-harness session. Minutes of wall clock, and a
   model deciding what to do.
 

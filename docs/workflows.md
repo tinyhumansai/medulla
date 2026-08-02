@@ -57,6 +57,36 @@ Exactly one node must be a `trigger`. `medulla workflow catalog` prints the
 contract for all twelve node kinds, with this host's notes layered on — read it
 before writing a graph rather than guessing at field names.
 
+Things worth knowing about script steps here — a `tool_call` with the
+`medulla:shell` slug, which runs in the operator's project directory:
+
+- `args.script` is an inline script; `args.script_path` runs a file the
+  repository already has. Exactly one of the two, never both. Prefer
+  `script_path` when the repository maintains the script, so the graph does not
+  carry a copy that drifts from it.
+- `args.language` is `shell` (the default, run with bash), `javascript`, or
+  `python`. `args.cwd` narrows the directory (the workspace root by default) and
+  `args.env` adds environment variables as an object of strings.
+- `args.input` is handed to the script on stdin as JSON, and written to a file
+  at `argv[1]` and `$MEDULLA_INPUT`.
+- A non-zero exit **fails the step**, with the script's own stderr in the run
+  record. A step that succeeds returns `{ output, stderr }`, where `output` is
+  stdout parsed as JSON when it is JSON and a string otherwise.
+
+```json
+{
+  "id": "build", "kind": "tool_call", "name": "Build",
+  "config": {
+    "slug": "medulla:shell",
+    "args": {
+      "script_path": "scripts/build.sh",
+      "cwd": "crates/engine",
+      "env": { "PROFILE": "release" }
+    }
+  }
+}
+```
+
 Things worth knowing about `agent` nodes here:
 
 - `config.prompt` is the instruction (`instruction` is accepted as an alias).
@@ -308,6 +338,13 @@ Two guards are not configurable:
 - **`code` nodes have no sandbox** on this host, so the default grants a
   workflow author the daemon's own privileges. Set `allowCode = false` before
   loading untrusted workflows; the refusal message says as much.
+- **A script step's paths stay in the workspace.** `medulla:shell`'s
+  `args.script_path` and `args.cwd` are resolved inside the configured workspace
+  and refused anywhere else: relative only, no `..`, and re-checked after
+  symlinks are followed, so a link inside the workspace cannot point out of it.
+  A host with no workspace configured refuses both, leaving `args.script`. This
+  bounds *which file runs and where* — it is not a sandbox, and nothing bounds
+  what a script does once it has started.
 
 Workflow ids and run ids both become filenames and are validated as single path
 components before use: a document's `id` overrides the caller's, and a run id can

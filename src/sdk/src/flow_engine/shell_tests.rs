@@ -172,3 +172,174 @@ async fn a_failing_shell_step_fails_the_node_with_the_scripts_own_error() {
 
     assert!(err.to_string().contains("no such target"), "{err}");
 }
+
+// Unix-only: `medulla:shell` defaults to `ScriptLanguage::Shell`, which
+// `run_script` refuses on Windows rather than emulating a POSIX shell
+// there (see the `#[cfg(windows)]` guard in `flow_engine::caps::script`).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_step_can_run_a_script_file_the_repository_already_has() {
+    // The point of `script_path`: a project's own `scripts/release.sh` becomes
+    // a workflow step without being pasted into the graph, where it would drift
+    // from the copy the repository actually maintains.
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("scripts")).unwrap();
+    std::fs::write(
+        root.path().join("scripts/release.sh"),
+        "echo shipped $(basename \"$PWD\" > /dev/null; echo v1)\n",
+    )
+    .unwrap();
+
+    let result = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script_path": "scripts/release.sh" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(result["output"], json!("shipped v1"));
+}
+
+// Unix-only: `medulla:shell` defaults to `ScriptLanguage::Shell`, which
+// `run_script` refuses on Windows rather than emulating a POSIX shell
+// there (see the `#[cfg(windows)]` guard in `flow_engine::caps::script`).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_step_can_narrow_the_directory_it_runs_in() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("crate-a")).unwrap();
+    std::fs::write(root.path().join("crate-a/VERSION"), "2.0.0").unwrap();
+    // The same name at the workspace root, so a step that ignored `cwd` would
+    // read the wrong file and still look like it worked.
+    std::fs::write(root.path().join("VERSION"), "0.0.0").unwrap();
+
+    let result = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "cat VERSION", "cwd": "crate-a" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(result["output"], json!("2.0.0"));
+}
+
+// Unix-only: `medulla:shell` defaults to `ScriptLanguage::Shell`, which
+// `run_script` refuses on Windows rather than emulating a POSIX shell
+// there (see the `#[cfg(windows)]` guard in `flow_engine::caps::script`).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_step_can_declare_the_environment_its_script_reads() {
+    let root = tempfile::tempdir().unwrap();
+
+    let result = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({
+                "script": "printf '%s/%s' \"$PROFILE\" \"$TARGET\"",
+                "env": { "PROFILE": "release", "TARGET": "wasm" },
+            }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(result["output"], json!("release/wasm"));
+}
+
+// Unix-only: `medulla:shell` defaults to `ScriptLanguage::Shell`, which
+// `run_script` refuses on Windows rather than emulating a POSIX shell
+// there (see the `#[cfg(windows)]` guard in `flow_engine::caps::script`).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_declared_variable_wins_over_the_inherited_one() {
+    // `MEDULLA_INPUT` is set by the runner itself, so overriding it is the
+    // sharpest available check that a declaration is layered last.
+    let root = tempfile::tempdir().unwrap();
+
+    let result = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({
+                "script": "printf '%s' \"$MEDULLA_INPUT\"",
+                "env": { "MEDULLA_INPUT": "overridden" },
+            }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(result["output"], json!("overridden"));
+}
+
+#[tokio::test]
+async fn a_script_outside_the_workspace_is_refused_rather_than_run() {
+    let root = tempfile::tempdir().unwrap();
+    let invoker = MedullaToolInvoker::new(scripting_settings(root.path()));
+
+    for (args, needle) in [
+        (
+            json!({ "script_path": "../../etc/profile" }),
+            "must not traverse outside",
+        ),
+        (
+            json!({ "script_path": "/etc/profile" }),
+            "must be relative to the workspace",
+        ),
+        (
+            json!({ "script": "echo hi", "cwd": "../elsewhere" }),
+            "must not traverse outside",
+        ),
+    ] {
+        let err = invoker
+            .invoke("medulla:shell", args.clone(), None)
+            .await
+            .expect_err("a path outside the workspace must be refused");
+        assert!(err.to_string().contains(needle), "{args}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn a_malformed_environment_is_refused_before_the_script_runs() {
+    let root = tempfile::tempdir().unwrap();
+
+    let err = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo hi", "env": { "PROFILE": 3 } }),
+            None,
+        )
+        .await
+        .expect_err("a non-string value must be refused");
+
+    assert!(err.to_string().contains("must be a string"), "{err}");
+}
+
+#[tokio::test]
+async fn a_step_names_one_script_or_the_other_but_never_both() {
+    let root = tempfile::tempdir().unwrap();
+    let invoker = MedullaToolInvoker::new(scripting_settings(root.path()));
+
+    let both = invoker
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo hi", "script_path": "scripts/build.sh" }),
+            None,
+        )
+        .await
+        .expect_err("an ambiguous call must not run");
+    assert!(both.to_string().contains("not both"), "{both}");
+
+    // The "nothing at all" message has to name both ways in, not just one.
+    let neither = invoker
+        .invoke("medulla:shell", json!({ "input": 1 }), None)
+        .await
+        .expect_err("a call with no script must not run");
+    assert!(
+        neither.to_string().contains("args.script_path"),
+        "{neither}"
+    );
+}

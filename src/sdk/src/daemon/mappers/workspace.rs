@@ -50,9 +50,7 @@ fn has_worktree_signature(value: &Value) -> bool {
         && value.get("headShort").and_then(Value::as_str).is_some()
         && value.get("created").and_then(Value::as_bool).is_some()
         && value.get("nextCommand").and_then(Value::as_str).is_some()
-        && value
-            .pointer("/submodules/state")
-            .and_then(Value::as_str)
+        && value.pointer("/submodules/state").and_then(Value::as_str)
             == Some("initialized_recursive")
         && value
             .pointer("/submodules/count")

@@ -4,7 +4,7 @@ use medulla::config::ResourceDisplay;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
 
-use super::super::super::types::App;
+use crate::ui::app::types::App;
 
 /// Navigation lines the ambient footer may never take from the rail.
 const MIN_RAIL_LINES: usize = 3;

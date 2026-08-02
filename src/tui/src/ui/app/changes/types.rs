@@ -89,7 +89,9 @@ impl GitChangesState {
 
     /// Repository-relative selected path, if any.
     pub(crate) fn selected_path(&self) -> Option<&Path> {
-        self.files.get(self.selected).map(|file| file.path.as_path())
+        self.files
+            .get(self.selected)
+            .map(|file| file.path.as_path())
     }
 
     /// Concise status-line summary for a successful or failed refresh.

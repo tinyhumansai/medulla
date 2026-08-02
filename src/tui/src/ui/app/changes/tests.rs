@@ -40,7 +40,10 @@ fn load_combines_committed_and_untracked_changes_since_baseline() {
             .iter()
             .map(|file| file.path.as_path())
             .collect::<Vec<_>>(),
-        vec![std::path::Path::new("new.txt"), std::path::Path::new("tracked.txt")]
+        vec![
+            std::path::Path::new("new.txt"),
+            std::path::Path::new("tracked.txt")
+        ]
     );
     let patch = repository::patch(
         directory.path(),

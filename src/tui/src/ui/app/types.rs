@@ -55,12 +55,7 @@ pub const TABS: [&str; 7] = [
 /// draw anything.
 #[cfg(not(feature = "workflows"))]
 pub const TABS: [&str; 6] = [
-    "Overview",
-    "Agents",
-    "Changes",
-    "Hosts",
-    "Feedback",
-    "Settings",
+    "Overview", "Agents", "Changes", "Hosts", "Feedback", "Settings",
 ];
 
 /// The Routing tab's left-nav pages.

@@ -24,7 +24,10 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
     .lines()
     .map(str::to_owned)
     .collect();
-    let mut files = parse_name_status(&git_bytes(root, &["diff", "--name-status", "-z", baseline])?);
+    let mut files = parse_name_status(&git_bytes(
+        root,
+        &["diff", "--name-status", "-z", baseline],
+    )?);
     for path in split_paths(git_bytes(
         root,
         &["ls-files", "--others", "--exclude-standard", "-z"],
@@ -75,7 +78,9 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
 
 /// Parse Git's NUL-delimited name-status output, retaining rename destinations.
 pub(super) fn parse_name_status(output: &[u8]) -> Vec<ChangedFile> {
-    let mut fields = output.split(|byte| *byte == 0).filter(|field| !field.is_empty());
+    let mut fields = output
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty());
     let mut files = Vec::new();
     while let Some(status) = fields.next() {
         let Some(first) = fields.next() else { break };

@@ -525,9 +525,6 @@ impl App {
         else {
             return None;
         };
-        if task.status != TaskStatus::Running {
-            return None;
-        }
         let lanes = self.lanes();
         let lane = lanes.get(*lane_index)?;
         // `Agent` is main's name for a roster agent / delegated task / peer
@@ -548,5 +545,17 @@ impl App {
             .map(|w| w.address)
             .unwrap_or_else(|| agent_id.to_string());
         Some((address, task.task_id.clone()))
+    }
+
+    /// The selected running task eligible for destructive termination.
+    pub(super) fn kill_target(&self) -> Option<(String, String)> {
+        let rows = self.rail_rows();
+        let row = rows.get(self.agent_index.min(rows.len().saturating_sub(1)))?;
+        let RailRow::Agent(AgentRow::Sub { task, .. }) = row else {
+            return None;
+        };
+        (task.status == TaskStatus::Running)
+            .then(|| self.watch_target())
+            .flatten()
     }
 }

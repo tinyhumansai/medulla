@@ -83,7 +83,7 @@ impl App {
 
         match k.code {
             KeyCode::Char('K') => {
-                if let Some(target) = self.watch_target() {
+                if let Some(target) = self.kill_target() {
                     self.arm_kill(target);
                 } else {
                     self.set_status("Select a running harness task first");

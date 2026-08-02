@@ -274,7 +274,7 @@ async fn an_unchanged_screen_costs_nothing_after_the_first_frame() {
     let session_id = sessions
         .open(sh("printf 'STILL\\n'; sleep 30", peer))
         .expect("a pty session");
-    let runtime = runtime_serving(session_id);
+    let runtime = runtime_serving(sessions.clone(), session_id);
     start_task(&runtime, peer, task_id).await;
 
     let outbox: Outbox = Arc::new(Mutex::new(Vec::new()));
@@ -322,7 +322,7 @@ async fn an_owned_task_kill_stops_its_real_harness() {
     let task_id = "t3#0";
     let sessions = PtyManager::new();
     let session_id = sessions.open(sh("sleep 30", peer)).expect("a pty session");
-    let runtime = runtime_serving(session_id.clone());
+    let runtime = runtime_serving(sessions.clone(), session_id.clone());
     start_task(&runtime, peer, task_id).await;
     let mut router = ScreenRouter::new(sessions.clone(), runtime, send_fn(|_, _| async {}));
 
@@ -333,14 +333,19 @@ async fn an_owned_task_kill_stops_its_real_harness() {
         },
     );
 
-    assert!(
-        !sessions
-            .row(&session_id)
-            .expect("the killed session remains inspectable")
-            .state
-            .is_running(),
-        "the task-scoped kill must stop the harness process"
-    );
+    let deadline = Instant::now() + PATIENCE;
+    while sessions
+        .row(&session_id)
+        .expect("the killed session remains inspectable")
+        .state
+        .is_running()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the task-scoped kill must stop the harness process"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert_eq!(router.active(), 0, "its screen stream is also stopped");
     sessions.shutdown();
 }

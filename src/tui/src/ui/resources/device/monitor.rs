@@ -25,28 +25,37 @@ impl DeviceMonitor {
     /// between two refreshes, and there is no earlier one to compare against.
     /// Memory and disk are absolute and are available immediately.
     pub fn sample(&mut self) -> DeviceSnapshot {
+        self.sample_for(true)
+    }
+
+    /// Return a recent sample, discovering mounts only when disk capacity will
+    /// actually be displayed.
+    pub(crate) fn sample_for(&mut self, include_disk: bool) -> DeviceSnapshot {
         if let Some(injected) = self.injected {
             return injected;
         }
         let now = Instant::now();
         let first = self.last_refresh.is_none();
-        if self
-            .last_refresh
-            .is_some_and(|last| now.duration_since(last) < REFRESH_INTERVAL)
-        {
+        if self.last_refresh.is_some_and(|last| {
+            now.duration_since(last) < REFRESH_INTERVAL
+                && (self.last_refresh_included_disk || !include_disk)
+        }) {
             return self.snapshot;
         }
         self.last_refresh = Some(now);
+        self.last_refresh_included_disk = include_disk;
         self.system.refresh_cpu_usage();
         self.system.refresh_memory();
         // Rebuild the Disks instance to discover newly mounted filesystems.
         // `Disks::refresh(true)` only refreshes existing entries and does not
         // discover new mounts; `new_with_refreshed_list()` discovers the current
         // mount inventory, so we rebuild on each refresh to detect dynamic changes.
-        self.disks = Disks::new_with_refreshed_list();
+        if include_disk {
+            self.disks = Disks::new_with_refreshed_list();
+        }
 
         let memory_total = self.system.total_memory();
-        let capacity = self.working_disk();
+        let capacity = include_disk.then(|| self.working_disk()).flatten();
         self.snapshot = DeviceSnapshot {
             // A single refresh only primes the counters; reporting the value it
             // returns would show a confident 0% on the first frame.

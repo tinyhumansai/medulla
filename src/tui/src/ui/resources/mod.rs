@@ -148,6 +148,10 @@ fn ram_segment(display: ResourceDisplay, used: u64, total: u64) -> Option<String
     }
 }
 
+/// Formats disk throughput relative to its recent decaying peak.
+///
+/// The busier read/write direction determines the bar fill. Flooring the peak
+/// at one byte per second avoids division by zero before any disk activity.
 fn disk_segment(display: ResourceDisplay, sample: ResourceSnapshot) -> Option<String> {
     let peak = sample.disk_peak_bytes_per_second.max(1.0);
     let busiest = sample

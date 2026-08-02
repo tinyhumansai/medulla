@@ -223,7 +223,7 @@ fn enabled_process_indicators_render_on_the_status_line() {
     };
     let runtime = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, config);
-    let out = text_of(&draw(&mut app, 220, 40));
+    let out = text_of(&draw(&mut app, 80, 40));
     for label in ["CPU", "RAM", "IO R"] {
         assert!(out.contains(label), "missing {label}: {out}");
     }

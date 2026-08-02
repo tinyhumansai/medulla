@@ -9,6 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::agents::Line as StyledLine;
 use crate::ui::chat::tool_call;
@@ -381,10 +382,6 @@ impl App {
     /// status bar that opens by telling you which program you are running spends
     /// its first columns on the one thing you cannot be unsure of.
     pub(super) fn draw_status_line(&mut self, f: &mut Frame, area: Rect) {
-        let halves = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(area);
         let (dot, dot_color) = self.connection_dot();
         let mut spans = vec![
             Span::styled(format!("{dot} "), Style::default().fg(dot_color)),
@@ -415,6 +412,15 @@ impl App {
                 Style::default().fg(self.theme.accent),
             ));
         }
+        let left_width = spans
+            .iter()
+            .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+            .sum::<usize>()
+            .min(usize::from(area.width)) as u16;
+        let halves = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(left_width), Constraint::Min(0)])
+            .split(area);
         f.render_widget(Paragraph::new(TLine::from(spans)), halves[0]);
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(

@@ -26,6 +26,7 @@ fn each_resource_uses_its_selected_format() {
         cpu: ResourceDisplay::Percent,
         ram: ResourceDisplay::Value,
         disk_io: ResourceDisplay::Bar,
+        ..AppearanceConfig::default()
     };
     assert_eq!(
         segments(&config, sample()),

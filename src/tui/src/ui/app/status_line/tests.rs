@@ -110,6 +110,7 @@ fn the_legacy_appearance_toggles_are_read_as_placements() {
     let hidden = AppearanceConfig {
         show_harness_branch: false,
         show_harness_path: true,
+        ..AppearanceConfig::default()
     };
     let derived = StatusLineConfig::from_appearance(&hidden);
 

@@ -25,6 +25,10 @@ pub struct WorkerTuiConfig {
     /// advertised on the capability probe as `source: configured`. `None` means
     /// estimates only.
     pub budget: Option<medulla::config::BudgetConfig>,
+    /// Whether commits made by harnesses this worker launches are attributed
+    /// to Medulla — the resolved `attribution.commit` config value (on by
+    /// default; see [`medulla::config::AttributionConfig`]).
+    pub attribution: bool,
 }
 /// The select loop.
 /// What building the daemon runtime needs, once the launch step is answered.
@@ -48,4 +52,8 @@ pub(in super::super) struct StartWiring {
     /// Operator-declared per-provider token budgets from the loaded config,
     /// advertised on the capability probe. `None` means estimates only.
     pub(in super::super) budget: Option<medulla::config::BudgetConfig>,
+    /// Whether commits made by harnesses this worker launches are attributed
+    /// to Medulla — the resolved `attribution.commit` config value (on by
+    /// default; see [`medulla::config::AttributionConfig`]).
+    pub(in super::super) attribution: bool,
 }

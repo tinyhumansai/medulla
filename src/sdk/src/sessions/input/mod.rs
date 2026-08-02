@@ -20,7 +20,7 @@
 //!
 //! An envelope-driven session is therefore **observed, not executed**: folding
 //! one never spawns a process. That is why [`fold_envelope`] returns an
-//! [`EnvelopeFold`] rather than a bare [`TurnRequest`] — most envelope events
+//! [`Folded`] rather than a bare [`TurnRequest`] — most envelope events
 //! are progress reports on a turn somebody else is running.
 
 use ::tinyplace::types::{
@@ -51,7 +51,7 @@ pub fn fold(
     policy: SessionPolicy,
 ) -> Folded {
     match input {
-        SessionInput::Frame { from, frame } => fold_frame(&from, frame, default_provider, policy),
+        SessionInput::Frame { from, frame } => fold_frame(&from, *frame, default_provider, policy),
         SessionInput::PlainText { from, text } => {
             if text.trim().is_empty() {
                 return Folded::Ignore;

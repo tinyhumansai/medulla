@@ -70,6 +70,12 @@ pub fn host_descriptor(worker: &WorkerInfo) -> AgentDescriptor {
     if let Some(workspace) = worker.workspace.as_deref().filter(|w| !w.trim().is_empty()) {
         metadata.insert("workspace".into(), Value::String(workspace.to_string()));
     }
+    // Falling back to the address means falling back to a 44-character base58
+    // public key, which is the widest thing the Agents rail ever holds and so
+    // sizes the entire sidebar. Shortened to `abcd…1234`: the middle of a key
+    // distinguishes nothing a human reads, and the ends are what tell two peers
+    // apart. A label or handle passes through untouched — `short_if_address`
+    // only cuts what actually looks like a key.
     let name = [
         worker.label.as_deref(),
         worker.handle.as_deref(),
@@ -80,8 +86,8 @@ pub fn host_descriptor(worker: &WorkerInfo) -> AgentDescriptor {
     .flatten()
     .map(str::trim)
     .find(|s| !s.is_empty())
-    .unwrap_or_default()
-    .to_string();
+    .map(crate::ui::util::short_if_address)
+    .unwrap_or_default();
     AgentDescriptor {
         id: worker.id.clone(),
         name,

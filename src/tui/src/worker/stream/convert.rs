@@ -59,7 +59,7 @@ fn wire_row(cells: &[ScreenCell]) -> Vec<ScreenRun> {
     coalesce_runs(
         cells
             .iter()
-            .map(|cell| (cell.text.clone(), wire_style(cell))),
+            .map(|cell| (cell.text.as_str().to_string(), wire_style(cell))),
     )
 }
 

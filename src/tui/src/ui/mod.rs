@@ -19,6 +19,7 @@ pub(crate) mod agent_lane;
 pub mod app;
 pub mod chat;
 pub mod composer;
+pub mod harness_pane;
 pub(crate) mod layout;
 pub mod login;
 pub(crate) mod multi_pane;

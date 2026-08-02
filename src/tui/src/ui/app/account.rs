@@ -1,45 +1,40 @@
 //! The Account subpage's actions: arming and performing a logout.
 //!
-//! Logging out clears the on-disk credential store, which cannot be undone
-//! without signing in again, so it is a two-step action: the first Enter arms
-//! it, the second performs it. Leaving the subpage disarms.
+//! Logging out clears the session the embedded core holds, which cannot be
+//! undone without signing in again, so it is a two-step action: the first Enter
+//! arms it, the second performs it. Leaving the subpage disarms.
 
-use super::types::App;
+use super::types::{App, Cmd};
 
 impl App {
     /// Handle Enter on the Account subpage.
     ///
-    /// Arms the logout on the first press and performs it on the second. The
-    /// returned message is the status to show.
-    pub(crate) fn confirm_logout(&mut self) -> String {
+    /// Arms the logout on the first press and performs it on the second.
+    /// Returns the status to show and, on the second press, the command that
+    /// actually clears the session.
+    pub(crate) fn confirm_logout(&mut self) -> (String, Option<Cmd>) {
         if !self.logout_armed {
             self.logout_armed = true;
-            return "Account · press Enter again to log out, or move away to cancel".into();
+            return (
+                "Account · press Enter again to log out, or move away to cancel".into(),
+                None,
+            );
         }
         self.logout_armed = false;
-        self.perform_logout()
+        ("Account · logging out…".into(), Some(Cmd::Logout))
     }
 
-    /// Clear the stored credentials, returning the status to show.
+    /// Record that the session was cleared, and quit back to the login screen.
     ///
-    /// On success this also requests a relogin: the in-memory runtime still
-    /// holds a live token, so leaving the session running would leave the user
-    /// signed out on disk but signed in on screen. Quitting back to the login
-    /// screen makes the logout mean what it says. A failed clear leaves the
-    /// session alone — there is nothing to return to the login screen for.
-    fn perform_logout(&mut self) -> String {
-        let Some(home) = self.medulla_home.clone() else {
-            return "Account · cannot log out: no Medulla home configured".into();
-        };
-        let store = medulla::auth::CredentialStore::at_home(&home);
-        match store.clear() {
-            Ok(()) => {
-                self.relogin_requested = true;
-                self.should_quit = true;
-                "Account · logged out. Returning to the login screen…".into()
-            }
-            Err(e) => format!("Account · logout failed: {e}"),
-        }
+    /// The runtime is still holding a live session in memory, so leaving it
+    /// running would leave the operator signed out on disk but signed in on
+    /// screen. Quitting is what makes the logout mean what it says.
+    ///
+    /// Called from the event loop when the clear succeeds — never optimistically
+    /// on the keypress, because a failed clear must leave the session alone.
+    pub fn logged_out(&mut self) {
+        self.relogin_requested = true;
+        self.should_quit = true;
     }
 
     /// Whether the app quit in order to re-authenticate. Read by the startup

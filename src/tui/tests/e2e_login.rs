@@ -179,10 +179,22 @@ async fn loopback_flow_times_out() {
 // Backend stub for the --token and me() paths.
 // ---------------------------------------------------------------------------
 
+/// The `/auth/me` body the live backend returns.
+///
+/// `/auth/me` hands back a Mongoose document's `toJSON()`, and with no
+/// `virtuals: true` transform configured that document carries `_id` and no
+/// `id`. Every stub here serves this shape by default: one that invented an
+/// `id` field is why a login flow that could not read a real response passed
+/// its whole test suite.
+const LIVE_ME: &str = r#"{"_id":"68f0a1b2c3d4e5f60718293a","email":"dev@example.com"}"#;
+
+/// The account id inside [`LIVE_ME`] — the directory name the home must adopt.
+const LIVE_ME_ID: &str = "68f0a1b2c3d4e5f60718293a";
+
 /// A minimal one-request-per-connection HTTP stub serving the two auth routes
 /// the login command touches: `POST /auth/login-token/consume` and
-/// `GET /auth/me`.
-async fn start_auth_stub() -> (String, tokio::task::JoinHandle<()>) {
+/// `GET /auth/me`. `me` is the raw JSON body served for the latter.
+async fn start_auth_stub(me: &'static str) -> (String, tokio::task::JoinHandle<()>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -201,7 +213,7 @@ async fn start_auth_stub() -> (String, tokio::task::JoinHandle<()>) {
                 let data = if line.contains("/auth/login-token/consume") {
                     r#"{"jwt":"jwt-from-token"}"#.to_string()
                 } else if line.contains("/auth/me") {
-                    r#"{"id":"user-1","email":"dev@example.com"}"#.to_string()
+                    me.to_string()
                 } else {
                     "null".to_string()
                 };
@@ -219,9 +231,129 @@ async fn start_auth_stub() -> (String, tokio::task::JoinHandle<()>) {
     (format!("http://{addr}"), handle)
 }
 
+/// Run the installed `medulla` binary against `base_url` with a private home.
+///
+/// The credential and endpoint variables are cleared rather than inherited: a
+/// developer's real `MEDULLA_API_URL` would otherwise point this at production
+/// and redeem a token there.
+async fn run_medulla(
+    args: Vec<String>,
+    home: std::path::PathBuf,
+    base_url: String,
+) -> std::process::Output {
+    tokio::task::spawn_blocking(move || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_medulla"))
+            .args(&args)
+            .current_dir(&home)
+            .env("MEDULLA_HOME", &home)
+            .env("MEDULLA_API_URL", &base_url)
+            .env(
+                "TINYPLACE_CLAUDE_SESSIONS_DIR",
+                home.join("claude-sessions"),
+            )
+            .env("TINYPLACE_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
+            .env_remove("MEDULLA_TOKEN")
+            .env_remove("MEDULLA_USER")
+            .env_remove("MEDULLA_STAGING")
+            .env_remove("MEDULLA_BACKEND_URL")
+            .env_remove("OPENROUTER_API_KEY")
+            .output()
+            .expect("the medulla binary should run")
+    })
+    .await
+    .expect("binary runs to completion")
+}
+
+/// The regression this file exists for: `medulla login` against a backend that
+/// spells the account id `_id` must scope the install to that account, not
+/// refuse with "the backend did not say which account this token belongs to".
+///
+/// Driven through the real binary and real HTTP because the bug lived exactly in
+/// the seam a library-level test replaces: the stub used to invent an `id` field
+/// no deployment sends, so every layer agreed with itself and none agreed with
+/// the backend.
+#[tokio::test]
+async fn login_scopes_the_home_to_the_backends_underscore_id() {
+    let (base_url, handle) = start_auth_stub(LIVE_ME).await;
+    let home = tempfile::TempDir::new().unwrap();
+
+    let out = run_medulla(
+        vec![
+            "login".to_string(),
+            "--token".to_string(),
+            "deadbeef".repeat(8),
+        ],
+        home.path().to_path_buf(),
+        base_url,
+    )
+    .await;
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "login should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("did not say which account"),
+        "the id-less refusal must not fire for a real response: {stderr}"
+    );
+    // The id reached the greeting…
+    assert!(
+        stdout.contains(LIVE_ME_ID),
+        "the greeting names the account: {stdout}"
+    );
+    // …the marker every later launch reads…
+    let marker = std::fs::read_to_string(home.path().join("active_user.toml"))
+        .expect("the active-user marker was written");
+    assert!(
+        marker.contains(LIVE_ME_ID),
+        "the marker names the account: {marker}"
+    );
+    // …and the account's own directory, which is the whole point of the id.
+    assert!(
+        home.path().join(LIVE_ME_ID).is_dir(),
+        "the account home was created under the id"
+    );
+
+    handle.abort();
+}
+
+/// The guard itself still holds: a response that genuinely carries no id has
+/// nowhere correct to go, and must refuse before a session is stored.
+#[tokio::test]
+async fn login_still_refuses_a_response_with_no_account_id() {
+    let (base_url, handle) = start_auth_stub(r#"{"email":"dev@example.com"}"#).await;
+    let home = tempfile::TempDir::new().unwrap();
+
+    let out = run_medulla(
+        vec![
+            "login".to_string(),
+            "--token".to_string(),
+            "deadbeef".repeat(8),
+        ],
+        home.path().to_path_buf(),
+        base_url,
+    )
+    .await;
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "an id-less login must fail");
+    assert!(
+        stderr.contains("did not say which account"),
+        "the refusal explains itself: {stderr}"
+    );
+    assert!(
+        !home.path().join("active_user.toml").exists(),
+        "nothing was adopted"
+    );
+
+    handle.abort();
+}
+
 #[tokio::test]
 async fn token_path_redeems_and_me_verifies() {
-    let (base_url, handle) = start_auth_stub().await;
+    let (base_url, handle) = start_auth_stub(LIVE_ME).await;
 
     // --token path: redeem a one-time token for a JWT.
     let client = MedullaClient::new(&base_url, String::new());
@@ -236,7 +368,7 @@ async fn token_path_redeems_and_me_verifies() {
     let me = authed.me().await.expect("me");
     assert_eq!(
         medulla::auth::describe_me(&me),
-        "Logged in as dev@example.com (user-1)"
+        format!("Logged in as dev@example.com ({LIVE_ME_ID})")
     );
 
     handle.abort();

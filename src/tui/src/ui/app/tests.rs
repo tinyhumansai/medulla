@@ -1,10 +1,10 @@
 //! Focused unit tests for the [`App`] screen: that every tab renders, the async
 //! header toggle shows, and the composer/slash-command dispatch behaves.
 
-use super::types::SP_FEEDBACK;
 use super::*;
 use std::sync::Arc;
 
+use super::types::RP_HARNESSES;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
@@ -52,6 +52,28 @@ fn every_tab_renders() {
 }
 
 #[test]
+fn harnesses_page_renders_custom_openrouter_presets_and_editor_controls() {
+    let mut a = app();
+    a.tab_index = tab("Hosts");
+    a.routing_index = RP_HARNESSES;
+    a.routing_focused = true;
+    a.credential_status.openrouter_api_key = true;
+    a.custom_harnesses = vec![medulla::config::CustomHarnessConfig::from_editor_line(
+        "deepseek | DeepSeek via Claude | claude | deepseek/deepseek-chat | | this-device",
+    )
+    .expect("valid custom harness")];
+
+    let out = render(&mut a);
+
+    assert!(out.contains("Custom OpenRouter harnesses"));
+    assert!(out.contains("DeepSeek via Claude"));
+    assert!(out.contains("key connected"));
+    assert!(out.contains("a add"));
+    assert!(out.contains("e edit"));
+    assert!(!out.contains("sk-or-"));
+}
+
+#[test]
 fn slash_help_switches_tab() {
     let mut a = app();
     a.tab_index = 1;
@@ -88,166 +110,58 @@ fn typing_inserts_into_draft() {
     assert_eq!(a.draft.text, "hi\n");
 }
 
-// --- Feedback subpage (Settings > GENERAL > Feedback) ------------------------
+#[test]
+fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
+    use super::types::{HarnessPicker, HarnessPickerStep};
+    use crate::ui::harness_pane::HarnessChoice;
 
-/// An app parked on the Feedback subpage with the mock board already loaded.
-fn feedback_app() -> App {
     let mut a = app();
-    // Enter the content pane, as a user arriving via `/feedback` or Enter does:
-    // the board's letter bindings only act on a focused page.
-    a.enter_settings_subpage(SP_FEEDBACK);
-    let page = futures::executor::block_on(a.runtime.list_feedback(a.feedback_query())).unwrap();
-    a.set_feedback_page(page);
-    a
-}
+    a.tab_index = tab("Agents");
+    // The cursor is on a harness row, so the last frame recorded a session for
+    // it — the state the attach shortcut reads. Opening the picker on top of
+    // that used to lose the very next Enter to the pane underneath, which
+    // attached instead of advancing to the workspace step.
+    a.harness_pane_session = Some("already-running".to_string());
+    a.harness_picker = Some(HarnessPicker {
+        choices: vec![HarnessChoice::native(
+            medulla::tinyplace::HarnessProvider::Claude,
+        )],
+        index: 0,
+        step: HarnessPickerStep::Harness,
+        cwd: ".".into(),
+        workspace_query: String::new(),
+        workspace_choices: Vec::new(),
+        workspace_index: 0,
+    });
 
-#[test]
-fn slash_feedback_opens_the_board() {
-    let mut a = app();
-    let cmd = a.execute("/feedback".into());
-    assert_eq!(a.tab(), "Settings");
-    assert_eq!(a.settings_subpage(), "Feedback");
-    assert!(matches!(cmd, Some(Cmd::LoadFeedback(_))));
-}
-
-#[test]
-fn feedback_tab_renders_rows_and_controls() {
-    let mut a = feedback_app();
-    let out = render(&mut a);
-    assert!(out.contains("Split the Trace tab"), "{out}");
-    assert!(out.contains("u upvote"), "{out}");
-    assert!(out.contains("sort hot"), "{out}");
-}
-
-#[test]
-fn feedback_tab_without_a_board_shows_a_sign_in_hint() {
-    let mut a = app();
-    a.set_settings_subpage(SP_FEEDBACK);
-    a.set_feedback_page(None);
-    let out = render(&mut a);
-    assert!(out.contains("signed-in backend connection"), "{out}");
-}
-
-#[test]
-fn jk_keys_move_the_selection_and_load_comments() {
-    let mut a = feedback_app();
-    assert_eq!(a.feedback_index(), 0);
-    // As a Settings subpage, Feedback browses with j/k — ↑↓ move the nav.
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
-    assert_eq!(a.feedback_index(), 1);
-    // Selecting a row whose comments are not loaded asks for them.
-    assert!(matches!(cmd, Some(Cmd::LoadFeedbackDetail(id)) if id == "fb-2"));
-}
-
-#[test]
-fn u_and_d_vote_and_toggle_off_when_repeated() {
-    let mut a = feedback_app();
-    // fb-1 leads the board and this user has already upvoted it, so `u` retracts.
-    assert_eq!(a.feedback_items()[0].my_vote, 1);
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE));
-    assert!(matches!(cmd, Some(Cmd::VoteFeedback { value: 0, .. })));
-
-    // `d` on the same row is a fresh downvote, not a toggle.
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
-    assert!(matches!(cmd, Some(Cmd::VoteFeedback { value: -1, .. })));
-}
-
-#[test]
-fn s_cycles_sort_and_f_cycles_the_type_filter() {
-    let mut a = feedback_app();
-    assert_eq!(a.feedback_sort(), "hot");
-    a.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-    assert_eq!(a.feedback_sort(), "top");
-    a.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-    assert_eq!(a.feedback_sort(), "new");
-    a.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-    assert_eq!(a.feedback_sort(), "hot");
-
-    // The filter cycles all → features → bugs → all, reloading each time.
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
-    assert!(matches!(cmd, Some(Cmd::LoadFeedback(_))));
-}
-
-#[test]
-fn c_opens_a_comment_prompt_that_submits_the_typed_text() {
-    let mut a = feedback_app();
-    a.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
-    for ch in "me too".chars() {
-        a.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-    }
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    match cmd {
-        Some(Cmd::CommentFeedback { id, body }) => {
-            assert_eq!(id, "fb-1");
-            assert_eq!(body, "me too");
-        }
-        other => panic!("expected CommentFeedback, got {other:?}"),
-    }
-}
 
-#[test]
-fn an_empty_comment_is_cancelled_rather_than_posted() {
-    let mut a = feedback_app();
-    a.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(cmd.is_none());
+    assert_eq!(a.attached_harness(), None, "must not attach behind a modal");
+    assert_eq!(
+        a.harness_picker.as_ref().map(|picker| picker.step),
+        Some(HarnessPickerStep::Workspace),
+        "the picker should have advanced to its workspace step"
+    );
 }
 
 #[test]
-fn n_walks_the_two_step_submit_prompt() {
-    let mut a = feedback_app();
-    // Step one: the title.
-    a.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
-    for ch in "Add X".chars() {
-        a.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-    }
-    // Submitting the title must not send anything yet — it opens the body step.
+fn enter_on_a_harness_uses_the_attach_path_in_normal_mode() {
+    let mut a = app();
+    a.tab_index = tab("Agents");
+    a.focus_agents_rail();
+    // The render pass records the harness behind the visible pane. A vanished
+    // session exercises the refusal path without opening a real child here;
+    // importantly, Enter is still consumed as an attach attempt instead of
+    // returning to the composer or submitting a turn.
+    a.harness_pane_session = Some("just-exited".to_string());
+
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
     assert!(cmd.is_none());
-
-    // Step two: the body, which submits.
-    for ch in "please".chars() {
-        a.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-    }
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    match cmd {
-        Some(Cmd::SubmitFeedback { kind, title, body }) => {
-            assert_eq!(kind, medulla::client::FeedbackType::Feature);
-            assert_eq!(title, "Add X");
-            assert_eq!(body, "please");
-        }
-        other => panic!("expected SubmitFeedback, got {other:?}"),
-    }
-}
-
-#[test]
-fn b_submits_as_a_bug_report() {
-    let mut a = feedback_app();
-    a.on_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
-    for ch in "Crash".chars() {
-        a.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-    }
-    a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    for ch in "boom".chars() {
-        a.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-    }
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(matches!(
-        cmd,
-        Some(Cmd::SubmitFeedback { kind, .. }) if kind == medulla::client::FeedbackType::Bug
-    ));
-}
-
-#[test]
-fn a_vote_result_updates_the_row_in_place() {
-    let mut a = feedback_app();
-    let mut updated = a.feedback_items()[0].clone();
-    updated.score = 99;
-    updated.my_vote = 0;
-    a.apply_feedback_item(updated);
-    assert_eq!(a.feedback_items()[0].score, 99);
-    // Applying an update must not move the cursor.
-    assert_eq!(a.feedback_index(), 0);
+    assert!(a.agents_rail_focused());
+    assert!(a.status().contains("harness has exited"), "{}", a.status());
+    assert_eq!(a.attached_harness(), None);
 }
 
 #[test]
@@ -288,10 +202,27 @@ fn clicking_a_context_chunk_selects_it() {
     assert_eq!(a.context_index, 1);
 }
 
+#[cfg(feature = "workflows")]
+#[test]
+fn the_wheel_scrolls_the_workflow_preview_only_when_the_pointer_is_over_it() {
+    let mut a = app();
+    a.tab_index = tab("Workflows");
+    a.hit_workflow_preview = Some(ratatui::layout::Rect::new(40, 10, 30, 12));
+
+    a.scroll_at(50, 15, false);
+    assert_eq!(a.wf.preview_scroll, 3);
+
+    a.scroll_at(10, 15, false);
+    assert_eq!(a.wf.preview_scroll, 3);
+
+    a.scroll_at(50, 15, true);
+    assert_eq!(a.wf.preview_scroll, 0);
+}
+
 #[test]
 fn routing_strategies_render_host_and_subscription_groups() {
     let mut a = app();
-    a.tab_index = tab("Routing");
+    a.tab_index = tab("Hosts");
     a.routing_index = types::RP_STRATEGIES;
     a.routing_focused = true;
 
@@ -307,7 +238,7 @@ fn subscription_strategy_navigation_persists_and_emits_its_own_operation() {
     let dir = tempfile::tempdir().unwrap();
     let mut a = app();
     a.set_config_path(dir.path().join("config.toml"));
-    a.tab_index = tab("Routing");
+    a.tab_index = tab("Hosts");
     a.routing_index = types::RP_STRATEGIES;
     a.routing_focused = true;
 

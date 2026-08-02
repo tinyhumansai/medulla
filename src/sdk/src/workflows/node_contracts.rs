@@ -34,17 +34,60 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
             "`config.prompt` carries the instruction. `instruction` is accepted as an alias, \
              since that is what the rest of Medulla calls it."
                 .to_string(),
+            format!(
+                "`config.harness` chooses *what* runs the step, as distinct from `agent_ref`, \
+                 which chooses *where*: one of {}, or the id of a custom harness preset the \
+                 worker exposes. `config.model` is the model hint. Omit both to inherit the \
+                 workflow's `defaults` block, and then the host's configuration.",
+                crate::flow_engine::HarnessSelector::builtin_names().join(", ")
+            ),
+            "Naming a `harness` and no `model` runs that harness on its own default model — an \
+             inherited model is deliberately left behind, because a model id chosen for one \
+             harness is meaningless or wrong on another. Name both when you mean both."
+                .to_string(),
+            "`harness` must be written plainly, never as a `=`-expression: which binary and \
+             which credentials run a step is a decision the graph makes, not one its data makes. \
+             Authoring one is refused rather than saved. `model` may be an expression."
+                .to_string(),
             "The harness reply is available as `=item.text`. If the harness replied with JSON \
              it is also parsed, so `=item.json.<field>` works without an output_parser."
+                .to_string(),
+            "`execution: \"per_item\"` with a `concurrency` is how you run several harnesses at \
+             once — one session per input item, so `split_out` → agent(concurrency: 4) → merge \
+             works through a list in parallel and hands the merge one result per item. Bear in \
+             mind each item is a whole coding session, not a model call: fan out over a list you \
+             have already narrowed."
+                .to_string(),
+            "This host caps how many harness tasks a run may have in flight (`workflows.\
+             maxParallelAgents`, 4 by default) because a dispatch occupies a worker for the \
+             length of a coding task. A higher `concurrency` is throttled to that ceiling, never \
+             refused — check `workflow_host` for the current value."
                 .to_string(),
         ],
         "tool_call" => vec![
             format!(
-                "Slugs beginning `{NATIVE_TOOL_PREFIX}` are built into this host and always \
-                 available: {}. Any other slug must be listed in `workflows.toolAllowlist`, and \
-                 is refused otherwise.",
+                "Slugs beginning `{NATIVE_TOOL_PREFIX}` are built into this host: {}. Any other \
+                 slug must be listed in `workflows.toolAllowlist`, and is refused otherwise.",
                 NATIVE_TOOLS.join(", ")
             ),
+            "`medulla:shell` runs a script in the operator's project directory. \
+             `args.script` is the source (required); `args.language` picks the interpreter — \
+             `shell` (the default, run with bash), `javascript`, or `python`; `args.input` is \
+             handed to it on stdin as JSON. It returns `{ output, stderr }`, where `output` is \
+             the script's stdout parsed as JSON when it is JSON. Gated on \
+             `workflows.allowCode` for the same reason `code` nodes are — check `workflow_host`."
+                .to_string(),
+            "`language: shell` requires a unix host: there is no portable POSIX shell on \
+             Windows, and this host refuses rather than emulating one, so a `shell` step run \
+             there fails outright. `javascript` and `python` need no such shell and work on any \
+             host — prefer them when the workflow may run on Windows. `workflow_host` reports \
+             whether the current host can run shell scripts."
+                .to_string(),
+            "Reach for `medulla:shell` before an `agent` node whenever the work is a \
+             deterministic command. An `agent` node is a whole coding-harness session — minutes \
+             of wall clock and a model deciding what to run — which is the right shape for work \
+             needing judgement and a very expensive way to run `npm test`."
+                .to_string(),
             "There is no third-party integration registry on this host, so an allowlisted \
              non-native slug will still fail at run time. Express host-specific steps as a \
              `medulla:` tool call or an `agent` node."
@@ -62,12 +105,47 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
                 .to_string(),
         ],
         "code" => vec![
-            "Code nodes are disabled on this host by default: there is no sandbox, so workflow \
-             code would run with the daemon's own privileges. Prefer a `transform` node's \
-             expressions, which the engine evaluates itself."
+            "Code nodes are enabled by default and there is no sandbox, so workflow code runs \
+             with the daemon's own privileges. Set `workflows.allowCode = false` when definitions \
+             are not trusted; enabled code still runs out-of-process and time-bounded. Check \
+             `workflow_host` before authoring one."
                 .to_string(),
-            "`workflows.allowCode` enables them, out-of-process and time-bounded — but that is \
-             an explicit decision to trust whoever wrote the workflow."
+            // The engine's own example is written for a host that wraps the
+            // source in a function. Medulla executes the file as-is, so that
+            // example is a syntax error here — stating the real convention is
+            // the difference between a node that works and one that does not.
+            "CALLING CONVENTION ON THIS HOST: the source is executed as a whole program, not \
+             wrapped in a function. The input arrives on **stdin as JSON** (and as a file whose \
+             path is `argv[1]` and `$MEDULLA_INPUT`); the result is whatever the program prints \
+             to **stdout**, parsed as JSON when it is JSON and taken as a string otherwise. \
+             `return` at the top level is a syntax error — print instead."
+                .to_string(),
+            "`language` must be exactly `javascript` or `python`. The engine matches those two \
+             literal strings and silently treats everything else — `python3`, `js`, `shell` — as \
+             JavaScript, so a near-miss spelling runs your program through node and fails with a \
+             syntax error naming an interpreter you did not choose. Authoring one is refused \
+             rather than saved. A `code` node cannot run shell at all: that is `medulla:shell`."
+                .to_string(),
+            "THE INPUT IS AN ARRAY OF ITEMS, not the upstream value directly: \
+             `[{\"json\": <value>, \"paired_item\": 0}, …]`. Reach the first item's value with \
+             `items[0].json`. When the upstream node is an `agent`, `tool_call`, or \
+             `http_request`, that value is itself the `{json, text, raw}` envelope — so a field \
+             from a `medulla:shell` step upstream is `items[0].json.json.output.<field>`. \
+             Getting this wrong is the most likely way a working script still fails."
+                .to_string(),
+            "Working javascript: `const items = JSON.parse(require('fs').readFileSync(0, \
+             'utf8')); console.log(JSON.stringify({ total: items[0].json.a + items[0].json.b \
+             }));`. Working python: `import json, sys; items = json.load(sys.stdin); \
+             print(json.dumps({'total': items[0]['json']['a']}))`."
+                .to_string(),
+            "A `code` node runs in a scratch directory, not the operator's project — it is a \
+             computation over its input. A step that means to touch the repository is a \
+             `tool_call` with the `medulla:shell` slug, which runs in the workspace and says so \
+             in the graph."
+                .to_string(),
+            "A dry run does NOT execute a code node: the simulation mocks the runner, so a \
+             script with a syntax error or the wrong output shape passes one cleanly. \
+             `workflow_run` is the only thing that proves a script works."
                 .to_string(),
         ],
         "sub_workflow" => vec![

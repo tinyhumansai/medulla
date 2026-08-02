@@ -124,7 +124,7 @@ impl App {
             Span::raw(count),
         ]);
         let hints = TLine::from(Span::styled(
-            "↑/↓ select · u upvote · d downvote · c comment · n feature · b bug · s sort · f filter · r refresh",
+            "↑/↓ select · PgUp/PgDn scroll detail · u upvote · d downvote · c comment · n feature · b bug · s sort · f filter · r refresh",
             Style::default().add_modifier(Modifier::DIM),
         ));
         f.render_widget(

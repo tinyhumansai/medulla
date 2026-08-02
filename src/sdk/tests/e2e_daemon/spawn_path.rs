@@ -92,11 +92,15 @@ async fn opencode_tool_status_details_and_reply() {
         .map(|f| f.text.clone())
         .collect();
     assert!(
-        statuses.iter().any(|s| s == "running read: /a/b.rs"),
+        statuses
+            .iter()
+            .any(|s| s == "running Read · /a/b.rs\u{1f}r1"),
         "tool_call → status: {statuses:?}"
     );
     assert!(
-        statuses.iter().any(|s| s == "tool completed"),
+        statuses
+            .iter()
+            .any(|s| s == "tool completed · 13 B output\u{1f}r1"),
         "tool_result → status: {statuses:?}"
     );
     let reply = frames.last().unwrap();

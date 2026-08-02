@@ -14,26 +14,27 @@ pub(super) enum AppMsg {
     OpenResume(Vec<medulla::ui::chat_store::MainChatSummary>),
     /// Confirmation that a chat was resumed.
     Resumed(String),
-    /// Memory overview data loaded off the UI thread.
-    MemoryLoaded {
-        /// Current memory status, when a service is attached.
-        status: Option<medulla::memory::MemoryStatus>,
-        /// Current persona directives.
-        directives: Vec<String>,
-    },
+    /// The session was cleared; quit back to the login screen.
+    LoggedOut,
     /// Account usage returned by the runtime.
     UsageLoaded(Option<serde_json::Value>),
-    /// Ranked memory-search results and their query.
-    MemoryResults {
-        /// Ranked hits.
-        hits: Vec<medulla::memory::MemoryHit>,
-        /// The submitted query.
-        query: String,
-    },
     /// A newer release was detected by the background update checker.
     UpdateAvailable(String),
+    /// An automatic review began outside the selected pane.
+    #[cfg(feature = "workflows")]
+    CopilotStarted {
+        /// The workflow whose automatic review started.
+        workflow: String,
+        /// The synthetic user turn shown in its transcript.
+        instruction: String,
+    },
     /// A page of the feedback board. `None` = this runtime has no board.
-    FeedbackLoaded(Option<medulla::client::FeedbackPage>),
+    FeedbackLoaded {
+        /// The query that produced it, so a superseded load can be dropped.
+        query: medulla::client::FeedbackQuery,
+        /// The page itself.
+        page: Option<medulla::client::FeedbackPage>,
+    },
     /// Comments for one board item.
     FeedbackComments {
         /// The item the comments belong to.
@@ -45,15 +46,7 @@ pub(super) enum AppMsg {
     FeedbackItemUpdated(medulla::client::FeedbackItem),
     /// A feedback action finished; reload the board and report `status`.
     FeedbackChanged(String),
-    /// A memory ingest finished; clear the in-flight flag and report the outcome.
-    MemoryIngestDone(String),
-    /// Current local task document.
-    TasksLoaded(medulla::tasks::TaskDocument),
     /// A progress line from a running copilot turn.
-    ///
-    /// Addressed by workflow rather than applied to whatever is selected: the
-    /// operator may have moved the rail on while the turn runs, and the line
-    /// belongs to the thread that asked for it.
     #[cfg(feature = "workflows")]
     CopilotStatus {
         /// The workflow whose turn reported it.
@@ -72,15 +65,27 @@ pub(super) enum AppMsg {
         changes: Vec<String>,
         /// The workflow the turn created, for a create turn that made one.
         created: Option<String>,
+        /// Whether the workflow the turn was scoped to no longer exists, so its
+        /// conversation can be closed down with it.
+        removed: bool,
     },
     /// A copilot turn failed.
     #[cfg(feature = "workflows")]
     CopilotFailed {
         /// The workflow the turn was scoped to.
         workflow: String,
+        /// The instruction belonging to this specific failed turn.
+        instruction: String,
         /// Why it failed.
         error: String,
     },
+    /// The workflow store was written to by something other than a copilot turn,
+    /// so the catalogue on screen is stale.
+    ///
+    /// Carries no payload: what changed is whatever the store now holds, and a
+    /// re-read is both cheaper and more honest than describing the edit twice.
+    #[cfg(feature = "workflows")]
+    WorkflowsChanged,
 }
 
 /// Why the event loop stopped.
@@ -103,6 +108,10 @@ pub(crate) enum SessionExit {
 pub(crate) struct SessionWiring {
     /// The loaded configuration for this session.
     pub loaded: medulla::config::LoadedConfig,
+    /// Starts a host on this device after launch. `None` when this device is
+    /// not hosting — there is then no bus binding or session manager to hand a
+    /// new host, and the command says so rather than half-starting one.
+    pub local_hosts: Option<crate::local_host::LocalHostSpawner>,
     /// A note to show on the status line at startup, if any.
     pub startup_status: Option<String>,
     /// The tiny.place presence observation, when that service is running.
@@ -110,10 +119,13 @@ pub(crate) struct SessionWiring {
         Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
     /// Where appearance/config edits are persisted.
     pub config_path: std::path::PathBuf,
-    /// The Medulla home, used to locate the credential store.
+    /// The Medulla home: where user-level application state is kept.
     pub medulla_home: std::path::PathBuf,
-    /// The persona-memory service backing the Memory tab.
-    pub memory_service: Option<Arc<medulla::memory::MemoryService>>,
+    /// The account the embedded core is signed in as, when it is.
+    ///
+    /// Resolved once at startup rather than polled: the session cannot change
+    /// under a running app — logging out quits it.
+    pub account: Option<medulla::core_host::auth::AuthState>,
     /// Live events from a history share the welcome flow left running.
     pub sharing:
         Option<tokio::sync::mpsc::UnboundedReceiver<medulla_tui::ui::welcome::WelcomeEvent>>,
@@ -122,4 +134,12 @@ pub(crate) struct SessionWiring {
     /// A read-only view of the host running on this device, when one is. `None`
     /// means this machine orchestrates but does not run the work itself.
     pub host: Option<medulla::daemon::embedded::HostObservation>,
+    /// The live harness sessions this device is running, and the state machine
+    /// that says which task each one serves.
+    ///
+    /// `None` when this machine does not host: there are no local harnesses to
+    /// show, and the Agents tab falls back to a remote worker's streamed screen
+    /// or to the transcript. Shared with the host's executor — the sessions it
+    /// opens are the ones rendered here.
+    pub harnesses: Option<medulla_tui::ui::harness_pane::LocalHarnesses>,
 }

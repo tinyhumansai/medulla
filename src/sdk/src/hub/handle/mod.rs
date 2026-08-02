@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::relay::Relay;
-use super::roster::{register_payload, remove_conflicting, HubWorker, SharedRoster};
+use super::roster::{addresses_of, register_payload, remove_conflicting, HubWorker, SharedRoster};
 use rust_socketio::asynchronous::Client;
 
 /// Whether `address` is a directory alias rather than a cryptoId.
@@ -91,8 +91,24 @@ impl HubHandle {
                 max_fps: 1,
                 resync: true,
             });
-        (self.log)(&format!("hub: watching task {task_id} on {worker}"));
-        self.relay.send(worker, &body).await
+        // Armed before the send, so a frame that beats this function's return
+        // is still recognised as wanted.
+        self.runner.screens().arm(worker, task_id);
+        let sent = self.relay.send(worker, &body).await;
+        // Narrated after the send, and only for what actually happened. Logged
+        // before it, a send that failed still read as a watch that started —
+        // which points every later question at the worker ("why did it never
+        // stream?") when the request never left this process.
+        match &sent {
+            Ok(()) => (self.log)(&format!("hub: watching task {task_id} on {worker}")),
+            Err(error) => {
+                self.runner.screens().disarm(worker, task_id);
+                (self.log)(&format!(
+                    "hub: could not ask {worker} to stream {task_id} — {error}"
+                ));
+            }
+        }
+        sent
     }
 
     /// Ask `worker` to stop streaming `task_id`, and drop what we hold.
@@ -107,7 +123,10 @@ impl HubHandle {
             },
         );
         let sent = self.relay.send(worker, &body).await;
-        self.runner.screens().forget(worker, task_id);
+        // Disarmed, not forgotten: looking away should not throw away a screen
+        // that is already here. Looking back redraws it at once, with its age
+        // in the title, while the fresh subscribe catches up.
+        self.runner.screens().disarm(worker, task_id);
         sent
     }
 
@@ -132,6 +151,7 @@ impl HubHandle {
             address: wiring.address,
             public_key: wiring.public_key,
             relay: wiring.relay,
+            catalog: wiring.catalog,
             runner: wiring.runner,
             system_info: Arc::new(Mutex::new(HashMap::new())),
             log: wiring.log,
@@ -373,6 +393,27 @@ impl HubHandle {
         self.reregister().await
     }
 
+    /// Replace the agent-template roles a worker is offered for.
+    ///
+    /// Unlike a label this is not display-only: roles ride the descriptor the
+    /// hub advertises, so the re-register is what actually makes the
+    /// orchestrator start routing role-matched subtasks here.
+    /// Errors when no worker holds `id` — a host can be removed between the
+    /// render the operator toggled against and this call, and reporting that as
+    /// a successful role change would leave the UI claiming a roster state that
+    /// never existed.
+    pub async fn set_roles(&self, id: &str, roles: Vec<String>) -> anyhow::Result<()> {
+        {
+            let mut r = self.roster.lock().expect("roster lock");
+            let Some(w) = r.iter_mut().find(|w| w.id == id) else {
+                anyhow::bail!("no host {id} to set roles on");
+            };
+            w.roles = roles;
+        }
+        self.save();
+        self.reregister().await
+    }
+
     /// Mark a worker as the selected default (local display state only).
     pub fn select(&self, id: &str) {
         {
@@ -385,8 +426,14 @@ impl HubHandle {
     }
 
     /// Re-emit `medulla:register_agents` for the current roster.
+    ///
+    /// Re-asks the relay who is up rather than reusing the last answer: this
+    /// runs on every roster mutation, and presence expires on a TTL, so a
+    /// worker that died since the last advertisement is caught here.
     async fn reregister(&self) -> anyhow::Result<()> {
-        let payload = register_payload(&self.list());
+        let workers = self.list();
+        let online = self.relay.presence(&addresses_of(&workers)).await;
+        let payload = register_payload(&workers, &online, &self.catalog);
         self.socket
             .emit("medulla:register_agents", payload)
             .await
@@ -394,6 +441,7 @@ impl HubHandle {
     }
 }
 
+mod handoff;
 mod types;
 pub(super) use types::HandleWiring;
 pub use types::HubHandle;

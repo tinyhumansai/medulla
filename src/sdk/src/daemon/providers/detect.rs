@@ -88,7 +88,7 @@ pub fn detect_providers(
 /// Build the argv for a one-shot headless run of `provider`, starting a fresh
 /// session.
 ///
-/// Thin wrapper over [`build_resumed_run_args`] with no session to resume.
+/// Thin wrapper over `build_resumed_run_args` with no session to resume.
 pub fn build_run_args(
     provider: HarnessProvider,
     prompt: &str,

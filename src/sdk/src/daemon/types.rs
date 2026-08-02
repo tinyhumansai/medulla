@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, Mutex as TokioMutex, Notify, Semaphore};
@@ -24,6 +24,44 @@ pub(super) const DEFAULT_STATUS_THROTTLE_MS: i64 = 4_000;
 pub(super) const DEFAULT_MAX_PENDING: usize = 16;
 /// Default timeout for the on-demand capability probe, in ms.
 pub(super) const DEFAULT_CAPABILITY_TIMEOUT_MS: u64 = 60_000;
+
+/// How many status-throttle windows of total silence pass before the task loop
+/// emits an unconditional heartbeat frame.
+///
+/// The heartbeat exists because the requester's liveness watchdog is reset by
+/// *frames*, not by the task still being alive: a task waiting for a harness
+/// slot, or running one long tool call, produces no semantic events at all and
+/// looks identical to a crashed worker. Expressed as a multiple of
+/// [`DaemonConfig::status_throttle_ms`] so it scales with how chatty the
+/// operator asked this worker to be — and so tests can shrink it without a new
+/// config knob. At the default throttle this is one frame every 32s, well
+/// inside the hub's 240s no-progress window.
+pub(super) const HEARTBEAT_THROTTLE_WINDOWS: i64 = 8;
+
+/// Upper bound on the derived heartbeat period, in ms.
+///
+/// A very slack `status_throttle_ms` must not push the heartbeat past the
+/// requester's no-progress window and reintroduce the very timeout it prevents.
+pub(super) const MAX_HEARTBEAT_MS: i64 = 60_000;
+
+/// The leading text of every load-shed rejection this daemon sends.
+///
+/// Shared with the requesting side (`crate::hub`) so backpressure can be
+/// recognised as backpressure — a retryable "come back later", not a terminal
+/// task failure — instead of being matched on a duplicated string literal.
+pub const CAPACITY_REJECTION_PREFIX: &str = "daemon at capacity";
+
+/// The leading text of every "an operator is working here" refusal.
+///
+/// Shared with the requesting side (`crate::hub`) for the same reason
+/// [`CAPACITY_REJECTION_PREFIX`] is: backpressure and human occupancy are both
+/// "I did not attempt this", and both have to survive the trip through a
+/// text-only error frame without being recognised by a duplicated literal.
+///
+/// Distinct from backpressure because the two clear on completely different
+/// timescales. A saturated daemon frees up in seconds; a workspace clears when a
+/// person is finished with it.
+pub const HARNESS_HELD_PREFIX: &str = "harness held by operator";
 
 /// A lock-serialized encrypted send: `(to, body) -> ()`. Errors are handled by
 /// the transport (logged), so the runtime never observes a send failure.
@@ -76,6 +114,12 @@ pub struct DaemonConfig {
     /// resolved from [`env`](Self::env) by name) layered into the spawn
     /// environment. `None` means routing is off.
     pub router: Option<crate::config::RouterConfig>,
+    /// Whether commits made by harnesses this daemon launches are attributed to
+    /// Medulla — the resolved `attribution.commit` config value (on by default;
+    /// see [`crate::config::AttributionConfig`]).
+    pub attribution: bool,
+    /// Named OpenRouter presets this host exposes.
+    pub custom_harnesses: Vec<crate::config::CustomHarnessConfig>,
     /// Operator-declared per-provider token budgets from the `[budget]` config.
     /// When set, the capability probe advertises `source: configured` budgets for
     /// matching providers instead of estimates. `None` means estimates only.
@@ -98,6 +142,94 @@ pub(super) struct RunningTask {
     /// Stops this task. Held per-task rather than only in the global controller
     /// map so an `abort` frame can cancel exactly the task it names.
     pub(super) abort: super::providers::Abort,
+}
+
+/// One admitted-but-unfinished task, released on drop.
+///
+/// The admission count is the daemon's load-shed gate: once it reaches
+/// [`DaemonConfig::max_pending`] every further task is rejected. It therefore
+/// has to be released on *every* exit from a task handler, including an unwind
+/// — the handler runs under a bare `tokio::spawn` that is never joined, so a
+/// panic inside it is swallowed silently, and a hand-rolled `fetch_sub` on the
+/// straight-line path would leak the slot permanently. Sixteen such unwinds pin
+/// the daemon at capacity until it is restarted.
+///
+/// The same reasoning covers the two records whose lifetime matches the
+/// admission: the `running` entry (a stranded one makes its task id refuse
+/// every later dispatch as "already running") and the controller registration.
+/// Both are attached to the guard so they cannot be released separately.
+pub(super) struct AdmissionGuard {
+    /// Runtime state the guard releases into.
+    inner: Arc<Inner>,
+    /// `running` map key to remove, once the task has been registered.
+    key: Option<String>,
+    /// Controller id to unregister, once one has been allocated.
+    controller: Option<u64>,
+}
+
+impl AdmissionGuard {
+    /// Claim admission, or `None` when the daemon is already at capacity.
+    ///
+    /// Check and increment are one `compare_exchange` so two concurrently
+    /// spawned handlers cannot both observe the last free slot and overshoot
+    /// `max_pending`.
+    pub(super) fn claim(inner: &Arc<Inner>) -> Option<Self> {
+        let max = inner.config.max_pending;
+        let mut current = inner.admitted.load(Ordering::SeqCst);
+        loop {
+            if current >= max {
+                return None;
+            }
+            match inner.admitted.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    return Some(AdmissionGuard {
+                        inner: inner.clone(),
+                        key: None,
+                        controller: None,
+                    })
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    /// Tie the `running` record under `key` to this admission.
+    pub(super) fn attach_task(&mut self, key: String) {
+        self.key = Some(key);
+    }
+
+    /// Tie the controller registration `id` to this admission.
+    pub(super) fn attach_controller(&mut self, id: u64) {
+        self.controller = Some(id);
+    }
+}
+
+impl Drop for AdmissionGuard {
+    fn drop(&mut self) {
+        // A poisoned map must still release the count: recovering the guard
+        // (`into_inner`) is strictly better than panicking a second time and
+        // wedging the load-shed gate for the rest of the process's life.
+        if let Some(key) = self.key.take() {
+            self.inner
+                .running
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&key);
+        }
+        if let Some(id) = self.controller.take() {
+            self.inner
+                .controllers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id);
+        }
+        self.inner.admitted.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// Shared, `Arc`-wrapped runtime state behind [`DaemonRuntime`].
@@ -133,6 +265,13 @@ pub(super) struct Inner {
     /// Kept outside the immutable config so the daemon TUI can change the
     /// allowlist without restarting the worker.
     pub(super) accessible_dirs: StdMutex<Vec<String>>,
+    /// Harness sessions bound to the conversations tasks have named.
+    ///
+    /// Empty for the whole life of a daemon serving only ordinary tasks: a task
+    /// frame names no conversation, so nothing is ever recorded and every task
+    /// runs context-free. It fills only for senders that opt in — today, the
+    /// workflow copilot, whose pane is one conversation.
+    pub(super) sessions: crate::sessions::SessionRegistry,
 }
 
 /// The provider-agnostic daemon task state machine. Cheap to clone (an `Arc`),

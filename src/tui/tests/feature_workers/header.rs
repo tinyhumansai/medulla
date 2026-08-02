@@ -26,6 +26,10 @@ fn header_shows_stream_glyph_for_running_cycle() {
         }
     }
     impl Runtime for RunningFleet {
+        fn describe(&self) -> String {
+            "RunningFleet (test)".into()
+        }
+
         fn snapshot(&self) -> RuntimeSnapshot {
             self.0.snapshot()
         }

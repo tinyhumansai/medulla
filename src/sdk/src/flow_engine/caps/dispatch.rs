@@ -37,6 +37,19 @@ pub trait HarnessDispatch: Send + Sync {
         let _ = status;
         self.dispatch(request).await
     }
+
+    /// Stop every dispatch this handle currently has in flight.
+    ///
+    /// Deliberately not per-task. The caller that wants this is the copilot
+    /// pane, which holds a dispatch of its own serving one conversation with at
+    /// most one turn running — so "stop what this handle is doing" is exactly
+    /// what the operator means by pressing the key, and it needs no task id
+    /// threaded back out through the turn that generated it.
+    ///
+    /// Defaulted to a no-op because not every dispatch can be stopped: a
+    /// stand-in has nothing in flight, and a handle without a live runner has
+    /// nothing to signal.
+    fn abort_in_flight(&self) {}
 }
 
 /// Dispatch over the real hub task runner.
@@ -66,5 +79,9 @@ impl HarnessDispatch for TaskRunnerDispatch {
         status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     ) -> Result<TaskOutcome, RunError> {
         self.runner.run(request, status).await
+    }
+
+    fn abort_in_flight(&self) {
+        self.runner.abort_all();
     }
 }

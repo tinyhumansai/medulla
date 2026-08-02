@@ -14,13 +14,11 @@
 //! - [`consumer`] — receiver-side fold of the SDK's v2 harness stream into a live
 //!   [`consumer::SessionView`].
 //! - [`status`] — the derived session-status state machine over SDK events.
-//! - [`attribution`] — git commit attribution for Medulla-launched harnesses.
 //! - [`config`] — the tinyplace CLI config-file model and endpoint resolution.
 //! - [`runtime`] — agent-runtime helpers: a file-backed [`runtime::FileSessionStore`],
 //!   identity bootstrap, and async mailbox / contact / presence loops driving the
 //!   SDK client.
 
-pub mod attribution;
 pub mod config;
 pub mod consumer;
 pub mod control;
@@ -51,8 +49,8 @@ pub use control::{
 pub use frames::{
     decode_task_frame, encode_task_frame, encode_task_frame_with_usage,
     encode_task_frame_with_work, parse_agent_capabilities, AgentCapabilities, BudgetSource,
-    BudgetWindow, EncodeFrameInput, HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrame,
-    TaskFrameKind, TokenUsage, WorkflowAdvert, TINYPLACE_PROTO,
+    BudgetWindow, CustomHarnessAdvert, EncodeFrameInput, HarnessBudget, HarnessProvider,
+    HarnessReadiness, TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, TINYPLACE_PROTO,
 };
 pub use runtime::{
     acquire_identity, acquire_identity_at, load_or_create_identity, spawn_contact_auto_accepter,

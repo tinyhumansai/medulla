@@ -3,13 +3,20 @@
 use super::load::merge_value;
 use super::*;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
+}
+
+/// The account home inside a `MEDULLA_HOME` root: `MEDULLA_HOME` names the
+/// directory that holds accounts, and a test signs nobody in, so every path the
+/// loader derives lands under the pre-login account.
+fn home_of(root: &Path) -> PathBuf {
+    root.join(crate::home::user::PRE_LOGIN_USER_ID)
 }
 
 /// A unique temp dir for a test, used as an injected `MEDULLA_HOME` and/or cwd.
@@ -98,7 +105,7 @@ fn load_config_missing_file_yields_home_derived_defaults() {
     .unwrap();
     assert_eq!(
         loaded.config.state_dir,
-        home.join("state").to_string_lossy()
+        home_of(&home).join("state").to_string_lossy()
     );
     assert_eq!(loaded.path, "(built-in defaults)");
     assert!(loaded.sources.is_empty());
@@ -150,11 +157,11 @@ fn load_config_state_and_identity_derive_from_home() {
     .unwrap();
     assert_eq!(
         loaded.config.state_dir,
-        home.join("state").to_string_lossy()
+        home_of(&home).join("state").to_string_lossy()
     );
     assert_eq!(
         loaded.config.tinyplace.unwrap().identity_dir,
-        home.join("tinyplace").to_string_lossy()
+        home_of(&home).join("tinyplace").to_string_lossy()
     );
     let _ = std::fs::remove_dir_all(&home);
     let _ = std::fs::remove_dir_all(&cwd);
@@ -183,8 +190,9 @@ fn load_config_layers_global_project_env_flag() {
     let home = temp_dir("layer-home");
     let cwd = temp_dir("layer-cwd");
     // Global config sets a base URL and a token env name.
+    std::fs::create_dir_all(home_of(&home)).unwrap();
     std::fs::write(
-        home.join("config.toml"),
+        home_of(&home).join("config.toml"),
         "[backend]\nbaseUrl = \"http://global:1\"\ntokenEnv = \"GLOBAL_TOK\"\n",
     )
     .unwrap();
@@ -271,8 +279,9 @@ fn load_config_layers_router_section_from_toml() {
     // claude uses its override while codex inherits the top-level endpoint.
     let home = temp_dir("router-home");
     let cwd = temp_dir("router-cwd");
+    std::fs::create_dir_all(home_of(&home)).unwrap();
     std::fs::write(
-        home.join("config.toml"),
+        home_of(&home).join("config.toml"),
         "[router]\nbaseUrl = \"https://gateway.internal/v1\"\napiKeyEnv = \"MEDULLA_ROUTER_KEY\"\n\n[router.models]\nreasoning = \"gpt-tier-a\"\n",
     )
     .unwrap();
@@ -349,8 +358,75 @@ fn a_synthesized_tinyplace_section_honours_the_staging_switch() {
     // Built with `join` rather than written out: the value is a real path, so
     // on Windows it comes back separated with a backslash.
     let expected = std::path::Path::new("/tmp/mh")
+        .join(crate::home::user::PRE_LOGIN_USER_ID)
         .join("tinyplace")
         .to_string_lossy()
         .into_owned();
     assert_eq!(default_tinyplace_config(&prod).identity_dir, expected);
+}
+
+#[test]
+fn explicit_config_from_env_reads_the_path_a_parent_process_recorded() {
+    // A subprocess (the `medulla workflow mcp` tool server, an ACP harness)
+    // only inherits environment, not the parent's parsed `--config` flag. This
+    // is the one place that env var is read back, so every subprocess call
+    // site agrees on how to find it.
+    let with_path = env(&[(CONFIG_PATH_ENV, "/tmp/explicit.toml")]);
+    assert_eq!(
+        explicit_config_from_env(&with_path),
+        Some("/tmp/explicit.toml")
+    );
+}
+
+#[test]
+fn explicit_config_from_env_is_none_when_the_parent_never_set_it() {
+    // The common case — the TUI was launched without `--config` — must not
+    // manufacture a path that then fails to open.
+    assert_eq!(explicit_config_from_env(&HashMap::new()), None);
+}
+
+#[test]
+fn a_subprocess_reading_the_recorded_path_loads_the_same_config_the_parent_did() {
+    // The end-to-end claim the fix makes: a subprocess that resolves its
+    // config via `explicit_config_from_env` sees the exact file the parent's
+    // own `--config` pointed at, not whatever `config_file_layers` would have
+    // discovered from `cwd` on its own. Before the fix, every such subprocess
+    // passed `None` unconditionally and could silently answer with a more
+    // permissive default config (e.g. `allowCode = true`) than the one the
+    // operator explicitly chose.
+    let home = temp_dir("subprocess-home");
+    let discoverable_cwd = temp_dir("subprocess-cwd");
+    // A config file `cwd` would happily discover if nothing overrode it —
+    // permissive, so the test fails loudly if the override is ignored.
+    std::fs::write(
+        discoverable_cwd.join("medulla.toml"),
+        "[workflows]\nallowCode = true\n",
+    )
+    .unwrap();
+
+    // The explicit file the parent process actually chose — restrictive, and
+    // in a different directory than `cwd` so nothing but the env var can find
+    // it.
+    let explicit_dir = temp_dir("subprocess-explicit");
+    let explicit_path = explicit_dir.join("chosen.toml");
+    std::fs::write(&explicit_path, "[workflows]\nallowCode = false\n").unwrap();
+
+    let mut parent_env = env(&[("MEDULLA_HOME", home.to_str().unwrap())]);
+    parent_env.insert(
+        CONFIG_PATH_ENV.to_string(),
+        explicit_path.to_string_lossy().into_owned(),
+    );
+
+    let loaded = load_config(
+        explicit_config_from_env(&parent_env),
+        &parent_env,
+        &discoverable_cwd,
+    )
+    .unwrap();
+
+    assert!(
+        !loaded.config.workflows.allow_code,
+        "the subprocess must load the explicit config the parent recorded, \
+         not silently discover the more permissive one sitting in its cwd"
+    );
 }

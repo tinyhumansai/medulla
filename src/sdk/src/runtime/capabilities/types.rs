@@ -7,7 +7,6 @@ use crate::client::{
     FeedbackType,
 };
 use crate::hub::WorkerActivity;
-use crate::memory::{MemoryHit, MemoryStatus};
 
 use super::super::{Runtime, StreamState, WorkerInfo, WorkerOp};
 
@@ -72,32 +71,6 @@ impl<T: Runtime + ?Sized> FleetCapability for T {
 
     fn stream_state(&self) -> Option<StreamState> {
         Runtime::stream_state(self)
-    }
-}
-
-/// Read-only access to an attached persona-memory service.
-pub trait MemoryCapability: Send + Sync {
-    /// Return memory health, or `None` when memory is not attached.
-    fn memory_status(&self) -> Option<MemoryStatus>;
-
-    /// Search memory using an optional facet and maximum result count.
-    fn memory_search(&self, query: String, facet: Option<String>, k: usize) -> Vec<MemoryHit>;
-
-    /// Return the attached persona's verbatim directives.
-    fn memory_directives(&self) -> Vec<String>;
-}
-
-impl<T: Runtime + ?Sized> MemoryCapability for T {
-    fn memory_status(&self) -> Option<MemoryStatus> {
-        Runtime::memory_status(self)
-    }
-
-    fn memory_search(&self, query: String, facet: Option<String>, k: usize) -> Vec<MemoryHit> {
-        Runtime::memory_search(self, query, facet, k)
-    }
-
-    fn memory_directives(&self) -> Vec<String> {
-        Runtime::memory_directives(self)
     }
 }
 
@@ -176,16 +149,11 @@ impl<T: Runtime + ?Sized> FeedbackCapability for T {
 /// Composite bound for code that intentionally consumes every optional runtime
 /// capability while remaining independent of chat/session lifecycle methods.
 pub trait RuntimeCapabilities:
-    UsageCapability + SteeringCapability + FleetCapability + MemoryCapability + FeedbackCapability
+    UsageCapability + SteeringCapability + FleetCapability + FeedbackCapability
 {
 }
 
 impl<T> RuntimeCapabilities for T where
-    T: UsageCapability
-        + SteeringCapability
-        + FleetCapability
-        + MemoryCapability
-        + FeedbackCapability
-        + ?Sized
+    T: UsageCapability + SteeringCapability + FleetCapability + FeedbackCapability + ?Sized
 {
 }

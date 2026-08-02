@@ -237,8 +237,12 @@ async fn open_rejects_a_binary_that_is_not_on_the_sessions_path() {
 fn fake_harness(dir: &std::path::Path, body: &str) -> InteractiveSpec {
     use std::os::unix::fs::PermissionsExt;
     let path = dir.join("fake-claude");
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let staging_path = dir.join("fake-claude.tmp");
+    // Publish the fixture only after its writer has closed so Linux cannot
+    // reject a concurrent spawn with ETXTBSY ("Text file busy").
+    std::fs::write(&staging_path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&staging_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::rename(&staging_path, &path).unwrap();
     let mut env = std::collections::HashMap::new();
     env.insert(
         "PATH".to_string(),
@@ -404,11 +408,26 @@ done
         .await
         .expect("spawn");
     let abort = Abort::new();
+    let (streamed_tx, streamed_rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn({
         let (session, abort) = (session.clone(), abort.clone());
-        async move { session.submit("work", &abort, |_| {}).await }
+        async move {
+            let mut streamed_tx = Some(streamed_tx);
+            session
+                .submit("work", &abort, move |event| {
+                    if matches!(event, StreamEvent::AssistantDelta { text } if text == "partial") {
+                        if let Some(streamed_tx) = streamed_tx.take() {
+                            let _ = streamed_tx.send(());
+                        }
+                    }
+                })
+                .await
+        }
     });
-    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    tokio::time::timeout(std::time::Duration::from_secs(30), streamed_rx)
+        .await
+        .expect("the fake harness must stream before it is interrupted")
+        .expect("the turn must stay alive until its streamed text is observed");
     abort.abort();
 
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), handle)

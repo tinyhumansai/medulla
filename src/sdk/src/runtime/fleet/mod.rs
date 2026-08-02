@@ -13,7 +13,7 @@
 //! runtime. They live here because the same shapes now reach every runtime and
 //! the whole UI layer, neither of which is unix-only.
 //!
-//! [`demo`] holds the env-gated stand-in fleet used to exercise the UI without a
+//! `demo` holds the env-gated stand-in fleet used to exercise the UI without a
 //! backend; nothing in this module reads it. The default agent-template catalog
 //! and its on-disk store live in [`crate::agents`], which owns everything about
 //! where templates come from.

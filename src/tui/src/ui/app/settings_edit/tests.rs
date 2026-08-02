@@ -36,32 +36,28 @@ fn written(dir: &std::path::Path) -> TuiConfig {
 fn toggling_a_flag_applies_live_and_persists() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut app = app_in(dir.path());
-    app.config_index = row_at(&app, "Persona memory");
+    app.config_index = row_at(&app, "Update check");
 
     let rows = app.config_rows();
     let row = rows[app.config_index];
     assert_eq!(
         app.read_setting(&row),
-        SettingValue::Flag(false),
-        "off by default"
+        SettingValue::Flag(true),
+        "on by default"
     );
 
     let status = app.adjust_setting(0);
 
     assert_eq!(
         app.read_setting(&row),
-        SettingValue::Flag(true),
+        SettingValue::Flag(false),
         "applied live"
     );
     assert!(
         status.contains("saved to"),
         "status names the target: {status}"
     );
-    assert_eq!(
-        written(dir.path()).memory.and_then(|m| m.enabled),
-        Some(true),
-        "persisted"
-    );
+    assert!(!written(dir.path()).update.check, "persisted");
 }
 
 #[test]

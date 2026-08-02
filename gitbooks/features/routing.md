@@ -51,11 +51,8 @@ There is no `model` field on the orchestration surface, and the terminal app has
 no configuration for inference. That is intentional rather than an omission.
 
 Running Medulla yourself with your own inference is the other path. You map each
-tier to whatever models you like, on any provider. That is what model-agnostic by
-design means in
-[Open Benchmarks, Open SDKs](../open-benchmarks-open-sdks.md), and every
-published benchmark number was produced with off-the-shelf models you can rent
-today.
+tier to whatever models you like, on any provider — model-agnostic by design,
+with off-the-shelf models you can rent today.
 
 Two softer influences sit on top. A delegated task can carry a preferred model,
 which is advisory, so the harness may honour it or fall back to its own
@@ -91,11 +88,11 @@ failing the task, while surfacing every other failure immediately.
 ## Runtime selection
 
 Separately from model routing, the terminal app picks how it talks to an
-orchestrator at all, falling back down a chain and reporting in the status line
-why it did. It tries the core socket first, meaning a locally running
-orchestration server. It then tries the backend, the hosted orchestrator, when a
-token resolves. Failing both it uses the mock, a scripted offline runtime that
-lets you explore with no account.
+orchestrator at all, and reports in the status line why. It runs on an OpenHuman
+core embedded in the same process, so there is no server to reach and nothing to
+attach to. `--mock` selects a scripted offline runtime instead, and a core that
+boots with nobody signed in takes that same offline runtime rather than pretending
+to be live.
 
 [Configuration](../developers/configuration.md#runtimes) covers the selection
 rules and their edge cases.

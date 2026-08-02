@@ -10,7 +10,7 @@
 //! one it showed a minute ago, and a hub watching a fan-out must not accumulate
 //! a framebuffer per worker forever.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crate::tinyplace::{apply_frame, ApplyOutcome, ScreenFrame, ScreenGrid, ScreenView};
@@ -41,9 +41,16 @@ pub struct WatchedScreen {
 /// The hub's live screens, keyed by worker and session.
 ///
 /// Cheap to clone; every clone reads and writes the same map.
+///
+/// Holds two things, and the distinction matters: `screens` is what the hub has
+/// *received*, `watching` is what it has *asked for*. They are not the same, and
+/// inferring one from the other is what let a stopped stream restart itself — a
+/// frame still in flight when a watch ended found nothing held, which looks
+/// exactly like a gap that needs repairing.
 #[derive(Clone, Default)]
 pub struct ScreenStore {
     screens: Arc<Mutex<HashMap<(String, String), WatchedScreen>>>,
+    watching: Arc<Mutex<HashSet<(String, String)>>>,
 }
 
 impl ScreenStore {
@@ -126,12 +133,50 @@ impl ScreenStore {
         all
     }
 
-    /// Drop a screen — after unsubscribing, or when its worker goes away.
-    pub fn forget(&self, worker: &str, task_id: &str) {
-        self.screens
+    /// Record that the hub has asked `worker` to stream `task_id`.
+    ///
+    /// Called when the subscribe is sent, not when the first frame lands: the
+    /// gap between the two is a second of relay latency, and frames arriving in
+    /// it are wanted.
+    pub fn arm(&self, worker: &str, task_id: &str) {
+        self.watching
+            .lock()
+            .expect("screen store lock")
+            .insert((worker.to_string(), task_id.to_string()));
+    }
+
+    /// Whether the hub is currently watching `task_id` on `worker`.
+    pub fn is_watching(&self, worker: &str, task_id: &str) -> bool {
+        self.watching
+            .lock()
+            .expect("screen store lock")
+            .contains(&(worker.to_string(), task_id.to_string()))
+    }
+
+    /// Stop watching, but keep the screen already received.
+    ///
+    /// The two are separate on purpose. Clearing the intent stops a late frame
+    /// being read as a gap and answered with a fresh subscribe — the bug that
+    /// made a stopped stream restart itself. Keeping the screen is what lets
+    /// the pane redraw the moment the operator looks back: those frames were
+    /// paid for on arrival, and a screen labelled with its age beats a blank
+    /// pane waiting on a relay round trip.
+    pub fn disarm(&self, worker: &str, task_id: &str) {
+        self.watching
             .lock()
             .expect("screen store lock")
             .remove(&(worker.to_string(), task_id.to_string()));
+    }
+
+    /// Drop a screen and any intent to watch it — when its worker goes away, or
+    /// its task is over and the screen could only ever go stale.
+    pub fn forget(&self, worker: &str, task_id: &str) {
+        let key = (worker.to_string(), task_id.to_string());
+        self.watching
+            .lock()
+            .expect("screen store lock")
+            .remove(&key);
+        self.screens.lock().expect("screen store lock").remove(&key);
     }
 
     /// How many screens are held.

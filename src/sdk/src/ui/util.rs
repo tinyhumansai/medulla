@@ -47,14 +47,106 @@ pub fn clip_left(value: &str, width: usize) -> String {
     out
 }
 
+/// Ellipsize the middle while preserving both identifying ends.
+///
+/// This is the path-shaped counterpart to [`clip`]: a deep workspace usually
+/// shares its leading directories with its neighbours, while its final
+/// component names the project. Keeping both sides makes the shortened value
+/// recognisable without letting it widen the pane that contains it.
+pub fn clip_middle(value: &str, width: usize) -> String {
+    let single = collapse_ws(value);
+    let chars: Vec<char> = single.chars().collect();
+    if chars.len() <= width {
+        return single;
+    }
+    if width <= 1 {
+        return "…".to_string();
+    }
+    let available = width - 1;
+    let head_len = available.div_ceil(2);
+    let tail_len = available / 2;
+    let head: String = chars.iter().take(head_len).collect();
+    let tail: String = chars.iter().skip(chars.len() - tail_len).collect();
+    format!("{head}…{tail}")
+}
+
 fn collapse_ws(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// How many characters of an address survive at each end.
+const ADDRESS_EDGE: usize = 4;
+
+/// Shorten a machine address for display: `abcd…1234`.
+///
+/// A tiny.place address is a Solana public key — 32 to 44 base58 characters of
+/// pure entropy. Rendered whole it is the widest thing in the Agents rail, and
+/// it sizes the whole sidebar, because the rail is measured against its widest
+/// row. It also distinguishes nothing a human reads: the middle is noise, and
+/// two peers are told apart by their ends.
+///
+/// Clipping from the right ([`clip`]) is the wrong shape here — several peers'
+/// keys can share a prefix, so `AbCdEf…` rows would all look alike. Keeping both
+/// ends is what keeps them distinguishable.
+///
+/// Unconditional: it shortens anything longer than the shortened form, so it is
+/// for slots that are *known* to hold an opaque id. A slot that might hold a
+/// name the operator chose wants [`short_if_address`] instead — this function
+/// would happily turn `this-device` into `this…vice`.
+pub fn short_address(value: &str) -> String {
+    let trimmed = value.trim();
+    let chars: Vec<char> = trimmed.chars().collect();
+    // The ellipsis has to save at least one character to be worth printing.
+    if chars.len() <= ADDRESS_EDGE * 2 + 1 {
+        return trimmed.to_string();
+    }
+    let head: String = chars.iter().take(ADDRESS_EDGE).collect();
+    let tail: String = chars.iter().skip(chars.len() - ADDRESS_EDGE).collect();
+    format!("{head}…{tail}")
+}
+
+/// Whether `value` looks like a bare machine address rather than a name someone
+/// chose.
+///
+/// Shortening is only ever right for the former: a label, a handle, or a
+/// workspace path is meaningful text, and cutting its middle out destroys the
+/// thing that made it readable. A base58 public key has no spaces, no
+/// punctuation a human would type, and a length in the key range.
+pub fn looks_like_address(value: &str) -> bool {
+    let trimmed = value.trim();
+    (32..=44).contains(&trimmed.chars().count())
+        && trimmed.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Shorten `value` only if it looks like a bare address, otherwise return it
+/// unchanged.
+///
+/// The safe default for a display slot that *might* hold an address and might
+/// hold a name the operator gave the machine.
+pub fn short_if_address(value: &str) -> String {
+    if looks_like_address(value) {
+        short_address(value)
+    } else {
+        value.trim().to_string()
+    }
 }
 
 /// Compact token count, e.g. `980` · `1.2k` · `34k`.
 pub fn fmt_tokens(n: i64) -> String {
     if n < 1_000 {
         return n.to_string();
+    }
+    // Millions get their own unit, or a 1M context window renders as `1000k` —
+    // technically correct, and the reason the rail read `ctx 1.2k/1000k` where
+    // it should say `1M`. A round million drops the `.0`, matching
+    // [`crate::ui::meters::tokens`] so the rail and the meter agree.
+    if n >= 1_000_000 {
+        let m = n as f64 / 1_000_000.0;
+        return if (m - m.round()).abs() < f64::EPSILON {
+            format!("{}M", m.round() as i64)
+        } else {
+            format!("{m:.1}M")
+        };
     }
     let k = n as f64 / 1_000.0;
     if k >= 10.0 {

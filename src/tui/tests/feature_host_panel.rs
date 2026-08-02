@@ -60,6 +60,32 @@ fn an_idle_host_reports_itself_ready_with_what_it_runs_and_where() {
 }
 
 #[test]
+fn a_deep_workspace_keeps_its_root_and_project_within_two_lines() {
+    let workspace = concat!(
+        "/Users/example/work/tinyhumansai/a/very/deep/collection/of/projects/",
+        "and/worktrees/that/would/not/fit/on/one/line/",
+        "medulla-public"
+    );
+    let mut app = overview_app();
+    app.set_host_observation(HostObservation::detached(
+        "this-device",
+        workspace,
+        vec![HarnessProvider::Claude],
+        HarnessProvider::Claude,
+        EmbeddedDaemonStats::default(),
+    ));
+
+    let screen = render(&mut app, 120, 40);
+    assert!(screen.contains("/Users/example"), "path root: {screen}");
+    assert!(screen.contains("medulla-public"), "project tail: {screen}");
+    assert!(screen.contains('…'), "omitted middle marker: {screen}");
+    assert!(
+        !screen.contains(workspace),
+        "the path should wrap: {screen}"
+    );
+}
+
+#[test]
 fn a_host_with_work_in_flight_reports_busy_and_counts_what_it_has_done() {
     let mut app = overview_app();
     app.set_host_observation(host(EmbeddedDaemonStats {

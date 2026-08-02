@@ -44,6 +44,10 @@ pub struct FleetRuntime {
 }
 
 impl medulla::runtime::Runtime for FleetRuntime {
+    fn describe(&self) -> String {
+        "FleetRuntime (test)".into()
+    }
+
     fn snapshot(&self) -> medulla::runtime::RuntimeSnapshot {
         self.inner.snapshot()
     }
@@ -97,6 +101,7 @@ pub fn fleet_app() -> App {
         inner,
         workers: vec![medulla::runtime::WorkerInfo {
             id: "w_1".into(),
+            roles: Vec::new(),
             address: "@dev".into(),
             handle: Some("@dev".into()),
             label: Some("primary".into()),
@@ -158,7 +163,7 @@ pub fn render(app: &mut App, w: u16, h: u16) -> String {
 }
 
 /// Focus the view named `name`, whether it is a top-level tab or one of the
-/// Settings subpages (Trace, Context, Feedback, …) that used to be tabs.
+/// Settings subpages (Trace, Context, …) that used to be tabs.
 pub fn tab(app: &mut App, name: &str) {
     match TABS.iter().position(|t| *t == name) {
         Some(index) => app.tab_index = index,

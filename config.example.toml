@@ -95,6 +95,35 @@ tokenEnv = "MEDULLA_TOKEN"
 # skipPermissions = true
 
 # ---------------------------------------------------------------------------
+# customHarnesses — OpenRouter models through a coding CLI
+# ---------------------------------------------------------------------------
+# When OPENROUTER_API_KEY is present, Routing › Harnesses can add and edit these
+# presets. The coding CLI remains the agent harness while OpenRouter supplies
+# the model. This makes, for example, DeepSeek through Claude Code available as
+# named capacity on one fleet host.
+#
+# apiKeyEnv stores only the environment-variable name; never put the key value
+# in this file. Claude presets map the main model onto Opus and fastModel onto
+# the Sonnet/Haiku tiers so sub-agents keep using OpenRouter. Codex and OpenCode
+# receive the model through their normal -m argument.
+#
+# OpenRouter-bound runs do not reach openrouter.ai directly: Medulla starts a
+# loopback proxy and points the harness at it, so the attribution headers on the
+# wire are Medulla's rather than the harness's. The harness is handed a
+# machine-local token and never the real key. See docs/attribution-proxy.md.
+# [[customHarnesses]]
+# id = "deepseek"
+# name = "DeepSeek via Claude"
+# baseHarness = "claude"              # claude | codex | opencode
+# model = "deepseek/deepseek-chat"
+# fastModel = "deepseek/deepseek-chat"
+# hostId = "this-device"               # must match [host].address
+# default = false
+# apiKeyEnv = "OPENROUTER_API_KEY"
+# baseUrl = "https://openrouter.ai/api" # optional; defaults per base harness
+# contextWindow = 114000                # optional; Claude auto-compaction window
+
+# ---------------------------------------------------------------------------
 # core — the medulla-serve NDJSON orchestration socket (optional)
 # ---------------------------------------------------------------------------
 # [core]
@@ -120,6 +149,19 @@ tokenEnv = "MEDULLA_TOKEN"
 # Env override: MEDULLA_STATE_DIR.
 # ---------------------------------------------------------------------------
 # stateDir = "/absolute/path/to/state"
+
+# ---------------------------------------------------------------------------
+# workflows — authored workflow capabilities (optional)
+# ---------------------------------------------------------------------------
+# Definitions are saved under <home>/workflows and runtime state under
+# <home>/state/workflows. Code execution is on by default but is not sandboxed;
+# set allowCode = false before loading workflows you do not trust. HTTP and
+# third-party tools remain deny-by-default.
+# [workflows]
+# allowCode = true
+# runTimeoutSecs = 600
+# toolAllowlist = []
+# httpAllowlist = []
 
 # ---------------------------------------------------------------------------
 # workflow — daemon worker workspace allowlist
@@ -175,6 +217,42 @@ tokenEnv = "MEDULLA_TOKEN"
 # accent = "magenta"      # inline overlay borders (prompt / resume picker)
 # selectionFg = "black"   # text drawn on top of the primary selection background
 # dimBorder = "darkgray"  # panel borders
+
+# Legacy harness-row toggles, kept so an older config keeps working. They are
+# read only when [statusLine] below is absent, in which case `false` means that
+# field is hidden. Settings › Status line writes [statusLine] and takes over.
+# [appearance]
+# showHarnessBranch = true
+# showHarnessPath = true
+
+# ---------------------------------------------------------------------------
+# statusLine — how one operator-started harness row on the Agents rail is laid
+# out. Settings › Status line edits these live and previews the result, which
+# is by far the easier way to arrive at a layout you like.
+#
+# Every field answers three questions:
+#   where   "line1" | "line2" | "line3" | "hidden"  (at most three lines)
+#   when    "always" | "active" (only the selected row) | "alert" (only a
+#           harness that failed, exited non-zero, or recorded an error)
+#   spelled per-field, see below
+#
+# The defaults below reproduce the historical single-line row:
+#   ● codex · unmanaged · main · ~/work/medulla
+# ---------------------------------------------------------------------------
+# [statusLine]
+# state = "line1"                # the ● / ✓ / ✕ run-state glyph
+# stateWhen = "always"
+# harness = "line1"
+# harnessWhen = "always"
+# harnessStyle = "short"         # "long" (Claude Code) | "short" (claude) | "icon"
+# control = "line1"              # managed / unmanaged
+# controlWhen = "always"
+# controlStyle = "text"          # "text" (unmanaged) | "icon" (⊘ / ⊙)
+# branch = "line1"
+# branchWhen = "always"
+# path = "line1"
+# pathWhen = "always"
+# pathStyle = "shortened"        # "full" | "shortened" (~/…/tail) | "last"
 
 # ---------------------------------------------------------------------------
 # fleet — operator-declared capacity: the Host → Harness → Workspace → Agent

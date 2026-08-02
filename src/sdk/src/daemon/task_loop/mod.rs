@@ -13,7 +13,7 @@ mod probe;
 mod run;
 mod system_info;
 #[cfg(feature = "workflows")]
-mod workflow;
+pub(in crate::daemon) mod workflow;
 
 use crate::tinyplace::{HarnessProvider, TaskFrame, TaskFrameKind};
 
@@ -74,4 +74,36 @@ impl DaemonRuntime {
             }
         }
     }
+}
+
+/// Add a task's workflow-tool mode to the environment its harness runs in.
+///
+/// The MCP server is a subprocess the harness spawns, so the only channel from
+/// here to it is the environment the session was started with. Absent for every
+/// ordinary dispatch, which leaves the full authoring surface in place.
+pub(super) fn with_tool_mode(
+    mut env: std::collections::HashMap<String, String>,
+    mode: Option<&str>,
+) -> std::collections::HashMap<String, String> {
+    #[cfg(feature = "workflows")]
+    {
+        env.remove(crate::workflows::mcp::TOOL_MODE_ENV);
+        if let Some(mode) = mode {
+            env.insert(
+                crate::workflows::mcp::TOOL_MODE_ENV.to_string(),
+                mode.to_string(),
+            );
+            // Workflow tools are attached through ACP; legacy provider JSONL
+            // cannot expose the MCP server an evolution turn needs.
+            env.insert(
+                crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+                "acp".to_string(),
+            );
+        }
+    }
+    // Without the feature there is no MCP server to restrict, so the mode has
+    // nowhere to go and nothing to protect.
+    #[cfg(not(feature = "workflows"))]
+    let _ = mode;
+    env
 }

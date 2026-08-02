@@ -14,7 +14,7 @@ impl App {
         self.hit_nav = multi_pane::draw_nav(
             f,
             area,
-            self.panel("Routing"),
+            self.panel("Hosts"),
             &self.theme,
             &ROUTING_SUBPAGES,
             &[],

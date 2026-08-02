@@ -7,9 +7,9 @@
 //! "what exists to run it on", read from what the runtime declares. Neither
 //! probes anything, and both degrade to empty rather than to an error.
 //!
-//! Split by responsibility: [`types`] holds the node data model, [`registry`]
-//! the projection of the local peer registry onto the chain, [`rows`] the
-//! tree flattening and the template catalog beside it, [`detail`] the
+//! Split by responsibility: `types` holds the node data model, `registry`
+//! the projection of the local peer registry onto the chain, `rows` the
+//! tree flattening and the template catalog beside it, `detail` the
 //! selected-node pane, and the private `fmt` submodule the shared
 //! magnitude/budget formatters.
 

@@ -1,11 +1,19 @@
 //! Data types for the `screen` module.
 #[allow(unused_imports)]
 use super::*;
+
+use super::super::super::cell_text::CellText;
+
 /// One rendered terminal cell.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScreenCell {
     /// The cell's text (a space when blank).
-    pub text: String,
+    ///
+    /// A [`CellText`], not a `String`: a snapshot is one of these per cell, and
+    /// at 120×30 that was 3,600 heap allocations every time a screen was read —
+    /// by the render loop each frame, by every subscriber ten times a second,
+    /// and by the prompt injector at 40 Hz for each session still starting up.
+    pub text: CellText,
     /// Foreground color.
     pub fg: vt100::Color,
     /// Background color.
@@ -19,6 +27,7 @@ pub struct ScreenCell {
     /// Whether foreground/background are swapped.
     pub inverse: bool,
 }
+
 /// An owned copy of a session's screen, safe to render without holding the
 /// emulator's lock.
 #[derive(Debug, Clone, PartialEq, Eq)]

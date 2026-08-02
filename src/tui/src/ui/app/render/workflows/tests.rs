@@ -25,6 +25,7 @@ fn diamond(id: &str) -> WorkflowRecord {
         name: format!("{id} sweep"),
         description: String::new(),
         enabled: true,
+        defaults: Default::default(),
         graph: serde_json::from_value(json!({
             "name": id,
             "nodes": [
@@ -43,6 +44,40 @@ fn diamond(id: &str) -> WorkflowRecord {
                 { "from_node": "yes", "to_node": "join" },
                 { "from_node": "no", "to_node": "join" },
             ],
+        }))
+        .expect("graph parses"),
+        source_path: None,
+    }
+}
+
+/// A workflow with enough parallel lanes to require vertical graph scrolling.
+fn fanout(id: &str) -> WorkflowRecord {
+    let nodes = std::iter::once(json!({
+        "id": "start", "kind": "trigger", "name": "Start",
+        "config": { "trigger_kind": "manual" }
+    }))
+    .chain((0..8).map(|index| {
+        json!({
+            "id": format!("agent-{index}"),
+            "kind": "agent",
+            "name": format!("Agent {index}"),
+            "config": { "prompt": "go" }
+        })
+    }))
+    .collect::<Vec<_>>();
+    let edges = (0..8)
+        .map(|index| json!({ "from_node": "start", "to_node": format!("agent-{index}") }))
+        .collect::<Vec<_>>();
+    WorkflowRecord {
+        id: id.to_string(),
+        name: format!("{id} fanout"),
+        description: String::new(),
+        enabled: true,
+        defaults: Default::default(),
+        graph: serde_json::from_value(json!({
+            "name": id,
+            "nodes": nodes,
+            "edges": edges,
         }))
         .expect("graph parses"),
         source_path: None,
@@ -128,6 +163,31 @@ fn the_tab_is_a_sidebar_beside_one_content_pane() {
 }
 
 #[test]
+fn canvas_navigation_uses_the_split_graph_panes_measured_height() {
+    let (_home, mut app) = app_with(&[fanout("parallel")], &[]);
+
+    render_sized(&mut app, 140, 34);
+    let measured_lanes = app.visible_lanes();
+    assert_eq!(
+        measured_lanes,
+        (app.wf.graph_rows / super::LANE_STRIDE).max(1)
+    );
+
+    app.move_graph_cursor(Move::Forward);
+    for _ in 0..7 {
+        app.move_graph_cursor(Move::LaneDown);
+    }
+    let selected_lane = app.selected_graph_node().expect("selected node").lane;
+    assert!(
+        selected_lane < app.wf.canvas_lane + measured_lanes,
+        "lane {selected_lane} must remain inside {}..{}",
+        app.wf.canvas_lane,
+        app.wf.canvas_lane + measured_lanes
+    );
+    assert!(app.wf.canvas_lane > 0, "the reduced pane must scroll");
+}
+
+#[test]
 fn each_view_takes_the_content_pane_in_turn() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 
@@ -150,6 +210,15 @@ fn each_view_takes_the_content_pane_in_turn() {
 }
 
 #[test]
+fn long_workflow_names_cannot_widen_the_rail_past_the_agents_cap() {
+    let mut workflow = diamond("nightly");
+    workflow.name = "an extremely long workflow name ".repeat(8);
+    let (_home, app) = app_with(&[workflow], &[]);
+
+    assert_eq!(app.workflow_sidebar_width(200), 38);
+}
+
+#[test]
 fn the_graph_is_drawn_as_boxes_joined_by_wires() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 
@@ -157,6 +226,10 @@ fn the_graph_is_drawn_as_boxes_joined_by_wires() {
 
     assert!(screen.contains("▶ Start"), "the trigger box is missing");
     assert!(screen.contains("◆ Check"), "the condition box is missing");
+    assert!(
+        screen.contains("Start · trigger") && screen.contains("wheel/Page scroll"),
+        "the selected step's persistent detail pane is missing: {screen}"
+    );
     assert!(
         screen.contains('╭') && screen.contains('╯'),
         "nodes are drawn as boxes"
@@ -202,10 +275,14 @@ fn the_selected_workflows_runs_are_listed_under_it_in_the_rail() {
             node_id: "start".into(),
             status: "success".into(),
             duration_ms: 3,
+            input: None,
+            output: None,
             diagnostics: Vec::new(),
         }],
         pending_approvals: Vec::new(),
         error: None,
+        summary: None,
+        diagnosis: None,
     };
     let (_home, mut app) = app_with(&[diamond("nightly")], &[run]);
 
@@ -227,17 +304,23 @@ fn selecting_a_run_overlays_it_on_the_graph() {
                 node_id: "start".into(),
                 status: "success".into(),
                 duration_ms: 3,
+                input: None,
+                output: Some(json!({ "started": true })),
                 diagnostics: Vec::new(),
             },
             RunStep {
                 node_id: "check".into(),
                 status: "failed".into(),
                 duration_ms: 4,
+                input: None,
+                output: None,
                 diagnostics: Vec::new(),
             },
         ],
         pending_approvals: Vec::new(),
         error: Some("boom".into()),
+        summary: None,
+        diagnosis: None,
     };
     let (_home, mut app) = app_with(&[diamond("nightly")], &[run]);
 
@@ -247,6 +330,14 @@ fn selecting_a_run_overlays_it_on_the_graph() {
     assert!(screen.contains("run "), "the title names the overlaid run");
     assert!(screen.contains('✓'), "a step that passed is marked");
     assert!(screen.contains('✗'), "the step that failed is marked");
+    assert!(
+        screen.contains("\"started\": true"),
+        "the selected step's recorded result is shown: {screen}"
+    );
+    assert!(
+        screen.contains("[f] Fix this run via agent"),
+        "a failed run offers the existing repair action: {screen}"
+    );
 }
 
 #[test]

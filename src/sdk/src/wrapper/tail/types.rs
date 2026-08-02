@@ -4,7 +4,9 @@ use super::*;
 /// One appended transcript line and its 1-based line number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TailLine {
+    /// One-based transcript line number.
     pub line_no: i64,
+    /// Line contents without the trailing newline.
     pub text: String,
 }
 /// The outcome of one poll: any newly-located transcript (first sighting) plus
@@ -13,14 +15,17 @@ pub struct TailLine {
 pub struct TailPoll {
     /// Set on the poll that first locates the transcript.
     pub located: Option<LocatedSession>,
+    /// Lines appended since the previous poll.
     pub lines: Vec<TailLine>,
 }
 /// The transcript the tailer latched onto.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocatedSession {
+    /// Transcript path selected by discovery.
     pub path: PathBuf,
     /// The harness's own session id, read from the transcript head.
     pub harness_session_id: String,
+    /// Working directory recorded in the transcript.
     pub cwd: Option<String>,
 }
 pub(super) struct Active {

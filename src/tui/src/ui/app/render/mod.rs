@@ -14,20 +14,20 @@ use crate::ui::agents::Line as StyledLine;
 use crate::ui::chat::tool_call;
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
 use crate::ui::util::{clip, clock, wrap};
+use crate::worker::pty::ATTENTION_GLYPH;
 
 use super::types::{App, TABS};
 
 mod agents;
 mod decisions;
 mod feedback;
-mod memory;
+mod harness_modals;
 mod overview;
 mod points;
 mod prompt;
 mod routing;
 mod selection;
 mod settings;
-mod tasks;
 mod template_modal;
 #[cfg(feature = "workflows")]
 pub(super) mod workflows;
@@ -285,6 +285,26 @@ impl App {
     /// "which backend am I on, and what is it doing" is a glance-down check.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
+        // The harness pane is resolved during the draw and read by the *next*
+        // key press, so it has to be cleared here rather than left over: a
+        // `Ctrl-]` on the Settings tab must not attach to whatever the Agents
+        // tab was showing several frames ago. `draw_agents_pane` fills it back
+        // in when it resolves a session.
+        self.harness_pane_session = None;
+        // Same reasoning as above: a stale rect would route the wheel into a
+        // terminal that is no longer on screen.
+        self.hit_harness = None;
+        self.hit_workflow_preview = None;
+        // Focus follows the pane, not the other way round. `agents_selection`
+        // (called only while drawing the Agents tab) is what notices the cursor
+        // moving off the attached session; it has nothing to say once the
+        // operator has left the tab entirely. Without this, `harness_focus`
+        // stayed `Attached` after a click elsewhere, and the next keystroke —
+        // meant for whatever tab was now on screen — was typed into a harness
+        // pane the operator could no longer see.
+        if self.harness_focus.attached_to().is_some() && self.tab() != "Agents" {
+            self.release_harness();
+        }
         // The composer now lives inside the Agents pane, so the only things that
         // still claim a row of their own below the content are the inline prompt
         // and the resume picker.
@@ -322,6 +342,15 @@ impl App {
         }
         if self.template_modal {
             self.draw_template_modal(f, rows[2]);
+        }
+        // Above the content, and above each other in answer order: the picker
+        // can open the directory prompt, and the hand-back question is asked
+        // over whichever pane the operator is releasing.
+        if self.harness_picker.is_some() {
+            self.draw_harness_picker(f, rows[2]);
+        }
+        if self.handback_prompt.is_some() {
+            self.draw_handback_prompt(f, rows[2]);
         }
         if has_prompt {
             self.draw_prompt(f, rows[3]);
@@ -414,9 +443,30 @@ impl App {
         self.hit_tabs_row = area.y;
         let mut spans = Vec::new();
         let mut col = area.x;
+        // A harness waiting on the operator is only visible on the Agents rail,
+        // and an operator reading Workflows or Settings is exactly the person
+        // who does not know a pane has stopped. The count rides on the tab so
+        // the signal survives leaving the tab that carries it.
+        let waiting = self.harnesses_waiting();
+        // Badges are built *before* the width is measured, because they are part
+        // of what has to fit: measuring the bare names and then rendering wider
+        // labels overflows the bar on a terminal that was only just wide enough,
+        // and the tab that pushed past the edge would be the one shouting for
+        // attention.
+        let badges: Vec<String> = TABS
+            .iter()
+            .map(|name| {
+                if *name == "Agents" && waiting > 0 {
+                    format!(" {ATTENTION_GLYPH}{waiting}")
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
         let roomy_width = TABS
             .iter()
-            .map(|name| name.chars().count() + 3)
+            .zip(&badges)
+            .map(|(name, badge)| name.chars().count() + badge.chars().count() + 3)
             .sum::<usize>();
         let gap = if roomy_width <= area.width as usize {
             " "
@@ -424,16 +474,24 @@ impl App {
             ""
         };
         for (i, name) in TABS.iter().enumerate() {
+            let badge = &badges[i];
             let label = if gap.is_empty() {
-                format!("{name} ")
+                format!("{name}{badge} ")
             } else {
-                format!(" {name} ")
+                format!(" {name}{badge} ")
             };
             let w = label.chars().count() as u16;
             self.hit_tabs.push((col, col + w - 1));
             let mut style = Style::default();
             if i == self.tab_index {
                 style = self.theme.selection();
+            } else if !badge.is_empty() {
+                // Only when the tab is not the one you are on: the selection
+                // style is how "you are here" is said, and blinking over it
+                // would trade a fact for a nag.
+                style = style
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
             }
             spans.push(Span::styled(label, style));
             spans.push(Span::raw(gap));
@@ -454,6 +512,23 @@ impl App {
         let workflows = self.tab() == "Workflows";
         #[cfg(not(feature = "workflows"))]
         let workflows = false;
+        // An attached harness has swallowed every other binding, so advertising
+        // them would be a lie. One key is live, and it is the one that gets the
+        // keyboard back.
+        if self.harness_focus.attached_to().is_some() {
+            f.render_widget(
+                Paragraph::new(TLine::from(Span::styled(
+                    format!(
+                        "Typing into the harness — every key goes to it · {} releases the keyboard",
+                        crate::ui::harness_pane::FOCUS_CHORD_LABEL
+                    ),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )))
+                .wrap(Wrap { trim: true }),
+                area,
+            );
+            return;
+        }
         let text = if self.tab() == "TokenMaxxxing" && self.tokenmaxxxing_is_production() {
             "Tab views · TokenMaxxxing coming soon"
         } else if self.tab() == "TokenMaxxxing" {
@@ -461,7 +536,7 @@ impl App {
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
         } else {
-            "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
+            "Tab views · Esc/↑↓ rail · ⏎/^] harness · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
         };
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(
@@ -483,12 +558,11 @@ impl App {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
             "Agents" => self.draw_agents(f, area),
-            "Tasks" => self.draw_tasks(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),
-            "Routing" => self.draw_routing(f, area),
-            "Memory" => self.draw_memory(f, area),
+            "Hosts" => self.draw_routing(f, area),
+            "Feedback" => self.draw_feedback(f, area),
             // Trace, Context, and Feedback are Settings subpages, not tabs.
             "Settings" => self.draw_settings(f, area),
             _ => self.draw_overview(f, area),

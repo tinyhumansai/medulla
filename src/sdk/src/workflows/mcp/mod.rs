@@ -20,7 +20,7 @@ mod tools;
 #[cfg(test)]
 mod tests;
 
-pub use tools::{tool_definitions, TOOL_NAMES};
+pub use tools::{tool_definitions, ToolMode, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV};
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -31,19 +31,77 @@ use serde_json::{json, Value};
 use crate::workflows::WorkflowStore;
 
 /// The MCP protocol version this server speaks.
-///
-/// Echoed back on `initialize`; a client asking for a different one still gets
-/// this, which is what the specification says to do rather than failing.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Versions this server will speak if a client asks for one.
+///
+/// The specification's negotiation is: answer with the client's version if you
+/// support it, otherwise with your own and let the client decide. Answering with
+/// a fixed version regardless — which this did — is the one response that tells
+/// a client nothing, because it looks identical whether or not its request was
+/// understood.
+const SUPPORTED_VERSIONS: [&str; 2] = ["2024-11-05", "2025-03-26"];
+
+/// The version to answer `initialize` with, given what the client asked for.
+fn negotiate(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|asked| SUPPORTED_VERSIONS.iter().find(|known| **known == asked))
+        .copied()
+        .unwrap_or(PROTOCOL_VERSION)
+}
 
 /// The server's advertised name, as it appears to a model.
 pub const SERVER_NAME: &str = "medulla-workflows";
+
+/// Check that a harness session would actually be handed these tools.
+///
+/// The three ways they silently do not arrive, all of which leave a session that
+/// starts fine and can do nothing: workflows turned off, a binary whose own path
+/// cannot be resolved, and the `workflows` feature compiled out.
+///
+/// For a *workflow run* that is survivable — an `agent` node dispatches an
+/// instruction and needs no workflow tools to carry it out. For an *authoring*
+/// turn it is fatal, because the tools are the whole of what the turn is for:
+/// without them the prompt tells a model to call things that are not there, and
+/// the operator gets a confident reply and an unchanged graph. So the copilot
+/// asks first rather than finding out from the silence.
+///
+/// # Errors
+///
+/// Returns the reason the tools would be missing, phrased for an operator who
+/// has to fix it.
+pub fn preflight(env: &HashMap<String, String>, cwd: &Path) -> Result<(), String> {
+    let enabled =
+        crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
+            .map(|loaded| loaded.config.workflows.enabled)
+            .unwrap_or(true);
+    if !enabled {
+        return Err(
+            "workflows are turned off on this host (workflows.enabled = false), so the copilot \
+             has no tools to edit a graph with"
+                .to_string(),
+        );
+    }
+    if std::env::current_exe().is_err() {
+        return Err(
+            "cannot determine this binary's own path, so the workflow tool server cannot be \
+             started for the harness"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
 
 /// Handle one JSON-RPC request, returning the response to write back.
 ///
 /// `None` for a notification, which by JSON-RPC definition gets no reply — a
 /// server that answered one would confuse the client's request correlation.
-pub async fn handle_request(store: &Arc<dyn WorkflowStore>, request: &Value) -> Option<Value> {
+pub async fn handle_request(
+    store: &Arc<dyn WorkflowStore>,
+    policy: &crate::workflows::ops::HostPolicy,
+    mode: ToolMode,
+    request: &Value,
+) -> Option<Value> {
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
     let id = request.get("id").cloned();
     let params = request.get("params").cloned().unwrap_or(Value::Null);
@@ -54,12 +112,14 @@ pub async fn handle_request(store: &Arc<dyn WorkflowStore>, request: &Value) -> 
 
     let result = match method {
         "initialize" => Ok(json!({
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": negotiate(
+                params.get("protocolVersion").and_then(Value::as_str)
+            ),
             "capabilities": { "tools": {} },
             "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
         })),
-        "tools/list" => Ok(json!({ "tools": tool_definitions() })),
-        "tools/call" => tools::call(store, &params).await,
+        "tools/list" => Ok(json!({ "tools": tool_definitions(mode) })),
+        "tools/call" => tools::call(store, policy, mode, &params).await,
         // Answered rather than errored: some clients probe for these before
         // deciding what the server offers, and an error reads as a broken
         // server rather than an empty list.
@@ -119,6 +179,27 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let store = crate::workflows::ops::discover_store(env, cwd);
+    // Loaded once, not per call: this process serves one harness session, and
+    // an operator editing config mid-session is not a case worth re-reading a
+    // file on every tool call for. Defaults on failure — a server that refused
+    // to start because config was unreadable would take the copilot's tools
+    // with it, which is worse than answering `workflow_host` conservatively.
+    // Respects the parent's `--config`, if it recorded one before spawning this
+    // subprocess — see `crate::config::CONFIG_PATH_ENV`. Passing `None`
+    // unconditionally here used to make this server re-discover its own
+    // config from `cwd`, silently answering with a different policy
+    // (`allowCode`, `enabled`, …) than the harness session it serves was
+    // actually launched under.
+    // The custom harness presets ride along with the `workflows` section: an
+    // author choosing a harness needs to know which presets this machine has,
+    // and they live in their own config section rather than that one.
+    let policy = crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
+        .map(policy_from_loaded)
+        .unwrap_or_default();
+    // The mode the parent asked for. Read once at startup for the same reason
+    // config is: this process serves exactly one harness session, and which
+    // kind of turn that is was decided before it was spawned.
+    let mode = ToolMode::from_env(env);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut stdout = tokio::io::stdout();
 
@@ -127,7 +208,7 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_request(&store, &request).await,
+            Ok(request) => handle_request(&store, &policy, mode, &request).await,
             Err(err) => Some(json!({
                 "jsonrpc": "2.0",
                 "id": Value::Null,
@@ -140,4 +221,123 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
         }
     }
     Ok(())
+}
+
+/// Build the tool-call policy from a loaded config.
+///
+/// A custom-harness preset attaches to a fleet `hostId`; one for another
+/// machine is not this device's to advertise (`workflow_host`) or execute
+/// (`workflow_run`, which reaches [`crate::workflows::local::run_here`] and
+/// starts an embedded daemon *on this device*). This is the third local
+/// execution path that starts one — the CLI
+/// (`commands::workflow::local_custom_harnesses` in the `medulla-tui` crate)
+/// and the interactive TUI host (`local_host::options_from_config_with_custom`,
+/// also `medulla-tui`) both filter to the effective local `[host]` address the
+/// same way; this filters to the same address using
+/// [`HostSection::effective_address`](crate::config::HostSection::effective_address),
+/// the shared logic both of those now call through.
+fn policy_from_loaded(loaded: crate::config::LoadedConfig) -> crate::workflows::ops::HostPolicy {
+    let local_host_id = loaded.config.host.effective_address();
+    let custom_harness_configs = crate::config::load_layered_custom_harnesses(&loaded.sources)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|preset| preset.host_id == local_host_id)
+        .collect::<Vec<_>>();
+    let custom_harnesses = custom_harness_configs
+        .iter()
+        .map(|preset| preset.id.clone())
+        .collect();
+    crate::workflows::ops::HostPolicy {
+        workflows: loaded.config.workflows,
+        custom_harnesses,
+        custom_harness_configs,
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::policy_from_loaded;
+    use crate::config::{CustomHarnessConfig, HostSection, LoadedConfig, TuiConfig};
+    use crate::tinyplace::HarnessProvider;
+
+    /// A minimal, valid custom-harness preset for `host_id`.
+    fn preset(id: &str, host_id: &str) -> CustomHarnessConfig {
+        CustomHarnessConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            base_harness: HarnessProvider::Claude,
+            model: "deepseek/deepseek-chat".to_string(),
+            fast_model: None,
+            context_window: None,
+            host_id: host_id.to_string(),
+            default: false,
+            api_key_env: "OPENROUTER_API_KEY".to_string(),
+            base_url: String::new(),
+        }
+    }
+
+    /// Writes `presets` as this file's `[[workflows.customHarnesses]]` table
+    /// and returns a [`LoadedConfig`] whose `sources` names it, matching what
+    /// `crate::config::load_config` would have produced from a real file.
+    fn loaded_with_presets(
+        root: &std::path::Path,
+        host_address: &str,
+        presets: &[CustomHarnessConfig],
+    ) -> LoadedConfig {
+        let path = root.join("medulla.tui.json");
+        let rows: Vec<serde_json::Value> = presets
+            .iter()
+            .map(|preset| serde_json::to_value(preset).unwrap())
+            .collect();
+        std::fs::write(
+            &path,
+            serde_json::json!({ "customHarnesses": rows }).to_string(),
+        )
+        .unwrap();
+
+        let mut config = TuiConfig::default();
+        config.host.address = host_address.to_string();
+
+        LoadedConfig {
+            config,
+            path: path.to_string_lossy().to_string(),
+            sources: vec![path.to_string_lossy().to_string()],
+        }
+    }
+
+    #[test]
+    fn presets_for_another_fleet_host_are_not_advertised_or_carried_for_execution() {
+        let root = tempfile::tempdir().unwrap();
+        let loaded = loaded_with_presets(
+            root.path(),
+            "this-machine",
+            &[
+                preset("mine", "this-machine"),
+                preset("someone-elses", "other-machine"),
+            ],
+        );
+
+        let policy = policy_from_loaded(loaded);
+
+        assert_eq!(policy.custom_harnesses, vec!["mine".to_string()]);
+        assert_eq!(policy.custom_harness_configs.len(), 1);
+        assert_eq!(policy.custom_harness_configs[0].id, "mine");
+    }
+
+    #[test]
+    fn a_blank_host_address_matches_the_section_default_not_every_preset() {
+        let root = tempfile::tempdir().unwrap();
+        // The operator never set `[host].address`, so the effective id is the
+        // section default — not the blank string a preset might (incorrectly)
+        // carry.
+        let loaded = loaded_with_presets(
+            root.path(),
+            "",
+            &[preset("mine", &HostSection::default().address)],
+        );
+
+        let policy = policy_from_loaded(loaded);
+
+        assert_eq!(policy.custom_harnesses, vec!["mine".to_string()]);
+    }
 }

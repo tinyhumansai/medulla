@@ -6,7 +6,7 @@ use super::*;
 pub struct InteractiveSpec {
     /// Which CLI to spawn. Only [`HarnessProvider::Claude`] supports this
     /// transport today; see
-    /// [`can_run_interactive`](super::super::routing::can_run_interactive).
+    /// [`can_run_interactive`](crate::sessions::can_run_interactive).
     pub provider: HarnessProvider,
     /// The resolved binary name or path.
     pub bin: String,

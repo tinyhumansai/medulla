@@ -43,6 +43,7 @@ fn router_options(
     let _ = bin;
     RunTaskOptions {
         conversation: String::new(),
+        session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
         provider,
         prompt: "do it".to_string(),
@@ -55,6 +56,7 @@ fn router_options(
         skip_permissions: false,
         abort: Abort::new(),
         router,
+        attribution: true,
         on_event: None,
         on_stdin: None,
         on_session: None,
@@ -219,4 +221,68 @@ async fn router_loaded_from_config_file_reaches_the_spawned_child() {
     assert_eq!(result.reply, "endpoint=https://gw/anthropic");
     let seen = std::fs::read_to_string(&marker).expect("marker written");
     assert_eq!(seen, SECRET, "child received the key resolved by name");
+}
+
+#[tokio::test]
+async fn an_openrouter_router_reaches_the_child_as_the_local_proxy_never_the_key() {
+    // The invariant this whole feature rests on, observed from inside a real
+    // spawned child: an OpenRouter-bound run gives the harness a loopback
+    // endpoint and a machine-local token, and the operator's key is nowhere in
+    // its environment. A harness that still held the key could ignore the
+    // endpoint and call OpenRouter directly, unattributed.
+    const SECRET: &str = "OPENROUTER-KEY-VALUE-DO-NOT-LEAK-4c1e";
+    let dir = TempDir::new();
+    let marker = dir.path().join("openrouter-marker");
+    let marker = marker.to_string_lossy().into_owned();
+    // Dumps the whole environment out of band so the assertions can prove a
+    // negative: that the key is absent under *any* name, not merely the one we
+    // thought to check.
+    let script = format!(
+        "#!/bin/sh\n\
+         env > '{marker}'\n\
+         printf '{{\"type\":\"result\",\"result\":\"endpoint=%s token=%s\"}}\\n' \
+         \"$ANTHROPIC_BASE_URL\" \"$ANTHROPIC_AUTH_TOKEN\"\n",
+    );
+    let bin = dir.write_script("openrouter_claude.sh", &script);
+
+    let env = env_with(&[
+        ("TINYPLACE_CLAUDE_BIN", &bin),
+        ("OPENROUTER_API_KEY", SECRET),
+        // Keeps the proxy off the network. It is never called in this test — the
+        // fake harness does not make a request — but a listener that *could*
+        // reach openrouter.ai has no business existing in the suite.
+        ("MEDULLA_OPENROUTER_URL", "http://127.0.0.1:1/api"),
+    ]);
+    let router =
+        router_cfg(r#"{"baseUrl":"https://openrouter.ai/api","apiKeyEnv":"OPENROUTER_API_KEY"}"#);
+    let options = router_options(HarnessProvider::Claude, &bin, env, Some(router));
+    let result = run_provider_task(options).await.expect("router run ok");
+
+    // Pointed at the local proxy rather than at OpenRouter.
+    assert!(
+        result.reply.contains("endpoint=http://127.0.0.1:"),
+        "child should be routed through the loopback proxy: {}",
+        result.reply
+    );
+    assert!(
+        result.reply.contains("/anthropic"),
+        "claude should land on the Anthropic-dialect mount: {}",
+        result.reply
+    );
+    assert!(
+        result.reply.contains("token=mdl-"),
+        "child should hold a loopback token: {}",
+        result.reply
+    );
+
+    // And the operator's key is gone from the child's environment entirely.
+    let child_env = std::fs::read_to_string(&marker).expect("marker written");
+    assert!(
+        !child_env.contains(SECRET),
+        "the OpenRouter key must not survive anywhere in the child environment"
+    );
+    assert!(
+        !child_env.contains("OPENROUTER_API_KEY="),
+        "the key variable itself must be scrubbed"
+    );
 }

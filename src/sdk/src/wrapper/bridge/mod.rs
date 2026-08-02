@@ -18,8 +18,8 @@ use crate::daemon::transport::SignalTransport;
 use crate::session_history::SessionAgentKind;
 use crate::tinyplace::{
     config_path, decode_task_frame, load_or_create_identity, parse_harness_control_frame,
-    parse_session_envelope, reduce_status, tick_status, HarnessEvent, HarnessProvider,
-    SemanticEvent, SessionStatusState,
+    parse_screen_message, parse_session_envelope, reduce_status, tick_status, HarnessEvent,
+    HarnessProvider, SemanticEvent, SessionStatusState,
 };
 use ::tinyplace::auth::timestamp;
 use ::tinyplace::crypto::sha256_hex;
@@ -332,12 +332,28 @@ fn classify_inbound(
     if !from_owner || message.text.trim().is_empty() {
         return None;
     }
-    if parse_session_envelope(&message.text).is_some() || decode_task_frame(&message.text).is_some()
-    {
+    if is_structured_frame(&message.text) {
         return None;
     }
     Some(message.text.clone())
 }
 
+/// Whether `body` belongs to one of the structured protocols that share this
+/// channel, and so must never be injected into the child as prompt text.
+///
+/// The channel carries four: task frames, harness control frames, session
+/// envelopes, and screen messages. Control frames are handled before this point
+/// (they carry text that *is* meant to be injected); the rest are recognised
+/// here. Keeping the set in one predicate is the point — the omission this
+/// replaced silently typed `medulla.screen.v1` subscribes into a live harness,
+/// because a body no parser claims is indistinguishable from an owner's DM.
+fn is_structured_frame(body: &str) -> bool {
+    parse_session_envelope(body).is_some()
+        || decode_task_frame(body).is_some()
+        || parse_screen_message(body).is_some()
+}
+
+#[cfg(test)]
+mod tests;
 mod types;
 pub(super) use types::Bridge;

@@ -150,3 +150,40 @@ fn an_empty_store_reports_empty() {
     assert!(store.for_worker("nobody").is_empty());
     assert_eq!(store.get("nobody", "w_1"), None::<WatchedScreen>);
 }
+
+#[test]
+fn intent_is_tracked_separately_from_what_has_arrived() {
+    let store = ScreenStore::new();
+
+    // Watching starts before anything has been received: the subscribe and the
+    // first frame are a relay round-trip apart, and frames arriving in that
+    // window are wanted.
+    assert!(!store.is_watching("workerA", "w_1"));
+    store.arm("workerA", "w_1");
+    assert!(store.is_watching("workerA", "w_1"));
+    assert!(store.get("workerA", "w_1").is_none(), "nothing held yet");
+
+    let screen = grid("hello");
+    store.apply("workerA", &frame(None, &screen, "w_1", 1, 0), 100);
+    assert!(store.get("workerA", "w_1").is_some());
+
+    // Disarming stops the watch but keeps the screen: looking away must not
+    // throw away a frame already paid for, or looking back would show a blank
+    // pane until the relay round trip completes.
+    store.disarm("workerA", "w_1");
+    assert!(!store.is_watching("workerA", "w_1"));
+    assert!(store.get("workerA", "w_1").is_some(), "the screen is kept");
+
+    // Forgetting drops both — for a worker that has gone away.
+    store.forget("workerA", "w_1");
+    assert!(store.get("workerA", "w_1").is_none());
+}
+
+#[test]
+fn watching_one_task_says_nothing_about_another() {
+    let store = ScreenStore::new();
+    store.arm("workerA", "w_1");
+
+    assert!(!store.is_watching("workerA", "w_2"), "a different task");
+    assert!(!store.is_watching("workerB", "w_1"), "a different worker");
+}

@@ -30,12 +30,6 @@ impl ThreadEventLog {
             trim_to_cap(&mut self.chat_events, CHAT_CAP);
         }
     }
-
-    /// Remove both projections while retaining their allocated capacity.
-    pub(crate) fn clear(&mut self) {
-        self.events.clear();
-        self.chat_events.clear();
-    }
 }
 
 /// Drop the oldest entries when a bounded log exceeds its retention limit.

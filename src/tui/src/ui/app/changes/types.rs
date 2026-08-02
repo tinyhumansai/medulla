@@ -99,9 +99,10 @@ impl GitChangesState {
     }
 
     /// Reload only the selected file's patch, re-indexing its hunks.
+    ///
+    /// Clamps the cursor to the new patch bounds but preserves scroll position
+    /// across refreshes. Only file selection should reset scroll and cursor.
     pub(crate) fn reload_patch(&mut self) {
-        self.scroll = 0;
-        self.cursor = 0;
         let selected_path = self.selected_path().map(|p| p.to_path_buf());
         let new_patch = match (&self.root, &self.baseline, &selected_path) {
             (Some(root), Some(baseline), Some(path)) => {
@@ -126,6 +127,10 @@ impl GitChangesState {
         self.hunks = hunks(&self.patch);
         self.error = None;
 
+        // Clamp cursor to new patch bounds instead of resetting it unconditionally.
+        // This preserves the review position across refreshes.
+        self.cursor = self.cursor.min(self.patch.len().saturating_sub(1));
+
         if patch_changed {
             if let Some(path) = selected_path {
                 self.comments
@@ -138,6 +143,9 @@ impl GitChangesState {
     pub(crate) fn select_file(&mut self, delta: isize) {
         let last = self.files.len().saturating_sub(1);
         self.selected = self.selected.saturating_add_signed(delta).min(last);
+        // Reset cursor and scroll when switching files so the review starts at the top.
+        self.scroll = 0;
+        self.cursor = 0;
         self.reload_patch();
     }
 

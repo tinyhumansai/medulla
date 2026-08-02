@@ -53,16 +53,30 @@ impl App {
     /// Open a comment prompt seeded with the note already at the cursor.
     ///
     /// Editing and adding are the same prompt; submitting empty text removes the
-    /// note. Nothing on this path touches the working tree.
+    /// note. Nothing on this path touches the working tree. Outdated comments
+    /// cannot be edited since their anchors have drifted; warn and refuse.
     pub(super) fn edit_change_comment(&mut self) {
         let anchor = self.changes.cursor_anchor();
-        let existing = self
+        let path = match self.changes.selected_path() {
+            Some(p) => p,
+            None => {
+                self.set_status("No changed file selected");
+                return;
+            }
+        };
+
+        // Find the comment and check if it's outdated.
+        let comment = self
             .changes
-            .selected_path()
-            .and_then(|path| self.changes.comments.body(path, anchor))
-            .map(str::to_owned);
-        match existing {
-            Some(body) => self.open_change_comment_with(anchor, body),
+            .comments
+            .for_path(path)
+            .find(|c| c.anchor == anchor);
+
+        match comment {
+            Some(c) if c.outdated => self.set_status(
+                "This comment anchor is outdated (content drifted) · delete and re-anchor it",
+            ),
+            Some(c) => self.open_change_comment_with(anchor, c.body.clone()),
             None => self.set_status("No comment here yet · press c to add one"),
         }
     }

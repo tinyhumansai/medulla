@@ -303,6 +303,15 @@ pub struct TaskFrame {
     /// id it could not find.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub workflow: Option<String>,
+    /// Inbound-only values for the selected workflow's declared inputs.
+    ///
+    /// Omitted on ordinary tasks and when a workflow needs no declared values.
+    #[serde(
+        rename = "inputs",
+        skip_serializing_if = "serde_json::Map::is_empty",
+        default
+    )]
+    pub workflow_inputs: serde_json::Map<String, serde_json::Value>,
     /// Inbound-only: which slice of the workflow tools this task's harness is
     /// served.
     ///
@@ -400,6 +409,8 @@ pub struct EncodeFrameInput {
     /// Inbound-only: the installed workflow to run instead of treating `text` as
     /// an instruction. `None` on every response and on ordinary tasks.
     pub workflow: Option<String>,
+    /// Inbound-only values for the selected workflow's declared inputs.
+    pub workflow_inputs: serde_json::Map<String, serde_json::Value>,
     /// Inbound-only: the continuity group successive tasks share a session
     /// through. `None` on every response and on ordinary tasks, which stay
     /// context-free by design — see [`TaskFrame::conversation`].

@@ -101,6 +101,30 @@ fn install_workflow(home: &std::path::Path, id: &str) {
     store.save(&record).expect("installs");
 }
 
+/// Install a workflow whose only agent prompt binds a required declared input.
+fn install_parameterized_workflow(home: &std::path::Path, id: &str) {
+    let home = home.join("local");
+    let store = FileWorkflowStore::new(
+        vec![home.join("workflows")],
+        home.join("state").join("workflows").join("runs"),
+    );
+    let document = json!({
+        "id": id,
+        "name": "Parameterized",
+        "inputs": [{ "name": "repo", "type": "string", "required": true }],
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "work", "kind": "agent", "name": "Work",
+              "config": { "prompt": "=inputs.repo" } }
+        ],
+        "edges": [{ "from_node": "t", "to_node": "work" }]
+    })
+    .to_string();
+    let record = medulla::workflows::store::parse_workflow(&document, id).expect("valid fixture");
+    store.save(&record).expect("installs");
+}
+
 /// Start a worker whose home is `home`, returning it with a peer endpoint.
 fn worker(home: &std::path::Path, run_task: RunTaskFn) -> (EmbeddedDaemon, LocalBridge) {
     let network = LocalBridgeNetwork::new();
@@ -124,6 +148,16 @@ fn worker(home: &std::path::Path, run_task: RunTaskFn) -> (EmbeddedDaemon, Local
 /// A frame the orchestrator sends. `workflow` names an installed graph; `None`
 /// is an ordinary instruction.
 fn frame(task_id: &str, text: &str, workflow: Option<&str>) -> String {
+    frame_with_inputs(task_id, text, workflow, Default::default())
+}
+
+/// A workflow frame carrying values for its declared inputs.
+fn frame_with_inputs(
+    task_id: &str,
+    text: &str,
+    workflow: Option<&str>,
+    workflow_inputs: serde_json::Map<String, serde_json::Value>,
+) -> String {
     encode_task_frame(EncodeFrameInput {
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
@@ -136,6 +170,7 @@ fn frame(task_id: &str, text: &str, workflow: Option<&str>) -> String {
         model: None,
         tool_mode: None,
         workflow: workflow.map(str::to_string),
+        workflow_inputs,
         conversation: None,
         fleet_depth: 0,
     })
@@ -195,6 +230,26 @@ async fn a_frame_naming_a_workflow_runs_the_whole_graph_on_the_worker() {
         prompts,
         vec!["step one".to_string(), "step two".to_string()]
     );
+}
+
+#[tokio::test]
+async fn a_frame_supplies_the_selected_workflows_declared_inputs() {
+    let home = tempfile::tempdir().unwrap();
+    install_parameterized_workflow(home.path(), "parameterized");
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
+    let inputs = json!({ "repo": "acme/api" }).as_object().unwrap().clone();
+
+    peer.send(
+        "host",
+        &frame_with_inputs("w-input", "", Some("parameterized"), inputs),
+    )
+    .await
+    .unwrap();
+
+    let reply = wait_for(&peer, TaskFrameKind::Reply).await;
+    assert!(reply.text.contains("completed 1 step"), "{}", reply.text);
+    assert_eq!(prompts.lock().unwrap().as_slice(), ["acme/api"]);
 }
 
 #[tokio::test]
@@ -266,6 +321,7 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_inputs: Default::default(),
             conversation: None,
             fleet_depth: 0,
         }),

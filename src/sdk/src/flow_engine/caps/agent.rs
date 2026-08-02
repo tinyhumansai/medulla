@@ -237,6 +237,7 @@ impl HarnessAgentRunner {
             // itself and applies its own depth limit to.
             tool_mode: None,
             workflow: None,
+            workflow_inputs: Default::default(),
         }
     }
 

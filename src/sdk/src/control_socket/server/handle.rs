@@ -167,6 +167,22 @@ fn build_request(
 ) -> Result<TaskRequest, ControlFailure> {
     let instruction = required_str(params, "instruction")?;
     let workflow = optional_str(params, "workflow");
+    let workflow_inputs = match params.get("inputs") {
+        None => serde_json::Map::new(),
+        Some(Value::Object(inputs)) => inputs.clone(),
+        Some(_) => {
+            return Err(ControlFailure::new(
+                ErrorKind::BadRequest,
+                "`inputs` must be an object keyed by declared workflow input name",
+            ))
+        }
+    };
+    if workflow.is_none() && !workflow_inputs.is_empty() {
+        return Err(ControlFailure::new(
+            ErrorKind::BadRequest,
+            "`inputs` may only be supplied when `workflow` names a saved workflow",
+        ));
+    }
     if grant.tool_mode.is_some() && workflow.is_some() {
         return Err(ControlFailure::new(
             ErrorKind::BadRequest,
@@ -197,6 +213,7 @@ fn build_request(
         // the caller can neither widen nor forge the workflow scope.
         tool_mode: grant.tool_mode.clone(),
         workflow,
+        workflow_inputs,
         // Context-free by default, which the field's own documentation calls
         // the invariant that lets two tasks run concurrently without seeing
         // each other's work. A parallel dispatch tool must preserve it.

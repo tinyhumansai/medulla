@@ -106,6 +106,11 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         None => 0,
         Some(value) => u8::try_from(value.as_u64()?).ok()?,
     };
+    let workflow_inputs = match obj.get("inputs") {
+        None => serde_json::Map::new(),
+        Some(serde_json::Value::Object(inputs)) => inputs.clone(),
+        Some(_) => return None,
+    };
 
     Some(TaskFrame {
         proto: TINYPLACE_PROTO.to_string(),
@@ -120,6 +125,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         model,
         tool_mode,
         workflow,
+        workflow_inputs,
         conversation,
         fleet_depth,
         usage,

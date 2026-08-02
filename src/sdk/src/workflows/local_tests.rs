@@ -18,6 +18,7 @@ fn request() -> TaskRequest {
         // pass narrows it.
         tool_mode: None,
         workflow: None,
+        workflow_inputs: Default::default(),
         // The copilot keys its turns to a conversation, so a fixture standing in
         // for one carries a key too.
         conversation: Some("cloud-copilot:demo".into()),

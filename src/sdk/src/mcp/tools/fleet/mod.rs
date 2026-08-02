@@ -152,6 +152,9 @@ fn dispatch_params(instruction: &str, arguments: &Value) -> Value {
             object.insert(hint.to_string(), json!(value));
         }
     }
+    if let Some(inputs) = arguments.get("inputs") {
+        object.insert("inputs".to_string(), inputs.clone());
+    }
     params
 }
 

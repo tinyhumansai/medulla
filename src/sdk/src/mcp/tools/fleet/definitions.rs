@@ -102,6 +102,13 @@ pub(crate) fn definitions(
                          harness as a prompt; the instruction becomes its trigger payload. Ids \
                          come from workflow_list.",
                 },
+                "inputs": {
+                    "type": "object",
+                    "description":
+                        "Values for the selected workflow's declared inputs, keyed by name. Read \
+                         the declarations from workflow_get or workflow_list; omit this unless \
+                         workflow is set.",
+                },
             }),
             &["instruction"],
         ),

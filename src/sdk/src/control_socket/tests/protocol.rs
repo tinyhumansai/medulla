@@ -199,6 +199,55 @@ async fn a_dispatch_returns_a_handle_without_waiting() {
 }
 
 #[tokio::test]
+async fn a_workflow_dispatch_carries_its_declared_inputs_to_the_runner() {
+    let mut harness = Harness::new();
+    let dispatched = harness
+        .call(
+            "task.dispatch",
+            json!({
+                "instruction": "release trigger",
+                "workflow": "release",
+                "inputs": { "environment": "staging", "retries": 2 },
+            }),
+        )
+        .await;
+    let handle = dispatched["result"]["taskId"].as_str().unwrap().to_string();
+    harness
+        .call("task.get", json!({ "taskId": handle, "waitSeconds": 5 }))
+        .await;
+
+    let requests = harness.fake.dispatched.lock().unwrap();
+    let request = requests.first().expect("the dispatch reached the fleet");
+    assert_eq!(request.workflow.as_deref(), Some("release"));
+    assert_eq!(
+        request.workflow_inputs,
+        json!({ "environment": "staging", "retries": 2 })
+            .as_object()
+            .unwrap()
+            .clone()
+    );
+}
+
+#[tokio::test]
+async fn workflow_inputs_must_be_an_object_and_name_a_workflow() {
+    let wrong_shape = Harness::new()
+        .call(
+            "task.dispatch",
+            json!({ "instruction": "x", "workflow": "release", "inputs": ["staging"] }),
+        )
+        .await;
+    assert_eq!(kind(&wrong_shape), "badRequest");
+
+    let no_workflow = Harness::new()
+        .call(
+            "task.dispatch",
+            json!({ "instruction": "x", "inputs": { "environment": "staging" } }),
+        )
+        .await;
+    assert_eq!(kind(&no_workflow), "badRequest");
+}
+
+#[tokio::test]
 async fn a_dispatch_without_an_instruction_is_a_bad_request() {
     let response = Harness::new().call("task.dispatch", json!({})).await;
 

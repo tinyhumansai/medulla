@@ -246,6 +246,8 @@ async fn a_dispatch_forwards_only_the_hints_a_model_may_choose() {
             "instruction": "fix the flaky test",
             "worker": "alpha",
             "harness": "claude",
+            "workflow": "release",
+            "inputs": { "environment": "staging", "retries": 2 },
             // Capability handles keyed into registries shared by every dispatch.
             // A model that picks these could dedupe or cancel somebody else's
             // work, so they must not reach the wire.
@@ -263,6 +265,11 @@ async fn a_dispatch_forwards_only_the_hints_a_model_may_choose() {
     assert_eq!(params["instruction"], json!("fix the flaky test"));
     assert_eq!(params["worker"], json!("alpha"));
     assert_eq!(params["harness"], json!("claude"));
+    assert_eq!(params["workflow"], json!("release"));
+    assert_eq!(
+        params["inputs"],
+        json!({ "environment": "staging", "retries": 2 })
+    );
     for forged in ["taskId", "abortId", "conversation", "toolMode"] {
         assert!(params.get(forged).is_none(), "{forged} reached the wire");
     }

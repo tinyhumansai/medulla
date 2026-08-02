@@ -1,6 +1,8 @@
 //! Data types for the bridge-independent task sender: a dispatch request, its
 //! terminal outcome, and the error a dispatch can fail with.
 
+use serde_json::{Map, Value};
+
 use crate::tinyplace::{HarnessProvider, TokenUsage};
 
 /// A line sink for hub diagnostics.
@@ -69,6 +71,10 @@ pub struct TaskRequest {
     /// This is what lets one dispatch be a whole plan. The instruction becomes
     /// the workflow's trigger payload.
     pub workflow: Option<String>,
+    /// Values for the selected workflow's declared inputs, keyed by name.
+    ///
+    /// Empty for ordinary harness tasks and workflows with no declared inputs.
+    pub workflow_inputs: Map<String, Value>,
     /// Opt into session continuity: successive dispatches naming the same
     /// conversation resume one harness session.
     ///

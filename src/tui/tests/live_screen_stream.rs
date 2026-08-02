@@ -261,6 +261,7 @@ async fn a_hub_watches_a_real_workers_screen_over_the_relay() {
         model: None,
         tool_mode: None,
         workflow: None,
+        workflow_inputs: Default::default(),
         conversation: None,
         fleet_depth: 0,
     });

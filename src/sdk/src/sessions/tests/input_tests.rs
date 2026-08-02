@@ -26,6 +26,7 @@ fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
         work: None,
         tool_mode: None,
         workflow: None,
+        workflow_inputs: Default::default(),
         conversation: None,
         fleet_depth: 0,
     }

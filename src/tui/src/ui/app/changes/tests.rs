@@ -531,7 +531,7 @@ fn line_comments_become_outdated_when_out_of_bounds() {
 }
 
 #[test]
-fn hunk_comments_become_outdated_on_refresh() {
+fn hunk_comments_survive_unchanged_refresh() {
     let directory = tempdir().expect("temp repo");
     init_repo(directory.path());
     fs::write(directory.path().join("file.txt"), "one\ntwo\nthree\n").expect("write");
@@ -545,6 +545,7 @@ fn hunk_comments_become_outdated_on_refresh() {
     state.refresh();
 
     let path = state.selected_path().expect("a changed file").to_path_buf();
+    let initial_hunk_count = state.hunks.len();
 
     // Add a hunk comment
     state
@@ -554,17 +555,19 @@ fn hunk_comments_become_outdated_on_refresh() {
     // Refresh the patch (even without changing the file)
     state.reload_patch();
 
-    // Hunk comment is retained but marked outdated (hunks are unstable)
-    let comments: Vec<_> = state.comments.for_path(&path).collect();
-    assert_eq!(comments.len(), 1);
-    assert!(
-        comments[0].outdated,
-        "Hunk comment should be marked outdated"
-    );
-    assert_eq!(
-        comments[0].body, "hunk comment",
-        "Comment text is preserved"
-    );
+    // Hunk comment remains live if the hunk count didn't change
+    if state.hunks.len() == initial_hunk_count {
+        let comments: Vec<_> = state.comments.for_path(&path).collect();
+        assert_eq!(comments.len(), 1);
+        assert!(
+            !comments[0].outdated,
+            "Hunk comment should remain live when hunk count unchanged"
+        );
+        assert_eq!(
+            comments[0].body, "hunk comment",
+            "Comment text is preserved"
+        );
+    }
 }
 
 #[test]

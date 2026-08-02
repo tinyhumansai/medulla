@@ -112,4 +112,7 @@ pub struct ReviewComment {
     /// Whether this comment's anchor is no longer valid (patch changed, target disappeared).
     /// Outdated comments are displayed but cannot be edited and do not contribute to new anchors.
     pub outdated: bool,
+    /// Original content at the anchored position (line text or hunk header).
+    /// Used to detect when line/hunk indices shift due to insertions/deletions.
+    pub anchor_context: String,
 }

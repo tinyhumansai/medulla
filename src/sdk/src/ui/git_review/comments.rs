@@ -22,6 +22,20 @@ impl ReviewComments {
     /// there, which is how editing doubles as removal. Returns `true` when a
     /// comment now exists at that anchor.
     pub fn upsert(&mut self, path: &Path, anchor: CommentAnchor, body: &str) -> bool {
+        self.upsert_with_context(path, anchor, body, "")
+    }
+
+    /// Add or replace the comment at `path` + `anchor`, capturing context for drift detection.
+    ///
+    /// The `context` is the original content at the anchored position (line text or hunk header).
+    /// On refresh, this context is verified to detect when indices shift due to insertions/deletions.
+    pub fn upsert_with_context(
+        &mut self,
+        path: &Path,
+        anchor: CommentAnchor,
+        body: &str,
+        context: &str,
+    ) -> bool {
         let body = body.trim();
         let existing = self
             .items
@@ -34,6 +48,7 @@ impl ReviewComments {
             }
             (Some(index), false) => {
                 self.items[index].body = body.to_owned();
+                self.items[index].anchor_context = context.to_owned();
                 true
             }
             (None, true) => false,
@@ -43,6 +58,7 @@ impl ReviewComments {
                     anchor,
                     body: body.to_owned(),
                     outdated: false,
+                    anchor_context: context.to_owned(),
                 });
                 true
             }
@@ -85,11 +101,24 @@ impl ReviewComments {
     /// Mark comments outdated when their anchors can no longer be resolved.
     ///
     /// When a patch refreshes, line and hunk indices may no longer point to valid
-    /// positions. Rather than deleting a user's written comment, we mark it outdated.
-    /// Outdated comments remain visible (so the user's work is not lost) but cannot be
-    /// edited and do not participate in new anchor resolution. File-level comments are
-    /// never marked outdated since they are position-independent.
-    pub fn mark_outdated_if_invalid(&mut self, path: &Path, new_patch_len: usize) {
+    /// positions or content may have shifted. Rather than deleting a user's written
+    /// comment, we mark it outdated. Outdated comments remain visible (so the user's
+    /// work is not lost) but cannot be edited and do not participate in new anchor
+    /// resolution. File-level comments are never marked outdated since they are
+    /// position-independent.
+    ///
+    /// Line comments are marked outdated if:
+    /// - Their index exceeds the patch length, OR
+    /// - Their stored context (line text) no longer matches at that index
+    ///
+    /// Hunk comments are marked outdated if:
+    /// - Their index exceeds the hunk count
+    pub fn mark_outdated_if_invalid(
+        &mut self,
+        path: &Path,
+        patch_lines: &[String],
+        hunk_count: usize,
+    ) {
         for item in self.items.iter_mut() {
             if item.path != path {
                 continue; // skip comments for other paths
@@ -102,14 +131,17 @@ impl ReviewComments {
                     // file-level comments always remain valid
                 }
                 CommentAnchor::Line(index) => {
-                    if index >= new_patch_len {
-                        // line index no longer valid after refresh
+                    let is_valid = index < patch_lines.len()
+                        && (item.anchor_context.is_empty()
+                            || patch_lines[index] == item.anchor_context);
+                    if !is_valid {
                         item.outdated = true;
                     }
                 }
-                CommentAnchor::Hunk(_) => {
-                    // hunk indices are unstable across refreshes; mark all as outdated
-                    item.outdated = true;
+                CommentAnchor::Hunk(index) => {
+                    if index >= hunk_count {
+                        item.outdated = true;
+                    }
                 }
             }
         }

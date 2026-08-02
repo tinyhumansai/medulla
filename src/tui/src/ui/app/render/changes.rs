@@ -66,23 +66,26 @@ impl App {
             .changes
             .selected_path()
             .map_or_else(|| " Diff ".into(), |path| path.display().to_string());
-        let content_width = panes[1].width.saturating_sub(2) as usize;
+        let content_width = panes[1].width.saturating_sub(2);
         let viewport_height = panes[1].height.saturating_sub(2) as usize;
+        // Measure every row the way the widget will wrap it, so the scroll
+        // bound and the cursor-following offset both follow Ratatui's word
+        // boundary behavior as well as hard wrapping of long diff tokens.
         let heights: Vec<usize> = detail
             .iter()
-            .map(|line| wrapped_height(line.width(), content_width))
+            .map(|line| wrapped_height(line, content_width))
             .collect();
         let rendered_height: usize = heights.iter().sum();
+        let detail = Paragraph::new(detail)
+            .block(self.panel(format!(" {title} ")))
+            .wrap(Wrap { trim: false });
         self.changes.max_scroll = rendered_height.saturating_sub(viewport_height);
         if let Some(row) = cursor_row {
             self.changes.scroll = follow(&heights, row, viewport_height, self.changes.scroll);
         }
         self.changes.scroll = self.changes.scroll.min(self.changes.max_scroll);
         frame.render_widget(
-            Paragraph::new(detail)
-                .block(self.panel(format!(" {title} ")))
-                .wrap(Wrap { trim: false })
-                .scroll((self.changes.scroll.min(u16::MAX as usize) as u16, 0)),
+            detail.scroll((self.changes.scroll.min(u16::MAX as usize) as u16, 0)),
             panes[1],
         );
     }
@@ -188,6 +191,19 @@ fn comment_line(anchor: &str, body: &str) -> Line<'static> {
     ])
 }
 
+/// Number of terminal rows one logical line occupies in the diff pane.
+///
+/// Asks Ratatui itself, with the wrapping mode the pane renders with, so the
+/// count honors word boundaries as well as the hard wrapping of long diff
+/// tokens. The measured paragraph deliberately carries no block: `pane_width`
+/// is already the content width inside the borders, and the border rows are
+/// not part of the scrollable content.
+fn wrapped_height(line: &Line<'static>, pane_width: u16) -> usize {
+    Paragraph::new(line.clone())
+        .wrap(Wrap { trim: false })
+        .line_count(pane_width.max(1))
+}
+
 /// Smallest scroll offset that keeps rendered row `row` inside the viewport.
 fn follow(heights: &[usize], row: usize, viewport: usize, current: usize) -> usize {
     let before: usize = heights.iter().take(row).sum();
@@ -207,9 +223,4 @@ fn follow(heights: &[usize], row: usize, viewport: usize, current: usize) -> usi
     } else {
         current
     }
-}
-
-/// Number of terminal rows a wrapped logical line occupies.
-fn wrapped_height(width: usize, pane_width: usize) -> usize {
-    width.max(1).div_ceil(pane_width.max(1))
 }

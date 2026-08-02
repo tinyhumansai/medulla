@@ -6,7 +6,9 @@
 //! bound to the position the cursor is on.
 
 mod repository;
-mod types;
+/// Visible to the rest of `ui::app` so the render layer and its tests can name
+/// the row type they draw; the state itself is re-exported below.
+pub(super) mod types;
 
 #[cfg(test)]
 mod tests;

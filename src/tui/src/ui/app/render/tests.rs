@@ -20,6 +20,16 @@ fn app() -> App {
 }
 
 #[test]
+fn compact_tab_labels_shorten_the_current_wide_destinations() {
+    assert_eq!(super::compact_tab_label("Workflows", true), "Flows");
+    assert_eq!(super::compact_tab_label("Changes", true), "Diff");
+    assert_eq!(super::compact_tab_label("Feedback", true), "Feed");
+    assert_eq!(super::compact_tab_label("Settings", true), "Set");
+    assert_eq!(super::compact_tab_label("Hosts", true), "Hosts");
+    assert_eq!(super::compact_tab_label("Changes", false), "Changes");
+}
+
+#[test]
 fn harness_choice_window_keeps_the_selection_visible() {
     assert_eq!(
         super::harness_modals::harness_choice_window(20, 0, 13),
@@ -385,4 +395,63 @@ fn leaving_the_agents_tab_takes_the_keyboard_back_from_an_attached_harness() {
         None,
         "keys must not reach a harness the operator has navigated away from"
     );
+}
+
+/// Put the Changes tab in front of a patch whose selected line is far wider
+/// than the diff pane, so one rendered row wraps past the whole viewport.
+fn app_on_an_oversized_diff_line() -> App {
+    use crate::ui::app::changes::types::ChangedFile;
+
+    let mut app = app();
+    app.tab_index = crate::ui::app::types::TABS
+        .iter()
+        .position(|t| *t == "Changes")
+        .expect("Changes tab");
+    app.changes.root = Some(std::path::PathBuf::from("/repo"));
+    app.changes.baseline = Some("baseline".to_owned());
+    app.changes.files = vec![ChangedFile {
+        status: "M".into(),
+        path: std::path::PathBuf::from("wide.txt"),
+        origins: Vec::new(),
+    }];
+    app.changes.patch = vec![
+        "@@ -1,1 +1,1 @@".to_owned(),
+        format!("+{}", "word ".repeat(800)),
+        " tail".to_owned(),
+    ];
+    app.changes.cursor = 1;
+    app
+}
+
+#[test]
+fn a_wrapped_diff_bounds_the_scroll_by_the_rows_it_actually_occupies() {
+    let mut app = app_on_an_oversized_diff_line();
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
+
+    terminal.draw(|f| app.draw(f)).expect("draw");
+
+    // The oversized line wraps to many rows, so the bound has to exceed the
+    // three logical patch lines rather than counting them one row each.
+    assert!(
+        app.changes.max_scroll > 3,
+        "wrapped rows must widen the scroll bound: {}",
+        app.changes.max_scroll
+    );
+}
+
+#[test]
+fn a_cursor_on_an_oversized_line_holds_a_stable_scroll_offset() {
+    let mut app = app_on_an_oversized_diff_line();
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
+
+    terminal.draw(|f| app.draw(f)).expect("draw");
+    let first = app.changes.scroll;
+    terminal.draw(|f| app.draw(f)).expect("draw again");
+
+    // Showing the top of the row keeps consecutive frames identical instead of
+    // oscillating between the row's top and bottom edges.
+    assert_eq!(first, app.changes.scroll);
+    assert_eq!(app.changes.scroll, 1, "the header row precedes the cursor");
 }

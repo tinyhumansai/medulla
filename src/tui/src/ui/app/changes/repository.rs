@@ -18,43 +18,49 @@ pub(super) fn discover() -> Result<(PathBuf, String), String> {
 
 /// Resolve the repository root and session baseline for one directory.
 ///
-/// The two ways this legitimately fails — a directory outside any repository,
-/// and a repository with no commit to anchor to — are reported as short
-/// sentences rather than Git's own multi-line `fatal:` text, because they are
-/// ordinary states for the tab to sit in rather than faults to debug.
-/// Other errors (permission denied, Git not found) are preserved to guide the operator.
+/// A directory outside any repository is reported as a short sentence rather
+/// than Git's own multi-line `fatal:` text, because it is an ordinary state for
+/// the tab to sit in rather than a fault to debug. Every other discovery
+/// failure (permission denied, Git not installed) is preserved verbatim, since
+/// those do need debugging. A repository with no first commit is not a failure
+/// at all: [`resolve_baseline`] anchors it to the empty tree so the tab reviews
+/// the initial files.
 pub(super) fn discover_in(directory: &Path) -> Result<(PathBuf, String), String> {
-    let root = git(directory, &["rev-parse", "--show-toplevel"]).map_err(|error| {
-        // Only treat as "not a repo" if the error specifically indicates that
-        if error.contains("not a git repository") {
+    let root = git_path(directory, &["rev-parse", "--show-toplevel"]).map_err(|error| {
+        // Only the "outside a repository" case earns the friendly sentence.
+        if error.to_lowercase().contains("not a git repository") {
             "Not a Git repository · nothing to review here".to_owned()
         } else {
-            // Preserve other errors (permission denied, Git not found, etc.)
             error
         }
     })?;
-    let root = PathBuf::from(root.trim());
-    let baseline = git(&root, &["rev-parse", "HEAD"]).map_err(|error| {
-        // Only treat as "no commits" if the error is about HEAD not existing
-        if error.contains("HEAD") || error.contains("no commits") {
-            "This repository has no commits yet · nothing to compare against".to_owned()
-        } else {
-            // Preserve other errors
-            error
+    let baseline = resolve_baseline(&root)?;
+    Ok((root, baseline))
+}
+
+/// Resolve HEAD, using Git's empty tree for a repository with no first commit.
+pub(super) fn resolve_baseline(root: &Path) -> Result<String, String> {
+    match git(root, &["rev-parse", "--verify", "HEAD"]) {
+        Ok(head) => Ok(head.trim().to_owned()),
+        Err(_) => {
+            git(root, &["hash-object", "-t", "tree", "--stdin"]).map(|tree| tree.trim().to_owned())
         }
-    })?;
-    Ok((root, baseline.trim().to_owned()))
+    }
 }
 
 /// Load commits and files changed from `baseline` through the current worktree.
 pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<ChangedFile>), String> {
-    let commits = git(
-        root,
-        &["log", "--format=%h %s", &format!("{baseline}..HEAD")],
-    )?
-    .lines()
-    .map(str::to_owned)
-    .collect();
+    let commits = if has_head(root)? {
+        git(
+            root,
+            &["log", "--format=%h %s", &format!("{baseline}..HEAD")],
+        )?
+        .lines()
+        .map(str::to_owned)
+        .collect()
+    } else {
+        Vec::new()
+    };
     let mut files = parse_name_status(&git_bytes(
         root,
         &["diff", "--name-status", "-z", baseline],
@@ -110,11 +116,17 @@ pub(super) fn origins(
 ) -> Result<BTreeMap<PathBuf, Vec<ChangeOrigin>>, String> {
     let mut origins: BTreeMap<PathBuf, Vec<ChangeOrigin>> = BTreeMap::new();
     let range = format!("{baseline}..HEAD");
-    let sources: [(ChangeOrigin, Vec<&str>); 4] = [
-        (
+    let mut sources: Vec<(ChangeOrigin, Vec<&str>)> = Vec::new();
+    // An unborn repository has no commit to name as the range tip, and nothing
+    // can have been committed during the session either, so the range is simply
+    // skipped rather than asked for and failed on.
+    if has_head(root)? {
+        sources.push((
             ChangeOrigin::Committed,
             vec!["diff", "--name-only", "-z", &range, "--"],
-        ),
+        ));
+    }
+    sources.extend([
         (
             ChangeOrigin::Staged,
             vec!["diff", "--name-only", "-z", "--cached", "--"],
@@ -127,7 +139,7 @@ pub(super) fn origins(
             ChangeOrigin::Untracked,
             vec!["ls-files", "--others", "--exclude-standard", "-z"],
         ),
-    ];
+    ]);
     for (origin, args) in sources {
         for path in split_paths(git_bytes(root, &args)?) {
             let entry = origins.entry(path).or_default();
@@ -143,6 +155,7 @@ pub(super) fn origins(
 pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<String>, String> {
     let baseline_check = Command::new("git")
         .current_dir(root)
+        .env("GIT_LITERAL_PATHSPECS", "1")
         .args(["diff", "--quiet", baseline, "--"])
         .arg(path)
         .output()
@@ -155,15 +168,18 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
     let output = if changed_at_baseline {
         let result = Command::new("git")
             .current_dir(root)
+            .env("GIT_LITERAL_PATHSPECS", "1")
             .args(["diff", "--no-ext-diff", "--unified=3", baseline, "--"])
             .arg(path)
             .output()
             .map_err(|error| format!("Cannot run git: {error}"))?;
         command_stdout(result)?
+    } else if tracked(root, path)? {
+        String::new()
     } else {
         let result = Command::new("git")
             .current_dir(root)
-            .args(["diff", "--no-index", "--no-ext-diff", "--unified=3"])
+            .args(["diff", "--no-index", "--no-ext-diff", "--unified=3", "--"])
             .arg("/dev/null")
             .arg(path)
             .output()
@@ -174,6 +190,36 @@ pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<Stri
         String::from_utf8_lossy(&result.stdout).into_owned()
     };
     Ok(output.lines().map(str::to_owned).collect())
+}
+
+/// Whether Git currently tracks `path`, independent of its diff state.
+fn tracked(root: &Path, path: &Path) -> Result<bool, String> {
+    let result = Command::new("git")
+        .current_dir(root)
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .args(["ls-files", "--error-unmatch", "--"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("Cannot run git: {error}"))?;
+    match result.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(command_error(&result)),
+    }
+}
+
+/// Whether the repository has a commit that can be used as the log range tip.
+fn has_head(root: &Path) -> Result<bool, String> {
+    let result = Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .map_err(|error| format!("Cannot run git: {error}"))?;
+    match result.status.code() {
+        Some(0) => Ok(true),
+        Some(128) => Ok(false),
+        _ => Err(command_error(&result)),
+    }
 }
 
 /// Parse Git's NUL-delimited name-status output, retaining rename destinations.
@@ -208,6 +254,17 @@ fn split_paths(output: Vec<u8>) -> Vec<PathBuf> {
         .filter(|path| !path.is_empty())
         .map(bytes_to_path)
         .collect()
+}
+
+/// Decode one path followed by Git's platform-specific line terminator.
+pub(super) fn path_from_line(mut output: Vec<u8>) -> PathBuf {
+    if output.last() == Some(&b'\n') {
+        output.pop();
+        if output.last() == Some(&b'\r') {
+            output.pop();
+        }
+    }
+    bytes_to_path(&output)
 }
 
 #[cfg(unix)]
@@ -249,8 +306,15 @@ fn git_bytes(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     if output.status.success() {
         Ok(output.stdout)
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+        // Discovery reports this text to the operator, so a silent failure must
+        // still say something rather than surfacing as an empty message.
+        Err(command_error(&output))
     }
+}
+
+/// Run Git for a command whose stdout is exactly one native path.
+fn git_path(root: &Path, args: &[&str]) -> Result<PathBuf, String> {
+    git_bytes(root, args).map(path_from_line)
 }
 
 /// Accept a successful command and decode its non-path payload.

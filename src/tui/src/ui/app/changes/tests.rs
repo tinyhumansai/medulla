@@ -77,6 +77,67 @@ fn patch_uses_the_baseline_for_deleted_files() {
 }
 
 #[test]
+fn a_reverted_tracked_file_does_not_become_an_untracked_patch() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("tracked.txt"), "baseline\n").expect("write tracked");
+    git(directory.path(), &["add", "tracked.txt"]);
+    git(directory.path(), &["commit", "-m", "tracked baseline"]);
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    let patch = repository::patch(
+        directory.path(),
+        baseline.trim(),
+        std::path::Path::new("tracked.txt"),
+    )
+    .expect("reverted tracked patch");
+
+    assert!(patch.is_empty());
+}
+
+#[test]
+fn an_unborn_repository_uses_the_empty_tree_as_its_baseline() {
+    let directory = tempdir().expect("temp repo");
+    git(directory.path(), &["init"]);
+
+    let baseline = repository::resolve_baseline(directory.path()).expect("empty-tree baseline");
+    let expected = output(directory.path(), &["hash-object", "-t", "tree", "--stdin"]);
+
+    assert_eq!(baseline, expected.trim());
+}
+
+#[test]
+fn load_an_unborn_repository_lists_initial_files_without_commits() {
+    let directory = tempdir().expect("temp repo");
+    git(directory.path(), &["init"]);
+    fs::write(directory.path().join("initial.txt"), "initial\n").expect("write initial file");
+    let baseline = repository::resolve_baseline(directory.path()).expect("empty-tree baseline");
+
+    let (commits, files) = repository::load(directory.path(), &baseline).expect("load unborn repo");
+
+    assert!(commits.is_empty());
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, std::path::Path::new("initial.txt"));
+}
+
+#[test]
+fn patch_treats_pathspec_magic_in_a_tracked_filename_literally() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    let path = std::path::Path::new(":(top)magic.txt");
+    fs::write(directory.path().join(path), "baseline\n").expect("write tracked file");
+    git(directory.path(), &["add", ":(literal):(top)magic.txt"]);
+    git(directory.path(), &["commit", "-m", "add magic filename"]);
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+    fs::write(directory.path().join(path), "changed\n").expect("edit tracked file");
+
+    let patch = repository::patch(directory.path(), baseline.trim(), path).expect("literal patch");
+
+    assert!(patch.iter().any(|line| line == "-baseline"));
+    assert!(patch.iter().any(|line| line == "+changed"));
+}
+
+#[test]
 fn load_preserves_paths_that_git_would_quote() {
     let directory = tempdir().expect("temp repo");
     init_repo(directory.path());
@@ -88,6 +149,35 @@ fn load_preserves_paths_that_git_would_quote() {
     let patch = repository::patch(directory.path(), baseline.trim(), &files[0].path)
         .expect("untracked patch");
     assert!(patch.iter().any(|line| line == "+new"));
+}
+
+#[test]
+fn patch_accepts_an_untracked_path_that_starts_with_a_dash() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("-new.txt"), "new\n").expect("write dash path");
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    let patch = repository::patch(
+        directory.path(),
+        baseline.trim(),
+        std::path::Path::new("-new.txt"),
+    )
+    .expect("dash-prefixed patch");
+
+    assert!(patch.iter().any(|line| line == "+new"));
+}
+
+#[test]
+fn git_path_removes_only_the_command_terminator() {
+    assert_eq!(
+        repository::path_from_line(b"/repo/with space \n".to_vec()),
+        std::path::Path::new("/repo/with space ")
+    );
+    assert_eq!(
+        repository::path_from_line(b"C:\\repo\r\n".to_vec()),
+        std::path::Path::new("C:\\repo")
+    );
 }
 
 /// Initialize a repository with one empty baseline commit.
@@ -330,11 +420,30 @@ fn a_directory_outside_any_repository_reads_as_a_plain_sentence() {
 }
 
 #[test]
-fn a_repository_without_a_commit_says_there_is_nothing_to_compare() {
+fn a_repository_without_a_commit_discovers_the_empty_tree_baseline() {
     let directory = tempdir().expect("temp repo");
     git(directory.path(), &["init"]);
-    let error = repository::discover_in(directory.path()).expect_err("no commits");
-    assert!(error.contains("no commits yet"), "{error}");
+
+    let (_, baseline) = repository::discover_in(directory.path()).expect("unborn discovery");
+
+    let expected = output(directory.path(), &["hash-object", "-t", "tree", "--stdin"]);
+    assert_eq!(baseline, expected.trim());
+}
+
+#[test]
+fn origins_of_an_unborn_repository_skip_the_commit_range() {
+    let directory = tempdir().expect("temp repo");
+    git(directory.path(), &["init"]);
+    fs::write(directory.path().join("staged.txt"), "staged\n").expect("write staged file");
+    git(directory.path(), &["add", "staged.txt"]);
+    let baseline = repository::resolve_baseline(directory.path()).expect("empty-tree baseline");
+
+    let origins = repository::origins(directory.path(), &baseline).expect("unborn origins");
+
+    assert_eq!(
+        origins.get(std::path::Path::new("staged.txt")),
+        Some(&vec![ChangeOrigin::Staged])
+    );
 }
 
 #[test]

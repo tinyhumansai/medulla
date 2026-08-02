@@ -87,6 +87,13 @@ impl App {
             }
             return;
         }
+        // Every remaining tab is a list or a board with no text field, and the
+        // overlays left in `overlay_owns_keys` — the resume picker and the
+        // decisions board — own the keyboard without offering one. Both drop the
+        // payload rather than let it reach the composer behind them. The earlier
+        // arms are still named in that helper on purpose: it is one list, so an
+        // overlay added later cannot own the keyboard while a paste lands behind
+        // it.
         if self.tab() != "Agents" || self.overlay_owns_keys() {
             return;
         }

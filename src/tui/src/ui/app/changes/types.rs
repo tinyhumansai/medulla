@@ -1,7 +1,7 @@
 //! Data types for the session-scoped Git changes view.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::repository;
 

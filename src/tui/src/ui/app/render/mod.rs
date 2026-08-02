@@ -443,9 +443,7 @@ impl App {
             .iter()
             .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
             .sum::<usize>();
-        let left_width = desired_left_width
-            .min(available_left_width)
-            as u16;
+        let left_width = desired_left_width.min(available_left_width) as u16;
         let halves = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([

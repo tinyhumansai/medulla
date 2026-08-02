@@ -377,6 +377,15 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ));
         }
+        let resource_config = self.loaded.config.appearance.clone();
+        let sample = self.resource_monitor.sample();
+        let resource_segments = crate::ui::resources::segments(&resource_config, sample);
+        if !resource_segments.is_empty() {
+            spans.push(Span::styled(
+                format!("  {}", resource_segments.join(" · ")),
+                Style::default().fg(self.theme.accent),
+            ));
+        }
         f.render_widget(Paragraph::new(TLine::from(spans)), halves[0]);
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(

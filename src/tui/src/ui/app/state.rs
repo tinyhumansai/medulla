@@ -117,6 +117,7 @@ impl App {
             settings_index: 0,
             settings_focused: false,
             appearance_index: 0,
+            resource_monitor: Default::default(),
             config_index: 0,
             logout_armed: false,
             relogin_requested: false,

@@ -13,7 +13,7 @@ use ratatui::buffer::Buffer;
 use ratatui::style::Color;
 use ratatui::Terminal;
 
-use medulla::config::{LoadedConfig, TinyplaceConfig};
+use medulla::config::{AppearanceConfig, LoadedConfig, ResourceDisplay, TinyplaceConfig};
 use medulla::runtime::mock::MockRuntime;
 use medulla_tui::ui::app::{App, Cmd, TABS};
 
@@ -150,6 +150,42 @@ fn appearance_persists_theme_to_injected_path() {
         "status note: {}",
         app.status()
     );
+}
+
+#[test]
+fn appearance_cycles_and_persists_process_indicators() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    for _ in 0..4 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Right);
+
+    let out = text_of(&draw(&mut app, 180, 45));
+    assert!(out.contains("CPU indicator        percent"), "{out}");
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("[appearance]"), "{saved}");
+    assert!(saved.contains("cpu = \"percent\""), "{saved}");
+    assert!(saved.contains("diskIo = \"off\""), "{saved}");
+}
+
+#[test]
+fn enabled_process_indicators_render_on_the_status_line() {
+    let mut config = loaded();
+    config.config.appearance = AppearanceConfig {
+        cpu: ResourceDisplay::Percent,
+        ram: ResourceDisplay::Value,
+        disk_io: ResourceDisplay::Value,
+    };
+    let runtime = Arc::new(MockRuntime::demo());
+    let mut app = App::new(runtime, config);
+    let out = text_of(&draw(&mut app, 220, 40));
+    for label in ["CPU", "RAM", "IO R"] {
+        assert!(out.contains(label), "missing {label}: {out}");
+    }
 }
 
 #[test]

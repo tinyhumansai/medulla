@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+
+use super::AppearanceConfig;
 use serde_json::Value;
 
 use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
@@ -707,6 +709,9 @@ pub struct TuiConfig {
     pub update: UpdateConfig,
     #[serde(default)]
     pub theme: ThemeConfig,
+    /// Local-process resource indicators and their display formats.
+    #[serde(default)]
+    pub appearance: AppearanceConfig,
     #[serde(default)]
     pub onboarding: OnboardingConfig,
     /// Workspace roots managed by the daemon worker TUI.
@@ -754,6 +759,7 @@ impl Default for TuiConfig {
             memory: None,
             update: UpdateConfig::default(),
             theme: ThemeConfig::default(),
+            appearance: AppearanceConfig::default(),
             onboarding: OnboardingConfig::default(),
             workflow: WorkflowConfig::default(),
             workflows: WorkflowsConfig::default(),

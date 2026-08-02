@@ -9,6 +9,7 @@
 //! [`core_socket`] resolves and validates the core (`medulla-serve`) socket path.
 //! All public items are re-exported here so callers use `medulla::config::*`.
 
+mod appearance;
 mod core_socket;
 mod load;
 mod persist;
@@ -26,6 +27,7 @@ mod types_tests;
 #[cfg(test)]
 mod urls_tests;
 
+pub use appearance::{AppearanceConfig, ResourceDisplay};
 pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
 pub use load::{default_tinyplace_config, load_config};
 pub use persist::{

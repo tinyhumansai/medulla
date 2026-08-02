@@ -432,10 +432,70 @@ impl App {
 
     /// Cycle the selected Appearance role's color, apply it to the live theme,
     /// and persist the `[theme]` section.
-    pub(super) fn cycle_appearance_role(&mut self, forward: bool) {
-        let role = self.appearance_index.min(THEME_ROLES.len() - 1);
-        self.theme.cycle_role(role, forward);
-        self.persist_theme_now(THEME_ROLES[role]);
+    pub(super) fn cycle_appearance_option(&mut self, forward: bool) {
+        if self.appearance_index < THEME_ROLES.len() {
+            let role = self.appearance_index;
+            self.theme.cycle_role(role, forward);
+            self.persist_theme_now(THEME_ROLES[role]);
+            return;
+        }
+        use medulla::config::ResourceDisplay::{Bar, Off, Percent, Value};
+        let (name, display, choices): (&str, &mut _, &[_]) = match self.appearance_index {
+            4 => (
+                "CPU",
+                &mut self.loaded.config.appearance.cpu,
+                &[Off, Percent, Bar],
+            ),
+            5 => (
+                "RAM",
+                &mut self.loaded.config.appearance.ram,
+                &[Off, Percent, Value, Bar],
+            ),
+            _ => (
+                "Disk I/O",
+                &mut self.loaded.config.appearance.disk_io,
+                &[Off, Value, Bar],
+            ),
+        };
+        let current = choices
+            .iter()
+            .position(|choice| choice == display)
+            .unwrap_or(0);
+        let next = if forward {
+            (current + 1) % choices.len()
+        } else {
+            (current + choices.len() - 1) % choices.len()
+        };
+        *display = choices[next];
+        let value = format!("{:?}", *display).to_ascii_lowercase();
+        match &self.config_path {
+            Some(path) => {
+                let mut section = toml::Table::new();
+                section.insert(
+                    "cpu".into(),
+                    toml::Value::String(
+                        format!("{:?}", self.loaded.config.appearance.cpu).to_ascii_lowercase(),
+                    ),
+                );
+                section.insert(
+                    "ram".into(),
+                    toml::Value::String(
+                        format!("{:?}", self.loaded.config.appearance.ram).to_ascii_lowercase(),
+                    ),
+                );
+                section.insert(
+                    "diskIo".into(),
+                    toml::Value::String(
+                        format!("{:?}", self.loaded.config.appearance.disk_io).to_ascii_lowercase(),
+                    ),
+                );
+                match medulla::config::persist_section(path, "appearance", section) {
+                    Ok(()) => self.set_status(format!("{name} indicator: {value} (saved)")),
+                    Err(error) => self.set_status(format!("Appearance save failed: {error}")),
+                }
+            }
+            None => self.set_status(format!("{name} indicator: {value} (not persisted)")),
+        }
     }
 
     /// Persist the operator's routing strategy to config and remember it on the

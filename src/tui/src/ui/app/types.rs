@@ -737,6 +737,8 @@ pub struct App {
     pub(super) settings_focused: bool,
     /// The selected theme role on the Appearance subpage.
     pub(super) appearance_index: usize,
+    /// Throttled sampler backing the optional local-process status indicators.
+    pub(super) resource_monitor: crate::ui::resources::ResourceMonitor,
     /// The selected editable row on the Config subpage.
     pub(super) config_index: usize,
     /// Whether the Account subpage's logout is armed. Logging out clears stored

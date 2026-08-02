@@ -44,7 +44,7 @@ pub use persist::{
     persist_welcome_completed, persist_workflow_workspaces,
 };
 pub use types::{
-    wire_value, AppearanceConfig, AttributionConfig, BackendConfig, BudgetConfig, ControlStyle,
+    wire_value, AttributionConfig, BackendConfig, BudgetConfig, ControlStyle,
     CoreConfig, EvolveSettings, FieldPlacement, FieldVisibility, FleetConfig, HarnessNameStyle,
     HarnessSection, HostSection, HubSection, HubWorkerConfig, LoadedConfig, MedullaConfig,
     OnboardingConfig, OpencodeConfig, PathStyle, Peer, ProviderBudgetConfig, RouterConfig,

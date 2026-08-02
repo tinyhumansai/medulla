@@ -2,28 +2,6 @@
 
 use super::*;
 
-/// Display preferences edited from the Appearance settings subpage.
-///
-/// Both harness-row details default on so adding this section does not remove
-/// information from existing installations.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default, rename_all = "camelCase")]
-pub struct AppearanceConfig {
-    /// Whether an operator-started harness row shows its Git branch.
-    pub show_harness_branch: bool,
-    /// Whether an operator-started harness row shows its shortened working path.
-    pub show_harness_path: bool,
-}
-
-impl Default for AppearanceConfig {
-    fn default() -> Self {
-        Self {
-            show_harness_branch: true,
-            show_harness_path: true,
-        }
-    }
-}
-
 /// The optional `[theme]` config section: named ratatui colors (case-insensitive)
 /// or `#rrggbb` hex strings. Missing fields fall back to the default theme. The
 /// Appearance settings subpage persists these keys.

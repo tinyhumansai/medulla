@@ -5,7 +5,7 @@ use crossterm::event::{
 };
 
 use super::super::super::pty::PtyManager;
-use super::super::types::{ExecutionMode, SetupStep};
+use super::super::types::{ExecutionMode, SetupStep, WorkerCmd, TAB_MASTER};
 use super::helpers::{app_at_setup, app_with, desk_with, render, render_lines};
 
 /// Build a synthetic left-click at a terminal cell.
@@ -36,6 +36,45 @@ fn ctrl_o_releases_and_recaptures_the_mouse_for_native_copy() {
     )));
     assert!(app.mouse_capture());
     assert!(app.status().contains("click"));
+}
+
+#[test]
+fn a_pasted_address_lands_in_the_prompt_instead_of_being_dropped() {
+    let mut app = app_with(PtyManager::new(), None);
+    app.set_tab(TAB_MASTER);
+    // `a` opens the pairing prompt; the address is pasted, not typed.
+    app.on_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('a'),
+        KeyModifiers::NONE,
+    )));
+
+    assert!(
+        app.on_event(Event::Paste("0xabc\r\n".into())).is_none(),
+        "a paste never submits"
+    );
+    assert_eq!(
+        app.prompt.as_ref().map(|p| p.draft.text.as_str()),
+        Some("0xabc "),
+        "the payload sits in the prompt, flattened to one line"
+    );
+
+    // Enter is what submits, and the flattened trailing newline trims away.
+    let command = app.on_event(Event::Key(KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+    )));
+    assert!(
+        matches!(command, Some(WorkerCmd::ConnectMaster(ref a)) if a == "0xabc"),
+        "pasted address submitted: {command:?}"
+    );
+}
+
+#[test]
+fn a_paste_with_no_prompt_open_is_ignored() {
+    let mut app = app_with(PtyManager::new(), None);
+
+    assert!(app.on_event(Event::Paste("stray".into())).is_none());
+    assert!(app.prompt.is_none(), "no prompt was conjured");
 }
 
 #[test]

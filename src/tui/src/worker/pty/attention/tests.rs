@@ -55,6 +55,20 @@ fn claude_plan_prompt_names_planning() {
 }
 
 #[test]
+fn a_wrapped_claude_plan_prompt_still_names_planning() {
+    let screen = "Would you like to proceed?\n\
+                  ❯ 1. Yes, and auto-\n\
+                       accept edits\n\
+                    2. Yes, but review\n\
+                       each edit first\n\
+                    3. No, keep\n\
+                       planning";
+    let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Approval);
+    assert!(what.contains("planning"), "{what}");
+}
+
+#[test]
 fn ordinary_keep_planning_words_are_not_a_plan_prompt() {
     for screen in [
         "User: keep planning while you investigate",

@@ -56,17 +56,39 @@ fn has_opencode_permission_menu(squashed: &str) -> bool {
 /// menu tail, alongside the selected-option structure that proves the harness
 /// is waiting for a choice.
 fn has_claude_plan_exit_menu(screen: &str) -> bool {
-    has_active_selected_option(screen)
-        && screen
-            .lines()
-            .rev()
-            .filter(|line| !line.trim().is_empty())
-            .take(6)
-            .any(|line| numbered_option_contains(line, "keepplanning"))
+    let lines: Vec<&str> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let tail_start = lines.len().saturating_sub(12);
+    let tail = &lines[tail_start..];
+    has_active_selected_option_in(tail)
+        && tail
+            .iter()
+            .enumerate()
+            .any(|(index, _)| numbered_option_contains(tail, index, "keepplanning"))
 }
 
-/// Whether a numbered menu row's label contains `marker`.
-fn numbered_option_contains(line: &str, marker: &str) -> bool {
+/// Whether a numbered option and its wrapped continuation contain `marker`.
+fn numbered_option_contains(lines: &[&str], index: usize, marker: &str) -> bool {
+    let Some(label) = numbered_option_label(lines[index]) else {
+        return false;
+    };
+    let mut joined = squash(label);
+    for continuation in lines[index + 1..].iter().take(3) {
+        if numbered_option_label(continuation).is_some() || is_composer(continuation) {
+            break;
+        }
+        let continuation = continuation
+            .trim_start_matches([' ', '│', '┃', '|'])
+            .trim_start();
+        joined.push_str(&squash(continuation));
+    }
+    joined.contains(marker)
+}
+
+/// Return the label portion of a numbered menu row.
+fn numbered_option_label(line: &str) -> Option<&str> {
     let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
     let without_caret = trimmed
         .strip_prefix(|first| CARETS.contains(&first))
@@ -77,11 +99,10 @@ fn numbered_option_contains(line: &str, marker: &str) -> bool {
         .take_while(char::is_ascii_digit)
         .collect();
     if digits.is_empty() {
-        return false;
+        return None;
     }
     let after = &without_caret[digits.len()..];
-    matches!(after.chars().next(), Some('.') | Some(')'))
-        && squash(after[1..].trim_start()).contains(marker)
+    matches!(after.chars().next(), Some('.') | Some(')')).then(|| after[1..].trim_start())
 }
 
 /// Carets a harness rests on the option it would take if you pressed Return.
@@ -157,13 +178,14 @@ fn has_active_selected_option(screen: &str) -> bool {
         .filter(|line| !line.trim().is_empty())
         .collect();
     let tail_start = lines.len().saturating_sub(6);
-    lines
-        .iter()
-        .enumerate()
-        .skip(tail_start)
-        .any(|(index, line)| {
-            is_selected_option(line) && !lines[index + 1..].iter().any(|line| is_composer(line))
-        })
+    has_active_selected_option_in(&lines[tail_start..])
+}
+
+/// Whether `lines` contain a selected option with no composer below it.
+fn has_active_selected_option_in(lines: &[&str]) -> bool {
+    lines.iter().enumerate().any(|(index, line)| {
+        is_selected_option(line) && !lines[index + 1..].iter().any(|line| is_composer(line))
+    })
 }
 
 /// Whether `line` is an idle input composer rather than a numbered option.

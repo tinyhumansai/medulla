@@ -84,6 +84,14 @@ impl App {
                         format!("{:?}", self.loaded.config.appearance.disk_io).to_ascii_lowercase(),
                     ),
                 );
+                section.insert(
+                    "showHarnessBranch".into(),
+                    toml::Value::Boolean(self.loaded.config.appearance.show_harness_branch),
+                );
+                section.insert(
+                    "showHarnessPath".into(),
+                    toml::Value::Boolean(self.loaded.config.appearance.show_harness_path),
+                );
                 match medulla::config::persist_section(path, "appearance", section) {
                     Ok(()) => self.set_status(format!("{name} indicator: {value} (saved)")),
                     Err(error) => self.set_status(format!("Appearance save failed: {error}")),

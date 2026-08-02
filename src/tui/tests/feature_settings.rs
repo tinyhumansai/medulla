@@ -193,12 +193,33 @@ fn appearance_cycles_and_persists_process_indicators() {
 }
 
 #[test]
+fn appearance_persists_process_indicators_to_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("medulla.tui.json");
+    std::fs::write(&path, r#"{"unrelated":{"kept":true}}"#).unwrap();
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    for _ in 0..4 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Right);
+
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["appearance"]["cpu"], "percent");
+    assert_eq!(saved["appearance"]["diskIo"], "off");
+    assert_eq!(saved["unrelated"]["kept"], true);
+}
+
+#[test]
 fn enabled_process_indicators_render_on_the_status_line() {
     let mut config = loaded();
     config.config.appearance = AppearanceConfig {
         cpu: ResourceDisplay::Percent,
         ram: ResourceDisplay::Value,
         disk_io: ResourceDisplay::Value,
+        ..AppearanceConfig::default()
     };
     let runtime = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, config);

@@ -9,13 +9,12 @@
 //! says rather than how it is laid out across columns.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::ui::agents::{AgentLane, TaskStatus};
-use crate::ui::resources::DeviceSnapshot;
 use crate::worker::pty::ATTENTION_GLYPH;
 
 use super::super::super::rail::{RailRow, NEW_HARNESS_LABEL};
@@ -25,6 +24,7 @@ use super::types::{AgentsPanes, Selection};
 
 #[cfg(test)]
 mod attention_tests;
+mod device_footer;
 mod harness_line;
 mod rows;
 mod state;
@@ -36,6 +36,7 @@ mod tests;
 mod wrap;
 
 use wrap::wrap_line;
+use device_footer::DeviceFooter;
 
 /// The most content columns the Agents rail ever takes.
 ///
@@ -49,13 +50,6 @@ pub(in crate::ui::app) const RAIL_MAX_CONTENT: usize = 36;
 /// How far a wrapped row's continuation lines are indented, so a row that took
 /// two lines still reads as one row rather than as two entries.
 const CONT_INDENT: usize = 5;
-
-/// Navigation lines the device footer may never take from the rail. Below this
-/// the rail stops being navigable, which no ambient readout is worth.
-const MIN_RAIL_LINES: usize = 3;
-
-/// Device readings the footer can show at most: CPU, RAM, and disk.
-const DEVICE_METRICS: usize = 3;
 
 /// Build the rail title from the lane inventory and one attention snapshot.
 fn rail_title(lanes: &[AgentLane], waiting: usize) -> String {
@@ -176,38 +170,8 @@ impl App {
             }
         }
 
-        // Device health sits under the rail as a footer, not as more selectable
-        // rows: it is ambient context, and putting it on the cursor's path would
-        // place three unactionable stops between the operator and their agents.
-        // It is given only the height the list can spare — `MIN_RAIL_LINES` and
-        // the blank separator are reserved first — so a short terminal drops
-        // disk, then RAM, then the footer entirely rather than pushing lanes
-        // off-screen.
-        let device_budget = (inner.height as usize)
-            .saturating_sub(MIN_RAIL_LINES + 1)
-            .min(DEVICE_METRICS);
-        // Skip sampling when all device metrics are disabled to avoid unnecessary
-        // host polling and mount discovery when the indicators are off.
-        let appearance = &self.loaded.config.appearance;
-        let any_device_metric_enabled = appearance.device_cpu
-            != medulla::config::ResourceDisplay::Off
-            || appearance.device_ram != medulla::config::ResourceDisplay::Off
-            || appearance.device_disk != medulla::config::ResourceDisplay::Off;
-        let device_snapshot = if any_device_metric_enabled {
-            self.device_monitor.sample()
-        } else {
-            DeviceSnapshot::default()
-        };
-        let device =
-            crate::ui::resources::device_lines(appearance, device_snapshot, width, device_budget);
-        // The separator only earns its row when there is something to separate.
-        let footer_height = if device.is_empty() {
-            0
-        } else {
-            device.len() + 1
-        };
-
-        let capacity = (inner.height as usize).saturating_sub(footer_height).max(1);
+        let device_footer = DeviceFooter::prepare(self, width, inner.height as usize);
+        let capacity = device_footer.navigation_capacity;
         let start =
             selected_row_viewport_start(active_line, active_line_end, lines.len(), capacity);
         // Clicks map against the navigation lines alone. Handing the footer's
@@ -222,22 +186,7 @@ impl App {
             owners.iter().skip(start).take(capacity).copied().collect(),
         ));
         let mut view: Vec<TLine> = lines.into_iter().skip(start).take(capacity).collect();
-        if !device.is_empty() {
-            // Pad to the footer's slot so the readings stay pinned to the bottom
-            // of the rail instead of drifting up with a short lane list.
-            while view.len() + footer_height < inner.height as usize {
-                view.push(TLine::from(""));
-            }
-            view.push(TLine::from(""));
-            let style = Style::default()
-                .fg(self.theme.accent)
-                .add_modifier(Modifier::DIM);
-            view.extend(
-                device
-                    .into_iter()
-                    .map(|line| TLine::from(Span::styled(line, style))),
-            );
-        }
+        device_footer.append_to(&mut view, Style::default().fg(self.theme.accent));
         f.render_widget(Paragraph::new(Text::from(view)), inner);
     }
 

@@ -175,11 +175,18 @@ impl FleetOps for HubFleetOps {
         let activity = handle.activity();
         let agent_id = self.roster_id(&handle, &request.worker_address);
         let task_id = activity_key(&request);
-        activity.dispatched(&task_id, &agent_id);
+        let wire_task_id = request.task_id.clone();
+        activity.dispatched_as(&wire_task_id, &task_id, &agent_id);
+        activity.observed(
+            &wire_task_id,
+            "status",
+            "dispatching task",
+            crate::clock::now_millis(),
+        );
 
-        let tee = tee_status(activity.clone(), task_id.clone(), status);
+        let tee = tee_status(activity.clone(), wire_task_id.clone(), status);
         let outcome = handle.task_runner().run(request, Some(tee)).await;
-        record_outcome(&activity, &task_id, &outcome);
+        record_outcome(&activity, &wire_task_id, &outcome);
         outcome
     }
 

@@ -65,6 +65,21 @@ fn mcp_activity_uses_the_cycle_and_abort_handle_the_ui_can_cancel() {
 }
 
 #[test]
+fn worker_frames_land_on_the_cancellable_mcp_activity() {
+    let activity = ActivityLog::new();
+    let request = request("alpha");
+    let visible_id = activity_key(&request);
+    activity.dispatched_as(&request.task_id, &visible_id, "alpha");
+
+    activity.observed(&request.task_id, "ack", "accepted", 1);
+
+    let snapshot = activity.snapshot();
+    let entry = &snapshot[0];
+    assert_eq!(entry.task_id, visible_id);
+    assert_eq!(entry.agent_id, "alpha");
+}
+
+#[test]
 fn the_default_worker_falls_back_to_this_host() {
     let ops = HubFleetOps::new(
         HubSlot::default(),

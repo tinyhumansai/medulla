@@ -5,6 +5,7 @@ use std::collections::{BinaryHeap, HashSet};
 use std::path::Path;
 
 use super::types::{App, HarnessPickerStep, WorkspaceChoice};
+use crate::ui::composer::flatten_paste;
 
 const MAX_WORKSPACE_CHOICES: usize = 10;
 const MAX_RECENT_WORKSPACES: usize = 12;
@@ -26,6 +27,36 @@ impl App {
         }
         self.refresh_harness_workspace_choices();
         self.set_status("Workspace · type to filter · Tab complete · Enter start · Esc back");
+    }
+
+    /// Take a pasted directory into the workspace query, on the step that has
+    /// one.
+    ///
+    /// The picker is two overlays in one. Its harness step is a list of
+    /// providers with no field on it, so a paste there is dropped for the same
+    /// reason it swallows the keyboard — leaving it to surface in the query once
+    /// the step advanced would be worse than losing it. Its workspace step *is*
+    /// a text field ("type to filter"), and pasting a path into it is the common
+    /// case.
+    ///
+    /// Appended rather than inserted, and flattened to one line, because that is
+    /// what the query is: a single-line box with no caret, edited by the same
+    /// `push`/`pop` that typing uses. A path copied with a trailing newline
+    /// therefore lands as the path plus a space, which
+    /// [`resolve_workspace`](crate::ui::harness_pane::LocalHarnesses::resolve_workspace)
+    /// trims before it is used.
+    pub(super) fn paste_into_harness_workspace(&mut self, text: &str) {
+        let Some(picker) = &mut self.harness_picker else {
+            return;
+        };
+        if picker.step != HarnessPickerStep::Workspace {
+            return;
+        }
+        picker.workspace_query.push_str(&flatten_paste(text));
+        // Narrowing the completions invalidates where the cursor pointed,
+        // exactly as typing a character does.
+        picker.workspace_index = 0;
+        self.refresh_harness_workspace_choices();
     }
 
     /// Recompute cached completions after the query changes.

@@ -44,6 +44,13 @@ impl App {
             prompt.paste(text);
             return;
         }
+        // The harness picker is two overlays in one: a provider list with no
+        // field, then a visible path box. Routed as one call so the distinction
+        // stays with the picker rather than being re-derived here.
+        if self.harness_picker.is_some() {
+            self.paste_into_harness_workspace(text);
+            return;
+        }
         // The Workflows copilot is the app's other multiline composer, and the
         // pane a long instruction is most likely to be pasted into. The
         // catalogue and the canvas beside it are lists: they own the keyboard

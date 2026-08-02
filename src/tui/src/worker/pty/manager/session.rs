@@ -186,6 +186,12 @@ impl PtyManager {
         true
     }
 
+    /// Interrupt and close a session only if the operator has not taken it.
+    pub fn stop_if_orchestrator(&self, id: &str) -> bool {
+        self.handle(id)
+            .is_some_and(|session| session.stop_if_orchestrator())
+    }
+
     /// Drop an exited session's record and screen.
     ///
     /// Refuses while the child is alive, so a forgotten session can never leave

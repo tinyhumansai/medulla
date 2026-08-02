@@ -277,8 +277,7 @@ impl PtySessionExecutor {
     /// composer, which is the failure that produces confidently wrong answers
     /// rather than an error.
     fn stop_turn(&self, id: &str) {
-        let _ = self.sessions.write(id, &[0x03]);
-        self.sessions.close(id);
+        self.sessions.stop_if_orchestrator(id);
     }
 
     /// Decide which session serves this task: reuse an idle one, or launch.

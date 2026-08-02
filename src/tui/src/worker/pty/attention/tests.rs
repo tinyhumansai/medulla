@@ -55,6 +55,42 @@ fn claude_plan_prompt_names_planning() {
 }
 
 #[test]
+fn a_wrapped_claude_plan_prompt_still_names_planning() {
+    let screen = "Would you like to proceed?\n\
+                  ❯ 1. Yes, and auto-\n\
+                       accept edits\n\
+                    2. Yes, but review\n\
+                       each edit first\n\
+                    3. No, keep\n\
+                       planning";
+    let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Approval);
+    assert!(what.contains("planning"), "{what}");
+}
+
+#[test]
+fn ordinary_keep_planning_words_are_not_a_plan_prompt() {
+    for screen in [
+        "User: keep planning while you investigate",
+        "User: keep planning while you investigate\nWorking… (esc to interrupt)",
+    ] {
+        assert!(detect(HarnessProvider::Claude, screen).is_none());
+    }
+}
+
+#[test]
+fn a_retained_plan_option_does_not_relabel_a_new_menu() {
+    let screen = "Earlier plan menu:\n\
+                    1. Keep planning\n\
+                  Pick a model to continue with:\n\
+                  ❯ 1. Sonnet\n\
+                    2. Opus";
+    let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Choice);
+    assert!(!what.contains("planning"), "{what}");
+}
+
+#[test]
 fn a_working_harness_wants_nothing() {
     assert!(detect(HarnessProvider::Claude, CLAUDE_WORKING).is_none());
     assert!(is_working(CLAUDE_WORKING));

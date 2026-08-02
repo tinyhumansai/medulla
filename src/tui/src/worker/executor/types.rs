@@ -1,6 +1,10 @@
 //! Data types for the `executor` module.
-#[allow(unused_imports)]
-use super::*;
+
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use super::super::pty::{LaunchSpec, PtyManager};
 /// The session a task will run in, and whether it was already running.
 ///
 /// The distinction decides how its transcript is tailed: a fresh session writes

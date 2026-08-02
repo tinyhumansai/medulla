@@ -33,16 +33,6 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         "claude is asking permission",
     ),
     (
-        HarnessProvider::Claude,
-        // Plan mode's exit prompt. "keep planning" is its third option and is
-        // unique to it, so it is named separately from the tool prompts above:
-        // an operator reading the rail wants to know a plan is ready, which is
-        // a different thing to answer than a shell command.
-        &["keepplanning"],
-        AttentionKind::Approval,
-        "claude finished planning and wants a decision",
-    ),
-    (
         HarnessProvider::Codex,
         &["andtellcodexwhattodo"],
         AttentionKind::Approval,
@@ -57,6 +47,67 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
 /// retained conversation even while the working footer is visible.
 fn has_opencode_permission_menu(squashed: &str) -> bool {
     squashed.contains("allowonce") && squashed.contains("alwaysallow")
+}
+
+/// Whether Claude drew the numbered menu used to leave plan mode.
+///
+/// "Keep planning" is ordinary conversational language, so its words alone
+/// are not a safe marker. Require it to be a numbered option in the active
+/// menu tail, alongside the selected-option structure that proves the harness
+/// is waiting for a choice.
+fn has_claude_plan_exit_menu(screen: &str) -> bool {
+    let lines: Vec<&str> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let tail_start = lines.len().saturating_sub(12);
+    let tail = &lines[tail_start..];
+    let Some(selected) = active_selected_option_index(tail) else {
+        return false;
+    };
+    // The selected row starts the actionable portion of the live menu. A
+    // matching row above it belongs to retained output (or an older menu), so
+    // it must not relabel the current choice as a plan-exit decision.
+    tail[selected..]
+        .iter()
+        .enumerate()
+        .any(|(offset, _)| numbered_option_contains(tail, selected + offset, "keepplanning"))
+}
+
+/// Whether a numbered option and its wrapped continuation contain `marker`.
+fn numbered_option_contains(lines: &[&str], index: usize, marker: &str) -> bool {
+    let Some(label) = numbered_option_label(lines[index]) else {
+        return false;
+    };
+    let mut joined = squash(label);
+    for continuation in lines[index + 1..].iter().take(3) {
+        if numbered_option_label(continuation).is_some() || is_composer(continuation) {
+            break;
+        }
+        let continuation = continuation
+            .trim_start_matches([' ', '│', '┃', '|'])
+            .trim_start();
+        joined.push_str(&squash(continuation));
+    }
+    joined.contains(marker)
+}
+
+/// Return the label portion of a numbered menu row.
+fn numbered_option_label(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    let without_caret = trimmed
+        .strip_prefix(|first| CARETS.contains(&first))
+        .unwrap_or(trimmed)
+        .trim_start();
+    let digits: String = without_caret
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let after = &without_caret[digits.len()..];
+    matches!(after.chars().next(), Some('.') | Some(')')).then(|| after[1..].trim_start())
 }
 
 /// Carets a harness rests on the option it would take if you pressed Return.
@@ -132,13 +183,20 @@ fn has_active_selected_option(screen: &str) -> bool {
         .filter(|line| !line.trim().is_empty())
         .collect();
     let tail_start = lines.len().saturating_sub(6);
-    lines
-        .iter()
-        .enumerate()
-        .skip(tail_start)
-        .any(|(index, line)| {
-            is_selected_option(line) && !lines[index + 1..].iter().any(|line| is_composer(line))
-        })
+    has_active_selected_option_in(&lines[tail_start..])
+}
+
+/// Whether `lines` contain a selected option with no composer below it.
+fn has_active_selected_option_in(lines: &[&str]) -> bool {
+    active_selected_option_index(lines).is_some()
+}
+
+/// Locate the live menu's selected row, excluding completed menus above a composer.
+fn active_selected_option_index(lines: &[&str]) -> Option<usize> {
+    lines.iter().enumerate().rev().find_map(|(index, line)| {
+        (is_selected_option(line) && !lines[index + 1..].iter().any(|line| is_composer(line)))
+            .then_some(index)
+    })
 }
 
 /// Whether `line` is an idle input composer rather than a numbered option.
@@ -238,6 +296,15 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
         .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
     {
         return Some((*kind, (*what).to_string()));
+    }
+    if provider == HarnessProvider::Claude
+        && !is_working(screen)
+        && has_claude_plan_exit_menu(screen)
+    {
+        return Some((
+            AttentionKind::Approval,
+            "claude finished planning and wants a decision".to_string(),
+        ));
     }
     if provider == HarnessProvider::Opencode && has_opencode_permission_menu(&squashed) {
         return Some((

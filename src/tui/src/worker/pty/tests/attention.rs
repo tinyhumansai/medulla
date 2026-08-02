@@ -417,6 +417,40 @@ fn a_bell_rung_mid_turn_is_a_progress_chime_not_a_question() {
 }
 
 #[test]
+fn a_working_vetoed_completion_does_not_hide_the_next_request() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh("printf 'working (esc to interrupt)\\a\\n'; read line; printf '\\033[2J\\033[Hnext request\\a\\n'; sleep 30"))
+        .expect("a session");
+    let row = manager.row(&id).expect("a row");
+
+    wait_for("the working bell to paint", || {
+        super::screen_text(&manager, &id).contains("working")
+    });
+    now.store(200, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(manager.attention(&id), None);
+
+    manager.settle_turn(&id);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("reuse after the observed completion");
+    manager.write(&id, b"\r").expect("emit the next request");
+    wait_for("the next request to paint", || {
+        super::screen_text(&manager, &id).contains("next request")
+    });
+    now.store(500, Ordering::SeqCst);
+    wait_for("the request bell to remain eligible", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.shutdown();
+}
+
+#[test]
 fn an_ordinary_screen_asks_for_nothing() {
     let manager = PtyManager::new();
     let id = manager

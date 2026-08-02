@@ -464,6 +464,26 @@ fn a_harness_waiting_on_you_blinks_and_says_what_it_wants() {
 }
 
 #[test]
+fn a_long_attention_reason_wraps_without_losing_words() {
+    let app = app();
+    let mut row = waiting_row("/workspace/medulla");
+    let reason = "claude is waiting for you to accept the bypass-permissions disclaimer";
+    row.attention = Some(HarnessAttention::new(AttentionKind::Dialog, reason, NOW));
+
+    let lines = app.own_harness_lines(&row, false, 36, NOW);
+    let rendered = lines
+        .iter()
+        .skip(1)
+        .map(|line| line.to_string().trim().to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        rendered.contains(reason),
+        "complete reason was {rendered:?}"
+    );
+}
+
+#[test]
 fn the_pane_you_are_typing_in_does_not_blink_at_you() {
     let mut app = app();
     let row = waiting_row("/workspace/medulla");

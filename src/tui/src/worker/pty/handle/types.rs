@@ -117,6 +117,8 @@ pub(crate) struct AttentionState {
     pub(crate) seen_bells: usize,
     /// Revision used to reject a sample raced by release or acknowledgement.
     pub(crate) generation: u64,
+    /// Generation in which an eligible bell was sampled, cue or working-vetoed.
+    pub(crate) observed_bell_generation: Option<u64>,
     /// Completion chimes promised by settled turns but not observed yet.
     pub(crate) pending_completion_bells: usize,
     /// Epoch ms of the last classification attempt.

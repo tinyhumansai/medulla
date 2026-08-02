@@ -82,7 +82,7 @@ impl App {
         if let Some(cue) = waiting {
             let text = format!("  {ATTENTION_GLYPH} {}", cue.label(now));
             lines.extend(wrap_line(
-                &TLine::from(Span::styled(clip(&text, width.max(1)), style)),
+                &TLine::from(Span::styled(text, style)),
                 width,
                 CONT_INDENT,
             ));

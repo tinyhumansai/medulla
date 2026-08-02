@@ -99,6 +99,11 @@ fn refresh(session: &SessionHandle, now: i64) {
     }
     let consumed_pending = unseen_bells.min(pending_completion_bells);
     state.pending_completion_bells -= consumed_pending;
+    if eligible_bells > 0 {
+        // Remember even a bell vetoed by the working footer. Settlement needs
+        // to know its completion chime was observed, despite there being no cue.
+        state.observed_bell_generation = Some(generation);
+    }
     state.seen_bells = consumed_bell_count(state.seen_bells, bells);
     state.cue = match (cue, state.cue.take()) {
         (None, held) => held.filter(|held| held.kind == AttentionKind::Bell),

@@ -101,6 +101,7 @@ impl SessionHandle {
         let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
         attention.pending_completion_bells -= consumed_pending;
         let completion_bell_already_accounted_for = unseen_bells > consumed_pending
+            || attention.observed_bell_generation == Some(attention.generation)
             || attention
                 .cue
                 .as_ref()

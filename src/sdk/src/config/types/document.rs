@@ -49,6 +49,9 @@ pub struct TuiConfig {
     /// above, which despite the name is only a list of workspace roots.
     #[serde(default)]
     pub workflows: WorkflowsConfig,
+    /// What Medulla's MCP server offers the harnesses it spawns.
+    #[serde(default)]
+    pub mcp: McpSection,
     /// Persisted orchestrator worker roster.
     #[serde(default)]
     pub hub: HubSection,
@@ -111,6 +114,7 @@ impl Default for TuiConfig {
             onboarding: OnboardingConfig::default(),
             workflow: WorkflowConfig::default(),
             workflows: WorkflowsConfig::default(),
+            mcp: McpSection::default(),
             hub: HubSection::default(),
             host: HostSection::default(),
             hosts: Vec::new(),

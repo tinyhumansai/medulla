@@ -84,6 +84,43 @@ fn agents_x_cancels_selected_cycle_task() {
 }
 
 #[test]
+fn agents_x_reaches_local_mcp_cancel_when_backend_steering_is_unavailable() {
+    let inner = Arc::new(MockRuntime::empty());
+    inner.script_event(TuiEvent::TaskStart {
+        task_id: "mcp:dispatch-1/t:task-1".into(),
+        instruction: "delegated locally".into(),
+        depth: 1,
+        agent_id: Some("medulla".into()),
+        contract: None,
+    });
+    let runtime = Arc::new(LocalCancelRuntime {
+        inner,
+        cancelled: Mutex::new(Vec::new()),
+    });
+    let mut app = App::new(runtime.clone(), loaded());
+    app.refresh_snapshot();
+    tab(&mut app, "Agents");
+    for _ in 0..12 {
+        if app.selected_task_id().is_some() {
+            break;
+        }
+        let _ = app.on_event(alt_key(KeyCode::Down));
+    }
+
+    let _ = app.on_event(alt_key(KeyCode::Char('X')));
+
+    assert_eq!(
+        *runtime.cancelled.lock().unwrap(),
+        [("mcp:dispatch-1".to_string(), "task-1".to_string())]
+    );
+    assert!(
+        app.status().contains("Cancel requested"),
+        "{}",
+        app.status()
+    );
+}
+
+#[test]
 fn agents_a_opens_the_answer_prompt() {
     let (mut app, _rt) = app_with_selected_task();
     let _ = app.on_event(alt_key(KeyCode::Char('A')));

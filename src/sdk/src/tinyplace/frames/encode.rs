@@ -45,7 +45,10 @@ fn build(
         model: input.model,
         tool_mode: input.tool_mode,
         workflow: input.workflow,
+        workflow_fingerprint: input.workflow_fingerprint,
+        workflow_inputs: input.workflow_inputs,
         conversation: input.conversation,
+        fleet_depth: input.fleet_depth,
         usage,
         // An empty snapshot says nothing and would only cost bytes on every
         // status frame, so it is dropped rather than sent.

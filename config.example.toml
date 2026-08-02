@@ -164,6 +164,38 @@ tokenEnv = "MEDULLA_TOKEN"
 # httpAllowlist = []
 
 # ---------------------------------------------------------------------------
+# mcp — Medulla's tool server, as offered to the harnesses it spawns
+# ---------------------------------------------------------------------------
+# Medulla drives Claude Code and Codex over ACP as a client, so offering an MCP
+# server is the only way it can hand a spawned harness anything to call. That
+# server is this binary in a subprocess. Nothing here writes to another
+# program's config, and nothing it enables is reachable by a process Medulla did
+# not spawn: the socket path and grant token are minted per session and handed
+# to exactly one child.
+# [mcp]
+# Offer the fleet_* tools — see the fleet, dispatch work to it, poll and abort.
+# Turning this off leaves the workflow_* tools untouched.
+#
+# These only exist on a host that is running a fleet — in practice the machine
+# you drive Medulla from. A harness dispatched to a remote worker is run by that
+# worker's daemon, which has no hub of its own, so it gets the workflow_* tools
+# and is never shown the fleet ones. The same instruction therefore reaches a
+# harness with a different tool surface depending on where the task landed.
+# fleetTools = true
+# How deep a dispatch tree may go before fleet_dispatch is withheld, counted
+# from the operator's own turn. 0 lets no spawned harness dispatch; 1 lets only
+# those the orchestrator spawned directly. Enforced against the grant Medulla
+# minted, not against anything the harness claims about itself.
+# maxDepth = 2
+# Most concurrent MCP-dispatched tasks one grant may hold. Absent follows
+# workflows.maxParallelAgents.
+# maxInFlight = 4
+# Override the control socket path. Absent uses an account-scoped path under the
+# Medulla home, which is what keeps two accounts on one machine from sharing a
+# fleet.
+# socketPath = "/absolute/path/to/control.sock"
+
+# ---------------------------------------------------------------------------
 # workflow — daemon worker workspace allowlist
 # ---------------------------------------------------------------------------
 # [workflow]

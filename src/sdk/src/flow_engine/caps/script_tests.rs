@@ -16,6 +16,28 @@
 use super::*;
 use serde_json::json;
 
+/// The plain shape most cases here want: an inline script, no declared
+/// environment. Cases that exercise `cwd`, a script file, or `env` build a
+/// [`ScriptRequest`] themselves.
+async fn run(
+    language: ScriptLanguage,
+    source: &str,
+    input: &Value,
+    timeout: Duration,
+    cwd: Option<&Path>,
+) -> Result<ScriptOutput> {
+    let env = BTreeMap::new();
+    run_script(ScriptRequest {
+        language,
+        source: ScriptSource::Inline(source),
+        input,
+        timeout,
+        cwd,
+        env: &env,
+    })
+    .await
+}
+
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Whether an interpreter is on `PATH`, so a test can skip rather than fail.
@@ -34,7 +56,7 @@ fn available(program: &str) -> bool {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_shell_script_reads_its_input_on_stdin_and_returns_stdout() {
-    let output = run_script(
+    let output = run(
         ScriptLanguage::Shell,
         "cat",
         &json!({ "name": "sweep" }),
@@ -56,7 +78,7 @@ async fn a_shell_script_reads_its_input_on_stdin_and_returns_stdout() {
 #[tokio::test]
 async fn a_shell_script_can_read_its_input_from_the_path_instead() {
     // Shell reads a path more naturally than a pipe, so both are offered.
-    let output = run_script(
+    let output = run(
         ScriptLanguage::Shell,
         "cat \"$MEDULLA_INPUT\"",
         &json!({ "n": 1 }),
@@ -75,7 +97,7 @@ async fn a_shell_script_can_read_its_input_from_the_path_instead() {
 #[cfg(unix)]
 #[tokio::test]
 async fn the_input_path_is_also_the_first_argument() {
-    let output = run_script(
+    let output = run(
         ScriptLanguage::Shell,
         "cat \"$1\"",
         &json!(42),
@@ -94,7 +116,7 @@ async fn the_input_path_is_also_the_first_argument() {
 #[cfg(unix)]
 #[tokio::test]
 async fn output_that_is_not_json_comes_back_as_a_string() {
-    let output = run_script(
+    let output = run(
         ScriptLanguage::Shell,
         "echo hello there",
         &json!(null),
@@ -114,7 +136,7 @@ async fn output_that_is_not_json_comes_back_as_a_string() {
 #[cfg(unix)]
 #[tokio::test]
 async fn stderr_survives_a_script_that_succeeded() {
-    let output = run_script(
+    let output = run(
         ScriptLanguage::Shell,
         "echo warning: skipped one >&2; echo done",
         &json!(null),
@@ -135,7 +157,7 @@ async fn stderr_survives_a_script_that_succeeded() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_failing_script_reports_its_stderr_rather_than_only_its_code() {
-    let err = run_script(
+    let err = run(
         ScriptLanguage::Shell,
         "echo could not reach the host >&2; exit 3",
         &json!(null),
@@ -158,7 +180,7 @@ async fn a_failing_script_reports_its_stderr_rather_than_only_its_code() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_script_that_never_ends_is_stopped_and_says_so() {
-    let err = run_script(
+    let err = run(
         ScriptLanguage::Shell,
         "sleep 30",
         &json!(null),
@@ -173,7 +195,7 @@ async fn a_script_that_never_ends_is_stopped_and_says_so() {
 
 #[tokio::test]
 async fn a_missing_interpreter_says_what_is_missing_rather_than_failing_opaquely() {
-    let err = run_script(
+    let err = run(
         ScriptLanguage::Python,
         "print(1)",
         &json!(null),
@@ -200,7 +222,7 @@ async fn a_script_runs_where_it_was_told_to() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("marker.txt"), "found me").expect("write");
 
-    let output = run_script(
+    let output = run(
         ScriptLanguage::Shell,
         "cat marker.txt",
         &json!(null),
@@ -221,7 +243,7 @@ async fn a_script_runs_where_it_was_told_to() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_script_with_no_directory_given_runs_somewhere_disposable() {
-    let output = run_script(ScriptLanguage::Shell, "pwd", &json!(null), TIMEOUT, None)
+    let output = run(ScriptLanguage::Shell, "pwd", &json!(null), TIMEOUT, None)
         .await
         .expect("runs");
 
@@ -241,7 +263,7 @@ async fn javascript_reads_the_same_input_the_same_way() {
         return;
     }
 
-    let output = run_script(
+    let output = run(
         ScriptLanguage::JavaScript,
         "const fs = require('fs');\n\
          const input = JSON.parse(fs.readFileSync(0, 'utf8'));\n\
@@ -262,7 +284,7 @@ async fn python_reads_the_same_input_the_same_way() {
         return;
     }
 
-    let output = run_script(
+    let output = run(
         ScriptLanguage::Python,
         "import json, sys\nprint(json.dumps({'doubled': json.load(sys.stdin)['n'] * 2}))",
         &json!({ "n": 21 }),
@@ -311,7 +333,7 @@ async fn shell_is_refused_on_windows_rather_than_emulated() {
     // path-translating into Git Bash or swapping in `cmd`/PowerShell — either
     // of which would make a workflow look portable while quietly behaving
     // differently by host.
-    let err = run_script(
+    let err = run(
         ScriptLanguage::Shell,
         "echo hi",
         &json!(null),

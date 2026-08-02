@@ -557,7 +557,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // returns `None` when there are none, so the gate only duplicated a check it
     // already makes. The hub is tiny.place/harness wiring and stays TUI-side
     // regardless of which runtime backs the session.
-    let _hub_session = crate::hub_relay::start(
+    let hub_session = crate::hub_relay::start(
         &env,
         &home,
         hub_slot.clone(),
@@ -569,6 +569,30 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         loaded.config.fleet.agent_templates.clone(),
     )
     .await;
+
+    // Bound once, here, and held for the whole process: the socket belongs to
+    // this process rather than to a login session, and rebinding inside the
+    // relogin loop below would race this process's own live socket. The server
+    // reads the hub slot per request, so a relogin that refills that slot is
+    // picked up with no rebind.
+    #[cfg(feature = "workflows")]
+    let _control_plane = {
+        let primary_address = loaded.config.host.effective_address();
+        let local_default_worker = local_dispatch
+            .hosts
+            .iter()
+            .find(|worker| worker.address == primary_address)
+            .map(|worker| worker.address.clone());
+        crate::control_plane::start(
+            &env,
+            &loaded.config,
+            hub_session.is_some(),
+            hub_slot.clone(),
+            local_default_worker,
+            &hub_logs,
+        )
+        .await
+    };
 
     // A session, and another after every logout. `run` reports `Relogin` when
     // the Account page's logout landed, and the whole point of that logout is to

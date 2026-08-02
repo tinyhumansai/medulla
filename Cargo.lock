@@ -3224,6 +3224,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libc",
  "openhuman",
  "regex",
  "reqwest",
@@ -3240,6 +3241,23 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "uuid 1.24.0",
+]
+
+[[package]]
+name = "medulla-link"
+version = "0.5.6"
+dependencies = [
+ "chacha20poly1305",
+ "fs2",
+ "hmac",
+ "rand 0.8.7",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

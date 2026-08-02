@@ -13,6 +13,7 @@
 
 mod account;
 mod appearance;
+mod changes;
 mod commands;
 mod credentials;
 mod custom_harnesses;

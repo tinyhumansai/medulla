@@ -41,10 +41,11 @@ use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 /// putting one line back. Memory is out of the build entirely (its tab said
 /// "coming soon"); Tasks duplicates what the Agents tab already shows per lane.
 #[cfg(feature = "workflows")]
-pub const TABS: [&str; 6] = [
+pub const TABS: [&str; 7] = [
     "Overview",
     "Agents",
     "Workflows",
+    "Changes",
     "Hosts",
     "Feedback",
     "Settings",
@@ -53,7 +54,9 @@ pub const TABS: [&str; 6] = [
 /// Without the workflow engine. A slim build must not offer a tab that cannot
 /// draw anything.
 #[cfg(not(feature = "workflows"))]
-pub const TABS: [&str; 5] = ["Overview", "Agents", "Hosts", "Feedback", "Settings"];
+pub const TABS: [&str; 6] = [
+    "Overview", "Agents", "Changes", "Hosts", "Feedback", "Settings",
+];
 
 /// The Routing tab's left-nav pages.
 ///
@@ -607,6 +610,11 @@ impl HandbackPolicy {
 
 /// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Attach a session-local review comment to a changed file.
+    ChangesComment {
+        /// Repository-relative path being reviewed.
+        path: std::path::PathBuf,
+    },
     /// Add a worker from an address/@handle line.
     HostAdd,
     /// Edit the label of the worker with the given id.
@@ -743,6 +751,8 @@ pub struct App {
     pub snapshot: RuntimeSnapshot,
     /// The active top-level tab index (into [`TABS`]).
     pub tab_index: usize,
+    /// Git changes made since this TUI session started.
+    pub(super) changes: super::changes::GitChangesState,
     pub(super) draft: Draft,
     pub(super) history: Vec<String>,
     pub(super) history_index: i64,

@@ -3,7 +3,7 @@
 //! The Workflows tab shows a graph and a chat beside it. The chat is not a new
 //! kind of agent — it is one dispatched harness task per instruction, run
 //! against a session that already has the `medulla-workflows` MCP tools
-//! ([`crate::workflows::mcp`]) attached. So the copilot's "tools to the graph"
+//! ([`crate::mcp`]) attached. So the copilot's "tools to the graph"
 //! are the same operations the `medulla workflow` subcommand and every other
 //! authoring surface call, and none of the three can drift from the others.
 //!
@@ -165,7 +165,10 @@ impl CopilotSession {
             // setting this would run the graph the operator is trying to edit.
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
             conversation: Some(self.conversation.clone()),
+            fleet_depth: 0,
         };
 
         let outcome = self.dispatch.dispatch_with_status(request, status).await?;
@@ -237,7 +240,10 @@ impl CopilotSession {
             // authoring turn, not a run.
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
             conversation: Some(self.conversation.clone()),
+            fleet_depth: 0,
         };
 
         let outcome = self.dispatch.dispatch_with_status(request, status).await?;

@@ -40,7 +40,10 @@ async fn task_runner_round_trips_entirely_over_the_local_bridge() {
                                 model: None,
                                 tool_mode: None,
                                 workflow: None,
+                                workflow_fingerprint: None,
+                                workflow_inputs: Default::default(),
                                 conversation: None,
+                                fleet_depth: 0,
                             }),
                         )
                         .await
@@ -66,7 +69,10 @@ async fn task_runner_round_trips_entirely_over_the_local_bridge() {
                 model: None,
                 tool_mode: None,
                 workflow: None,
+                workflow_fingerprint: None,
+                workflow_inputs: Default::default(),
                 conversation: None,
+                fleet_depth: 0,
             },
             None,
         )

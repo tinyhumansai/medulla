@@ -39,11 +39,12 @@ use medulla::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 /// graph to navigate and a copilot to edit it by. Three panes' worth of surface
 /// does not fit in a subpage of something else.
 #[cfg(feature = "workflows")]
-pub const TABS: [&str; 8] = [
+pub const TABS: [&str; 9] = [
     "Overview",
     "Agents",
     "Tasks",
     "Workflows",
+    "Changes",
     "TokenMaxxxing",
     "Routing",
     "Memory",
@@ -53,10 +54,11 @@ pub const TABS: [&str; 8] = [
 /// Without the workflow engine. A slim build must not offer a tab that cannot
 /// draw anything.
 #[cfg(not(feature = "workflows"))]
-pub const TABS: [&str; 7] = [
+pub const TABS: [&str; 8] = [
     "Overview",
     "Agents",
     "Tasks",
+    "Changes",
     "TokenMaxxxing",
     "Routing",
     "Memory",
@@ -484,6 +486,11 @@ pub(super) enum MemoryEntry {
 
 /// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Attach a session-local review comment to a changed file.
+    ChangesComment {
+        /// Repository-relative path being reviewed.
+        path: String,
+    },
     /// Create a task from a title line.
     TaskCreate,
     /// Edit the selected task title.
@@ -597,6 +604,8 @@ pub struct App {
     pub snapshot: RuntimeSnapshot,
     /// The active top-level tab index (into [`TABS`]).
     pub tab_index: usize,
+    /// Git changes made since this TUI session started.
+    pub(super) changes: super::changes::GitChangesState,
     pub(super) draft: Draft,
     pub(super) history: Vec<String>,
     pub(super) history_index: i64,

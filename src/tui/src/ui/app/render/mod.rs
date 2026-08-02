@@ -18,6 +18,7 @@ use crate::ui::util::{clip, clock, wrap};
 use super::types::{App, TABS};
 
 mod agents;
+mod changes;
 mod decisions;
 mod feedback;
 mod memory;
@@ -423,7 +424,21 @@ impl App {
         } else {
             ""
         };
+        let compact = TABS
+            .iter()
+            .map(|tab| tab.chars().count() + 1)
+            .sum::<usize>()
+            > area.width as usize;
         for (i, name) in TABS.iter().enumerate() {
+            // Keep every destination visible on narrow terminals. The full
+            // TokenMaxxxing word is repeated as the page title immediately
+            // below, so it is the least lossy label to compact when the ring's
+            // minimum one-space-per-tab form is still wider than the screen.
+            let name = if compact && *name == "TokenMaxxxing" {
+                "TokenMx"
+            } else {
+                name
+            };
             let label = if gap.is_empty() {
                 format!("{name} ")
             } else {
@@ -460,6 +475,8 @@ impl App {
             "Tab views · ↑↓ pages · ⏎ open · Esc menu · 1-3 jump"
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
+        } else if self.tab() == "Changes" {
+            "Tab views · ↑↓ files · PageUp/PageDown diff · c comment · r refresh"
         } else {
             "Tab views · Esc/↑↓ rail · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
         };
@@ -484,6 +501,7 @@ impl App {
             "Overview" => self.draw_overview(f, area),
             "Agents" => self.draw_agents(f, area),
             "Tasks" => self.draw_tasks(f, area),
+            "Changes" => self.draw_changes(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),

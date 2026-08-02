@@ -12,6 +12,7 @@
 //! are re-exported here so callers use `crate::ui::app::*`.
 
 mod account;
+mod changes;
 mod commands;
 mod credentials;
 mod decisions;

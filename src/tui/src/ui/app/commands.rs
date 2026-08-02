@@ -110,6 +110,13 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
+            PromptKind::ChangesComment { path } => {
+                if !text.is_empty() {
+                    self.changes.comments.entry(path).or_default().push(text);
+                    self.set_status("Comment added for this session");
+                }
+                None
+            }
             PromptKind::TaskCreate => {
                 if text.is_empty() {
                     self.set_status("Tasks · title is required");

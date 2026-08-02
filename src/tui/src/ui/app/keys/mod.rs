@@ -21,6 +21,7 @@ use crate::ui::composer::{
 };
 
 mod agents;
+mod changes;
 mod memory;
 mod routing;
 mod settings;
@@ -175,6 +176,9 @@ impl App {
             if let MemoryKey::Handled(cmd) = self.on_memory_key(k.code) {
                 return cmd;
             }
+        }
+        if tab == "Changes" && self.on_changes_key(k.code) {
+            return None;
         }
         // Workflows owns three panes, one of which is a composer, so it gets
         // first refusal on every key that is not a global chord — exactly as

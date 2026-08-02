@@ -52,6 +52,7 @@ impl App {
             loaded,
             snapshot,
             tab_index: 0,
+            changes: super::changes::GitChangesState::capture(),
             draft: Draft::new(),
             history: Vec::new(),
             history_index: -1,
@@ -431,6 +432,10 @@ impl App {
     /// active subpage.
     pub(super) fn tab_enter_cmd(&mut self) -> Option<Cmd> {
         match self.tab() {
+            "Changes" => {
+                self.refresh_changes();
+                None
+            }
             "Memory" => Some(Cmd::LoadMemory),
             "Tasks" => Some(Cmd::LoadTasks),
             // The workflow store is files on this machine, so entering the tab

@@ -79,6 +79,18 @@ fn ordinary_keep_planning_words_are_not_a_plan_prompt() {
 }
 
 #[test]
+fn a_retained_plan_option_does_not_relabel_a_new_menu() {
+    let screen = "Earlier plan menu:\n\
+                    1. Keep planning\n\
+                  Pick a model to continue with:\n\
+                  ❯ 1. Sonnet\n\
+                    2. Opus";
+    let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Choice);
+    assert!(!what.contains("planning"), "{what}");
+}
+
+#[test]
 fn a_working_harness_wants_nothing() {
     assert!(detect(HarnessProvider::Claude, CLAUDE_WORKING).is_none());
     assert!(is_working(CLAUDE_WORKING));

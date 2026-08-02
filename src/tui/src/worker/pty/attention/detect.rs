@@ -62,11 +62,16 @@ fn has_claude_plan_exit_menu(screen: &str) -> bool {
         .collect();
     let tail_start = lines.len().saturating_sub(12);
     let tail = &lines[tail_start..];
-    has_active_selected_option_in(tail)
-        && tail
-            .iter()
-            .enumerate()
-            .any(|(index, _)| numbered_option_contains(tail, index, "keepplanning"))
+    let Some(selected) = active_selected_option_index(tail) else {
+        return false;
+    };
+    // The selected row starts the actionable portion of the live menu. A
+    // matching row above it belongs to retained output (or an older menu), so
+    // it must not relabel the current choice as a plan-exit decision.
+    tail[selected..]
+        .iter()
+        .enumerate()
+        .any(|(offset, _)| numbered_option_contains(tail, selected + offset, "keepplanning"))
 }
 
 /// Whether a numbered option and its wrapped continuation contain `marker`.
@@ -183,8 +188,14 @@ fn has_active_selected_option(screen: &str) -> bool {
 
 /// Whether `lines` contain a selected option with no composer below it.
 fn has_active_selected_option_in(lines: &[&str]) -> bool {
-    lines.iter().enumerate().any(|(index, line)| {
-        is_selected_option(line) && !lines[index + 1..].iter().any(|line| is_composer(line))
+    active_selected_option_index(lines).is_some()
+}
+
+/// Locate the live menu's selected row, excluding completed menus above a composer.
+fn active_selected_option_index(lines: &[&str]) -> Option<usize> {
+    lines.iter().enumerate().rev().find_map(|(index, line)| {
+        (is_selected_option(line) && !lines[index + 1..].iter().any(|line| is_composer(line)))
+            .then_some(index)
     })
 }
 

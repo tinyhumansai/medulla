@@ -9,7 +9,8 @@ use serde_json::json;
 use tinyflows::graph_ops::GraphOp;
 
 use super::{
-    apply_workflow_ops, create_workflow, preview_workflow_ops, validate_handle, GraphHandle,
+    apply_workflow_ops, apply_workflow_ops_observed, create_workflow, preview_workflow_ops,
+    validate_handle, GraphHandle,
 };
 use crate::workflows::{FileWorkflowStore, WorkflowError, WorkflowStore};
 
@@ -35,6 +36,133 @@ fn store() -> (tempfile::TempDir, Arc<dyn WorkflowStore>) {
         root.path().join("runs"),
     ));
     (root, store)
+}
+
+#[test]
+fn concurrent_store_instances_rebase_graph_ops_instead_of_losing_one() {
+    let root = tempfile::tempdir().unwrap();
+    let definitions = root.path().join("workflows");
+    let runs = root.path().join("runs");
+    let first: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![definitions.clone()],
+        runs.clone(),
+    ));
+    let second: Arc<dyn WorkflowStore> =
+        Arc::new(FileWorkflowStore::new(vec![definitions.clone()], runs));
+    create_workflow(&first, &document("sweep"), "sweep").unwrap();
+
+    // Both first attempts pause after reading the same record, immediately
+    // before their CAS. One must then lose and retry; no scheduler sleep or
+    // knowledge of the store's private lock path is involved.
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+
+    let name_barrier = barrier.clone();
+    let name_edit = std::thread::spawn(move || {
+        apply_workflow_ops_observed(
+            &first,
+            "sweep",
+            &[GraphOp::SetNodeName {
+                id: "work".into(),
+                name: "Renamed".into(),
+            }],
+            |attempt| {
+                if attempt == 1 {
+                    name_barrier.wait();
+                }
+            },
+        )
+    });
+    let config_barrier = barrier.clone();
+    let config_edit = std::thread::spawn(move || {
+        apply_workflow_ops_observed(
+            &second,
+            "sweep",
+            &[GraphOp::UpdateNodeConfig {
+                id: "work".into(),
+                config: json!({ "prompt": "carefully" }),
+            }],
+            |attempt| {
+                if attempt == 1 {
+                    config_barrier.wait();
+                }
+            },
+        )
+    });
+    let (_, name_attempts) = name_edit.join().unwrap().unwrap();
+    let (_, config_attempts) = config_edit.join().unwrap().unwrap();
+    assert!(
+        name_attempts > 1 || config_attempts > 1,
+        "one stale CAS must rebase"
+    );
+    let check: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![definitions],
+        root.path().join("check-runs"),
+    ));
+    let record = check.get("sweep").unwrap().unwrap();
+    let node = record.graph.node("work").unwrap();
+    assert_eq!(node.name, "Renamed");
+    assert_eq!(node.config["prompt"], "carefully");
+}
+
+#[test]
+fn graph_ops_and_defaults_rebase_without_reverting_each_other() {
+    let root = tempfile::tempdir().unwrap();
+    let definitions = root.path().join("workflows");
+    let runs = root.path().join("runs");
+    let graph_store: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![definitions.clone()],
+        runs.clone(),
+    ));
+    let defaults_store: Arc<dyn WorkflowStore> =
+        Arc::new(FileWorkflowStore::new(vec![definitions.clone()], runs));
+    create_workflow(&graph_store, &document("sweep"), "sweep").unwrap();
+
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+
+    let graph_barrier = barrier.clone();
+    let graph_edit = std::thread::spawn(move || {
+        apply_workflow_ops_observed(
+            &graph_store,
+            "sweep",
+            &[GraphOp::SetNodeName {
+                id: "work".into(),
+                name: "Renamed".into(),
+            }],
+            |attempt| {
+                if attempt == 1 {
+                    graph_barrier.wait();
+                }
+            },
+        )
+    });
+    let defaults_barrier = barrier.clone();
+    let defaults_edit = std::thread::spawn(move || {
+        crate::workflows::ops::set_defaults_observed(
+            &defaults_store,
+            "sweep",
+            Some("codex"),
+            Some("gpt-5"),
+            |attempt| {
+                if attempt == 1 {
+                    defaults_barrier.wait();
+                }
+            },
+        )
+    });
+    let (_, graph_attempts) = graph_edit.join().unwrap().unwrap();
+    let (_, defaults_attempts) = defaults_edit.join().unwrap().unwrap();
+    assert!(
+        graph_attempts > 1 || defaults_attempts > 1,
+        "one stale whole-record CAS must rebase"
+    );
+    let check: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![definitions],
+        root.path().join("check-runs"),
+    ));
+    let record = check.get("sweep").unwrap().unwrap();
+    assert_eq!(record.graph.node("work").unwrap().name, "Renamed");
+    assert_eq!(record.defaults.harness.as_deref(), Some("codex"));
+    assert_eq!(record.defaults.model.as_deref(), Some("gpt-5"));
 }
 
 #[test]

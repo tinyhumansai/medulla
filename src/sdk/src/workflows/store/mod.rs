@@ -81,14 +81,27 @@ pub trait WorkflowStore: Send + Sync {
         record: &WorkflowRecord,
         expected_fingerprint: &str,
     ) -> Result<bool, WorkflowError> {
-        let Some(current) = self.get(&record.id)? else {
-            return Ok(false);
-        };
-        if crate::workflows::fingerprint(&current.graph) != expected_fingerprint {
-            return Ok(false);
-        }
-        self.save(record)?;
-        Ok(true)
+        save_if_current_matches(self, record, expected_fingerprint, |current| {
+            crate::workflows::fingerprint(&current.graph)
+        })
+    }
+
+    /// Save only when the entire current record still has `expected_fingerprint`.
+    ///
+    /// Definition edits use this stronger comparison so a graph write cannot
+    /// silently restore stale defaults or metadata. File-backed stores override
+    /// it atomically; the default supports lightweight test stores.
+    fn save_if_record_fingerprint(
+        &self,
+        record: &WorkflowRecord,
+        expected_fingerprint: &str,
+    ) -> Result<bool, WorkflowError> {
+        save_if_current_matches(
+            self,
+            record,
+            expected_fingerprint,
+            crate::workflows::record_fingerprint,
+        )
     }
 
     /// Remove a workflow. Removing one that does not exist is an error, so a
@@ -211,6 +224,28 @@ pub trait WorkflowStore: Send + Sync {
         let _ = workflow_id;
         Ok(Box::new(NoopProposalDecisionGuard))
     }
+}
+
+/// Implement the non-transactional compare-and-save fallback with a chosen
+/// fingerprint scope.
+fn save_if_current_matches<S, F>(
+    store: &S,
+    record: &WorkflowRecord,
+    expected_fingerprint: &str,
+    fingerprint: F,
+) -> Result<bool, WorkflowError>
+where
+    S: WorkflowStore + ?Sized,
+    F: FnOnce(&WorkflowRecord) -> String,
+{
+    let Some(current) = store.get(&record.id)? else {
+        return Ok(false);
+    };
+    if fingerprint(&current) != expected_fingerprint {
+        return Ok(false);
+    }
+    store.save(record)?;
+    Ok(true)
 }
 
 /// Fetch a proposal by id, turning absence into an error.

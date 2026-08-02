@@ -29,6 +29,22 @@ fn a_field_moved_to_line_two_leaves_the_first_line_and_indents() {
 }
 
 #[test]
+fn a_renamed_thread_is_shown_on_its_own_default_line() {
+    let app = app_with(StatusLineConfig::default());
+    let mut row = harness_row("/workspace/medulla");
+    row.thread_name = Some("Ship the sidebar".into());
+
+    let lines = app.own_harness_lines(&row, false, 48, NOW);
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(
+        lines[0].to_string(),
+        "● codex · unmanaged · main · /workspace/medulla"
+    );
+    assert_eq!(lines[1].to_string(), "  Ship the sidebar");
+}
+
+#[test]
 fn three_lines_are_available_and_an_unused_one_is_closed_up() {
     let app = app_with(StatusLineConfig {
         branch: FieldPlacement::Line3,

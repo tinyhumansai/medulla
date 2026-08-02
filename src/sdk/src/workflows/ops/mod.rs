@@ -34,6 +34,8 @@ use crate::workflows::{FileWorkflowStore, WorkflowError, WorkflowRecord, Workflo
 pub use evolve::{
     accept_proposal, add_note, evolve, notes, proposals, propose, reject_proposal, verify_proposal,
 };
+#[cfg(test)]
+pub(crate) use graph::set_defaults_observed;
 pub use graph::{
     apply_ops, catalog, create, delete, get, host_facts, list, preview_ops, set_defaults, validate,
     HostPolicy,

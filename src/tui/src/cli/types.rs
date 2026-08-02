@@ -39,6 +39,12 @@ pub enum Command {
     Hub,
     /// Author, inspect, and run workflows (`list`/`get`/`create`/`apply-ops`/…).
     Workflow,
+    /// Serve Medulla's tools over MCP on stdin/stdout.
+    ///
+    /// Not for a human to run. Medulla spawns this itself when it starts a
+    /// harness, handing the child a socket path and a grant token in its
+    /// environment; run by hand it serves the workflow tools and no fleet.
+    Mcp,
 }
 
 /// Parsed `medulla init` flags.

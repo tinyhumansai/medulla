@@ -16,7 +16,10 @@ fn the_tool_mode_survives_a_frame_round_trip() {
         model: None,
         tool_mode: Some("propose:sweep".into()),
         workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
         conversation: None,
+        fleet_depth: 0,
     });
 
     let decoded = decode_task_frame(&body).expect("the frame decodes");

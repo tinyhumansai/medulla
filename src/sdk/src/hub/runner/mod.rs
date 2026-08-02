@@ -85,6 +85,12 @@ impl Drop for TaskRunner {
 }
 
 impl TaskRunner {
+    /// Number of registered capability probes, exposed only for cleanup tests.
+    #[cfg(test)]
+    pub(in crate::hub) fn capability_waiter_count(&self) -> usize {
+        self.capabilities_waiters.lock().unwrap().len()
+    }
+
     /// The relay this runner dispatches over, for callers that need to ask it
     /// something — currently roster liveness.
     pub fn relay(&self) -> Arc<dyn Relay> {
@@ -165,7 +171,8 @@ impl TaskRunner {
     ) -> Self {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
         let system_info_waiters: SystemInfoWaiters = Arc::new(Mutex::new(HashMap::new()));
-        let capabilities_waiters: CapabilitiesWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let capabilities_waiters: CapabilitiesWaiters =
+            Arc::new(std::sync::Mutex::new(HashMap::new()));
         let screens = super::ScreenStore::new();
         let pump = tokio::spawn(pump::pump_loop(
             relay.clone(),
@@ -198,16 +205,20 @@ impl TaskRunner {
     /// reaps its correlation entry, and returns [`RunError::Aborted`]. A no-op if
     /// no dispatch is in flight for that id — it already settled, or was never
     /// dispatched here. Best-effort: a lost signal (poisoned lock) just leaves the
-    /// dispatch to its own liveness bound.
-    pub fn abort_task(&self, task_id: &str) {
-        let signal = self
-            .aborts
-            .lock()
-            .ok()
-            .and_then(|map| map.get(task_id).cloned());
-        if let Some(signal) = signal {
-            signal.notify_one();
-        }
+    /// dispatch to its own liveness bound. Returns whether a live dispatch was
+    /// found and signalled.
+    pub fn abort_task(&self, task_id: &str) -> bool {
+        let Ok(mut aborts) = self.aborts.lock() else {
+            return false;
+        };
+        let Some(signal) = aborts.remove(task_id) else {
+            return false;
+        };
+        // Removing and notifying under the same lock makes cancellation and
+        // AbortGuard's terminal cleanup mutually exclusive. If cleanup wins,
+        // this returns false; if this wins, a live task receives the signal.
+        signal.notify_one();
+        true
     }
 
     /// Cancel every dispatch this runner has in flight.
@@ -330,7 +341,10 @@ impl TaskRunner {
                 model: req.model.clone(),
                 tool_mode: req.tool_mode.clone(),
                 workflow: req.workflow.clone(),
+                workflow_fingerprint: req.workflow_fingerprint.clone(),
+                workflow_inputs: req.workflow_inputs.clone(),
                 conversation: req.conversation.clone(),
+                fleet_depth: req.fleet_depth,
             });
 
             if let Err(e) = self.relay.send(&req.worker_address, &body).await {
@@ -431,7 +445,10 @@ async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) 
         model: None,
         tool_mode: None,
         workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
         conversation: None,
+        fleet_depth: 0,
     });
     let _ = relay.send(address, &body).await;
 }

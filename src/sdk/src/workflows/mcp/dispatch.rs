@@ -1,16 +1,16 @@
 //! Tool-call dispatch and the shared JSON helpers behind tool definitions.
 //!
-//! Names are prefixed `workflow_` so they cannot collide with the harness's own
-//! reserved tool names ([`crate::harness_contract::RESERVED_TOOL_NAMES`]).
-
-use std::sync::Arc;
+//! Names are prefixed by their family — `workflow_` and `fleet_` — so they
+//! cannot collide with each other or with the harness's own reserved tool names
+//! ([`crate::harness_contract::RESERVED_TOOL_NAMES`]).
 
 use serde_json::{json, Value};
 
+use crate::mcp::tools::{arg, content};
+use crate::mcp::{McpSession, RpcError};
 use crate::workflows::authoring::GraphHandle;
-use crate::workflows::{ops, WorkflowStore};
+use crate::workflows::ops;
 
-use super::super::RpcError;
 use super::evolve::ToolMode;
 
 /// Every tool this server exposes, in the order a model meets them.
@@ -46,22 +46,21 @@ pub const TOOL_NAMES: [&str; 19] = [
     "workflow_propose",
 ];
 
-/// A JSON Schema object with the given properties and required keys.
-pub(super) fn schema(properties: Value, required: &[&str]) -> Value {
-    json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    })
-}
-
-/// A required string argument.
-fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
-    arguments
-        .get(name)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| RpcError::invalid_params(format!("missing required argument '{name}'")))
+/// Whether a tool performs a short mutation of shared workflow authoring data.
+///
+/// Runs deliberately stay concurrent: they have unique run ids and may take
+/// minutes. These authoring calls are short and include read-modify-write paths
+/// that would otherwise lose one of two pipelined edits.
+fn mutates_workflow(name: &str) -> bool {
+    matches!(
+        name,
+        "workflow_create"
+            | "workflow_apply_ops"
+            | "workflow_defaults"
+            | "workflow_delete"
+            | "workflow_note_add"
+            | "workflow_propose"
+    )
 }
 
 /// Read the optional `inputs` argument: values for the workflow's declared
@@ -88,26 +87,22 @@ fn declared_inputs(
 
 /// Run a `tools/call`.
 pub(crate) async fn call(
-    store: &Arc<dyn WorkflowStore>,
-    policy: &crate::workflows::ops::HostPolicy,
-    mode: ToolMode,
-    params: &Value,
+    session: &McpSession,
+    name: &str,
+    arguments: Value,
 ) -> Result<Value, RpcError> {
-    let name = params
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| RpcError::invalid_params("missing tool name"))?;
-    let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
-
-    // Checked before the match rather than inside each arm: a withheld tool is
-    // withheld whatever its arguments are, and a guard per arm is a guard that
-    // will eventually be forgotten on a new one.
-    if !mode.allows(name) {
-        return Ok(content(&json!({ "error": mode.refusal(name) }), true));
-    }
+    let store = &session.store;
+    let policy = &session.policy;
+    let mode = session.mode;
     if let Some(error) = scope_error(mode, name, &arguments) {
         return Ok(content(&json!({ "error": error }), true));
     }
+
+    let _mutation_guard = if mutates_workflow(name) {
+        Some(session.workflow_mutations.lock().await)
+    } else {
+        None
+    };
 
     let outcome = match name {
         "workflow_list" => ops::list(store).map_err(to_rpc),
@@ -288,17 +283,6 @@ fn string_list(arguments: &Value, name: &str) -> Vec<String> {
         Some(Value::String(single)) => vec![single.clone()],
         _ => Vec::new(),
     }
-}
-
-/// Wrap a value as an MCP tool result.
-fn content(value: &Value, is_error: bool) -> Value {
-    json!({
-        "content": [{
-            "type": "text",
-            "text": serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
-        }],
-        "isError": is_error,
-    })
 }
 
 /// A workflow error as an RPC error.

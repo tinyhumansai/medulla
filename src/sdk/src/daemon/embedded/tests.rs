@@ -120,7 +120,10 @@ fn task_frame(task_id: &str, prompt: &str) -> String {
         model: None,
         tool_mode: None,
         workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
         conversation: None,
+        fleet_depth: 0,
     })
 }
 
@@ -242,7 +245,10 @@ async fn the_host_answers_a_capability_probe_with_what_this_machine_has() {
             model: None,
             tool_mode: None,
             workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
             conversation: None,
+            fleet_depth: 0,
         }),
     )
     .await

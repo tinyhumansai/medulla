@@ -177,7 +177,7 @@ async fn the_host_tool_names_the_custom_presets_this_machine_has() {
         "params": { "name": "workflow_host", "arguments": {} },
     });
 
-    let response = handle_request(&store, &policy, ToolMode::Full, &request)
+    let response = handle_request(&session_with(&store, ToolMode::Full, policy), &request)
         .await
         .expect("a response");
     let facts: Value =

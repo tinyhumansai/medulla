@@ -2,6 +2,7 @@
 
 mod cases;
 mod harness_facts;
+mod policy;
 mod propose;
 
 use cases::*;

@@ -88,7 +88,7 @@ pub(crate) struct SessionIo {
 
 /// The fields that are strings, and therefore cannot be atomics.
 ///
-/// All three are written at most a handful of times per session and read only
+/// These are written at most a handful of times per session and read only
 /// when a row is built, so one small mutex for the set costs nothing and keeps
 /// the hot fields lock-free.
 #[derive(Default)]
@@ -102,6 +102,8 @@ pub(crate) struct ColdFields {
     pub(super) label: String,
     /// The harness session id — minted for claude, read back for codex.
     pub(super) session_id: Option<String>,
+    /// The non-empty terminal title last advertised by the harness.
+    pub(super) thread_name: Option<String>,
     /// Why the session failed, when it did.
     pub(super) last_error: Option<String>,
 }

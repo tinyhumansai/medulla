@@ -41,9 +41,23 @@ impl ActivityLog {
     /// target once, and re-deriving it when a frame returns would have to guess
     /// again with less information.
     pub fn dispatched(&self, task_id: &str, agent_id: &str) {
+        self.dispatched_as(task_id, task_id, agent_id);
+    }
+
+    /// Correlate frames carrying `observed_task_id` with an operator-visible row.
+    ///
+    /// Most dispatches use one id for both. Control-plane dispatches do not:
+    /// workers echo a unique dedupe id while the operator cancels by a separate
+    /// abort handle. Recording the mapping here keeps ACKs and structured work
+    /// on the visible, cancellable row without changing the wire protocol.
+    pub fn dispatched_as(&self, observed_task_id: &str, activity_task_id: &str, agent_id: &str) {
         let mut map = self.attribution.lock().expect("attribution lock");
-        map.retain(|(id, _)| id != task_id);
-        map.push_back((task_id.to_string(), agent_id.to_string()));
+        map.retain(|entry| entry.observed_task_id != observed_task_id);
+        map.push_back(ActivityAttribution {
+            observed_task_id: observed_task_id.to_string(),
+            activity_task_id: activity_task_id.to_string(),
+            agent_id: agent_id.to_string(),
+        });
         while map.len() > ATTRIBUTION_CAPACITY {
             map.pop_front();
         }
@@ -64,19 +78,21 @@ impl ActivityLog {
         at: i64,
         work: Option<Box<crate::harness_work::WorkSnapshot>>,
     ) {
-        let agent_id = self
+        let attribution = self
             .attribution
             .lock()
             .expect("attribution lock")
             .iter()
             .rev()
-            .find(|(id, _)| id == task_id)
-            .map(|(_, agent)| agent.clone())
-            .unwrap_or_default();
+            .find(|entry| entry.observed_task_id == task_id)
+            .cloned();
+        let (task_id, agent_id) = attribution
+            .map(|entry| (entry.activity_task_id, entry.agent_id))
+            .unwrap_or_else(|| (task_id.to_string(), String::new()));
         let mut entries = self.entries.lock().expect("activity lock");
         entries.push_back(WorkerActivity {
             agent_id,
-            task_id: task_id.to_string(),
+            task_id,
             kind: kind.to_string(),
             content: content.to_string(),
             at,
@@ -95,6 +111,30 @@ impl ActivityLog {
             .iter()
             .cloned()
             .collect()
+    }
+
+    /// Whether a reply or error has already settled the named task.
+    ///
+    /// Accepts the worker-facing id and resolves it through the same attribution
+    /// map as [`observed`](Self::observed), so fallback producers cannot append
+    /// a second terminal frame to an operator-visible alias.
+    pub fn has_terminal(&self, observed_task_id: &str) -> bool {
+        let task_id = self
+            .attribution
+            .lock()
+            .expect("attribution lock")
+            .iter()
+            .rev()
+            .find(|entry| entry.observed_task_id == observed_task_id)
+            .map(|entry| entry.activity_task_id.clone())
+            .unwrap_or_else(|| observed_task_id.to_string());
+        self.entries
+            .lock()
+            .expect("activity lock")
+            .iter()
+            .any(|entry| {
+                entry.task_id == task_id && matches!(entry.kind.as_str(), "reply" | "error")
+            })
     }
 
     /// How many distinct tasks are still running per worker.
@@ -124,5 +164,6 @@ impl ActivityLog {
 }
 
 mod types;
+use types::ActivityAttribution;
 pub use types::ActivityLog;
 pub use types::WorkerActivity;

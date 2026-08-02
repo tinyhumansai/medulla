@@ -35,6 +35,10 @@ pub(in crate::ui::app) enum StatusLineField {
     ControlWhen,
     /// How the control state is spelled.
     ControlStyle,
+    /// Where the thread name sits.
+    Thread,
+    /// When the thread name is drawn.
+    ThreadWhen,
     /// Where the Git branch sits.
     Branch,
     /// When the Git branch is drawn.

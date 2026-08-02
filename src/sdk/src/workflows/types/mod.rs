@@ -37,5 +37,6 @@ pub use proposal::{
 pub(crate) use run::bounded_evidence;
 pub use run::{RunId, RunRecord, RunStatus, RunStep};
 pub use workflow::{
-    WorkflowDefaults, WorkflowId, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    record_fingerprint, WorkflowDefaults, WorkflowId, WorkflowRecord, WorkflowRevision,
+    WorkflowSummary,
 };

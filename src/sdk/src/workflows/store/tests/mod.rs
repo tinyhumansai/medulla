@@ -14,7 +14,7 @@
 //! listing), [`path_guards`] (escaping-id refusal), and [`history`]
 //! (revision snapshotting, undo, rollback). Shared fixtures live here and
 //! reach every submodule through `super::*`, the same pattern
-//! `workflows::mcp::tests` uses.
+//! `mcp::tests` uses.
 
 mod discovery;
 mod evolution_scope;

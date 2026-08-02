@@ -117,6 +117,7 @@ impl SessionHandle {
             cwd: self.meta.cwd.clone(),
             branch: self.meta.branch.clone(),
             session_id: cold.session_id.clone(),
+            thread_name: cold.thread_name.clone(),
             started_at: self.meta.started_at,
             last_output_at: self.last_output_at(),
             last_error: cold.last_error.clone(),

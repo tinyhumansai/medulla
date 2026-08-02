@@ -94,7 +94,10 @@ async fn a_task_round_trips_from_the_orchestrator_to_this_device_and_back() {
                 model: None,
                 tool_mode: None,
                 workflow: None,
+                workflow_fingerprint: None,
+                workflow_inputs: Default::default(),
                 conversation: None,
+                fleet_depth: 0,
             },
             None,
         )
@@ -161,7 +164,10 @@ async fn concurrent_tasks_are_correlated_back_to_the_right_caller() {
                             model: None,
                             tool_mode: None,
                             workflow: None,
+                            workflow_fingerprint: None,
+                            workflow_inputs: Default::default(),
                             conversation: None,
+                            fleet_depth: 0,
                         },
                         None,
                     )

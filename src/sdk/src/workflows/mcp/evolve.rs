@@ -56,19 +56,21 @@ impl ToolMode {
         }
     }
 
-    /// The mode named by this string, defaulting to [`ToolMode::Full`].
+    /// The mode named by this string, defaulting absent values to full.
+    ///
+    /// Unknown explicit values fail closed to [`ToolMode::Propose`]: accepting
+    /// a typo as full authority would widen a restricted review turn.
     pub fn from_wire(value: Option<&str>) -> Self {
         match value {
+            None | Some("full") => Self::Full,
             Some("propose") => Self::Propose,
-            _ => Self::Full,
+            Some(_) => Self::Propose,
         }
     }
 
     /// The mode named by this environment, defaulting to [`ToolMode::Full`].
     ///
-    /// An unrecognised value is `Full` rather than an error: this runs at
-    /// server startup, where failing would leave a turn with no tools at all
-    /// and no way to say why.
+    /// An unrecognised explicit value is restricted rather than trusted.
     pub fn from_env(env: &std::collections::HashMap<String, String>) -> Self {
         Self::from_wire(env.get(TOOL_MODE_ENV).map(String::as_str))
     }

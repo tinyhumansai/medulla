@@ -1,102 +1,8 @@
-//! Unit tests for [`super::attribution`]: trailer shape, the config-driven
-//! on/off switch, and per-provider coverage.
+//! Exercises generated hook shims and attribution environment behavior.
 
 use std::collections::HashMap;
 
-use super::{attribution_args, attribution_trailer, ATTRIBUTION_EMAIL, ATTRIBUTION_NAME};
-use crate::config::AttributionConfig;
-use crate::tinyplace::HarnessProvider;
-
-#[test]
-fn trailer_uses_the_medulla_identity() {
-    assert_eq!(
-        attribution_trailer(),
-        "Co-authored-by: Medulla <medulla@tinyhumans.ai>"
-    );
-    assert_eq!(ATTRIBUTION_NAME, "Medulla");
-    assert_eq!(ATTRIBUTION_EMAIL, "medulla@tinyhumans.ai");
-}
-
-/// Attribution is on unless the operator turns it off — a harness commit that
-/// does not name the tool that wrote it is the surprising case.
-#[test]
-fn attribution_config_defaults_to_on() {
-    assert!(AttributionConfig::default().commit);
-}
-
-/// An absent `attribution` section, and an empty one, both mean "on".
-#[test]
-fn absent_or_empty_config_section_means_on() {
-    let from_absent: crate::config::TuiConfig =
-        serde_json::from_str("{}").expect("empty config parses");
-    assert!(from_absent.attribution.commit);
-
-    let from_empty: AttributionConfig = serde_json::from_str("{}").expect("empty section parses");
-    assert!(from_empty.commit);
-}
-
-/// The operator turns attribution off with `attribution.commit: false`.
-#[test]
-fn config_can_turn_attribution_off() {
-    let parsed: crate::config::TuiConfig =
-        serde_json::from_str(r#"{"attribution":{"commit":false}}"#).expect("config parses");
-    assert!(!parsed.attribution.commit);
-}
-
-#[test]
-fn claude_receives_inline_settings_carrying_the_trailer() {
-    let args = attribution_args(HarnessProvider::Claude, true);
-    assert_eq!(args.len(), 2, "expected a flag/value pair, got {args:?}");
-    assert_eq!(args[0], "--settings");
-
-    let parsed: serde_json::Value =
-        serde_json::from_str(&args[1]).expect("settings payload must be valid JSON");
-    assert_eq!(
-        parsed["attribution"]["commit"],
-        serde_json::Value::String(attribution_trailer()),
-    );
-}
-
-/// The payload must carry *only* `attribution.commit`, so it layers over the
-/// operator's own settings without clobbering unrelated keys.
-#[test]
-fn claude_settings_payload_is_minimal() {
-    let args = attribution_args(HarnessProvider::Claude, true);
-    let parsed: serde_json::Value = serde_json::from_str(&args[1]).unwrap();
-
-    let top = parsed.as_object().expect("payload is a JSON object");
-    assert_eq!(top.len(), 1, "unexpected top-level keys: {top:?}");
-    let attribution = parsed["attribution"]
-        .as_object()
-        .expect("attribution is a JSON object");
-    assert_eq!(attribution.len(), 1, "unexpected keys: {attribution:?}");
-}
-
-/// Codex hardcodes its own trailer and Opencode has no knob at all, so neither
-/// receives CLI args — they are attributed by the hook instead.
-#[test]
-fn providers_without_a_knob_receive_no_args() {
-    for provider in [HarnessProvider::Codex, HarnessProvider::Opencode] {
-        assert!(
-            attribution_args(provider, true).is_empty(),
-            "{provider:?} should receive no attribution args"
-        );
-    }
-}
-
-#[test]
-fn disabling_suppresses_args_for_every_provider() {
-    for provider in [
-        HarnessProvider::Claude,
-        HarnessProvider::Codex,
-        HarnessProvider::Opencode,
-    ] {
-        assert!(
-            attribution_args(provider, false).is_empty(),
-            "{provider:?} should receive no args when off"
-        );
-    }
-}
+use super::super::attribution_env;
 
 // ---------------------------------------------------------------------------
 // prepare_commit_msg hook generator tests
@@ -134,14 +40,7 @@ fn every_client_hook_is_shimmed_and_executable() {
     use std::os::unix::fs::PermissionsExt;
 
     let hook_dir = super::prepare_commit_msg::generate_hook_dir();
-    for name in [
-        "prepare-commit-msg",
-        "pre-commit",
-        "commit-msg",
-        "pre-push",
-        "post-checkout",
-        "pre-rebase",
-    ] {
+    for name in super::prepare_commit_msg::CLIENT_HOOKS {
         let hook_path = hook_dir.join(name);
         assert!(hook_path.exists(), "{name} shim must exist: {hook_path:?}");
         let perms = std::fs::metadata(&hook_path)
@@ -504,17 +403,6 @@ fn hook_is_noop_when_attribution_env_is_empty() {
     );
 }
 
-/// Cleanup must remove the hook directory and its contents.
-#[cfg(unix)]
-#[test]
-fn cleanup_removes_hook_dir() {
-    let hook_dir = super::prepare_commit_msg::generate_hook_dir();
-    assert!(hook_dir.exists(), "hook dir exists before cleanup");
-
-    super::prepare_commit_msg::cleanup_hook_dir(&hook_dir);
-    assert!(!hook_dir.exists(), "hook dir removed after cleanup");
-}
-
 /// Git hooks are not supported on non-Unix, so the hook env is empty there.
 #[cfg(not(unix))]
 #[test]
@@ -532,7 +420,7 @@ fn non_unix_returns_empty() {
 #[cfg(unix)]
 #[test]
 fn enabled_attribution_yields_hook_env() {
-    let env = super::attribution_env(true, &HashMap::new());
+    let env = attribution_env(true, &HashMap::new());
     assert!(
         env.contains_key("MEDULLA_ATTRIBUTION"),
         "missing MEDULLA_ATTRIBUTION"
@@ -543,14 +431,17 @@ fn enabled_attribution_yields_hook_env() {
 /// Turning attribution off in config suppresses the hook env entirely.
 #[test]
 fn disabled_attribution_yields_no_hook_env() {
-    assert!(super::attribution_env(false, &HashMap::new()).is_empty());
+    assert!(attribution_env(false, &HashMap::new()).is_empty());
 }
 
 /// `cleanup_hook_dir` must remove a directory the caller owns.
 #[cfg(unix)]
 #[test]
 fn cleanup_hook_dir_removes_the_directory() {
-    let hook_dir = super::prepare_commit_msg::generate_hook_dir();
+    let root = tempfile::tempdir().unwrap();
+    let hook_dir = root.path().join("caller-owned-hooks");
+    std::fs::create_dir(&hook_dir).unwrap();
+    std::fs::write(hook_dir.join("shim"), "test").unwrap();
     assert!(hook_dir.exists(), "hook dir must exist before cleanup");
 
     super::prepare_commit_msg::cleanup_hook_dir(&hook_dir);

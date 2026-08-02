@@ -351,3 +351,82 @@ fn discovery_resolves_the_root_and_pins_the_current_head() {
         output(directory.path(), &["rev-parse", "HEAD"]).trim()
     );
 }
+
+#[test]
+fn comment_anchors_survive_patch_refresh_when_valid() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("file.txt"), "one\ntwo\nthree\n").expect("write");
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    let mut state = GitChangesState {
+        root: Some(directory.path().to_path_buf()),
+        baseline: Some(baseline.trim().to_owned()),
+        ..GitChangesState::default()
+    };
+    state.refresh();
+    assert_eq!(state.files.len(), 1);
+
+    // Add comments at file and line level
+    let path = state.selected_path().expect("a changed file").to_path_buf();
+    state.comments.upsert(&path, CommentAnchor::File, "file comment");
+    state.comments.upsert(&path, CommentAnchor::Line(0), "line comment");
+    assert_eq!(state.comments.count_for(&path), 2);
+
+    // Refresh without changing the patch
+    state.refresh();
+
+    // File-level comment survives; line comment survived because line 0 still exists
+    assert_eq!(
+        state.comments.body(&path, CommentAnchor::File),
+        Some("file comment")
+    );
+    assert_eq!(
+        state.comments.body(&path, CommentAnchor::Line(0)),
+        Some("line comment")
+    );
+
+    // Edit the file to add more lines
+    fs::write(directory.path().join("file.txt"), "zero\none\ntwo\nthree\nfour\n").expect("write");
+    state.refresh();
+
+    // File-level comment still survives
+    assert_eq!(
+        state.comments.body(&path, CommentAnchor::File),
+        Some("file comment")
+    );
+    // Line 0 still exists but has different content now
+    assert_eq!(
+        state.comments.body(&path, CommentAnchor::Line(0)),
+        Some("line comment")
+    );
+}
+
+#[test]
+fn out_of_bounds_line_comments_are_invalidated_on_refresh() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("file.txt"), "one\ntwo\nthree\n").expect("write");
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    let mut state = GitChangesState {
+        root: Some(directory.path().to_path_buf()),
+        baseline: Some(baseline.trim().to_owned()),
+        ..GitChangesState::default()
+    };
+    state.refresh();
+
+    let path = state.selected_path().expect("a changed file").to_path_buf();
+    let initial_patch_len = state.patch.len();
+
+    // Add a comment on a line near the end
+    state.comments.upsert(&path, CommentAnchor::Line(initial_patch_len - 1), "end comment");
+    assert_eq!(state.comments.count_for(&path), 1);
+
+    // Replace file with much shorter content, patch becomes shorter
+    fs::write(directory.path().join("file.txt"), "x\n").expect("write");
+    state.refresh();
+
+    // The comment at the old end line is now out of bounds and should be removed
+    assert!(state.comments.body(&path, CommentAnchor::Line(initial_patch_len - 1)).is_none());
+}

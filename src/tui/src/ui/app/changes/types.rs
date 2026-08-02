@@ -102,13 +102,21 @@ impl GitChangesState {
     pub(crate) fn reload_patch(&mut self) {
         self.scroll = 0;
         self.cursor = 0;
-        self.patch = match (&self.root, &self.baseline, self.selected_path()) {
+        let selected_path = self.selected_path().map(|p| p.to_path_buf());
+        self.patch = match (&self.root, &self.baseline, &selected_path) {
             (Some(root), Some(baseline), Some(path)) => {
                 repository::patch(root, baseline, path).unwrap_or_else(|error| vec![error])
             }
             _ => Vec::new(),
         };
         self.hunks = hunks(&self.patch);
+
+        // Invalidate anchors that no longer point to valid patch positions.
+        // When a patch changes, line and hunk indices become stale and must be
+        // remapped or removed to prevent comments from drifting to wrong content.
+        if let Some(path) = selected_path {
+            self.comments.invalidate_out_of_bounds(&path, self.patch.len());
+        }
     }
 
     /// Move the file selection, reloading the patch that comes into view.

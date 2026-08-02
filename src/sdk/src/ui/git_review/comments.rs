@@ -80,4 +80,23 @@ impl ReviewComments {
     pub fn iter(&self) -> impl Iterator<Item = &ReviewComment> {
         self.items.iter()
     }
+
+    /// Remove comments with line/hunk anchors that exceed the new patch size.
+    ///
+    /// When a patch is reloaded and changes significantly, line and hunk indices
+    /// become stale. This method invalidates anchors that no longer point to valid
+    /// positions, keeping only file-level comments which remain valid across
+    /// refreshes. Line comments whose index is still within bounds are retained.
+    pub fn invalidate_out_of_bounds(&mut self, path: &Path, new_patch_len: usize) {
+        self.items.retain(|item| {
+            if item.path != path {
+                return true; // keep comments for other paths
+            }
+            match item.anchor {
+                CommentAnchor::File => true, // file-level comments always survive refresh
+                CommentAnchor::Line(index) => index < new_patch_len, // keep line if index valid
+                CommentAnchor::Hunk(_) => false, // hunk indices are unstable; invalidate them
+            }
+        });
+    }
 }

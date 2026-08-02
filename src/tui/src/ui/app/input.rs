@@ -7,7 +7,7 @@ use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
 
 use super::rail::RailRow;
 use crate::ui::agents::{agent_row_model, AgentRole, AgentRow, TaskStatus};
-use crate::ui::composer::Draft;
+use crate::ui::composer::{insert_at, normalize_paste, Draft};
 
 use super::types::{App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_SUBPAGES};
 
@@ -51,8 +51,52 @@ impl App {
                 self.on_key(k)
             }
             Event::Mouse(m) => self.on_mouse(m),
+            Event::Paste(text) => {
+                self.on_paste(&text);
+                None
+            }
             _ => None,
         }
+    }
+
+    /// Insert a bracketed-paste payload into whatever text field has the caret.
+    ///
+    /// The point of routing paste as its own event is that the payload is never
+    /// re-read as key presses: a newline inside it lands in the draft instead of
+    /// reaching the `Enter` bindings, so a multi-line paste no longer submits
+    /// itself — once per line, at that — and a `/`-prefixed paste no longer runs
+    /// the command the peek happens to be highlighting. Only an explicit `Enter`
+    /// submits.
+    ///
+    /// Who takes it follows [`App::on_key`]'s precedence exactly, because a
+    /// paste that landed somewhere the keyboard is not would be a payload the
+    /// operator never sees again. So: the hand-back question first, since it is
+    /// asked while still attached and the chrome holds the keyboard until it is
+    /// answered; then the attached harness, which owns the keyboard outright and
+    /// therefore owns the paste; then an open inline prompt, flattened to one
+    /// line because that is all it can draw. Otherwise the Agents composer takes
+    /// it, with `\r\n` and bare `\r` normalised to `\n`. Modals that own no text
+    /// field (the harness and resume pickers, the decisions overlay) swallow the
+    /// paste for the same reason they swallow the keyboard.
+    fn on_paste(&mut self, text: &str) {
+        if self.handback_prompt.is_some() {
+            return;
+        }
+        if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
+            self.paste_into_harness(&session, text);
+            return;
+        }
+        if let Some(prompt) = self.prompt.as_mut() {
+            prompt.paste(text);
+            return;
+        }
+        if self.tab() != "Agents" || self.overlay_owns_keys() {
+            return;
+        }
+        self.draft = insert_at(&self.draft.text, self.draft.cursor, &normalize_paste(text));
+        // Narrowing the command peek invalidates where its cursor pointed,
+        // exactly as typing a character does.
+        self.command_index = 0;
     }
 
     /// Handle scroll and left-click mouse events for the active tab.

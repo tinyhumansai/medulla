@@ -42,6 +42,7 @@ impl ReviewComments {
                     path: path.to_path_buf(),
                     anchor,
                     body: body.to_owned(),
+                    outdated: false,
                 });
                 true
             }
@@ -81,22 +82,36 @@ impl ReviewComments {
         self.items.iter()
     }
 
-    /// Remove comments with line/hunk anchors that exceed the new patch size.
+    /// Mark comments outdated when their anchors can no longer be resolved.
     ///
-    /// When a patch is reloaded and changes significantly, line and hunk indices
-    /// become stale. This method invalidates anchors that no longer point to valid
-    /// positions, keeping only file-level comments which remain valid across
-    /// refreshes. Line comments whose index is still within bounds are retained.
-    pub fn invalidate_out_of_bounds(&mut self, path: &Path, new_patch_len: usize) {
-        self.items.retain(|item| {
+    /// When a patch refreshes, line and hunk indices may no longer point to valid
+    /// positions. Rather than deleting a user's written comment, we mark it outdated.
+    /// Outdated comments remain visible (so the user's work is not lost) but cannot be
+    /// edited and do not participate in new anchor resolution. File-level comments are
+    /// never marked outdated since they are position-independent.
+    pub fn mark_outdated_if_invalid(&mut self, path: &Path, new_patch_len: usize) {
+        for item in self.items.iter_mut() {
             if item.path != path {
-                return true; // keep comments for other paths
+                continue; // skip comments for other paths
+            }
+            if item.outdated {
+                continue; // already marked
             }
             match item.anchor {
-                CommentAnchor::File => true, // file-level comments always survive refresh
-                CommentAnchor::Line(index) => index < new_patch_len, // keep line if index valid
-                CommentAnchor::Hunk(_) => false, // hunk indices are unstable; invalidate them
+                CommentAnchor::File => {
+                    // file-level comments always remain valid
+                }
+                CommentAnchor::Line(index) => {
+                    if index >= new_patch_len {
+                        // line index no longer valid after refresh
+                        item.outdated = true;
+                    }
+                }
+                CommentAnchor::Hunk(_) => {
+                    // hunk indices are unstable across refreshes; mark all as outdated
+                    item.outdated = true;
+                }
             }
-        });
+        }
     }
 }

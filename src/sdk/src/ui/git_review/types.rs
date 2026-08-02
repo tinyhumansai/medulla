@@ -99,7 +99,8 @@ impl CommentAnchor {
 ///
 /// Comments live only in memory for the lifetime of the session and are never
 /// written back into the repository, so adding one cannot modify the working
-/// tree.
+/// tree. When a patch refreshes and an anchor can no longer be resolved, the
+/// comment is marked outdated but retained so the user's written note is not lost.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewComment {
     /// Repository-relative path the comment belongs to.
@@ -108,4 +109,7 @@ pub struct ReviewComment {
     pub anchor: CommentAnchor,
     /// The operator's note.
     pub body: String,
+    /// Whether this comment's anchor is no longer valid (patch changed, target disappeared).
+    /// Outdated comments are displayed but cannot be edited and do not contribute to new anchors.
+    pub outdated: bool,
 }

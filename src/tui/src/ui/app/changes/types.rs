@@ -111,12 +111,13 @@ impl GitChangesState {
         };
         self.hunks = hunks(&self.patch);
 
-        // Invalidate anchors that no longer point to valid patch positions.
-        // When a patch changes, line and hunk indices become stale and must be
-        // remapped or removed to prevent comments from drifting to wrong content.
+        // Mark anchors outdated when they no longer point to valid patch positions.
+        // When a patch changes, line and hunk indices become stale. Rather than
+        // deleting a user's written comment, we mark it outdated so it remains visible
+        // but cannot be edited or used for new anchors.
         if let Some(path) = selected_path {
             self.comments
-                .invalidate_out_of_bounds(&path, self.patch.len());
+                .mark_outdated_if_invalid(&path, self.patch.len());
         }
     }
 

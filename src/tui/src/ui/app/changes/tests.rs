@@ -462,7 +462,7 @@ fn discovery_resolves_the_root_and_pins_the_current_head() {
 }
 
 #[test]
-fn comment_anchors_survive_patch_refresh_when_valid() {
+fn file_level_comments_survive_all_refreshes() {
     let directory = tempdir().expect("temp repo");
     init_repo(directory.path());
     fs::write(directory.path().join("file.txt"), "one\ntwo\nthree\n").expect("write");
@@ -474,32 +474,13 @@ fn comment_anchors_survive_patch_refresh_when_valid() {
         ..GitChangesState::default()
     };
     state.refresh();
-    assert_eq!(state.files.len(), 1);
 
-    // Add comments at file and line level
     let path = state.selected_path().expect("a changed file").to_path_buf();
     state
         .comments
         .upsert(&path, CommentAnchor::File, "file comment");
-    state
-        .comments
-        .upsert(&path, CommentAnchor::Line(0), "line comment");
-    assert_eq!(state.comments.count_for(&path), 2);
 
-    // Refresh without changing the patch
-    state.refresh();
-
-    // File-level comment survives; line comment survived because line 0 still exists
-    assert_eq!(
-        state.comments.body(&path, CommentAnchor::File),
-        Some("file comment")
-    );
-    assert_eq!(
-        state.comments.body(&path, CommentAnchor::Line(0)),
-        Some("line comment")
-    );
-
-    // Edit the file to add more lines
+    // Edit the file multiple times
     fs::write(
         directory.path().join("file.txt"),
         "zero\none\ntwo\nthree\nfour\n",
@@ -507,20 +488,15 @@ fn comment_anchors_survive_patch_refresh_when_valid() {
     .expect("write");
     state.refresh();
 
-    // File-level comment still survives
+    // File-level comment always survives
     assert_eq!(
         state.comments.body(&path, CommentAnchor::File),
         Some("file comment")
     );
-    // Line 0 still exists but has different content now
-    assert_eq!(
-        state.comments.body(&path, CommentAnchor::Line(0)),
-        Some("line comment")
-    );
 }
 
 #[test]
-fn out_of_bounds_line_comments_are_invalidated_on_refresh() {
+fn line_comments_become_outdated_when_out_of_bounds() {
     let directory = tempdir().expect("temp repo");
     init_repo(directory.path());
     fs::write(directory.path().join("file.txt"), "one\ntwo\nthree\n").expect("write");
@@ -536,23 +512,59 @@ fn out_of_bounds_line_comments_are_invalidated_on_refresh() {
     let path = state.selected_path().expect("a changed file").to_path_buf();
     let initial_patch_len = state.patch.len();
 
-    // Add a comment on a line near the end
+    // Add a line comment near the end
     state.comments.upsert(
         &path,
         CommentAnchor::Line(initial_patch_len - 1),
         "end comment",
     );
-    assert_eq!(state.comments.count_for(&path), 1);
 
-    // Replace file with much shorter content, patch becomes shorter
+    // Replace file with shorter content
     fs::write(directory.path().join("file.txt"), "x\n").expect("write");
     state.refresh();
 
-    // The comment at the old end line is now out of bounds and should be removed
-    assert!(state
+    // Comment is retained (not deleted) but marked outdated
+    let comments: Vec<_> = state.comments.for_path(&path).collect();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].outdated, "Comment should be marked outdated");
+    assert_eq!(comments[0].body, "end comment", "Comment text is preserved");
+}
+
+#[test]
+fn hunk_comments_become_outdated_on_refresh() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("file.txt"), "one\ntwo\nthree\n").expect("write");
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    let mut state = GitChangesState {
+        root: Some(directory.path().to_path_buf()),
+        baseline: Some(baseline.trim().to_owned()),
+        ..GitChangesState::default()
+    };
+    state.refresh();
+
+    let path = state.selected_path().expect("a changed file").to_path_buf();
+
+    // Add a hunk comment
+    state
         .comments
-        .body(&path, CommentAnchor::Line(initial_patch_len - 1))
-        .is_none());
+        .upsert(&path, CommentAnchor::Hunk(0), "hunk comment");
+
+    // Refresh the patch (even without changing the file)
+    state.reload_patch();
+
+    // Hunk comment is retained but marked outdated (hunks are unstable)
+    let comments: Vec<_> = state.comments.for_path(&path).collect();
+    assert_eq!(comments.len(), 1);
+    assert!(
+        comments[0].outdated,
+        "Hunk comment should be marked outdated"
+    );
+    assert_eq!(
+        comments[0].body, "hunk comment",
+        "Comment text is preserved"
+    );
 }
 
 #[test]

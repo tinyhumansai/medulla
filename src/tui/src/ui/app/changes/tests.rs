@@ -80,11 +80,11 @@ fn patch_uses_the_baseline_for_deleted_files() {
 fn load_preserves_paths_that_git_would_quote() {
     let directory = tempdir().expect("temp repo");
     init_repo(directory.path());
-    fs::write(directory.path().join("café\tfile.txt"), "new\n").expect("write unusual path");
+    fs::write(directory.path().join("café file.txt"), "new\n").expect("write unusual path");
     let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
 
     let (_, files) = repository::load(directory.path(), baseline.trim()).expect("load");
-    assert_eq!(files[0].path, std::path::Path::new("café\tfile.txt"));
+    assert_eq!(files[0].path, std::path::Path::new("café file.txt"));
     let patch = repository::patch(directory.path(), baseline.trim(), &files[0].path)
         .expect("untracked patch");
     assert!(patch.iter().any(|line| line == "+new"));

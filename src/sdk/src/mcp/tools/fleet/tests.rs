@@ -121,6 +121,25 @@ async fn a_session_with_no_fleet_is_shown_no_fleet_tools() {
 }
 
 #[tokio::test]
+async fn a_fleet_only_host_stays_closed_when_its_grant_cannot_connect() {
+    let root = tempfile::tempdir().unwrap();
+    let store: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![root.path().join("workflows")],
+        root.path().join("runs"),
+    ));
+    let session = McpSession::local(store, Default::default(), ToolMode::Full)
+        .with_workflows_enabled(false)
+        .with_fleet(Arc::new(OfflineFleet));
+
+    let names = advertised(&session).await;
+
+    assert!(
+        names.is_empty(),
+        "an offline fleet-only grant must fail closed"
+    );
+}
+
+#[tokio::test]
 async fn a_connected_session_is_shown_every_fleet_tool() {
     let (_root, session) = session(Arc::new(FakeBackend::connected()));
 

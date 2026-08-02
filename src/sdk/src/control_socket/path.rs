@@ -213,7 +213,7 @@ fn ensure_private_parent(path: &Path, trusted_path: bool) -> Result<(), ControlS
 /// permits its users to remove only entries they own.
 #[cfg(unix)]
 fn insecure_ancestor(path: &Path) -> Result<Option<PathBuf>, ControlSocketError> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -229,11 +229,38 @@ fn insecure_ancestor(path: &Path) -> Result<Option<PathBuf>, ControlSocketError>
         let meta = std::fs::metadata(ancestor)
             .map_err(|error| ControlSocketError::Io(error.to_string()))?;
         let mode = meta.permissions().mode();
-        if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+        if mode & 0o022 != 0
+            && (mode & 0o1000 == 0 || !trusted_sticky_owner(meta.uid(), effective_uid()))
+        {
             return Ok(Some(ancestor.to_path_buf()));
         }
     }
     Ok(None)
+}
+
+/// Whether a sticky directory's owner is allowed to control this socket.
+///
+/// Sticky mode prevents ordinary peers from replacing one another's entries,
+/// but the directory owner remains allowed to do so. Only this process's user
+/// and root are therefore trusted owners.
+#[cfg(unix)]
+pub(super) fn trusted_sticky_owner(owner_uid: u32, effective_uid: u32) -> bool {
+    owner_uid == effective_uid || owner_uid == 0
+}
+
+/// The effective Unix user whose socket entry the directory must protect.
+#[cfg(unix)]
+fn effective_uid() -> u32 {
+    // SAFETY: `geteuid` takes no arguments and has no safety preconditions.
+    unsafe { libc::geteuid() }
+}
+
+/// The stable filesystem identity used to guard stale-socket reclamation.
+#[cfg(unix)]
+fn socket_identity(meta: &std::fs::Metadata) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+
+    (meta.dev(), meta.ino())
 }
 
 /// Make `path` bindable, or say why it is not.
@@ -271,6 +298,7 @@ pub async fn prepare_bind(path: &Path, trusted_path: bool) -> Result<(), Control
     if !meta.file_type().is_socket() {
         return Err(ControlSocketError::NotASocket(path.to_path_buf()));
     }
+    let probed_identity = socket_identity(&meta);
 
     match tokio::time::timeout(
         std::time::Duration::from_millis(250),
@@ -287,7 +315,18 @@ pub async fn prepare_bind(path: &Path, trusted_path: bool) -> Result<(), Control
                 std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
             ) =>
         {
-            std::fs::remove_file(path).map_err(|e| ControlSocketError::Io(e.to_string()))
+            // Another starter may have reclaimed and rebound this path while
+            // our connect was in flight. Never unlink an inode we did not
+            // actually probe.
+            let current = match std::fs::symlink_metadata(path) {
+                Ok(current) => current,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => return Err(ControlSocketError::Io(error.to_string())),
+            };
+            if !current.file_type().is_socket() || socket_identity(&current) != probed_identity {
+                return Err(ControlSocketError::AlreadyBound(path.to_path_buf()));
+            }
+            std::fs::remove_file(path).map_err(|error| ControlSocketError::Io(error.to_string()))
         }
         // Any other error, including a timeout, is ambiguous. Refusing to bind
         // is the safe half of that: the cost is no control plane this run, where

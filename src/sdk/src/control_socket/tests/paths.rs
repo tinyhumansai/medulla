@@ -140,7 +140,7 @@ fn without_a_runtime_dir_the_fallback_uses_the_temp_dir() {
 
 #[cfg(unix)]
 mod bind {
-    use super::super::super::path::prepare_bind;
+    use super::super::super::path::{prepare_bind, trusted_sticky_owner};
     use super::*;
 
     #[tokio::test]
@@ -219,6 +219,14 @@ mod bind {
 
         let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
         assert_eq!(mode & 0o1777, 0o1777, "shared parent must not be chmodded");
+    }
+
+    #[test]
+    fn sticky_directories_are_trusted_only_for_this_user_or_root() {
+        assert!(trusted_sticky_owner(1000, 1000));
+        assert!(trusted_sticky_owner(0, 1000));
+        assert!(!trusted_sticky_owner(2000, 1000));
+        assert!(!trusted_sticky_owner(2000, 0));
     }
 
     #[tokio::test]

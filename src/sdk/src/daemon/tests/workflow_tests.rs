@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::daemon::providers::{RunTaskFn, RunTaskResult};
 use crate::daemon::task_loop::workflow::RuntimeDispatch;
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::hub::TaskRequest;
@@ -59,4 +60,50 @@ async fn workflow_dispatch_waits_for_a_daemon_harness_slot() {
     task.await
         .expect("dispatch task joins")
         .expect("dispatch runs");
+}
+
+#[tokio::test]
+async fn workflow_dispatch_preserves_the_callers_fleet_depth() {
+    let (captured_tx, mut captured_rx) = tokio::sync::mpsc::unbounded_channel();
+    let runner: RunTaskFn = Arc::new(move |options| {
+        let captured_tx = captured_tx.clone();
+        Box::pin(async move {
+            captured_tx.send(options.env.clone()).unwrap();
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: options.provider,
+                reply: "done".to_string(),
+                events: 0,
+            })
+        })
+    });
+    let (send, _) = recording_send();
+    let runtime = crate::daemon::DaemonRuntime::new(base_config(), runner, send);
+    let dispatch = RuntimeDispatch::new(runtime, "peer".into());
+
+    dispatch
+        .dispatch(TaskRequest {
+            task_id: "child-1".into(),
+            abort_id: "child-1".into(),
+            cycle_id: None,
+            instruction: "do the child work".into(),
+            worker_address: "claude".into(),
+            provider: None,
+            custom_harness: None,
+            model: None,
+            tool_mode: Some("execute".into()),
+            workflow: None,
+            conversation: None,
+            fleet_depth: 2,
+        })
+        .await
+        .unwrap();
+
+    let env = captured_rx.recv().await.unwrap();
+    assert_eq!(
+        env.get(crate::control_socket::FLEET_DEPTH_ENV)
+            .map(String::as_str),
+        Some("2")
+    );
 }

@@ -225,9 +225,13 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // The custom harness presets ride along with the `workflows` section: an
     // author choosing a harness needs to know which presets this machine has,
     // and they live in their own config section rather than that one.
-    let policy = crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
-        .map(policy_from_loaded)
-        .unwrap_or_default();
+    let loaded =
+        crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd).ok();
+    let workflows_enabled = loaded
+        .as_ref()
+        .map(|loaded| loaded.config.workflows.enabled)
+        .unwrap_or(true);
+    let policy = loaded.map(policy_from_loaded).unwrap_or_default();
     // The mode the parent asked for. Read once at startup for the same reason
     // config is: this process serves exactly one harness session, and which
     // kind of turn that is was decided before it was spawned.
@@ -237,7 +241,9 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // asked. A host with no grant in its environment — a remote worker, or one
     // with fleet tools turned off — gets the offline stand-in and serves the
     // workflow tools alone rather than failing to start.
-    let session = McpSession::local(store, policy, mode).with_fleet(backend::from_env(env).await);
+    let session = McpSession::local(store, policy, mode)
+        .with_workflows_enabled(workflows_enabled)
+        .with_fleet(backend::from_env(env).await);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut stdout = tokio::io::stdout();
 

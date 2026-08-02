@@ -76,27 +76,7 @@ impl DaemonRuntime {
     }
 }
 
-/// Add a task's workflow-tool mode to the environment its harness runs in.
-///
-/// The MCP server is a subprocess the harness spawns, so the only channel from
-/// here to it is the environment the session was started with. Absent for every
-/// ordinary dispatch, which leaves the full authoring surface in place.
-pub(super) fn with_tool_mode(
-    mut env: std::collections::HashMap<String, String>,
-    mode: Option<&str>,
-) -> std::collections::HashMap<String, String> {
-    with_tool_mode_at_depth(env_without_depth(&mut env), mode, 0)
-}
-
-/// Strip any inherited depth so it cannot leak from this process into a task.
-fn env_without_depth(
-    env: &mut std::collections::HashMap<String, String>,
-) -> std::collections::HashMap<String, String> {
-    env.remove(crate::control_socket::FLEET_DEPTH_ENV);
-    std::mem::take(env)
-}
-
-/// [`with_tool_mode`], and the depth the task's harness runs at.
+/// Add a task's workflow-tool mode and fleet depth to its harness environment.
 ///
 /// Always written, never inherited: one daemon serves tasks at several depths,
 /// so a value left over from its own environment could only ever be right for

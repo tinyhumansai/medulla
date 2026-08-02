@@ -153,10 +153,6 @@ pub(crate) fn definitions(
                     "type": "string",
                     "description": "The handle fleet_dispatch returned.",
                 },
-                "reason": {
-                    "type": "string",
-                    "description": "Why, for the operator's log.",
-                },
             }),
             &["taskId"],
         ),

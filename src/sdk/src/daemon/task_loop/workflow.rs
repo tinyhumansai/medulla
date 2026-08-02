@@ -78,7 +78,11 @@ impl HarnessDispatch for RuntimeDispatch {
             provider,
             prompt: request.instruction,
             cwd: inner.config.workspace.clone(),
-            env: super::with_tool_mode(inner.config.env.clone(), request.tool_mode.as_deref()),
+            env: super::with_tool_mode_at_depth(
+                inner.config.env.clone(),
+                request.tool_mode.as_deref(),
+                request.fleet_depth,
+            ),
             timeout_ms: inner.config.task_timeout_ms,
             model: request.model.or_else(|| inner.config.model.clone()),
             agent: inner.config.agent.clone(),

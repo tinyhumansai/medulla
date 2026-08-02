@@ -28,7 +28,7 @@ fn task_without_tool_mode_clears_an_inherited_mode() {
         "propose".to_string(),
     )]);
 
-    env = crate::daemon::task_loop::with_tool_mode(env, None);
+    env = crate::daemon::task_loop::with_tool_mode_at_depth(env, None, 0);
 
     assert!(!env.contains_key(crate::mcp::TOOL_MODE_ENV));
 }
@@ -36,8 +36,11 @@ fn task_without_tool_mode_clears_an_inherited_mode() {
 #[cfg(feature = "workflows")]
 #[test]
 fn task_with_tool_mode_forces_acp_transport() {
-    let env =
-        crate::daemon::task_loop::with_tool_mode(std::collections::HashMap::new(), Some("propose"));
+    let env = crate::daemon::task_loop::with_tool_mode_at_depth(
+        std::collections::HashMap::new(),
+        Some("propose"),
+        0,
+    );
 
     assert_eq!(
         env.get(crate::daemon::providers::HARNESS_PROTOCOL_ENV)

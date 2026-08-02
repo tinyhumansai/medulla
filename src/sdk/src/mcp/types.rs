@@ -56,4 +56,14 @@ impl McpSession {
         self.fleet = fleet;
         self
     }
+
+    /// Apply the host workflow switch before a fleet handshake is attempted.
+    ///
+    /// A successful handshake replaces both family flags with the grant's
+    /// authority. If it fails, this keeps a fleet-only host from accidentally
+    /// falling back to the local workflow surface.
+    pub(super) fn with_workflows_enabled(mut self, enabled: bool) -> Self {
+        self.families.workflows = enabled;
+        self
+    }
 }

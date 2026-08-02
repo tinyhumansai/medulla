@@ -134,6 +134,11 @@ fn cpu_segment(display: ResourceDisplay, fraction: f64) -> Option<String> {
     }
 }
 
+/// Formats process RSS relative to the machine's total physical memory.
+///
+/// Using total memory makes the percentage meaningful alongside the absolute
+/// RSS value. A platform that reports no total memory renders `0%` instead of
+/// hiding an explicitly enabled metric or dividing by zero.
 fn ram_segment(display: ResourceDisplay, used: u64, total: u64) -> Option<String> {
     let fraction = if total == 0 {
         0.0

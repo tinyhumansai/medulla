@@ -403,9 +403,36 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ));
         }
-        let resource_config = self.loaded.config.appearance.clone();
+        // Operational messages must remain readable when resource indicators
+        // are enabled. Reserve up to a third of the row for a non-empty status;
+        // an idle status yields the whole row back to the indicators.
+        let status_width = UnicodeWidthStr::width(self.status.as_str());
+        let reserved_status_width = status_width.min(usize::from(area.width / 3));
+        let available_left_width = usize::from(area.width).saturating_sub(reserved_status_width);
+        let base_left_width = spans
+            .iter()
+            .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+            .sum::<usize>();
+
+        let mut resource_config = self.loaded.config.appearance.clone();
         let sample = self.resource_monitor.sample();
-        let resource_segments = crate::ui::resources::segments(&resource_config, sample);
+        let mut resource_segments = crate::ui::resources::segments(&resource_config, sample);
+        let resource_width = resource_segments.join(" · ").width() + 2;
+        if base_left_width + resource_width > available_left_width {
+            // Bars are the widest representation. Retain every enabled metric
+            // at narrow widths by degrading bars to their compact percentage
+            // form before the pane itself has to clip content.
+            for display in [
+                &mut resource_config.cpu,
+                &mut resource_config.ram,
+                &mut resource_config.disk_io,
+            ] {
+                if *display == medulla::config::ResourceDisplay::Bar {
+                    *display = medulla::config::ResourceDisplay::Percent;
+                }
+            }
+            resource_segments = crate::ui::resources::segments(&resource_config, sample);
+        }
         if !resource_segments.is_empty() {
             spans.push(Span::styled(
                 format!("  {}", resource_segments.join(" · ")),
@@ -416,13 +443,8 @@ impl App {
             .iter()
             .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
             .sum::<usize>();
-        // Operational messages must remain readable when resource indicators
-        // are enabled. Reserve up to a third of the row for a non-empty status;
-        // an idle status yields the whole row back to the indicators.
-        let status_width = UnicodeWidthStr::width(self.status.as_str());
-        let reserved_status_width = status_width.min(usize::from(area.width / 3));
         let left_width = desired_left_width
-            .min(usize::from(area.width).saturating_sub(reserved_status_width))
+            .min(available_left_width)
             as u16;
         let halves = Layout::default()
             .direction(Direction::Horizontal)

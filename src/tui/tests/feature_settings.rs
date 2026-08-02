@@ -218,15 +218,15 @@ fn appearance_persists_process_indicators_to_json() {
 fn enabled_process_indicators_render_on_the_status_line() {
     let mut config = loaded();
     config.config.appearance = AppearanceConfig {
-        cpu: ResourceDisplay::Percent,
-        ram: ResourceDisplay::Value,
-        disk_io: ResourceDisplay::Value,
+        cpu: ResourceDisplay::Bar,
+        ram: ResourceDisplay::Bar,
+        disk_io: ResourceDisplay::Bar,
         ..AppearanceConfig::default()
     };
     let runtime = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, config);
     let out = text_of(&draw(&mut app, 80, 40));
-    for label in ["CPU", "RAM", "IO R"] {
+    for label in ["CPU", "RAM", "IO"] {
         assert!(out.contains(label), "missing {label}: {out}");
     }
 }

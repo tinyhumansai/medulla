@@ -205,6 +205,18 @@ pub trait Runtime: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
+    /// Kill the harness serving `task_id` on `worker`.
+    ///
+    /// A no-op success without a hub. Interactive callers are responsible for
+    /// confirming the destructive action before invoking this method.
+    fn kill_task(
+        &self,
+        _worker: String,
+        _task_id: String,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Tell the orchestrator a harness has been handed back, with the brief.
     ///
     /// An **error** by default rather than a silent success, unlike

@@ -24,6 +24,7 @@ use super::types::{AgentsPanes, Selection};
 
 #[cfg(test)]
 mod attention_tests;
+mod device_footer;
 mod harness_line;
 mod rows;
 mod state;
@@ -32,8 +33,10 @@ mod status;
 mod status_line_tests;
 #[cfg(test)]
 mod tests;
+mod types;
 mod wrap;
 
+use types::DeviceFooter;
 use wrap::wrap_line;
 
 /// The most content columns the Agents rail ever takes.
@@ -168,14 +171,23 @@ impl App {
             }
         }
 
-        let capacity = (inner.height as usize).max(1);
+        let device_footer = DeviceFooter::prepare(self, width, inner.height as usize);
+        let capacity = device_footer.navigation_capacity;
         let start =
             selected_row_viewport_start(active_line, active_line_end, lines.len(), capacity);
+        // Clicks map against the navigation lines alone. Handing the footer's
+        // rows to the hit test would turn a click on "Device RAM" into a
+        // selection of whichever lane happened to share its offset.
+        let nav_area = Rect {
+            height: capacity.min(inner.height as usize) as u16,
+            ..inner
+        };
         self.hit_agents = Some((
-            inner,
+            nav_area,
             owners.iter().skip(start).take(capacity).copied().collect(),
         ));
-        let view: Vec<TLine> = lines.into_iter().skip(start).take(capacity).collect();
+        let mut view: Vec<TLine> = lines.into_iter().skip(start).take(capacity).collect();
+        device_footer.append_to(&mut view, Style::default().fg(self.theme.accent));
         f.render_widget(Paragraph::new(Text::from(view)), inner);
     }
 

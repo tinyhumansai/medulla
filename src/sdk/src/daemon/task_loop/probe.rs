@@ -10,7 +10,29 @@ impl DaemonRuntime {
     /// Answer a `capabilities` probe with the cached [`AgentCapabilities`].
     pub(super) async fn handle_capabilities(&self, from: String, frame: TaskFrame) {
         #[cfg_attr(not(feature = "workflows"), allow(unused_mut))]
-        let mut capabilities = self.get_capabilities().await;
+        let mut capabilities = if self
+            .inner
+            .screen_kill
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && self.inner.capabilities.lock().await.is_none()
+        {
+            let runtime = self.clone();
+            tokio::spawn(async move {
+                runtime.get_capabilities().await;
+            });
+            AgentCapabilities {
+                cwd: Some(self.inner.config.workspace.clone()),
+                providers: self.inner.config.providers.clone(),
+                screen_kill: true,
+                ..Default::default()
+            }
+        } else {
+            self.get_capabilities().await
+        };
+        capabilities.screen_kill = self
+            .inner
+            .screen_kill
+            .load(std::sync::atomic::Ordering::Relaxed);
         // Read fresh rather than cached: the harness probe is expensive and
         // worth caching, but an operator who just installed a workflow expects
         // the next probe to advertise it.
@@ -63,13 +85,9 @@ impl DaemonRuntime {
         let abort = Abort::new();
         let controller_id = self.register_controller(abort.clone());
         let accessible_dirs = self.inner.accessible_dirs.lock().unwrap().clone();
-        // Compete for the concurrency budget like a task.
-        let permit = self
-            .inner
-            .slots
-            .acquire()
-            .await
-            .expect("semaphore is never closed");
+        // Control-plane negotiation must not wait behind the harness-task slot
+        // it may be needed to terminate. The probe is separately serialized by
+        // the capability cache lock and bounded by its own timeout.
         let capabilities = probe_capabilities(ProbeOptions {
             provider,
             run_task: self.inner.run_task.clone(),
@@ -91,7 +109,6 @@ impl DaemonRuntime {
             router: self.inner.config.router.clone(),
         })
         .await;
-        drop(permit);
         self.unregister_controller(controller_id);
         *guard = Some(capabilities.clone());
         capabilities

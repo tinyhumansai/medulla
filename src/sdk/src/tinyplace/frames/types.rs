@@ -515,6 +515,16 @@ pub struct AgentCapabilities {
     /// field. Same backward-compatibility contract as the two vectors above.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflows: Vec<WorkflowAdvert>,
+    /// Whether this worker accepts task-correlated harness termination requests.
+    ///
+    /// Older workers omit the field and therefore deserialize as `false`, so an
+    /// upgraded controller never sends them an unknown screen control message.
+    #[serde(
+        rename = "screenKill",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub screen_kill: bool,
 }
 
 /// Fleet-safe description of one named custom harness.

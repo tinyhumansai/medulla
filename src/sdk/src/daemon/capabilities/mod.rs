@@ -62,6 +62,8 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         // Filled in by the daemon from its own workflow store: this probe
         // describes the harness, not what has been authored on top of it.
         workflows: Vec::new(),
+        // Enabled by the embedding worker only when it installs a ScreenRouter.
+        screen_kill: false,
         // Deterministic digest of CLAUDE.md/AGENTS.md/README.md — the summary
         // of last resort so a failed probe still carries project context.
         summary: dir.fallback_summary.clone(),

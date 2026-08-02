@@ -66,6 +66,7 @@ impl App {
             context_index: 0,
             agent_index: 0,
             watching: None,
+            kill_armed: None,
             agents_focus: super::types::AgentsFocus::default(),
             agent_scroll: 0,
             chat_scroll: 0,
@@ -119,6 +120,7 @@ impl App {
             settings_focused: false,
             appearance_index: 0,
             resource_monitor: Default::default(),
+            device_monitor: Default::default(),
             status_line_index: 0,
             status_line_promotion_pending,
             config_index: 0,
@@ -175,6 +177,14 @@ impl App {
     /// Record who the core is signed in as, for the Account subpage.
     pub fn set_account(&mut self, account: Option<medulla::core_host::auth::AuthState>) {
         self.account = account;
+    }
+
+    /// Pin the sidebar's device readings to a fixed sample.
+    ///
+    /// Render tests need the footer to say the same thing on every machine, so
+    /// they inject a snapshot instead of letting the rail sample the host.
+    pub fn set_device_snapshot(&mut self, snapshot: crate::ui::resources::DeviceSnapshot) {
+        self.device_monitor.inject(snapshot);
     }
 
     /// Configure Account logout with a testable home; without it, logout reports no writable location.
@@ -389,7 +399,17 @@ impl App {
     }
 
     pub fn set_status(&mut self, s: impl Into<String>) {
+        // A destructive confirmation is valid only while its question remains
+        // visible. Any asynchronous status replacement cancels it.
+        self.kill_armed = None;
         self.status = s.into();
+    }
+
+    /// Show and arm the harness-kill confirmation as one invariant-preserving
+    /// state transition.
+    pub(super) fn arm_kill(&mut self, target: (String, String)) {
+        self.set_status("Kill this harness? y confirm · any other key cancels");
+        self.kill_armed = Some(target);
     }
 
     /// Replace the Context-tab chunks.

@@ -22,7 +22,11 @@ impl App {
         f.render_widget(block, area);
         let sel = self.appearance_index.min(APPEARANCE_ROWS - 1);
         let mut lines: Vec<TLine> = Vec::new();
+        let mut selected_line_index: usize = 0;
         for (i, role) in THEME_ROLES.iter().enumerate() {
+            if i == sel {
+                selected_line_index = lines.len();
+            }
             let c = self.theme.role(i);
             let text_style = if i == sel {
                 self.theme.selection()
@@ -37,15 +41,40 @@ impl App {
             ]));
         }
         lines.push(TLine::from(""));
+        // Headers, not rows: the cursor indexes the indicators alone, so these
+        // are drawn between them purely to say whose usage each group reports.
+        // Without the split, "CPU" above "CPU" invites reading the device's
+        // load as Medulla's own.
+        let header = Style::default().add_modifier(Modifier::DIM);
         for (offset, (label, value)) in [
-            ("CPU indicator", self.loaded.config.appearance.cpu),
-            ("RAM indicator", self.loaded.config.appearance.ram),
-            ("Disk I/O indicator", self.loaded.config.appearance.disk_io),
+            ("Process CPU", self.loaded.config.appearance.cpu),
+            ("Process RAM", self.loaded.config.appearance.ram),
+            ("Process disk I/O", self.loaded.config.appearance.disk_io),
+            ("Device CPU", self.loaded.config.appearance.device_cpu),
+            ("Device RAM", self.loaded.config.appearance.device_ram),
+            ("Device disk", self.loaded.config.appearance.device_disk),
         ]
         .into_iter()
         .enumerate()
         {
+            match offset {
+                0 => lines.push(TLine::from(Span::styled(
+                    "  Medulla process — status line",
+                    header,
+                ))),
+                3 => {
+                    lines.push(TLine::from(""));
+                    lines.push(TLine::from(Span::styled(
+                        "  This device — Agents sidebar",
+                        header,
+                    )));
+                }
+                _ => {}
+            }
             let index = THEME_ROLES.len() + offset;
+            if index == sel {
+                selected_line_index = lines.len();
+            }
             let style = if index == sel {
                 self.theme.selection()
             } else {
@@ -79,7 +108,19 @@ impl App {
             where_saved,
             Style::default().add_modifier(Modifier::DIM),
         )));
-        f.render_widget(Paragraph::new(Text::from(lines)), inner);
+        // Scroll to keep the selected row visible on short terminals. The actual
+        // display line of the selected row differs from `sel` due to inserted
+        // headers and blank lines, so we track the line index as we build.
+        let height = inner.height as usize;
+        let scroll = if selected_line_index < height {
+            0
+        } else {
+            selected_line_index.saturating_sub(height / 2)
+        };
+        f.render_widget(
+            Paragraph::new(Text::from(lines)).scroll((scroll as u16, 0)),
+            inner,
+        );
     }
 
     /// Draw the Usage subpage: this session's token usage and the account totals.

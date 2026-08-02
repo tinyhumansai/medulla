@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 use crate::tinyplace::{encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind};
 
 use super::types::CapabilityProbeGuard;
-use super::{RunError, TaskRunner, MAX_RESETS};
+use super::{RunError, TaskRunner, CONTACT_POLL, CONTACT_WAIT, MAX_RESETS};
 
 impl Drop for CapabilityProbeGuard {
     fn drop(&mut self) {
@@ -26,6 +26,9 @@ impl TaskRunner {
     /// (the hub's socket-plane `capabilities_result`) treats any error as "no
     /// budgets to advertise" and falls open to the static facts.
     pub async fn capabilities(&self, address: &str) -> Result<AgentCapabilities, RunError> {
+        // A failed refresh must not leave support advertised by an older worker
+        // that previously occupied this address.
+        self.capabilities.lock().await.remove(address);
         if !self.relay.contact_accepted(address).await {
             let _ = self.relay.request_contact(address).await;
             return Err(RunError::Worker(
@@ -75,7 +78,13 @@ impl TaskRunner {
                 return Err(RunError::Transport(error));
             }
             match tokio::time::timeout(self.ack_window, receiver).await {
-                Ok(Ok(Ok(caps))) => return Ok(caps),
+                Ok(Ok(Ok(caps))) => {
+                    self.capabilities
+                        .lock()
+                        .await
+                        .insert(address.to_string(), caps.clone());
+                    return Ok(caps);
+                }
                 Ok(Ok(Err(error))) => return Err(RunError::Worker(error)),
                 Ok(Err(_)) => {
                     return Err(RunError::Transport(
@@ -91,6 +100,60 @@ impl TaskRunner {
                     self.relay.reset_session(address).await;
                 }
             }
+        }
+    }
+
+    /// Negotiate capabilities while making a backend abort effective before
+    /// the task itself is registered and sent.
+    pub async fn capabilities_for_dispatch(
+        &self,
+        address: &str,
+        abort_id: &str,
+    ) -> (
+        Result<AgentCapabilities, RunError>,
+        std::sync::Arc<tokio::sync::Notify>,
+    ) {
+        let abort = std::sync::Arc::new(tokio::sync::Notify::new());
+        self.aborts
+            .lock()
+            .expect("aborts lock")
+            .insert(abort_id.to_string(), abort.clone());
+        if !self.relay.contact_accepted(address).await {
+            let _ = self.relay.request_contact(address).await;
+            let deadline = std::time::Instant::now() + CONTACT_WAIT;
+            while std::time::Instant::now() < deadline
+                && !self.relay.contact_accepted(address).await
+            {
+                tokio::select! {
+                    biased;
+                    _ = abort.notified() => {
+                        let mut aborts = self.aborts.lock().expect("aborts lock");
+                        if aborts.get(abort_id).is_some_and(|current| {
+                            std::sync::Arc::ptr_eq(current, &abort)
+                        }) {
+                            aborts.remove(abort_id);
+                        }
+                        return (Err(RunError::Aborted), abort);
+                    },
+                    _ = tokio::time::sleep(CONTACT_POLL) => {}
+                }
+            }
+        }
+        tokio::select! {
+            biased;
+            _ = abort.notified() => {
+                let mut aborts = self.aborts.lock().expect("aborts lock");
+                if aborts
+                    .get(abort_id)
+                    .is_some_and(|current| std::sync::Arc::ptr_eq(current, &abort))
+                {
+                    aborts.remove(abort_id);
+                }
+                (Err(RunError::Aborted), abort)
+            }
+            result = self.capabilities(address) => {
+                (result, abort)
+            },
         }
     }
 }

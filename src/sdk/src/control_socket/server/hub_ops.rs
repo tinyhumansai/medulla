@@ -188,7 +188,22 @@ impl FleetOps for HubFleetOps {
         );
 
         let tee = tee_status(status);
-        let outcome = handle.task_runner().run(request, Some(tee)).await;
+        let runner = handle.task_runner();
+        let (capabilities, abort) = runner
+            .capabilities_for_dispatch(&request.worker_address, &request.abort_id)
+            .await;
+        let screen_kill = match capabilities {
+            Ok(capabilities) => capabilities.screen_kill,
+            Err(RunError::Aborted) => {
+                let outcome = Err(RunError::Aborted);
+                record_outcome(&activity, &wire_task_id, &outcome);
+                return outcome;
+            }
+            Err(_) => false,
+        };
+        let outcome = runner
+            .run_negotiated(request, Some(tee), screen_kill, Some(abort), Some(task_id))
+            .await;
         record_outcome(&activity, &wire_task_id, &outcome);
         outcome
     }

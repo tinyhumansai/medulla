@@ -29,8 +29,22 @@ impl SessionHandle {
     /// running that turn. Clearing `busy` on handback would advertise a harness
     /// as free while it was still finishing someone else's work.
     pub(in super::super) fn set_control(&self, control: HarnessControl) {
+        let _cold = lock(&self.cold);
         self.operator_held
             .store(control == HarnessControl::User, Ordering::Release);
+    }
+
+    /// Interrupt and close only while orchestration still owns the session.
+    /// Serialized with control handoff so takeover and termination cannot race.
+    pub(in super::super) fn stop_if_orchestrator(&self) -> bool {
+        let _cold = lock(&self.cold);
+        if self.operator_held.load(Ordering::Acquire) {
+            return false;
+        }
+        let _ = self.write(&[0x03]);
+        self.kill();
+        self.mark_closed();
+        true
     }
 
     /// Whether this session may serve `label`'s next turn.

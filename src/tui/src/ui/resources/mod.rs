@@ -1,96 +1,28 @@
-//! Sampling and formatting of the Medulla process's CPU, memory, and disk I/O.
+//! Sampling and formatting of resource usage, at two scales.
 //!
-//! Sampling is throttled so frequent ratatui redraws do not turn the status line
-//! into a source of measurable load itself. The monitor refreshes only the
-//! current PID and keeps a decaying disk-throughput peak for relative bars.
-
-use std::time::{Duration, Instant};
+//! This module owns the Medulla process's own CPU, memory, and disk I/O, shown
+//! as status-line segments; the [`device`] submodule owns whole-device CPU,
+//! memory, and disk capacity, shown as a footer under the Agents rail. The two
+//! are kept visually and textually distinct — process segments are bare
+//! (`CPU 25%`), device lines are prefixed (`Device CPU 25%`) — so a reader is
+//! never left guessing whose usage a number describes.
+//!
+//! Sampling is throttled at both scales so frequent ratatui redraws do not turn
+//! the chrome into a source of measurable load itself. The process monitor
+//! refreshes only the current PID and keeps a decaying disk-throughput peak for
+//! relative bars.
 
 use medulla::config::{AppearanceConfig, ResourceDisplay};
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
-pub use types::ResourceSnapshot;
+pub use device::{device_lines, device_width_hint, DeviceMonitor};
+pub use types::{DeviceSnapshot, ResourceMonitor, ResourceSnapshot};
 
+mod device;
+mod process_monitor;
 mod types;
 
 #[cfg(test)]
 mod tests;
-
-/// Stateful, low-overhead sampler for the current Medulla process.
-pub struct ResourceMonitor {
-    system: System,
-    pid: Option<sysinfo::Pid>,
-    last_refresh: Option<Instant>,
-    disk_peak_bytes_per_second: f64,
-    snapshot: ResourceSnapshot,
-}
-
-impl Default for ResourceMonitor {
-    fn default() -> Self {
-        Self {
-            system: System::new(),
-            pid: sysinfo::get_current_pid().ok(),
-            last_refresh: None,
-            disk_peak_bytes_per_second: 1.0,
-            snapshot: ResourceSnapshot::default(),
-        }
-    }
-}
-
-impl ResourceMonitor {
-    /// Return a recent sample, refreshing at most once per second.
-    pub fn sample(&mut self) -> ResourceSnapshot {
-        let now = Instant::now();
-        if self
-            .last_refresh
-            .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
-        {
-            return self.snapshot;
-        }
-        let baseline_ready = self.last_refresh.is_some();
-        let elapsed = self
-            .last_refresh
-            .map(|last| now.duration_since(last).as_secs_f64())
-            .unwrap_or(1.0)
-            .max(0.001);
-        self.last_refresh = Some(now);
-        self.system.refresh_memory();
-        let Some(pid) = self.pid else {
-            return self.snapshot;
-        };
-        self.system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[pid]),
-            true,
-            ProcessRefreshKind::nothing()
-                .with_cpu()
-                .with_memory()
-                .with_disk_usage()
-                .without_tasks(),
-        );
-        let Some(process) = self.system.process(pid) else {
-            return self.snapshot;
-        };
-        let cores = std::thread::available_parallelism()
-            .map(|count| count.get() as f64)
-            .unwrap_or(1.0);
-        let disk = process.disk_usage();
-        let (read_rate, write_rate) =
-            disk_rates(disk.read_bytes, disk.written_bytes, elapsed, baseline_ready);
-        self.disk_peak_bytes_per_second = (self.disk_peak_bytes_per_second * 0.9)
-            .max(read_rate)
-            .max(write_rate)
-            .max(1.0);
-        self.snapshot = ResourceSnapshot {
-            cpu_fraction: (process.cpu_usage() as f64 / (cores * 100.0)).clamp(0.0, 1.0),
-            memory_bytes: process.memory(),
-            total_memory_bytes: self.system.total_memory(),
-            disk_read_bytes_per_second: read_rate,
-            disk_write_bytes_per_second: write_rate,
-            disk_peak_bytes_per_second: self.disk_peak_bytes_per_second,
-        };
-        self.snapshot
-    }
-}
 
 /// Convert sysinfo's deltas to rates only after an initial counter baseline.
 ///
@@ -124,6 +56,14 @@ pub fn segments(config: &AppearanceConfig, sample: ResourceSnapshot) -> Vec<Stri
     output
 }
 
+/// Format CPU usage as a status-line segment.
+///
+/// `Percent` and `Value` render identically as a percentage: CPU usage is
+/// inherently normalized by the system and the percentage is already the
+/// complete picture. `Bar` adds a full-machine capacity visualization: the bar
+/// shows usage relative to available cores, scaled by the process count, so a
+/// 4-core system at full CPU shows a 100% bar even when the process uses only
+/// 25%.
 fn cpu_segment(display: ResourceDisplay, fraction: f64) -> Option<String> {
     match display {
         ResourceDisplay::Off => None,

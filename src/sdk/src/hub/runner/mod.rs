@@ -190,6 +190,7 @@ impl TaskRunner {
             waiters,
             system_info_waiters,
             capabilities_waiters,
+            capabilities: Arc::new(Mutex::new(HashMap::new())),
             aborts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             counter: AtomicU64::new(0),
             ack_window,
@@ -219,6 +220,22 @@ impl TaskRunner {
         // this returns false; if this wins, a live task receives the signal.
         signal.notify_one();
         true
+    }
+
+    /// Return the active dispatch receipt for a worker/task pair.
+    pub async fn kill_correlation_for(
+        &self,
+        worker: &str,
+        task_id: &str,
+    ) -> Option<(String, String)> {
+        self.waiters
+            .lock()
+            .await
+            .iter()
+            .find(|(_, waiter)| {
+                waiter.from == worker && waiter.task_id == task_id && waiter.screen_kill
+            })
+            .map(|(correlation, waiter)| (correlation.clone(), waiter.wire_task_id.clone()))
     }
 
     /// Cancel every dispatch this runner has in flight.
@@ -271,6 +288,31 @@ impl TaskRunner {
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<TaskOutcome, RunError> {
+        self.run_inner(req, status, false, None, None).await
+    }
+
+    /// Run a dispatch with the screen-control support negotiated specifically
+    /// for this request.
+    pub async fn run_negotiated(
+        &self,
+        req: TaskRequest,
+        status: Option<mpsc::UnboundedSender<String>>,
+        screen_kill: bool,
+        abort: Option<Arc<Notify>>,
+        visible_task_id: Option<String>,
+    ) -> Result<TaskOutcome, RunError> {
+        self.run_inner(req, status, screen_kill, abort, visible_task_id)
+            .await
+    }
+
+    async fn run_inner(
+        &self,
+        req: TaskRequest,
+        status: Option<mpsc::UnboundedSender<String>>,
+        screen_kill: bool,
+        prepared_abort: Option<Arc<Notify>>,
+        visible_task_id: Option<String>,
+    ) -> Result<TaskOutcome, RunError> {
         // Register this dispatch's abort signal FIRST — before the contact wait —
         // so a `task_abort` that arrives during contact negotiation (up to
         // `CONTACT_WAIT` for a first-time worker) is honored, not silently dropped
@@ -278,7 +320,7 @@ impl TaskRunner {
         // the backend aborts by, and held for the whole call (spanning any
         // reset+resend retries). The guard removes it on every return path, so a
         // settled dispatch leaves nothing for a later `task_abort` to match.
-        let abort = Arc::new(Notify::new());
+        let abort = prepared_abort.unwrap_or_else(|| Arc::new(Notify::new()));
         self.aborts
             .lock()
             .expect("aborts lock")
@@ -322,6 +364,11 @@ impl TaskRunner {
             self.waiters.lock().await.insert(
                 cid.clone(),
                 Waiter {
+                    task_id: visible_task_id
+                        .clone()
+                        .unwrap_or_else(|| req.task_id.clone()),
+                    wire_task_id: req.task_id.clone(),
+                    screen_kill,
                     from: req.worker_address.clone(),
                     reply: tx,
                     status: status.clone(),

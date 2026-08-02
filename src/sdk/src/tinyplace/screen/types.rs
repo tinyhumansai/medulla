@@ -178,9 +178,9 @@ pub struct ScreenFrame {
 
 /// Everything that can cross this protocol, in both directions.
 ///
-/// There is no `input` and no `resize`: the viewer never reaches back into the
-/// session, and the sender's geometry is authoritative. Both are additive later
-/// if that changes.
+/// There is no `input` and no `resize`: the viewer cannot steer the session,
+/// and the sender's geometry is authoritative. The one control operation is an
+/// explicit, task-scoped kill used by an operator to recover a hung harness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScreenMessage {
@@ -198,6 +198,14 @@ pub enum ScreenMessage {
     Unsubscribe {
         /// The task to stop watching.
         task_id: String,
+    },
+    /// Viewer → sender: kill the harness serving an owned running task.
+    Kill {
+        /// The task whose harness should be killed.
+        task_id: String,
+        /// The unique dispatch receipt, preventing a delayed kill from matching
+        /// a later dispatch that reused the task id.
+        correlation_id: String,
     },
     /// Viewer → sender: the highest sequence the viewer holds, which the next
     /// diff may be taken from.

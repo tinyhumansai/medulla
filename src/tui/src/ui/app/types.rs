@@ -352,6 +352,13 @@ pub enum Cmd {
         /// The `(worker address, task id)` to start streaming, if any.
         start: Option<(String, String)>,
     },
+    /// Kill the harness serving a watched task after UI confirmation.
+    KillTask {
+        /// The worker address that owns the harness.
+        worker: String,
+        /// The dispatched task whose harness should be killed.
+        task_id: String,
+    },
     /// Push a handoff brief for a harness the operator just gave back.
     ///
     /// Off the render thread because it does two things that must not block a
@@ -610,10 +617,12 @@ impl HandbackPolicy {
 
 /// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
-    /// Attach a session-local review comment to a changed file.
+    /// Attach a session-local review comment to a file, hunk, or patch line.
     ChangesComment {
         /// Repository-relative path being reviewed.
         path: std::path::PathBuf,
+        /// Position within that file's patch the note is bound to.
+        anchor: medulla::ui::git_review::CommentAnchor,
     },
     /// Add a worker from an address/@handle line.
     HostAdd,
@@ -770,6 +779,8 @@ pub struct App {
     /// new one: a subscription nobody is looking at costs the worker a sample,
     /// a ratchet advance and a send on every tick.
     pub(super) watching: Option<(String, String)>,
+    /// The watched `(worker, task)` awaiting destructive-action confirmation.
+    pub(super) kill_armed: Option<(String, String)>,
     /// Which half of the Agents tab the keyboard is driving.
     pub(super) agents_focus: AgentsFocus,
     pub(super) agent_scroll: usize,
@@ -897,6 +908,8 @@ pub struct App {
     pub(super) appearance_index: usize,
     /// Throttled sampler backing the optional local-process status indicators.
     pub(super) resource_monitor: crate::ui::resources::ResourceMonitor,
+    /// Throttled sampler backing the optional whole-device sidebar indicators.
+    pub(super) device_monitor: crate::ui::resources::DeviceMonitor,
     /// The selected field row on the Status line subpage.
     pub(super) status_line_index: usize,
     /// Whether the next persisted status-line edit must write the complete

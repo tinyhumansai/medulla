@@ -12,7 +12,8 @@ pub const LOGO: [&str; 3] = ["      ▌  ▜ ▜   ", "▛▛▌█▌▛▌▌�
 
 pub use medulla::clipboard;
 pub use medulla::ui::{
-    agents, chat_store, command, decisions, events, fleet, harness, meters, stream, util, work,
+    agents, chat_store, command, decisions, events, fleet, git_review, harness, meters, stream,
+    util, work,
 };
 
 pub(crate) mod agent_lane;
@@ -24,7 +25,7 @@ pub(crate) mod layout;
 pub mod login;
 pub(crate) mod multi_pane;
 pub mod onboarding;
-pub(crate) mod resources;
+pub mod resources;
 pub mod screen;
 pub(crate) mod selection;
 pub mod theme;

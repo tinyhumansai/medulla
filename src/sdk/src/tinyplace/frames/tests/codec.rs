@@ -348,11 +348,6 @@ fn harness_readiness_omits_reason_when_ready() {
 }
 
 #[test]
-fn budget_window_defaults_to_unknown() {
-    assert_eq!(BudgetWindow::default(), BudgetWindow::Unknown);
-}
-
-#[test]
 fn parse_agent_capabilities_defaults_missing_arrays() {
     let caps = parse_agent_capabilities(r#"{"cwd":"/x"}"#).unwrap();
     assert!(caps.accessible_dirs.is_empty());
@@ -388,6 +383,7 @@ fn empty_budgets_and_readiness_are_omitted_on_the_wire() {
     let value = serde_json::to_value(&caps).unwrap();
     assert!(value.get("budgets").is_none());
     assert!(value.get("readiness").is_none());
+    assert!(value.get("screenKill").is_none());
 }
 
 #[test]

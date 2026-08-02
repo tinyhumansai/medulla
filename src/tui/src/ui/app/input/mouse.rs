@@ -43,6 +43,9 @@ fn pointer_report(
 impl App {
     /// Handle scroll and left-click mouse events for the active tab.
     pub(in crate::ui::app) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
+        if self.kill_armed.take().is_some() {
+            self.set_status("Harness kill cancelled");
+        }
         // A modal swallows the mouse, the same way it swallows the keyboard.
         // The harness picker is one: a click that navigated the rail behind it
         // left an overlay on screen describing a row nobody was pointing at.

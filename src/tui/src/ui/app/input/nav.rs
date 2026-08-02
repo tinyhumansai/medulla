@@ -8,7 +8,7 @@
 
 use super::super::rail::RailRow;
 use super::super::types::{App, Cmd};
-use crate::ui::agents::{agent_row_model, AgentRole, AgentRow};
+use crate::ui::agents::{agent_row_model, AgentRole, AgentRow, TaskStatus};
 use crate::ui::composer::Draft;
 
 impl App {
@@ -141,7 +141,7 @@ impl App {
     }
 
     /// The `(worker address, task id)` the current selection asks to watch.
-    fn watch_target(&self) -> Option<(String, String)> {
+    pub(in crate::ui::app) fn watch_target(&self) -> Option<(String, String)> {
         // Only on the Agents tab: leaving it releases the subscription.
         if self.tab() != "Agents" {
             return None;
@@ -174,5 +174,17 @@ impl App {
             .map(|w| w.address)
             .unwrap_or_else(|| agent_id.to_string());
         Some((address, task.task_id.clone()))
+    }
+
+    /// The selected running task eligible for destructive termination.
+    pub(in crate::ui::app) fn kill_target(&self) -> Option<(String, String)> {
+        let rows = self.rail_rows();
+        let row = rows.get(self.agent_index.min(rows.len().saturating_sub(1)))?;
+        let RailRow::Agent(AgentRow::Sub { task, .. }) = row else {
+            return None;
+        };
+        (task.status == TaskStatus::Running)
+            .then(|| self.watch_target())
+            .flatten()
     }
 }

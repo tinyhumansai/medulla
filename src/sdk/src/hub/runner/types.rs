@@ -3,6 +3,12 @@
 use super::*;
 /// A registered dispatch awaiting its terminal frame.
 pub(super) struct Waiter {
+    /// The task id this dispatch carries on the wire.
+    pub(super) task_id: String,
+    /// Worker-facing task id used by the daemon's running-task registry.
+    pub(super) wire_task_id: String,
+    /// Screen termination support negotiated for this exact dispatch.
+    pub(super) screen_kill: bool,
     /// The worker address this dispatch was sent to — the only sender whose
     /// frames may settle it. See [`Probe::from`].
     pub(super) from: String,
@@ -78,6 +84,8 @@ pub struct TaskRunner {
     pub(super) system_info_waiters: SystemInfoWaiters,
     /// Capability probes waiting for a worker's `capabilities_result`.
     pub(super) capabilities_waiters: CapabilitiesWaiters,
+    /// Last successfully negotiated capabilities for each worker address.
+    pub(super) capabilities: Arc<Mutex<HashMap<String, AgentCapabilities>>>,
     /// Abort signals for in-flight dispatches, keyed by orchestrator-facing task
     /// id; [`abort_task`](Self::abort_task) notifies one to cancel its dispatch.
     pub(super) aborts: Aborts,

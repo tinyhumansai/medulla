@@ -1,4 +1,4 @@
-//! Data types for selecting CPU, memory, and disk-I/O display formats.
+//! Data types for selecting process and whole-device resource display formats.
 
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +31,12 @@ pub struct AppearanceConfig {
     pub ram: ResourceDisplay,
     /// How to show this process's read/write throughput.
     pub disk_io: ResourceDisplay,
+    /// How to show whole-device CPU utilization in the Agents sidebar.
+    pub device_cpu: ResourceDisplay,
+    /// How to show whole-device memory pressure in the Agents sidebar.
+    pub device_ram: ResourceDisplay,
+    /// How to show whole-device disk-capacity pressure in the Agents sidebar.
+    pub device_disk: ResourceDisplay,
 }
 
 impl AppearanceConfig {
@@ -42,6 +48,9 @@ impl AppearanceConfig {
             cpu: ResourceDisplay::Off,
             ram: ResourceDisplay::Off,
             disk_io: ResourceDisplay::Off,
+            device_cpu: ResourceDisplay::Off,
+            device_ram: ResourceDisplay::Off,
+            device_disk: ResourceDisplay::Off,
         }
     }
 }

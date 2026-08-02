@@ -277,8 +277,7 @@ impl PtySessionExecutor {
     /// composer, which is the failure that produces confidently wrong answers
     /// rather than an error.
     fn stop_turn(&self, id: &str) {
-        let _ = self.sessions.write(id, &[0x03]);
-        self.sessions.close(id);
+        self.sessions.stop_if_orchestrator(id);
     }
 
     /// Decide which session serves this task: reuse an idle one, or launch.
@@ -481,9 +480,14 @@ impl PtySessionExecutor {
                 ));
             }
             if abort.is_aborted() {
-                // A real interrupt, not a kill: Ctrl-C reaches the harness the
-                // same way the operator's would, and the session survives it.
-                let _ = self.sessions.write(id, &[0x03]);
+                if abort.is_terminated() {
+                    self.stop_turn(id);
+                } else {
+                    // A requester abort is an interrupt: Ctrl-C reaches the
+                    // harness the same way the operator's would, and the
+                    // reusable session survives it.
+                    let _ = self.sessions.write(id, &[0x03]);
+                }
                 return Err(format!("{} task aborted", provider.as_str()));
             }
             if !self

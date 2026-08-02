@@ -181,8 +181,8 @@ fn an_oversized_value_pair_falls_back_to_the_percentage() {
         ..AppearanceConfig::default()
     };
     // `bytes` tops out at gigabytes, so a petabyte-scale filesystem renders a
-    // very wide pair even though the width clears VALUE_MIN_WIDTH. The line must
-    // degrade rather than overflow into the navigation rows.
+    // very wide pair on a rail that comfortably fits ordinary readings. The
+    // line must degrade rather than overflow into the navigation rows.
     let sample = DeviceSnapshot {
         cpu_fraction: None,
         memory_used_bytes: None,
@@ -224,4 +224,21 @@ fn completed_value_and_bar_lines_fall_back_at_their_exact_boundaries() {
         device_lines(&bar_config, full_disk, 20, 3),
         ["Device disk 100%"]
     );
+}
+
+#[test]
+fn a_value_pair_is_kept_on_any_rail_wide_enough_to_hold_it() {
+    let config = AppearanceConfig {
+        device_ram: ResourceDisplay::Value,
+        ..AppearanceConfig::default()
+    };
+    // "Device RAM 8G/32G" is 17 columns. A fixed minimum-width gate used to
+    // reject it on rails narrower than 24 even though it fits, so the reading
+    // degraded to a percentage for no reason.
+    assert_eq!(
+        device_lines(&config, sample(), 17, 3),
+        ["Device RAM 8G/32G"]
+    );
+    // One column short, and the percentage is the honest fallback.
+    assert_eq!(device_lines(&config, sample(), 16, 3), ["Device RAM 25%"]);
 }

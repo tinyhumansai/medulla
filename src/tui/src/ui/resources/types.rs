@@ -1,9 +1,13 @@
-//! Stateful process sampler and the immutable readings passed from the
-//! samplers to formatting.
+//! Data types for resource sampling: the immutable readings passed from the
+//! samplers to formatting, and the sampler's own state.
+//!
+//! The behaviour-heavy sampling lives in [`process_monitor`](super::process_monitor)
+//! for the process scale and [`device`](super::device) for the device scale;
+//! only shape and construction are declared here.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::System;
 
 /// One current-process resource sample.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -42,11 +46,16 @@ pub struct DeviceSnapshot {
 
 /// Stateful, low-overhead sampler for the current Medulla process.
 pub struct ResourceMonitor {
-    system: System,
-    pid: Option<sysinfo::Pid>,
-    last_refresh: Option<Instant>,
-    disk_peak_bytes_per_second: f64,
-    snapshot: ResourceSnapshot,
+    /// sysinfo handle reused across refreshes so counters keep their baseline.
+    pub(super) system: System,
+    /// This process's PID, absent when the platform will not report it.
+    pub(super) pid: Option<sysinfo::Pid>,
+    /// When the last host refresh happened, for throttling.
+    pub(super) last_refresh: Option<Instant>,
+    /// Decaying peak throughput, the scale relative disk bars are drawn against.
+    pub(super) disk_peak_bytes_per_second: f64,
+    /// Most recent reading, handed back while inside the throttle interval.
+    pub(super) snapshot: ResourceSnapshot,
 }
 
 impl Default for ResourceMonitor {
@@ -58,60 +67,5 @@ impl Default for ResourceMonitor {
             disk_peak_bytes_per_second: 1.0,
             snapshot: ResourceSnapshot::default(),
         }
-    }
-}
-
-impl ResourceMonitor {
-    /// Return a recent sample, refreshing at most once per second.
-    pub fn sample(&mut self) -> ResourceSnapshot {
-        let now = Instant::now();
-        if self
-            .last_refresh
-            .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
-        {
-            return self.snapshot;
-        }
-        let baseline_ready = self.last_refresh.is_some();
-        let elapsed = self
-            .last_refresh
-            .map(|last| now.duration_since(last).as_secs_f64())
-            .unwrap_or(1.0)
-            .max(0.001);
-        self.last_refresh = Some(now);
-        self.system.refresh_memory();
-        let Some(pid) = self.pid else {
-            return self.snapshot;
-        };
-        self.system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[pid]),
-            true,
-            ProcessRefreshKind::nothing()
-                .with_cpu()
-                .with_memory()
-                .with_disk_usage()
-                .without_tasks(),
-        );
-        let Some(process) = self.system.process(pid) else {
-            return self.snapshot;
-        };
-        let cores = std::thread::available_parallelism()
-            .map(|count| count.get() as f64)
-            .unwrap_or(1.0);
-        let disk = process.disk_usage();
-        let (read_rate, write_rate) =
-            super::disk_rates(disk.read_bytes, disk.written_bytes, elapsed, baseline_ready);
-        self.disk_peak_bytes_per_second = (self.disk_peak_bytes_per_second * 0.9)
-            .max(read_rate)
-            .max(write_rate)
-            .max(1.0);
-        self.snapshot = ResourceSnapshot {
-            cpu_fraction: (process.cpu_usage() as f64 / (cores * 100.0)).clamp(0.0, 1.0),
-            memory_bytes: process.memory(),
-            total_memory_bytes: self.system.total_memory(),
-            disk_read_bytes_per_second: read_rate,
-            disk_write_bytes_per_second: write_rate,
-            disk_peak_bytes_per_second: self.disk_peak_bytes_per_second,
-        };
-        self.snapshot
     }
 }

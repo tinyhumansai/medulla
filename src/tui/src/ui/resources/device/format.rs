@@ -8,10 +8,6 @@ use medulla::config::{AppearanceConfig, ResourceDisplay};
 
 use super::super::types::DeviceSnapshot;
 
-/// Below this inner width a `used/total` pair no longer fits beside its label,
-/// and the line falls back to a percentage.
-const VALUE_MIN_WIDTH: usize = 24;
-
 /// Below this inner width the bar glyphs crowd out the label, and the line
 /// falls back to a percentage.
 const BAR_MIN_WIDTH: usize = 20;
@@ -90,15 +86,15 @@ fn metric_line(
     let line = match display {
         ResourceDisplay::Off => return None,
         ResourceDisplay::Percent => percent,
-        // `Value` and `Bar` both need room. When the rail is too narrow, or the
-        // byte counts behind a `Value` are unavailable, the percentage is the
-        // detail worth keeping.
-        ResourceDisplay::Value if width >= VALUE_MIN_WIDTH => match values {
+        // `Value` and `Bar` both need room. When the finished line does not fit,
+        // or the byte counts behind a `Value` are unavailable, the percentage is
+        // the detail worth keeping. Measuring the assembled line beats a fixed
+        // minimum width: a byte pair's length depends on the magnitudes in it,
+        // so any constant is simultaneously too strict for `8G/32G` and too
+        // generous for a petabyte filesystem. Labels and byte counts are ASCII,
+        // so bytes are columns here.
+        ResourceDisplay::Value => match values {
             Some((used, total)) => {
-                // `VALUE_MIN_WIDTH` assumes typical byte counts. A large enough
-                // filesystem widens the pair past the rail anyway, so measure the
-                // finished line and keep the percentage when it would overflow.
-                // Labels and byte counts are ASCII, so bytes are columns here.
                 let pair = format!("{label} {}/{}", bytes(used), bytes(total));
                 if pair.len() <= width {
                     pair
@@ -116,7 +112,9 @@ fn metric_line(
                 percent
             }
         }
-        ResourceDisplay::Value | ResourceDisplay::Bar => percent,
+        // `Value` is handled above for every width now that it measures its own
+        // line, so only a bar too narrow for its glyphs still lands here.
+        ResourceDisplay::Bar => percent,
     };
     Some(line)
 }

@@ -18,6 +18,7 @@ pub use device::{device_lines, DeviceMonitor};
 pub use types::{DeviceSnapshot, ResourceMonitor, ResourceSnapshot};
 
 mod device;
+mod process_monitor;
 mod types;
 
 #[cfg(test)]

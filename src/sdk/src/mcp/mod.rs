@@ -76,6 +76,13 @@ pub const PROTOCOL_VERSION: &str = "2024-11-05";
 /// understood.
 const SUPPORTED_VERSIONS: [&str; 2] = ["2024-11-05", "2025-03-26"];
 
+/// Maximum MCP requests allowed to execute or wait for stdout concurrently.
+///
+/// A fleet result poll can live for two minutes. Bounding both its task permit
+/// and the response channel prevents a pipelining client from growing either
+/// queue without limit while preserving useful parallelism for short calls.
+const MAX_CONCURRENT_REQUESTS: usize = 32;
+
 /// The version to answer `initialize` with, given what the client asked for.
 fn negotiate(requested: Option<&str>) -> &'static str {
     requested
@@ -248,8 +255,9 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
             .with_fleet(backend::from_env(env).await),
     );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    let (responses, mut pending_responses) = tokio::sync::mpsc::unbounded_channel::<Value>();
-    let writer = tokio::spawn(async move {
+    let (responses, mut pending_responses) =
+        tokio::sync::mpsc::channel::<Value>(MAX_CONCURRENT_REQUESTS);
+    let mut writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(response) = pending_responses.recv().await {
             stdout.write_all(format!("{response}\n").as_bytes()).await?;
@@ -257,33 +265,67 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
         }
         Ok::<(), std::io::Error>(())
     });
+    let permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_REQUESTS));
     let mut requests = tokio::task::JoinSet::new();
 
-    while let Some(line) = lines.next_line().await? {
+    loop {
+        // A broken output pipe means no future request can be answered. Watch
+        // it while stdin is open instead of discovering it only at EOF.
+        let line = tokio::select! {
+            result = &mut writer => return result.map_err(std::io::Error::other)?,
+            line = lines.next_line() => line?,
+        };
+        let Some(line) = line else {
+            break;
+        };
         if line.trim().is_empty() {
             continue;
         }
         match serde_json::from_str::<Value>(&line) {
             Ok(request) => {
+                let permit = tokio::select! {
+                    result = &mut writer => return result.map_err(std::io::Error::other)?,
+                    permit = Arc::clone(&permits).acquire_owned() => permit
+                        .map_err(|_| std::io::Error::other("MCP request limiter closed"))?,
+                };
                 let session = Arc::clone(&session);
                 let responses = responses.clone();
                 requests.spawn(async move {
+                    let _permit = permit;
                     if let Some(response) = handle_request(&session, &request).await {
-                        let _ = responses.send(response);
+                        let _ = responses.send(response).await;
                     }
                 });
             }
             Err(err) => {
-                let _ = responses.send(json!({
+                let response = json!({
                 "jsonrpc": "2.0",
                 "id": Value::Null,
                 "error": { "code": -32700, "message": format!("parse error: {err}") },
-                }));
+                });
+                tokio::select! {
+                    result = &mut writer => return result.map_err(std::io::Error::other)?,
+                    sent = responses.send(response) => {
+                        if sent.is_err() {
+                            return writer.await.map_err(std::io::Error::other)?;
+                        }
+                    }
+                }
             }
         }
     }
-    while let Some(result) = requests.join_next().await {
-        result.map_err(std::io::Error::other)?;
+    while !requests.is_empty() {
+        tokio::select! {
+            result = &mut writer => {
+                requests.abort_all();
+                return result.map_err(std::io::Error::other)?;
+            }
+            result = requests.join_next() => {
+                if let Some(result) = result {
+                    result.map_err(std::io::Error::other)?;
+                }
+            }
+        }
     }
     drop(responses);
     writer.await.map_err(std::io::Error::other)??;

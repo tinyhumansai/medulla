@@ -105,6 +105,8 @@ fn legacy_inline_hook_path_is_delegated_during_a_real_commit() {
         let output = std::process::Command::new("git")
             .args(args)
             .current_dir(&repo)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
             .output()
             .unwrap();
         assert!(
@@ -130,6 +132,8 @@ fn legacy_inline_hook_path_is_delegated_during_a_real_commit() {
     let output = std::process::Command::new("git")
         .args(["commit", "-q", "-m", "exercise the shim"])
         .current_dir(&repo)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_CONFIG_PARAMETERS", format!("{base} {injected}"))
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "core.hooksPath")

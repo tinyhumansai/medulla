@@ -61,5 +61,5 @@ pub use client::ControlClient;
 #[cfg(unix)]
 pub use server::{
     handle_control, ControlServer, FleetDefaults, HubFleetOps, HubSlot, SessionState, TaskEntry,
-    TaskRegistry, TaskState,
+    TaskRegistry, TaskState, MAX_WAIT,
 };

@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::time::Instant;
 
-use crate::control_socket::{ControlClient, ControlError, Hello};
+use crate::control_socket::{ControlClient, ControlError, Hello, MAX_WAIT};
 
 use super::FleetBackend;
 
@@ -18,7 +18,7 @@ const REPLY_MARGIN: Duration = Duration::from_secs(5);
 /// Deadline for operations that do not intentionally wait on task progress.
 const SHORT_REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// The matching control-server ceiling for `task.get` long polls.
-const MAX_WAIT_SECONDS: u64 = 120;
+const MAX_WAIT_SECONDS: u64 = MAX_WAIT.as_secs();
 
 /// A fleet reached through a running Medulla's control socket.
 pub struct ProxyFleet {

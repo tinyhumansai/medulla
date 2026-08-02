@@ -22,7 +22,7 @@ use super::registry::{TaskEntry, TaskRegistry};
 use super::types::SessionState;
 
 /// The longest a `task.get` may block before answering "still running".
-const MAX_WAIT: Duration = Duration::from_secs(120);
+pub const MAX_WAIT: Duration = Duration::from_secs(120);
 
 /// A successful reply.
 fn ok(id: &Value, result: Value) -> Value {

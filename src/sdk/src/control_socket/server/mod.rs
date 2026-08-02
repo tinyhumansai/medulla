@@ -4,6 +4,7 @@
 //! write the answer back. Every decision worth testing lives in that handler,
 //! which is why this file has no branches a test would want to reach.
 
+mod connection;
 mod handle;
 mod hub_ops;
 #[cfg(test)]
@@ -13,7 +14,7 @@ mod registry;
 mod tests;
 mod types;
 
-pub use handle::handle_control;
+pub use handle::{handle_control, MAX_WAIT};
 pub use hub_ops::{FleetDefaults, HubFleetOps, HubSlot};
 pub use registry::{TaskEntry, TaskRegistry, TaskState};
 pub use types::{ControlServer, SessionState};
@@ -21,26 +22,12 @@ pub use types::{ControlServer, SessionState};
 use std::path::Path;
 use std::sync::Arc;
 
-use serde_json::Value;
-
 use super::grants::GrantRegistry;
 use super::path::{prepare_bind, restrict_socket, ControlSocketError};
 use super::types::FleetOps;
-
-/// The largest frame the server will read.
-///
-/// An instruction can legitimately be long — it is a whole brief for an agent
-/// with no context — so this is generous rather than tight. Its job is to stop
-/// an endless line from consuming memory, not to police content.
-const MAX_FRAME_BYTES: usize = 1024 * 1024;
-
-/// How long a connection has to complete `hello`.
-///
-/// Bounded because an unauthenticated connection holding a slot forever is the
-/// cheapest denial there is. Deliberately *not* applied afterwards: an
-/// authenticated shim holds its connection open for the whole harness session
-/// and is idle for most of it.
-const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+use connection::serve_connection;
+#[cfg(test)]
+use connection::{read_frame, MAX_FRAME_BYTES};
 
 impl ControlServer {
     /// Bind `path` and start serving `ops`.
@@ -141,102 +128,4 @@ impl Drop for ControlServer {
             }
         }
     }
-}
-
-/// Serve one connection until it closes.
-#[cfg(unix)]
-async fn serve_connection(
-    stream: tokio::net::UnixStream,
-    ops: Arc<dyn FleetOps>,
-    grants: GrantRegistry,
-    registry: TaskRegistry,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
-) -> std::io::Result<()> {
-    use tokio::io::{AsyncWriteExt, BufReader};
-
-    let (read_half, mut write_half) = stream.into_split();
-    let mut reader = BufReader::new(read_half);
-    let mut session = SessionState::default();
-
-    loop {
-        // The handshake is bounded; an authenticated connection is not, because
-        // a shim legitimately sits idle between a harness's tool calls. Either
-        // way the read races the server's shutdown, so dropping the server
-        // closes this connection rather than leaving it parked on a read that
-        // will never complete.
-        let next = if session.grant().is_none() {
-            tokio::select! {
-                _ = shutdown.changed() => return Ok(()),
-                read = tokio::time::timeout(HANDSHAKE_TIMEOUT, read_frame(&mut reader)) => match read {
-                    Ok(next) => next?,
-                    Err(_) => return Ok(()),
-                },
-            }
-        } else {
-            tokio::select! {
-                _ = shutdown.changed() => return Ok(()),
-                read = read_frame(&mut reader) => read?,
-            }
-        };
-        let Some(line) = next else {
-            return Ok(());
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-        if line.len() > MAX_FRAME_BYTES {
-            return Ok(());
-        }
-        let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_control(&ops, &grants, &registry, &mut session, &request).await,
-            Err(err) => serde_json::json!({
-                "v": super::types::PROTOCOL_VERSION,
-                "id": Value::Null,
-                "ok": false,
-                "error": {
-                    "kind": super::types::ErrorKind::BadRequest.as_wire(),
-                    "message": format!("could not parse frame: {err}"),
-                    "retryable": false,
-                },
-            }),
-        };
-        write_half
-            .write_all(format!("{response}\n").as_bytes())
-            .await?;
-        write_half.flush().await?;
-    }
-}
-
-/// Read one newline-delimited frame without ever accumulating an endless line.
-///
-/// `None` means EOF or an oversized frame; both close the connection. The
-/// per-call `take` limit applies before `read_until` buffers bytes, which is the
-/// property a length check after `lines.next_line()` cannot provide.
-#[cfg(unix)]
-async fn read_frame<R>(reader: &mut R) -> std::io::Result<Option<String>>
-where
-    R: tokio::io::AsyncBufRead + Unpin,
-{
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt};
-
-    let mut bytes = Vec::with_capacity(4096);
-    let read = reader
-        .take((MAX_FRAME_BYTES + 2) as u64)
-        .read_until(b'\n', &mut bytes)
-        .await?;
-    if read == 0 {
-        return Ok(None);
-    }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
-        }
-    }
-    if bytes.len() > MAX_FRAME_BYTES {
-        return Ok(None);
-    }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
 }

@@ -158,6 +158,31 @@ async fn a_dispatch_crosses_the_socket_and_comes_back_as_a_reply() {
 }
 
 #[tokio::test]
+async fn an_out_of_range_result_wait_cannot_overflow_the_proxy_deadline() {
+    let (_dir, _server, _fleet, session) = wired(Grant::new("session", 0, 2)).await;
+    let (dispatched, is_error) = call(
+        &session,
+        "fleet_dispatch",
+        json!({ "instruction": "finish immediately" }),
+    )
+    .await;
+    assert!(!is_error, "{dispatched}");
+
+    let (settled, is_error) = call(
+        &session,
+        "fleet_result",
+        json!({
+            "taskId": dispatched["taskId"],
+            "waitSeconds": u64::MAX,
+        }),
+    )
+    .await;
+
+    assert!(!is_error, "{settled}");
+    assert_eq!(settled["status"], json!("done"));
+}
+
+#[tokio::test]
 async fn the_roster_survives_the_round_trip_intact() {
     let (_dir, _server, _fleet, session) = wired(Grant::new("session", 0, 2)).await;
 

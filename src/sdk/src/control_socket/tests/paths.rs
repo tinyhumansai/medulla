@@ -52,6 +52,16 @@ fn a_relative_override_is_anchored_before_child_processes_receive_it() {
 }
 
 #[test]
+fn an_overlong_explicit_path_is_rejected_at_resolution() {
+    let path = format!("/tmp/{}/control.sock", "x".repeat(120));
+
+    assert!(matches!(
+        control_socket_path(&env(&[(CONTROL_SOCKET_ENV, &path)]), None),
+        Err(super::super::path::ControlSocketError::NoViablePath)
+    ));
+}
+
+#[test]
 fn a_relative_home_also_produces_an_anchored_socket_path() {
     let resolved = control_socket_path(&env(&[("MEDULLA_HOME", "relative-home")]), None).unwrap();
 
@@ -266,6 +276,28 @@ mod bind {
     }
 
     #[tokio::test]
+    async fn a_symlink_cannot_hide_a_replaceable_parent() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let actual_parent = dir.path().join("replaceable");
+        let private_parent = dir.path().join("private");
+        std::fs::create_dir(&actual_parent).unwrap();
+        std::fs::create_dir(&private_parent).unwrap();
+        std::fs::set_permissions(&actual_parent, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let linked_parent = private_parent.join("socket-parent");
+        symlink(&actual_parent, &linked_parent).unwrap();
+
+        let result = prepare_bind(&linked_parent.join("control.sock"), true).await;
+        let resolved_actual_parent = std::fs::canonicalize(&actual_parent).unwrap();
+
+        assert!(matches!(
+            result,
+            Err(ControlSocketError::InsecureParent(path)) if path == resolved_actual_parent
+        ));
+    }
+
+    #[tokio::test]
     async fn an_explicit_path_refuses_a_private_parent_beneath_a_replaceable_ancestor() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -277,10 +309,11 @@ mod bind {
         std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
 
         let result = prepare_bind(&private.join("control.sock"), true).await;
+        let resolved_shared = std::fs::canonicalize(&shared).unwrap();
 
         assert!(matches!(
             result,
-            Err(ControlSocketError::InsecureParent(path)) if path == shared
+            Err(ControlSocketError::InsecureParent(path)) if path == resolved_shared
         ));
         assert_eq!(
             std::fs::metadata(&private).unwrap().permissions().mode() & 0o777,

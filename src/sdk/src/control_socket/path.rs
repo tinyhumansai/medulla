@@ -178,7 +178,12 @@ pub fn control_socket_path(
 
 /// Anchor an operator-supplied relative path before it crosses a process boundary.
 fn absolute_override(explicit: &str) -> Result<PathBuf, ControlSocketError> {
-    absolute_path(PathBuf::from(explicit))
+    let path = absolute_path(PathBuf::from(explicit))?;
+    if fits(&path) {
+        Ok(path)
+    } else {
+        Err(ControlSocketError::NoViablePath)
+    }
 }
 
 /// Anchor any relative socket path before it crosses a process boundary.
@@ -250,7 +255,12 @@ fn insecure_ancestor(path: &Path) -> Result<Option<PathBuf>, ControlSocketError>
     let Some(parent) = absolute.parent() else {
         return Ok(None);
     };
-    for ancestor in parent.ancestors() {
+    // Follow the complete parent path once before walking upward. Calling
+    // `metadata` on lexical ancestors follows only the ancestor currently
+    // inspected and can miss a writable directory behind an earlier symlink.
+    let resolved_parent =
+        std::fs::canonicalize(parent).map_err(|error| ControlSocketError::Io(error.to_string()))?;
+    for ancestor in resolved_parent.ancestors() {
         let meta = std::fs::metadata(ancestor)
             .map_err(|error| ControlSocketError::Io(error.to_string()))?;
         let mode = meta.permissions().mode();

@@ -17,6 +17,8 @@ use super::FleetBackend;
 const REPLY_MARGIN: Duration = Duration::from_secs(5);
 /// Deadline for operations that do not intentionally wait on task progress.
 const SHORT_REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+/// The matching control-server ceiling for `task.get` long polls.
+const MAX_WAIT_SECONDS: u64 = 120;
 
 /// A fleet reached through a running Medulla's control socket.
 pub struct ProxyFleet {
@@ -49,7 +51,7 @@ impl ProxyFleet {
             params
                 .get("waitSeconds")
                 .and_then(Value::as_u64)
-                .map(Duration::from_secs)
+                .map(|seconds| Duration::from_secs(seconds.min(MAX_WAIT_SECONDS)))
                 .unwrap_or_default()
                 .saturating_add(REPLY_MARGIN)
                 .max(SHORT_REPLY_TIMEOUT)

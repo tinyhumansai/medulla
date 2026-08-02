@@ -109,7 +109,10 @@ impl TaskRunner {
         &self,
         address: &str,
         abort_id: &str,
-    ) -> Result<(AgentCapabilities, std::sync::Arc<tokio::sync::Notify>), RunError> {
+    ) -> (
+        Result<AgentCapabilities, RunError>,
+        std::sync::Arc<tokio::sync::Notify>,
+    ) {
         let abort = std::sync::Arc::new(tokio::sync::Notify::new());
         self.aborts
             .lock()
@@ -130,7 +133,7 @@ impl TaskRunner {
                         }) {
                             aborts.remove(abort_id);
                         }
-                        return Err(RunError::Aborted);
+                        return (Err(RunError::Aborted), abort);
                     },
                     _ = tokio::time::sleep(CONTACT_POLL) => {}
                 }
@@ -146,10 +149,10 @@ impl TaskRunner {
                 {
                     aborts.remove(abort_id);
                 }
-                Err(RunError::Aborted)
+                (Err(RunError::Aborted), abort)
             }
             result = self.capabilities(address) => {
-                result.map(|capabilities| (capabilities, abort))
+                (result, abort)
             },
         }
     }

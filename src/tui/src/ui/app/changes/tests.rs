@@ -99,10 +99,7 @@ fn an_unborn_repository_uses_the_empty_tree_as_its_baseline() {
     git(directory.path(), &["init"]);
 
     let baseline = repository::resolve_baseline(directory.path()).expect("empty-tree baseline");
-    let expected = output(
-        directory.path(),
-        &["hash-object", "-t", "tree", "--stdin"],
-    );
+    let expected = output(directory.path(), &["hash-object", "-t", "tree", "--stdin"]);
 
     assert_eq!(baseline, expected.trim());
 }

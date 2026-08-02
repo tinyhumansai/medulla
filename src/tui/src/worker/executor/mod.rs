@@ -247,12 +247,11 @@ impl PtySessionExecutor {
             } else {
                 // A failed reusable turn can leave the harness blocked on the
                 // very prompt that caused the failure. The daemon is about to
-                // drop its task-to-session binding, so hand a latched prompt to
-                // the operator before that happens; user-held sessions have a
-                // direct rail row and cannot be reclaimed behind their back.
-                if self.sessions.attention(id).is_some() {
-                    self.sessions.set_control(id, HarnessControl::User);
-                }
+                // drop its task-to-session binding, so hand it to the operator
+                // unconditionally: attention sampling is asynchronous and may
+                // not have latched a brand-new cue yet. User-held sessions have
+                // a direct rail row and cannot be reclaimed behind their back.
+                self.sessions.set_control(id, HarnessControl::User);
                 self.sessions.release(id);
             }
         }

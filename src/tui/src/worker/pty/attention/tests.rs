@@ -155,6 +155,13 @@ fn an_idle_composer_is_not_a_question() {
 }
 
 #[test]
+fn a_retained_numbered_menu_above_the_composer_is_not_a_choice() {
+    let screen =
+        "Pick a model:\n❯ 1. fast\n  2. careful\n\n> Try \"ask another question\"\n? for shortcuts";
+    assert!(detect(HarnessProvider::Codex, screen).is_none());
+}
+
+#[test]
 fn a_composer_caret_is_not_an_option() {
     // A caret with prose after it is a composer, which is what a harness shows
     // for most of its life; only a caret on a *numbered* option is a menu.

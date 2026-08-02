@@ -120,6 +120,37 @@ pub(super) fn is_selected_option(line: &str) -> bool {
         && after[1..].trim_start().chars().next().is_some()
 }
 
+/// Whether a selected option belongs to the live bottom-of-screen prompt.
+///
+/// Completed menus remain in terminal scrollback after a CLI returns to its
+/// composer. Bound the search to the active tail and reject any candidate with
+/// a composer below it, while leaving room for the menu's remaining choices and
+/// closing border.
+fn has_active_selected_option(screen: &str) -> bool {
+    let lines: Vec<&str> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let tail_start = lines.len().saturating_sub(6);
+    lines
+        .iter()
+        .enumerate()
+        .skip(tail_start)
+        .any(|(index, line)| {
+            is_selected_option(line) && !lines[index + 1..].iter().any(|line| is_composer(line))
+        })
+}
+
+/// Whether `line` is an idle input composer rather than a numbered option.
+fn is_composer(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    trimmed
+        .chars()
+        .next()
+        .is_some_and(|first| first == '>' || CARETS.contains(&first))
+        && !is_selected_option(line)
+}
+
 /// Whether the screen carries a bare yes/no confirmation.
 ///
 /// Matched on punctuation, so it is checked against the raw text rather than
@@ -174,7 +205,7 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     if is_working(screen) {
         return None;
     }
-    if screen.lines().any(is_selected_option) {
+    if has_active_selected_option(screen) {
         return Some((
             AttentionKind::Choice,
             format!("{} is waiting on a choice", provider.as_str()),

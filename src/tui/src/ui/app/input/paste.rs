@@ -36,8 +36,10 @@ impl App {
     ///    can draw;
     /// 4. the harness picker, whose workspace step is a path box and whose
     ///    harness step is a list;
-    /// 5. the Workflows copilot, when it is the focused pane;
-    /// 6. the Agents composer, when one is actually on screen, with `\r\n` and
+    /// 5. any remaining modal, before anything per-tab — one can be raised over
+    ///    a tab the operator has since moved to;
+    /// 6. the Workflows copilot, when it is the focused pane;
+    /// 7. the Agents composer, when one is actually on screen, with `\r\n` and
     ///    bare `\r` normalised to `\n`.
     ///
     /// Anything else drops the payload, and does so from an explicit arm: a
@@ -70,6 +72,20 @@ impl App {
             self.paste_into_harness_workspace(text);
             return;
         }
+        // Every remaining modal — the resume picker and the decisions board —
+        // owns the keyboard and offers no field, so it swallows the paste for
+        // the same reason it swallows a keystroke. Checked here rather than
+        // beside the composer because a modal can be raised over *any* tab: a
+        // `/resume` answers asynchronously, so its picker lands over whichever
+        // tab the operator moved to while it was in flight, and a check that ran
+        // after the per-tab routing let a paste into the copilot underneath it.
+        //
+        // The arms above are still named in `overlay_owns_keys` on purpose: it
+        // is one list, so an overlay added later cannot own the keyboard while a
+        // paste lands behind it.
+        if self.overlay_owns_keys() {
+            return;
+        }
         // The Workflows copilot is the app's other multiline composer, and the
         // pane a long instruction is most likely to be pasted into. The
         // catalogue and the canvas beside it are lists: they own the keyboard
@@ -87,14 +103,10 @@ impl App {
             }
             return;
         }
-        // Every remaining tab is a list or a board with no text field, and the
-        // overlays left in `overlay_owns_keys` — the resume picker and the
-        // decisions board — own the keyboard without offering one. Both drop the
-        // payload rather than let it reach the composer behind them. The earlier
-        // arms are still named in that helper on purpose: it is one list, so an
-        // overlay added later cannot own the keyboard while a paste lands behind
-        // it.
-        if self.tab() != "Agents" || self.overlay_owns_keys() {
+        // Every remaining tab is a list or a board with no text field of its
+        // own, so a paste made on one is dropped rather than banked into the
+        // Agents composer it is not looking at.
+        if self.tab() != "Agents" {
             return;
         }
         // The composer belongs to the orchestrator lane and nowhere else, so a

@@ -288,6 +288,37 @@ mod copilot {
             "nothing was banked into the copilot behind the list: {screen}"
         );
     }
+
+    #[test]
+    fn a_modal_over_the_copilot_swallows_the_paste_it_is_covering() {
+        // `/resume` answers asynchronously, so its picker opens over whichever
+        // tab the operator has moved to in the meantime — the copilot included.
+        // The keyboard gives the modal precedence; paste has to agree, or the
+        // payload lands in a draft the modal is sitting on top of and gets
+        // submitted once it closes.
+        let home = tempfile::tempdir().expect("temp home");
+        let mut app = workflows_app(home.path());
+        key_press(&mut app, KeyCode::Char('c'));
+        app.open_resume(vec![medulla_tui::ui::chat_store::MainChatSummary {
+            session_id: "chat-1".into(),
+            name: "yesterday".into(),
+            turns: 3,
+            thread_count: 1,
+            updated_at: "2026-08-02T00:00:00Z".into(),
+        }]);
+        assert!(app.resume_open(), "the picker is over the copilot");
+
+        assert!(paste(&mut app, "stray text").is_none());
+
+        // Dismiss it and look at the composer it was covering.
+        key_press(&mut app, KeyCode::Esc);
+        assert!(!app.resume_open());
+        let screen = rendered(&mut app);
+        assert!(
+            !screen.contains("stray text"),
+            "the modal swallowed it rather than the draft behind it: {screen}"
+        );
+    }
 }
 
 /// The "start a harness" picker, which is a modal on its first step and a text

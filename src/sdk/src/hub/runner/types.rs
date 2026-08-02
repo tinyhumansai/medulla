@@ -34,7 +34,17 @@ pub(super) type SystemInfoWaiters = Arc<Mutex<HashMap<String, Probe<WorkerSystem
 /// In-flight capability probes, keyed by correlation id. Each resolves with the
 /// worker's self-reported [`AgentCapabilities`] (carrying its budgets/readiness)
 /// or the worker's error text.
-pub(super) type CapabilitiesWaiters = Arc<Mutex<HashMap<String, Probe<AgentCapabilities>>>>;
+///
+/// This uses a synchronous mutex because [`CapabilityProbeGuard`] must remove a
+/// cancelled probe during `Drop`, which cannot await. The lock is never held
+/// across a suspension point.
+pub(super) type CapabilitiesWaiters =
+    Arc<std::sync::Mutex<HashMap<String, Probe<AgentCapabilities>>>>;
+/// Removes a capability waiter when its future completes or is cancelled.
+pub(super) struct CapabilityProbeGuard {
+    pub(super) waiters: CapabilitiesWaiters,
+    pub(super) key: String,
+}
 /// Shared registry of abort signals, keyed by the orchestrator-facing task id
 /// (`medulla:task_abort.taskId`). One entry per in-flight [`TaskRunner::run`],
 /// registered for the whole call; notifying it makes that call stop the worker,

@@ -85,6 +85,12 @@ impl Drop for TaskRunner {
 }
 
 impl TaskRunner {
+    /// Number of registered capability probes, exposed only for cleanup tests.
+    #[cfg(test)]
+    pub(in crate::hub) fn capability_waiter_count(&self) -> usize {
+        self.capabilities_waiters.lock().unwrap().len()
+    }
+
     /// The relay this runner dispatches over, for callers that need to ask it
     /// something — currently roster liveness.
     pub fn relay(&self) -> Arc<dyn Relay> {
@@ -165,7 +171,8 @@ impl TaskRunner {
     ) -> Self {
         let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
         let system_info_waiters: SystemInfoWaiters = Arc::new(Mutex::new(HashMap::new()));
-        let capabilities_waiters: CapabilitiesWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let capabilities_waiters: CapabilitiesWaiters =
+            Arc::new(std::sync::Mutex::new(HashMap::new()));
         let screens = super::ScreenStore::new();
         let pump = tokio::spawn(pump::pump_loop(
             relay.clone(),

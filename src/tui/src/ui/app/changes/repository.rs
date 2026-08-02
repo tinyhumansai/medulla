@@ -1,18 +1,34 @@
 //! Read-only Git command adapter for the Changes tab.
 
+use std::collections::BTreeMap;
 #[cfg(unix)]
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use medulla::ui::git_review::ChangeOrigin;
 
 use super::types::ChangedFile;
 
 /// Find the enclosing repository root and resolve its current commit.
 pub(super) fn discover() -> Result<(PathBuf, String), String> {
     let cwd = std::env::current_dir().map_err(|error| format!("Cannot read directory: {error}"))?;
-    let root = git(&cwd, &["rev-parse", "--show-toplevel"])?;
+    discover_in(&cwd)
+}
+
+/// Resolve the repository root and session baseline for one directory.
+///
+/// The two ways this legitimately fails — a directory outside any repository,
+/// and a repository with no commit to anchor to — are reported as short
+/// sentences rather than Git's own multi-line `fatal:` text, because they are
+/// ordinary states for the tab to sit in rather than faults to debug.
+pub(super) fn discover_in(directory: &Path) -> Result<(PathBuf, String), String> {
+    let root = git(directory, &["rev-parse", "--show-toplevel"])
+        .map_err(|_| "Not a Git repository · nothing to review here".to_owned())?;
     let root = PathBuf::from(root.trim());
-    let baseline = git(&root, &["rev-parse", "HEAD"])?;
+    let baseline = git(&root, &["rev-parse", "HEAD"]).map_err(|_| {
+        "This repository has no commits yet · nothing to compare against".to_owned()
+    })?;
     Ok((root, baseline.trim().to_owned()))
 }
 
@@ -36,11 +52,57 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
         files.push(ChangedFile {
             status: "?".into(),
             path,
+            origins: Vec::new(),
         });
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     files.dedup_by(|left, right| left.path == right.path);
+    let origins = origins(root, baseline)?;
+    for file in &mut files {
+        file.origins = origins.get(&file.path).cloned().unwrap_or_default();
+    }
     Ok((commits, files))
+}
+
+/// Classify where each changed path's content currently lives.
+///
+/// A path is reported once per place it differs, so a file committed during the
+/// session and then edited again carries both `Committed` and `Unstaged`. This
+/// is what lets the rail distinguish work the agent has already recorded from
+/// edits still sitting in the index or the working tree.
+pub(super) fn origins(
+    root: &Path,
+    baseline: &str,
+) -> Result<BTreeMap<PathBuf, Vec<ChangeOrigin>>, String> {
+    let mut origins: BTreeMap<PathBuf, Vec<ChangeOrigin>> = BTreeMap::new();
+    let range = format!("{baseline}..HEAD");
+    let sources: [(ChangeOrigin, Vec<&str>); 4] = [
+        (
+            ChangeOrigin::Committed,
+            vec!["diff", "--name-only", "-z", &range, "--"],
+        ),
+        (
+            ChangeOrigin::Staged,
+            vec!["diff", "--name-only", "-z", "--cached", "--"],
+        ),
+        (
+            ChangeOrigin::Unstaged,
+            vec!["diff", "--name-only", "-z", "--"],
+        ),
+        (
+            ChangeOrigin::Untracked,
+            vec!["ls-files", "--others", "--exclude-standard", "-z"],
+        ),
+    ];
+    for (origin, args) in sources {
+        for path in split_paths(git_bytes(root, &args)?) {
+            let entry = origins.entry(path).or_default();
+            if !entry.contains(&origin) {
+                entry.push(origin);
+            }
+        }
+    }
+    Ok(origins)
 }
 
 /// Return the unified patch for one path, including untracked files.
@@ -98,6 +160,7 @@ pub(super) fn parse_name_status(output: &[u8]) -> Vec<ChangedFile> {
             files.push(ChangedFile {
                 status: status.to_string(),
                 path: bytes_to_path(path),
+                origins: Vec::new(),
             });
         }
     }

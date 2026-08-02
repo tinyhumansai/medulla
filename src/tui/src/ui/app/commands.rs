@@ -121,11 +121,20 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
-            PromptKind::ChangesComment { path } => {
-                if !text.is_empty() {
-                    self.changes.comments.entry(path).or_default().push(text);
-                    self.set_status("Comment added for this session");
-                }
+            PromptKind::ChangesComment { path, anchor } => {
+                // Comments are session state only: this writes into the review
+                // store and never back into the repository, so the working tree
+                // the operator is reading stays exactly as Git reported it.
+                let kept = self.changes.comments.upsert(&path, anchor, &text);
+                self.set_status(if kept {
+                    format!(
+                        "Comment saved on {} · {}",
+                        path.display(),
+                        anchor.describe()
+                    )
+                } else {
+                    format!("Comment cleared on {}", path.display())
+                });
                 None
             }
             PromptKind::HostAdd => match WorkerOp::parse_add(&text) {

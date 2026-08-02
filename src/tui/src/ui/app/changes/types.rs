@@ -1,7 +1,16 @@
 //! Data types for the session-scoped Git changes view.
+//!
+//! The review model itself — hunk boundaries, comment anchors, and the comment
+//! store — lives in [`medulla::ui::git_review`] so surfaces other than the
+//! terminal can reuse it. What stays here is the terminal session's cursor and
+//! its cache of the last Git read.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+use medulla::ui::git_review::{
+    hunks, next_hunk, origin_label, previous_hunk, ChangeOrigin, CommentAnchor, Hunk,
+    ReviewComments,
+};
 
 use super::repository;
 
@@ -12,6 +21,15 @@ pub(crate) struct ChangedFile {
     pub(crate) status: String,
     /// Repository-relative path.
     pub(crate) path: PathBuf,
+    /// Where the change currently lives: committed, staged, unstaged, untracked.
+    pub(crate) origins: Vec<ChangeOrigin>,
+}
+
+impl ChangedFile {
+    /// Combined origin label such as `commit+unstaged`, empty when unclassified.
+    pub(crate) fn origin_label(&self) -> String {
+        origin_label(&self.origins)
+    }
 }
 
 /// Cached repository data and navigation for the Changes tab.
@@ -27,12 +45,16 @@ pub(crate) struct GitChangesState {
     pub(crate) files: Vec<ChangedFile>,
     /// Highlighted file.
     pub(crate) selected: usize,
+    /// Highlighted line within the selected patch; the anchor for comments.
+    pub(crate) cursor: usize,
+    /// Hunk boundaries of the selected patch, in patch-line indices.
+    pub(crate) hunks: Vec<Hunk>,
     /// Vertical offset into the selected patch.
     pub(crate) scroll: usize,
     /// Patch text for the selected file.
     pub(crate) patch: Vec<String>,
     /// Review notes kept for the lifetime of this TUI session.
-    pub(crate) comments: BTreeMap<PathBuf, Vec<String>>,
+    pub(crate) comments: ReviewComments,
     /// Largest valid vertical offset for the currently rendered detail pane.
     pub(crate) max_scroll: usize,
     /// Last repository error, rendered instead of an empty view.
@@ -76,15 +98,71 @@ impl GitChangesState {
         }
     }
 
-    /// Reload only the selected file's patch.
+    /// Reload only the selected file's patch, re-indexing its hunks.
     pub(crate) fn reload_patch(&mut self) {
         self.scroll = 0;
+        self.cursor = 0;
         self.patch = match (&self.root, &self.baseline, self.selected_path()) {
             (Some(root), Some(baseline), Some(path)) => {
                 repository::patch(root, baseline, path).unwrap_or_else(|error| vec![error])
             }
             _ => Vec::new(),
         };
+        self.hunks = hunks(&self.patch);
+    }
+
+    /// Move the file selection, reloading the patch that comes into view.
+    pub(crate) fn select_file(&mut self, delta: isize) {
+        let last = self.files.len().saturating_sub(1);
+        self.selected = self.selected.saturating_add_signed(delta).min(last);
+        self.reload_patch();
+    }
+
+    /// Move the line cursor within the selected patch, clamped to its bounds.
+    pub(crate) fn move_cursor(&mut self, delta: isize) {
+        let last = self.patch.len().saturating_sub(1);
+        self.cursor = self.cursor.saturating_add_signed(delta).min(last);
+    }
+
+    /// Jump the cursor to the next or previous hunk header.
+    ///
+    /// Returns `false` when there is no hunk in that direction, leaving the
+    /// cursor where it is rather than wrapping past the end of the patch.
+    pub(crate) fn jump_hunk(&mut self, forward: bool) -> bool {
+        let target = if forward {
+            next_hunk(&self.hunks, self.cursor)
+        } else {
+            previous_hunk(&self.hunks, self.cursor)
+        };
+        match target {
+            Some(line) => {
+                self.cursor = line;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Index of the hunk containing the cursor, if the cursor is inside one.
+    pub(crate) fn hunk_at_cursor(&self) -> Option<usize> {
+        self.hunks
+            .iter()
+            .position(|hunk| hunk.contains(self.cursor))
+    }
+
+    /// The anchor the cursor currently addresses.
+    ///
+    /// A cursor resting on a `@@` header comments on the whole hunk; anywhere
+    /// else inside a patch comments on that single line; a file with no patch
+    /// at all can still take a file-level note.
+    pub(crate) fn cursor_anchor(&self) -> CommentAnchor {
+        if self.patch.is_empty() {
+            return CommentAnchor::File;
+        }
+        match self.hunk_at_cursor() {
+            Some(index) if self.hunks[index].header == self.cursor => CommentAnchor::Hunk(index),
+            _ => CommentAnchor::Line(self.cursor),
+        }
     }
 
     /// Repository-relative selected path, if any.
@@ -98,9 +176,10 @@ impl GitChangesState {
     pub(crate) fn status_message(&self) -> String {
         self.error.clone().unwrap_or_else(|| {
             format!(
-                "Changes since session start · {} commit(s) · {} file(s)",
+                "Changes since session start · {} commit(s) · {} file(s) · {} comment(s)",
                 self.commits.len(),
-                self.files.len()
+                self.files.len(),
+                self.comments.len()
             )
         })
     }

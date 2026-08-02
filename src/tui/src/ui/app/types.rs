@@ -610,10 +610,12 @@ impl HandbackPolicy {
 
 /// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
-    /// Attach a session-local review comment to a changed file.
+    /// Attach a session-local review comment to a file, hunk, or patch line.
     ChangesComment {
         /// Repository-relative path being reviewed.
         path: std::path::PathBuf,
+        /// Position within that file's patch the note is bound to.
+        anchor: medulla::ui::git_review::CommentAnchor,
     },
     /// Add a worker from an address/@handle line.
     HostAdd,

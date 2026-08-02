@@ -22,12 +22,26 @@ pub(super) fn discover() -> Result<(PathBuf, String), String> {
 /// and a repository with no commit to anchor to — are reported as short
 /// sentences rather than Git's own multi-line `fatal:` text, because they are
 /// ordinary states for the tab to sit in rather than faults to debug.
+/// Other errors (permission denied, Git not found) are preserved to guide the operator.
 pub(super) fn discover_in(directory: &Path) -> Result<(PathBuf, String), String> {
-    let root = git(directory, &["rev-parse", "--show-toplevel"])
-        .map_err(|_| "Not a Git repository · nothing to review here".to_owned())?;
+    let root = git(directory, &["rev-parse", "--show-toplevel"]).map_err(|error| {
+        // Only treat as "not a repo" if the error specifically indicates that
+        if error.contains("not a git repository") {
+            "Not a Git repository · nothing to review here".to_owned()
+        } else {
+            // Preserve other errors (permission denied, Git not found, etc.)
+            error
+        }
+    })?;
     let root = PathBuf::from(root.trim());
-    let baseline = git(&root, &["rev-parse", "HEAD"]).map_err(|_| {
-        "This repository has no commits yet · nothing to compare against".to_owned()
+    let baseline = git(&root, &["rev-parse", "HEAD"]).map_err(|error| {
+        // Only treat as "no commits" if the error is about HEAD not existing
+        if error.contains("HEAD") || error.contains("no commits") {
+            "This repository has no commits yet · nothing to compare against".to_owned()
+        } else {
+            // Preserve other errors
+            error
+        }
     })?;
     Ok((root, baseline.trim().to_owned()))
 }

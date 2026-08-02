@@ -14,6 +14,7 @@ use crate::harness_work::kinds;
 use super::super::events::{semantic, tool_call_payload, tool_result_payload};
 use super::super::shared::text_from_content;
 use super::super::types::HarnessSemanticEvent;
+use super::super::workspace::workspace_event_from_output;
 
 /// Map a codex `item.started`/`item.completed` record to semantic events.
 ///
@@ -151,14 +152,23 @@ fn command_event(
         .and_then(Value::as_i64)
         .map(|code| code != 0)
         .unwrap_or(false);
-    vec![semantic(
+    let mut events = vec![semantic(
         line,
         ts,
         record_type,
         "tool_result",
         "agent",
         tool_result_payload(id, is_error, output),
-    )]
+    )];
+    if !is_error {
+        events.extend(workspace_event_from_output(
+            output,
+            line,
+            ts,
+            &format!("{record_type}:workspace"),
+        ));
+    }
+    events
 }
 
 /// Codex's todo list as a `todo_update`.

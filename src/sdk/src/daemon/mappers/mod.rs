@@ -31,6 +31,7 @@ mod timestamp;
 mod types;
 mod usage;
 mod work;
+mod workspace;
 
 #[cfg(test)]
 mod tests;

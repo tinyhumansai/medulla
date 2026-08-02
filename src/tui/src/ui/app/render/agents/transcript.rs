@@ -115,6 +115,7 @@ impl App {
             let capacity = self.fleet_capacity();
             if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
                 let placement = capacity.placement(descriptor);
+                let active_info = self.selected_work(selection).map(|work| &work.info);
                 // Labelled, not bare: "this device · claude · /Users/me/repo"
                 // reads as three unexplained tokens, and the two an operator
                 // actually needs — which machine, which folder — are exactly the
@@ -140,9 +141,14 @@ impl App {
                     .host
                     .map(|h| h.name.clone())
                     .or_else(|| Some(descriptor.name.clone()).filter(|n| !n.trim().is_empty()));
-                let workspace = placement
-                    .workspace
-                    .map(|w| w.path.clone())
+                // An init record's cwd only repeats where the harness was
+                // launched and can disagree with the declared placement. A
+                // branch is added only by a completed worktree report, making
+                // that cwd authoritative for the live session.
+                let workspace = active_info
+                    .filter(|info| info.branch.is_some())
+                    .and_then(|info| info.cwd.clone())
+                    .or_else(|| placement.workspace.map(|w| w.path.clone()))
                     .or_else(|| meta("workspace"));
                 let chip = [
                     host.map(|h| format!("host {h}")),
@@ -151,6 +157,9 @@ impl App {
                         .map(|h| h.kind.clone())
                         .or_else(|| meta("harness")),
                     workspace.map(|w| format!("dir {w}")),
+                    active_info
+                        .and_then(|info| info.branch.as_ref())
+                        .map(|branch| format!("branch {branch}")),
                     placement
                         .template
                         .map(|t| format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))),

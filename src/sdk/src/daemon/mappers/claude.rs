@@ -12,6 +12,7 @@ use super::shared::{as_array, parse_json_object};
 use super::timestamp::parse_timestamp_ms;
 use super::types::HarnessSemanticEvent;
 use super::work::work_events_for_tool;
+use super::workspace::workspace_event_from_output;
 
 /// Map one raw Claude JSONL line into zero or more semantic events.
 pub(super) fn claude_events_from_line(raw: &str, line: i64) -> Vec<HarnessSemanticEvent> {
@@ -84,14 +85,23 @@ fn claude_user_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSemanticEv
                 .unwrap_or("");
             let is_error = object.get("is_error") == Some(&Value::Bool(true));
             let output = flatten_claude_tool_result(object.get("content"));
-            vec![semantic(
+            let mut events = vec![semantic(
                 line,
                 ts,
                 "user:tool_result",
                 "tool_result",
                 "agent",
                 tool_result_payload(call_id, is_error, &output),
-            )]
+            )];
+            if !is_error {
+                events.extend(workspace_event_from_output(
+                    &output,
+                    line,
+                    ts,
+                    "user:tool_result:workspace",
+                ));
+            }
+            events
         }
         _ => Vec::new(),
     }

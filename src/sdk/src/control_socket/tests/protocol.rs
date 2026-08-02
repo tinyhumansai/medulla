@@ -526,6 +526,13 @@ async fn aborting_a_task_that_already_settled_reports_that_nothing_was_cancelled
         .await;
     let task_id = dispatched["result"]["taskId"].as_str().unwrap().to_string();
 
+    harness
+        .call(
+            "task.get",
+            json!({ "taskId": task_id.clone(), "waitSeconds": 5 }),
+        )
+        .await;
+
     let response = harness
         .call("task.abort", json!({ "taskId": task_id }))
         .await;

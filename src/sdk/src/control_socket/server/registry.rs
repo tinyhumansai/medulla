@@ -35,8 +35,11 @@ const STATUS_TAIL_MAX: usize = 200;
 /// How long a settled task's result stays readable.
 const RESULT_TTL: Duration = Duration::from_secs(30 * 60);
 
-/// The most tasks tracked at once, across every grant.
-pub(super) const MAX_ENTRIES: usize = 256;
+/// The process-wide ceiling on live dispatches across every grant.
+pub(super) const MAX_IN_FLIGHT_GLOBAL: usize = 256;
+
+/// The most live and retained settled tasks kept in the registry.
+pub(super) const MAX_ENTRIES: usize = MAX_IN_FLIGHT_GLOBAL * 2;
 
 /// Translate a dispatch failure into a state a model can reason about.
 ///
@@ -124,7 +127,7 @@ impl TaskRegistry {
                 .values()
                 .filter(|tracked| !tracked.entry.state.is_settled())
                 .count();
-            if global_in_flight >= MAX_ENTRIES {
+            if global_in_flight >= MAX_IN_FLIGHT_GLOBAL {
                 return Err(SpawnError::GlobalAtCapacity(global_in_flight));
             }
             let in_flight = tasks
@@ -190,7 +193,14 @@ impl TaskRegistry {
 
         // A returned handle is now cancellable: the production dispatch has
         // registered its abort signal, or it already settled synchronously.
-        let _ = started_rx.await;
+        if started_rx.await.is_err() {
+            self.settle(
+                &task_id,
+                state_from_error(RunError::Transport(
+                    "the dispatch task ended before it started".to_string(),
+                )),
+            );
+        }
         Ok(task_id)
     }
 
@@ -244,6 +254,7 @@ impl TaskRegistry {
                 tracked
                     .entry
                     .finished_at
+                    .filter(|_| tracked.settled.receiver_count() == 0)
                     .map(|finished| (id.clone(), finished))
             })
             .collect();

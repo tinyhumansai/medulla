@@ -6,11 +6,13 @@
 //! boundary.
 
 pub mod fleet;
+mod support;
 
 #[cfg(test)]
 pub(crate) use crate::workflows::mcp::scope_error_for;
 pub use crate::workflows::mcp::{ToolMode, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV};
 pub use fleet::FLEET_TOOL_NAMES;
+pub(crate) use support::{arg, content, schema};
 
 use serde_json::{json, Value};
 
@@ -71,33 +73,4 @@ pub(super) async fn call(session: &McpSession, params: &Value) -> Result<Value, 
     } else {
         crate::workflows::mcp::call(session, name, arguments).await
     }
-}
-
-/// Build a JSON Schema object with the given properties and required keys.
-pub(crate) fn schema(properties: Value, required: &[&str]) -> Value {
-    json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    })
-}
-
-/// Read a required, non-empty string argument.
-pub(crate) fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
-    arguments
-        .get(name)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| RpcError::invalid_params(format!("missing required argument '{name}'")))
-}
-
-/// Wrap a value as an MCP tool result.
-pub(crate) fn content(value: &Value, is_error: bool) -> Value {
-    json!({
-        "content": [{
-            "type": "text",
-            "text": serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
-        }],
-        "isError": is_error,
-    })
 }

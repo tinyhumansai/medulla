@@ -212,6 +212,10 @@ async fn a_dropped_server_surfaces_as_disconnected_and_cleans_up() {
         client.call("worker.list", json!({})).await,
         Err(ControlError::Disconnected(_))
     ));
+    assert!(matches!(
+        client.call("worker.list", json!({})).await,
+        Err(ControlError::Disconnected(message)) if message.contains("no longer usable")
+    ));
 }
 
 #[tokio::test]

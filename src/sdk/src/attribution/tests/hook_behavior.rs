@@ -40,14 +40,7 @@ fn every_client_hook_is_shimmed_and_executable() {
     use std::os::unix::fs::PermissionsExt;
 
     let hook_dir = super::prepare_commit_msg::generate_hook_dir();
-    for name in [
-        "prepare-commit-msg",
-        "pre-commit",
-        "commit-msg",
-        "pre-push",
-        "post-checkout",
-        "pre-rebase",
-    ] {
+    for name in super::prepare_commit_msg::CLIENT_HOOKS {
         let hook_path = hook_dir.join(name);
         assert!(hook_path.exists(), "{name} shim must exist: {hook_path:?}");
         let perms = std::fs::metadata(&hook_path)
@@ -410,17 +403,6 @@ fn hook_is_noop_when_attribution_env_is_empty() {
     );
 }
 
-/// Cleanup must remove the hook directory and its contents.
-#[cfg(unix)]
-#[test]
-fn cleanup_removes_hook_dir() {
-    let hook_dir = super::prepare_commit_msg::generate_hook_dir();
-    assert!(hook_dir.exists(), "hook dir exists before cleanup");
-
-    super::prepare_commit_msg::cleanup_hook_dir(&hook_dir);
-    assert!(!hook_dir.exists(), "hook dir removed after cleanup");
-}
-
 /// Git hooks are not supported on non-Unix, so the hook env is empty there.
 #[cfg(not(unix))]
 #[test]
@@ -456,7 +438,10 @@ fn disabled_attribution_yields_no_hook_env() {
 #[cfg(unix)]
 #[test]
 fn cleanup_hook_dir_removes_the_directory() {
-    let hook_dir = super::prepare_commit_msg::generate_hook_dir();
+    let root = tempfile::tempdir().unwrap();
+    let hook_dir = root.path().join("caller-owned-hooks");
+    std::fs::create_dir(&hook_dir).unwrap();
+    std::fs::write(hook_dir.join("shim"), "test").unwrap();
     assert!(hook_dir.exists(), "hook dir must exist before cleanup");
 
     super::prepare_commit_msg::cleanup_hook_dir(&hook_dir);

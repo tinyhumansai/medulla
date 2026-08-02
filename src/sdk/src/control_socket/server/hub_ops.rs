@@ -28,23 +28,19 @@ pub struct FleetDefaults {
     pub worker_address: Option<String>,
 }
 
-/// Tee a dispatch's status frames into the activity log and on to a poller.
+/// Forward a dispatch's status frames to its control-plane poller.
 ///
-/// A tee rather than a move: `fleet_result` needs the frames for its progress,
-/// and the Agents view needs them to show the task doing something. Forwarding
-/// to only one of the two trades one blind spot for another.
+/// The production task runner already writes each frame to the activity log.
+/// This channel exists only to give `fleet_result` its own progress tail.
 pub(super) fn tee_status(
-    activity: ActivityLog,
-    task_id: String,
     onward: Option<mpsc::UnboundedSender<String>>,
 ) -> mpsc::UnboundedSender<String> {
     let (tee, mut frames) = mpsc::unbounded_channel::<String>();
     tokio::spawn(async move {
         while let Some(line) = frames.recv().await {
-            activity.observed(&task_id, "status", &line, crate::clock::now_millis());
             if let Some(onward) = &onward {
-                // A closed receiver means the poller gave up; the activity log
-                // still wants the rest, so this does not end the loop.
+                // A closed receiver means the poller gave up. The task runner's
+                // independent activity path still records later frames.
                 let _ = onward.send(line);
             }
         }
@@ -184,7 +180,7 @@ impl FleetOps for HubFleetOps {
             crate::clock::now_millis(),
         );
 
-        let tee = tee_status(activity.clone(), wire_task_id.clone(), status);
+        let tee = tee_status(status);
         let outcome = handle.task_runner().run(request, Some(tee)).await;
         record_outcome(&activity, &wire_task_id, &outcome);
         outcome

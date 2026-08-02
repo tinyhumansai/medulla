@@ -93,15 +93,13 @@ fn the_default_worker_falls_back_to_this_host() {
 }
 
 #[tokio::test]
-async fn status_frames_reach_the_poller_and_the_activity_log_both() {
-    // The tee is the whole point: `fleet_result` reads the poller's copy for its
-    // progress, and the Agents view reads the log's. Forwarding to one only
-    // would leave the other blind.
+async fn status_frames_reach_the_poller_without_duplicate_activity() {
     let activity = ActivityLog::new();
     activity.dispatched("mcp-wire-1", "alpha");
+    activity.observed("mcp-wire-1", "status", "reading files", 1);
     let (poller, mut polled) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-    let tee = tee_status(activity.clone(), "mcp-wire-1".into(), Some(poller));
+    let tee = tee_status(Some(poller));
     tee.send("reading files".to_string()).unwrap();
     tee.send("writing a patch".to_string()).unwrap();
     drop(tee);
@@ -115,21 +113,17 @@ async fn status_frames_reach_the_poller_and_the_activity_log_both() {
         .filter(|entry| entry.task_id == "mcp-wire-1" && entry.kind == "status")
         .map(|entry| entry.content)
         .collect();
-    assert_eq!(seen, ["reading files", "writing a patch"]);
+    assert_eq!(seen, ["reading files"]);
 }
 
-#[tokio::test]
-async fn a_task_the_operator_never_started_still_lands_on_a_lane() {
+#[test]
+fn a_task_the_operator_never_started_still_lands_on_a_lane() {
     // Without the attribution, work dispatched by a harness runs on somebody's
     // machine and appears against no worker at all — invisible in the Agents
     // view, so nobody can see it or stop it.
     let activity = ActivityLog::new();
     activity.dispatched("mcp-wire-1", "alpha");
-
-    let tee = tee_status(activity.clone(), "mcp-wire-1".into(), None);
-    tee.send("on it".to_string()).unwrap();
-    drop(tee);
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    activity.observed("mcp-wire-1", "ack", "accepted", 1);
 
     let entry = activity
         .snapshot()

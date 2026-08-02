@@ -482,7 +482,7 @@ fn task_abort(
         }));
     }
     if ops.abort(&entry.task_id) {
-        Ok(json!({ "aborted": true, "taskId": task_id }))
+        Ok(json!({ "aborted": true, "taskId": task_id, "status": "aborting" }))
     } else {
         let status = registry
             .get(token, &task_id)

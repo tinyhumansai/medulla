@@ -60,30 +60,44 @@ pub fn set_defaults(
     harness: Option<&str>,
     model: Option<&str>,
 ) -> Result<Value, WorkflowError> {
-    const MAX_RETRIES: usize = 16;
-    for _ in 0..MAX_RETRIES {
-        let mut record = require(store.as_ref(), id)?;
-        let expected = crate::workflows::record_fingerprint(&record);
-        if let Some(harness) = harness {
-            record.defaults.harness = Some(harness.trim().to_string()).filter(|s| !s.is_empty());
-        }
-        if let Some(model) = model {
-            record.defaults.model = Some(model.trim().to_string()).filter(|s| !s.is_empty());
-        }
-        record
-            .defaults
-            .preference()
-            .map_err(|message| WorkflowError::Invalid {
-                id: id.to_string(),
-                messages: vec![format!("`defaults`: {message}")],
-            })?;
-        if store.save_if_record_fingerprint(&record, &expected)? {
-            return Ok(json!({ "updated": record.id, "defaults": record.defaults }));
-        }
-    }
-    Err(WorkflowError::Engine(format!(
-        "workflow '{id}' kept changing while its defaults were being saved; retry the edit"
-    )))
+    set_defaults_observed(store, id, harness, model, |_| {}).map(|(value, _)| value)
+}
+
+/// Set defaults while observing each freshly read save attempt.
+pub(crate) fn set_defaults_observed(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    harness: Option<&str>,
+    model: Option<&str>,
+    observer: impl FnMut(usize),
+) -> Result<(Value, usize), WorkflowError> {
+    let (record, attempts) = crate::workflows::authoring::mutate_workflow_record(
+        store,
+        id,
+        |record| {
+            if let Some(harness) = harness {
+                record.defaults.harness =
+                    Some(harness.trim().to_string()).filter(|s| !s.is_empty());
+            }
+            if let Some(model) = model {
+                record.defaults.model = Some(model.trim().to_string()).filter(|s| !s.is_empty());
+            }
+            record
+                .defaults
+                .preference()
+                .map_err(|message| WorkflowError::Invalid {
+                    id: id.to_string(),
+                    messages: vec![format!("`defaults`: {message}")],
+                })?;
+            Ok(())
+        },
+        observer,
+        "kept changing while its defaults were being saved; retry the edit",
+    )?;
+    Ok((
+        json!({ "updated": record.id, "defaults": record.defaults }),
+        attempts,
+    ))
 }
 
 /// Remove a workflow.

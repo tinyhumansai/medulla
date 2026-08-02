@@ -22,6 +22,7 @@ pub struct ControlClient {
     write: OwnedWriteHalf,
     next_id: u64,
     hello: Hello,
+    usable: bool,
 }
 
 impl ControlClient {
@@ -49,6 +50,7 @@ impl ControlClient {
             lines: BufReader::new(read_half).lines(),
             write,
             next_id: 1,
+            usable: true,
             // Replaced by the handshake below; a placeholder rather than an
             // `Option` so every later read is unconditional.
             hello: Hello {
@@ -110,32 +112,67 @@ impl ControlClient {
         params: Value,
         deadline: Instant,
     ) -> Result<Value, ControlError> {
+        if !self.usable {
+            return Err(ControlError::Disconnected(
+                "the control connection is no longer usable; reconnect before retrying".into(),
+            ));
+        }
         let id = self.next_id;
         self.next_id += 1;
         let frame = json!({ "v": PROTOCOL_VERSION, "id": id, "op": op, "params": params });
 
-        timeout_at(
+        let write_result = timeout_at(
             deadline,
             self.write.write_all(format!("{frame}\n").as_bytes()),
         )
-        .await
-        .map_err(|_| ControlError::Disconnected("timed out writing the request".into()))?
-        .map_err(|err| ControlError::Disconnected(err.to_string()))?;
-        timeout_at(deadline, self.write.flush())
-            .await
-            .map_err(|_| ControlError::Disconnected("timed out flushing the request".into()))?
-            .map_err(|err| ControlError::Disconnected(err.to_string()))?;
+        .await;
+        match write_result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                self.usable = false;
+                return Err(ControlError::Disconnected(error.to_string()));
+            }
+            Err(_) => {
+                self.usable = false;
+                return Err(ControlError::Disconnected(
+                    "timed out writing the request".into(),
+                ));
+            }
+        }
+        match timeout_at(deadline, self.write.flush()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                self.usable = false;
+                return Err(ControlError::Disconnected(error.to_string()));
+            }
+            Err(_) => {
+                self.usable = false;
+                return Err(ControlError::Disconnected(
+                    "timed out flushing the request".into(),
+                ));
+            }
+        }
 
         loop {
-            let line = timeout_at(deadline, self.lines.next_line())
-                .await
-                .map_err(|_| {
-                    ControlError::Disconnected("timed out waiting for Medulla's reply".into())
-                })?
-                .map_err(|err| ControlError::Disconnected(err.to_string()))?
-                .ok_or_else(|| {
-                    ControlError::Disconnected("the server closed the connection".to_string())
-                })?;
+            let line = match timeout_at(deadline, self.lines.next_line()).await {
+                Ok(Ok(Some(line))) => line,
+                Ok(Ok(None)) => {
+                    self.usable = false;
+                    return Err(ControlError::Disconnected(
+                        "the server closed the connection".to_string(),
+                    ));
+                }
+                Ok(Err(error)) => {
+                    self.usable = false;
+                    return Err(ControlError::Disconnected(error.to_string()));
+                }
+                Err(_) => {
+                    self.usable = false;
+                    return Err(ControlError::Disconnected(
+                        "timed out waiting for Medulla's reply".into(),
+                    ));
+                }
+            };
             if line.trim().is_empty() {
                 continue;
             }

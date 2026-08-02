@@ -201,17 +201,17 @@ impl TaskRunner {
     /// dispatch to its own liveness bound. Returns whether a live dispatch was
     /// found and signalled.
     pub fn abort_task(&self, task_id: &str) -> bool {
-        let signal = self
-            .aborts
-            .lock()
-            .ok()
-            .and_then(|map| map.get(task_id).cloned());
-        if let Some(signal) = signal {
-            signal.notify_one();
-            true
-        } else {
-            false
-        }
+        let Ok(mut aborts) = self.aborts.lock() else {
+            return false;
+        };
+        let Some(signal) = aborts.remove(task_id) else {
+            return false;
+        };
+        // Removing and notifying under the same lock makes cancellation and
+        // AbortGuard's terminal cleanup mutually exclusive. If cleanup wins,
+        // this returns false; if this wins, a live task receives the signal.
+        signal.notify_one();
+        true
     }
 
     /// Cancel every dispatch this runner has in flight.

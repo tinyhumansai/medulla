@@ -96,7 +96,7 @@ fn the_mode_is_read_from_the_environment_and_defaults_to_full() {
             TOOL_MODE_ENV.to_string(),
             "nonsense".to_string()
         )])),
-        ToolMode::Full
+        ToolMode::Propose
     );
 }
 

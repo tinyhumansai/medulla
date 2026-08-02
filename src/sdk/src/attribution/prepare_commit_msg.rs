@@ -62,7 +62,7 @@ const BASE_PARAMETERS_KEY: &str = "MEDULLA_GIT_CONFIG_BASE_PARAMETERS";
 /// are omitted: they run in the receiving repository, never in a harness's
 /// working clone.
 #[cfg(unix)]
-const CLIENT_HOOKS: &[&str] = &[
+pub(super) const CLIENT_HOOKS: &[&str] = &[
     "applypatch-msg",
     "pre-applypatch",
     "post-applypatch",

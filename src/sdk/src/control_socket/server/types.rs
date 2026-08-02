@@ -49,7 +49,7 @@ pub struct TaskEntry {
     /// The handle returned to the caller.
     pub task_id: String,
     /// The grant that dispatched it. Scopes reads, polls, and aborts.
-    pub token: String,
+    pub(crate) token: String,
     /// Where it was sent.
     pub worker: String,
     /// The first line of the instruction, for a listing.

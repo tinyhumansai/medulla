@@ -33,17 +33,53 @@ pub fn apply_workflow_ops(
     // independent store instances. Rebase the patch when another writer wins
     // between read and save instead of reporting two successes while silently
     // discarding the earlier edit.
+    apply_workflow_ops_observed(store, id, ops, |_| {}).map(|(record, _)| record)
+}
+
+/// Apply graph operations while observing each freshly read save attempt.
+///
+/// The observer is used by concurrency tests to synchronize both writers after
+/// their first read without relying on scheduler timing. Production callers use
+/// [`apply_workflow_ops`], whose observer is a no-op.
+pub(crate) fn apply_workflow_ops_observed(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    ops: &[GraphOp],
+    observer: impl FnMut(usize),
+) -> Result<(WorkflowRecord, usize), WorkflowError> {
+    mutate_workflow_record(
+        store,
+        id,
+        |record| {
+            record.graph = apply_ops(&record.graph, ops)
+                .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
+            validate_graph(id, &record.graph)?;
+            crate::workflows::gates::check(id, &record.graph)
+        },
+        observer,
+        "kept changing while the edit was being saved; retry the edit",
+    )
+}
+
+/// Mutate and atomically save a workflow record, rebasing after CAS conflicts.
+pub(crate) fn mutate_workflow_record(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    mut mutate: impl FnMut(&mut WorkflowRecord) -> Result<(), WorkflowError>,
+    mut observer: impl FnMut(usize),
+    failure: &str,
+) -> Result<(WorkflowRecord, usize), WorkflowError> {
     const MAX_RETRIES: usize = 16;
-    for _ in 0..MAX_RETRIES {
-        let current = require(store.as_ref(), id)?;
-        let expected = crate::workflows::record_fingerprint(&current);
-        if let Some(record) = apply_workflow_ops_if_record_unchanged(store, id, ops, &expected)? {
-            return Ok(record);
+    for attempt in 1..=MAX_RETRIES {
+        let mut record = require(store.as_ref(), id)?;
+        let expected = crate::workflows::record_fingerprint(&record);
+        mutate(&mut record)?;
+        observer(attempt);
+        if store.save_if_record_fingerprint(&record, &expected)? {
+            return Ok((record, attempt));
         }
     }
-    Err(WorkflowError::Engine(format!(
-        "workflow '{id}' kept changing while the edit was being saved; retry the edit"
-    )))
+    Err(WorkflowError::Engine(format!("workflow '{id}' {failure}")))
 }
 
 /// Apply `ops` only if the graph still matches `expected_fingerprint`.
@@ -72,27 +108,6 @@ pub fn apply_workflow_ops_if_unchanged(
     validate_graph(id, &record.graph)?;
     crate::workflows::gates::check(id, &record.graph)?;
     if !store.save_if_fingerprint(&record, expected_fingerprint)? {
-        return Ok(None);
-    }
-    Ok(Some(record))
-}
-
-/// Apply graph ops only while the whole workflow record remains unchanged.
-fn apply_workflow_ops_if_record_unchanged(
-    store: &Arc<dyn WorkflowStore>,
-    id: &str,
-    ops: &[GraphOp],
-    expected_fingerprint: &str,
-) -> Result<Option<WorkflowRecord>, WorkflowError> {
-    let mut record = require(store.as_ref(), id)?;
-    if crate::workflows::record_fingerprint(&record) != expected_fingerprint {
-        return Ok(None);
-    }
-    record.graph = apply_ops(&record.graph, ops)
-        .map_err(|err| WorkflowError::Engine(format!("workflow '{id}': {err}")))?;
-    validate_graph(id, &record.graph)?;
-    crate::workflows::gates::check(id, &record.graph)?;
-    if !store.save_if_record_fingerprint(&record, expected_fingerprint)? {
         return Ok(None);
     }
     Ok(Some(record))

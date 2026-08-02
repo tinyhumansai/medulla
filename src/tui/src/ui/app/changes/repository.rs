@@ -61,6 +61,26 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
     for file in &mut files {
         file.origins = origins.get(&file.path).cloned().unwrap_or_default();
     }
+
+    // Include paths that have tracked origins (Committed, Staged, Unstaged) but are absent
+    // from the aggregate diff. This can happen when a session commit changes a file and a
+    // later staged or unstaged edit restores it to baseline—the cancelling changes mean
+    // `git diff baseline` won't report it, but the file still has change history that should
+    // be visible in the Changes tab.
+    for (path, file_origins) in origins.iter() {
+        if !files.iter().any(|f| &f.path == path) && !file_origins.is_empty() {
+            // Only include if there are actual tracked changes (not just "Untracked")
+            if file_origins.iter().any(|o| o != &ChangeOrigin::Untracked) {
+                files.push(ChangedFile {
+                    status: "M".into(), // Use generic "modified" status for reconstructed entries
+                    path: path.clone(),
+                    origins: file_origins.clone(),
+                });
+            }
+        }
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+
     Ok((commits, files))
 }
 

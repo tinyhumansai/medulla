@@ -430,3 +430,34 @@ fn out_of_bounds_line_comments_are_invalidated_on_refresh() {
     // The comment at the old end line is now out of bounds and should be removed
     assert!(state.comments.body(&path, CommentAnchor::Line(initial_patch_len - 1)).is_none());
 }
+
+#[test]
+fn cancelled_changes_remain_visible_in_file_list() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("file.txt"), "baseline\n").expect("write baseline");
+    git(directory.path(), &["add", "file.txt"]);
+    git(directory.path(), &["commit", "-m", "baseline"]);
+    let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    // Commit a change
+    fs::write(directory.path().join("file.txt"), "changed\n").expect("write changed");
+    git(directory.path(), &["add", "file.txt"]);
+    git(directory.path(), &["commit", "-m", "commit change"]);
+
+    // Restore to baseline in working tree, so the aggregate diff shows no change
+    fs::write(directory.path().join("file.txt"), "baseline\n").expect("restore baseline");
+
+    // Despite aggregate diff showing no change, load() should include the file
+    // because it has ChangeOrigin::Committed (from the earlier commit)
+    let (_, files) = repository::load(directory.path(), baseline.trim()).expect("load");
+    assert!(!files.is_empty(), "File with cancelled changes should still appear");
+    let file = files
+        .iter()
+        .find(|f| f.path == std::path::Path::new("file.txt"))
+        .expect("file.txt");
+    assert!(
+        file.origins.contains(&ChangeOrigin::Committed),
+        "Should report Committed origin even when change is cancelled"
+    );
+}

@@ -40,11 +40,12 @@ use crate::hub_relay::HubSlot;
 pub(crate) async fn start(
     env: &HashMap<String, String>,
     config: &medulla::config::TuiConfig,
+    hub_available: bool,
     hub: HubSlot,
     local_default_worker: Option<String>,
     logs: &medulla_tui::log::LogBuffer,
 ) -> Option<ControlServer> {
-    if !config.mcp.fleet_tools {
+    if !config.mcp.fleet_tools || !hub_available {
         return None;
     }
     let configured = config.mcp.socket_path.as_deref();
@@ -99,10 +100,11 @@ pub(crate) async fn start(
 pub(crate) async fn start(
     env: &HashMap<String, String>,
     config: &medulla::config::TuiConfig,
+    hub_available: bool,
     hub: HubSlot,
     local_default_worker: Option<String>,
     logs: &medulla_tui::log::LogBuffer,
 ) -> Option<()> {
-    let _ = (env, config, hub, local_default_worker, logs);
+    let _ = (env, config, hub_available, hub, local_default_worker, logs);
     None
 }

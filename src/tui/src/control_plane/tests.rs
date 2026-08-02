@@ -28,6 +28,26 @@ async fn fleet_tools_off_binds_nothing_at_all() {
     let server = start(
         &env(&[]),
         &config(root.path(), false),
+        true,
+        HubSlot::default(),
+        None,
+        &logs,
+    )
+    .await;
+
+    assert!(server.is_none());
+    assert!(!root.path().join("control.sock").exists());
+}
+
+#[tokio::test]
+async fn a_hub_that_did_not_start_gets_no_control_plane() {
+    let root = tempfile::tempdir().unwrap();
+    let logs = medulla_tui::log::LogBuffer::new();
+
+    let server = start(
+        &env(&[]),
+        &config(root.path(), true),
+        false,
         HubSlot::default(),
         None,
         &logs,
@@ -48,6 +68,7 @@ async fn binding_serves_and_cleans_up_after_itself() {
     let server = start(
         &env(&[]),
         &config(root.path(), true),
+        true,
         HubSlot::default(),
         Some("this-device".into()),
         &logs,
@@ -79,6 +100,7 @@ async fn a_second_instance_does_not_take_a_live_address() {
     let _first = start(
         &env(&[]),
         &config(root.path(), true),
+        true,
         HubSlot::default(),
         Some("this-device".into()),
         &logs,
@@ -89,6 +111,7 @@ async fn a_second_instance_does_not_take_a_live_address() {
     let second = start(
         &env(&[]),
         &config(root.path(), true),
+        true,
         HubSlot::default(),
         Some("this-device".into()),
         &logs,
@@ -120,6 +143,7 @@ async fn an_environment_socket_path_does_not_bypass_parent_security() {
     let server = start(
         &env(&[(CONTROL_SOCKET_ENV, &env_socket_string)]),
         &config(root.path(), true),
+        true,
         HubSlot::default(),
         None,
         &logs,

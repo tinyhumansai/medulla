@@ -28,12 +28,25 @@ fn agents_app() -> App {
     app
 }
 
+/// An Agents-tab app with lanes on its rail, so the cursor can be moved off the
+/// orchestrator onto a row that draws no composer.
+fn demo_agents_app() -> App {
+    let mut app = App::new(Arc::new(MockRuntime::demo()), loaded());
+    app.tab_index = tab_index("Agents");
+    app.refresh_snapshot();
+    app
+}
+
 fn tab_index(name: &str) -> usize {
     TABS.iter().position(|t| *t == name).unwrap_or(0)
 }
 
 fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+fn key_press(app: &mut App, code: KeyCode) {
+    let _ = app.on_event(key(code));
 }
 
 fn type_str(app: &mut App, text: &str) {
@@ -150,6 +163,131 @@ fn a_paste_outside_a_text_field_is_ignored() {
         "",
         "the Agents composer is not silently filled from another tab"
     );
+}
+
+#[test]
+fn a_paste_is_refused_when_no_composer_is_on_screen() {
+    // The composer is drawn for the orchestrator lane and nowhere else, which is
+    // why typing on any other rail row stays on the rail. A paste that ignored
+    // that filled an invisible draft the operator could later submit by accident
+    // — the same failure the keyboard already closed.
+    let mut app = demo_agents_app();
+    key_press(&mut app, KeyCode::Esc);
+    key_press(&mut app, KeyCode::Down);
+    assert!(
+        !app.agents_composer_shown(),
+        "the cursor is on a row that draws no composer"
+    );
+
+    assert!(paste(&mut app, "a whole log excerpt\n").is_none());
+
+    assert_eq!(
+        app.draft_text(),
+        "",
+        "nothing was retained in a draft nobody can see"
+    );
+    assert!(
+        app.status().contains("orchestrator lane"),
+        "the refusal says what to do about it: {}",
+        app.status()
+    );
+}
+
+#[test]
+fn a_paste_from_the_rail_moves_the_keyboard_to_the_composer() {
+    // Esc on an empty draft parks focus on the rail with the cursor still on the
+    // orchestrator, so the composer is visible but not driving the keyboard.
+    // Typing there returns focus with the character; a paste that inserted
+    // without moving focus left Enter merely stepping back in rather than
+    // sending, and the arrows still walking lanes instead of the pasted text.
+    let mut app = demo_agents_app();
+    key_press(&mut app, KeyCode::Esc);
+    assert!(app.agents_rail_focused(), "the rail has the keyboard");
+    assert!(app.agents_composer_shown(), "and the composer is on screen");
+
+    assert!(paste(&mut app, "ship it").is_none());
+
+    assert_eq!(app.draft_text(), "ship it");
+    assert!(
+        !app.agents_rail_focused(),
+        "the keyboard followed the paste into the composer"
+    );
+    let cmd = app.on_event(key(KeyCode::Enter));
+    assert!(
+        matches!(cmd, Some(Cmd::Submit(ref sent)) if sent == "ship it"),
+        "so the next Enter sends it: {cmd:?}"
+    );
+}
+
+/// The Workflows copilot: the app's second multiline composer, and the one a
+/// long instruction is most likely to be pasted into.
+#[cfg(feature = "workflows")]
+mod copilot {
+    use super::*;
+
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// A Workflows-tab app reading a store scoped to `home`.
+    ///
+    /// Scoped deliberately: the store a real session resolves also reads the
+    /// current directory's `.medulla/workflows`, which would make the test
+    /// depend on the developer's own catalogue.
+    fn workflows_app(home: &std::path::Path) -> App {
+        let mut app = App::new(Arc::new(MockRuntime::demo()), loaded());
+        app.set_medulla_home(home.to_path_buf());
+        app.set_workflow_store(Arc::new(medulla::workflows::FileWorkflowStore::new(
+            vec![home.join("workflows")],
+            home.join("state").join("workflows").join("runs"),
+        )));
+        app.tab_index = tab_index("Workflows");
+        app
+    }
+
+    fn rendered(app: &mut App) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(150, 34)).expect("test terminal");
+        terminal.draw(|f| app.draw(f)).expect("draws");
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn a_paste_lands_in_the_copilot_composer_with_its_line_breaks() {
+        let home = tempfile::tempdir().expect("temp home");
+        let mut app = workflows_app(home.path());
+        // `c` is the binding that reaches the copilot from the catalogue.
+        key_press(&mut app, KeyCode::Char('c'));
+
+        assert!(paste(&mut app, "run the sweep\r\nthen notify me").is_none());
+
+        let screen = rendered(&mut app);
+        assert!(
+            screen.contains("run the sweep") && screen.contains("then notify me"),
+            "the whole instruction is in the composer: {screen}"
+        );
+    }
+
+    #[test]
+    fn a_paste_on_the_catalogue_is_ignored_rather_than_stored_out_of_sight() {
+        // The sidebar is a list, not a field. Its only draft is the copilot's,
+        // one pane over and not on screen for this focus.
+        let home = tempfile::tempdir().expect("temp home");
+        let mut app = workflows_app(home.path());
+
+        assert!(paste(&mut app, "stray text").is_none());
+
+        key_press(&mut app, KeyCode::Char('c'));
+        let screen = rendered(&mut app);
+        assert!(
+            !screen.contains("stray text"),
+            "nothing was banked into the copilot behind the list: {screen}"
+        );
+    }
 }
 
 /// Paste with a harness attached, which is a second keyboard target: the pane

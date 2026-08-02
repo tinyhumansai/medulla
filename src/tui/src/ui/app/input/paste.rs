@@ -1,7 +1,7 @@
 //! Where a bracketed-paste payload lands.
 //!
 //! Bracketed paste is on for the TUI's own terminal, so a paste no longer
-//! arrives as synthetic key presses anywhere: it is one `Event::Paste`, and
+//! arrives as synthetic key presses anywhere: it is one [`Event::Paste`], and
 //! every surface that accepts text has to be named here or the payload is
 //! silently dropped. That makes this module the paste half of
 //! [`super::super::keys`], and it follows that module's precedence exactly.
@@ -9,6 +9,8 @@
 use crate::ui::composer::{insert_at, normalize_paste};
 
 use super::super::types::App;
+#[cfg(feature = "workflows")]
+use super::super::types::WorkflowFocus;
 
 impl App {
     /// Insert a bracketed-paste payload into whatever text field has the caret.
@@ -42,9 +44,40 @@ impl App {
             prompt.paste(text);
             return;
         }
+        // The Workflows copilot is the app's other multiline composer, and the
+        // pane a long instruction is most likely to be pasted into. The
+        // catalogue and the canvas beside it are lists: they own the keyboard
+        // for their focus and hold no field a payload could be seen in, so a
+        // paste made on either is dropped rather than banked into the copilot
+        // one pane over.
+        #[cfg(feature = "workflows")]
+        if self.tab() == "Workflows" {
+            if self.wf.focus == WorkflowFocus::Copilot {
+                self.wf.draft = insert_at(
+                    &self.wf.draft.text,
+                    self.wf.draft.cursor,
+                    &normalize_paste(text),
+                );
+            }
+            return;
+        }
         if self.tab() != "Agents" || self.overlay_owns_keys() {
             return;
         }
+        // The composer belongs to the orchestrator lane and nowhere else, so a
+        // paste made with the cursor on a worker or an unattached harness row
+        // has nowhere visible to land. Refused with a reason rather than
+        // retained: text held in a draft nobody can see is text the operator
+        // submits by accident on their next trip back to the orchestrator.
+        if !self.agents_composer_shown() {
+            self.set_status("Select the orchestrator lane to paste an instruction");
+            return;
+        }
+        // Pasting is typing, so the keyboard follows it in — exactly as a
+        // printable key does from the rail. Leaving focus behind made the next
+        // Enter step back into the composer instead of sending what was just
+        // pasted, and the arrows keep walking lanes over text nobody can edit.
+        self.focus_agents_composer();
         self.draft = insert_at(&self.draft.text, self.draft.cursor, &normalize_paste(text));
         // Narrowing the command peek invalidates where its cursor pointed,
         // exactly as typing a character does.

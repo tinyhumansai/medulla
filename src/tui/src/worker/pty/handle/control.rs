@@ -7,9 +7,6 @@ use super::super::types::HarnessControl;
 use super::super::AttentionKind;
 use super::SessionHandle;
 
-/// A working-vetoed bell must be close to settlement to represent completion.
-const COMPLETION_BELL_ASSOCIATION_MS: i64 = 500;
-
 impl SessionHandle {
     /// Who holds this session right now.
     pub fn control(&self) -> HarnessControl {
@@ -97,32 +94,22 @@ impl SessionHandle {
     }
 
     /// Mark a submitted turn complete and consume its completion chime.
-    pub(in super::super) fn settle_turn(&self, now: i64) {
+    pub(in super::super) fn settle_turn(&self) {
         let bells = self.bell_count();
         let mut attention = lock(&self.attention);
         let unseen_bells = bells.saturating_sub(attention.seen_bells);
         let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
         attention.pending_completion_bells -= consumed_pending;
-        let recent_working_bell =
-            attention
-                .observed_working_bell
-                .is_some_and(|(generation, observed_at)| {
-                    generation == attention.generation
-                        && now >= observed_at
-                        && now - observed_at <= COMPLETION_BELL_ASSOCIATION_MS
-                });
-        let completion_bell_already_accounted_for = unseen_bells > consumed_pending
-            || recent_working_bell
-            || attention
-                .cue
-                .as_ref()
-                .is_some_and(|cue| cue.kind == AttentionKind::Bell);
+        let completion_bell_already_accounted_for = attention
+            .cue
+            .as_ref()
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell);
         attention.seen_bells = attention.seen_bells.max(bells);
         attention.generation = attention.generation.wrapping_add(1);
-        // A bell already represented by the current cue is just as consumed as
-        // an unclassified bell past the watermark. Otherwise record one more
-        // promised completion chime; several turns can settle before their
-        // delayed bells reach the emulator, so this must be a count, not a bit.
+        // A bell already represented by the current cue is consumed. Otherwise
+        // promise one completion chime, even when a progress bell was sampled
+        // just before settlement. A successful next submission explicitly
+        // clears an unfulfilled promise, so a silent turn cannot hide its bell.
         if !completion_bell_already_accounted_for {
             attention.pending_completion_bells =
                 attention.pending_completion_bells.saturating_add(1);
@@ -137,10 +124,18 @@ impl SessionHandle {
     /// Clear the current cue because a person or injected turn is handling it.
     pub(in super::super) fn acknowledge_attention(&self) -> bool {
         let bells = self.bell_count();
+        self.acknowledge_attention_through(bells)
+    }
+
+    /// Clear attention and completion debt through a known bell watermark.
+    pub(in super::super) fn acknowledge_attention_through(&self, bells: usize) -> bool {
         let mut attention = lock(&self.attention);
         let unseen_bells = bells.saturating_sub(attention.seen_bells);
         let consumed_pending = unseen_bells.min(attention.pending_completion_bells);
         attention.pending_completion_bells -= consumed_pending;
+        // Starting another submitted turn proves that any remaining promised
+        // chime will never arrive. Do not carry that debt into the new turn.
+        attention.pending_completion_bells = 0;
         attention.seen_bells = attention.seen_bells.max(bells);
         attention.generation = attention.generation.wrapping_add(1);
         attention.cue.take().is_some()

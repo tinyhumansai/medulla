@@ -146,9 +146,10 @@ fn releasing_consumes_a_completion_bell_emitted_just_after_settlement() {
     let row = manager.row(&id).expect("a row");
 
     manager.settle_turn(&id);
-    assert!(
-        !manager.acknowledge(&id),
-        "the late bell does not exist yet"
+    assert_eq!(
+        manager.attention(&id),
+        None,
+        "the late bell is not here yet"
     );
     manager
         .claim_idle(&row.label, row.provider)
@@ -223,7 +224,11 @@ fn a_consumed_completion_bell_does_not_hide_the_next_turns_first_bell() {
     manager
         .claim_idle(&row.label, row.provider)
         .expect("reuse the session");
+    let watermark = manager
+        .submission_watermark(&id)
+        .expect("the reused session");
     manager.write(&id, b"\r").expect("emit next turn bell");
+    manager.acknowledge_through(&id, watermark);
     wait_for("the next turn request to paint", || {
         super::screen_text(&manager, &id).contains("next request")
     });
@@ -437,12 +442,48 @@ fn a_working_vetoed_completion_does_not_hide_the_next_request() {
     manager
         .claim_idle(&row.label, row.provider)
         .expect("reuse after the observed completion");
+    let watermark = manager
+        .submission_watermark(&id)
+        .expect("the reused session");
     manager.write(&id, b"\r").expect("emit the next request");
+    manager.acknowledge_through(&id, watermark);
     wait_for("the next request to paint", || {
         super::screen_text(&manager, &id).contains("next request")
     });
     now.store(500, Ordering::SeqCst);
     wait_for("the request bell to remain eligible", || {
+        manager
+            .attention(&id)
+            .is_some_and(|cue| cue.kind == AttentionKind::Bell)
+    });
+    manager.shutdown();
+}
+
+#[test]
+fn a_silent_completion_does_not_hide_the_next_turns_bell() {
+    let now = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&now);
+    let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
+    let id = manager
+        .open(sh("read line; printf 'next request\\a\\n'; sleep 30"))
+        .expect("a session");
+    let row = manager.row(&id).expect("a row");
+
+    manager.settle_turn(&id);
+    manager
+        .claim_idle(&row.label, row.provider)
+        .expect("reuse after a silent turn");
+    let watermark = manager
+        .submission_watermark(&id)
+        .expect("the reused session");
+    manager.write(&id, b"\r").expect("submit the next turn");
+    manager.acknowledge_through(&id, watermark);
+    wait_for("the next request to paint", || {
+        super::screen_text(&manager, &id).contains("next request")
+    });
+
+    now.store(200, Ordering::SeqCst);
+    wait_for("the next turn's bell to remain eligible", || {
         manager
             .attention(&id)
             .is_some_and(|cue| cue.kind == AttentionKind::Bell)

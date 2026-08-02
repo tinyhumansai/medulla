@@ -100,12 +100,6 @@ fn refresh(session: &SessionHandle, now: i64) {
     }
     let consumed_pending = unseen_bells.min(pending_completion_bells);
     state.pending_completion_bells -= consumed_pending;
-    if eligible_bells > 0 && working {
-        // A working footer vetoes the cue, but a bell sampled immediately before
-        // settlement can still be that turn's completion chime. Keep its sample
-        // time so an older progress bell cannot stand in for a delayed chime.
-        state.observed_working_bell = Some((generation, now));
-    }
     state.seen_bells = consumed_bell_count(state.seen_bells, bells);
     state.cue = match (cue, state.cue.take()) {
         (None, held) => held.filter(|held| held.kind == AttentionKind::Bell),

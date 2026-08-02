@@ -57,7 +57,6 @@ impl SessionHandle {
                 cue: None,
                 seen_bells: 0,
                 generation: 0,
-                observed_working_bell: None,
                 pending_completion_bells: 0,
                 checked_at: started_at,
             }),

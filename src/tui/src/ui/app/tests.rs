@@ -111,6 +111,41 @@ fn typing_inserts_into_draft() {
 }
 
 #[test]
+fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
+    use super::types::{HarnessPicker, HarnessPickerStep};
+    use crate::ui::harness_pane::HarnessChoice;
+
+    let mut a = app();
+    a.tab_index = tab("Agents");
+    // The cursor is on a harness row, so the last frame recorded a session for
+    // it — the state the attach shortcut reads. Opening the picker on top of
+    // that used to lose the very next Enter to the pane underneath, which
+    // attached instead of advancing to the workspace step.
+    a.harness_pane_session = Some("already-running".to_string());
+    a.harness_picker = Some(HarnessPicker {
+        choices: vec![HarnessChoice::native(
+            medulla::tinyplace::HarnessProvider::Claude,
+        )],
+        index: 0,
+        step: HarnessPickerStep::Harness,
+        cwd: ".".into(),
+        workspace_query: String::new(),
+        workspace_choices: Vec::new(),
+        workspace_index: 0,
+    });
+
+    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(cmd.is_none());
+    assert_eq!(a.attached_harness(), None, "must not attach behind a modal");
+    assert_eq!(
+        a.harness_picker.as_ref().map(|picker| picker.step),
+        Some(HarnessPickerStep::Workspace),
+        "the picker should have advanced to its workspace step"
+    );
+}
+
+#[test]
 fn enter_on_a_harness_uses_the_attach_path_in_normal_mode() {
     let mut a = app();
     a.tab_index = tab("Agents");

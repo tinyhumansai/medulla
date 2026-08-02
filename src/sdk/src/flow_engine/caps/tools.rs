@@ -97,33 +97,8 @@ impl MedullaToolInvoker {
         }
 
         let policy = ScriptPolicy::new(&self.settings.workspace);
-        let inline = args
-            .get("script")
-            .map(|value| {
-                value
-                    .as_str()
-                    .filter(|source| !source.trim().is_empty())
-                    .ok_or_else(|| {
-                        EngineError::Capability(
-                            "medulla:shell: `args.script` must be a non-empty script".to_string(),
-                        )
-                    })
-            })
-            .transpose()?;
-        let path = args
-            .get("script_path")
-            .map(|value| {
-                value
-                    .as_str()
-                    .filter(|raw| !raw.trim().is_empty())
-                    .ok_or_else(|| {
-                        EngineError::Capability(
-                            "medulla:shell: `args.script_path` must be a non-empty path"
-                                .to_string(),
-                        )
-                    })
-            })
-            .transpose()?;
+        let inline = non_empty_str(&args, "script", "a non-empty script")?;
+        let path = non_empty_str(&args, "script_path", "a non-empty path")?;
 
         // Exactly one, never both: a call carrying each would otherwise run
         // whichever this function happened to check first, which is precisely
@@ -162,10 +137,9 @@ impl MedullaToolInvoker {
             None => ScriptLanguage::Shell,
         };
 
-        let cwd = match args.get("cwd").and_then(Value::as_str) {
-            Some(raw) if !raw.trim().is_empty() => Some(policy.resolve_cwd(raw)?),
-            _ => None,
-        };
+        let cwd = non_empty_str(&args, "cwd", "a non-empty path")?
+            .map(|raw| policy.resolve_cwd(raw))
+            .transpose()?;
         let env = read_env(args.get("env"))?;
 
         let output = run_script(ScriptRequest {
@@ -186,6 +160,28 @@ impl MedullaToolInvoker {
             "stderr": output.stderr,
         }))
     }
+}
+
+/// Reads an optional string argument, refusing a present-but-unusable one.
+///
+/// Absent and `null` mean "not given". Anything else must be a non-blank
+/// string, because a malformed argument must not fail open: `{"cwd": 3}`
+/// quietly ignored would run the step at the workspace root, read the wrong
+/// file, and report success.
+fn non_empty_str<'a>(args: &'a Value, name: &str, expected: &str) -> Result<Option<&'a str>> {
+    let Some(value) = args.get(name) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    value
+        .as_str()
+        .filter(|raw| !raw.trim().is_empty())
+        .map(Some)
+        .ok_or_else(|| {
+            EngineError::Capability(format!("medulla:shell: `args.{name}` must be {expected}"))
+        })
 }
 
 #[async_trait]

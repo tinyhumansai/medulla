@@ -343,3 +343,55 @@ async fn a_step_names_one_script_or_the_other_but_never_both() {
         "{neither}"
     );
 }
+
+#[tokio::test]
+async fn a_malformed_path_argument_is_refused_rather_than_ignored() {
+    // Failing open here is the dangerous shape: a `cwd` quietly dropped runs
+    // the step at the workspace root, reads a different file, and reports
+    // success — a wrong answer that looks like a right one.
+    let root = tempfile::tempdir().unwrap();
+    let invoker = MedullaToolInvoker::new(scripting_settings(root.path()));
+
+    for (args, needle) in [
+        (
+            json!({ "script": "cat VERSION", "cwd": 3 }),
+            "`args.cwd` must be a non-empty path",
+        ),
+        (
+            json!({ "script": "cat VERSION", "cwd": "  " }),
+            "`args.cwd` must be a non-empty path",
+        ),
+        (
+            json!({ "script": 7 }),
+            "`args.script` must be a non-empty script",
+        ),
+        (
+            json!({ "script_path": ["scripts/build.sh"] }),
+            "`args.script_path` must be a non-empty path",
+        ),
+    ] {
+        let err = invoker
+            .invoke("medulla:shell", args.clone(), None)
+            .await
+            .expect_err("a malformed argument must be refused");
+        assert!(err.to_string().contains(needle), "{args}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn an_explicit_null_argument_reads_as_absent() {
+    // `null` is how a templating layer spells "I had nothing for this", so it
+    // means absent rather than malformed.
+    let root = tempfile::tempdir().unwrap();
+
+    let err = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": null, "script_path": null }),
+            None,
+        )
+        .await
+        .expect_err("a call with no script must not run");
+
+    assert!(err.to_string().contains("is required"), "{err}");
+}

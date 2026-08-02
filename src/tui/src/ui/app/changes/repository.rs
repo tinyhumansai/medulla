@@ -1,5 +1,6 @@
 //! Read-only Git command adapter for the Changes tab.
 
+#[cfg(unix)]
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -44,14 +45,17 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
 
 /// Return the unified patch for one path, including untracked files.
 pub(super) fn patch(root: &Path, baseline: &str, path: &Path) -> Result<Vec<String>, String> {
-    let changed_at_baseline = Command::new("git")
+    let baseline_check = Command::new("git")
         .current_dir(root)
         .args(["diff", "--quiet", baseline, "--"])
         .arg(path)
-        .status()
-        .map_err(|error| format!("Cannot run git: {error}"))?
-        .code()
-        == Some(1);
+        .output()
+        .map_err(|error| format!("Cannot run git: {error}"))?;
+    let changed_at_baseline = match baseline_check.status.code() {
+        Some(0) => false,
+        Some(1) => true,
+        _ => return Err(command_error(&baseline_check)),
+    };
     let output = if changed_at_baseline {
         let result = Command::new("git")
             .current_dir(root)
@@ -158,5 +162,15 @@ fn command_stdout(output: std::process::Output) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
+/// Decode a Git subprocess failure, supplying a useful fallback when silent.
+fn command_error(output: &std::process::Output) -> String {
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if detail.is_empty() {
+        "Git command failed".into()
+    } else {
+        detail
     }
 }

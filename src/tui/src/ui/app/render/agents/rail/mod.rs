@@ -33,9 +33,10 @@ mod status;
 mod status_line_tests;
 #[cfg(test)]
 mod tests;
+mod types;
 mod wrap;
 
-use device_footer::DeviceFooter;
+use types::DeviceFooter;
 use wrap::wrap_line;
 
 /// The most content columns the Agents rail ever takes.

@@ -6,19 +6,13 @@ use ratatui::text::{Line as TLine, Span};
 
 use crate::ui::app::types::App;
 
+use super::types::DeviceFooter;
+
 /// Navigation lines the ambient footer may never take from the rail.
 const MIN_RAIL_LINES: usize = 3;
 
 /// Device readings the footer can show at most: CPU, RAM, and disk.
 const DEVICE_METRICS: usize = 3;
-
-/// Prepared footer content and the navigation capacity left above it.
-pub(super) struct DeviceFooter {
-    lines: Vec<String>,
-    /// Number of rail lines available for selectable navigation rows.
-    pub(super) navigation_capacity: usize,
-    rail_height: usize,
-}
 
 impl DeviceFooter {
     /// Sample enabled metrics and budget the footer without displacing the

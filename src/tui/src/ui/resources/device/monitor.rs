@@ -61,7 +61,13 @@ impl DeviceMonitor {
             // returns would show a confident 0% on the first frame.
             cpu_fraction: (!first)
                 .then(|| (f64::from(self.system.global_cpu_usage()) / 100.0).clamp(0.0, 1.0)),
-            memory_used_bytes: (memory_total > 0).then(|| self.system.used_memory()),
+            // Pressure, not occupancy: `used_memory()` counts the page cache,
+            // which a host reclaims on demand, so a long-lived Linux box reads
+            // as ~100% used while plenty is actually available. `total -
+            // available` is what the operator can still spend, and matches how
+            // disk pressure is derived below.
+            memory_used_bytes: (memory_total > 0)
+                .then(|| memory_total.saturating_sub(self.system.available_memory())),
             memory_total_bytes: (memory_total > 0).then_some(memory_total),
             disk_used_bytes: capacity.map(|(total, available)| total.saturating_sub(available)),
             disk_total_bytes: capacity.map(|(total, _)| total),

@@ -106,7 +106,7 @@ impl ScreenRouter {
                     ));
                     return;
                 }
-                self.registry.unsubscribe(&task_id);
+                self.registry.unsubscribe_for(from, &task_id);
                 self.log(&format!("screen: {from} killed {task_id}"));
             }
             // The sampler chains from the last frame it actually sent, so an

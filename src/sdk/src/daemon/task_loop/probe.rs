@@ -63,13 +63,9 @@ impl DaemonRuntime {
         let abort = Abort::new();
         let controller_id = self.register_controller(abort.clone());
         let accessible_dirs = self.inner.accessible_dirs.lock().unwrap().clone();
-        // Compete for the concurrency budget like a task.
-        let permit = self
-            .inner
-            .slots
-            .acquire()
-            .await
-            .expect("semaphore is never closed");
+        // Control-plane negotiation must not wait behind the harness-task slot
+        // it may be needed to terminate. The probe is separately serialized by
+        // the capability cache lock and bounded by its own timeout.
         let capabilities = probe_capabilities(ProbeOptions {
             provider,
             run_task: self.inner.run_task.clone(),
@@ -91,7 +87,6 @@ impl DaemonRuntime {
             router: self.inner.config.router.clone(),
         })
         .await;
-        drop(permit);
         self.unregister_controller(controller_id);
         *guard = Some(capabilities.clone());
         capabilities

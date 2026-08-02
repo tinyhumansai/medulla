@@ -116,11 +116,8 @@ impl GitChangesState {
         // deleting a user's written comment, we mark it outdated so it remains visible
         // but cannot be edited or used for new anchors.
         if let Some(path) = selected_path {
-            self.comments.mark_outdated_if_invalid(
-                &path,
-                &self.patch.iter().map(|s| s.clone()).collect::<Vec<_>>(),
-                self.hunks.len(),
-            );
+            self.comments
+                .mark_outdated_if_invalid(&path, &self.patch, self.hunks.len());
         }
     }
 

@@ -555,19 +555,25 @@ fn hunk_comments_survive_unchanged_refresh() {
     // Refresh the patch (even without changing the file)
     state.reload_patch();
 
-    // Hunk comment remains live if the hunk count didn't change
-    if state.hunks.len() == initial_hunk_count {
-        let comments: Vec<_> = state.comments.for_path(&path).collect();
-        assert_eq!(comments.len(), 1);
-        assert!(
-            !comments[0].outdated,
-            "Hunk comment should remain live when hunk count unchanged"
-        );
-        assert_eq!(
-            comments[0].body, "hunk comment",
-            "Comment text is preserved"
-        );
-    }
+    // Reloading an untouched patch must not change the hunk count. This is the
+    // premise of the test, so assert it rather than guarding on it — a guard would
+    // let the case the test exists to prove pass vacuously.
+    assert_eq!(
+        state.hunks.len(),
+        initial_hunk_count,
+        "Reloading an unchanged patch should not alter the hunk count"
+    );
+
+    let comments: Vec<_> = state.comments.for_path(&path).collect();
+    assert_eq!(comments.len(), 1);
+    assert!(
+        !comments[0].outdated,
+        "Hunk comment should remain live when hunk count unchanged"
+    );
+    assert_eq!(
+        comments[0].body, "hunk comment",
+        "Comment text is preserved"
+    );
 }
 
 #[test]

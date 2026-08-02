@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 use crate::tinyplace::{encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind};
 
 use super::types::CapabilityProbeGuard;
-use super::{RunError, TaskRunner, MAX_RESETS};
+use super::{RunError, TaskRunner, CONTACT_POLL, CONTACT_WAIT, MAX_RESETS};
 
 impl Drop for CapabilityProbeGuard {
     fn drop(&mut self) {
@@ -115,6 +115,19 @@ impl TaskRunner {
             .lock()
             .expect("aborts lock")
             .insert(abort_id.to_string(), abort.clone());
+        if !self.relay.contact_accepted(address).await {
+            let _ = self.relay.request_contact(address).await;
+            let deadline = std::time::Instant::now() + CONTACT_WAIT;
+            while std::time::Instant::now() < deadline
+                && !self.relay.contact_accepted(address).await
+            {
+                tokio::select! {
+                    biased;
+                    _ = abort.notified() => return Err(RunError::Aborted),
+                    _ = tokio::time::sleep(CONTACT_POLL) => {}
+                }
+            }
+        }
         tokio::select! {
             biased;
             _ = abort.notified() => {

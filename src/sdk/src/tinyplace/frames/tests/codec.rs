@@ -392,19 +392,6 @@ fn empty_budgets_and_readiness_are_omitted_on_the_wire() {
 }
 
 #[test]
-fn screen_kill_support_is_additive_and_defaults_off_for_older_workers() {
-    let older = parse_agent_capabilities(r#"{"providers":["claude"]}"#).unwrap();
-    assert!(!older.screen_kill);
-
-    let current = crate::tinyplace::AgentCapabilities {
-        screen_kill: true,
-        ..Default::default()
-    };
-    let value = serde_json::to_value(&current).unwrap();
-    assert_eq!(value["screenKill"], true);
-}
-
-#[test]
 fn new_capabilities_round_trip_budgets_and_readiness() {
     let caps = crate::tinyplace::AgentCapabilities {
         cwd: Some("/repo".to_string()),

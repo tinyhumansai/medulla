@@ -48,7 +48,10 @@ impl Default for DeviceMonitor {
             // refresh, so an operator who leaves every device indicator off
             // pays only for this struct.
             system: System::new(),
-            disks: Disks::new(),
+            // `Disks::new()` alone creates an empty list; `refresh(true)` will
+            // only refresh existing entries. `new_with_refreshed_list()` populates
+            // the disks on initialization so that real mounts are discovered.
+            disks: Disks::new_with_refreshed_list(),
             last_refresh: None,
             snapshot: DeviceSnapshot::default(),
             injected: None,
@@ -78,9 +81,10 @@ impl DeviceMonitor {
         self.last_refresh = Some(now);
         self.system.refresh_cpu_usage();
         self.system.refresh_memory();
-        // `true` re-reads the mount list as well as each disk's usage, so a
-        // volume mounted while the TUI runs shows up rather than being missed
-        // until restart.
+        // `refresh(true)` re-reads each disk's usage and controls whether to keep
+        // entries for unmounted disks (true = keep them). The mount list itself is
+        // discovered once during initialization via `new_with_refreshed_list()`,
+        // so a volume mounted while the TUI runs will appear on the next refresh.
         self.disks.refresh(true);
 
         let memory_total = self.system.total_memory();

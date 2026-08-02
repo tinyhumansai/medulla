@@ -412,14 +412,24 @@ impl App {
                 Style::default().fg(self.theme.accent),
             ));
         }
-        let left_width = spans
+        let desired_left_width = spans
             .iter()
             .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
-            .sum::<usize>()
-            .min(usize::from(area.width)) as u16;
+            .sum::<usize>();
+        // Operational messages must remain readable when resource indicators
+        // are enabled. Reserve up to a third of the row for a non-empty status;
+        // an idle status yields the whole row back to the indicators.
+        let status_width = UnicodeWidthStr::width(self.status.as_str());
+        let reserved_status_width = status_width.min(usize::from(area.width / 3));
+        let left_width = desired_left_width
+            .min(usize::from(area.width).saturating_sub(reserved_status_width))
+            as u16;
         let halves = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(left_width), Constraint::Min(0)])
+            .constraints([
+                Constraint::Length(left_width),
+                Constraint::Min(reserved_status_width as u16),
+            ])
             .split(area);
         f.render_widget(Paragraph::new(TLine::from(spans)), halves[0]);
         f.render_widget(

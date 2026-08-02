@@ -176,6 +176,11 @@ fn bar(fraction: f64) -> String {
     format!("{}{}", "█".repeat(filled), "░".repeat(WIDTH - filled))
 }
 
+/// Formats byte quantities compactly for the single-line status display.
+///
+/// Binary thresholds match memory and I/O accounting, while short `K`, `M`,
+/// and `G` suffixes conserve columns. One decimal retains useful precision
+/// without making rapidly changing resource values visually noisy.
 fn bytes(value: f64) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;

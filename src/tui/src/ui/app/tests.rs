@@ -24,7 +24,7 @@ fn app() -> App {
 
 fn app_with_running_task() -> App {
     let rt = MockRuntime::demo();
-    rt.script_event(crate::ui::TuiEvent::TaskStart {
+    rt.script_event(crate::ui::events::TuiEvent::TaskStart {
         task_id: "task-1".into(),
         instruction: "Continue the auth refactor.".into(),
         depth: 2,

@@ -190,11 +190,14 @@ impl DaemonRuntime {
     /// The abort remains bound to the task record while the map is locked. This
     /// avoids resolving a reusable session id and acting on it after a later
     /// task has claimed the same harness.
-    pub fn terminate_task(&self, from: &str, task_id: &str) -> bool {
+    pub fn terminate_task(&self, from: &str, task_id: &str, correlation_id: &str) -> bool {
         let running = self.inner.running.lock().unwrap();
         let Some(task) = running.get(&Self::task_key(from, task_id)) else {
             return false;
         };
+        if task.correlation_id.as_deref() != Some(correlation_id) {
+            return false;
+        }
         task.abort.terminate();
         true
     }

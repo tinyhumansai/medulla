@@ -210,6 +210,16 @@ impl TaskRunner {
         }
     }
 
+    /// Return the active dispatch receipt for a worker/task pair.
+    pub async fn correlation_for(&self, worker: &str, task_id: &str) -> Option<String> {
+        self.waiters
+            .lock()
+            .await
+            .iter()
+            .find(|(_, waiter)| waiter.from == worker && waiter.task_id == task_id)
+            .map(|(correlation, _)| correlation.clone())
+    }
+
     /// Cancel every dispatch this runner has in flight.
     ///
     /// For a caller that owns a runner serving one piece of work and wants to

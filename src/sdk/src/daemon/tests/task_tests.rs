@@ -65,16 +65,11 @@ fn delegated_full_mode_task_on_a_remote_worker_keeps_its_provider_transport() {
 
 #[cfg(feature = "workflows")]
 #[test]
-fn a_delegated_task_needs_acp_when_this_process_owns_the_fleet_plane() {
-    assert!(crate::daemon::task_loop::delegated_task_can_reach_fleet(
-        1, true
-    ));
-    assert!(!crate::daemon::task_loop::delegated_task_can_reach_fleet(
-        0, true
-    ));
-    assert!(!crate::daemon::task_loop::delegated_task_can_reach_fleet(
-        1, false
-    ));
+fn root_and_delegated_tasks_need_acp_when_this_process_owns_the_fleet_plane() {
+    // Depth no longer participates in the decision: the root task and every
+    // descendant share the process-local control plane and fleet grant.
+    assert!(crate::daemon::task_loop::task_can_reach_fleet(true));
+    assert!(!crate::daemon::task_loop::task_can_reach_fleet(false));
 }
 
 #[tokio::test]

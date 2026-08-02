@@ -46,7 +46,7 @@
 //! server that exposes tools and no resources or prompts.
 
 pub mod backend;
-mod tools;
+pub(crate) mod tools;
 mod types;
 
 #[cfg(test)]

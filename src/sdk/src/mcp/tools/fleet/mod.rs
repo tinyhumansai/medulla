@@ -62,7 +62,7 @@ pub(super) async fn call(
         "fleet_dispatch" => {
             // Required, and a real protocol error when absent: a dispatch with
             // no brief is not a request that can be partially honoured.
-            let instruction = super::dispatch::arg(arguments, "instruction")?;
+            let instruction = super::arg(arguments, "instruction")?;
             op(
                 session,
                 "task.dispatch",
@@ -71,7 +71,7 @@ pub(super) async fn call(
             .await
         }
         "fleet_result" => {
-            let task_id = super::dispatch::arg(arguments, "taskId")?;
+            let task_id = super::arg(arguments, "taskId")?;
             let wait = arguments
                 .get("waitSeconds")
                 .and_then(Value::as_u64)
@@ -84,7 +84,7 @@ pub(super) async fn call(
             .await
         }
         "fleet_abort" => {
-            let task_id = super::dispatch::arg(arguments, "taskId")?;
+            let task_id = super::arg(arguments, "taskId")?;
             op(session, "task.abort", json!({ "taskId": task_id })).await
         }
         other => {
@@ -95,8 +95,8 @@ pub(super) async fn call(
     };
 
     Ok(match outcome {
-        Ok(value) => super::dispatch::content(&value, false),
-        Err(message) => super::dispatch::content(&json!({ "error": message }), true),
+        Ok(value) => super::content(&value, false),
+        Err(message) => super::content(&json!({ "error": message }), true),
     })
 }
 

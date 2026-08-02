@@ -6,10 +6,11 @@
 
 use serde_json::{json, Value};
 
+use crate::mcp::tools::{arg, content};
+use crate::mcp::{McpSession, RpcError};
 use crate::workflows::authoring::GraphHandle;
 use crate::workflows::ops;
 
-use super::super::RpcError;
 use super::evolve::ToolMode;
 
 /// Every tool this server exposes, in the order a model meets them.
@@ -62,24 +63,6 @@ fn mutates_workflow(name: &str) -> bool {
     )
 }
 
-/// A JSON Schema object with the given properties and required keys.
-pub(super) fn schema(properties: Value, required: &[&str]) -> Value {
-    json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    })
-}
-
-/// A required string argument.
-pub(super) fn arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, RpcError> {
-    arguments
-        .get(name)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| RpcError::invalid_params(format!("missing required argument '{name}'")))
-}
-
 /// Read the optional `inputs` argument: values for the workflow's declared
 /// inputs, keyed by name.
 ///
@@ -104,45 +87,13 @@ fn declared_inputs(
 
 /// Run a `tools/call`.
 pub(crate) async fn call(
-    session: &super::super::McpSession,
-    params: &Value,
+    session: &McpSession,
+    name: &str,
+    arguments: Value,
 ) -> Result<Value, RpcError> {
     let store = &session.store;
     let policy = &session.policy;
     let mode = session.mode;
-    let name = params
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| RpcError::invalid_params("missing tool name"))?;
-    let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
-
-    // Checked before the match rather than inside each arm: a withheld tool is
-    // withheld whatever its arguments are, and a guard per arm is a guard that
-    // will eventually be forgotten on a new one.
-    //
-    // Family first: a tool this session's grant does not cover was never
-    // advertised, so reaching here means the model called something it was not
-    // offered rather than something its turn restricts.
-    if !session.families.allows(name) {
-        return Ok(content(
-            &json!({
-                "error": format!(
-                    "'{name}' is not available to this session — the operator did not grant \
-                     it. Work with the tools you were offered."
-                )
-            }),
-            true,
-        ));
-    }
-    if !mode.allows(name) {
-        return Ok(content(&json!({ "error": mode.refusal(name) }), true));
-    }
-
-    // The fleet family reaches the control plane rather than the local store, so
-    // it branches off before the workflow verbs are matched.
-    if name.starts_with("fleet_") {
-        return super::fleet::call(session, name, &arguments).await;
-    }
     if let Some(error) = scope_error(mode, name, &arguments) {
         return Ok(content(&json!({ "error": error }), true));
     }
@@ -332,17 +283,6 @@ fn string_list(arguments: &Value, name: &str) -> Vec<String> {
         Some(Value::String(single)) => vec![single.clone()],
         _ => Vec::new(),
     }
-}
-
-/// Wrap a value as an MCP tool result.
-pub(super) fn content(value: &Value, is_error: bool) -> Value {
-    json!({
-        "content": [{
-            "type": "text",
-            "text": serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
-        }],
-        "isError": is_error,
-    })
 }
 
 /// A workflow error as an RPC error.

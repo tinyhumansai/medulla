@@ -26,6 +26,7 @@ pub mod copilot;
 pub mod evolve;
 pub mod gates;
 pub mod local;
+pub(crate) mod mcp;
 pub mod node_contracts;
 pub mod ops;
 mod registry;

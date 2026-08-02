@@ -132,6 +132,28 @@ fn claude_worktree_report_moves_the_session_to_the_created_branch() {
 }
 
 #[test]
+fn claude_worktree_report_survives_a_later_command_failure() {
+    let events = map_all(
+        "claude",
+        &[json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": "worktree-1",
+                "is_error": true,
+                "content": "[PASS] WORKTREE_READY\n  path: /repo/worktrees/fix-label\n  branch: fix-label\nerror: tests failed"
+            }]}
+        })],
+    );
+    let snapshot = fold(&events);
+    assert_eq!(
+        snapshot.info.cwd.as_deref(),
+        Some("/repo/worktrees/fix-label")
+    );
+    assert_eq!(snapshot.info.branch.as_deref(), Some("fix-label"));
+}
+
+#[test]
 fn claude_exit_plan_mode_becomes_a_goal_and_steps() {
     let events = map_all(
         "claude",
@@ -271,7 +293,38 @@ fn codex_json_worktree_report_moves_the_session_to_the_created_branch() {
 }
 
 #[test]
-fn failed_or_unrelated_command_output_does_not_move_the_session() {
+fn codex_worktree_report_survives_trailing_output_and_a_later_failure() {
+    let events = map_all(
+        "codex",
+        &[json!({
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "id": "cmd-1",
+                "command": "worktree fix-label --json && cargo test",
+                "aggregated_output": concat!(
+                    "{\"status\":\"ready\",\"repository\":\"/repo\",",
+                    "\"path\":\"/repo/worktrees/fix-label\",\"branch\":\"fix-label\",",
+                    "\"head\":\"abc123456789\",\"headShort\":\"abc1234\",",
+                    "\"created\":true,\"submodules\":{",
+                    "\"state\":\"initialized_recursive\",\"count\":0},",
+                    "\"nextCommand\":\"cd /repo/worktrees/fix-label\"}\n",
+                    "error: tests failed"
+                ),
+                "exit_code": 1
+            }
+        })],
+    );
+    let snapshot = fold(&events);
+    assert_eq!(
+        snapshot.info.cwd.as_deref(),
+        Some("/repo/worktrees/fix-label")
+    );
+    assert_eq!(snapshot.info.branch.as_deref(), Some("fix-label"));
+}
+
+#[test]
+fn unrelated_command_output_does_not_move_the_session() {
     let events = map_all(
         "codex",
         &[
@@ -280,7 +333,7 @@ fn failed_or_unrelated_command_output_does_not_move_the_session() {
                 "item": {
                     "type": "command_execution",
                     "id": "cmd-1",
-                    "aggregated_output": "[PASS] WORKTREE_READY\n  path: /wrong\n  branch: wrong",
+                    "aggregated_output": "[FAIL] worktree creation failed",
                     "exit_code": 1
                 }
             }),

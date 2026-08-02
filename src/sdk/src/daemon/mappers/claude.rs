@@ -93,14 +93,12 @@ fn claude_user_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSemanticEv
                 "agent",
                 tool_result_payload(call_id, is_error, &output),
             )];
-            if !is_error {
-                events.extend(workspace_event_from_output(
-                    &output,
-                    line,
-                    ts,
-                    "user:tool_result:workspace",
-                ));
-            }
+            events.extend(workspace_event_from_output(
+                &output,
+                line,
+                ts,
+                "user:tool_result:workspace",
+            ));
             events
         }
         _ => Vec::new(),

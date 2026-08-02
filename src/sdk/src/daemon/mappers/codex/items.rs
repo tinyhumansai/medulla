@@ -160,14 +160,12 @@ fn command_event(
         "agent",
         tool_result_payload(id, is_error, output),
     )];
-    if !is_error {
-        events.extend(workspace_event_from_output(
-            output,
-            line,
-            ts,
-            &format!("{record_type}:workspace"),
-        ));
-    }
+    events.extend(workspace_event_from_output(
+        output,
+        line,
+        ts,
+        &format!("{record_type}:workspace"),
+    ));
     events
 }
 

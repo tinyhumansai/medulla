@@ -31,14 +31,17 @@ pub(super) fn workspace_event_from_output(
     ))
 }
 
-/// Read the `--json` report, allowing harmless log text before the object.
+/// Read the `--json` report, allowing command output around the object.
 fn json_report(output: &str) -> Option<(String, String)> {
-    let start = output.find('{')?;
-    let value: Value = serde_json::from_str(&output[start..]).ok()?;
-    if !has_worktree_signature(&value) {
-        return None;
-    }
-    report_fields(&value)
+    output.match_indices('{').find_map(|(start, _)| {
+        let value = serde_json::Deserializer::from_str(&output[start..])
+            .into_iter::<Value>()
+            .next()?
+            .ok()?;
+        has_worktree_signature(&value)
+            .then(|| report_fields(&value))
+            .flatten()
+    })
 }
 
 /// Verify fields unique to the helper's stable JSON contract before trusting

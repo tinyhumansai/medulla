@@ -95,6 +95,19 @@ impl App {
         false
     }
 
+    /// Whether a modal overlay is up and owns the keyboard.
+    ///
+    /// The handback prompt is included for completeness even though
+    /// [`App::on_key`] answers it before anything else gets a look in — a later
+    /// reordering should not quietly reopen the hole this closes.
+    fn overlay_owns_keys(&self) -> bool {
+        self.handback_prompt.is_some()
+            || self.prompt.is_some()
+            || self.harness_picker.is_some()
+            || self.resume_picker.is_some()
+            || self.decision_open
+    }
+
     /// Attach to the harness the Agents pane resolved on the last draw.
     ///
     /// Refuses, with a reason, rather than silently doing nothing: an operator

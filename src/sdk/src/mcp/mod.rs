@@ -57,6 +57,7 @@ pub use tools::{
     tool_definitions, ToolMode, FLEET_TOOL_NAMES, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV,
 };
 pub use types::McpSession;
+pub(crate) use types::RpcError;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -177,32 +178,6 @@ pub async fn handle_request(session: &McpSession, request: &Value) -> Option<Val
             "error": { "code": error.code, "message": error.message },
         }),
     })
-}
-
-/// A JSON-RPC error.
-pub(crate) struct RpcError {
-    /// The JSON-RPC error code.
-    pub code: i64,
-    /// The human-readable message; for a tool this is what the model reads.
-    pub message: String,
-}
-
-impl RpcError {
-    /// The method is not one this server implements.
-    fn method_not_found(method: &str) -> Self {
-        Self {
-            code: -32601,
-            message: format!("method not found: {method}"),
-        }
-    }
-
-    /// The request was understood but its arguments were not usable.
-    pub(crate) fn invalid_params(message: impl Into<String>) -> Self {
-        Self {
-            code: -32602,
-            message: message.into(),
-        }
-    }
 }
 
 /// Serve MCP over stdin/stdout until the client closes the stream.

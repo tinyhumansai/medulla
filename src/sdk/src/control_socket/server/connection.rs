@@ -33,13 +33,40 @@ pub(super) async fn serve_connection(
     ops: Arc<dyn FleetOps>,
     grants: GrantRegistry,
     registry: TaskRegistry,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) -> std::io::Result<()> {
+    serve_connection_with_handshake_timeout(
+        stream,
+        ops,
+        grants,
+        registry,
+        shutdown,
+        HANDSHAKE_TIMEOUT,
+    )
+    .await
+}
+
+/// Serve a connection with an explicit pre-authentication lifetime.
+///
+/// Kept separate so the absolute-deadline behavior can be tested without
+/// making the suite wait for the production five-second bound.
+#[cfg(unix)]
+pub(super) async fn serve_connection_with_handshake_timeout(
+    stream: tokio::net::UnixStream,
+    ops: Arc<dyn FleetOps>,
+    grants: GrantRegistry,
+    registry: TaskRegistry,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    handshake_timeout: std::time::Duration,
 ) -> std::io::Result<()> {
     use tokio::io::{AsyncWriteExt, BufReader};
 
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
     let mut session = SessionState::default();
+    // One lifetime for the unauthenticated connection, not one per frame. A
+    // client sending blank lines must not be able to renew its socket forever.
+    let handshake_deadline = tokio::time::Instant::now() + handshake_timeout;
 
     loop {
         // The handshake is bounded; an authenticated connection is not, because
@@ -48,7 +75,7 @@ pub(super) async fn serve_connection(
         let next = if session.grant().is_none() {
             tokio::select! {
                 _ = shutdown.changed() => return Ok(()),
-                read = tokio::time::timeout(HANDSHAKE_TIMEOUT, read_frame(&mut reader)) => match read {
+                read = tokio::time::timeout_at(handshake_deadline, read_frame(&mut reader)) => match read {
                     Ok(next) => next?,
                     Err(_) => return Ok(()),
                 },

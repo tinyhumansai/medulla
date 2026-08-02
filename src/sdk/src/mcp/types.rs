@@ -23,6 +23,12 @@ pub struct McpSession {
     pub families: ToolFamilies,
     /// The live fleet, or a stand-in that says there is none.
     pub fleet: Arc<dyn FleetBackend>,
+    /// Serializes the short workflow tools that mutate shared definitions.
+    ///
+    /// Request handling is concurrent so long fleet polls cannot block aborts.
+    /// Definition edits remain read-modify-write operations, however, and must
+    /// not read the same base then overwrite one another within this session.
+    pub(crate) workflow_mutations: tokio::sync::Mutex<()>,
 }
 
 impl McpSession {
@@ -41,6 +47,7 @@ impl McpSession {
             mode,
             families: ToolFamilies::workflows_only(),
             fleet: Arc::new(OfflineFleet),
+            workflow_mutations: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -65,5 +72,31 @@ impl McpSession {
     pub(super) fn with_workflows_enabled(mut self, enabled: bool) -> Self {
         self.families.workflows = enabled;
         self
+    }
+}
+
+/// A JSON-RPC error.
+pub(crate) struct RpcError {
+    /// The JSON-RPC error code.
+    pub code: i64,
+    /// The human-readable message; for a tool this is what the model reads.
+    pub message: String,
+}
+
+impl RpcError {
+    /// The method is not one this server implements.
+    pub(super) fn method_not_found(method: &str) -> Self {
+        Self {
+            code: -32601,
+            message: format!("method not found: {method}"),
+        }
+    }
+
+    /// The request was understood but its arguments were not usable.
+    pub(crate) fn invalid_params(message: impl Into<String>) -> Self {
+        Self {
+            code: -32602,
+            message: message.into(),
+        }
     }
 }

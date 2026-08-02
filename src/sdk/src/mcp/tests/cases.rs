@@ -68,6 +68,7 @@ pub(super) fn session_with(
         // behind it is not a state production can reach.
         families: crate::control_socket::ToolFamilies::workflows_only(),
         fleet: Arc::new(crate::mcp::OfflineFleet),
+        workflow_mutations: tokio::sync::Mutex::new(()),
     }
 }
 

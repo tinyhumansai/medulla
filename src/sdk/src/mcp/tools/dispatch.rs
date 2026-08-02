@@ -45,6 +45,23 @@ pub const TOOL_NAMES: [&str; 19] = [
     "workflow_propose",
 ];
 
+/// Whether a tool performs a short mutation of shared workflow authoring data.
+///
+/// Runs deliberately stay concurrent: they have unique run ids and may take
+/// minutes. These authoring calls are short and include read-modify-write paths
+/// that would otherwise lose one of two pipelined edits.
+fn mutates_workflow(name: &str) -> bool {
+    matches!(
+        name,
+        "workflow_create"
+            | "workflow_apply_ops"
+            | "workflow_defaults"
+            | "workflow_delete"
+            | "workflow_note_add"
+            | "workflow_propose"
+    )
+}
+
 /// A JSON Schema object with the given properties and required keys.
 pub(super) fn schema(properties: Value, required: &[&str]) -> Value {
     json!({
@@ -129,6 +146,12 @@ pub(crate) async fn call(
     if let Some(error) = scope_error(mode, name, &arguments) {
         return Ok(content(&json!({ "error": error }), true));
     }
+
+    let _mutation_guard = if mutates_workflow(name) {
+        Some(session.workflow_mutations.lock().await)
+    } else {
+        None
+    };
 
     let outcome = match name {
         "workflow_list" => ops::list(store).map_err(to_rpc),

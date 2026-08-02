@@ -74,12 +74,8 @@ impl ResourceMonitor {
             .map(|count| count.get() as f64)
             .unwrap_or(1.0);
         let disk = process.disk_usage();
-        let (read_rate, write_rate) = disk_rates(
-            disk.read_bytes,
-            disk.written_bytes,
-            elapsed,
-            baseline_ready,
-        );
+        let (read_rate, write_rate) =
+            disk_rates(disk.read_bytes, disk.written_bytes, elapsed, baseline_ready);
         self.disk_peak_bytes_per_second = (self.disk_peak_bytes_per_second * 0.9)
             .max(read_rate)
             .max(write_rate)
@@ -101,14 +97,16 @@ impl ResourceMonitor {
 /// A process's first refresh can report accumulated startup I/O as its delta.
 /// Ignoring that reading prevents it from inflating the decaying peak used by
 /// subsequent disk bars.
-fn disk_rates(read_bytes: u64, written_bytes: u64, elapsed: f64, baseline_ready: bool) -> (f64, f64) {
+fn disk_rates(
+    read_bytes: u64,
+    written_bytes: u64,
+    elapsed: f64,
+    baseline_ready: bool,
+) -> (f64, f64) {
     if !baseline_ready {
         return (0.0, 0.0);
     }
-    (
-        read_bytes as f64 / elapsed,
-        written_bytes as f64 / elapsed,
-    )
+    (read_bytes as f64 / elapsed, written_bytes as f64 / elapsed)
 }
 
 /// Format every enabled resource as compact status-line segments.

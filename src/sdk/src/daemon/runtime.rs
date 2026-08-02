@@ -185,11 +185,11 @@ impl DaemonRuntime {
             .and_then(|task| task.session_id.clone())
     }
 
-    /// Abort the running task identified by its authenticated sender and id.
+    /// Terminate the running task identified by sender, id, and dispatch receipt.
     ///
-    /// The abort remains bound to the task record while the map is locked. This
-    /// avoids resolving a reusable session id and acting on it after a later
-    /// task has claimed the same harness.
+    /// The signal remains bound to the task record while the map is locked. The
+    /// correlation check prevents a delayed request from terminating a later
+    /// dispatch that reused the same task id.
     pub fn terminate_task(&self, from: &str, task_id: &str, correlation_id: &str) -> bool {
         let running = self.inner.running.lock().unwrap();
         let Some(task) = running.get(&Self::task_key(from, task_id)) else {

@@ -2,7 +2,7 @@
 
 #[cfg(feature = "workflows")]
 #[test]
-fn clears_inherited_mode_transport_and_fleet_capabilities() {
+fn clears_task_capabilities_but_preserves_operator_transport() {
     let env = std::collections::HashMap::from([
         (crate::mcp::TOOL_MODE_ENV.to_string(), "propose".to_string()),
         (
@@ -24,7 +24,11 @@ fn clears_inherited_mode_transport_and_fleet_capabilities() {
     assert!(!env.contains_key(crate::mcp::TOOL_MODE_ENV));
     assert!(!env.contains_key(crate::control_socket::MCP_SOCKET_ENV));
     assert!(!env.contains_key(crate::control_socket::MCP_GRANT_ENV));
-    assert!(!env.contains_key(crate::daemon::providers::HARNESS_PROTOCOL_ENV));
+    assert_eq!(
+        env.get(crate::daemon::providers::HARNESS_PROTOCOL_ENV)
+            .map(String::as_str),
+        Some("acp")
+    );
 }
 
 #[cfg(feature = "workflows")]

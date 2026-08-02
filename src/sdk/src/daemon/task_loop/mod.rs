@@ -102,7 +102,6 @@ pub(super) fn with_tool_mode_at_depth(
     #[cfg(feature = "workflows")]
     {
         env.remove(crate::mcp::TOOL_MODE_ENV);
-        env.remove(crate::daemon::providers::HARNESS_PROTOCOL_ENV);
         if let Some(mode) = mode {
             env.insert(crate::mcp::TOOL_MODE_ENV.to_string(), mode.to_string());
         }

@@ -7,13 +7,12 @@ use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEventKind};
 
 use super::rail::RailRow;
 use crate::ui::agents::{agent_row_model, AgentRole, AgentRow};
-use crate::ui::composer::Draft;
+use crate::ui::composer::{insert_at, normalize_paste, Draft};
 
 use super::types::{
     App, Cmd, MEMORY_SUBPAGES, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TASKS_SUBPAGES,
     TOKENMAXXING_SUBPAGES,
 };
-use crate::ui::composer::insert_at;
 
 impl App {
     /// Route a terminal event to the key or mouse handler, producing any command
@@ -32,22 +31,31 @@ impl App {
         }
     }
 
-    /// Insert a bracketed-paste payload into the active chat composer.
+    /// Insert a bracketed-paste payload into whatever text field has the caret.
     ///
-    /// Terminal paste payloads may use CRLF or bare carriage returns. Keeping
-    /// one internal newline representation makes caret movement predictable,
-    /// while treating the entire payload as text guarantees it cannot trigger
-    /// the command peek or submit bindings.
+    /// The point of routing paste as its own event is that the payload is never
+    /// re-read as key presses: a newline inside it lands in the draft instead of
+    /// reaching the `Enter` bindings, so a multi-line paste no longer submits
+    /// itself — once per line, at that — and a `/`-prefixed paste no longer runs
+    /// the command the peek happens to be highlighting. Only an explicit `Enter`
+    /// submits.
+    ///
+    /// An open inline prompt takes the payload first, flattened to one line
+    /// because that is all it can draw. Otherwise the Agents composer takes it,
+    /// with `\r\n` and bare `\r` normalised to `\n`. Modals that own no text
+    /// field (the resume picker, the decisions overlay) swallow the paste rather
+    /// than let it land in a composer the operator cannot see.
     fn on_paste(&mut self, text: &str) {
-        if self.tab() != "Agents"
-            || self.resume_picker.is_some()
-            || self.prompt.is_some()
-            || self.decision_open
-        {
+        if let Some(prompt) = self.prompt.as_mut() {
+            prompt.paste(text);
             return;
         }
-        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-        self.draft = insert_at(&self.draft.text, self.draft.cursor, &normalized);
+        if self.tab() != "Agents" || self.resume_picker.is_some() || self.decision_open {
+            return;
+        }
+        self.draft = insert_at(&self.draft.text, self.draft.cursor, &normalize_paste(text));
+        // Narrowing the command peek invalidates where its cursor pointed,
+        // exactly as typing a character does.
         self.command_index = 0;
     }
 

@@ -138,6 +138,37 @@ fn token_entry_edits_and_submits() {
 }
 
 #[test]
+fn a_pasted_token_lands_in_the_input_and_waits_for_enter() {
+    let mut s = LoginScreen::new("b");
+    choose(&mut s, 3);
+
+    // Bracketed paste delivers the key in one event, trailing newline and all.
+    // It must not submit itself — the operator still presses Enter.
+    s.handle_paste("sk-test-key\n");
+    assert!(s.handle_key(key(KeyCode::Enter)).is_some());
+
+    let mut again = LoginScreen::new("b");
+    choose(&mut again, 3);
+    again.handle_key(key(KeyCode::Char('s')));
+    again.handle_paste("k-rest\r\n");
+    assert_eq!(
+        again.handle_key(key(KeyCode::Enter)),
+        Some(LoginCmd::SubmitToken("sk-rest".into())),
+        "the paste appends to what was typed and the newline is trimmed off"
+    );
+}
+
+#[test]
+fn a_paste_outside_token_entry_is_ignored() {
+    let mut s = LoginScreen::new("b");
+    s.handle_paste("stray");
+    // Still on the menu: opening token entry now shows an empty field.
+    choose(&mut s, 3);
+    assert!(s.handle_key(key(KeyCode::Enter)).is_none());
+    assert!(render(&mut s).contains("enter a token"));
+}
+
+#[test]
 fn the_quit_row_and_ctrl_c_yield_quit() {
     let mut q = LoginScreen::new("b");
     choose(&mut q, 6);

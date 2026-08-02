@@ -86,3 +86,30 @@ fn prefilled_prompt_places_the_caret_after_unicode_text() {
     assert_eq!(prompt.draft.text, "café");
     assert_eq!(prompt.draft.cursor, 4);
 }
+
+#[test]
+fn paste_normalisation_collapses_every_line_ending_to_lf() {
+    assert_eq!(normalize_paste("a\r\nb\rc\nd"), "a\nb\nc\nd");
+    // A CRLF must not become two newlines by way of the bare-CR pass.
+    assert_eq!(normalize_paste("a\r\n\r\nb"), "a\n\nb");
+    assert_eq!(normalize_paste("plain"), "plain");
+}
+
+#[test]
+fn flattening_turns_line_breaks_into_spaces_for_single_line_fields() {
+    assert_eq!(flatten_paste("token\r\n"), "token ");
+    assert_eq!(flatten_paste("a\rb"), "a b");
+    // The trailing space is what every caller's `trim` on submit removes.
+    assert_eq!(flatten_paste("token\n").trim(), "token");
+}
+
+#[test]
+fn prompt_paste_flattens_at_the_caret_and_advances_it() {
+    let mut prompt = TextPrompt::with_text((), "title", "ac");
+    prompt.draft.cursor = 1;
+
+    prompt.paste("b\nX");
+
+    assert_eq!(prompt.draft.text, "ab Xc");
+    assert_eq!(prompt.draft.cursor, 4);
+}

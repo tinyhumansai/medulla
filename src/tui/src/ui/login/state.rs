@@ -6,6 +6,8 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::ui::composer::flatten_paste;
+
 use super::types::{
     LoginCmd, LoginEvent, LoginOutcome, LoginScreen, MenuItem, Phase, DOCS_URL, MENU, REPO_URL,
 };
@@ -64,6 +66,21 @@ impl LoginScreen {
                 None
             }
         }
+    }
+
+    /// Append a bracketed-paste payload to the token input.
+    ///
+    /// The "Paste key" row exists to be pasted into, and with bracketed paste
+    /// enabled the token no longer arrives as key presses — without this it
+    /// would be dropped entirely, and a token copied with a trailing newline
+    /// would previously have submitted itself half-typed. Line breaks flatten to
+    /// spaces, which the `trim` on submit then removes. Ignored outside token
+    /// entry: no other phase has a field to paste into.
+    pub fn handle_paste(&mut self, text: &str) {
+        if self.phase != Phase::TokenEntry {
+            return;
+        }
+        self.input.push_str(&flatten_paste(text));
     }
 
     /// Handle one key event, optionally emitting an async command.

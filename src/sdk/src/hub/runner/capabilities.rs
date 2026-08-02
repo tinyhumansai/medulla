@@ -109,7 +109,7 @@ impl TaskRunner {
         &self,
         address: &str,
         abort_id: &str,
-    ) -> Result<AgentCapabilities, RunError> {
+    ) -> Result<(AgentCapabilities, std::sync::Arc<tokio::sync::Notify>), RunError> {
         let abort = std::sync::Arc::new(tokio::sync::Notify::new());
         self.aborts
             .lock()
@@ -148,7 +148,9 @@ impl TaskRunner {
                 }
                 Err(RunError::Aborted)
             }
-            result = self.capabilities(address) => result,
+            result = self.capabilities(address) => {
+                result.map(|capabilities| (capabilities, abort))
+            },
         }
     }
 }

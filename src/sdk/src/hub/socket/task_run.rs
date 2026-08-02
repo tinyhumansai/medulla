@@ -169,7 +169,7 @@ pub(super) async fn handle_task_run(
         .capabilities_for_dispatch(&worker_address, &task_id)
         .await
     {
-        Ok(capabilities) => Some(capabilities),
+        Ok((capabilities, abort)) => Some((capabilities, abort)),
         Err(crate::hub::RunError::Aborted) => {
             let outcome = Err(crate::hub::RunError::Aborted);
             let _ = socket
@@ -192,7 +192,7 @@ pub(super) async fn handle_task_run(
             if strategy == crate::runtime::SubscriptionRoutingStrategy::Manual {
                 None
             } else {
-                capabilities.as_ref().and_then(|capabilities| {
+                capabilities.as_ref().and_then(|(capabilities, _)| {
                     super::super::roster::subscription_for_strategy(capabilities, strategy)
                 })
             }
@@ -280,8 +280,12 @@ pub(super) async fn handle_task_run(
         fleet_depth: 0,
     };
 
-    let screen_kill = capabilities.is_some_and(|capabilities| capabilities.screen_kill);
-    let outcome = runner.run_negotiated(req, Some(tx), screen_kill).await;
+    let (screen_kill, abort) = capabilities
+        .map(|(capabilities, abort)| (capabilities.screen_kill, Some(abort)))
+        .unwrap_or((false, None));
+    let outcome = runner
+        .run_negotiated(req, Some(tx), screen_kill, abort)
+        .await;
     match &outcome {
         Ok(o) => log(&format!(
             "hub: task {} ok ({} chars)",

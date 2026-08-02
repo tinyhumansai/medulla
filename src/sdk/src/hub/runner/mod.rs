@@ -294,15 +294,17 @@ impl TaskRunner {
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
         screen_kill: bool,
+        abort: Option<Arc<Notify>>,
     ) -> Result<TaskOutcome, RunError> {
-        self.run_with_screen_kill(req, status, screen_kill).await
+        self.run_inner(req, status, screen_kill, abort).await
     }
 
-    async fn run_with_screen_kill(
+    async fn run_inner(
         &self,
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
         screen_kill: bool,
+        prepared_abort: Option<Arc<Notify>>,
     ) -> Result<TaskOutcome, RunError> {
         // Register this dispatch's abort signal FIRST — before the contact wait —
         // so a `task_abort` that arrives during contact negotiation (up to
@@ -311,13 +313,11 @@ impl TaskRunner {
         // the backend aborts by, and held for the whole call (spanning any
         // reset+resend retries). The guard removes it on every return path, so a
         // settled dispatch leaves nothing for a later `task_abort` to match.
-        let abort = self
-            .aborts
+        let abort = prepared_abort.unwrap_or_else(|| Arc::new(Notify::new()));
+        self.aborts
             .lock()
             .expect("aborts lock")
-            .entry(req.abort_id.clone())
-            .or_insert_with(|| Arc::new(Notify::new()))
-            .clone();
+            .insert(req.abort_id.clone(), abort.clone());
         let _abort_guard = AbortGuard {
             aborts: self.aborts.clone(),
             key: req.abort_id.clone(),

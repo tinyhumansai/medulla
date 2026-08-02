@@ -3245,7 +3245,7 @@ dependencies = [
 
 [[package]]
 name = "medulla-link"
-version = "0.5.6"
+version = "0.5.7"
 dependencies = [
  "chacha20poly1305",
  "fs2",
@@ -3256,7 +3256,7 @@ dependencies = [
  "sha2 0.10.9",
  "subtle",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.19",
  "tokio",
 ]
 

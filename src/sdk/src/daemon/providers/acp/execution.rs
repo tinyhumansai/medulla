@@ -104,23 +104,7 @@ pub(super) async fn medulla_mcp_servers(
             );
             Some((plane.socket.clone(), plane.grants.mint(grant)))
         } else if let Some((socket, token)) = parent_grant {
-            match crate::control_socket::ControlClient::connect(&socket, &token).await {
-                Ok(mut client) => client
-                    .call_until(
-                        "grant.child",
-                        serde_json::json!({}),
-                        tokio::time::Instant::now() + Duration::from_secs(5),
-                    )
-                    .await
-                    .ok()
-                    .and_then(|result| {
-                        result
-                            .get("token")
-                            .and_then(serde_json::Value::as_str)
-                            .map(|token| (socket, token.to_string()))
-                    }),
-                Err(_) => None,
-            }
+            exchange_parent_grant(socket, token).await
         } else {
             None
         };
@@ -159,6 +143,34 @@ pub(super) async fn medulla_mcp_servers(
         }
         vec![McpServer::Stdio(server)]
     }
+}
+
+/// Exchange a verified parent handoff for the child-only grant attached to ACP.
+///
+/// The control transport is currently Unix-only. Other targets fail closed and
+/// omit fleet tools instead of exposing an unverified capability path.
+#[cfg(all(feature = "workflows", unix))]
+async fn exchange_parent_grant(socket: PathBuf, token: String) -> Option<(PathBuf, String)> {
+    let mut client = crate::control_socket::ControlClient::connect(&socket, &token)
+        .await
+        .ok()?;
+    client
+        .call_until(
+            "grant.child",
+            serde_json::json!({}),
+            tokio::time::Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .ok()?
+        .get("token")
+        .and_then(serde_json::Value::as_str)
+        .map(|token| (socket, token.to_string()))
+}
+
+/// Refuse parent handoffs where no authenticated control transport exists.
+#[cfg(all(feature = "workflows", not(unix)))]
+async fn exchange_parent_grant(_socket: PathBuf, _token: String) -> Option<(PathBuf, String)> {
+    None
 }
 
 /// Build the capability for one ACP session from that task's own environment.

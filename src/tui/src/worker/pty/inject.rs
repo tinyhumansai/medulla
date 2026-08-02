@@ -114,9 +114,8 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
         // No composer to commit to: a line-oriented reader takes the bytes and
         // the return in one go, and there is no rendering to wait on.
         sessions.write(id, text.as_bytes())?;
-        let watermark = sessions.submission_watermark(id)?;
         sessions.write(id, submit_sequence())?;
-        sessions.acknowledge_through(id, watermark);
+        sessions.acknowledge(id);
         return Ok(());
     }
 
@@ -150,12 +149,11 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
     // Let the composer settle before the Return, so it is not swallowed by the
     // paste block still being committed.
     await_still(sessions, id).await;
-    let watermark = sessions.submission_watermark(id)?;
     sessions.write(id, submit_sequence())?;
     // Only a successfully submitted turn answers the previous cue. Keeping it
     // through every fallible readiness/dialog/paste step lets the executor hand
     // a blocked session to the operator if injection fails.
-    sessions.acknowledge_through(id, watermark);
+    sessions.acknowledge(id);
     Ok(())
 }
 

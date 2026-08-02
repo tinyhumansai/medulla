@@ -116,19 +116,6 @@ impl PtyManager {
         }
     }
 
-    /// Bell watermark immediately before a prompt submission attempt.
-    pub(crate) fn submission_watermark(&self, id: &str) -> Result<usize, String> {
-        self.handle(id)
-            .map(|session| session.bell_count())
-            .ok_or_else(|| format!("unknown harness session: {id}"))
-    }
-
-    /// Acknowledge the prior cue without consuming bells after `watermark`.
-    pub(crate) fn acknowledge_through(&self, id: &str, watermark: usize) -> bool {
-        self.handle(id)
-            .is_some_and(|session| session.acknowledge_attention_through(watermark))
-    }
-
     /// Every session, open order — the list pane's rows.
     ///
     /// Built under the registry's read lock rather than off a cloned `Arc` list,

@@ -141,20 +141,20 @@ fn releasing_consumes_a_completion_bell_emitted_just_after_settlement() {
     let clock = Arc::clone(&now);
     let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
     let id = manager
-        .open(sh("read line; printf 'late completion\\a\\n'; sleep 30"))
+        .open(sh(
+            "sleep 0.15; printf 'late completion\\a\\n'; read line; sleep 30",
+        ))
         .expect("a session");
     let row = manager.row(&id).expect("a row");
 
     manager.settle_turn(&id);
-    assert_eq!(
-        manager.attention(&id),
-        None,
-        "the late bell is not here yet"
+    assert!(
+        !manager.acknowledge(&id),
+        "early acknowledgment finds no cue but preserves the promised chime"
     );
     manager
         .claim_idle(&row.label, row.provider)
-        .expect("reuse can begin before the old chime arrives");
-    manager.write(&id, b"\r").expect("release the child");
+        .expect("reuse waits for the old chime window");
     wait_for("the late completion bell to reach the emulator", || {
         super::screen_text(&manager, &id).contains("late completion")
     });
@@ -224,11 +224,7 @@ fn a_consumed_completion_bell_does_not_hide_the_next_turns_first_bell() {
     manager
         .claim_idle(&row.label, row.provider)
         .expect("reuse the session");
-    let watermark = manager
-        .submission_watermark(&id)
-        .expect("the reused session");
     manager.write(&id, b"\r").expect("emit next turn bell");
-    manager.acknowledge_through(&id, watermark);
     wait_for("the next turn request to paint", || {
         super::screen_text(&manager, &id).contains("next request")
     });
@@ -318,19 +314,17 @@ fn successive_settlements_track_each_pending_completion_bell() {
     let clock = Arc::clone(&now);
     let manager = PtyManager::with_now(Arc::new(move || clock.load(Ordering::SeqCst)));
     let id = manager
-        .open(sh("read line; printf 'two completions\\a\\a\\n'; sleep 30"))
+        .open(sh(
+            "sleep 0.15; printf 'two completions\\a\\a\\n'; read line; sleep 30",
+        ))
         .expect("a session");
     let row = manager.row(&id).expect("a row");
 
     manager.settle_turn(&id);
-    manager
-        .claim_idle(&row.label, row.provider)
-        .expect("claim the second turn");
     manager.settle_turn(&id);
     manager
         .claim_idle(&row.label, row.provider)
-        .expect("reuse after both turns settle");
-    manager.write(&id, b"\r").expect("emit both late chimes");
+        .expect("reuse waits for both promised chimes");
     wait_for("both completion bells to paint", || {
         super::screen_text(&manager, &id).contains("two completions")
     });
@@ -442,11 +436,7 @@ fn a_working_vetoed_completion_does_not_hide_the_next_request() {
     manager
         .claim_idle(&row.label, row.provider)
         .expect("reuse after the observed completion");
-    let watermark = manager
-        .submission_watermark(&id)
-        .expect("the reused session");
     manager.write(&id, b"\r").expect("emit the next request");
-    manager.acknowledge_through(&id, watermark);
     wait_for("the next request to paint", || {
         super::screen_text(&manager, &id).contains("next request")
     });
@@ -473,11 +463,7 @@ fn a_silent_completion_does_not_hide_the_next_turns_bell() {
     manager
         .claim_idle(&row.label, row.provider)
         .expect("reuse after a silent turn");
-    let watermark = manager
-        .submission_watermark(&id)
-        .expect("the reused session");
     manager.write(&id, b"\r").expect("submit the next turn");
-    manager.acknowledge_through(&id, watermark);
     wait_for("the next request to paint", || {
         super::screen_text(&manager, &id).contains("next request")
     });

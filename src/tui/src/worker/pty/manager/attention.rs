@@ -100,6 +100,9 @@ fn refresh(session: &SessionHandle, now: i64) {
     }
     let consumed_pending = unseen_bells.min(pending_completion_bells);
     state.pending_completion_bells -= consumed_pending;
+    if state.pending_completion_bells == 0 {
+        state.completion_deadline = None;
+    }
     state.seen_bells = consumed_bell_count(state.seen_bells, bells);
     state.cue = match (cue, state.cue.take()) {
         (None, held) => held.filter(|held| held.kind == AttentionKind::Bell),

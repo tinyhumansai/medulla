@@ -119,6 +119,8 @@ pub(crate) struct AttentionState {
     pub(crate) generation: u64,
     /// Completion chimes promised by settled turns but not observed yet.
     pub(crate) pending_completion_bells: usize,
+    /// Deadline before which promised chimes may arrive ahead of session reuse.
+    pub(crate) completion_deadline: Option<std::time::Instant>,
     /// Epoch ms of the last classification attempt.
     pub(crate) checked_at: i64,
 }

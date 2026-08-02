@@ -58,6 +58,7 @@ impl SessionHandle {
                 seen_bells: 0,
                 generation: 0,
                 pending_completion_bells: 0,
+                completion_deadline: None,
                 checked_at: started_at,
             }),
             screen: Mutex::new(screen),

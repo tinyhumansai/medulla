@@ -265,3 +265,25 @@ fn the_width_hint_reserves_room_for_a_configured_bar() {
     // Nothing enabled asks for nothing.
     assert_eq!(device_width_hint(&AppearanceConfig::default(), sample()), 0);
 }
+
+#[test]
+fn the_width_hint_reserves_room_for_every_bar_at_full() {
+    let config = AppearanceConfig {
+        device_disk: ResourceDisplay::Bar,
+        ..AppearanceConfig::default()
+    };
+    // The sample's disk sits at 75%, rendering `Device disk ███░ 75%` — 20
+    // columns. At 100% the same line needs 21 for the extra digit, so a hint
+    // taken from the live reading alone would leave the bar a column short and
+    // silently degrade it to a percentage even on a wide terminal.
+    assert_eq!(device_width_hint(&config, sample()), 21);
+
+    // A value pair is widest at whatever magnitudes the host reports, so the
+    // live reading has to be measured as well: saturating RAM to 32G/32G gives
+    // 18 columns against the live 8G/32G's 17.
+    let values = AppearanceConfig {
+        device_ram: ResourceDisplay::Value,
+        ..AppearanceConfig::default()
+    };
+    assert_eq!(device_width_hint(&values, sample()), 18);
+}

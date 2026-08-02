@@ -11,11 +11,11 @@ use super::super::types::{FleetOps, ToolFamilies, PROTOCOL_VERSION};
 use super::{FakeFleet, FakeOutcome};
 
 /// A handler under test: a fleet, a registry, a minted grant, and a connection.
-struct Harness {
+pub(super) struct Harness {
     /// The fleet as the handler sees it.
     ops: Arc<dyn FleetOps>,
     /// The same fleet, typed, so a test can read what actually reached it.
-    fake: Arc<FakeFleet>,
+    pub(super) fake: Arc<FakeFleet>,
     grants: GrantRegistry,
     registry: TaskRegistry,
     session: SessionState,
@@ -39,7 +39,7 @@ impl Harness {
     }
 
     /// The default harness: a connected fleet and a grant that may dispatch.
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self::with(FakeFleet::new(), Grant::new("session-1", 0, 2))
     }
 
@@ -70,7 +70,7 @@ impl Harness {
     }
 
     /// Handshake, then send `op`.
-    async fn call(&mut self, op: &str, params: Value) -> Value {
+    pub(super) async fn call(&mut self, op: &str, params: Value) -> Value {
         if self.session.grant().is_none() {
             self.hello().await;
         }
@@ -79,7 +79,7 @@ impl Harness {
 }
 
 /// The error slug on a refusal.
-fn kind(response: &Value) -> &str {
+pub(super) fn kind(response: &Value) -> &str {
     response["error"]["kind"].as_str().unwrap_or("<none>")
 }
 
@@ -182,6 +182,11 @@ async fn a_roster_read_returns_the_workers_and_the_default() {
 
     let result = &response["result"];
     assert_eq!(result["workers"][0]["id"], json!("alpha"));
+    assert_eq!(result["workers"][0]["workflows"][0]["id"], json!("release"));
+    assert_eq!(
+        result["workers"][0]["workflows"][0]["fingerprint"],
+        json!("release-fingerprint")
+    );
     assert_eq!(result["defaultWorker"], json!("alpha-address"));
 }
 
@@ -228,6 +233,7 @@ async fn a_workflow_dispatch_carries_its_declared_inputs_to_the_runner() {
             json!({
                 "instruction": "release trigger",
                 "workflow": "release",
+                "workflowFingerprint": "release-fingerprint",
                 "inputs": { "environment": "staging", "retries": 2 },
             }),
         )
@@ -254,7 +260,12 @@ async fn workflow_inputs_must_be_an_object_and_name_a_workflow() {
     let wrong_shape = Harness::new()
         .call(
             "task.dispatch",
-            json!({ "instruction": "x", "workflow": "release", "inputs": ["staging"] }),
+            json!({
+                "instruction": "x",
+                "workflow": "release",
+                "workflowFingerprint": "release-fingerprint",
+                "inputs": ["staging"]
+            }),
         )
         .await;
     assert_eq!(kind(&wrong_shape), "badRequest");
@@ -271,7 +282,11 @@ async fn workflow_inputs_must_be_an_object_and_name_a_workflow() {
 #[tokio::test]
 async fn a_workflow_dispatch_rejects_direct_harness_routing_hints() {
     for hint in [json!({ "harness": "claude" }), json!({ "model": "opus" })] {
-        let mut params = json!({ "instruction": "x", "workflow": "release" });
+        let mut params = json!({
+            "instruction": "x",
+            "workflow": "release",
+            "workflowFingerprint": "release-fingerprint"
+        });
         params
             .as_object_mut()
             .unwrap()

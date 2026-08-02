@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
-use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert};
+use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert};
 // `trigger_input` is shared with the cloud plane's adapter
 // ([`crate::workflows::bridge`]) rather than defined twice: a frame's text must
 // become the same trigger payload whether it arrived over tiny.place or over the
@@ -131,15 +131,31 @@ impl DaemonRuntime {
         if !self.workflow_settings().enabled {
             return Vec::new();
         }
-        self.workflow_store()
+        let store = self.workflow_store();
+        store
             .list()
             .unwrap_or_default()
             .into_iter()
-            .map(|summary| WorkflowAdvert {
-                id: summary.id,
-                name: summary.name,
-                description: summary.description,
-                node_count: summary.node_count,
+            .filter_map(|summary| {
+                let record = store.get(&summary.id).ok().flatten()?;
+                Some(WorkflowAdvert {
+                    id: summary.id,
+                    name: summary.name,
+                    description: summary.description,
+                    node_count: summary.node_count,
+                    fingerprint: crate::workflows::record_fingerprint(&record),
+                    inputs: summary
+                        .inputs
+                        .into_iter()
+                        .map(|input| WorkflowInputAdvert {
+                            name: input.name,
+                            ty: input.ty.as_str().to_string(),
+                            description: input.description.unwrap_or_default(),
+                            required: input.required,
+                            default: input.default,
+                        })
+                        .collect(),
+                })
             })
             .collect()
     }

@@ -3,7 +3,8 @@
 //! Split by what each file pins down: [`protocol`] covers the request handler's
 //! branches, [`grants`] covers the capability model that makes this surface
 //! exclusive, [`paths`] covers socket resolution and bind safety, and
-//! [`roundtrip`] drives a real listener with a real client.
+//! [`roundtrip`] drives a real listener with a real client. The focused
+//! [`workflow_dispatch`] module pins workflow identity to the selected worker.
 
 #[cfg(unix)]
 mod grants;
@@ -12,6 +13,8 @@ mod paths;
 mod protocol;
 #[cfg(unix)]
 mod roundtrip;
+#[cfg(unix)]
+mod workflow_dispatch;
 
 #[cfg(unix)]
 use std::sync::Mutex;
@@ -22,7 +25,7 @@ use tokio::sync::mpsc;
 #[cfg(unix)]
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
 #[cfg(unix)]
-use crate::tinyplace::TokenUsage;
+use crate::tinyplace::{TokenUsage, WorkflowAdvert};
 
 #[cfg(unix)]
 use super::types::{FleetOps, FleetWorker};
@@ -46,6 +49,7 @@ pub(super) struct FakeFleet {
     workers: Mutex<Option<Vec<FleetWorker>>>,
     default_worker: Mutex<Option<String>>,
     outcome: Mutex<FakeOutcome>,
+    workflows: Mutex<Vec<WorkflowAdvert>>,
     /// Every request that reached `dispatch`, for asserting on what was built.
     pub(super) dispatched: Mutex<Vec<TaskRequest>>,
     /// Every abort id that reached `abort`.
@@ -74,6 +78,11 @@ impl FakeFleet {
             }])),
             default_worker: Mutex::new(Some("alpha-address".into())),
             outcome: Mutex::new(FakeOutcome::Reply("done".into())),
+            workflows: Mutex::new(vec![WorkflowAdvert {
+                id: "release".into(),
+                fingerprint: "release-fingerprint".into(),
+                ..WorkflowAdvert::default()
+            }]),
             dispatched: Mutex::new(Vec::new()),
             aborted: Mutex::new(Vec::new()),
             hang_release: tokio::sync::watch::channel(false).0,
@@ -110,6 +119,10 @@ impl FleetOps for FakeFleet {
 
     fn default_worker(&self) -> Option<String> {
         self.default_worker.lock().unwrap().clone()
+    }
+
+    async fn worker_workflows(&self, _worker: &str) -> Result<Vec<WorkflowAdvert>, RunError> {
+        Ok(self.workflows.lock().unwrap().clone())
     }
 
     async fn dispatch(

@@ -278,7 +278,7 @@ pub async fn handle_control(
 
     let result = match op {
         "grant.child" => grant_child(grants, &grant),
-        "worker.list" => worker_list(ops),
+        "worker.list" => worker_list(ops).await,
         "task.dispatch" => task_dispatch(ops, registry, &token, &grant, &params).await,
         "task.get" => task_get(registry, &token, &params).await,
         "task.list" => Ok(json!({ "tasks": registry
@@ -362,13 +362,19 @@ fn hello(
 }
 
 /// The roster, or the reason it is not yet knowable.
-fn worker_list(ops: &Arc<dyn FleetOps>) -> Result<Value, ControlFailure> {
-    let workers = ops.workers().ok_or_else(|| {
+async fn worker_list(ops: &Arc<dyn FleetOps>) -> Result<Value, ControlFailure> {
+    let mut workers = ops.workers().ok_or_else(|| {
         ControlFailure::new(
             ErrorKind::HubNotReady,
             "the fleet is still connecting; try again in a moment",
         )
     })?;
+    for worker in &mut workers {
+        worker.workflows = ops
+            .worker_workflows(&worker.address)
+            .await
+            .unwrap_or_default();
+    }
     Ok(json!({
         "workers": workers,
         "defaultWorker": ops.default_worker(),
@@ -411,6 +417,7 @@ async fn task_dispatch(
     }
     let worker = resolve_worker(ops, optional_str(params, "worker").as_deref())?;
     let request = build_request(grant, params, worker.clone())?;
+    validate_worker_workflow(ops, &worker, params).await?;
     let task_id = match registry
         .spawn_below_limit(ops.clone(), token.to_string(), request, grant.max_in_flight)
         .await
@@ -442,6 +449,56 @@ async fn task_dispatch(
         }
     };
     Ok(json!({ "taskId": task_id, "worker": worker, "status": "running" }))
+}
+
+/// Bind a workflow dispatch to the exact definition the selected worker advertised.
+async fn validate_worker_workflow(
+    ops: &Arc<dyn FleetOps>,
+    worker: &str,
+    params: &Value,
+) -> Result<(), ControlFailure> {
+    let workflow = optional_str(params, "workflow");
+    let fingerprint = optional_str(params, "workflowFingerprint");
+    let Some(workflow) = workflow else {
+        if fingerprint.is_some() {
+            return Err(ControlFailure::new(
+                ErrorKind::BadRequest,
+                "`workflowFingerprint` may only be supplied with `workflow`",
+            ));
+        }
+        return Ok(());
+    };
+    let fingerprint = fingerprint.ok_or_else(|| {
+        ControlFailure::new(
+            ErrorKind::BadRequest,
+            "a workflow dispatch requires `workflowFingerprint` from the selected worker's \
+             entry in `fleet_workers`; local workflow ids are not portable across machines",
+        )
+    })?;
+    let catalog = ops.worker_workflows(worker).await.map_err(|error| {
+        ControlFailure::new(
+            ErrorKind::DispatchFailed,
+            format!("could not verify workflows on worker {worker}: {error}"),
+        )
+    })?;
+    let advertised = catalog.iter().find(|candidate| candidate.id == workflow);
+    match advertised {
+        None => Err(ControlFailure::new(
+            ErrorKind::BadRequest,
+            format!(
+                "worker {worker} does not advertise workflow `{workflow}`; call fleet_workers and \
+                 choose from that worker's workflow catalog"
+            ),
+        )),
+        Some(advertised) if advertised.fingerprint != fingerprint => Err(ControlFailure::new(
+            ErrorKind::BadRequest,
+            format!(
+                "workflow `{workflow}` on worker {worker} has a different definition fingerprint; \
+                 refresh fleet_workers before dispatching"
+            ),
+        )),
+        Some(_) => Ok(()),
+    }
 }
 
 /// Read one task, optionally waiting for it to settle first.

@@ -98,16 +98,23 @@ pub(crate) fn definitions(
                 "workflow": {
                     "type": "string",
                     "description":
-                        "Run this saved workflow instead of handing the instruction to a \
-                         harness as a prompt; the instruction becomes its trigger payload. Ids \
-                         come from workflow_list.",
+                        "Run a workflow advertised by the selected worker instead of handing the \
+                         instruction to a harness as a prompt; the instruction becomes its \
+                         trigger payload. Choose the id from that worker's workflows in \
+                         fleet_workers, never from the local workflow_list.",
+                },
+                "workflowFingerprint": {
+                    "type": "string",
+                    "description":
+                        "Required with workflow. Copy the fingerprint from the selected worker's \
+                         workflow entry in fleet_workers. This prevents a same-named but different \
+                         graph on another machine from running silently.",
                 },
                 "inputs": {
                     "type": "object",
                     "description":
-                        "Values for the selected workflow's declared inputs, keyed by name. Read \
-                         the declarations from workflow_get or workflow_list; omit this unless \
-                         workflow is set.",
+                        "Values for the selected worker workflow's declared inputs, keyed by name; \
+                         omit this unless workflow is set.",
                 },
             }),
             &["instruction"],

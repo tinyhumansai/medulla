@@ -9,6 +9,7 @@
 use tokio::sync::mpsc;
 
 use crate::hub::{ActivityLog, HubHandle, RunError, TaskOutcome, TaskRequest};
+use crate::tinyplace::WorkflowAdvert;
 
 use super::super::types::{FleetOps, FleetWorker};
 use super::types::{FleetDefaults, HubSlot};
@@ -121,6 +122,7 @@ impl FleetOps for HubFleetOps {
                         held,
                         held_reason: worker.control_reason,
                         running,
+                        workflows: Vec::new(),
                     }
                 })
                 .collect(),
@@ -137,6 +139,20 @@ impl FleetOps for HubFleetOps {
             }
         }
         self.defaults.worker_address.clone()
+    }
+
+    async fn worker_workflows(&self, worker: &str) -> Result<Vec<WorkflowAdvert>, RunError> {
+        let Some(handle) = self.handle() else {
+            return Err(RunError::Transport(
+                "the hub is not connected yet, so workflow capabilities are unavailable"
+                    .to_string(),
+            ));
+        };
+        handle
+            .task_runner()
+            .capabilities(worker)
+            .await
+            .map(|capabilities| capabilities.workflows)
     }
 
     async fn dispatch(

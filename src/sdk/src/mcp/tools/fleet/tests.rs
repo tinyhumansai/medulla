@@ -247,6 +247,7 @@ async fn a_dispatch_forwards_only_the_hints_a_model_may_choose() {
             "worker": "alpha",
             "harness": "claude",
             "workflow": "release",
+            "workflowFingerprint": "release-fingerprint",
             "inputs": { "environment": "staging", "retries": 2 },
             // Capability handles keyed into registries shared by every dispatch.
             // A model that picks these could dedupe or cancel somebody else's
@@ -266,6 +267,7 @@ async fn a_dispatch_forwards_only_the_hints_a_model_may_choose() {
     assert_eq!(params["worker"], json!("alpha"));
     assert_eq!(params["harness"], json!("claude"));
     assert_eq!(params["workflow"], json!("release"));
+    assert_eq!(params["workflowFingerprint"], json!("release-fingerprint"));
     assert_eq!(
         params["inputs"],
         json!({ "environment": "staging", "retries": 2 })

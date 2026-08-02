@@ -142,7 +142,13 @@ async fn status(session: &McpSession) -> Result<Value, String> {
 fn dispatch_params(instruction: &str, arguments: &Value) -> Value {
     let mut params = json!({ "instruction": instruction });
     let object = params.as_object_mut().expect("a json object");
-    for hint in ["worker", "harness", "model", "workflow"] {
+    for hint in [
+        "worker",
+        "harness",
+        "model",
+        "workflow",
+        "workflowFingerprint",
+    ] {
         if let Some(value) = arguments
             .get(hint)
             .and_then(Value::as_str)

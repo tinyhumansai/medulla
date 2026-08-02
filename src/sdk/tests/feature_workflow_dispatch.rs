@@ -83,6 +83,14 @@ fn install_workflow(home: &std::path::Path, id: &str) {
         "id": id,
         "name": "Two step",
         "description": "does two things",
+        "inputs": [
+            {
+                "name": "environment",
+                "type": "string",
+                "description": "Release environment",
+                "default": "staging"
+            }
+        ],
         "nodes": [
             { "id": "t", "kind": "trigger", "name": "start",
               "config": { "trigger_kind": "manual" } },
@@ -342,6 +350,10 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
     assert_eq!(advertised.name, "Two step");
     assert_eq!(advertised.description, "does two things");
     assert_eq!(advertised.node_count, 3);
+    assert!(!advertised.fingerprint.is_empty());
+    assert_eq!(advertised.inputs[0].name, "environment");
+    assert_eq!(advertised.inputs[0].ty, "string");
+    assert_eq!(advertised.inputs[0].default, Some(json!("staging")));
 }
 
 #[tokio::test]

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
+use crate::tinyplace::WorkflowAdvert;
 
 /// The control protocol version this build speaks.
 ///
@@ -236,6 +237,10 @@ pub struct FleetWorker {
     /// Ids of the tasks it is running right now.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub running: Vec<String>,
+    /// Workflows this worker advertised, including the definition fingerprint
+    /// a safe workflow dispatch must echo.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflows: Vec<WorkflowAdvert>,
 }
 
 /// The live fleet, as the control plane needs it.
@@ -256,6 +261,14 @@ pub trait FleetOps: Send + Sync + 'static {
 
     /// Where a dispatch goes when the caller named no worker.
     fn default_worker(&self) -> Option<String>;
+
+    /// The workflow catalog advertised by one worker.
+    ///
+    /// Implementations should probe the selected worker rather than consult a
+    /// local store: workflow ids are scoped to the machine that will run them.
+    async fn worker_workflows(&self, _worker: &str) -> Result<Vec<WorkflowAdvert>, RunError> {
+        Ok(Vec::new())
+    }
 
     /// Run one task to completion.
     ///

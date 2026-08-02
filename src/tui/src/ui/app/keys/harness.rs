@@ -10,7 +10,8 @@
 //! minimum that leaves a way out, and it is the traditional choice precisely
 //! because full-screen programs do not bind it. While the chrome owns the
 //! keyboard, plain Enter also attaches when the selected pane is a harness;
-//! everywhere else Enter keeps its normal meaning. Recognising the chord is
+//! everywhere else Enter keeps its normal meaning — including under an open
+//! overlay, which owns the keyboard until it is answered. Recognising the chord is
 //! [`is_focus_chord`](crate::ui::harness_pane::keys::is_focus_chord) rather than
 //! a character comparison — terminals do not deliver it the way it is written.
 

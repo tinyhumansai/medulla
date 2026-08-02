@@ -53,19 +53,18 @@ impl App {
             .changes
             .selected_path()
             .map_or_else(|| " Diff ".into(), |path| path.display().to_string());
-        let content_width = panes[1].width.saturating_sub(2) as usize;
+        let content_width = panes[1].width.saturating_sub(2);
         let viewport_height = panes[1].height.saturating_sub(2) as usize;
-        let rendered_height = detail
-            .iter()
-            .map(|line| wrapped_height(line.width(), content_width))
-            .sum::<usize>();
+        let detail = Paragraph::new(detail)
+            .block(self.panel(format!(" {title} ")))
+            .wrap(Wrap { trim: false });
+        // Ask the widget itself so the scroll bound follows Ratatui's word
+        // boundary behavior as well as hard wrapping of long diff tokens.
+        let rendered_height = detail.line_count(content_width);
         self.changes.max_scroll = rendered_height.saturating_sub(viewport_height);
         self.changes.scroll = self.changes.scroll.min(self.changes.max_scroll);
         frame.render_widget(
-            Paragraph::new(detail)
-                .block(self.panel(format!(" {title} ")))
-                .wrap(Wrap { trim: false })
-                .scroll((self.changes.scroll.min(u16::MAX as usize) as u16, 0)),
+            detail.scroll((self.changes.scroll.min(u16::MAX as usize) as u16, 0)),
             panes[1],
         );
     }
@@ -120,9 +119,4 @@ impl App {
         }
         lines
     }
-}
-
-/// Number of terminal rows a wrapped logical line occupies.
-fn wrapped_height(width: usize, pane_width: usize) -> usize {
-    width.max(1).div_ceil(pane_width.max(1))
 }

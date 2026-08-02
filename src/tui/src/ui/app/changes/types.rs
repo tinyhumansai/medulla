@@ -115,7 +115,8 @@ impl GitChangesState {
         // When a patch changes, line and hunk indices become stale and must be
         // remapped or removed to prevent comments from drifting to wrong content.
         if let Some(path) = selected_path {
-            self.comments.invalidate_out_of_bounds(&path, self.patch.len());
+            self.comments
+                .invalidate_out_of_bounds(&path, self.patch.len());
         }
     }
 

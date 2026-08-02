@@ -369,8 +369,12 @@ fn comment_anchors_survive_patch_refresh_when_valid() {
 
     // Add comments at file and line level
     let path = state.selected_path().expect("a changed file").to_path_buf();
-    state.comments.upsert(&path, CommentAnchor::File, "file comment");
-    state.comments.upsert(&path, CommentAnchor::Line(0), "line comment");
+    state
+        .comments
+        .upsert(&path, CommentAnchor::File, "file comment");
+    state
+        .comments
+        .upsert(&path, CommentAnchor::Line(0), "line comment");
     assert_eq!(state.comments.count_for(&path), 2);
 
     // Refresh without changing the patch
@@ -387,7 +391,11 @@ fn comment_anchors_survive_patch_refresh_when_valid() {
     );
 
     // Edit the file to add more lines
-    fs::write(directory.path().join("file.txt"), "zero\none\ntwo\nthree\nfour\n").expect("write");
+    fs::write(
+        directory.path().join("file.txt"),
+        "zero\none\ntwo\nthree\nfour\n",
+    )
+    .expect("write");
     state.refresh();
 
     // File-level comment still survives
@@ -420,7 +428,11 @@ fn out_of_bounds_line_comments_are_invalidated_on_refresh() {
     let initial_patch_len = state.patch.len();
 
     // Add a comment on a line near the end
-    state.comments.upsert(&path, CommentAnchor::Line(initial_patch_len - 1), "end comment");
+    state.comments.upsert(
+        &path,
+        CommentAnchor::Line(initial_patch_len - 1),
+        "end comment",
+    );
     assert_eq!(state.comments.count_for(&path), 1);
 
     // Replace file with much shorter content, patch becomes shorter
@@ -428,7 +440,10 @@ fn out_of_bounds_line_comments_are_invalidated_on_refresh() {
     state.refresh();
 
     // The comment at the old end line is now out of bounds and should be removed
-    assert!(state.comments.body(&path, CommentAnchor::Line(initial_patch_len - 1)).is_none());
+    assert!(state
+        .comments
+        .body(&path, CommentAnchor::Line(initial_patch_len - 1))
+        .is_none());
 }
 
 #[test]
@@ -451,7 +466,10 @@ fn cancelled_changes_remain_visible_in_file_list() {
     // Despite aggregate diff showing no change, load() should include the file
     // because it has ChangeOrigin::Committed (from the earlier commit)
     let (_, files) = repository::load(directory.path(), baseline.trim()).expect("load");
-    assert!(!files.is_empty(), "File with cancelled changes should still appear");
+    assert!(
+        !files.is_empty(),
+        "File with cancelled changes should still appear"
+    );
     let file = files
         .iter()
         .find(|f| f.path == std::path::Path::new("file.txt"))

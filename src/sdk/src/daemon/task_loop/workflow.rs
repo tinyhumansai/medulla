@@ -137,6 +137,7 @@ impl DaemonRuntime {
             .list()
             .unwrap_or_default()
             .into_iter()
+            .filter(|summary| summary.enabled)
             .filter_map(|summary| {
                 let record = store.get(&summary.id).ok().flatten()?;
                 Some(WorkflowAdvert {

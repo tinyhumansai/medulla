@@ -109,6 +109,18 @@ fn install_workflow(home: &std::path::Path, id: &str) {
     store.save(&record).expect("installs");
 }
 
+/// Mark one installed workflow unavailable without removing its definition.
+fn disable_workflow(home: &std::path::Path, id: &str) {
+    let home = home.join("local");
+    let store = FileWorkflowStore::new(
+        vec![home.join("workflows")],
+        home.join("state").join("workflows").join("runs"),
+    );
+    let mut record = store.get(id).unwrap().expect("installed workflow");
+    record.enabled = false;
+    store.save(&record).expect("disables workflow");
+}
+
 /// Install a workflow whose only agent prompt binds a required declared input.
 fn install_parameterized_workflow(home: &std::path::Path, id: &str) {
     let home = home.join("local");
@@ -385,6 +397,8 @@ async fn naming_a_workflow_the_worker_does_not_have_says_what_it_does_have() {
 async fn a_worker_advertises_the_workflows_it_has_installed() {
     let home = tempfile::tempdir().unwrap();
     install_workflow(home.path(), "two-step");
+    install_workflow(home.path(), "paused");
+    disable_workflow(home.path(), "paused");
     let (_host, peer) = worker(
         home.path(),
         recording_executor(Arc::new(Mutex::new(Vec::new()))),
@@ -430,6 +444,13 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
     assert_eq!(advertised.inputs[0].name, "environment");
     assert_eq!(advertised.inputs[0].ty, "string");
     assert_eq!(advertised.inputs[0].default, Some(json!("staging")));
+    assert!(
+        capabilities
+            .workflows
+            .iter()
+            .all(|advert| advert.id != "paused"),
+        "disabled workflows must not be offered for fleet dispatch"
+    );
 }
 
 #[tokio::test]

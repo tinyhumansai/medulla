@@ -90,12 +90,6 @@ const DIALOG_CLEAR_BUDGET: Duration = Duration::from_millis(3_000);
 /// for, waits for it to be taken, then presses Enter. Errors if the session is
 /// unknown or is no longer running.
 pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Result<(), String> {
-    // Whatever this harness was asking the operator for, it is about to be
-    // given a turn instead — so the flag that was making its row blink is
-    // answered. It comes straight back on the next refresh if the harness is in
-    // fact still sitting on a prompt (which `clear_startup_dialogs` below is
-    // about to find out), so this cannot hide a real block.
-    sessions.acknowledge(id);
     // One buffer for the whole injection, reused by every poll.
     //
     // Every wait below re-reads the screen at [`TICK`], and this used to mean a
@@ -120,7 +114,9 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
         // No composer to commit to: a line-oriented reader takes the bytes and
         // the return in one go, and there is no rendering to wait on.
         sessions.write(id, text.as_bytes())?;
-        return sessions.write(id, submit_sequence());
+        sessions.write(id, submit_sequence())?;
+        sessions.acknowledge(id);
+        return Ok(());
     }
 
     // The child has a composer, so the paste must be *in* it before Enter can
@@ -153,7 +149,12 @@ pub async fn inject_prompt(sessions: &PtyManager, id: &str, text: &str) -> Resul
     // Let the composer settle before the Return, so it is not swallowed by the
     // paste block still being committed.
     await_still(sessions, id).await;
-    sessions.write(id, submit_sequence())
+    sessions.write(id, submit_sequence())?;
+    // Only a successfully submitted turn answers the previous cue. Keeping it
+    // through every fallible readiness/dialog/paste step lets the executor hand
+    // a blocked session to the operator if injection fails.
+    sessions.acknowledge(id);
+    Ok(())
 }
 
 /// Reusable screen buffers for one injection.

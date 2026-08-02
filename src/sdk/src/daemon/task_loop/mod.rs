@@ -86,6 +86,12 @@ pub(super) fn with_tool_mode_at_depth(
     mode: Option<&str>,
     depth: u8,
 ) -> std::collections::HashMap<String, String> {
+    // These are capabilities for the MCP subprocess that received them, not
+    // ambient configuration. A nested harness must obtain its own grant at its
+    // actual depth; inheriting its parent's pair would bypass both depth and
+    // session isolation, including on the direct-provider transport.
+    env.remove(crate::control_socket::MCP_SOCKET_ENV);
+    env.remove(crate::control_socket::MCP_GRANT_ENV);
     env.insert(
         crate::control_socket::FLEET_DEPTH_ENV.to_string(),
         depth.to_string(),

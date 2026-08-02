@@ -23,14 +23,23 @@ use super::{
 #[cfg(feature = "workflows")]
 #[test]
 fn task_without_tool_mode_clears_an_inherited_mode() {
-    let mut env = std::collections::HashMap::from([(
-        crate::mcp::TOOL_MODE_ENV.to_string(),
-        "propose".to_string(),
-    )]);
+    let mut env = std::collections::HashMap::from([
+        (crate::mcp::TOOL_MODE_ENV.to_string(), "propose".to_string()),
+        (
+            crate::control_socket::MCP_SOCKET_ENV.to_string(),
+            "/tmp/parent.sock".to_string(),
+        ),
+        (
+            crate::control_socket::MCP_GRANT_ENV.to_string(),
+            "parent-grant".to_string(),
+        ),
+    ]);
 
     env = crate::daemon::task_loop::with_tool_mode_at_depth(env, None, 0);
 
     assert!(!env.contains_key(crate::mcp::TOOL_MODE_ENV));
+    assert!(!env.contains_key(crate::control_socket::MCP_SOCKET_ENV));
+    assert!(!env.contains_key(crate::control_socket::MCP_GRANT_ENV));
     assert!(!env.contains_key(crate::daemon::providers::HARNESS_PROTOCOL_ENV));
 }
 

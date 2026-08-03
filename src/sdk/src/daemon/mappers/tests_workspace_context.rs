@@ -235,3 +235,40 @@ fn claude_batched_worktree_results_track_the_last_checkout() {
         Some("https://github.com/tinyhumansai/medulla/pull/162")
     );
 }
+
+#[test]
+fn claude_pr_result_is_rejected_after_batched_workspace_switch() {
+    let result = snapshot(
+        "claude",
+        &[
+            claude_shell("worktree-a", "worktree workspace-a"),
+            claude_result(
+                "worktree-a",
+                "[PASS] WORKTREE_READY\n  path: /repo/worktrees/workspace-a\n  branch: workspace-a\n",
+            ),
+            claude_shell(
+                "pr-a",
+                "cd /repo/worktrees/workspace-a && gh pr create --fill",
+            ),
+            claude_shell("worktree-b", "worktree workspace-b"),
+            json!({
+                "type": "user",
+                "message": { "role": "user", "content": [
+                    {
+                        "type": "tool_result", "tool_use_id": "worktree-b",
+                        "content": "[PASS] WORKTREE_READY\n  path: /repo/worktrees/workspace-b\n  branch: workspace-b\n"
+                    },
+                    {
+                        "type": "tool_result", "tool_use_id": "pr-a",
+                        "content": "https://github.com/tinyhumansai/medulla/pull/163"
+                    }
+                ]}
+            }),
+        ],
+    );
+    assert_eq!(
+        result.info.cwd.as_deref(),
+        Some("/repo/worktrees/workspace-b")
+    );
+    assert!(result.info.pull_request.is_none());
+}

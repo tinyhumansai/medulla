@@ -34,7 +34,7 @@ pub struct HarnessLineMapper {
     /// Latest token usage observed on the stream, if any.
     pub(super) usage: Option<TokenUsage>,
     /// Claude shell calls whose results may authoritatively report a PR URL.
-    pub(super) pull_request_calls: HashMap<String, super::workspace::PullRequestCommand>,
+    pub(super) pull_request_calls: HashMap<String, super::workspace::PendingPullRequestCall>,
     /// Latest checkout authoritatively reported by a worktree helper.
     pub(super) workspace_cwd: Option<String>,
 }

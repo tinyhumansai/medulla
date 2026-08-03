@@ -13,13 +13,13 @@ use super::shared::{as_array, parse_json_object};
 use super::timestamp::parse_timestamp_ms;
 use super::types::HarnessSemanticEvent;
 use super::work::work_events_for_tool;
-use super::workspace::{pull_request_command, workspace_event_from_output, PullRequestCommand};
+use super::workspace::{pull_request_command, workspace_event_from_output, PendingPullRequestCall};
 
 /// Map one raw Claude JSONL line into zero or more semantic events.
 pub(super) fn claude_events_from_line(
     raw: &str,
     line: i64,
-    pull_request_calls: &mut HashMap<String, PullRequestCommand>,
+    pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
@@ -53,10 +53,21 @@ pub(super) fn claude_events_from_line(
                 vec![user_prompt_event(line, ts, text)]
             };
         }
-        return as_array(message.get("content"))
-            .iter()
-            .flat_map(|block| claude_user_block(block, line, ts, pull_request_calls))
-            .collect();
+        let mut current_cwd = workspace_cwd.map(str::to_string);
+        let mut events = Vec::new();
+        for block in as_array(message.get("content")) {
+            let block_events =
+                claude_user_block(&block, line, ts, pull_request_calls, current_cwd.as_deref());
+            if let Some(cwd) = block_events.iter().rev().find_map(|event| {
+                (event.event.kind == "session_info" && event.record_type.ends_with(":workspace"))
+                    .then(|| event.event.payload.get("cwd").and_then(Value::as_str))
+                    .flatten()
+            }) {
+                current_cwd = Some(cwd.to_string());
+            }
+            events.extend(block_events);
+        }
+        return events;
     }
 
     if record_type == Some("assistant") && source_role == Some("assistant") {
@@ -76,7 +87,8 @@ fn claude_user_block(
     block: &Value,
     line: i64,
     ts: i64,
-    pull_request_calls: &mut HashMap<String, PullRequestCommand>,
+    pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
+    workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
         Some(object) => object,
@@ -108,7 +120,9 @@ fn claude_user_block(
             )];
             events.extend(workspace_event_from_output(
                 &output,
-                pull_request_calls.remove(call_id),
+                pull_request_calls
+                    .remove(call_id)
+                    .and_then(|call| call.command_in(workspace_cwd)),
                 line,
                 ts,
                 "user:tool_result:workspace",
@@ -124,7 +138,7 @@ fn claude_assistant_block(
     block: &Value,
     line: i64,
     ts: i64,
-    pull_request_calls: &mut HashMap<String, PullRequestCommand>,
+    pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
@@ -179,7 +193,10 @@ fn claude_assistant_block(
                     .and_then(Value::as_str)
                     .and_then(|command| pull_request_command(command, workspace_cwd))
                 {
-                    pull_request_calls.insert(call_id.to_string(), command);
+                    pull_request_calls.insert(
+                        call_id.to_string(),
+                        PendingPullRequestCall::new(command, workspace_cwd),
+                    );
                 }
             }
             // The tool_call always goes out; the work events are additive, so a

@@ -18,13 +18,13 @@ use super::shared::{parse_json_object, parse_maybe_json, text_from_content};
 use super::timestamp::parse_timestamp_ms;
 use super::types::HarnessSemanticEvent;
 use super::work::work_events_for_tool;
-use super::workspace::{pull_request_command, workspace_event_from_output, PullRequestCommand};
+use super::workspace::{pull_request_command, workspace_event_from_output, PendingPullRequestCall};
 
 /// Map one raw Codex JSONL line into zero or more semantic events.
 pub(super) fn codex_events_from_line(
     raw: &str,
     line: i64,
-    pull_request_calls: &mut HashMap<String, PullRequestCommand>,
+    pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
@@ -131,7 +131,10 @@ pub(super) fn codex_events_from_line(
                 .and_then(Value::as_str)
                 .and_then(|command| pull_request_command(command, workspace_cwd))
             {
-                pull_request_calls.insert(call_id.to_string(), command);
+                pull_request_calls.insert(
+                    call_id.to_string(),
+                    PendingPullRequestCall::new(command, workspace_cwd),
+                );
             }
         }
         // `update_plan` and `apply_patch` are ordinary function calls on this
@@ -178,7 +181,9 @@ pub(super) fn codex_events_from_line(
         )];
         events.extend(workspace_event_from_output(
             &output,
-            pull_request_calls.remove(call_id),
+            pull_request_calls
+                .remove(call_id)
+                .and_then(|call| call.command_in(workspace_cwd)),
             line,
             ts,
             &format!("response_item:{}:workspace", payload_type.unwrap()),

@@ -24,6 +24,27 @@ pub(super) enum PullRequestCommand {
     View,
 }
 
+/// A correlated PR command and the logical checkout where it started.
+pub(super) struct PendingPullRequestCall {
+    command: PullRequestCommand,
+    workspace_cwd: Option<String>,
+}
+
+impl PendingPullRequestCall {
+    /// Bind a recognized command to the current tool-reported checkout.
+    pub(super) fn new(command: PullRequestCommand, workspace_cwd: Option<&str>) -> Self {
+        Self {
+            command,
+            workspace_cwd: workspace_cwd.map(str::to_string),
+        }
+    }
+
+    /// Return the command only if the session has not moved since it started.
+    pub(super) fn command_in(self, workspace_cwd: Option<&str>) -> Option<PullRequestCommand> {
+        (self.workspace_cwd.as_deref() == workspace_cwd).then_some(self.command)
+    }
+}
+
 /// Turn repository facts embedded in tool output into updated session facts.
 ///
 /// A stable `worktree` report supplies the checkout and branch. GitHub CLI
@@ -171,7 +192,7 @@ fn pull_request_url(output: &str) -> Option<String> {
             })
             .next()?;
         let url = token.strip_prefix(PREFIX)?;
-        let (repo, number) = url.split_once("/pull/")?;
+        let (repo, number) = url.rsplit_once("/pull/")?;
         let mut parts = repo.split('/');
         let owner = parts.next()?;
         let name = parts.next()?;

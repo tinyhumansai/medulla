@@ -32,6 +32,10 @@ fn github_pr_urls_are_normalized_from_plain_and_json_output() {
         pull_request_url(r#"{"url":"https://github.com/tinyhumansai/medulla/pull/158"}"#),
         Some("https://github.com/tinyhumansai/medulla/pull/158".to_string())
     );
+    assert_eq!(
+        pull_request_url("https://github.com/acme/pull/pull/42"),
+        Some("https://github.com/acme/pull/pull/42".to_string())
+    );
 }
 
 #[test]

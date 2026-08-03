@@ -97,10 +97,15 @@ impl App {
                 if let Err(error) = self.remember_harness_workspace(&workspace) {
                     status.push_str(&format!(" · {error}"));
                 }
-                self.set_status(status);
+                // Hand back first, then say what happened. `hand_back_session`
+                // sets its own status, so setting ours before it would show the
+                // operator "Handed back …" for a harness they just started —
+                // losing the name, the managed/unmanaged confirmation, and any
+                // workspace-remember error this message carries.
                 if managed {
                     self.hand_back_session(&id, None);
                 }
+                self.set_status(status);
             }
             // Surfaced, never swallowed: a spawn that fails silently leaves the
             // operator waiting for a pane that is never coming.
@@ -182,11 +187,15 @@ impl App {
         };
         match harnesses.control(&session) {
             // The operator already holds it, so the only decision left is
-            // whether to give it back.
+            // whether to give it back. `took_control` is read, not assumed:
+            // a hold can begin implicitly (focusing in under a `Never` handback
+            // policy), and hardcoding `false` would claim an explicit decision
+            // the operator never made — the same field `begin_harness_release`
+            // resolves the same way.
             Some(HarnessControl::User) => {
                 self.handback_prompt = Some(HandbackPrompt {
                     session,
-                    took_control: false,
+                    took_control: self.harness_took_control,
                     note: Draft::default(),
                     editing_note: false,
                     is_takeover: false,
@@ -473,10 +482,13 @@ impl App {
     /// Route a key while choosing managed or unmanaged control.
     fn handle_harness_decision_key(&mut self, event: KeyEvent) {
         match event.code {
+            // One step back, not two. Decision is reached *after* the workspace
+            // is chosen, so returning to the harness list would discard a
+            // workspace the operator never changed and make them reselect both.
+            // Reuses the forward entry point so the hint text and the completion
+            // list are the same ones the step normally opens with.
             KeyCode::Esc => {
-                if let Some(picker) = &mut self.harness_picker {
-                    picker.step = HarnessPickerStep::Harness;
-                }
+                self.open_harness_workspace_step(false);
             }
             KeyCode::Up | KeyCode::Down => {
                 if let Some(picker) = &mut self.harness_picker {

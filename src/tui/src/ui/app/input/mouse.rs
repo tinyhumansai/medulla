@@ -347,7 +347,17 @@ impl App {
                                 self.open_harness_picker();
                                 return None;
                             }
-                            if row.session_id().is_some() {
+                            if let Some(session) = row.session_id() {
+                                // Point the prompt at the row that was clicked,
+                                // not at whatever the last render left behind.
+                                // `harness_pane_session` is written during the
+                                // draw, and no draw happens between the cursor
+                                // move above and this call — so without this the
+                                // prompt would offer to hand over the previously
+                                // visible harness, and confirming it would
+                                // transfer control of one the operator never
+                                // pointed at.
+                                self.harness_pane_session = Some(session.to_string());
                                 self.open_harness_enter_prompt();
                                 return None;
                             }

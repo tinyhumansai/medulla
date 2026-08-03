@@ -48,6 +48,7 @@ fn raise(app: &mut App, overlay: Overlay) {
                 workspace_choices: Vec::new(),
                 workspace_index: 0,
                 workspace_picked: false,
+                managed: true,
             })
         }
         Overlay::HandbackPrompt => {
@@ -56,6 +57,7 @@ fn raise(app: &mut App, overlay: Overlay) {
                 took_control: false,
                 note: Draft::default(),
                 editing_note: false,
+                is_takeover: false,
             })
         }
         Overlay::InlinePrompt => {

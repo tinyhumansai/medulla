@@ -416,10 +416,15 @@ fn a_paste_cancels_a_harness_kill_instead_of_slipping_past_it() {
         !matches!(after, Some(Cmd::KillTask { .. })),
         "a paste must not leave the kill armed for the next keypress"
     );
+    // That `y` is now an ordinary keystroke, and an ordinary keystroke on any
+    // rail row reaches the conversation — the cursor moves to the orchestrator
+    // lane and the character is kept. It landing in the composer is the proof
+    // the prompt is gone: while the question was up, `on_key` consumed the key
+    // ahead of every other target and nothing reached a draft at all.
     assert_eq!(
         app.draft_text(),
-        "",
-        "and nothing was typed into a composer"
+        "y",
+        "the keystroke after the prompt is an ordinary one again"
     );
 }
 

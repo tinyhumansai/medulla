@@ -53,6 +53,7 @@ fn issues_and_malformed_pr_urls_are_not_session_context() {
 #[test]
 fn only_direct_github_pr_commands_may_report_a_pull_request() {
     assert!(pull_request_command("gh pr create --fill", None).is_some());
+    assert!(pull_request_command("gh pr create --title 'R&D cleanup'", None).is_some());
     assert!(pull_request_command("  gh pr view --json url", None).is_some());
     assert!(pull_request_command("/bin/zsh -lc 'gh pr view --json url'", None).is_some());
     assert!(pull_request_command("gh pr view 123 --repo other/project", None).is_none());

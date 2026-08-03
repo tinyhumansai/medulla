@@ -198,8 +198,18 @@ impl GitChangesState {
             .harness_baseline
             .clone()
             .ok_or_else(|| "No harness launch snapshot is available".to_owned())?;
+        if self.root.as_ref() != Some(&root) {
+            self.comments = ReviewComments::default();
+        }
         self.root = Some(root);
-        self.choose_baseline(&baseline, BaselineSource::HarnessLaunch)
+        self.baseline = Some(baseline);
+        self.baseline_source = BaselineSource::HarnessLaunch;
+        self.picking_baseline = false;
+        self.selected = 0;
+        self.cursor = 0;
+        self.scroll = 0;
+        self.refresh();
+        Ok(())
     }
 
     /// Display label for the active baseline.

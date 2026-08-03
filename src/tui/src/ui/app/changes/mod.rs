@@ -37,13 +37,15 @@ impl App {
                 .sessions
                 .rows()
                 .into_iter()
-                .filter(|row| row.launch_commit.is_some())
+                .filter_map(|row| {
+                    launch_baseline(&row.cwd, row.launch_commit.as_deref())
+                        .map(|commit| (row, commit))
+                })
                 .collect();
             preferred_id
                 .as_deref()
-                .and_then(|id| rows.iter().find(|row| row.id == id).cloned())
-                .or_else(|| rows.into_iter().max_by_key(|row| row.started_at))
-                .and_then(|row| row.launch_commit.clone().map(|commit| (row, commit)))
+                .and_then(|id| rows.iter().find(|(row, _)| row.id == id).cloned())
+                .or_else(|| rows.into_iter().max_by_key(|(row, _)| row.started_at))
         });
         if let Some((row, commit)) = latest {
             self.changes.follow_harness(Path::new(&row.cwd), &commit);
@@ -165,6 +167,15 @@ impl App {
             kind: PromptKind::ChangesComment { path, anchor },
         });
     }
+}
+
+/// Return the immutable launch baseline, deriving Git's empty tree when the
+/// harness started before an unborn repository had its first commit.
+fn launch_baseline(cwd: &str, launch_commit: Option<&str>) -> Option<String> {
+    launch_commit.map(str::to_owned).or_else(|| {
+        let (root, _) = repository::discover_in(Path::new(cwd)).ok()?;
+        repository::empty_tree(&root).ok()
+    })
 }
 
 /// Describe an anchor for the prompt title, naming the hunk when there is one.

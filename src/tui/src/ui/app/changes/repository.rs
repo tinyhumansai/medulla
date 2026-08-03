@@ -42,10 +42,13 @@ pub(super) fn discover_in(directory: &Path) -> Result<(PathBuf, String), String>
 pub(super) fn resolve_baseline(root: &Path) -> Result<String, String> {
     match git(root, &["rev-parse", "--verify", "HEAD"]) {
         Ok(head) => Ok(head.trim().to_owned()),
-        Err(_) => {
-            git(root, &["hash-object", "-t", "tree", "--stdin"]).map(|tree| tree.trim().to_owned())
-        }
+        Err(_) => empty_tree(root),
     }
+}
+
+/// Resolve Git's canonical empty-tree object for an unborn launch snapshot.
+pub(super) fn empty_tree(root: &Path) -> Result<String, String> {
+    git(root, &["hash-object", "-t", "tree", "--stdin"]).map(|tree| tree.trim().to_owned())
 }
 
 /// Load commits and files changed from `baseline` through the current worktree.

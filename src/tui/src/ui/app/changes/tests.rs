@@ -6,8 +6,8 @@ use std::process::Command;
 use medulla::ui::git_review::{ChangeOrigin, CommentAnchor};
 use tempfile::tempdir;
 
-use super::repository;
 use super::types::{BaselineSource, ChangedFile, GitChangesState};
+use super::{launch_baseline, repository};
 
 #[test]
 fn name_status_keeps_simple_paths_and_rename_destinations() {
@@ -119,6 +119,65 @@ fn load_an_unborn_repository_lists_initial_files_without_commits() {
     assert!(commits.is_empty());
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, std::path::Path::new("initial.txt"));
+}
+
+#[test]
+fn an_unborn_harness_derives_an_empty_tree_launch_baseline() {
+    let directory = tempdir().expect("temp repo");
+    git(directory.path(), &["init"]);
+    fs::write(directory.path().join("initial.txt"), "new\n").expect("write initial file");
+
+    let empty_tree = repository::empty_tree(directory.path()).expect("empty tree");
+    git(
+        directory.path(),
+        &["config", "user.email", "test@example.com"],
+    );
+    git(directory.path(), &["config", "user.name", "Test"]);
+    git(directory.path(), &["add", "initial.txt"]);
+    git(
+        directory.path(),
+        &["commit", "-m", "first commit after launch"],
+    );
+
+    let baseline = launch_baseline(&directory.path().to_string_lossy(), None)
+        .expect("unborn launch baseline after HEAD advances");
+
+    assert_eq!(baseline, empty_tree);
+}
+
+#[test]
+fn choosing_a_harness_baseline_clears_comments_when_repository_changes() {
+    let first = tempdir().expect("first repo");
+    let second = tempdir().expect("second repo");
+    init_repo(first.path());
+    init_repo(second.path());
+    let first_root = repository::discover_in(first.path()).expect("first root").0;
+    let (second_root, second_baseline) =
+        repository::discover_in(second.path()).expect("second root");
+    let mut state = GitChangesState {
+        root: Some(first_root),
+        harness_root: Some(second_root.clone()),
+        harness_baseline: Some(second_baseline.clone()),
+        ..GitChangesState::default()
+    };
+    state.comments.upsert(
+        std::path::Path::new("src/main.rs"),
+        CommentAnchor::File,
+        "belongs to the first repository",
+    );
+
+    state
+        .choose_harness_baseline()
+        .expect("switch to harness repository");
+
+    assert_eq!(state.root.as_deref(), Some(second_root.as_path()));
+    assert_eq!(state.baseline.as_deref(), Some(second_baseline.as_str()));
+    assert_eq!(
+        state
+            .comments
+            .count_for(std::path::Path::new("src/main.rs")),
+        0
+    );
 }
 
 #[test]

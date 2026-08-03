@@ -76,6 +76,8 @@ fn only_direct_github_pr_commands_may_report_a_pull_request() {
     assert!(pull_request_command("gh pr create -Hother-branch", None).is_none());
     assert!(pull_request_command("gh pr create -dHother-branch", None).is_none());
     assert!(pull_request_command("gh pr create -dRother/project", None).is_none());
+    assert!(pull_request_command("gh pr create -eHother-branch", None).is_none());
+    assert!(pull_request_command("gh pr create -eRother/project", None).is_none());
     assert!(pull_request_command("gh pr create -tHotfix", None).is_some());
     assert!(pull_request_command("gh pr create '--head' other-branch", None).is_none());
     assert!(pull_request_command("gh pr create --hea\\d other-branch", None).is_none());

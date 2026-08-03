@@ -147,7 +147,7 @@ fn has_short_option(argument: &str, sought: char) -> bool {
         }
         // Boolean shorthands may be bundled. Every other known create
         // shorthand consumes the remainder as its joined value.
-        if !matches!(shorthand, 'd' | 'f' | 'w') {
+        if !matches!(shorthand, 'd' | 'e' | 'f' | 'w') {
             return false;
         }
     }

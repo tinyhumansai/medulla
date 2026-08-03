@@ -275,7 +275,14 @@ async fn run_provider_attempt(
     };
 
     let mut reader = BufReader::new(stdout);
-    let mut mapper = HarnessLineMapper::new(provider_name(spec.provider));
+    // PR attribution must use the environment actually installed on the child,
+    // not the daemon host's environment. Embedders may add or remove GH_REPO in
+    // `spec.env`, and either case changes whether a reported PR is authoritative
+    // for the current checkout.
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override(
+        provider_name(spec.provider),
+        merged_env.contains_key("GH_REPO"),
+    );
     let mut messages: Vec<String> = Vec::new();
     let mut claude_result: Option<String> = None;
     // First announcement wins — a run reports exactly one session.

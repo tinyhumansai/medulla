@@ -22,10 +22,11 @@ impl HarnessLineMapper {
         Self::new_with_gh_repo_override(provider, std::env::var_os("GH_REPO").is_some())
     }
 
-    /// Build a mapper with explicit inherited `GH_REPO` state.
+    /// Build a mapper with explicit effective child `GH_REPO` state.
     ///
-    /// This injection seam keeps transcript tests deterministic without
-    /// mutating the process environment shared by parallel tests.
+    /// Provider execution passes the environment installed on the child. This
+    /// injection seam also keeps transcript tests deterministic without mutating
+    /// the process environment shared by parallel tests.
     pub fn new_with_gh_repo_override(provider: &str, gh_repo_is_set: bool) -> Self {
         let provider = match provider {
             "claude" => Provider::Claude,

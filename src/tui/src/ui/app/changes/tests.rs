@@ -7,7 +7,7 @@ use medulla::ui::git_review::{ChangeOrigin, CommentAnchor};
 use tempfile::tempdir;
 
 use super::types::{BaselineSource, ChangedFile, GitChangesState};
-use super::{launch_baseline, repository};
+use super::{launch_baseline, repository, select_harness_baseline};
 
 #[test]
 fn name_status_keeps_simple_paths_and_rename_destinations() {
@@ -177,6 +177,49 @@ fn choosing_a_harness_baseline_clears_comments_when_repository_changes() {
             .comments
             .count_for(std::path::Path::new("src/main.rs")),
         0
+    );
+}
+
+#[test]
+fn a_selected_non_git_harness_is_not_replaced_by_another_repository() {
+    use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
+
+    let outside = tempdir().expect("non-git directory");
+    let repository = tempdir().expect("git repository");
+    init_repo(repository.path());
+    let head = output(repository.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    let row =
+        |id: &str, label: &str, cwd: &std::path::Path, launch_commit, started_at| SessionRow {
+            id: id.to_owned(),
+            label: label.to_owned(),
+            provider: medulla::protocol::HarnessProvider::Codex,
+            state: PtyState::Running,
+            cwd: cwd.to_string_lossy().into_owned(),
+            branch: None,
+            launch_commit,
+            session_id: None,
+            thread_name: None,
+            started_at,
+            last_output_at: started_at,
+            last_error: None,
+            busy: false,
+            control: HarnessControl::User,
+            user_spawned: true,
+            attention: None,
+        };
+    let rows = vec![
+        row("selected", "plain", outside.path(), None, 1),
+        row("git", "repository", repository.path(), Some(head), 2),
+    ];
+
+    let error = select_harness_baseline(rows, Some("selected"))
+        .expect_err("selected non-git harness must be reported");
+
+    assert!(
+        error.contains("plain is not in a Git repository"),
+        "{error}"
     );
 }
 

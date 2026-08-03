@@ -21,6 +21,7 @@ use medulla::ui::git_review::CommentAnchor;
 pub(crate) use types::GitChangesState;
 
 use crate::ui::composer::{Draft, TextPrompt};
+use crate::worker::pty::SessionRow;
 
 use super::types::{App, PromptKind};
 use types::BaselineSource;
@@ -32,23 +33,19 @@ impl App {
             .attached_harness()
             .map(str::to_owned)
             .or_else(|| self.selected_harness_session.clone());
-        let latest = self.harnesses.as_ref().and_then(|harnesses| {
-            let rows: Vec<_> = harnesses
-                .sessions
-                .rows()
-                .into_iter()
-                .filter_map(|row| {
-                    launch_baseline(&row.cwd, row.launch_commit.as_deref())
-                        .map(|commit| (row, commit))
-                })
-                .collect();
-            preferred_id
-                .as_deref()
-                .and_then(|id| rows.iter().find(|(row, _)| row.id == id).cloned())
-                .or_else(|| rows.into_iter().max_by_key(|(row, _)| row.started_at))
+        let selected = self.harnesses.as_ref().map(|harnesses| {
+            select_harness_baseline(harnesses.sessions.rows(), preferred_id.as_deref())
         });
-        if let Some((row, commit)) = latest {
-            self.changes.follow_harness(Path::new(&row.cwd), &commit);
+        match selected {
+            Some(Ok(Some((row, commit)))) => {
+                self.changes.follow_harness(Path::new(&row.cwd), &commit);
+            }
+            Some(Err(error)) => {
+                self.changes.clear_repository(error);
+                self.set_status(self.changes.status_message());
+                return;
+            }
+            _ => {}
         }
         self.changes.refresh();
         self.set_status(self.changes.status_message());
@@ -176,6 +173,30 @@ fn launch_baseline(cwd: &str, launch_commit: Option<&str>) -> Option<String> {
         let (root, _) = repository::discover_in(Path::new(cwd)).ok()?;
         repository::empty_tree(&root).ok()
     })
+}
+
+/// Resolve the selected harness without silently substituting another
+/// repository. The newest eligible harness is only a default when no live
+/// preferred row exists.
+fn select_harness_baseline(
+    rows: Vec<SessionRow>,
+    preferred_id: Option<&str>,
+) -> Result<Option<(SessionRow, String)>, String> {
+    if let Some(preferred) = preferred_id {
+        if let Some(row) = rows.iter().find(|row| row.id == preferred).cloned() {
+            let commit =
+                launch_baseline(&row.cwd, row.launch_commit.as_deref()).ok_or_else(|| {
+                    format!("Selected harness {} is not in a Git repository", row.label)
+                })?;
+            return Ok(Some((row, commit)));
+        }
+    }
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            launch_baseline(&row.cwd, row.launch_commit.as_deref()).map(|commit| (row, commit))
+        })
+        .max_by_key(|(row, _)| row.started_at))
 }
 
 /// Describe an anchor for the prompt title, naming the hunk when there is one.

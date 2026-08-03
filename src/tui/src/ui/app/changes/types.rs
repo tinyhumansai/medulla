@@ -144,6 +144,25 @@ impl GitChangesState {
         }
     }
 
+    /// Clear repository-backed content when the selected harness cannot be
+    /// reviewed, preventing stale changes from another repository remaining on
+    /// screen beneath the error.
+    pub(crate) fn clear_repository(&mut self, error: String) {
+        self.root = None;
+        self.baseline = None;
+        self.harness_root = None;
+        self.harness_baseline = None;
+        self.recent_commits.clear();
+        self.commits.clear();
+        self.files.clear();
+        self.patch.clear();
+        self.hunks.clear();
+        self.selected = 0;
+        self.cursor = 0;
+        self.scroll = 0;
+        self.error = Some(error);
+    }
+
     /// Follow a harness's immutable launch snapshot while launch mode is active.
     pub(crate) fn follow_harness(&mut self, cwd: &Path, launch_commit: &str) {
         let Ok((root, _)) = repository::discover_in(cwd) else {

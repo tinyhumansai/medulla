@@ -115,6 +115,16 @@ impl SessionRegistry {
 
     /// Remember `session_id` as `key`'s binding, refreshing its recency.
     pub fn record(&self, key: &SessionKey, session_id: impl Into<String>) {
+        self.record_with_workspace_context(key, session_id, WorkspaceContext::default());
+    }
+
+    /// Remember a session id and its mapper workspace state atomically.
+    pub fn record_with_workspace_context(
+        &self,
+        key: &SessionKey,
+        session_id: impl Into<String>,
+        workspace_context: WorkspaceContext,
+    ) {
         let session_id = session_id.into();
         if session_id.trim().is_empty() {
             return;
@@ -123,7 +133,7 @@ impl SessionRegistry {
             key.map_key(),
             SessionBinding {
                 session_id,
-                workspace_context: WorkspaceContext::default(),
+                workspace_context,
             },
             self.max_bindings,
         );

@@ -17,8 +17,8 @@ mod pr;
 mod tests;
 mod types;
 
-pub(super) use pr::{pull_request_command, pull_request_url, pull_request_url_from_json};
-pub(super) use types::{PendingPullRequestCall, PullRequestCommand};
+pub(crate) use pr::{pull_request_command, pull_request_url, pull_request_url_from_json};
+pub(crate) use types::{PendingPullRequestCall, PullRequestCommand};
 
 /// Turn repository facts embedded in tool output into updated session facts.
 ///
@@ -26,7 +26,7 @@ pub(super) use types::{PendingPullRequestCall, PullRequestCommand};
 /// commands print the pull-request URL they created or inspected. Either fact
 /// is useful independently, and when one command prints both they travel in a
 /// single update.
-pub(super) fn workspace_event_from_output(
+pub(crate) fn workspace_event_from_output(
     output: &str,
     pull_request_command: Option<PullRequestCommand>,
     workspace_cwd: Option<&str>,

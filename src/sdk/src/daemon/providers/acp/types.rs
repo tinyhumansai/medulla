@@ -6,6 +6,9 @@ use std::time::Instant;
 use serde_json::Value;
 
 use super::super::types::OnEvent;
+use super::super::types::OnWorkspaceContext;
+use crate::daemon::mappers::PullRequestCommand;
+use crate::sessions::WorkspaceContext;
 
 /// Provider metadata accumulated across ACP's initial call and later patches.
 #[derive(Default)]
@@ -32,4 +35,12 @@ pub(in crate::daemon::providers) struct FoldState {
     pub(super) last_activity: Instant,
     /// Tool metadata retained until each call settles.
     pub(super) tool_calls: HashMap<String, AcpToolCall>,
+    /// PR commands waiting for their ACP tool result.
+    pub(super) pull_request_calls: HashMap<String, PullRequestCommand>,
+    /// Repository identity retained across ACP turns.
+    pub(super) workspace_context: WorkspaceContext,
+    /// Whether `GH_REPO` makes checkout-local PR output non-authoritative.
+    pub(super) gh_repo_is_set: bool,
+    /// Observer persisting changed workspace state into the session binding.
+    pub(super) on_workspace_context: Option<OnWorkspaceContext>,
 }

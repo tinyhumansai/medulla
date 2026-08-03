@@ -32,6 +32,7 @@ mod types;
 mod usage;
 mod work;
 mod workspace;
+pub(crate) use workspace::{pull_request_command, workspace_event_from_output, PullRequestCommand};
 
 #[cfg(test)]
 mod tests;

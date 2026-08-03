@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use crate::daemon::providers::{Abort, RunTaskOptions};
 use crate::daemon::status_detail;
 use crate::protocol::HarnessProvider;
+use crate::sessions::WorkspaceContext;
 
 use super::types::FoldState;
 
@@ -420,4 +421,60 @@ fn agent_env_strips_inherited_fleet_capabilities() {
 
     assert!(!env.contains_key(crate::control_socket::MCP_SOCKET_ENV));
     assert!(!env.contains_key(crate::control_socket::MCP_GRANT_ENV));
+}
+
+#[test]
+fn acp_terminal_pr_results_update_and_persist_workspace_context() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observed_events = events.clone();
+    let contexts = Arc::new(Mutex::new(Vec::new()));
+    let observed_contexts = contexts.clone();
+    let mut state = FoldState::with_workspace(
+        Some(Box::new(move |event| {
+            observed_events.lock().unwrap().push(event.event.clone());
+        })),
+        WorkspaceContext {
+            cwd: Some("/repo/worktrees/pr-153".to_string()),
+            branch: Some("fix/pr-context".to_string()),
+            pull_request: None,
+        },
+        false,
+        Some(Box::new(move |context| {
+            observed_contexts.lock().unwrap().push(context);
+        })),
+    );
+    let call = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-pr",
+        "title": "Terminal",
+        "kind": "execute",
+        "status": "in_progress",
+        "rawInput": { "command": "cd /repo/worktrees/pr-153 && gh pr view --json url" }
+    }))
+    .unwrap();
+    let result = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-pr",
+        "status": "completed",
+        "rawOutput": "{\"url\":\"https://github.com/acme/repo/pull/153\"}"
+    }))
+    .unwrap();
+
+    state.fold(call);
+    state.fold(result);
+
+    assert!(events.lock().unwrap().iter().any(|event| {
+        event.kind == crate::harness_work::kinds::SESSION_INFO
+            && event.payload["pull_request"] == "https://github.com/acme/repo/pull/153"
+    }));
+    assert_eq!(
+        contexts
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .pull_request
+            .as_deref(),
+        Some("https://github.com/acme/repo/pull/153")
+    );
 }

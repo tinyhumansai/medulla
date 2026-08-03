@@ -230,7 +230,12 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     // revoked once the session is over however it ended.
     let revoke_key = session_key.clone();
     let task_env = options.env.clone();
-    let state = Arc::new(Mutex::new(FoldState::new(options.on_event)));
+    let state = Arc::new(Mutex::new(FoldState::with_workspace(
+        options.on_event,
+        options.workspace_context,
+        options.env.contains_key("GH_REPO"),
+        options.on_workspace_context,
+    )));
     let notification_state = state.clone();
     let approve = options.skip_permissions;
     let cwd = PathBuf::from(&options.cwd);

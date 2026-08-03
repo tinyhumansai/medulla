@@ -80,6 +80,8 @@ pub(crate) struct GitChangesState {
     pub(crate) harness_root: Option<PathBuf>,
     /// Marker proving the tracked harness checkout has not been replaced.
     pub(crate) harness_checkout_identity: Option<String>,
+    /// Repository owning review comments, retained while no repository is visible.
+    pub(crate) comments_root: Option<PathBuf>,
     /// Recent repository history offered by the baseline picker.
     pub(crate) recent_commits: Vec<GitCommit>,
     /// Whether the baseline picker has keyboard focus.
@@ -150,6 +152,9 @@ impl GitChangesState {
     /// reviewed, preventing stale changes from another repository remaining on
     /// screen beneath the error.
     pub(crate) fn clear_repository(&mut self, error: String) {
+        if self.comments_root.is_none() {
+            self.comments_root = self.root.clone();
+        }
         self.root = None;
         self.baseline = None;
         self.baseline_source = BaselineSource::AppLaunch;
@@ -188,9 +193,11 @@ impl GitChangesState {
         ) && (self.root.as_ref() != Some(&root)
             || self.baseline.as_deref() != Some(launch_commit))
         {
-            if self.root.as_ref() != Some(&root) {
+            let comments_root = self.comments_root.as_ref().or(self.root.as_ref());
+            if comments_root != Some(&root) {
                 self.comments = ReviewComments::default();
             }
+            self.comments_root = Some(root.clone());
             self.root = Some(root);
             self.baseline = Some(launch_commit.to_owned());
             self.baseline_source = BaselineSource::HarnessLaunch;
@@ -238,9 +245,11 @@ impl GitChangesState {
         if !crate::worker::pty::checkout::matches(&root, identity) {
             return Err("Harness Git checkout changed since launch".to_owned());
         }
-        if self.root.as_ref() != Some(&root) {
+        let comments_root = self.comments_root.as_ref().or(self.root.as_ref());
+        if comments_root != Some(&root) {
             self.comments = ReviewComments::default();
         }
+        self.comments_root = Some(root.clone());
         self.root = Some(root);
         self.baseline = Some(baseline);
         self.baseline_source = BaselineSource::HarnessLaunch;

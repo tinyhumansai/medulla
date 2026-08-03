@@ -87,6 +87,24 @@ fn following_a_new_launch_commit_in_the_same_repository_preserves_comments() {
 }
 
 #[test]
+fn returning_from_a_non_git_harness_preserves_same_repository_comments() {
+    let directory = tempdir().expect("repository");
+    init_repo(directory.path());
+    let launch = output(directory.path(), &["rev-parse", "HEAD"]);
+    let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
+    let mut state = GitChangesState::default();
+    state.follow_harness(directory.path(), &launch, &identity);
+    state
+        .comments
+        .upsert(Path::new("src/main.rs"), CommentAnchor::File, "keep this");
+
+    state.clear_repository("selected harness is outside Git".to_owned());
+    state.follow_harness(directory.path(), &launch, &identity);
+
+    assert_eq!(state.comments.count_for(Path::new("src/main.rs")), 1);
+}
+
+#[test]
 fn applying_harness_launch_revalidates_the_checkout_marker() {
     let directory = tempdir().expect("repository");
     init_repo(directory.path());

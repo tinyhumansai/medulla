@@ -264,7 +264,11 @@ fn git_root(cwd: &str) -> Option<String> {
     output
         .status
         .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .then(|| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim_end_matches(['\r', '\n'])
+                .to_owned()
+        })
         .filter(|root| !root.is_empty())
 }
 

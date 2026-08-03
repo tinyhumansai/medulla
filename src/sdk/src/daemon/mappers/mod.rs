@@ -39,6 +39,8 @@ mod tests;
 mod tests_ext;
 #[cfg(test)]
 mod tests_work;
+#[cfg(test)]
+mod tests_workspace_context;
 
 pub use shared::{normalize_tool_kind, tool_display};
 pub use timestamp::parse_iso_ms;

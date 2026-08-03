@@ -222,8 +222,21 @@ fn absolute_path(path: PathBuf) -> Result<PathBuf, ControlSocketError> {
         return Ok(path);
     }
     std::env::current_dir()
-        .map(|cwd| cwd.join(path))
+        .map(|cwd| absolute_path_from(path, &cwd))
         .map_err(|error| ControlSocketError::Io(error.to_string()))
+}
+
+/// Anchor a relative path to a known working directory.
+///
+/// Keeping this operation separate from [`std::env::current_dir`] lets tests
+/// exercise the process-boundary guarantee without depending on the checkout's
+/// own path length.
+pub(super) fn absolute_path_from(path: PathBuf, cwd: &Path) -> PathBuf {
+    if path.is_absolute() || path.has_root() {
+        path
+    } else {
+        cwd.join(path)
+    }
 }
 
 /// Create the socket's parent directory, private to this user when newly made.

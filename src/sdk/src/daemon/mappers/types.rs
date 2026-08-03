@@ -3,6 +3,7 @@
 //! [`mapper`](super::mapper); the fields are `pub(super)` so it can drive them.
 
 use crate::protocol::{HarnessEvent, TokenUsage};
+use std::collections::HashSet;
 
 /// One typed event parsed from a single transcript line, pre-envelope. Mirrors
 /// the TS `HarnessSemanticEvent`; `timestamp_ms` is epoch milliseconds (receive
@@ -32,6 +33,8 @@ pub struct HarnessLineMapper {
     pub(super) last_at_ms: i64,
     /// Latest token usage observed on the stream, if any.
     pub(super) usage: Option<TokenUsage>,
+    /// Claude shell calls whose results may authoritatively report a PR URL.
+    pub(super) pull_request_calls: HashSet<String>,
 }
 
 /// Which provider's flat-run transcript shape a mapper folds.

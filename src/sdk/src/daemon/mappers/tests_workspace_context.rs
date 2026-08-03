@@ -1,0 +1,104 @@
+//! Provider-level tests for associating GitHub CLI results with a session.
+
+use serde_json::json;
+
+use crate::harness_work::WorkFold;
+
+use super::HarnessLineMapper;
+
+/// Map a transcript and fold its semantic events into session state.
+fn snapshot(provider: &str, lines: &[serde_json::Value]) -> crate::harness_work::WorkSnapshot {
+    let mut mapper = HarnessLineMapper::new(provider);
+    let mut fold = WorkFold::new();
+    for (line, value) in lines.iter().enumerate() {
+        for event in mapper.map_line(&value.to_string(), line as i64) {
+            fold.apply(&event.event.kind, &event.event.payload, event.timestamp_ms);
+        }
+    }
+    fold.into_snapshot()
+}
+
+/// A Claude assistant record wrapping one shell call.
+fn claude_shell(id: &str, command: &str) -> serde_json::Value {
+    json!({
+        "type": "assistant",
+        "message": { "role": "assistant", "content": [{
+            "type": "tool_use", "id": id, "name": "Bash",
+            "input": { "command": command }
+        }]}
+    })
+}
+
+/// A Claude user record returning one shell call's output.
+fn claude_result(id: &str, output: &str) -> serde_json::Value {
+    json!({
+        "type": "user",
+        "message": { "role": "user", "content": [{
+            "type": "tool_result", "tool_use_id": id, "content": output
+        }]}
+    })
+}
+
+#[test]
+fn claude_pr_output_attaches_the_review_to_the_session() {
+    let result = snapshot(
+        "claude",
+        &[
+            claude_shell("pr-1", "gh pr create --title fix"),
+            claude_result("pr-1", "https://github.com/tinyhumansai/medulla/pull/157"),
+        ],
+    );
+    assert_eq!(
+        result.info.pull_request.as_deref(),
+        Some("https://github.com/tinyhumansai/medulla/pull/157")
+    );
+}
+
+#[test]
+fn claude_unrelated_output_cannot_replace_the_sessions_pull_request() {
+    let result = snapshot(
+        "claude",
+        &[
+            claude_shell("search-1", "rg pull fixtures"),
+            claude_result("search-1", "https://github.com/tinyhumansai/other/pull/999"),
+        ],
+    );
+    assert!(result.info.pull_request.is_none());
+}
+
+#[test]
+fn codex_pr_json_attaches_the_review_to_the_session() {
+    let result = snapshot(
+        "codex",
+        &[json!({
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution", "id": "cmd-pr",
+                "command": "gh pr view --json url",
+                "aggregated_output": "{\"url\":\"https://github.com/tinyhumansai/medulla/pull/158\"}",
+                "exit_code": 0
+            }
+        })],
+    );
+    assert_eq!(
+        result.info.pull_request.as_deref(),
+        Some("https://github.com/tinyhumansai/medulla/pull/158")
+    );
+}
+
+#[test]
+fn codex_unrelated_output_cannot_replace_the_sessions_pull_request() {
+    let result = snapshot(
+        "codex",
+        &[json!({
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution", "id": "cmd-search",
+                "command": "rg pull fixtures",
+                "aggregated_output": "https://github.com/tinyhumansai/other/pull/999",
+                "exit_code": 0
+            }
+        })],
+    );
+    assert!(result.info.pull_request.is_none());
+}

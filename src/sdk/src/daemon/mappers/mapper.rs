@@ -29,6 +29,7 @@ impl HarnessLineMapper {
             last_text: None,
             last_at_ms: i64::MIN,
             usage: None,
+            pull_request_calls: Default::default(),
         }
     }
 
@@ -51,7 +52,7 @@ impl HarnessLineMapper {
             }
         }
         let events = match self.provider {
-            Provider::Claude => claude_events_from_line(raw, line),
+            Provider::Claude => claude_events_from_line(raw, line, &mut self.pull_request_calls),
             Provider::Codex => codex_events_from_line(raw, line),
             Provider::Opencode => opencode_events_from_line(raw, line),
         };

@@ -202,6 +202,45 @@ fn session_info_merges_rather_than_overwrites() {
 }
 
 #[test]
+fn a_new_branch_clears_the_previous_branches_pull_request() {
+    let snapshot = fold_with(&[
+        (
+            kinds::SESSION_INFO,
+            json!({
+                "branch": "first",
+                "pull_request": "https://github.com/acme/repo/pull/42"
+            }),
+        ),
+        (kinds::SESSION_INFO, json!({ "branch": "second" })),
+    ]);
+
+    assert_eq!(snapshot.info.branch.as_deref(), Some("second"));
+    assert!(snapshot.info.pull_request.is_none());
+}
+
+#[test]
+fn repeating_the_same_branch_preserves_its_pull_request() {
+    let snapshot = fold_with(&[
+        (
+            kinds::SESSION_INFO,
+            json!({
+                "branch": "same",
+                "pull_request": "https://github.com/acme/repo/pull/42"
+            }),
+        ),
+        (
+            kinds::SESSION_INFO,
+            json!({ "branch": "same", "cwd": "/new/path" }),
+        ),
+    ]);
+
+    assert_eq!(
+        snapshot.info.pull_request.as_deref(),
+        Some("https://github.com/acme/repo/pull/42")
+    );
+}
+
+#[test]
 fn run_result_records_the_outcome() {
     let snapshot = fold_with(&[(
         kinds::RUN_RESULT,

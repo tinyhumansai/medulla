@@ -4,6 +4,7 @@
 //! events its `system`, `result`, and structured tool records imply.
 
 use serde_json::Value;
+use std::collections::HashSet;
 
 use crate::harness_work::kinds;
 
@@ -12,10 +13,14 @@ use super::shared::{as_array, parse_json_object};
 use super::timestamp::parse_timestamp_ms;
 use super::types::HarnessSemanticEvent;
 use super::work::work_events_for_tool;
-use super::workspace::workspace_event_from_output;
+use super::workspace::{is_pull_request_command, workspace_event_from_output};
 
 /// Map one raw Claude JSONL line into zero or more semantic events.
-pub(super) fn claude_events_from_line(raw: &str, line: i64) -> Vec<HarnessSemanticEvent> {
+pub(super) fn claude_events_from_line(
+    raw: &str,
+    line: i64,
+    pull_request_calls: &mut HashSet<String>,
+) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
         Some(record) => record,
         None => return Vec::new(),
@@ -49,14 +54,14 @@ pub(super) fn claude_events_from_line(raw: &str, line: i64) -> Vec<HarnessSemant
         }
         return as_array(message.get("content"))
             .iter()
-            .flat_map(|block| claude_user_block(block, line, ts))
+            .flat_map(|block| claude_user_block(block, line, ts, pull_request_calls))
             .collect();
     }
 
     if record_type == Some("assistant") && source_role == Some("assistant") {
         return as_array(message.get("content"))
             .iter()
-            .flat_map(|block| claude_assistant_block(block, line, ts))
+            .flat_map(|block| claude_assistant_block(block, line, ts, pull_request_calls))
             .collect();
     }
 
@@ -64,7 +69,12 @@ pub(super) fn claude_events_from_line(raw: &str, line: i64) -> Vec<HarnessSemant
 }
 
 /// Fold a single block of a user message (text prompt or tool_result).
-fn claude_user_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSemanticEvent> {
+fn claude_user_block(
+    block: &Value,
+    line: i64,
+    ts: i64,
+    pull_request_calls: &mut HashSet<String>,
+) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
         Some(object) => object,
         None => return Vec::new(),
@@ -95,6 +105,7 @@ fn claude_user_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSemanticEv
             )];
             events.extend(workspace_event_from_output(
                 &output,
+                pull_request_calls.remove(call_id),
                 line,
                 ts,
                 "user:tool_result:workspace",
@@ -106,7 +117,12 @@ fn claude_user_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSemanticEv
 }
 
 /// Fold a single block of an assistant message (text, thinking, or tool_use).
-fn claude_assistant_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSemanticEvent> {
+fn claude_assistant_block(
+    block: &Value,
+    line: i64,
+    ts: i64,
+    pull_request_calls: &mut HashSet<String>,
+) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
         Some(object) => object,
         None => return Vec::new(),
@@ -153,6 +169,15 @@ fn claude_assistant_block(block: &Value, line: i64, ts: i64) -> Vec<HarnessSeman
                 .unwrap_or("unknown");
             let call_id = object.get("id").and_then(Value::as_str).unwrap_or("");
             let input = object.get("input").cloned().unwrap_or(Value::Null);
+            if matches!(tool_name, "Bash" | "Shell")
+                && input
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_pull_request_command)
+                && !call_id.is_empty()
+            {
+                pull_request_calls.insert(call_id.to_string());
+            }
             // The tool_call always goes out; the work events are additive, so a
             // `TodoWrite` reads both as a call in the transcript and as the todo
             // list it actually is.

@@ -23,12 +23,15 @@ mod tests;
 /// single update.
 pub(super) fn workspace_event_from_output(
     output: &str,
+    accept_pull_request: bool,
     line: i64,
     ts: i64,
     record_type: &str,
 ) -> Option<HarnessSemanticEvent> {
     let checkout = json_report(output).or_else(|| text_report(output));
-    let pull_request = pull_request_url(output);
+    let pull_request = accept_pull_request
+        .then(|| pull_request_url(output))
+        .flatten();
     if checkout.is_none() && pull_request.is_none() {
         return None;
     }
@@ -48,6 +51,21 @@ pub(super) fn workspace_event_from_output(
         "agent",
         Value::Object(payload),
     ))
+}
+
+/// Whether a completed shell call is a GitHub CLI PR create/view operation.
+pub(super) fn is_pull_request_command(command: &str) -> bool {
+    command
+        .split(['\n', ';'])
+        .flat_map(|part| part.split("&&"))
+        .flat_map(|part| part.split("||"))
+        .map(str::trim)
+        .any(|part| {
+            let mut words = part.split_whitespace();
+            words.next() == Some("gh")
+                && words.next() == Some("pr")
+                && matches!(words.next(), Some("create" | "view"))
+        })
 }
 
 /// Find a GitHub pull-request URL in ordinary or JSON `gh` output.

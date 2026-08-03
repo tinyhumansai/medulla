@@ -15,7 +15,7 @@ mod tests;
 pub use catalog::{lookup, suggestions, CommandSpec, COMMANDS};
 pub use types::{CopyScope, SlashCommand};
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 use crate::ui::events::{chat_transcript, last_assistant_message, EventEnvelope};
 
 impl SlashCommand {

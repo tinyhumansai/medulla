@@ -67,7 +67,7 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
     SessionRow {
         id: "w_1".into(),
         label: "local".into(),
-        provider: medulla::tinyplace::HarnessProvider::Codex,
+        provider: medulla::protocol::HarnessProvider::Codex,
         state: PtyState::Running,
         cwd: cwd.into(),
         branch: Some("main".into()),

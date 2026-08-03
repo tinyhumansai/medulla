@@ -18,10 +18,10 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
+use medulla::bridge::{Bridge as _, LinkBridge};
 use medulla::contacts::ContactDesk;
-use medulla::daemon::transport::SignalTransport;
 use medulla::daemon::{DaemonConfig, DaemonRuntime};
-use medulla::tinyplace::{decode_task_frame, HarnessProvider};
+use medulla::protocol::{decode_task_frame, HarnessProvider};
 
 use medulla_tui::log::LogBuffer;
 use medulla_tui::worker::app::{ExecutionMode, WorkerApp, WorkerWiring};
@@ -80,7 +80,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
     // the orchestrator's own line, a mismatch is immediate.
     match &endpoint {
         Some(endpoint) => logs.push(format!(
-            "tiny.place: {} on {endpoint}",
+            "host link: {} on {endpoint}",
             agent_id.as_deref().unwrap_or("(no identity)")
         )),
         // Unconditional, because the silent case is the one that needs saying.
@@ -181,7 +181,7 @@ pub(super) fn worker_runtime(
     start: &StartWiring,
     mode: ExecutionMode,
     provider: HarnessProvider,
-    transport: &SignalTransport,
+    transport: &LinkBridge,
 ) -> DaemonRuntime {
     let StartWiring {
         env,
@@ -244,10 +244,23 @@ pub(super) fn worker_runtime(
     };
     let send = {
         let transport = transport.clone();
+        let logs = logs.clone();
         Arc::new(move |to: String, body: String| {
             let transport = transport.clone();
+            let logs = logs.clone();
             Box::pin(async move {
-                let _ = transport.send(&to, &body).await;
+                loop {
+                    match transport.send(&to, &body).await {
+                        Ok(()) => break,
+                        Err(err) if err.starts_with("link queue overflow:") => {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                        Err(err) => {
+                            logs.push(format!("worker: send to {to} failed ({err})"));
+                            break;
+                        }
+                    }
+                }
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         })
     };
@@ -264,28 +277,23 @@ pub(super) fn worker_runtime(
 /// it into a harness as a prompt. An unclaimed screen message would not be
 /// ignored — it would be executed.
 pub(super) fn spawn_inbox_drain(
-    transport: SignalTransport,
+    transport: LinkBridge,
     runtime: DaemonRuntime,
     mut screens: medulla_tui::worker::stream::ScreenRouter,
-    push: Option<medulla::daemon::ListenerGuard>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        // Held here so the push channel dies with the loop it feeds. A detached
-        // listener would keep a socket open for a drain that no longer exists —
-        // and a `JoinHandle` dropped on its own detaches rather than aborting.
-        let _push = push;
         loop {
             for message in transport.drain_inbox(50).await {
-                if let Some(screen) = medulla::tinyplace::parse_screen_message(&message.text) {
+                if let Some(screen) = medulla::protocol::parse_screen_message(&message.text) {
                     screens.handle(&message.from, screen);
                     continue;
                 }
                 let frame = decode_task_frame(&message.text);
                 runtime.handle_message(message.from, message.text, frame);
             }
-            // Returns early when the relay's push channel delivers, so a
-            // subscribe is acted on at about a round trip rather than up to a
-            // poll interval later. The interval stays the correctness floor.
+            // Returns early when the link's pump delivers, so a subscribe is
+            // acted on at about a round trip rather than up to a poll interval
+            // later. The interval stays the correctness floor.
             transport.wait_for_inbox(INBOX_POLL).await;
         }
     })

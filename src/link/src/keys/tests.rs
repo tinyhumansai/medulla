@@ -13,6 +13,7 @@ fn state() -> NodeState {
         forwarder_key: ForwarderKey([3u8; 32]),
         forwarder_endpoint: "link.example:4600".to_string(),
         peer_node_id: NodeId([4u8; 16]),
+        peers: Vec::new(),
         seq_reservation: 1,
     }
 }
@@ -24,6 +25,39 @@ fn a_pair_key_round_trips_through_its_display_form() {
     let key = PairKey::generate();
     let typed = key.encode();
     assert_eq!(PairKey::decode(&typed).unwrap(), key);
+}
+
+#[test]
+fn a_node_id_round_trips_through_its_hex_form() {
+    let id = NodeId([0xab; 16]);
+    assert_eq!(NodeId::from_hex(&id.to_string()), Some(id));
+    assert_eq!(NodeId::from_hex("not-hex"), None);
+}
+
+#[test]
+fn enrolled_peers_keep_their_distinct_pair_keys() {
+    let mut node = state();
+    node.peers = vec![
+        EnrolledPeer {
+            node_id: NodeId([5; 16]),
+            pair_key: PairKey::from_bytes([6; 16]),
+        },
+        EnrolledPeer {
+            node_id: NodeId([7; 16]),
+            pair_key: PairKey::from_bytes([8; 16]),
+        },
+    ];
+    let peers = node.enrolled_peers();
+    assert_eq!(peers[0].node_id, NodeId([5; 16]));
+    assert_eq!(peers[0].pair_key, PairKey::from_bytes([6; 16]));
+    assert_eq!(peers[1].node_id, NodeId([7; 16]));
+    assert_eq!(peers[1].pair_key, PairKey::from_bytes([8; 16]));
+
+    node.peers.clear();
+    let legacy = node.enrolled_peers();
+    assert_eq!(legacy.len(), 1);
+    assert_eq!(legacy[0].node_id, node.peer_node_id);
+    assert_eq!(legacy[0].pair_key, node.pair_key);
 }
 
 #[test]

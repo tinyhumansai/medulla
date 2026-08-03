@@ -164,10 +164,9 @@ fn value_types_are_debug_clone_eq() {
     };
     assert_eq!(thread.clone(), thread);
 
-    let ident = TinyplaceIdentity {
-        agent_id: "a".into(),
-        public_key: "pk".into(),
-        handle: Some("@h".into()),
+    let ident = LinkIdentity {
+        node_name: "a".into(),
+        forwarder: "forwarder:41641".into(),
     };
     assert_eq!(ident.clone(), ident);
 

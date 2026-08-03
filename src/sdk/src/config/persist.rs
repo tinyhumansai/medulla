@@ -367,18 +367,20 @@ pub fn persist_host_workspaces(path: &Path, workspaces: &[String]) -> anyhow::Re
     )
 }
 
-/// Replace the static tiny.place peer roster without touching worker identity.
+/// Replace the static link peer roster without touching link identity.
 ///
 /// The daemon TUI uses this when an operator adds a master. Only public peer
-/// addresses and labels are stored here; the worker's signing key remains in
-/// its own `identityDir` wallet and is never copied into the orchestrator
-/// configuration.
-pub fn persist_tinyplace_peers(path: &Path, peers: &[crate::config::Peer]) -> anyhow::Result<()> {
+/// names, ids and labels are stored here; the pair key stays in the link's own
+/// `node.json` and is never copied into a configuration file (protocol §7.1).
+pub fn persist_link_peers(path: &Path, peers: &[crate::config::Peer]) -> anyhow::Result<()> {
     let rows = peers
         .iter()
         .map(|peer| {
             let mut row = toml::Table::new();
             row.insert("id".into(), toml::Value::String(peer.id.clone()));
+            if let Some(value) = &peer.node_id {
+                row.insert("nodeId".into(), toml::Value::String(value.clone()));
+            }
             if let Some(value) = &peer.name {
                 row.insert("name".into(), toml::Value::String(value.clone()));
             }
@@ -404,5 +406,5 @@ pub fn persist_tinyplace_peers(path: &Path, peers: &[crate::config::Peer]) -> an
             toml::Value::Table(row)
         })
         .collect();
-    persist_setting(path, "tinyplace", "peers", toml::Value::Array(rows))
+    persist_setting(path, "link", "peers", toml::Value::Array(rows))
 }

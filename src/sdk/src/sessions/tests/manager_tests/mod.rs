@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::daemon::providers::{RunTaskFn, RunTaskResult};
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::input::{Folded, Observation};
 use super::super::manager::{OpenSession, SessionConfig, SessionManager, TranscriptRole};
@@ -106,7 +106,7 @@ fn gated_executor() -> (RunTaskFn, Arc<tokio::sync::Notify>) {
 /// the whole [`SessionManager`] path (spawn, stream, settle, teardown).
 ///
 /// The script is pointed at via `TINYVERSE_CLAUDE_BIN`, which
-/// [`provider_bin`](crate::tinyplace::env::provider_bin) honors first; `PATH` is
+/// [`provider_bin`](crate::protocol::env::provider_bin) honors first; `PATH` is
 /// forwarded so the script's `printf`/`sleep`/etc. resolve after the child's env
 /// is cleared. Returns the tempdir too — dropping it deletes the script, so the
 /// caller must keep it alive for the test's duration.

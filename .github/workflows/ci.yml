@@ -205,7 +205,9 @@ jobs:
           load: true
           provenance: false
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # A transient GHA cache-service failure must not discard a successfully
+          # built and loaded image or prevent the offline scenarios from running.
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - name: Coordination round trip (run.sh, --network none)
         run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh

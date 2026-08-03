@@ -6,7 +6,7 @@ members = ["src/link", "src/sdk", "src/tui"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.7.1"
+version = "0.7.3"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/medulla"
@@ -22,17 +22,16 @@ medulla-link = { path = "src/link" }
 # its own ratatui 0.30 / crossterm 0.29 TUI), so consumers must opt in
 # explicitly — see docs/vendoring.md.
 openhuman = { path = "vendor/openhuman", default-features = false }
-# Redirected to vendor/openhuman/vendor/* by [patch.crates-io] below. Declared
-# as registry coordinates rather than path deps so each crate has exactly ONE
-# declaration style: mixing the two yields two PackageIds for one crate and an
-# E0308 where the types look identical.
-tinyplace = "2.0"
 # The shared TinyHumans backend client. A path dependency into OpenHuman's own
 # vendored copy — NOT a second checkout — so this host and the embedded core
 # link one `tinyhumans-sdk` and agree on the backend contract by construction.
 # It has no registry coordinate, so unlike the tiny* crates below it is not
 # declared-then-patched.
 tinyhumans-sdk = { path = "vendor/openhuman/vendor/tinyhumans-sdk" }
+# Declared as registry coordinates rather than path deps so each crate has
+# exactly ONE declaration style: mixing the two yields two PackageIds for one
+# crate and an E0308 where the types look identical.
+#
 # The workflow engine. Declared as a registry dependency and redirected to the
 # vendored submodule by `[patch.crates-io]` below, matching how the sibling
 # openhuman host consumes it — one shared pin, one shared upgrade cadence.
@@ -106,6 +105,9 @@ tinychannels = { path = "vendor/openhuman/vendor/tinychannels" }
 tinycortex = { path = "vendor/openhuman/vendor/tinycortex" }
 tinyflows = { path = "vendor/openhuman/vendor/tinyflows" }
 tinyjuice = { path = "vendor/openhuman/vendor/tinyjuice" }
+# Load-bearing even though no crate in this workspace links tinyplace any more:
+# the vendored OpenHuman core still does, and without the redirect Cargo would
+# resolve the published crate instead of the vendored tree.
 tinyplace = { path = "vendor/openhuman/vendor/tinyplace/sdk/rust" }
 # NOT copied from OpenHuman: its whisper-rs-sys git patch. Cargo fetches a git
 # patch source during resolution even when the patched crate is absent from the

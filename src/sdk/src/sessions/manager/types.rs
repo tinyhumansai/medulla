@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use crate::daemon::providers::Abort;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::interactive::InteractiveSession;
 use super::super::types::{SessionClass, SessionDriver, SessionPolicy, SessionRecord};

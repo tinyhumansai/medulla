@@ -1,11 +1,11 @@
 //! Tests for the control module.
 
 use super::*;
-use crate::tinyplace::parse_harness_control_frame;
+use crate::protocol::parse_harness_control_frame;
 
 fn frame(session_id: Option<&str>) -> HarnessControlFrame {
     HarnessControlFrame {
-        control_version: crate::tinyplace::HARNESS_CONTROL_VERSION.to_string(),
+        control_version: crate::protocol::HARNESS_CONTROL_VERSION.to_string(),
         kind: "input".to_string(),
         session_id: session_id.map(str::to_string),
         text: "run tests".to_string(),
@@ -31,7 +31,7 @@ fn matches_wrapper_or_harness_id_only() {
 #[test]
 fn parses_and_targets_a_wire_frame() {
     let body = serde_json::json!({
-        "control_version": crate::tinyplace::HARNESS_CONTROL_VERSION,
+        "control_version": crate::protocol::HARNESS_CONTROL_VERSION,
         "kind": "input",
         "text": "hello",
     })

@@ -35,7 +35,7 @@ pub struct EvolveSession {
     /// The bridge address of the worker that runs it.
     pub worker_address: String,
     /// Optional harness hint.
-    pub provider: Option<crate::tinyplace::HarnessProvider>,
+    pub provider: Option<crate::protocol::HarnessProvider>,
     /// Optional model hint.
     pub model: Option<String>,
     /// The continuity group this pane's turns share.

@@ -6,7 +6,7 @@ use super::super::hub_ops::{activity_key, record_outcome, tee_status};
 use super::super::{FleetDefaults, HubFleetOps, HubSlot};
 use crate::control_socket::FleetOps;
 use crate::hub::{ActivityLog, RunError, TaskOutcome, TaskRequest};
-use crate::tinyplace::TokenUsage;
+use crate::protocol::TokenUsage;
 
 /// A request naming `worker`, with the ids the control plane would have minted.
 fn request(worker: &str) -> TaskRequest {

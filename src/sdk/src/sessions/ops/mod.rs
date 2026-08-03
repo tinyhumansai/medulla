@@ -6,7 +6,7 @@
 //! line. Mirrors the shape [`WorkerOp`](crate::runtime::WorkerOp) already
 //! establishes for the Workers tab.
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::manager::{OpenSession, SessionManager};
 use super::types::{SessionClass, SessionDriver};

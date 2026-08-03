@@ -17,7 +17,7 @@
 //! wants to let go of a harness.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use crate::ui::composer::Draft;
 use crate::ui::harness_pane::HarnessChoice;

@@ -4,7 +4,7 @@
 //! newer structured events need.
 
 use crate::harness_work::WorkSnapshot;
-use crate::tinyplace::{HarnessEvent, HarnessEventKind, ToolCallPayload, ToolResultPayload};
+use crate::protocol::{HarnessEvent, HarnessEventKind, ToolCallPayload, ToolResultPayload};
 
 /// What a tool-call status frame starts with.
 ///

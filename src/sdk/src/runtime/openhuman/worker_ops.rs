@@ -15,7 +15,7 @@ use anyhow::anyhow;
 /// without standing up a live hub handle.
 pub(super) fn hub_worker_to_info(
     worker: crate::hub::HubWorker,
-    details: Option<crate::tinyplace::WorkerSystemInfo>,
+    details: Option<crate::protocol::WorkerSystemInfo>,
 ) -> crate::runtime::WorkerInfo {
     let (cpu_cores, memory_total_bytes, memory_available_bytes, ip_address) = details
         .map(|details| {

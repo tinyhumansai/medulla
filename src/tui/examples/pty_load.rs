@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 
 // ------------------------------------------------------------- allocator ---

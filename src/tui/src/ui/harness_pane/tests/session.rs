@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use crate::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 

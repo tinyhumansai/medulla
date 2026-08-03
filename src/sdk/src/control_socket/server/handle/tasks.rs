@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::hub::TaskRequest;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::super::grants::Grant;
 use super::super::super::types::{ControlFailure, ErrorKind, FleetOps};

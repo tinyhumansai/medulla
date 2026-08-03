@@ -13,12 +13,12 @@ pub use ratatui::Terminal;
 pub use tokio::sync::broadcast;
 
 pub use medulla::config::LoadedConfig;
+pub use medulla::protocol::{
+    BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider, HarnessReadiness,
+};
 pub use medulla::runtime::mock::MockRuntime;
 pub use medulla::runtime::{
     ContextItem, Runtime, RuntimeSnapshot, StreamState, WorkerInfo, WorkerOp,
-};
-pub use medulla::tinyplace::{
-    BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider, HarnessReadiness,
 };
 pub use medulla_tui::ui::app::{App, Cmd, TABS};
 pub use medulla_tui::ui::chat_store::MainChatSummary;

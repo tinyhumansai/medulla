@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 
 use super::child::{exit_code, spawn_child_with};
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 use crate::wrapper::{PtyHarness, PtyRequest, WrapperConfig};
 
 mod types;

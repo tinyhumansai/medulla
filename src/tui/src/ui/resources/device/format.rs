@@ -152,16 +152,26 @@ fn bytes(value: u64) -> String {
 /// configured bar (19–20 columns) silently degraded to a percentage and the
 /// `Bar` setting looked broken until unrelated rows widened the rail.
 ///
-/// Measured against a fully-loaded reading rather than the live one so the rail
-/// keeps a stable width as usage moves; `values` still comes from the latest
-/// sample, since a byte pair's width depends on the magnitudes in it.
+/// Two readings are measured and the wider wins, because the widest rendering
+/// of a metric depends on which display it is set to. A bar or percentage is
+/// widest at 100% — `Device disk ████ 100%` is a column longer than the same
+/// line at 75% — so sizing against live values would leave the rail a column
+/// short the moment a metric rounded up, and it would degrade silently. A byte
+/// pair, by contrast, is widest at whatever magnitudes the host actually
+/// reports, which only the live sample knows. Taking the maximum over both
+/// covers each case without inflating the other, and keeps the width stable as
+/// usage moves.
 pub fn device_width_hint(config: &AppearanceConfig, sample: DeviceSnapshot) -> usize {
     let saturated = DeviceSnapshot {
         cpu_fraction: Some(1.0),
+        // Used equal to total reads as 100% for the bar and percentage forms.
+        memory_used_bytes: sample.memory_total_bytes,
+        disk_used_bytes: sample.disk_total_bytes,
         ..sample
     };
-    device_lines(config, saturated, usize::MAX, DEVICE_METRIC_COUNT)
-        .iter()
+    [sample, saturated]
+        .into_iter()
+        .flat_map(|reading| device_lines(config, reading, usize::MAX, DEVICE_METRIC_COUNT))
         .map(|line| line.chars().count())
         .max()
         .unwrap_or(0)

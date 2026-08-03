@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::manager::PtyManager;
 use super::types::{HarnessControl, LaunchSpec, PtyState};

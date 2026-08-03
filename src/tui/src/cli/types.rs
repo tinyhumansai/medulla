@@ -4,7 +4,7 @@
 //! module.
 
 use medulla::auth::Provider;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 /// The top-level subcommand selected from `argv[1..]`.
 #[derive(Debug, Clone, PartialEq, Eq)]

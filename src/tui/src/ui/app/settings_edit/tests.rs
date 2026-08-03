@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use medulla::config::{LoadedConfig, TinyplaceConfig, TuiConfig};
+use medulla::config::{LoadedConfig, TuiConfig};
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 
@@ -165,21 +165,6 @@ fn enter_on_a_number_row_explains_itself_instead_of_changing_it() {
 }
 
 #[test]
-fn the_tinyplace_row_appears_only_when_tinyplace_is_configured() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let mut app = app_in(dir.path());
-    assert!(
-        !app.config_rows().iter().any(|r| r.section == "tinyplace"),
-        "no peer-discovery row when tiny.place is off"
-    );
-
-    app.loaded.config.tinyplace = Some(TinyplaceConfig::default());
-
-    let row = app.config_rows()[row_at(&app, "Auto-discover peers")];
-    assert_eq!(app.read_setting(&row), SettingValue::Flag(true));
-}
-
-#[test]
 fn without_a_config_path_changes_apply_live_but_say_they_are_not_saved() {
     let rt: Arc<dyn Runtime> = Arc::new(MockRuntime::empty());
     let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
@@ -226,17 +211,13 @@ fn saving_warns_when_a_higher_precedence_file_still_wins() {
 }
 
 #[test]
-fn the_cursor_stays_in_range_as_rows_appear_and_disappear() {
+fn the_cursor_stays_in_range_however_far_it_is_driven() {
+    // Moving past the end must clamp rather than index off the list — the
+    // failure mode is a panic on the next render, not a stale highlight.
     let dir = tempfile::tempdir().expect("tempdir");
     let mut app = app_in(dir.path());
-    app.loaded.config.tinyplace = Some(TinyplaceConfig::default());
     for _ in 0..50 {
         app.move_config_index(false);
     }
-    let last = app.config_rows().len() - 1;
-    assert_eq!(app.config_row_index(), last);
-
-    // Dropping the tiny.place row shortens the list under the cursor.
-    app.loaded.config.tinyplace = None;
     assert_eq!(app.config_row_index(), app.config_rows().len() - 1);
 }

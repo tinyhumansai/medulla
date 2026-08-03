@@ -9,7 +9,7 @@
 
 mod types;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
@@ -21,7 +21,7 @@ use crate::keys::{self, AcquiredNode, NodeId};
 use crate::state::QueueLimits;
 use crate::transport::{Session, SessionConfig};
 
-use types::Command;
+use types::{Command, SCREEN_FRAME_HEADER, SCREEN_FRAME_MAGIC};
 pub use types::{LinkConfig, LinkError, LinkHandle, LinkStatus, PeerConfig};
 
 /// How many messages may sit in the inbound queue before the driver blocks.
@@ -53,30 +53,42 @@ impl Link {
             .forwarder_endpoint
             .clone()
             .unwrap_or_else(|| node.state.forwarder_endpoint.clone());
-        let forwarder = resolve(&endpoint)?;
         let socket = UdpSocket::bind(config.bind).await?;
+        let forwarder = resolve(&endpoint, config.bind.is_ipv4())?;
 
         let (command_tx, command_rx) = mpsc::channel(COMMAND_CAPACITY);
         let (inbound_tx, inbound_rx) = mpsc::channel(INBOUND_CAPACITY);
         let (status_tx, status_rx) = watch::channel(LinkStatus::default());
 
         let driver = Driver::new(&config, node, socket, forwarder, inbound_tx, status_tx);
+        // Captured before the driver moves into its task: the peer table is
+        // fixed at connect, and a caller that needs it must not have to wait for
+        // the first status publication to see it.
+        let peers = driver.sessions.keys().copied().collect();
+        let screen_updates = driver
+            .sessions
+            .keys()
+            .copied()
+            .map(|peer| (peer, Mutex::new(())))
+            .collect();
         tokio::spawn(driver.run(command_rx));
 
         Ok(LinkHandle {
             commands: command_tx,
             inbound: Mutex::new(inbound_rx),
             status: status_rx,
+            peers,
+            screen_updates,
         })
     }
 }
 
 /// Resolve a `host:port` forwarder endpoint to one address.
-fn resolve(endpoint: &str) -> Result<SocketAddr, LinkError> {
+fn resolve(endpoint: &str, ipv4: bool) -> Result<SocketAddr, LinkError> {
     endpoint
         .to_socket_addrs()
         .map_err(|_| LinkError::Endpoint(endpoint.to_string()))?
-        .next()
+        .find(|address| address.is_ipv4() == ipv4)
         .ok_or_else(|| LinkError::Endpoint(endpoint.to_string()))
 }
 
@@ -86,7 +98,10 @@ struct Driver {
     forwarder: SocketAddr,
     sessions: HashMap<NodeId, Session>,
     node: AcquiredNode,
-    inbound: mpsc::Sender<(NodeId, Vec<u8>)>,
+    inbound: mpsc::Sender<(NodeId, u64, Vec<u8>)>,
+    pending_inbound: HashMap<NodeId, VecDeque<(u64, Vec<u8>)>>,
+    inbound_cursor: usize,
+    last_screens: HashMap<NodeId, Vec<Vec<u8>>>,
     status: watch::Sender<LinkStatus>,
     /// Monotonic origin: every `now_ms` in the transport is measured from here,
     /// so a wall-clock jump cannot make a retransmission timer fire late (or
@@ -101,15 +116,19 @@ impl Driver {
         node: AcquiredNode,
         socket: UdpSocket,
         forwarder: SocketAddr,
-        inbound: mpsc::Sender<(NodeId, Vec<u8>)>,
+        inbound: mpsc::Sender<(NodeId, u64, Vec<u8>)>,
         status: watch::Sender<LinkStatus>,
     ) -> Self {
         let origin = Instant::now();
         let peers = if config.peers.is_empty() {
-            vec![PeerConfig {
-                node_id: node.state.peer_node_id,
-                pair_key: node.state.pair_key.clone(),
-            }]
+            node.state
+                .enrolled_peers()
+                .into_iter()
+                .map(|peer| PeerConfig {
+                    node_id: peer.node_id,
+                    pair_key: peer.pair_key,
+                })
+                .collect()
         } else {
             config.peers.clone()
         };
@@ -129,6 +148,9 @@ impl Driver {
             sessions,
             node,
             inbound,
+            pending_inbound: HashMap::new(),
+            inbound_cursor: 0,
+            last_screens: HashMap::new(),
             status,
             origin,
         }
@@ -143,6 +165,7 @@ impl Driver {
     async fn run(mut self, mut commands: mpsc::Receiver<Command>) {
         let mut buffer = vec![0u8; MAX_DATAGRAM];
         loop {
+            self.flush_inbound();
             self.flush().await;
             self.publish_status();
 
@@ -162,8 +185,11 @@ impl Driver {
                     None => return,
                 },
                 received = self.socket.recv_from(&mut buffer) => {
-                    if let Ok((len, _from)) = received {
-                        self.handle_datagram(&buffer[..len]).await;
+                    if let Ok((len, from)) = received {
+                        if from != self.forwarder {
+                            continue;
+                        }
+                        self.handle_datagram(&buffer[..len]);
                     }
                 }
                 _ = tokio::time::sleep(delay) => {}
@@ -197,7 +223,7 @@ impl Driver {
     /// dropped. That is not an error condition: with a blind forwarder in the
     /// middle, junk arriving is expected, and SSP recovers from a dropped
     /// datagram by construction.
-    async fn handle_datagram(&mut self, datagram: &[u8]) {
+    fn handle_datagram(&mut self, datagram: &[u8]) {
         let now = self.now_ms();
         let Ok(header) = crate::header::OuterHeader::decode(datagram) else {
             return;
@@ -205,16 +231,57 @@ impl Driver {
         let Some(session) = self.sessions.get_mut(&header.src) else {
             return;
         };
+        let pending = self.pending_inbound.entry(header.src).or_default();
+        if !pending.is_empty() {
+            return;
+        }
         if session.handle_datagram(datagram, now).is_err() {
             return;
         }
         let messages = session.take_messages();
-        let peer = header.src;
+        let epoch = session
+            .peer_epoch()
+            .expect("an accepted datagram has an epoch");
         for message in messages {
-            if self.inbound.send((peer, message)).await.is_err() {
-                return;
+            pending.push_back((epoch, message));
+        }
+        let screen = session.screen().rows().to_vec();
+        if self.last_screens.get(&header.src) != Some(&screen) {
+            self.last_screens.insert(header.src, screen.clone());
+            if let Some(message) = complete_screen_frame(&screen) {
+                pending.push_back((epoch, message));
             }
         }
+    }
+
+    /// Move pending deliveries into the shared handle queue without ever
+    /// suspending the socket/session driver on a slow consumer.
+    fn flush_inbound(&mut self) {
+        let peers: Vec<NodeId> = self.pending_inbound.keys().copied().collect();
+        if peers.is_empty() {
+            return;
+        }
+        let start = self.inbound_cursor % peers.len();
+        for offset in 0..peers.len() {
+            let index = (start + offset) % peers.len();
+            let peer = peers[index];
+            let Some(pending) = self.pending_inbound.get_mut(&peer) else {
+                continue;
+            };
+            let Some((epoch, message)) = pending.pop_front() else {
+                continue;
+            };
+            match self.inbound.try_send((peer, epoch, message)) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full((_, epoch, message))) => {
+                    pending.push_front((epoch, message));
+                    self.inbound_cursor = (index + 1) % peers.len();
+                    return;
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => return,
+            }
+        }
+        self.inbound_cursor = (start + 1) % peers.len();
     }
 
     /// Send whatever every session says is due now.
@@ -253,6 +320,27 @@ impl Driver {
             .collect();
         let _ = self.status.send(LinkStatus { peers });
     }
+}
+
+/// Reassemble the application frame once every channel-1 row has arrived.
+fn complete_screen_frame(rows: &[Vec<u8>]) -> Option<Vec<u8>> {
+    if rows.is_empty() {
+        return None;
+    }
+    let count = rows.len();
+    let mut body = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row.len() < SCREEN_FRAME_HEADER || &row[..4] != SCREEN_FRAME_MAGIC {
+            return None;
+        }
+        let declared = u32::from_be_bytes(row[4..8].try_into().ok()?) as usize;
+        let declared_index = u32::from_be_bytes(row[8..12].try_into().ok()?) as usize;
+        if declared != count || declared_index != index {
+            return None;
+        }
+        body.extend_from_slice(&row[SCREEN_FRAME_HEADER..]);
+    }
+    Some(body)
 }
 
 /// Build a session configuration from the node identity and one peer.

@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 use crate::daemon::providers::{Abort, RunTaskFn};
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::input::Observation;
 use super::registry::SessionRegistry;

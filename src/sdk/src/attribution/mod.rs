@@ -50,7 +50,7 @@
 
 use std::collections::HashMap;
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 #[cfg(test)]
 mod tests;

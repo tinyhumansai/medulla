@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Functional scenario suite for the medulla coordination harness.
 #
-# Reuses the real-process stack helpers in `lib.sh` (mock Signal server →
-# `medulla daemon` → real `opencode` → mock LLM). The happy-path round trip lives
+# Reuses the real-process stack helpers in `lib.sh` (mock link forwarder →
+# owner driver → `medulla daemon` → real `opencode` → mock LLM). The happy-path round trip lives
 # in `run.sh`; this file adds the functional edges around it:
 #
 #   1. capabilities  — a `capabilities` probe returns a capabilities_result frame
@@ -11,8 +11,9 @@
 #   2. token-usage   — a task reply carries propagated child token usage
 #                      (regression guard for the opencode `tokens:{input,output}`
 #                      shape the daemon must surface to the orchestrator).
-#   3. second-round  — a second delegation from a fresh owner identity succeeds on
-#                      the same running daemon (daemon is not single-shot).
+#   3. second-round  — a second delegation succeeds on the same running daemon
+#                      (daemon is not single-shot, and the link keeps its state
+#                      across legs rather than needing a fresh session per task).
 #   4. bad-provider  — a task requesting an unavailable provider comes back as an
 #                      Error frame, not a hang or a wrong-provider run.
 #   5. custom-marker — a bespoke MOCK_LLM_MARKER flows the whole chain end to end
@@ -50,13 +51,13 @@ group_shared_stack() {
   SESSION="medulla-e2e-$$-a"
   RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/medulla-e2e-XXXXXX")"
   e2e_init
-  boot_signal
+  boot_forwarder daemon
   boot_llm ""
   boot_daemon
 
   # ── 1. capabilities probe ────────────────────────────────────────────────
   scenario "capabilities probe returns opencode in a capabilities_result"
-  run_owner caps --endpoint "$SIGNAL_URL" --to "$WORKER_ID" \
+  run_owner caps --to "$WORKER_ID" \
     --kind capabilities --task "report" --task-id "caps-$$" --timeout-ms 120000
   [ "$OWNER_RC" = "0" ] || fail "capabilities owner exited $OWNER_RC (expected 0)"
   "$PYTHON_BIN" - "$RUN_DIR/caps.json" <<'PY' || fail "capabilities assertion failed"
@@ -73,7 +74,7 @@ PY
 
   # ── 2. token-usage propagation ───────────────────────────────────────────
   scenario "task reply carries propagated child token usage"
-  run_owner usage --endpoint "$SIGNAL_URL" --to "$WORKER_ID" \
+  run_owner usage --to "$WORKER_ID" \
     --task "emit the marker for USAGE-$$" --task-id "usage-$$" --timeout-ms 180000
   [ "$OWNER_RC" = "0" ] || fail "usage owner exited $OWNER_RC (expected 0)"
   "$PYTHON_BIN" - "$RUN_DIR/usage.json" <<'PY' || fail "token-usage assertion failed"
@@ -93,8 +94,8 @@ PY
   ok "token-usage propagation"
 
   # ── 3. second delegation round trip on the same daemon ───────────────────
-  scenario "a fresh owner gets a second reply from the same running daemon"
-  run_owner second --endpoint "$SIGNAL_URL" --to "$WORKER_ID" \
+  scenario "a second leg gets another reply from the same running daemon"
+  run_owner second --to "$WORKER_ID" \
     --task "emit the marker for SECOND-$$" --task-id "second-$$" --timeout-ms 180000
   [ "$OWNER_RC" = "0" ] || fail "second owner exited $OWNER_RC (expected 0)"
   "$PYTHON_BIN" - "$RUN_DIR/second.json" <<'PY' || fail "second round-trip assertion failed"
@@ -109,7 +110,7 @@ PY
 
   # ── 4. unavailable-provider error path ───────────────────────────────────
   scenario "a task requesting an unavailable provider returns an Error frame"
-  run_owner badprov --endpoint "$SIGNAL_URL" --to "$WORKER_ID" \
+  run_owner badprov --to "$WORKER_ID" \
     --provider claude --task "run this" --task-id "badprov-$$" --timeout-ms 120000
   # The owner exits non-zero on an Error terminal frame — expected here.
   [ "$OWNER_RC" != "0" ] || fail "bad-provider owner exited 0 (expected non-zero on Error)"
@@ -132,12 +133,12 @@ group_custom_marker() {
   SESSION="medulla-e2e-$$-b"
   RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/medulla-e2e-XXXXXX")"
   e2e_init
-  boot_signal
+  boot_forwarder daemon
   boot_llm "export MOCK_LLM_MARKER=$(printf %q "$marker")"
   boot_daemon
 
   scenario "a custom MOCK_LLM_MARKER flows the full chain end to end"
-  run_owner marker --endpoint "$SIGNAL_URL" --to "$WORKER_ID" \
+  run_owner marker --to "$WORKER_ID" \
     --task "emit the marker for MARKER-$$" --task-id "marker-$$" --timeout-ms 180000
   [ "$OWNER_RC" = "0" ] || fail "custom-marker owner exited $OWNER_RC (expected 0)"
   "$PYTHON_BIN" - "$RUN_DIR/marker.json" "$marker" <<'PY' || fail "custom-marker assertion failed"

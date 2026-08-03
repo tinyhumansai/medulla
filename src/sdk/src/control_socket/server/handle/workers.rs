@@ -38,7 +38,7 @@ pub(super) async fn worker_list(ops: &Arc<dyn FleetOps>) -> Result<Value, Contro
 pub(super) async fn probe_worker_workflows(
     ops: &Arc<dyn FleetOps>,
     worker: &str,
-) -> Result<Vec<crate::tinyplace::WorkflowAdvert>, crate::hub::RunError> {
+) -> Result<Vec<crate::protocol::WorkflowAdvert>, crate::hub::RunError> {
     tokio::time::timeout(WORKFLOW_PROBE_TIMEOUT, ops.worker_workflows(worker))
         .await
         .map_err(|_| crate::hub::RunError::Timeout)?

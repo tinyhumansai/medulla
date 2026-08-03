@@ -15,13 +15,13 @@ use ratatui::Terminal;
 use serde_json::json;
 
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackPage, FeedbackStatus, FeedbackType};
-use medulla::config::{LoadedConfig, TinyplaceConfig};
+use medulla::config::{LinkConfig, LoadedConfig};
 use medulla::runtime::mock::MockRuntime;
 use medulla_tui::ui::app::{App, Cmd, TABS};
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-    l.config.tinyplace = Some(TinyplaceConfig::default());
+    l.config.link = Some(LinkConfig::default());
     l
 }
 

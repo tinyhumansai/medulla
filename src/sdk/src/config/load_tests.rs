@@ -46,14 +46,14 @@ fn load_config_applies_staging_switch_to_both_urls() {
     );
 
     let cfg = cwd.join("medulla.tui.json");
-    std::fs::write(&cfg, r#"{"tinyplace":{"peers":[]}}"#).unwrap();
+    std::fs::write(&cfg, r#"{"link":{"peers":[]}}"#).unwrap();
     let loaded = load_config(Some(cfg.to_str().unwrap()), &env(base_env), &cwd).unwrap();
     assert_eq!(
         loaded.config.backend.base_url,
         "https://staging-api.tinyhumans.ai"
     );
     assert_eq!(
-        loaded.config.tinyplace.unwrap().base_url,
+        loaded.config.link.unwrap().forwarder_url,
         "https://staging-api.tiny.place"
     );
     let _ = std::fs::remove_dir_all(&home);
@@ -67,7 +67,7 @@ fn load_config_explicit_urls_win_over_env() {
     let cfg = cwd.join("medulla.tui.json");
     std::fs::write(
         &cfg,
-        r#"{"backend":{"baseUrl":"http://be:1"},"tinyplace":{"baseUrl":"http://tp:2","peers":[]}}"#,
+        r#"{"backend":{"baseUrl":"http://be:1"},"link":{"forwarderUrl":"http://tp:2","peers":[]}}"#,
     )
     .unwrap();
     let home_env = ("MEDULLA_HOME", home.to_str().unwrap());
@@ -79,7 +79,7 @@ fn load_config_explicit_urls_win_over_env() {
     )
     .unwrap();
     assert_eq!(loaded.config.backend.base_url, "http://be:1");
-    assert_eq!(loaded.config.tinyplace.unwrap().base_url, "http://tp:2");
+    assert_eq!(loaded.config.link.unwrap().forwarder_url, "http://tp:2");
     // But MEDULLA_API_URL still beats an explicit backend baseUrl.
     let loaded = load_config(
         Some(cfg.to_str().unwrap()),
@@ -146,9 +146,9 @@ fn load_config_invalid_json_errors() {
 fn load_config_state_and_identity_derive_from_home() {
     let home = temp_dir("derive-home");
     let cwd = temp_dir("derive-cwd");
-    // A tinyplace section with no identityDir → <home>/tinyplace; stateDir → <home>/state.
+    // A link section with no stateDir → <home>/link; stateDir → <home>/state.
     let cfg = cwd.join("medulla.toml");
-    std::fs::write(&cfg, "[tinyplace]\npeers = []\n").unwrap();
+    std::fs::write(&cfg, "[link]\npeers = []\n").unwrap();
     let loaded = load_config(
         None,
         &env(&[("MEDULLA_HOME", home.to_str().unwrap())]),
@@ -160,8 +160,8 @@ fn load_config_state_and_identity_derive_from_home() {
         home_of(&home).join("state").to_string_lossy()
     );
     assert_eq!(
-        loaded.config.tinyplace.unwrap().identity_dir,
-        home_of(&home).join("tinyplace").to_string_lossy()
+        loaded.config.link.unwrap().state_dir,
+        home_of(&home).join("link").to_string_lossy()
     );
     let _ = std::fs::remove_dir_all(&home);
     let _ = std::fs::remove_dir_all(&cwd);
@@ -327,42 +327,42 @@ fn merge_value_is_recursive() {
 }
 
 #[test]
-fn a_synthesized_tinyplace_section_honours_the_staging_switch() {
+fn a_synthesized_link_section_honours_the_staging_switch() {
     // Regression. `medulla daemon --tui` synthesizes this section when the
-    // config file has none, and used to do it with `TinyplaceConfig::default()`
-    // — whose `base_url` is the *constant* prod relay, because a serde default
-    // cannot read the environment. Under `MEDULLA_STAGING=1` that put the worker
-    // on prod while the orchestrator's hub (which resolves from env) sat on
-    // staging: both started cleanly, published keys, and reported healthy, but a
-    // contact request sent on one relay does not exist on the other, so the
-    // worker's Requests tab stayed empty forever with nothing logged anywhere.
+    // config file has none, and used to do it with `LinkConfig::default()` —
+    // whose `forwarder_url` is the *constant* prod backend, because a serde
+    // default cannot read the environment. Under `MEDULLA_STAGING=1` that put
+    // the worker on prod while the orchestrator's hub (which resolves from env)
+    // sat on staging: both started cleanly and reported healthy, but a datagram
+    // handed to one forwarder never reaches the other, so the two simply never
+    // heard from each other with nothing logged anywhere.
     let staging = env(&[("MEDULLA_STAGING", "1"), ("MEDULLA_HOME", "/tmp/mh")]);
     assert_eq!(
-        default_tinyplace_config(&staging).base_url,
+        default_link_config(&staging).forwarder_url,
         "https://staging-api.tiny.place",
         "the synthesized section must follow MEDULLA_STAGING, not a constant"
     );
     assert_ne!(
-        TinyplaceConfig::default().base_url,
-        default_tinyplace_config(&staging).base_url,
+        LinkConfig::default().forwarder_url,
+        default_link_config(&staging).forwarder_url,
         "if these ever agree this test has stopped proving anything"
     );
 
-    // Absent the switch it is still prod, and the identity dir is home-derived
-    // either way — the same wallet `medulla daemon` would have used.
+    // Absent the switch it is still prod, and the state dir is home-derived
+    // either way — the same identity `medulla daemon` would have used.
     let prod = env(&[("MEDULLA_HOME", "/tmp/mh")]);
     assert_eq!(
-        default_tinyplace_config(&prod).base_url,
+        default_link_config(&prod).forwarder_url,
         "https://api.tiny.place"
     );
     // Built with `join` rather than written out: the value is a real path, so
     // on Windows it comes back separated with a backslash.
     let expected = std::path::Path::new("/tmp/mh")
         .join(crate::home::user::PRE_LOGIN_USER_ID)
-        .join("tinyplace")
+        .join("link")
         .to_string_lossy()
         .into_owned();
-    assert_eq!(default_tinyplace_config(&prod).identity_dir, expected);
+    assert_eq!(default_link_config(&prod).state_dir, expected);
 }
 
 #[test]

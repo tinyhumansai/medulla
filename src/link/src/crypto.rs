@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! payload = ChaCha20-Poly1305(key = pair_key, nonce = §4.2,
-//!                             aad = header[0..42], plaintext = §4.1)
+//!                             aad = header[0..50], plaintext = §4.1)
 //! ```
 //!
 //! Two properties are worth stating because both are load-bearing.
@@ -44,7 +44,7 @@ pub enum CryptoError {
 /// Seal a plaintext for the peer.
 ///
 /// `seq` is the full sequence **including** the direction bit, exactly as it
-/// appears in the outer header. `aad` must be `header[0..42]` — the header bytes
+/// appears in the outer header. `aad` must be `header[0..50]` — the header bytes
 /// up to and excluding the forwarder tag.
 pub fn seal(key: &PairKey, seq: u64, aad: &[u8], plaintext: &[u8]) -> Vec<u8> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&expand_key(key)));

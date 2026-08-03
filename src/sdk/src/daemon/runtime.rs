@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{Mutex as TokioMutex, Notify, Semaphore};
 
-use ::tinyplace::auth::timestamp;
+use crate::clock::iso_now as timestamp;
 
-use crate::tinyplace::{EncodeFrameInput, HarnessProvider, TaskFrame, TaskFrameKind};
+use crate::protocol::{EncodeFrameInput, HarnessProvider, TaskFrame, TaskFrameKind};
 
 use super::providers::{Abort, RunTaskFn};
 use super::types::{
@@ -120,7 +120,7 @@ impl DaemonRuntime {
         // instruction to claude. Callers that can actually serve one classify it
         // before getting here; this refuses it for every caller that cannot, so
         // the mistake is not one each new drain has to remember to avoid.
-        if crate::tinyplace::parse_screen_message(&text).is_some() {
+        if crate::protocol::parse_screen_message(&text).is_some() {
             self.log(&format!(
                 "screen: ignored a screen message from {from} — this daemon serves no watchable sessions"
             ));
@@ -258,7 +258,7 @@ impl DaemonRuntime {
         text: &str,
         correlation: Option<&str>,
         harness: Option<HarnessProvider>,
-        usage: Option<crate::tinyplace::TokenUsage>,
+        usage: Option<crate::protocol::TokenUsage>,
     ) {
         self.reply_with(
             to,
@@ -287,7 +287,7 @@ impl DaemonRuntime {
         harness: Option<HarnessProvider>,
         attachments: FrameAttachments,
     ) {
-        let body = crate::tinyplace::encode_task_frame_with_work(
+        let body = crate::protocol::encode_task_frame_with_work(
             EncodeFrameInput {
                 kind,
                 task_id: task_id.to_string(),

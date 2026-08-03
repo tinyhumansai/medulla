@@ -1,7 +1,7 @@
 //! Unit tests for the hub's screen cache.
 
 use super::{ScreenStore, WatchedScreen};
-use crate::tinyplace::{build_frame, ApplyOutcome, FrameDecision, ScreenGrid, ScreenRun};
+use crate::protocol::{build_frame, ApplyOutcome, FrameDecision, ScreenGrid, ScreenRun};
 
 /// A one-row grid holding `text`.
 fn grid(text: &str) -> ScreenGrid {
@@ -21,7 +21,7 @@ fn frame(
     task: &str,
     seq: i64,
     base: i64,
-) -> crate::tinyplace::ScreenFrame {
+) -> crate::protocol::ScreenFrame {
     match build_frame(previous, next, task, seq, base) {
         FrameDecision::Send(frame) => frame,
         FrameDecision::Unchanged => panic!("expected a frame"),

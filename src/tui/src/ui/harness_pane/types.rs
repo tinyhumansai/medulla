@@ -12,14 +12,14 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessChoice {
     /// The CLI process that implements this choice.
-    pub provider: medulla::tinyplace::HarnessProvider,
+    pub provider: medulla::protocol::HarnessProvider,
     /// The configured preset, absent for a native CLI entry.
     pub preset: Option<medulla::config::CustomHarnessConfig>,
 }
 
 impl HarnessChoice {
     /// Build a choice for an installed provider with its ordinary configuration.
-    pub fn native(provider: medulla::tinyplace::HarnessProvider) -> Self {
+    pub fn native(provider: medulla::protocol::HarnessProvider) -> Self {
         Self {
             provider,
             preset: None,
@@ -93,7 +93,7 @@ pub struct LocalHarnesses {
     pub workspace: String,
     /// The coding-agent CLIs this device actually has, in the order the picker
     /// should offer them.
-    pub providers: Vec<medulla::tinyplace::HarnessProvider>,
+    pub providers: Vec<medulla::protocol::HarnessProvider>,
     /// Registered presets attached to this local host.
     pub custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
     /// The configured `[router]`, injected into an operator-started harness the

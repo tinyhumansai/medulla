@@ -8,7 +8,7 @@
 //! It is a pure function of a [`ScreenSnapshot`], so it can be exercised against
 //! literal cells with no child process involved.
 
-use medulla::tinyplace::{coalesce_runs, Color, RunStyle, ScreenGrid, ScreenRun};
+use medulla::protocol::{coalesce_runs, Color, RunStyle, ScreenGrid, ScreenRun};
 
 use super::super::pty::{ScreenCell, ScreenSnapshot};
 
@@ -36,16 +36,16 @@ pub fn wire_color(color: vt100::Color) -> Color {
 pub fn wire_style(cell: &ScreenCell) -> RunStyle {
     let mut attrs = 0u8;
     if cell.bold {
-        attrs |= medulla::tinyplace::ATTR_BOLD;
+        attrs |= medulla::protocol::ATTR_BOLD;
     }
     if cell.italic {
-        attrs |= medulla::tinyplace::ATTR_ITALIC;
+        attrs |= medulla::protocol::ATTR_ITALIC;
     }
     if cell.underline {
-        attrs |= medulla::tinyplace::ATTR_UNDERLINE;
+        attrs |= medulla::protocol::ATTR_UNDERLINE;
     }
     if cell.inverse {
-        attrs |= medulla::tinyplace::ATTR_INVERSE;
+        attrs |= medulla::protocol::ATTR_INVERSE;
     }
     RunStyle {
         fg: wire_color(cell.fg),

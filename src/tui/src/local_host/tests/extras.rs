@@ -4,7 +4,7 @@
 use medulla::bridge::LocalBridgeNetwork;
 use medulla::config::HostSection;
 use medulla::daemon::embedded::EmbeddedDaemonOptions;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 use medulla_tui::worker::pty::PtyManager;
 
 use crate::local_host::{

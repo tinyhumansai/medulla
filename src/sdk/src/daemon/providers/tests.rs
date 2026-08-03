@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::detect::{
     build_run_args, detect_providers, make_path_lookup, provider_bin, provider_name,
@@ -234,7 +234,7 @@ fn router_env_resolution_is_the_spawn_seams_source_of_truth() {
     // endpoint var + the key referenced BY NAME (resolved from the daemon env at
     // spawn, never returned here). This pins that contract at the provider seam.
     use crate::config::RouterConfig;
-    use crate::tinyplace::env::router_env;
+    use crate::protocol::env::router_env;
 
     let router: RouterConfig = serde_json::from_str(
         r#"{"baseUrl":"https://gw/v1","apiKeyEnv":"MEDULLA_ROUTER_KEY",

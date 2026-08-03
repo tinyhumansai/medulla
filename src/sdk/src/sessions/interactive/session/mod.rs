@@ -17,7 +17,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 use crate::daemon::providers::Abort;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::types::TurnOutcome;
 use super::frames::{encode_interrupt, encode_user_message, map_stream_frame, StreamEvent};

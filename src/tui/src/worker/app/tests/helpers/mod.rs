@@ -11,7 +11,7 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use medulla::contacts::{AdmissionPolicy, ContactDesk, ContactRelay, IncomingRequest};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
 use super::super::state::WorkerWiring;

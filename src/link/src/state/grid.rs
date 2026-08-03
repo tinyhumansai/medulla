@@ -55,6 +55,16 @@ impl RowGrid {
 }
 
 impl SspState for RowGrid {
+    fn rebase_steps(&self) -> Vec<Self> {
+        let mut steps = Vec::with_capacity(self.rows.len());
+        let mut rows = Vec::with_capacity(self.rows.len());
+        for row in &self.rows {
+            rows.push(row.clone());
+            steps.push(RowGrid { rows: rows.clone() });
+        }
+        steps
+    }
+
     /// Only the rows that differ from `prev`, plus the new row count.
     ///
     /// A row that exists in `self` but not in `prev` counts as changed, so a

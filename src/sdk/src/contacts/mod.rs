@@ -1,7 +1,6 @@
-//! Incoming contact-request management for tiny.place peers.
+//! Incoming contact-request management.
 //!
-//! The relay refuses a DM between two agents that are not accepted contacts, so
-//! accepting a contact request is the act that lets a peer dispatch work to this
+//! Accepting a contact request is the act that lets a peer dispatch work to this
 //! machine's coding agents. That makes it a privilege grant, not plumbing.
 //!
 //! Every prior implementation in this lineage auto-accepted every request. This
@@ -25,7 +24,6 @@ mod tests;
 pub use book::ContactBook;
 pub use desk::{ContactDesk, PollHealth};
 pub use service::{
-    decide, poll_once, reconcile_contacts, spawn_contact_poll, ClientContacts, ContactRelay,
-    IncomingRequest,
+    decide, poll_once, reconcile_contacts, spawn_contact_poll, ContactRelay, IncomingRequest,
 };
 pub use types::{AdmissionPolicy, ContactDecision, ContactRequest, RequestState};

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use medulla::config::Peer;
 use medulla::contacts::ContactDesk;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::super::pty::PtyManager;
 

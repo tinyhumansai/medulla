@@ -2,16 +2,19 @@
 # Multi-agent scenario suite for the medulla coordination harness.
 #
 # `tests.sh` exercises one daemon; this file exercises a *fleet*. It boots two
-# medulla daemons — each with its own workspace, MEDULLA_HOME and tiny.place
-# identity — against one shared mock Signal server and one shared mock LLM:
+# medulla daemons — each with its own workspace, MEDULLA_HOME and enrolled link
+# identity — against one shared mock link forwarder and one shared mock LLM:
 #
-#   mock Signal server ──┬── daemon "alpha" (workspace work-alpha) ── opencode ──┐
-#                        └── daemon "beta"  (workspace work-beta)  ── opencode ──┴─→ mock LLM
+#   mock forwarder ──┬── daemon "alpha" (workspace work-alpha) ── opencode ──┐
+#                    └── daemon "beta"  (workspace work-beta)  ── opencode ──┴─→ mock LLM
+#
+# Each daemon is a separately enrolled host with its own pair key, so the two
+# fleets share nothing but the blind forwarder in the middle.
 #
 # Scenarios:
 #
-#   1. fleet-registration — both daemons reach the serving state and register as
-#                           two *distinct* worker identities on one relay.
+#   1. fleet-registration — both daemons reach the serving state as two *distinct*
+#                           enrolled hosts on one forwarder.
 #   2. workspace-binding  — each daemon reports its own workspace as `cwd`, and
 #                           reads only its own workspace's AGENTS.md. Proven via
 #                           per-workspace sentinels: alpha's sentinel appears in
@@ -21,8 +24,9 @@
 #                           both return their own task's marker with no cross-talk.
 #   4. crash-containment  — killing beta mid-task does not disturb alpha: alpha
 #                           still answers a fresh task while beta is down.
-#   5. crash-recovery     — restarting beta re-onboards the *same* identity and it
-#                           serves again, proving a crash is not terminal.
+#   5. crash-recovery     — restarting beta comes back on the *same* enrolled
+#                           identity and serves again, proving a crash is not
+#                           terminal.
 #
 # Scenarios 1–5 share one booted stack. Same env overrides as run.sh (see lib.sh).
 # Exit 0 iff every scenario passes.
@@ -76,7 +80,7 @@ boot_fleet() {
   SESSION="medulla-e2e-multi-$$"
   RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/medulla-e2e-XXXXXX")"
   e2e_init
-  boot_signal
+  boot_forwarder alpha beta
   boot_llm ""
 
   WORK_ALPHA="$(make_workspace alpha "$ALPHA_SENTINEL")"
@@ -93,21 +97,29 @@ main() {
   alpha="$(worker_id alpha)"
   beta="$(worker_id beta)"
 
-  # ── 1. two distinct workers on one relay ──────────────────────────────────
-  scenario "two daemons register as distinct workers on one relay"
-  [ -n "$alpha" ] || fail "alpha registered no worker id"
-  [ -n "$beta" ]  || fail "beta registered no worker id"
+  # ── 1. two distinct enrolled hosts on one forwarder ───────────────────────
+  scenario "two daemons serve as distinct enrolled hosts on one forwarder"
+  [ -n "$alpha" ] || fail "alpha has no enrolled node id"
+  [ -n "$beta" ]  || fail "beta has no enrolled node id"
   [ "$alpha" != "$beta" ] \
-    || fail "both daemons registered the SAME worker id ($alpha) — identities collided"
-  log "  alpha=$alpha  beta=$beta"
+    || fail "both daemons hold the SAME node id ($alpha) — identities collided"
+  # The ids come from enrollment; the *names* come from each daemon's own
+  # serving line, so this is the daemons' report of who they are, not ours.
+  local alpha_name beta_name
+  alpha_name="$(worker_name alpha)"
+  beta_name="$(worker_name beta)"
+  [ -n "$alpha_name" ] && [ -n "$beta_name" ] || fail "a daemon advertised no name"
+  [ "$alpha_name" != "$beta_name" ] \
+    || fail "both daemons advertise the SAME name ($alpha_name)"
+  log "  alpha=$alpha ($alpha_name)  beta=$beta ($beta_name)"
   ok "fleet registration"
 
   # ── 2. each daemon is bound to its own workspace ──────────────────────────
   # A capabilities probe makes each daemon read its workspace and self-describe.
   scenario "each daemon reports and reads only its own workspace"
-  start_owner caps_alpha --endpoint "$SIGNAL_URL" --to "$alpha" \
+  start_owner caps_alpha --to "$alpha" \
     --kind capabilities --task "report" --task-id "caps-alpha-$$" --timeout-ms 120000
-  start_owner caps_beta --endpoint "$SIGNAL_URL" --to "$beta" \
+  start_owner caps_beta --to "$beta" \
     --kind capabilities --task "report" --task-id "caps-beta-$$" --timeout-ms 120000
   await_owner caps_alpha
   [ "$OWNER_RC" = "0" ] || fail "alpha capabilities owner exited $OWNER_RC (expected 0)"
@@ -178,9 +190,9 @@ PY
   # ── 3. concurrent routing, no cross-talk ──────────────────────────────────
   scenario "concurrent tasks route to the right worker with no cross-talk"
   local ta="TASKALPHA-$$" tb="TASKBETA-$$"
-  start_owner task_alpha --endpoint "$SIGNAL_URL" --to "$alpha" \
+  start_owner task_alpha --to "$alpha" \
     --task "emit the marker for $ta" --task-id "ta-$$" --timeout-ms 180000
-  start_owner task_beta --endpoint "$SIGNAL_URL" --to "$beta" \
+  start_owner task_beta --to "$beta" \
     --task "emit the marker for $tb" --task-id "tb-$$" --timeout-ms 180000
   await_owner task_alpha
   [ "$OWNER_RC" = "0" ] || fail "alpha task owner exited $OWNER_RC (expected 0)"
@@ -198,11 +210,11 @@ PY
   scenario "killing beta leaves alpha serving"
   kill_daemon beta
   # Beta is gone: nothing drains its inbox, so this leg must NOT come back.
-  start_owner orphan --endpoint "$SIGNAL_URL" --to "$beta" \
+  start_owner orphan --to "$beta" \
     --task "emit the marker for ORPHAN-$$" --task-id "orphan-$$" --timeout-ms 20000
   # Meanwhile alpha must still work.
   local survive="SURVIVE-$$"
-  run_owner task_survive --endpoint "$SIGNAL_URL" --to "$alpha" \
+  run_owner task_survive --to "$alpha" \
     --task "emit the marker for $survive" --task-id "surv-$$" --timeout-ms 180000
   [ "$OWNER_RC" = "0" ] || fail "alpha stopped serving after beta was killed (rc=$OWNER_RC)"
   assert_reply_contains "$RUN_DIR/task_survive.json" "$survive" "alpha-after-beta-crash"
@@ -216,12 +228,20 @@ PY
 
   # ── 5. the crashed daemon recovers ────────────────────────────────────────
   scenario "restarting beta restores service under the same identity"
+  # The orchestrator's side of a dead host has to be torn down before the
+  # replacement starts: the link's SSP state is per process, so a frame the old
+  # session is still retransmitting would reach a host that is numbering from
+  # zero. `reset_owner_link` does that while nothing is listening.
+  reset_owner_link beta
   boot_daemon_named beta "$WORK_BETA"
-  local rebooted; rebooted="$(worker_id beta)"
+  local rebooted rebooted_name; rebooted="$(worker_id beta)"; rebooted_name="$(worker_name beta)"
   [ "$rebooted" = "$beta" ] \
-    || fail "beta re-onboarded as a DIFFERENT identity ($rebooted != $beta) — config not reused"
+    || fail "beta came back as a DIFFERENT node ($rebooted != $beta) — identity not reused"
+  [ "$rebooted_name" = "$beta_name" ] \
+    || fail "beta came back advertising $rebooted_name, not $beta_name"
+
   local again="RECOVER-$$"
-  run_owner task_recover --endpoint "$SIGNAL_URL" --to "$beta" \
+  run_owner task_recover --to "$beta" \
     --task "emit the marker for $again" --task-id "rec-$$" --timeout-ms 180000
   [ "$OWNER_RC" = "0" ] || fail "restarted beta did not serve (rc=$OWNER_RC)"
   assert_reply_contains "$RUN_DIR/task_recover.json" "$again" "beta-after-restart"

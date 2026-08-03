@@ -12,7 +12,7 @@
 //!   [`Unbound`](SessionClass::Unbound) is long-lived: the operator can attach
 //!   and converse across turns.
 //! - [`SessionDriver`] — *where do its turns come from?* [`Task`](SessionDriver::Task)
-//!   means `medulla-tinyplace/1` frames; [`Envelope`](SessionDriver::Envelope)
+//!   means `medulla-task/1` frames; [`Envelope`](SessionDriver::Envelope)
 //!   means `tinyplace.harness.session.v*` packets from a wrapper.
 //!
 //! Every combination is meaningful, and the seam between the drivers is

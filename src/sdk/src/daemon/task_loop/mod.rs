@@ -17,7 +17,7 @@ mod tests;
 #[cfg(feature = "workflows")]
 pub(in crate::daemon) mod workflow;
 
-use crate::tinyplace::{HarnessProvider, TaskFrame, TaskFrameKind};
+use crate::protocol::{HarnessProvider, TaskFrame, TaskFrameKind};
 
 use super::types::DaemonRuntime;
 

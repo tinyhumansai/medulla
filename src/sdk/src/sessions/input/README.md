@@ -1,10 +1,10 @@
 # Input
 
-**The driver seam.** Sessions are driven from exactly two sources — a `medulla-tinyplace/1` task frame, or a `tinyplace.harness.session.v*` envelope — and this module is the one place that knows the difference.
+**The driver seam.** Sessions are driven from exactly two sources — a `medulla-task/1` task frame, or a `tinyplace.harness.session.v*` envelope — and this module is the one place that knows the difference.
 
 ## Contents
 
-- [`mod.rs`](./mod.rs) — **The driver seam.** Sessions are driven from exactly two sources — a `medulla-tinyplace/1` task frame, or a `tinyplace.harness.session.v*` envelope — and this module is the one place that knows the difference.
+- [`mod.rs`](./mod.rs) — **The driver seam.** Sessions are driven from exactly two sources — a `medulla-task/1` task frame, or a `tinyplace.harness.session.v*` envelope — and this module is the one place that knows the difference.
 - [`types.rs`](./types.rs) — Data types for the `input` module.
 
 ## Maintenance

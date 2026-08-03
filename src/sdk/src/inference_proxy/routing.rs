@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::config::{RouterConfig, RouterProviderConfig, OPENROUTER_API_KEY_ENV};
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::lifecycle::shared;
 use super::types::{ProxyEndpoint, ProxyRouting, UpstreamShape, PROXY_TOKEN_ENV};

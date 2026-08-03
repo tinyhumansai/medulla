@@ -9,9 +9,5 @@ pub struct IncomingRequest {
     /// The peer's directory handle, when known.
     pub handle: Option<String>,
 }
-/// A [`ContactRelay`] backed by the tiny.place SDK client.
-pub struct ClientContacts {
-    pub(super) client: ::tinyplace::TinyPlaceClient,
-}
 /// A clock in epoch ms (injectable for tests).
 pub type NowFn = Arc<dyn Fn() -> i64 + Send + Sync>;

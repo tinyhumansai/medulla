@@ -2,7 +2,7 @@
 
 use tokio::sync::oneshot;
 
-use crate::tinyplace::{encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind};
+use crate::protocol::{encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind};
 
 use super::types::CapabilityProbeGuard;
 use super::{RunError, TaskRunner, CONTACT_POLL, CONTACT_WAIT, MAX_RESETS};
@@ -61,7 +61,7 @@ impl TaskRunner {
                 kind: TaskFrameKind::Capabilities,
                 task_id: correlation_id.clone(),
                 text: String::new(),
-                ts: ::tinyplace::auth::timestamp(),
+                ts: crate::clock::iso_now(),
                 correlation_id: Some(correlation_id.clone()),
                 harness: None,
                 provider: None,

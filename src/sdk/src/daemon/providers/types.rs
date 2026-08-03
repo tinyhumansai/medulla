@@ -12,8 +12,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Notify};
 
 use crate::config::RouterConfig;
+use crate::protocol::HarnessProvider;
 use crate::sessions::SessionClass;
-use crate::tinyplace::HarnessProvider;
 use std::collections::HashMap;
 
 use super::super::mappers::HarnessSemanticEvent;
@@ -173,7 +173,7 @@ pub struct RunTaskResult {
     /// Count of semantic events observed.
     pub events: usize,
     /// Latest token usage the child reported on its stream, if any.
-    pub usage: Option<crate::tinyplace::TokenUsage>,
+    pub usage: Option<crate::protocol::TokenUsage>,
     /// The harness's own session id, captured from this run's stream (claude
     /// `session_id`, codex `thread_id`).
     ///

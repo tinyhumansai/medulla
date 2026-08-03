@@ -1,5 +1,5 @@
-//! Unit tests for the onboarding orchestration: the env-owner chain, identity
-//! presence detection, and the headless auto-register path.
+//! Unit tests for the onboarding orchestration: the env-owner chain, link
+//! identity detection, and the headless and interactive register paths.
 
 use super::*;
 
@@ -10,13 +10,36 @@ fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         .collect()
 }
 
+/// An environment rooted at `dir`, so a test never touches the developer's home.
+fn home_env(dir: &std::path::Path, extra: &[(&str, &str)]) -> HashMap<String, String> {
+    let mut e = env(&[
+        ("MEDULLA_HOME", dir.join("home").to_str().unwrap()),
+        ("USER", "ada"),
+        ("HOSTNAME", "box-1"),
+    ]);
+    for (k, v) in extra {
+        e.insert(k.to_string(), v.to_string());
+    }
+    e
+}
+
 #[test]
 fn env_owner_priority_order() {
     assert_eq!(
         env_owner(&env(&[("TINYPLACE_OPENHUMAN_OWNER", "@boss")])).as_deref(),
         Some("@boss")
     );
-    // Harness DM_TO wins over the generic owner.
+    // The link-native key wins over every legacy one.
+    assert_eq!(
+        env_owner(&env(&[
+            ("MEDULLA_LINK_OWNER", "orchestrator-1"),
+            ("TINYPLACE_HARNESS_DM_TO", "@dm"),
+            ("TINYPLACE_OPENHUMAN_OWNER", "@boss"),
+        ]))
+        .as_deref(),
+        Some("orchestrator-1")
+    );
+    // Harness DM_TO still wins over the generic owner.
     assert_eq!(
         env_owner(&env(&[
             ("TINYPLACE_HARNESS_DM_TO", "@dm"),
@@ -33,7 +56,7 @@ fn env_owner_priority_order() {
     // Blank values are skipped.
     assert_eq!(
         env_owner(&env(&[
-            ("TINYPLACE_HARNESS_DM_TO", "  "),
+            ("MEDULLA_LINK_OWNER", "  "),
             ("TINYPLACE_OPENHUMAN_OWNER", "@boss"),
         ]))
         .as_deref(),
@@ -43,48 +66,26 @@ fn env_owner_priority_order() {
 }
 
 #[test]
-fn identity_present_reads_env_and_config() {
-    let dir = std::env::temp_dir().join(format!("medulla-onb-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
-    let config_file = dir.join("config.json");
+fn identity_present_reads_the_link_state_file_and_never_mints_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let link_dir = dir.path().join("link");
 
-    // Nothing yet.
-    assert!(!identity_present(&config_file, &env(&[])));
-    // Env key present.
-    assert!(identity_present(
-        &config_file,
-        &env(&[("TINYPLACE_SECRET_KEY", &"a".repeat(64))])
-    ));
-    // Blank env key is not "present".
-    assert!(!identity_present(
-        &config_file,
-        &env(&[("TINYPLACE_SECRET_KEY", "  ")])
-    ));
+    // No enrollment yet.
+    assert!(!identity_present(&link_dir));
+    // And asking must not have created anything — enrollment needs an invite
+    // token and a hand-carried pair key, neither of which this code has.
+    assert!(!link_dir.exists());
 
-    // Config with a secret key.
-    std::fs::write(&config_file, r#"{"secretKey":"deadbeef"}"#).unwrap();
-    assert!(identity_present(&config_file, &env(&[])));
-
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&link_dir).unwrap();
+    std::fs::write(medulla_link::keys::node_path(&link_dir), "{}").unwrap();
+    assert!(identity_present(&link_dir));
 }
 
 #[tokio::test]
 async fn headless_auto_registers_with_env_owner() {
-    let dir = std::env::temp_dir().join(format!("medulla-onb-hl-{}-{}", std::process::id(), "a"));
-    let _ = std::fs::remove_dir_all(&dir);
-    let mut e = env(&[
-        ("MEDULLA_HOME", dir.join("home").to_str().unwrap()),
-        ("TINYPLACE_CONFIG", dir.join("tp.json").to_str().unwrap()),
-        ("TINYPLACE_OPENHUMAN_OWNER", "@overseer"),
-        ("USER", "ada"),
-        ("HOSTNAME", "box-1"),
-    ]);
-    // Provide a fixed identity so no network is needed and the address is stable.
-    let signer = LocalSigner::generate();
-    let hex: String = signer.seed().iter().map(|b| format!("{b:02x}")).collect();
-    e.insert("TINYPLACE_SECRET_KEY".to_string(), hex);
+    let dir = tempfile::tempdir().unwrap();
+    let e = home_env(dir.path(), &[("MEDULLA_LINK_OWNER", "orchestrator-1")]);
 
-    // Not registered yet → headless path writes a profile.
     let reg = ensure_registered(&e, false, None)
         .await
         .unwrap()
@@ -96,34 +97,102 @@ async fn headless_auto_registers_with_env_owner() {
         "name: {}",
         reg.profile.name
     );
-    assert_eq!(reg.profile.owner.as_deref(), Some("@overseer"));
-    assert_eq!(reg.profile.address, signer.agent_id());
+    assert_eq!(reg.profile.owner.as_deref(), Some("orchestrator-1"));
     assert!(reg.profile.registered_at.is_some());
 
-    // Second call: already registered, returns it without re-writing.
+    // Second call: a profile exists but this host has not enrolled, so it is
+    // still not "registered" and onboarding runs again rather than serving with
+    // no way to reach anyone.
+    let again = ensure_registered(&e, false, None)
+        .await
+        .unwrap()
+        .expect("registers again");
+    assert!(again.newly_registered);
+}
+
+#[tokio::test]
+async fn an_enrolled_host_with_a_profile_is_not_re_onboarded() {
+    let dir = tempfile::tempdir().unwrap();
+    let e = home_env(dir.path(), &[]);
+    let link_dir = medulla_link::keys::link_dir(&crate::home::medulla_home(&e));
+    std::fs::create_dir_all(&link_dir).unwrap();
+    std::fs::write(medulla_link::keys::node_path(&link_dir), "{}").unwrap();
+
+    ensure_registered(&e, false, None).await.unwrap().unwrap();
     let again = ensure_registered(&e, false, None)
         .await
         .unwrap()
         .expect("still registered");
     assert!(!again.newly_registered);
-    assert_eq!(again.profile.address, signer.agent_id());
+}
 
-    let _ = std::fs::remove_dir_all(&dir);
+#[tokio::test]
+async fn malformed_explicit_config_cannot_mutate_an_existing_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("broken.toml");
+    std::fs::write(&config_path, "[link\nstateDir = nope").unwrap();
+    let e = home_env(
+        dir.path(),
+        &[(
+            crate::config::CONFIG_PATH_ENV,
+            config_path.to_str().unwrap(),
+        )],
+    );
+    let profile_file = profile_path(&e);
+    let profile = WorkerProfile {
+        name: "existing-worker".to_string(),
+        address: String::new(),
+        owner: Some("orchestrator-1".to_string()),
+        registered_at: Some("2026-01-01T00:00:00Z".to_string()),
+    };
+    profile.save(&profile_file).unwrap();
+
+    let err = match ensure_registered_in(&e, false, None, dir.path()).await {
+        Err(err) => err,
+        Ok(_) => panic!("an explicit malformed config must stop onboarding"),
+    };
+
+    assert!(err.to_string().contains("explicit configuration failed"));
+    assert_eq!(
+        WorkerProfile::load(&profile_file)
+            .expect("profile remains readable")
+            .address,
+        "",
+        "validation must happen before onboarding writes the link identity"
+    );
+}
+
+#[tokio::test]
+async fn missing_explicit_config_cannot_mutate_an_existing_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.toml");
+    let e = home_env(
+        dir.path(),
+        &[(crate::config::CONFIG_PATH_ENV, missing.to_str().unwrap())],
+    );
+    let profile_file = profile_path(&e);
+    WorkerProfile {
+        name: "existing-worker".to_string(),
+        address: String::new(),
+        owner: None,
+        registered_at: None,
+    }
+    .save(&profile_file)
+    .unwrap();
+
+    let err = match ensure_registered_in(&e, false, None, dir.path()).await {
+        Err(err) => err,
+        Ok(_) => panic!("a missing explicit config must stop onboarding"),
+    };
+
+    assert!(err.to_string().contains("does not exist"));
+    assert_eq!(WorkerProfile::load(&profile_file).unwrap().address, "");
 }
 
 #[tokio::test]
 async fn headless_without_owner_still_registers() {
-    let dir = std::env::temp_dir().join(format!("medulla-onb-hl-{}-{}", std::process::id(), "b"));
-    let _ = std::fs::remove_dir_all(&dir);
-    let signer = LocalSigner::generate();
-    let hex: String = signer.seed().iter().map(|b| format!("{b:02x}")).collect();
-    let e = env(&[
-        ("MEDULLA_HOME", dir.join("home").to_str().unwrap()),
-        ("TINYPLACE_CONFIG", dir.join("tp.json").to_str().unwrap()),
-        ("TINYPLACE_SECRET_KEY", &hex),
-        ("USER", "grace"),
-        ("HOSTNAME", "node"),
-    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let e = home_env(dir.path(), &[("USER", "grace"), ("HOSTNAME", "node")]);
     let reg = ensure_registered(&e, false, None)
         .await
         .unwrap()
@@ -131,23 +200,6 @@ async fn headless_without_owner_still_registers() {
     assert!(reg.newly_registered);
     assert_eq!(reg.profile.owner, None);
     assert!(reg.profile.name.starts_with("grace@node/"));
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// A temp-dir environment with a fixed identity, so onboarding needs no network
-/// and the derived address is stable across a test.
-fn interactive_env(dir: &std::path::Path) -> HashMap<String, String> {
-    let mut e = env(&[
-        ("MEDULLA_HOME", dir.join("home").to_str().unwrap()),
-        ("TINYPLACE_CONFIG", dir.join("tp.json").to_str().unwrap()),
-        ("USER", "ada"),
-        ("HOSTNAME", "box-1"),
-    ]);
-    let signer = LocalSigner::generate();
-    let hex: String = signer.seed().iter().map(|b| format!("{b:02x}")).collect();
-    e.insert("TINYPLACE_SECRET_KEY".to_string(), hex);
-    e
 }
 
 #[tokio::test]
@@ -156,7 +208,7 @@ async fn an_aborted_interactive_onboarding_registers_nothing() {
     // no profile behind, or the next launch would treat them as registered under
     // a name they never agreed to.
     let dir = tempfile::tempdir().unwrap();
-    let e = interactive_env(dir.path());
+    let e = home_env(dir.path(), &[]);
 
     let outcome = ensure_registered(
         &e,
@@ -178,7 +230,7 @@ async fn the_interactive_name_and_owner_are_what_get_registered() {
     // The whole point of the callback is that the operator's choices win over
     // the machine-derived defaults.
     let dir = tempfile::tempdir().unwrap();
-    let e = interactive_env(dir.path());
+    let e = home_env(dir.path(), &[]);
 
     let reg = ensure_registered(
         &e,
@@ -204,10 +256,9 @@ async fn the_interactive_name_and_owner_are_what_get_registered() {
 #[tokio::test]
 async fn the_interactive_context_carries_the_defaults_to_prefill() {
     // The UI cannot prefill sensibly unless it is handed the derived name and
-    // the resolved endpoint, so assert they actually arrive.
+    // the env owner, so assert they actually arrive.
     let dir = tempfile::tempdir().unwrap();
-    let mut e = interactive_env(dir.path());
-    e.insert("TINYPLACE_OPENHUMAN_OWNER".into(), "@from-env".into());
+    let e = home_env(dir.path(), &[("MEDULLA_LINK_OWNER", "@from-env")]);
 
     let reg = ensure_registered(
         &e,
@@ -220,8 +271,11 @@ async fn the_interactive_context_carries_the_defaults_to_prefill() {
                     ctx.default_name
                 );
                 assert_eq!(ctx.prefill_owner.as_deref(), Some("@from-env"));
-                assert!(!ctx.endpoint.is_empty(), "an endpoint is resolved");
-                assert!(!ctx.address.is_empty(), "the identity address is passed");
+                // Not enrolled, so there is no node name or forwarder to show —
+                // and the screen must be handed empty strings rather than
+                // invented ones.
+                assert!(ctx.address.is_empty());
+                assert!(ctx.endpoint.is_empty());
                 Ok(Some((ctx.default_name.clone(), ctx.prefill_owner.clone())))
             })
         })),

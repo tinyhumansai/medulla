@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::daemon::{status_detail, work_detail, DaemonRuntime, NowFn};
-use crate::tinyplace::{AgentCapabilities, HarnessEvent, TaskFrameKind};
+use crate::protocol::{AgentCapabilities, HarnessEvent, TaskFrameKind};
 
 use super::{
     base_config, capabilities_frame, chatter_status_runner, counting_capability_runner,

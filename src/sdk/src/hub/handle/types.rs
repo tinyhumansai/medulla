@@ -9,16 +9,14 @@ pub struct HubHandle {
     pub(super) roster: SharedRoster,
     pub(super) socket: Client,
     pub(super) address: String,
-    pub(super) public_key: String,
-    /// The encrypted transport, used to open a contact edge with a peer the
-    /// moment it is added rather than at first dispatch.
+    /// The transport tasks are dispatched over.
     pub(super) relay: Arc<dyn Relay>,
     /// The agent-role catalog, read when re-advertising the roster.
     pub(super) catalog: Arc<Vec<crate::runtime::AgentTemplate>>,
     /// Sender/receiver correlation used for lightweight worker probes.
     pub(super) runner: Arc<super::super::runner::TaskRunner>,
     /// Latest capacity details keyed by stable worker id.
-    pub(super) system_info: Arc<Mutex<HashMap<String, crate::tinyplace::WorkerSystemInfo>>>,
+    pub(super) system_info: Arc<Mutex<HashMap<String, crate::protocol::WorkerSystemInfo>>>,
     /// Where roster mutations are narrated. An add that quietly does nothing is
     /// the hardest kind of failure to chase.
     pub(super) log: super::super::types::HubLog,
@@ -40,12 +38,10 @@ pub(in super::super) struct HandleWiring {
     pub roster: SharedRoster,
     /// The uplink to re-register through.
     pub socket: Client,
-    /// The hub's own tiny.place address — surfaced to the operator because every
+    /// The hub's own link node name — surfaced to the operator because every
     /// worker must trust it before it will accept a task.
     pub address: String,
-    /// The hub's own identity public key.
-    pub public_key: String,
-    /// The encrypted transport, for opening contact edges.
+    /// The transport tasks are dispatched over.
     pub relay: Arc<dyn Relay>,
     /// The agent-role catalog, for resolving a worker's roles into what it
     /// advertises. Shared and read-only: registration reads it, nothing here

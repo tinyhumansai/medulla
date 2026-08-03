@@ -2,7 +2,7 @@
 
 use std::sync::atomic::Ordering;
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::super::sync::lock;
 use super::super::types::{PtyState, SessionRow};

@@ -1,10 +1,12 @@
 //! Data types for the `bridge` module.
 #[allow(unused_imports)]
 use super::*;
-/// The tiny.place bridge for one wrapped session: encrypted transport plus the
+/// The host-link bridge for one wrapped session: the transport plus the
 /// per-session envelope/status/tailer state. Absent when running passthrough.
 pub(in super::super) struct Bridge {
-    pub(in super::super) transport: SignalTransport,
+    pub(in super::super) transport: LinkBridge,
+    pub(in super::super) publish_tx: Option<mpsc::Sender<String>>,
+    pub(in super::super) publisher: Option<tokio::task::JoinHandle<()>>,
     pub(in super::super) recipient: Option<String>,
     pub(in super::super) receive_from: Option<String>,
     pub(in super::super) receive_active: bool,

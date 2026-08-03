@@ -9,13 +9,13 @@ pub use std::sync::Arc;
 
 pub use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
-pub use medulla::config::{LoadedConfig, TinyplaceConfig};
+pub use medulla::config::{LinkConfig, LoadedConfig};
 pub use medulla::runtime::mock::MockRuntime;
 pub use medulla_tui::ui::app::{App, Cmd, TABS};
 
 pub fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-    l.config.tinyplace = Some(TinyplaceConfig::default());
+    l.config.link = Some(LinkConfig::default());
     l
 }
 

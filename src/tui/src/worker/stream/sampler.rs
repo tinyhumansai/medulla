@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use medulla::daemon::SendFn;
-use medulla::tinyplace::{
+use medulla::protocol::{
     build_frame, encode_screen_message, FrameDecision, ScreenFrame, ScreenGrid, ScreenMessage,
 };
 

@@ -13,11 +13,11 @@ use serde_json::Value;
 
 use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
 use super::AppearanceConfig;
+use crate::protocol::{BudgetWindow, HarnessProvider};
 use crate::runtime::fleet::{
     AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor, WorkspaceDescriptor,
 };
 use crate::runtime::{AgentDescriptor, RoutingStrategy, SubscriptionRoutingStrategy};
-use crate::tinyplace::{BudgetWindow, HarnessProvider};
 
 // --- serde default helpers -------------------------------------------------
 
@@ -26,16 +26,13 @@ fn d_state_dir() -> String {
     // value is `<medulla_home>/state`, filled in by `load_config`.
     "state".into()
 }
-fn d_tp_base() -> String {
+fn d_forwarder_url() -> String {
     PROD_TINYPLACE_BASE_URL.into()
 }
-fn d_tp_identity() -> String {
-    // Placeholder; the real value is `<medulla_home>/tinyplace`, filled in by
+fn d_link_state_dir() -> String {
+    // Placeholder; the real value is `<medulla_home>/link`, filled in by
     // `load_config`.
-    "tinyplace".into()
-}
-fn d_accept() -> String {
-    "peers".into()
+    "link".into()
 }
 fn d_opencode_cmd() -> String {
     "opencode".into()

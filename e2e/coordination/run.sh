@@ -2,12 +2,17 @@
 # End-to-end "live harness" for the medulla coordination round trip, driven by
 # tmux with real processes:
 #
-#   owner driver
-#     → mock tiny.place Signal server (real X3DH/double-ratchet in the SDK)
-#       → `medulla daemon` (real binary)
+#   owner driver (a real medulla-link endpoint)
+#     → mock link forwarder (blind UDP; docs/host-link-protocol.md §5)
+#       → `medulla daemon` (real binary, the host end of the same link)
 #         → the REAL `opencode` CLI (spawned by the daemon as its provider)
 #           → mock OpenAI-compatible LLM → `COORDINATION_OK <echo>`
-#     ← encrypted reply frame flows back, printed as JSON, exit 0.
+#     ← the reply frame flows back over the link, printed as JSON, exit 0.
+#
+# The forwarder is the only mocked transport piece, and it is blind by
+# construction: it authenticates the 58-byte cleartext header with each node's
+# forwarder key and copies the ChaCha20-Poly1305 payload verbatim. Every byte of
+# payload encryption is the real `medulla-link` crate on both ends.
 #
 # tmux is a hard requirement: both `medulla daemon` and `opencode` run under tmux
 # control. Every process gets its own tmux window; a second "smoke" window drives
@@ -22,7 +27,7 @@
 # `tests.sh`, which shares the boot/teardown helpers in `lib.sh`.
 #
 # Shared-boot helpers + all env knobs are documented in lib.sh; overrides:
-#   MEDULLA_BIN / MOCK_SIGNAL_BIN / OWNER_BIN / OPENCODE_BIN  prebuilt binaries
+#   MEDULLA_BIN / FORWARDER_BIN / OWNER_BIN / OPENCODE_BIN  prebuilt binaries
 #   E2E_KEEP=1     keep the run dir + tmux session on exit (debugging)
 #   E2E_SMOKE=0    skip the interactive opencode TUI smoke leg
 set -euo pipefail
@@ -38,7 +43,7 @@ OWNER_TASK="emit the coordination marker E2E-$$-$RANDOM"
 main() {
   e2e_init
 
-  boot_signal
+  boot_forwarder daemon
   boot_llm ""
   boot_daemon
 
@@ -49,8 +54,8 @@ main() {
     log "smoke leg skipped (E2E_SMOKE=0)"
   fi
 
-  # Owner driver: send task, drain for the encrypted reply.
-  run_owner owner --endpoint "$SIGNAL_URL" --to "$WORKER_ID" \
+  # Owner driver: send the task frame over the link, wait for the reply.
+  run_owner owner --to "$WORKER_ID" \
     --task "$OWNER_TASK" --task-id "coord-$$" --timeout-ms 180000
 
   assert_all "$OWNER_RC"
@@ -94,11 +99,11 @@ assert hit >= 1, f"task text never appeared in an LLM chat request ({chats} chat
 print(f"[e2e]   (b) LLM saw the task in {hit}/{chats} chat request(s)", file=sys.stderr)
 PY
 
-  # (c) /debug/stored shows envelopes delivered in BOTH directions.
+  # (c) the forwarder moved state-carrying datagrams in BOTH directions.
   assert_bidirectional_delivery "$RUN_DIR/owner.json"
-  log "  (c) bidirectional encrypted delivery confirmed"
+  log "  (c) bidirectional delivery across the forwarder confirmed"
 
-  printf '\n[e2e] PASS: coordination round trip green — owner=Reply(COORDINATION_OK) via real opencode, LLM saw the task, bidirectional encrypted delivery confirmed.\n' >&2
+  printf '\n[e2e] PASS: coordination round trip green — owner=Reply(COORDINATION_OK) via real opencode, LLM saw the task, bidirectional link delivery confirmed.\n' >&2
 }
 
 main "$@"

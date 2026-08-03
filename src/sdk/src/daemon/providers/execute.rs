@@ -12,7 +12,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::mappers::HarnessLineMapper;
 use super::detect::{
@@ -134,7 +134,7 @@ async fn run_provider_attempt(
     // `TINYPLACE_<P>_ARGS` (whitespace-split) is prepended to any configured
     // extra args, so a per-provider env override applies to headless daemon runs
     // too — matching the wrapper's child-argv prefix.
-    let mut extra_args = crate::tinyplace::env::provider_args(spec.provider, &spec.env);
+    let mut extra_args = crate::protocol::env::provider_args(spec.provider, &spec.env);
     // Medulla-launched harnesses attribute their commits to Medulla via a
     // `Co-authored-by` trailer. Nothing is persisted — the flags live only on
     // this child's argv. Empty for providers with no such knob.
@@ -156,7 +156,7 @@ async fn run_provider_attempt(
     // env var is absent is a hard error (an explicit error frame upstream), never a
     // silent empty key that would spawn the harness unauthenticated.
     if let Some(router) = &spec.router {
-        let injection = crate::tinyplace::env::router_env(spec.provider, router);
+        let injection = crate::protocol::env::router_env(spec.provider, router);
         for (key, value) in injection.env {
             merged_env.insert(key, value);
         }

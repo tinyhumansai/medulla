@@ -48,7 +48,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use medulla::daemon::providers::{Abort, RunTaskOptions};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::super::executor::PtySessionExecutor;
 use super::super::pty::{HarnessControl, LaunchSpec, PtyManager};

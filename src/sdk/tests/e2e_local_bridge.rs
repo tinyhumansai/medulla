@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use medulla::bridge::{Bridge, LocalBridgeNetwork};
 use medulla::hub::{TaskRequest, TaskRunner};
-use medulla::tinyplace::{decode_task_frame, encode_task_frame, EncodeFrameInput, TaskFrameKind};
+use medulla::protocol::{decode_task_frame, encode_task_frame, EncodeFrameInput, TaskFrameKind};
 
 #[tokio::test]
 async fn task_runner_round_trips_entirely_over_the_local_bridge() {

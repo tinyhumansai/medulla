@@ -17,8 +17,8 @@ use tokio::sync::broadcast;
 
 use crate::runtime::event_log::ThreadEventLog;
 use crate::runtime::{
-    AgentDescriptor, AgentPresence, CycleResultSummary, PeerSession, ThreadSummary,
-    TinyplaceIdentity, WorkerInfo,
+    AgentDescriptor, AgentPresence, CycleResultSummary, LinkIdentity, PeerSession, ThreadSummary,
+    WorkerInfo,
 };
 use crate::ui::chat_store::ChatMessage;
 use crate::ui::events::{EventEnvelope, TuiEvent};
@@ -84,8 +84,8 @@ pub(super) struct State {
     pub(super) presence: HashMap<String, AgentPresence>,
     /// Peer sessions keyed by agent id.
     pub(super) sessions: HashMap<String, Vec<PeerSession>>,
-    /// The tiny.place identity, when configured.
-    pub(super) tinyplace: Option<TinyplaceIdentity>,
+    /// The host-link identity, when configured.
+    pub(super) link: Option<LinkIdentity>,
     /// Scripted agent-harness status, when a scenario exercises the harness
     /// task board. `None` by default so the Agents view degrades to nothing.
     pub(super) harness: Option<crate::harness_contract::HarnessStatus>,
@@ -248,7 +248,7 @@ impl MockRuntime {
             workers: Vec::new(),
             presence: HashMap::new(),
             sessions: HashMap::new(),
-            tinyplace: None,
+            link: None,
             harness: None,
         };
         MockRuntime::from_state(state)

@@ -12,8 +12,8 @@ use ratatui::Terminal;
 
 use medulla::config::LoadedConfig;
 use medulla::daemon::embedded::{EmbeddedDaemonStats, HostObservation};
+use medulla::protocol::HarnessProvider;
 use medulla::runtime::mock::MockRuntime;
-use medulla::tinyplace::HarnessProvider;
 use medulla_tui::ui::app::App;
 
 /// An app parked on Overview, the tab the panel lives on.

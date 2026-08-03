@@ -11,7 +11,7 @@ pub use crossterm::event::{
 pub use ratatui::backend::TestBackend;
 pub use ratatui::Terminal;
 
-pub use medulla::config::{LoadedConfig, TinyplaceConfig};
+pub use medulla::config::{LinkConfig, LoadedConfig};
 pub use medulla::runtime::mock::MockRuntime;
 pub use medulla::runtime::Runtime;
 pub use medulla_tui::ui::app::{App, Cmd, TABS};
@@ -19,7 +19,7 @@ pub use medulla_tui::ui::events::{TaskDigest, TuiEvent, Usage};
 
 pub fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-    l.config.tinyplace = Some(TinyplaceConfig::default());
+    l.config.link = Some(LinkConfig::default());
     l
 }
 

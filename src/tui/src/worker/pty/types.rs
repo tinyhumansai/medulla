@@ -1,7 +1,7 @@
 //! Data model for PTY-backed harness sessions: how one is launched, what the
 //! operator watches about it, and the handle the UI holds.
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::attention::HarnessAttention;
 

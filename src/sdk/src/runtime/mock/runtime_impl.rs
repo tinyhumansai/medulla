@@ -40,7 +40,7 @@ impl Runtime for MockRuntime {
             capacity: s.capacity.clone(),
             presence: s.presence.clone(),
             sessions: s.sessions.clone(),
-            tinyplace: s.tinyplace.clone(),
+            link: s.link.clone(),
             threads,
             active_thread_id: s.active_id.clone(),
             harness: s.harness.clone(),

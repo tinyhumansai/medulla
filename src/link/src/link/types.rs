@@ -10,6 +10,9 @@ use crate::keys::{KeyError, NodeId, PairKey};
 use crate::state::QueueLimits;
 use crate::transport::{SessionStatus, TransportError, MAX_SENT_STATES};
 
+pub(super) const SCREEN_FRAME_MAGIC: &[u8; 4] = b"MSF1";
+pub(super) const SCREEN_FRAME_HEADER: usize = 12;
+
 /// A peer this endpoint can talk to, and the key it is talked to with.
 ///
 /// The pair key is per peer by construction (§7.1): an orchestrator generates
@@ -138,8 +141,10 @@ pub(super) enum Command {
 #[derive(Debug)]
 pub struct LinkHandle {
     pub(super) commands: mpsc::Sender<Command>,
-    pub(super) inbound: Mutex<mpsc::Receiver<(NodeId, Vec<u8>)>>,
+    pub(super) inbound: Mutex<mpsc::Receiver<(NodeId, u64, Vec<u8>)>>,
     pub(super) status: watch::Receiver<LinkStatus>,
+    pub(super) peers: Vec<NodeId>,
+    pub(super) screen_updates: HashMap<NodeId, Mutex<()>>,
 }
 
 impl LinkHandle {
@@ -173,11 +178,52 @@ impl LinkHandle {
             .await
     }
 
+    /// Replace `peer`'s screen frame, splitting large frames into state steps.
+    pub async fn send_screen_frame(&self, peer: NodeId, body: &[u8]) -> Result<(), LinkError> {
+        let screen_update = self
+            .screen_updates
+            .get(&peer)
+            .ok_or(LinkError::UnknownPeer(peer))?;
+        // A frame is represented by several cumulative grid states. Keep those
+        // states contiguous: interleaving another producer's prefixes could
+        // create a transition whose changed rows no longer fit one datagram.
+        let _guard = screen_update.lock().await;
+        let capacity = crate::transport::MAX_MESSAGE_BYTES - 20;
+        let count = body.len().div_ceil(capacity).max(1);
+        let mut rows = Vec::with_capacity(count);
+        for (index, chunk) in body.chunks(capacity).enumerate() {
+            let mut row = Vec::with_capacity(SCREEN_FRAME_HEADER + chunk.len());
+            row.extend_from_slice(SCREEN_FRAME_MAGIC);
+            row.extend_from_slice(&(count as u32).to_be_bytes());
+            row.extend_from_slice(&(index as u32).to_be_bytes());
+            row.extend_from_slice(chunk);
+            rows.push(row);
+            self.send_screen(peer, rows.clone()).await?;
+        }
+        if body.is_empty() {
+            let mut row = Vec::with_capacity(SCREEN_FRAME_HEADER);
+            row.extend_from_slice(SCREEN_FRAME_MAGIC);
+            row.extend_from_slice(&1u32.to_be_bytes());
+            row.extend_from_slice(&0u32.to_be_bytes());
+            self.send_screen(peer, vec![row]).await?;
+        }
+        Ok(())
+    }
+
     /// The next message received from any peer.
     ///
     /// `None` means the driver has stopped and no further message will arrive.
-    pub async fn recv(&self) -> Option<(NodeId, Vec<u8>)> {
+    pub async fn recv(&self) -> Option<(NodeId, u64, Vec<u8>)> {
         self.inbound.lock().await.recv().await
+    }
+
+    /// Every peer this link opened a session with.
+    ///
+    /// The host case has exactly one — the orchestrator recorded in `node.json`
+    /// — and a caller that must map a name onto a node id has no other source
+    /// for it, since the name lives only in the backend registry (§2).
+    pub fn peers(&self) -> &[NodeId] {
+        &self.peers
     }
 
     /// The current per-peer link status (§6.2).

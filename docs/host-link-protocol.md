@@ -52,18 +52,19 @@ given datagram.
 
 ## 3. Outer header
 
-Fixed 58 bytes, big-endian, cleartext. These are the only bytes the forwarder
+Fixed 66 bytes, big-endian, cleartext. These are the only bytes the forwarder
 parses.
 
 | Offset | Size | Field | Notes |
 |---:|---:|---|---|
-| 0 | 1 | `version` | `1`. Anything else is dropped |
+| 0 | 1 | `version` | `2`. Anything else is dropped |
 | 1 | 1 | `flags` | bit 0 = heartbeat (no state change). Bits 1–7 reserved, MUST be 0 |
 | 2 | 16 | `src_node_id` | |
 | 18 | 16 | `dst_node_id` | |
 | 34 | 8 | `seq` | §3.1 |
-| 42 | 16 | `tag` | `HMAC-SHA256(forwarder_key, bytes[0..42])[0..16]` |
-| 58 | … | `payload` | opaque to the forwarder (§4) |
+| 42 | 8 | `epoch` | random value minted for each endpoint process (§6.4) |
+| 50 | 16 | `tag` | `HMAC-SHA256(forwarder_key, bytes[0..50])[0..16]` |
+| 66 | … | `payload` | opaque to the forwarder (§4) |
 
 ### 3.1 `seq`
 
@@ -90,13 +91,13 @@ A datagram MUST NOT exceed **1400 bytes** total. This keeps it inside a typical
 fragmented — a fragmented UDP datagram is dropped whole if any fragment is lost,
 which would defeat the loss-tolerance the design is built on.
 
-The payload budget is therefore `1400 − 58 (header) − 16 (AEAD tag) − 4
+The payload budget is therefore `1400 − 66 (header) − 16 (AEAD tag) − 4
 (timestamps) = 1322` bytes per Instruction, diff included. Senders MUST fragment
 at the *state* layer — send a smaller diff — never at the datagram layer.
 
 ## 4. Payload
 
-`payload = ChaCha20-Poly1305(key = pair_key, nonce = §4.2, aad = header[0..42],
+`payload = ChaCha20-Poly1305(key = pair_key, nonce = §4.2, aad = header[0..50],
 plaintext = §4.1)`.
 
 Binding the AAD to the outer header means a recipient can verify the datagram was
@@ -194,7 +195,7 @@ already treats that as retryable, so it rejoins the existing retry path.
 The forwarder is a pure function of the header plus its binding table. In order,
 dropping silently unless stated:
 
-1. `len ≥ 58` and `version == 1`.
+1. `len ≥ 66` and `version == 2`.
 2. `src_node_id` resolves to a known, non-revoked node. (Unknown → drop.)
 3. `tag` verifies against that node's forwarder key, compared in **constant
    time**.
@@ -306,6 +307,16 @@ A correct implementation needs **both** of these tests, because either alone
 passes for the wrong reason: an outage longer than `ACK_WINDOW` must not fail the
 task (proving the clock pauses), *and* a hung peer on a `Live` link must still
 time out (proving the clock was gated rather than deleted).
+
+### 6.4 Endpoint restart
+
+Each endpoint process mints a random 64-bit `epoch` carried in every header. A
+peer that observes the epoch change rebases its outbound state onto the shared
+state 0, preserves any unconsumed messages and latest screen state, and resets
+its inbound state to 0 before applying the restarted peer's instruction. This
+prevents the old state-*n*/state-0 mismatch from wedging the link while retaining
+work that was still awaiting delivery. The epoch was added with wire version 2;
+version-1 datagrams are rejected rather than ambiguously interpreted.
 
 ## 7. Enrollment
 

@@ -13,7 +13,7 @@ use medulla::bridge::{Bridge, LocalBridgeNetwork, RoutingBridge};
 use medulla::daemon::embedded::{EmbeddedDaemon, EmbeddedDaemonOptions};
 use medulla::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use medulla::hub::{TaskRequest, TaskRunner};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 /// The host's address on the bus, as the TUI's `[host].address` default names it.
 const HOST: &str = "this-device";

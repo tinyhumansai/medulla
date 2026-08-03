@@ -5,7 +5,7 @@
 //! prompt. Each protocol sharing the channel gets a case.
 
 use super::is_structured_frame;
-use crate::tinyplace::{
+use crate::protocol::{
     encode_harness_control_frame, encode_screen_message, ScreenMessage, SCREEN_PROTO,
 };
 

@@ -6,7 +6,7 @@
 //! the emulator's screen — is asserted here too, since it is the only check that
 //! covers the conversion and the diff *together*.
 
-use medulla::tinyplace::{
+use medulla::protocol::{
     apply_frame, ApplyOutcome, Color, ScreenRun, ScreenView, ATTR_BOLD, ATTR_INVERSE,
     ATTR_UNDERLINE,
 };
@@ -363,8 +363,8 @@ fn spec(
 fn empty_router() -> ScreenRouter {
     let runtime = medulla::daemon::DaemonRuntime::new(
         medulla::daemon::DaemonConfig {
-            providers: vec![medulla::tinyplace::HarnessProvider::Claude],
-            default_provider: medulla::tinyplace::HarnessProvider::Claude,
+            providers: vec![medulla::protocol::HarnessProvider::Claude],
+            default_provider: medulla::protocol::HarnessProvider::Claude,
             workspace: "/tmp".into(),
             env: std::collections::HashMap::new(),
             task_timeout_ms: 1_000,
@@ -400,7 +400,7 @@ async fn a_subscribe_for_a_task_this_sender_never_dispatched_is_refused() {
     let mut router = empty_router();
     router.handle(
         "peerA",
-        medulla::tinyplace::ScreenMessage::Subscribe {
+        medulla::protocol::ScreenMessage::Subscribe {
             task_id: "t1".into(),
             max_fps: 1,
             resync: true,
@@ -416,7 +416,7 @@ async fn an_unsubscribe_for_a_task_nobody_streams_does_nothing() {
     let mut router = empty_router();
     router.handle(
         "peerA",
-        medulla::tinyplace::ScreenMessage::Unsubscribe {
+        medulla::protocol::ScreenMessage::Unsubscribe {
             task_id: "t1".into(),
         },
     );
@@ -428,7 +428,7 @@ async fn a_kill_for_a_task_this_sender_never_dispatched_is_refused() {
     let mut router = empty_router();
     router.handle(
         "peerA",
-        medulla::tinyplace::ScreenMessage::Kill {
+        medulla::protocol::ScreenMessage::Kill {
             task_id: "t1".into(),
             correlation_id: "cyc/t1/0".into(),
         },
@@ -493,14 +493,14 @@ async fn the_router_ignores_messages_it_is_not_the_receiver_for() {
     let mut router = empty_router();
     router.handle(
         "peerA",
-        medulla::tinyplace::ScreenMessage::Ack {
+        medulla::protocol::ScreenMessage::Ack {
             task_id: "t1".into(),
             seq: 4,
         },
     );
     router.handle(
         "peerA",
-        medulla::tinyplace::ScreenMessage::Frame(medulla::tinyplace::ScreenFrame {
+        medulla::protocol::ScreenMessage::Frame(medulla::protocol::ScreenFrame {
             task_id: "t1".into(),
             seq: 1,
             base_seq: 0,

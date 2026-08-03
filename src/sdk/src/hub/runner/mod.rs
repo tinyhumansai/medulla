@@ -1,7 +1,7 @@
 //! The bridge-independent task sender — the outbound half of the harness plane.
 //!
 //! The daemon only ever receives task frames; this runner sends them. It
-//! dispatches a `task` frame over the selected local or tiny.place bridge, then
+//! dispatches a `task` frame over the selected local or link bridge, then
 //! routes the worker's `ack`/`status`/`reply`/`error` frames back to the awaiting
 //! caller. Frames are correlated by a per-dispatch `correlationId`, because the
 //! inbox is shared across concurrent dispatches and one pump must fan each frame
@@ -17,9 +17,11 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
-use crate::tinyplace::{
+use crate::protocol::{
     encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind, WorkerSystemInfo,
 };
+
+use crate::bridge::BridgeLiveness;
 
 use super::relay::Relay;
 use super::types::{RunError, TaskOutcome, TaskRequest};
@@ -61,9 +63,54 @@ const ACK_WINDOW: Duration = Duration::from_secs(12);
 /// dispatches reaped as `bridge task timed out`.
 const IDLE_WINDOW: Duration = Duration::from_secs(240);
 
-/// How many times to reset the Signal session + resend before giving up. Covers
-/// the common one-sided-session desync (worker restarted) in one extra round.
+/// How many times to reset the transport session + resend before giving up.
+/// Covers a peer that has genuinely stopped listening in one extra round.
 const MAX_RESETS: u32 = 2;
+
+/// How often [`live_sleep`] re-reads link liveness while a window is running.
+///
+/// Short enough that a link coming back is noticed promptly, long enough that a
+/// four-minute idle window costs a few thousand cheap status reads rather than
+/// a busy loop.
+const LIVENESS_TICK: Duration = Duration::from_millis(100);
+
+/// Sleep for `window` of *link-live* time (host-link protocol §6.3).
+///
+/// This is the single most important integration detail of the host link, so it
+/// is a function rather than an inline sleep. Both of this runner's clocks —
+/// [`ACK_WINDOW`] and [`IDLE_WINDOW`] — exist because the old mailbox transport
+/// could silently black-hole a frame. The link cannot: it owns retransmission
+/// and recovers an outage by itself, with no reconnect and no re-enrollment. So
+/// a 30-second blip must not fail a task the transport was in the middle of
+/// recovering — which is exactly what an ordinary `sleep` would do.
+///
+/// Time therefore only accrues while the link to `peer` reports
+/// [`BridgeLiveness::Live`]. When it does not, the window is **paused**, and it
+/// **resumes rather than resets** on recovery: `ACK_WINDOW` measures peer
+/// *processing*, and a peer that was unreachable was not thinking. The
+/// distinction matters in the other direction too — a peer that is hung on a
+/// `Live` link still times out on schedule, because the clock was gated, not
+/// disabled.
+///
+/// The gate is evaluated for `peer`, never for the link as a whole (§6.3): an
+/// orchestrator holds sessions with many hosts, and one laptop going to sleep
+/// must not stop every other host's clock.
+///
+/// A bridge with no notion of reachability (the in-memory bus, every test fake)
+/// answers `Live` by default, so this behaves exactly like `sleep` for them.
+async fn live_sleep(relay: &dyn Relay, peer: &str, window: Duration) {
+    let mut remaining = window;
+    while !remaining.is_zero() {
+        if relay.liveness(peer).await == BridgeLiveness::Live {
+            let step = LIVENESS_TICK.min(remaining);
+            tokio::time::sleep(step).await;
+            remaining -= step;
+        } else {
+            // Paused: wait out a tick without spending any of the window.
+            tokio::time::sleep(LIVENESS_TICK).await;
+        }
+    }
+}
 
 impl Drop for AbortGuard {
     fn drop(&mut self) {
@@ -282,7 +329,8 @@ impl TaskRunner {
     /// dispatch can never pin its correlation entry: the `ACK_WINDOW` on a
     /// never-answering peer, and — once alive — the `IDLE_WINDOW` no-progress
     /// watchdog, which reaps a worker that acks then stops emitting frames
-    /// (crashed / vanished). Neither is a wall-clock cap on a working peer.
+    /// (crashed / vanished). Neither is a wall-clock cap on a working peer, and
+    /// both are measured in *link-live* time only — see [`live_sleep`].
     pub async fn run(
         &self,
         req: TaskRequest,
@@ -380,7 +428,7 @@ impl TaskRunner {
                 kind: TaskFrameKind::Task,
                 task_id: req.task_id.clone(),
                 text: req.instruction.clone(),
-                ts: ::tinyplace::auth::timestamp(),
+                ts: crate::clock::iso_now(),
                 correlation_id: Some(cid.clone()),
                 harness: None,
                 provider: req.provider,
@@ -394,9 +442,18 @@ impl TaskRunner {
                 fleet_depth: req.fleet_depth,
             });
 
-            if let Err(e) = self.relay.send(&req.worker_address, &body).await {
-                self.waiters.lock().await.remove(&cid);
-                return Err(RunError::Transport(e));
+            tokio::select! {
+                biased;
+                _ = abort.notified() => {
+                    self.waiters.lock().await.remove(&cid);
+                    return Err(RunError::Aborted);
+                }
+                result = self.relay.send(&req.worker_address, &body) => {
+                    if let Err(e) = result {
+                        self.waiters.lock().await.remove(&cid);
+                        return Err(RunError::Transport(e));
+                    }
+                }
             }
 
             // Ack window: first sign of life, an early terminal, an orchestrator
@@ -444,7 +501,9 @@ impl TaskRunner {
                             }
                             // A frame: the peer is working. Reset the idle clock.
                             _ = activity.notified() => continue,
-                            _ = tokio::time::sleep(self.idle_window) => {
+                            _ = live_sleep(
+                                self.relay.as_ref(), &req.worker_address, self.idle_window,
+                            ) => {
                                 self.waiters.lock().await.remove(&cid);
                                 send_abort(
                                     self.relay.as_ref(), &req.worker_address, &req.task_id, &cid,
@@ -454,9 +513,11 @@ impl TaskRunner {
                         }
                     }
                 }
-                _ = tokio::time::sleep(self.ack_window) => {
-                    // Silence — the peer likely can't decrypt (restarted / one-sided
-                    // session). Reset and resend, or give up.
+                _ = live_sleep(
+                    self.relay.as_ref(), &req.worker_address, self.ack_window,
+                ) => {
+                    // Silence while the link was live — so the peer itself is not
+                    // answering, not the network. Reset and resend, or give up.
                     self.waiters.lock().await.remove(&cid);
                     if attempt >= MAX_RESETS {
                         send_abort(
@@ -484,7 +545,7 @@ async fn send_abort(relay: &dyn Relay, address: &str, task_id: &str, cid: &str) 
         kind: TaskFrameKind::Abort,
         task_id: task_id.to_string(),
         text: "requester stopped waiting".to_string(),
-        ts: ::tinyplace::auth::timestamp(),
+        ts: crate::clock::iso_now(),
         correlation_id: Some(cid.to_string()),
         harness: None,
         provider: None,

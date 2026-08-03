@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use medulla::daemon::providers::{Abort, RunTaskOptions};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 use medulla_tui::worker::executor::PtySessionExecutor;
 use medulla_tui::worker::pty::PtyManager;
 

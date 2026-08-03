@@ -49,8 +49,7 @@ use crate::clipboard::osc52;
 /// the guard means it is not even reached on a machine that already has the
 /// binary.
 pub const REMOTE_JOIN_COMMAND: &str = "command -v medulla >/dev/null 2>&1 || \
-     curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh; \
-     medulla daemon";
+     curl -fsSL https://raw.githubusercontent.com/tinyhumansai/medulla/main/install.sh | sh";
 
 /// The OSC 52 escape that hands `address` to the operator's terminal clipboard.
 ///

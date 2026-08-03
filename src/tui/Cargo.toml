@@ -23,6 +23,9 @@ workflows = ["medulla/workflows"]
 
 [dependencies]
 medulla = { workspace = true, default-features = false }
+# The host-link transport: `main.rs` brings the link up before handing the
+# worker loop a bridge over it.
+medulla-link = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

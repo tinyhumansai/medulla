@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use medulla::auth::Provider;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::*;
 

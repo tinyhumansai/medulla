@@ -55,10 +55,16 @@ impl MedullaConfig {
 pub struct Peer {
     /// Stable peer identifier.
     pub id: String,
+    /// The peer's link node id, hex-encoded, as issued at enrollment.
+    ///
+    /// Optional because a peer row can exist before the host has enrolled — the
+    /// operator names it first and the id arrives with the enrollment response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
     /// Optional human-facing name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Optional tiny.place handle.
+    /// Optional public handle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
     /// Address used to contact the peer.
@@ -113,45 +119,34 @@ pub struct HubSection {
     pub workers: Vec<HubWorkerConfig>,
 }
 
-/// The `tinyplace` section: identity, discovery, and the static peer roster.
+/// The `link` section: this endpoint's host-link identity and its peer roster.
+///
+/// The pair key is deliberately absent and must stay absent: it is generated on
+/// the orchestrator, carried to the host by the user, and lives only in
+/// `<state_dir>/node.json` (protocol §7.1). A config file is copied, shared and
+/// pasted into issues; the key must never be in one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-pub struct TinyplaceConfig {
-    /// Base URL of the tiny.place service.
-    #[serde(default = "d_tp_base")]
-    pub base_url: String,
-    /// Directory containing this installation's tiny.place identity.
-    #[serde(default = "d_tp_identity")]
-    pub identity_dir: String,
-    /// Optional public handle registered for the identity.
+pub struct LinkConfig {
+    /// Base URL of the backend that fronts the forwarder and the host registry.
+    #[serde(default = "d_forwarder_url")]
+    pub forwarder_url: String,
+    /// This endpoint's own node name, as issued at enrollment.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub handle: Option<String>,
-    /// Optional public display name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
-    /// Optional public profile biography.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bio: Option<String>,
-    /// Whether startup discovers peers from the service.
-    #[serde(default = "d_true")]
-    pub auto_discover_peers: bool,
-    /// Contact acceptance policy (`peers`, for example).
-    #[serde(default = "d_accept")]
-    pub accept_contacts: String,
-    /// Peers declared directly in configuration.
+    pub node_name: Option<String>,
+    /// Where the link identity lives — normally `<medulla_home>/link`.
+    #[serde(default = "d_link_state_dir")]
+    pub state_dir: String,
+    /// The peers this endpoint can address.
     pub peers: Vec<Peer>,
 }
 
-impl Default for TinyplaceConfig {
+impl Default for LinkConfig {
     fn default() -> Self {
-        TinyplaceConfig {
-            base_url: d_tp_base(),
-            identity_dir: d_tp_identity(),
-            handle: None,
-            display_name: None,
-            bio: None,
-            auto_discover_peers: true,
-            accept_contacts: d_accept(),
+        LinkConfig {
+            forwarder_url: d_forwarder_url(),
+            node_name: None,
+            state_dir: d_link_state_dir(),
             peers: Vec::new(),
         }
     }

@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, Notify};
 
 use crate::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use crate::daemon::DaemonRuntime;
-use crate::tinyplace::TaskFrameKind;
+use crate::protocol::TaskFrameKind;
 
 use super::{
     abort_frame, abortable_runner, base_config, blocking_runner, decoded_frames, input_frame,
@@ -387,12 +387,12 @@ async fn a_screen_message_is_never_typed_into_a_harness() {
     let runtime = DaemonRuntime::new(base_config(), run_task, send);
 
     for body in [
-        crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Subscribe {
+        crate::protocol::encode_screen_message(&crate::protocol::ScreenMessage::Subscribe {
             task_id: "t1".into(),
             max_fps: 1,
             resync: true,
         }),
-        crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Unsubscribe {
+        crate::protocol::encode_screen_message(&crate::protocol::ScreenMessage::Unsubscribe {
             task_id: "t1".into(),
         }),
     ] {

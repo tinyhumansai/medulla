@@ -178,6 +178,9 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
     // `app_loop::run_tui`. This worker TUI runs the same daemon that spawns
     // ACP harness subprocesses, so it needs the same propagation.
     if let Some(path) = explicit_config.as_deref() {
+        if !std::path::Path::new(path).is_file() {
+            anyhow::bail!("explicit daemon configuration does not exist: {path}");
+        }
         std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
     }
     let loaded =
@@ -186,61 +189,72 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| medulla::home::medulla_home(&env).join("config.toml"));
 
-    // The contact queue and this daemon's address both come from the tiny.place
-    // service. Without a `[tinyplace]` section there is no identity, so the
-    // Contacts and Requests tabs say so rather than showing empty lists.
+    // The link identity is what lets an orchestrator reach this worker at all.
+    // Without an enrolled one the TUI still runs — as a local-sessions screen
+    // that simply never receives peer work — rather than refusing to start on a
+    // machine the operator has not finished setting up.
     let mut startup_status = None;
-    // A worker always has an identity: the address is minted on first run and
-    // reused from `<medulla_home>/tinyplace/config.json` thereafter. Absent a
-    // `[tinyplace]` section we synthesize one rather than running without it, so
+    // The `[link]` section, synthesized when the config file has none so
     // `medulla daemon --tui` bootstraps exactly like `medulla daemon` does —
-    // same wallet, same location, same relay. Requiring config for the TUI and
-    // not for the daemon would mean adding `--tui` silently cost you your peers.
-    // It must be `default_tinyplace_config`, not `TinyplaceConfig::default()`:
-    // only the former reads `MEDULLA_STAGING`, and a worker on the prod relay
-    // never sees a contact request sent on staging.
-    let mut tinyplace_config = loaded
+    // same identity directory, same forwarder. Requiring config for the TUI and
+    // not for the daemon would mean adding `--tui` silently cost you your hosts.
+    // It must be `default_link_config`, not `LinkConfig::default()`: only the
+    // former reads `MEDULLA_STAGING`, and a host on the prod forwarder never
+    // hears from an orchestrator on staging.
+    let link_config = loaded
         .config
-        .tinyplace
+        .link
         .clone()
-        .unwrap_or_else(|| medulla::config::default_tinyplace_config(&env));
-    let masters = tinyplace_config.peers.clone();
+        .unwrap_or_else(|| medulla::config::default_link_config(&env));
+    let masters = link_config.peers.clone();
 
-    // Claim the identity before anything binds it. `medulla daemon --tui` is a
-    // daemon — it publishes pre-keys, drains one inbox and drives one Signal
-    // ratchet — so two of them sharing a wallet would split a peer's messages
-    // between them and corrupt the ratchet for everyone. The guard is bound in
-    // this function, which lives as long as the process.
-    let _identity_lock = claim_identity(&env, &mut tinyplace_config)?;
-
-    let service = match medulla::tinyplace::service::TinyplaceService::start(&tinyplace_config) {
-        Ok(service) => Some(service),
-        Err(err) => {
-            startup_status = Some(format!("tiny.place service failed to start ({err})"));
-            None
-        }
-    };
-    let contacts = service.as_ref().map(|s| s.contacts());
-    // The encrypted transport is what lets peers reach this worker at all, and
-    // it comes from the same service as the contact queue — one transport per
-    // wallet, because two would be two writers to one Signal session store.
-    // Without a `[tinyplace]` section there is no identity, so the TUI runs as a
-    // local-sessions screen and simply never receives peer work.
-    let transport = service.as_ref().map(|s| s.transport());
-    // A failed pre-key publish makes this worker undeliverable, which otherwise
-    // looks from both ends like peer messages simply vanish. Surface it.
-    if let Some(notice) = service
+    // The bridge the worker loop serves peer work over. One endpoint holds the
+    // link identity for the life of the process: a second `Link` on the same
+    // node would draw sequences from a second counter under one AEAD key, which
+    // reuses nonces (protocol §3.1).
+    let enrolled_node_id = medulla_link::keys::read_node_state(&medulla_link::keys::node_path(
+        std::path::Path::new(&link_config.state_dir),
+    ))
+    .ok()
+    .map(|state| state.node_id.to_string());
+    let transport =
+        match medulla_link::Link::connect(medulla_link::LinkConfig::new(&link_config.state_dir))
+            .await
+        {
+            Ok(link) => {
+                // The owner is the link's single peer: a host enrolls against
+                // exactly one orchestrator (protocol §7.3).
+                let owner = link_config
+                    .peers
+                    .first()
+                    .map(|peer| peer.id.clone())
+                    .unwrap_or_else(|| "orchestrator".to_string());
+                let node_name = link_config
+                    .node_name
+                    .clone()
+                    .or(enrolled_node_id)
+                    .unwrap_or_else(|| owner.clone());
+                match medulla::bridge::LinkBridge::single_peer(
+                    std::sync::Arc::new(link),
+                    node_name,
+                    owner,
+                ) {
+                    Ok(bridge) => Some(bridge),
+                    Err(err) => {
+                        startup_status = Some(format!("host link is misconfigured ({err})"));
+                        None
+                    }
+                }
+            }
+            Err(err) => {
+                startup_status = Some(format!("host link unavailable ({err})"));
+                None
+            }
+        };
+    let agent_id = transport
         .as_ref()
-        .and_then(|s| s.observation().lock().ok().and_then(|o| o.notice.clone()))
-    {
-        startup_status = Some(notice);
-    }
-    let agent_id = service.as_ref().and_then(|s| {
-        s.observation()
-            .lock()
-            .ok()
-            .and_then(|o| o.identity.as_ref().map(|i| i.agent_id.clone()))
-    });
+        .map(|bridge| bridge.address().to_string())
+        .filter(|name| !name.is_empty());
 
     let workspaces = loaded
         .config
@@ -260,12 +274,14 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         workspaces,
         masters,
         config_path,
-        credential_dir: std::path::PathBuf::from(&tinyplace_config.identity_dir),
-        contacts,
+        credential_dir: std::path::PathBuf::from(&link_config.state_dir),
+        // The link has no contact graph — enrollment is the only handshake
+        // (protocol §7) — so there is no admission queue to render.
+        contacts: None,
         agent_id,
         startup_status,
         transport,
-        endpoint: service.as_ref().map(|s| s.endpoint().to_string()),
+        endpoint: Some(link_config.forwarder_url.clone()),
         theme,
         // Claude gates a fresh directory behind a modal trust dialog that only
         // appears on a TTY, so the worker clears it up front — naming the
@@ -285,45 +301,7 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         budget: loaded.config.budget.clone(),
     })
     .await;
-    drop(service); // aborts the background polls
     result
-}
-
-/// Acquire this worker's tiny.place identity exclusively, rewriting
-/// `config.identity_dir` to the slot that was actually claimed.
-///
-/// Two paths, matching the daemon's:
-///
-/// - the config left `identityDir` at its home-derived default, so this worker
-///   takes the first free slot of the identity pool — slot 1 (the address it has
-///   always had) when it is the only worker, `workers/<N>` when it is not; or
-/// - the operator named an identity, in `[tinyplace].identityDir` or in the
-///   environment, so that exact one is taken and a collision is an error rather
-///   than a silent move to an address the operator did not choose.
-fn claim_identity(
-    env: &std::collections::HashMap<String, String>,
-    config: &mut medulla::config::TinyplaceConfig,
-) -> anyhow::Result<medulla::tinyplace::IdentityLock> {
-    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    // Component-wise, not string or raw-`Path` equality: a hand-written
-    // `identityDir = ".../tinyplace/"` keeps its trailing separator, which a
-    // `Path`-value comparison treats as different and would route a default
-    // worker down the fail-loud named path — so a second one would see "already
-    // in use" instead of fanning out to `workers/2`.
-    let default_pool_dir = medulla::home::medulla_home(env).join("tinyplace");
-    let pooled = std::path::Path::new(&config.identity_dir)
-        .components()
-        .eq(default_pool_dir.components());
-    let acquired = if pooled {
-        medulla::tinyplace::acquire_identity(env, &home)
-    } else {
-        let named =
-            std::path::Path::new(&config.identity_dir).join(medulla::tinyplace::IDENTITY_FILE);
-        medulla::tinyplace::acquire_identity_at(&named, env)
-    }
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
-    config.identity_dir = acquired.identity_dir.to_string_lossy().into_owned();
-    Ok(acquired.lock)
 }
 
 /// Read `--name <value>` out of an argument list.

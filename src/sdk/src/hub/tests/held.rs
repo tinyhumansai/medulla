@@ -90,7 +90,7 @@ fn a_successful_task_reports_its_reply_and_usage() {
         "t1",
         &Ok(TaskOutcome {
             reply: "done".to_string(),
-            usage: crate::tinyplace::TokenUsage {
+            usage: crate::protocol::TokenUsage {
                 input_tokens: 3,
                 output_tokens: 5,
             },

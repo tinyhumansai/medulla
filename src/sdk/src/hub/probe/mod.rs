@@ -19,7 +19,7 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::tinyplace::AgentCapabilities;
+use crate::protocol::AgentCapabilities;
 
 /// The union of the toggled roles' tool allowlists.
 ///

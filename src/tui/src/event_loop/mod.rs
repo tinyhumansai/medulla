@@ -45,12 +45,12 @@ pub(crate) async fn run(
         loaded,
         local_hosts,
         startup_status,
-        tinyplace_obs,
         config_path,
         medulla_home,
         account,
         mut sharing,
         onboarding_path,
+        link_obs,
         host,
         harnesses,
     } = wiring;
@@ -58,8 +58,8 @@ pub(crate) async fn run(
     app.set_config_path(config_path);
     app.set_medulla_home(medulla_home);
     app.set_account(account);
-    if let Some(obs) = tinyplace_obs {
-        app.set_tinyplace_observation(obs);
+    if let Some(obs) = link_obs {
+        app.set_link_observation(obs);
     }
     if let Some(host) = host {
         app.set_host_observation(host);

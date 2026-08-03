@@ -8,11 +8,11 @@
 //! wrapper does. No I/O and no clock of its own beyond the timestamps it is
 //! handed, so every field is unit-testable.
 
-use ::tinyplace::crypto::sha256_hex;
-use ::tinyplace::types::{
+use crate::protocol::envelope::{
     HarnessBucket, HarnessEvent, HarnessInfo, HarnessScope, HarnessSource, SessionEnvelopeV2,
     SESSION_ENVELOPE_VERSION_V2,
 };
+use crate::update::sha256_hex;
 
 use crate::daemon::mappers::HarnessSemanticEvent;
 

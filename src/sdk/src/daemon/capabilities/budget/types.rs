@@ -3,13 +3,13 @@
 //! Behaviour-heavy `impl`s (seam wiring, evaluation) live beside the logic in
 //! [`super`].
 
-use crate::tinyplace::{BudgetWindow, HarnessProvider};
+use crate::protocol::{BudgetWindow, HarnessProvider};
 
 /// Operator-declared budget numbers for one provider, read through a seam.
 ///
 /// Every field is optional; a caller sets only what the operator specified. When
-/// present, it makes the emitted [`crate::tinyplace::HarnessBudget`] authoritative
-/// ([`crate::tinyplace::BudgetSource::Configured`]) rather than an estimate.
+/// present, it makes the emitted [`crate::protocol::HarnessBudget`] authoritative
+/// ([`crate::protocol::BudgetSource::Configured`]) rather than an estimate.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConfiguredBudget {
     /// Opaque seat identifier the operator recorded (never a credential).

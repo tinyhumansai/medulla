@@ -4,7 +4,7 @@
 //! `medulla help`/`--help`. Every function is pure over its input args.
 
 use medulla::auth::Provider;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::types::{
     Command, InitArgs, LoginArgs, RunArgs, TuiArgs, UpdateArgs, WorkflowAction, WorkflowArgs,
@@ -367,7 +367,6 @@ Daemon flags:\n  \
 --tui                   Show the operator screen: sessions/log, contacts, requests\n  \
 --providers <a,b>       Restrict to these coding agents (default: all found on PATH)\n  \
 --workspace <dir>       Directory tasks run in (default: cwd)\n  \
---handle <name>         Register this tiny.place handle on startup\n  \
 --model <name>          Default model hint passed to the harness\n  \
 --concurrency <n>       Maximum tasks running at once\n  \
 --once                  Drain the inbox once and exit (probe)\n  \

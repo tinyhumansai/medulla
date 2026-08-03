@@ -33,7 +33,7 @@
 #   <home>/credentials.json     saved by `medulla login`  (mode 0600)
 #   <home>/config.toml          the user-global config file
 #   <home>/state                default stateDir          (chats, serve.sock)
-#   <home>/tinyplace            default tinyplace identity dir
+#   <home>/link                 default host-link identity dir
 #
 # `.env` in the cwd is loaded at startup (KEY=VALUE, `#` comments, optional
 # `export `, quotes stripped). It never overrides variables already set in the
@@ -57,9 +57,9 @@ tokenEnv = "MEDULLA_TOKEN"
 # A plain `medulla` is both halves of the system: the orchestrator that decides
 # what work to hand out, and a host that runs it. The host binds an address on
 # an in-process bus the orchestrator dispatches over, so a task for this machine
-# never touches the network — no tiny.place identity, no contact request, no
-# second `medulla daemon` process. Remote workers still go over tiny.place, and
-# the orchestrator picks per address.
+# never touches the network — no link identity, no enrollment, no second
+# `medulla daemon` process. Remote workers still go over the host link, and the
+# orchestrator picks per address.
 #
 # It is on by default and needs no configuration: it serves whichever coding
 # agent CLIs it finds (claude / codex / opencode), in the directory you launched
@@ -203,19 +203,25 @@ tokenEnv = "MEDULLA_TOKEN"
 # workspaces = ["/absolute/path/to/workspace"]
 
 # ---------------------------------------------------------------------------
-# tinyplace — background presence + peer bridging (optional)
+# link — the host link to remote machines (optional)
 # ---------------------------------------------------------------------------
-# [tinyplace]
-# Base URL (env staging switch applies as for backend). Default: https://api.tiny.place
-# baseUrl = "https://api.tiny.place"
-# Identity directory. Default: <home>/tinyplace
-# identityDir = "/absolute/path/to/tinyplace"
-# handle = "@me"
-# displayName = "Me"
-# bio = "..."
-# autoDiscoverPeers = true
-# acceptContacts = "peers"     # peers | all | none
-# peers = []                   # [{ id, handle, name, address, tags, description, protocol }]
+# The transport between this endpoint and the machines it talks to. See
+# docs/host-link-protocol.md.
+#
+# The pair key is deliberately absent and must stay absent. It is generated on
+# the orchestrator, carried to the host by hand, and lives only in
+# <stateDir>/node.json — never in a config file, which gets copied, shared and
+# pasted into issues.
+# [link]
+# Backend fronting the forwarder and the host registry (the env staging switch
+# applies as for backend). Default: https://api.tiny.place
+# forwarderUrl = "https://api.tiny.place"
+# This endpoint's node name, as issued at enrollment.
+# nodeName = "my-orchestrator"
+# Link identity directory. Default: <home>/link
+# stateDir = "/absolute/path/to/link"
+# The enrolled peers. `nodeId` is the 16-byte wire id, hex, issued at enrollment.
+# peers = []                   # [{ id, nodeId, handle, name, address, tags, description, protocol }]
 
 # ---------------------------------------------------------------------------
 # opencode — coding-agent worker defaults (optional)
@@ -310,7 +316,7 @@ tokenEnv = "MEDULLA_TOKEN"
 # [[fleet.harnesses]]
 # id = "workshop-claude"
 # hostId = "workshop"
-# kind = "claude-code"       # claude-code · codex · opencode · tinyplace · …
+# kind = "claude-code"       # claude-code · codex · opencode · …
 # availability = "online"
 # ready = true
 # providers = ["anthropic"]

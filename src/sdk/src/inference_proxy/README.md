@@ -55,7 +55,7 @@ different keys do not.
 Spawn seams call `route_spawn(provider, router, env)`, which atomically replaces
 an OpenRouter-bound provider's endpoint, injects its loopback token, and scrubs
 the upstream credential. Nothing downstream changes: `RouterConfig` and
-`crate::tinyplace::env::router_env` perform the same child injection, simply
+`crate::protocol::env::router_env` perform the same child injection, simply
 pointed at loopback.
 
 `MEDULLA_OPENROUTER_URL` overrides the upstream so tests stay offline.

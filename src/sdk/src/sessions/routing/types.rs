@@ -4,7 +4,7 @@ use super::*;
 /// What provoked a session. The routing input that is *not* operator policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stimulus {
-    /// A `medulla-tinyplace/1` `task` frame — a discrete unit of delegated work.
+    /// A `medulla-task/1` `task` frame — a discrete unit of delegated work.
     Task,
     /// A conversational plain-text DM from a peer.
     PlainText,

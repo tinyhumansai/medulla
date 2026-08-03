@@ -1,7 +1,5 @@
 //! Data exchanged by the interactive event loop and its background tasks.
 
-use std::sync::Arc;
-
 use medulla::runtime::ContextItem;
 
 /// Messages sent from spawned async tasks back to the event loop.
@@ -115,8 +113,6 @@ pub(crate) struct SessionWiring {
     /// A note to show on the status line at startup, if any.
     pub startup_status: Option<String>,
     /// The tiny.place presence observation, when that service is running.
-    pub tinyplace_obs:
-        Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
     /// Where appearance/config edits are persisted.
     pub config_path: std::path::PathBuf,
     /// The Medulla home: where user-level application state is kept.
@@ -131,6 +127,11 @@ pub(crate) struct SessionWiring {
         Option<tokio::sync::mpsc::UnboundedReceiver<medulla_tui::ui::welcome::WelcomeEvent>>,
     /// Where to record onboarding once a backgrounded share settles.
     pub onboarding_path: std::path::PathBuf,
+    /// The background host-link service's shared observation: this endpoint's
+    /// identity, its peer roster and per-peer presence, merged into every
+    /// snapshot refresh. `None` when no link is configured.
+    pub link_obs:
+        Option<std::sync::Arc<std::sync::Mutex<medulla::protocol::service::LinkObservation>>>,
     /// A read-only view of the host running on this device, when one is. `None`
     /// means this machine orchestrates but does not run the work itself.
     pub host: Option<medulla::daemon::embedded::HostObservation>,

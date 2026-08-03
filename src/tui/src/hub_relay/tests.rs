@@ -17,10 +17,7 @@ fn on_by_default_in_backend_mode() {
     // A plain login (no hub-related vars) still runs the hub.
     assert!(hub_enabled(&env(&[])));
     // A pre-seeded worker also runs it (unchanged).
-    assert!(hub_enabled(&env(&[(
-        "MEDULLA_TINYPLACE_PEER",
-        "GRV1worker"
-    )])));
+    assert!(hub_enabled(&env(&[("MEDULLA_LINK_PEER", "GRV1worker")])));
 }
 
 #[test]
@@ -30,7 +27,7 @@ fn explicit_zero_is_a_hard_kill_switch() {
     // The kill-switch wins even when a worker is configured.
     assert!(!hub_enabled(&env(&[
         ("MEDULLA_HUB", "0"),
-        ("MEDULLA_TINYPLACE_PEER", "GRV1worker"),
+        ("MEDULLA_LINK_PEER", "GRV1worker"),
     ])));
 }
 
@@ -40,6 +37,102 @@ fn explicit_truthy_is_on() {
     assert!(hub_enabled(&env(&[("MEDULLA_HUB", "true")])));
     // A blank value is ignored → falls back to the default (on).
     assert!(hub_enabled(&env(&[("MEDULLA_HUB", "  ")])));
+}
+
+#[test]
+fn every_configured_link_peer_reaches_the_hub_bridge() {
+    use medulla_link::keys::{ForwarderKey, NodeId, NodeState, PairKey, Role};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state_dir = dir.path().join("link");
+    let _node = medulla_link::keys::acquire_or_create(&state_dir, || NodeState {
+        version: 1,
+        node_id: NodeId([1; 16]),
+        role: Role::Orchestrator,
+        pair_key: PairKey::from_bytes([2; 16]),
+        forwarder_key: ForwarderKey([3; 32]),
+        forwarder_endpoint: "127.0.0.1:4600".to_string(),
+        peer_node_id: NodeId([4; 16]),
+        peers: vec![
+            medulla_link::keys::EnrolledPeer {
+                node_id: NodeId([5; 16]),
+                pair_key: PairKey::from_bytes([5; 16]),
+            },
+            medulla_link::keys::EnrolledPeer {
+                node_id: NodeId([6; 16]),
+                pair_key: PairKey::from_bytes([6; 16]),
+            },
+        ],
+        seq_reservation: 1,
+    })
+    .expect("node state");
+    let peer = |id: &str, byte: u8| medulla::config::Peer {
+        id: id.to_string(),
+        node_id: Some(NodeId([byte; 16]).to_string()),
+        address: Some(id.to_string()),
+        ..Default::default()
+    };
+    let config = medulla::config::LinkConfig {
+        state_dir: state_dir.display().to_string(),
+        peers: vec![peer("worker-alpha", 5), peer("worker-beta", 6)],
+        ..Default::default()
+    };
+
+    let link = super::link_from_resolved_config(&config, None).expect("hub link");
+    assert_eq!(link.peers.len(), 2);
+    assert_eq!(link.peers[0].name, "worker-alpha");
+    assert_eq!(link.peers[0].node_id, NodeId([5; 16]));
+    assert_eq!(link.peers[1].name, "worker-beta");
+    assert_eq!(link.peers[1].node_id, NodeId([6; 16]));
+}
+
+#[test]
+fn every_unconfigured_enrolled_peer_reaches_the_hub_bridge_by_node_id() {
+    use medulla_link::keys::{ForwarderKey, NodeId, NodeState, PairKey, Role};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state_dir = dir.path().join("link");
+    let _node = medulla_link::keys::acquire_or_create(&state_dir, || NodeState {
+        version: 1,
+        node_id: NodeId([1; 16]),
+        role: Role::Orchestrator,
+        pair_key: PairKey::from_bytes([2; 16]),
+        forwarder_key: ForwarderKey([3; 32]),
+        forwarder_endpoint: "127.0.0.1:4600".to_string(),
+        peer_node_id: NodeId([4; 16]),
+        peers: vec![
+            medulla_link::keys::EnrolledPeer {
+                node_id: NodeId([5; 16]),
+                pair_key: PairKey::from_bytes([5; 16]),
+            },
+            medulla_link::keys::EnrolledPeer {
+                node_id: NodeId([6; 16]),
+                pair_key: PairKey::from_bytes([6; 16]),
+            },
+        ],
+        seq_reservation: 1,
+    })
+    .expect("node state");
+    let config = medulla::config::LinkConfig {
+        state_dir: state_dir.display().to_string(),
+        peers: vec![medulla::config::Peer {
+            id: "worker-alpha".to_string(),
+            node_id: Some(NodeId([5; 16]).to_string()),
+            address: Some("worker-alpha".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let link = super::link_from_resolved_config(&config, None).expect("hub link");
+    assert_eq!(link.peers.len(), 2);
+    assert!(link
+        .peers
+        .iter()
+        .any(|peer| peer.name == "worker-alpha" && peer.node_id == NodeId([5; 16])));
+    assert!(link.peers.iter().any(|peer| {
+        peer.name == NodeId([6; 16]).to_string() && peer.node_id == NodeId([6; 16])
+    }));
 }
 
 #[test]
@@ -133,7 +226,7 @@ fn an_explicit_environment_roster_is_not_merged_with_the_saved_one() {
         false,
     )]);
 
-    let from_env = super::workers_from_env(&env(&[("MEDULLA_TINYPLACE_PEER", "addr-env")]));
+    let from_env = super::workers_from_env(&env(&[("MEDULLA_LINK_PEER", "addr-env")]));
     assert_eq!(from_env.len(), 1);
     assert_eq!(from_env[0].address, "addr-env");
     // And the saved one is still on disk, untouched, for a run without the var.

@@ -29,7 +29,7 @@ impl LocalHost {
     }
 
     /// The coding-agent CLIs this machine actually has.
-    pub(crate) fn providers(&self) -> &[medulla::tinyplace::HarnessProvider] {
+    pub(crate) fn providers(&self) -> &[medulla::protocol::HarnessProvider] {
         self.daemon.providers()
     }
 

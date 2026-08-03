@@ -1,7 +1,7 @@
 //! Tests for the backend-shaped capability payload.
 
 use super::*;
-use crate::tinyplace::{
+use crate::protocol::{
     BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider, HarnessReadiness,
 };
 
@@ -93,7 +93,7 @@ fn the_probes_providers_win_over_the_configured_harness() {
 #[test]
 fn custom_harnesses_reach_the_backend_capability_payload() {
     let mut caps = probed();
-    caps.custom_harnesses = vec![crate::tinyplace::CustomHarnessAdvert {
+    caps.custom_harnesses = vec![crate::protocol::CustomHarnessAdvert {
         id: "deepseek".into(),
         name: "DeepSeek via Claude".into(),
         base_harness: HarnessProvider::Claude,

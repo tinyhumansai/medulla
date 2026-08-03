@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 use medulla_tui::ui::harness_pane::LocalHarnesses;
 use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 

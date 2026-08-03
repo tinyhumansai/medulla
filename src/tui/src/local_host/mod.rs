@@ -25,7 +25,7 @@ use medulla::config::HostSection;
 use medulla::daemon::embedded::{resolve_workspace, EmbeddedDaemon, EmbeddedDaemonOptions};
 use medulla::daemon::providers::{run_provider_task, RunTaskFn, RunTaskOptions};
 use medulla::hub::WorkerSpec;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 use medulla_tui::worker::executor::{agent_kind, PtySessionExecutor};
 use medulla_tui::worker::pty::PtyManager;
 use std::collections::HashMap;

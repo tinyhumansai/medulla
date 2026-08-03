@@ -11,7 +11,7 @@ pub struct TuiConfig {
     pub opencode: Option<OpencodeConfig>,
     /// Optional tiny.place identity and discovery configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tinyplace: Option<TinyplaceConfig>,
+    pub link: Option<LinkConfig>,
     /// Orchestration limits.
     pub medulla: MedullaConfig,
     /// Directory for runtime state and caches.
@@ -102,7 +102,7 @@ impl Default for TuiConfig {
     fn default() -> Self {
         TuiConfig {
             opencode: None,
-            tinyplace: None,
+            link: None,
             medulla: MedullaConfig::default(),
             state_dir: d_state_dir(),
             backend: BackendConfig::default(),
@@ -166,11 +166,11 @@ impl LoadedConfig {
         }
     }
 
-    /// The harness label for the Agents view: `TINYPLACE` when tinyplace is
+    /// The harness label for the Agents view: `LINK` when a host link is
     /// configured, else the opencode command's basename uppercased.
     pub fn harness(&self) -> String {
-        if self.config.tinyplace.is_some() {
-            "TINYPLACE".into()
+        if self.config.link.is_some() {
+            "LINK".into()
         } else if let Some(oc) = &self.config.opencode {
             oc.command
                 .rsplit('/')

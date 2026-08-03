@@ -40,6 +40,7 @@ fn enroll(
         forwarder_key,
         forwarder_endpoint,
         peer_node_id,
+        peers: Vec::new(),
         seq_reservation: 1,
     })
     .expect("a fresh identity directory");
@@ -124,7 +125,7 @@ async fn two_links_exchange_messages_through_a_forwarder() {
         .send(host_id, b"dispatch task 1")
         .await
         .unwrap();
-    let (from, body) = tokio::time::timeout(PATIENCE, host.recv())
+    let (from, _epoch, body) = tokio::time::timeout(PATIENCE, host.recv())
         .await
         .expect("the host heard nothing")
         .expect("the link closed");
@@ -134,12 +135,32 @@ async fn two_links_exchange_messages_through_a_forwarder() {
     host.send(orchestrator_id, b"task 1 accepted")
         .await
         .unwrap();
-    let (from, body) = tokio::time::timeout(PATIENCE, orchestrator.recv())
+    let (from, _epoch, body) = tokio::time::timeout(PATIENCE, orchestrator.recv())
         .await
         .expect("the orchestrator heard nothing")
         .expect("the link closed");
     assert_eq!(from, host_id);
     assert_eq!(body, b"task 1 accepted");
+
+    host.send_screen_frame(orchestrator_id, b"latest screen frame")
+        .await
+        .unwrap();
+    let (from, _epoch, body) = tokio::time::timeout(PATIENCE, orchestrator.recv())
+        .await
+        .expect("the orchestrator heard no screen update")
+        .expect("the link closed");
+    assert_eq!(from, host_id);
+    assert_eq!(body, b"latest screen frame");
+
+    let large_screen = vec![b'x'; 4_000];
+    host.send_screen_frame(orchestrator_id, &large_screen)
+        .await
+        .unwrap();
+    let (_from, _epoch, body) = tokio::time::timeout(PATIENCE, orchestrator.recv())
+        .await
+        .expect("the orchestrator heard no fragmented screen update")
+        .expect("the link closed");
+    assert_eq!(body, large_screen);
 
     // Both ends have heard from each other, so both report the peer live.
     let status = orchestrator.status();
@@ -195,7 +216,7 @@ async fn many_messages_arrive_in_order() {
             .unwrap();
     }
     for index in 0..20u32 {
-        let (_, body) = tokio::time::timeout(PATIENCE, host.recv())
+        let (_, _epoch, body) = tokio::time::timeout(PATIENCE, host.recv())
             .await
             .expect("a frame went missing")
             .expect("the link closed");

@@ -10,7 +10,7 @@
 //! A tty is not optional: Codex refuses to start with `stdin is not a terminal`,
 //! and both harnesses fall back to dumb line mode without one.
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 /// The argv for an interactive (screen-painting) run of `provider`.
 ///

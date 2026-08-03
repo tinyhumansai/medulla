@@ -36,20 +36,20 @@ pub use custom_harnesses::{
     load_custom_harnesses, load_layered_custom_harnesses, CustomHarnessConfig,
     OPENROUTER_ANTHROPIC_URL, OPENROUTER_API_KEY_ENV, OPENROUTER_OPENAI_URL,
 };
-pub use load::{default_tinyplace_config, explicit_config_from_env, load_config, CONFIG_PATH_ENV};
+pub use load::{default_link_config, explicit_config_from_env, load_config, CONFIG_PATH_ENV};
 pub use persist::{
     clear_setting, persist_custom_harnesses, persist_host_workspaces, persist_hub_workers,
-    persist_local_hosts, persist_root_setting, persist_routing_strategy, persist_section,
-    persist_setting, persist_subscription_routing_strategy, persist_tinyplace_peers,
+    persist_link_peers, persist_local_hosts, persist_root_setting, persist_routing_strategy,
+    persist_section, persist_setting, persist_subscription_routing_strategy,
     persist_welcome_completed, persist_workflow_workspaces,
 };
 pub use types::{
     wire_value, AttributionConfig, BackendConfig, BudgetConfig, ControlStyle, CoreConfig,
     EvolveSettings, FieldPlacement, FieldVisibility, FleetConfig, HarnessNameStyle, HarnessSection,
-    HostSection, HubSection, HubWorkerConfig, LoadedConfig, McpSection, MedullaConfig,
+    HostSection, HubSection, HubWorkerConfig, LinkConfig, LoadedConfig, McpSection, MedullaConfig,
     OnboardingConfig, OpencodeConfig, PathStyle, Peer, ProviderBudgetConfig, RouterConfig,
-    RouterProviderConfig, StatusLineConfig, ThemeConfig, TinyplaceConfig, TuiConfig, UpdateConfig,
-    WorkflowConfig, WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
+    RouterProviderConfig, StatusLineConfig, ThemeConfig, TuiConfig, UpdateConfig, WorkflowConfig,
+    WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, display_host, is_staging,

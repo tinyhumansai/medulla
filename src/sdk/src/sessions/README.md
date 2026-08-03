@@ -5,7 +5,7 @@ Interactive coding-agent session management: the two lifetime classes, the two t
 ## Contents
 
 - [`completion/`](./completion/) — Turn-completion detection for a harness driven through its **interactive** interface.
-- [`input/`](./input/) — **The driver seam.** Sessions are driven from exactly two sources — a `medulla-tinyplace/1` task frame, or a `tinyplace.harness.session.v*` envelope — and this module is the one place that knows the difference.
+- [`input/`](./input/) — **The driver seam.** Sessions are driven from exactly two sources — a `medulla-task/1` task frame, or a `tinyplace.harness.session.v*` envelope — and this module is the one place that knows the difference.
 - [`interactive/`](./interactive/) — The interactive transport: one long-lived harness process fed newline- delimited JSON turns over stdin.
 - [`manager/`](./manager/) — `SessionManager` — the operator-facing surface the Sessions tab drives, and the daemon-facing entry that runs a folded `TurnRequest`.
 - [`ops/`](./ops/) — `SessionOp` — the operator actions the Sessions screen dispatches, and the manager entry that applies one.

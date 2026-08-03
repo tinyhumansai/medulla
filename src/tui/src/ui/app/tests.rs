@@ -16,7 +16,7 @@ fn app() -> App {
     let rt: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     let loaded = {
         let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-        l.config.tinyplace = Some(medulla::config::TinyplaceConfig::default());
+        l.config.link = Some(medulla::config::LinkConfig::default());
         l
     };
     App::new(rt, loaded)
@@ -26,7 +26,7 @@ fn app_with_running_task() -> App {
     let rt = MockRuntime::demo();
     let loaded = {
         let mut loaded = LoadedConfig::defaults("medulla.tui.json".into());
-        loaded.config.tinyplace = Some(medulla::config::TinyplaceConfig::default());
+        loaded.config.link = Some(medulla::config::LinkConfig::default());
         loaded
     };
     let mut app = App::new(Arc::new(rt), loaded);
@@ -142,7 +142,7 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
     a.harness_pane_session = Some("already-running".to_string());
     a.harness_picker = Some(HarnessPicker {
         choices: vec![HarnessChoice::native(
-            medulla::tinyplace::HarnessProvider::Claude,
+            medulla::protocol::HarnessProvider::Claude,
         )],
         index: 0,
         step: HarnessPickerStep::Harness,

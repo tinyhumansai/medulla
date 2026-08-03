@@ -15,7 +15,6 @@ mod handle;
 /// module so its bounds keep their short names — `handoff::NOTE_MAX` reads, a
 /// `HANDOFF_NOTE_MAX` flattened into the crate root does not.
 pub mod handoff;
-mod pairing;
 mod probe;
 mod relay;
 mod roster;
@@ -29,7 +28,10 @@ mod workflows;
 mod tests;
 
 pub use activity::{ActivityLog, WorkerActivity};
-pub use boot::{run_hub, start_hub, HubConfig, HubSession, WorkerSpec, DEFAULT_LOCAL_HUB_ADDRESS};
+pub use boot::{
+    run_hub, start_hub, HubConfig, HubLinkConfig, HubLinkPeer, HubSession, WorkerSpec,
+    DEFAULT_LOCAL_HUB_ADDRESS,
+};
 pub use handle::HubHandle;
 pub use handoff::{HandoffControl, HarnessHandoff};
 pub use relay::Relay;

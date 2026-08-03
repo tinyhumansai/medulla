@@ -15,11 +15,11 @@ fn no_presence() -> std::collections::HashMap<String, bool> {
     std::collections::HashMap::new()
 }
 use super::super::roster::{subscription_for_strategy, worker_for_strategy};
-use crate::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
-use crate::tinyplace::{
+use crate::protocol::{
     AgentCapabilities, BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider,
     HarnessReadiness, WorkerSystemInfo,
 };
+use crate::runtime::{RoutingStrategy, SubscriptionRoutingStrategy};
 
 fn worker(id: &str, addr: &str) -> HubWorker {
     HubWorker {

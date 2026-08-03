@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, Notify};
 
 use crate::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use crate::daemon::DaemonRuntime;
-use crate::tinyplace::TaskFrameKind;
+use crate::protocol::TaskFrameKind;
 
 use super::{
     abort_frame, base_config, blocking_runner, decoded_frames, recording_send, task_frame,

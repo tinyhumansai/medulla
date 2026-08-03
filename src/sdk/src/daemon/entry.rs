@@ -1,10 +1,9 @@
 //! The `medulla daemon` CLI entry point: [`run_daemon`] wires provider
-//! detection, identity/config bootstrap, tiny.place onboarding, and the
-//! transport-backed serve loop around a [`DaemonRuntime`]. Flag parsing lives in
-//! [`super::flags`]; the runtime state machine in [`super::runtime`] and
-//! [`super::task_loop`].
+//! detection, worker onboarding, the host link, and the link-backed serve loop
+//! around a [`DaemonRuntime`]. Flag parsing lives in [`super::flags`]; the
+//! runtime state machine in [`super::runtime`] and [`super::task_loop`].
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -12,21 +11,15 @@ use std::sync::Arc;
 
 use crate::onboarding::OnboardingUi;
 
-use crate::tinyplace::{
-    acquire_identity, decode_task_frame, resolve_endpoint, spawn_contact_auto_accepter,
-    spawn_presence_heartbeat,
-};
-use ::tinyplace::api::directory::DirectoryApi;
-use ::tinyplace::api::registry::RegisterRequest;
-use ::tinyplace::types::AgentCard;
-use ::tinyplace::{LocalSigner, Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use medulla_link::{Link, LinkConfig};
 
-use super::capabilities::read_git_facts;
+use crate::bridge::{Bridge as _, LinkBridge};
+use crate::protocol::decode_task_frame;
+
 use super::flags::{parse_provider, Flags};
 use super::providers::{
     detect_providers, provider_bin, run_provider_task, RunTaskFn, RunTaskOptions, DAEMON_PROVIDERS,
 };
-use super::transport::{describe_error, SignalTransport};
 use super::types::{
     DaemonConfig, DaemonRuntime, SendFn, DEFAULT_MAX_PENDING, DEFAULT_STATUS_THROTTLE_MS,
 };
@@ -34,10 +27,6 @@ use super::types::{
 const DEFAULT_CONCURRENCY: usize = 2;
 const DEFAULT_TASK_TIMEOUT_MS: u64 = 600_000;
 const DEFAULT_POLL_MS: u64 = 2_000;
-/// How often the serve loop runs (idempotent) key maintenance to refill a
-/// consumed one-time pre-key pool. Long enough to be negligible overhead (the
-/// call is a health-gated no-op when the pool is healthy).
-const KEY_MAINTAIN_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(300);
 
 /// Run `medulla daemon` until a shutdown signal. `args` are the tokens after
 /// the `daemon` subcommand. `onboarding_ui` is the interactive first-run screen
@@ -130,8 +119,6 @@ pub async fn run_daemon(
     let model = flags.string("model");
     let opencode_agent = flags.string("opencode-agent");
     let skip_permissions = flags.is_set("dangerously-skip-permissions");
-    let handle = flags.string("handle");
-    let extra_skills = flags.list("skills").unwrap_or_default();
     let once = flags.is_set("once");
     let reonboard = flags.is_set("reonboard");
 
@@ -139,92 +126,82 @@ pub async fn run_daemon(
     // `onboarding_ui` this walks the operator through onboarding; without one it
     // auto-registers with defaults + an env owner so the daemon stays scriptable.
     // Aborting the interactive flow (q / Ctrl-C) exits cleanly without serving.
-    let worker_profile =
-        match crate::onboarding::ensure_registered(&env, reonboard, onboarding_ui).await? {
-            Some(reg) => reg.profile,
-            None => {
-                log("onboarding aborted; not starting daemon");
-                return Ok(());
-            }
-        };
+    let worker_profile = match crate::onboarding::ensure_registered_in(
+        &env,
+        reonboard,
+        onboarding_ui,
+        std::path::Path::new(&workspace),
+    )
+    .await?
+    {
+        Some(reg) => reg.profile,
+        None => {
+            log("onboarding aborted; not starting daemon");
+            return Ok(());
+        }
+    };
     // The profile's name is the daemon's advertised label unless --name overrides it.
-    let display_name = flags.string("name").or_else(|| {
+    let _display_name = flags.string("name").or_else(|| {
         let name = worker_profile.name.trim();
         (!name.is_empty()).then(|| name.to_string())
     });
 
-    // Identity + client.
+    // The host link.
     //
     // The identity is *acquired*, not merely loaded: the daemon takes an
-    // exclusive OS lock on a slot in the identity pool and holds it for its whole
-    // life. Without that, a second daemon on this machine would load the same
-    // key, bind the same tiny.place address, and the two would split one inbox
-    // between them while both advanced the same Signal ratchet.
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let acquired = acquire_identity(&env, &home).map_err(|e| anyhow::anyhow!("{e}"))?;
-    // Held to the end of `run_daemon`, which is the process lifetime. Releasing
-    // it early would let another daemon claim an address this one is serving on.
-    let _identity_lock = acquired.lock;
-    if acquired.slot > 1 {
-        log(&format!(
-            "another daemon holds the primary identity; using pool slot {} ({})",
-            acquired.slot,
-            acquired.identity_dir.display()
-        ));
+    // exclusive OS lock on `<medulla home>/link` and holds it for its whole
+    // life. Without that a second daemon on this machine would draw sequences
+    // from a second counter under the same pair key — which reuses AEAD nonces,
+    // and is a confidentiality break rather than a race to tidy up later
+    // (protocol §3.1). The lock is released when the link driver stops, which is
+    // when the handle below is dropped: the end of `run_daemon`.
+    let home = crate::home::medulla_home(&env);
+    let explicit_config = flags.string("config");
+    if let Some(path) = explicit_config.as_deref() {
+        if !std::path::Path::new(path).is_file() {
+            anyhow::bail!("explicit daemon configuration does not exist: {path}");
+        }
     }
-    let config = acquired.config;
-    let base_url = resolve_endpoint(&env, &config);
-    let signer = Arc::new(acquired.signer);
-    let client = TinyPlaceClient::new(TinyPlaceClientOptions {
-        base_url: base_url.clone(),
-        signer: Some(signer.clone() as Arc<dyn Signer>),
-        ..Default::default()
-    });
-    let identity_dir = acquired.identity_dir;
-
-    let transport = SignalTransport::new(client.clone(), &signer, &identity_dir);
-    let agent_id = transport.agent_id().to_string();
-
-    // Onboard (publish keys, register handle, upsert directory card) unless
-    // suppressed. Key publishing is what lets peers open an encrypted channel.
-    let onboarded = !flags.is_set("no-onboard");
-    if onboarded {
-        let git = read_git_facts(&workspace).await;
-        let bio = format!(
-            "Headless coding-agent daemon serving {} over tiny.place.{} cwd:{workspace}",
-            providers
-                .iter()
-                .map(|p| p.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            git.project
-                .as_ref()
-                .map(|p| format!(" project:{p}"))
-                .unwrap_or_default(),
-        );
-        let mut skills: Vec<String> = std::iter::once("coding-agent".to_string())
-            .chain(providers.iter().map(|p| p.as_str().to_string()))
-            .chain(extra_skills.iter().cloned())
-            .collect();
-        dedupe(&mut skills);
-        onboard(
-            &transport,
-            &signer,
-            &client.directory,
-            &agent_id,
-            handle.as_deref(),
-            display_name.as_deref(),
-            &bio,
-            &skills,
-            &client,
-            log,
-        )
-        .await;
-        log(&format!(
-            "onboarded {agent_id} (skills: {})",
-            skills.join(", ")
-        ));
-    }
+    let loaded_link_config = crate::config::load_config(
+        explicit_config.as_deref(),
+        &env,
+        std::path::Path::new(&workspace),
+    );
+    let link_dir = match loaded_link_config {
+        Ok(loaded) => loaded
+            .config
+            .link
+            .map(|link| PathBuf::from(link.state_dir))
+            .unwrap_or_else(|| medulla_link::keys::link_dir(&home)),
+        Err(err) if explicit_config.is_some() => {
+            anyhow::bail!("explicit daemon configuration failed to load: {err}")
+        }
+        Err(_) => medulla_link::keys::link_dir(&home),
+    };
+    // The orchestrator this host serves. A host enrolls against exactly one
+    // (protocol §7.3), so this is also the link's single peer.
+    let owner = crate::onboarding::env_owner(&env)
+        .or_else(|| {
+            let owner = worker_profile.owner.clone()?;
+            (!owner.trim().is_empty()).then_some(owner)
+        })
+        .unwrap_or_else(|| "orchestrator".to_string());
+    let node_name = if !worker_profile.address.trim().is_empty() {
+        worker_profile.address.trim().to_string()
+    } else {
+        worker_profile.name.clone()
+    };
+    let link = Link::connect(LinkConfig::new(&link_dir))
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "could not bring up the host link at {} ({e}) — enroll this machine first",
+                link_dir.display()
+            )
+        })?;
+    let transport = LinkBridge::single_peer(Arc::new(link), node_name, owner.clone())
+        .map_err(|e| anyhow::anyhow!("host link is misconfigured: {e}"))?;
+    let agent_id = transport.address().to_string();
 
     // Pairing hand-off. Adding this worker to an orchestrator needs exactly one
     // string to travel — this address — and the machine printing it is usually
@@ -241,30 +218,31 @@ pub async fn run_daemon(
             let _ = out.write_all(escape.as_bytes());
             let _ = out.flush();
         }
-        // The handle is only offered when onboarding actually registered it.
-        // `--handle` is read inside the onboard block, so under `--no-onboard`
-        // it names something no directory resolves — and "type @build-box on the
-        // orchestrator" would be advice that silently fails. The address itself
-        // stays valid either way: `--no-onboard` is for a daemon whose keys were
-        // published on an earlier run.
         eprint!(
             "{}",
-            super::pairing::pairing_banner(
-                &agent_id,
-                onboarded.then_some(handle.as_deref()).flatten(),
-                handoff.is_some()
-            )
+            super::pairing::pairing_banner(&agent_id, None, handoff.is_some())
         );
     }
 
-    // Runtime + transport-backed send.
+    // Runtime + link-backed send.
     let send: SendFn = {
         let transport = transport.clone();
         Arc::new(move |to: String, body: String| {
             let transport = transport.clone();
             Box::pin(async move {
-                if let Err(err) = transport.send(&to, &body).await {
-                    eprintln!("medulla daemon: send to {to} failed: {err}");
+                loop {
+                    match transport.send(&to, &body).await {
+                        Ok(()) => break,
+                        Err(err) if err.starts_with("link queue overflow:") => {
+                            // QueueOverflow is explicitly retryable: retain the
+                            // frame until peer acknowledgements free history.
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                        Err(err) => {
+                            eprintln!("medulla daemon: send to {to} failed: {err}");
+                            break;
+                        }
+                    }
                 }
             })
         })
@@ -338,38 +316,20 @@ pub async fn run_daemon(
     let runtime = DaemonRuntime::new(config, run_task, send)
         .with_log(Arc::new(|line: &str| eprintln!("medulla daemon: {line}")));
 
-    // Contact auto-accept + presence run unlocked (pure REST, no ratchet).
-    let accepter = spawn_contact_auto_accepter(
-        client.clone(),
-        std::time::Duration::from_millis(poll_ms),
-        |_agent_id: &str| true,
-    );
-    let presence =
-        spawn_presence_heartbeat(client.clone(), std::time::Duration::from_millis(poll_ms));
-
-    // Best-effort push channel: it only shortens the wait between a peer
-    // sending and the serve loop looking, so a failure to open it costs latency
-    // and nothing else. Held to the end of the run; dropping it closes the
-    // socket and reverts to fetching.
-    let _push = crate::daemon::listener::ws_inbox_enabled(&env).then(|| {
-        transport.spawn_inbox_listener(Some(Arc::new(|line: &str| {
-            eprintln!("medulla daemon: {line}")
-        })))
-    });
-
     if once {
-        // Probe hook: accept pending contacts, drain the inbox once, wait for
-        // every started task to settle, then exit.
+        // Probe hook: drain the inbox once, wait for every started task to
+        // settle, then exit.
+        transport
+            .wait_for_inbox(tokio::time::Duration::from_millis(poll_ms))
+            .await;
         drain_once(&transport, &runtime).await;
         runtime.idle().await;
-        accepter.abort();
-        presence.abort();
         log("--once complete");
         return Ok(());
     }
 
     log(&format!(
-        "serving providers [{}] as {agent_id} on {base_url} (workspace: {workspace})",
+        "serving providers [{}] as {agent_id} for {owner} (workspace: {workspace})",
         providers
             .iter()
             .map(|p| p.as_str())
@@ -380,33 +340,15 @@ pub async fn run_daemon(
     // Serve loop: poll → decode → dispatch, until a signal.
     let poll = tokio::time::Duration::from_millis(poll_ms);
     let mut sigterm = signal_stream()?;
-    // Periodic key maintenance. As the responder, this worker's one-time pre-key
-    // pool is consumed one key per new peer handshake; without a refill a
-    // long-lived daemon eventually runs dry and can no longer complete X3DH.
-    // `publish_keys` is health-gated (idempotent), so this is a no-op until the
-    // relay pool actually runs low. The immediate first tick is consumed here
-    // because we already published at startup.
-    let mut maintain = tokio::time::interval(KEY_MAINTAIN_INTERVAL);
-    // `interval` defaults to `Burst`, which would fire every tick missed while the
-    // host slept (or while a slow publish held the loop) back-to-back, starving
-    // inbox processing with a run of redundant health calls. Maintenance has no
-    // backlog worth replaying — one pass at the next tick is enough.
-    maintain.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    maintain.tick().await;
     loop {
         tokio::select! {
             _ = &mut sigterm => {
                 log("received shutdown signal, shutting down");
                 break;
             }
-            _ = maintain.tick() => {
-                if let Err(e) = transport.publish_keys(&signer).await {
-                    log(&format!("periodic key maintenance failed: {e}"));
-                }
-            }
-            // Returns early when the relay's push channel delivers, so a task
-            // frame is picked up at about a round trip rather than up to a poll
-            // interval later. The interval stays the correctness floor.
+            // Returns early when the link's pump delivers, so a task frame is
+            // picked up at about a round trip rather than up to a poll interval
+            // later. The interval stays the correctness floor.
             _ = transport.wait_for_inbox(poll) => {
                 for message in transport.drain_inbox(50).await {
                     let frame = decode_task_frame(&message.text);
@@ -417,99 +359,15 @@ pub async fn run_daemon(
     }
 
     runtime.shutdown();
-    accepter.abort();
-    presence.abort();
     Ok(())
 }
 
-/// Accept pending contacts and dispatch one inbox drain (the `--once` probe path).
-async fn drain_once(transport: &SignalTransport, runtime: &DaemonRuntime) {
+/// Dispatch one inbox drain (the `--once` probe path).
+async fn drain_once(transport: &LinkBridge, runtime: &DaemonRuntime) {
     for message in transport.drain_inbox(50).await {
-        let frame = crate::tinyplace::decode_task_frame(&message.text);
+        let frame = crate::protocol::decode_task_frame(&message.text);
         runtime.handle_message(message.from, message.text, frame);
     }
-}
-
-/// Publish pre-keys, best-effort claim the handle, and upsert the directory card.
-#[allow(clippy::too_many_arguments)]
-async fn onboard(
-    transport: &SignalTransport,
-    signer: &LocalSigner,
-    directory: &DirectoryApi,
-    agent_id: &str,
-    handle: Option<&str>,
-    display_name: Option<&str>,
-    bio: &str,
-    skills: &[String],
-    client: &TinyPlaceClient,
-    log: impl Fn(&str),
-) {
-    // Publish Signal pre-keys (required for peers to message us).
-    match transport.publish_keys(signer).await {
-        Ok(()) => log("published Signal pre-keys"),
-        Err(err) => log(&format!("pre-key publish failed: {err}")),
-    }
-
-    // Claim the handle (best-effort; needs funds).
-    if let Some(handle) = handle {
-        let result = client
-            .registry
-            .register(RegisterRequest {
-                username: handle.to_string(),
-                crypto_id: agent_id.to_string(),
-                ..Default::default()
-            })
-            .await;
-        match result {
-            Ok(_) => log(&format!("registered handle {handle}")),
-            Err(err) => log(&format!(
-                "handle registration skipped: {}",
-                describe_error(&err)
-            )),
-        }
-    }
-
-    // Upsert the directory card (best-effort). AgentCard has no Default, so
-    // build it from JSON with only the fields we set (the rest default).
-    let name = display_name
-        .map(str::to_string)
-        .or_else(|| handle.map(str::to_string))
-        .unwrap_or_else(|| "coding-agent daemon".to_string());
-    // `createdAt`/`updatedAt` are required by the card contract and always
-    // serialized (they are plain `String`s, so a default empty value still goes
-    // on the wire and the directory rejects it while parsing RFC 3339). Stamp
-    // both with the SDK's own timestamp helper — the same one `messages.send`
-    // uses — rather than letting them default.
-    let now = ::tinyplace::auth::timestamp();
-    // The directory checks that `publicKey` derives `cryptoId` and rejects the
-    // card otherwise. They are two encodings of the same Ed25519 public key:
-    // `cryptoId` is its base58 (the agent id), `publicKey` its base64.
-    let public_key = ::tinyplace::crypto::public_key_to_base64(signer.public_key());
-    let card: AgentCard = serde_json::from_value(serde_json::json!({
-        "agentId": agent_id,
-        "name": name,
-        "description": bio,
-        "username": handle,
-        "cryptoId": agent_id,
-        "publicKey": public_key,
-        "skills": skills,
-        "createdAt": now,
-        "updatedAt": now,
-    }))
-    .expect("AgentCard JSON is well-formed");
-    match directory.upsert_agent(agent_id, &card).await {
-        Ok(_) => log("upserted directory card"),
-        Err(err) => log(&format!(
-            "directory upsert skipped: {}",
-            describe_error(&err)
-        )),
-    }
-}
-
-/// Retain only the first occurrence of each value, preserving order.
-fn dedupe(values: &mut Vec<String>) {
-    let mut seen = HashSet::new();
-    values.retain(|value| seen.insert(value.clone()));
 }
 
 /// A future that resolves on SIGINT/SIGTERM (Unix) or Ctrl-C (elsewhere).

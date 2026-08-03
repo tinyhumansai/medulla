@@ -19,7 +19,7 @@ use std::time::Duration;
 use medulla::bridge::{Bridge, LocalBridge, LocalBridgeNetwork};
 use medulla::daemon::embedded::{EmbeddedDaemon, EmbeddedDaemonOptions};
 use medulla::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
-use medulla::tinyplace::{
+use medulla::protocol::{
     decode_task_frame, encode_task_frame, parse_agent_capabilities, EncodeFrameInput, TaskFrame,
     TaskFrameKind,
 };

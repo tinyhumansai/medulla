@@ -142,7 +142,9 @@ fn add_host_shows_the_line_to_run_on_the_machine_being_added() {
     // The page is a procedure, not a definition: both halves of the pairing and
     // the two keys that drive them.
     assert!(out.contains("On the machine you want to add"), "{out}");
-    assert!(out.contains("medulla daemon"), "{out}");
+    // The long install command may wrap between the executable and subcommand.
+    assert!(out.contains("command -v medulla"), "{out}");
+    assert!(out.contains("daemon"), "{out}");
     assert!(out.contains("Back here"), "{out}");
     assert!(out.contains("c copy the install line"), "{out}");
 }

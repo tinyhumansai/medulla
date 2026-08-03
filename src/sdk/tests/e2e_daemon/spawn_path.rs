@@ -309,7 +309,7 @@ async fn capabilities_result_advertises_budget_and_readiness() {
         .iter()
         .find(|b| b.provider == HarnessProvider::Claude)
         .expect("claude budget advertised");
-    assert_eq!(budget.source, medulla::tinyplace::BudgetSource::Estimate);
+    assert_eq!(budget.source, medulla::protocol::BudgetSource::Estimate);
     assert!(budget.limit_tokens.is_none());
     assert!(budget.remaining_tokens.is_none());
     assert!(

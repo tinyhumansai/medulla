@@ -35,9 +35,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # The workspace's vendored path deps all live under vendor/openhuman/vendor/*
-# now (see docs/vendoring.md). src/ carries both member crates (src/sdk,
-# src/tui) including their tests/ and examples/ trees — the examples pull
-# src/sdk/tests/support/ via #[path], so it must be present.
+# now (see docs/vendoring.md). src/ carries every member crate (src/sdk,
+# src/tui, src/link) including their tests/ and examples/ trees.
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY vendor ./vendor
@@ -49,7 +48,7 @@ COPY vendor ./vendor
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release \
     --bin medulla \
-    --example mock_signal_server \
+    --example mock_link_forwarder \
     --example coordination_owner
 
 # ---------------------------------------------------------------------------
@@ -85,7 +84,7 @@ RUN set -eux; \
 
 # Prebuilt binaries from the build stage, onto PATH.
 COPY --from=build /build/target/release/medulla                      /usr/local/bin/medulla
-COPY --from=build /build/target/release/examples/mock_signal_server  /usr/local/bin/mock_signal_server
+COPY --from=build /build/target/release/examples/mock_link_forwarder /usr/local/bin/mock_link_forwarder
 COPY --from=build /build/target/release/examples/coordination_owner  /usr/local/bin/coordination_owner
 
 # The harness scripts (run.sh, mock_llm.py, opencode.json).
@@ -94,7 +93,7 @@ COPY e2e/coordination /app/e2e/coordination
 
 # Hand run.sh its prebuilt binaries so it never shells out to cargo.
 ENV MEDULLA_BIN=/usr/local/bin/medulla \
-    MOCK_SIGNAL_BIN=/usr/local/bin/mock_signal_server \
+    FORWARDER_BIN=/usr/local/bin/mock_link_forwarder \
     OWNER_BIN=/usr/local/bin/coordination_owner \
     OPENCODE_BIN=/usr/local/bin/opencode \
     OPENCODE_DISABLE_AUTOUPDATE=1 \

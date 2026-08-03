@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 # Shared boot/teardown/assertion helpers for the medulla coordination e2e harness.
 #
-# Both the happy-path driver (`run.sh`) and the multi-scenario suite (`tests.sh`)
-# source this file. It owns the real-process stack under tmux:
+# Both the happy-path driver (`run.sh`) and the scenario suites (`tests.sh`,
+# `tests_multi.sh`) source this file. It owns the real-process stack under tmux:
 #
-#   mock tiny.place Signal server → `medulla daemon --providers opencode`
-#     → real `opencode` CLI → mock OpenAI-compatible LLM
+#   mock link forwarder (blind UDP, docs/host-link-protocol.md §5)
+#     → owner driver (long-lived, one per enrolled pair)
+#     → `medulla daemon --providers opencode`
+#       → real `opencode` CLI → mock OpenAI-compatible LLM
 #
 # Callers set SCRIPT_DIR + SDK_DIR (this file lives next to run.sh/tests.sh),
-# then call `e2e_init`, `boot_signal`, `boot_llm`, `boot_daemon`, run owner legs
-# via `run_owner`, and rely on the EXIT trap installed here for cleanup.
+# then call `e2e_init`, `boot_forwarder <name>…`, `boot_llm`, `boot_daemon`, run
+# owner legs via `run_owner`, and rely on the EXIT trap installed here.
 #
-# All state lands in the shared globals RUN_DIR / SESSION / SIGNAL_URL /
+# Enrollment (protocol §7) happens up front, before anything boots: for each
+# name, `coordination_owner --enroll` mints one orchestrator/host pair — a pair
+# key, two node ids and two forwarder keys — and writes a `node.json` for each
+# end. The forwarder is then seeded with the two *forwarder* keys, which is all a
+# blind forwarder is ever given; it never sees a pair key and cannot read a
+# payload.
+#
+# All state lands in the shared globals RUN_DIR / SESSION / FORWARDER_ADDR /
 # LLM_PORT / OC_CONFIG / WORKER_ID. Loopback only; deterministic; no real keys.
 
 # ── logging + diagnostics ───────────────────────────────────────────────────
@@ -77,15 +86,15 @@ resolve_binaries() {
   OPENCODE_DIR="$(cd "$(dirname "$OPENCODE_BIN")" && pwd)"
   log "opencode: $OPENCODE_BIN ($("$OPENCODE_BIN" --version 2>/dev/null | head -1))"
 
-  if [ -z "${MEDULLA_BIN:-}" ] || [ -z "${MOCK_SIGNAL_BIN:-}" ] || [ -z "${OWNER_BIN:-}" ]; then
+  if [ -z "${MEDULLA_BIN:-}" ] || [ -z "${FORWARDER_BIN:-}" ] || [ -z "${OWNER_BIN:-}" ]; then
     log "building medulla + examples (release)…"
     ( cd "$SDK_DIR" && cargo build --release --bin medulla \
-        --example mock_signal_server --example coordination_owner >&2 )
+        --example mock_link_forwarder --example coordination_owner >&2 )
     MEDULLA_BIN="${MEDULLA_BIN:-$SDK_DIR/target/release/medulla}"
-    MOCK_SIGNAL_BIN="${MOCK_SIGNAL_BIN:-$SDK_DIR/target/release/examples/mock_signal_server}"
+    FORWARDER_BIN="${FORWARDER_BIN:-$SDK_DIR/target/release/examples/mock_link_forwarder}"
     OWNER_BIN="${OWNER_BIN:-$SDK_DIR/target/release/examples/coordination_owner}"
   fi
-  for b in "$MEDULLA_BIN" "$MOCK_SIGNAL_BIN" "$OWNER_BIN"; do
+  for b in "$MEDULLA_BIN" "$FORWARDER_BIN" "$OWNER_BIN"; do
     [ -x "$b" ] || fail "missing binary: $b"
   done
   PYTHON_BIN="${PYTHON_BIN:-$(command -v python3)}"
@@ -102,7 +111,7 @@ e2e_init() {
   : "${RUN_DIR:=$(mktemp -d "${TMPDIR:-/tmp}/medulla-e2e-XXXXXX")}"
   trap cleanup EXIT
   resolve_binaries
-  mkdir -p "$RUN_DIR"/{ochome,mhome,work,tp}
+  mkdir -p "$RUN_DIR"/{ochome,work}
   # opencode's snapshot feature misbehaves in a non-git cwd (upstream #31382):
   # `opencode run` can produce no output at all. The config sets snapshot:false;
   # a git repo in the workdir is belt-and-braces for when git is present.
@@ -159,16 +168,106 @@ launch() {
     "bash $(printf %q "$script") > $(printf %q "$RUN_DIR/$name.log") 2>&1; echo \$? > $(printf %q "$RUN_DIR/$name.rc")" C-m
 }
 
-# Boot the mock tiny.place Signal server; sets SIGNAL_URL.
-boot_signal() {
-  launch signal <<EOF
-export MOCK_SIGNAL_PORT=0
-exec $(printf %q "$MOCK_SIGNAL_BIN")
+# Echo a free UDP port on loopback.
+#
+# The forwarder's address has to be known *before* it starts, because it is
+# written into every node.json at enrollment (protocol §7.3) and the daemon has
+# no flag to override it. So the port is picked here, released, and rebound by
+# the forwarder a moment later; if something takes it in between, the forwarder
+# fails to bind and the run stops loudly rather than pointing endpoints at
+# nothing.
+free_port() {
+  "$PYTHON_BIN" - <<'PY'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
+# Enroll one orchestrator/host pair for NAME (protocol §7).
+#
+# Writes `$RUN_DIR/mhome-<name>/e2e/link/node.json` (the host, which the daemon
+# opens) and `$RUN_DIR/owner-<name>/link/node.json` (its orchestrator), and sets:
+#
+# `MEDULLA_HOME` names the install *root*, and a medulla home is
+# `<root>/<account>` — so the host identity goes under the account the daemon is
+# launched with (`MEDULLA_USER=e2e`), not directly under the root.
+#
+#   HOST_NODE_ID_<name>   the worker's wire id — what an owner leg's --to takes
+#   OWNER_NODE_ID_<name>  the orchestrator's wire id
+#   OWNER_FOR_<host id>   reverse lookup used by start_owner to pick a queue
+#   HOST_FOR_<owner id>   reverse lookup used by the delivery assertion
+#   FORWARDER_NODES       accumulated --node specs for the forwarder's table
+enroll_pair() {
+  local name="$1" out
+  mkdir -p "$RUN_DIR/mhome-$name/e2e" "$RUN_DIR/owner-$name" "$RUN_DIR/queue-$name"
+  out="$("$OWNER_BIN" --enroll \
+    --state-dir "$RUN_DIR/owner-$name/link" \
+    --host-state-dir "$RUN_DIR/mhome-$name/e2e/link" \
+    --forwarder "$FORWARDER_ADDR" 2>"$RUN_DIR/enroll-$name.log")" \
+    || fail "enrollment for '$name' failed (see enroll-$name.log)"
+
+  local owner_id owner_key host_id host_key
+  owner_id="$(printf '%s\n' "$out" | sed -n 's/^OWNER_NODE_ID=//p')"
+  owner_key="$(printf '%s\n' "$out" | sed -n 's/^OWNER_FORWARDER_KEY=//p')"
+  host_id="$(printf '%s\n' "$out" | sed -n 's/^HOST_NODE_ID=//p')"
+  host_key="$(printf '%s\n' "$out" | sed -n 's/^HOST_FORWARDER_KEY=//p')"
+  [ -n "$owner_id" ] && [ -n "$host_id" ] || fail "enrollment for '$name' printed no node ids"
+
+  printf -v "HOST_NODE_ID_$name" '%s' "$host_id"
+  printf -v "OWNER_NODE_ID_$name" '%s' "$owner_id"
+  printf -v "OWNER_FOR_$host_id" '%s' "$name"
+  printf -v "HOST_FOR_$owner_id" '%s' "$host_id"
+  # One team for the whole harness: §5 rule 6's cross-team drop is a forwarder
+  # unit test, not something a green fleet run should be exercising.
+  FORWARDER_NODES+=("--node" "$owner_id:$owner_key:e2e" "--node" "$host_id:$host_key:e2e")
+  log "enrolled '$name': host=$host_id owner=$owner_id"
+}
+
+# Boot the mock link forwarder and one owner driver per enrolled pair.
+#   boot_forwarder <name>…
+#
+# Sets FORWARDER_ADDR. Every name given is enrolled first (the forwarder's node
+# table is fixed at boot), then the forwarder starts, then one long-lived
+# `coordination_owner --serve` per name.
+boot_forwarder() {
+  local port name
+  port="$(free_port)"
+  FORWARDER_ADDR="127.0.0.1:$port"
+  FORWARDER_NODES=()
+  for name in "$@"; do enroll_pair "$name"; done
+
+  local args="" a
+  for a in "${FORWARDER_NODES[@]}"; do args+=" $(printf %q "$a")"; done
+  launch forwarder <<EOF
+exec $(printf %q "$FORWARDER_BIN") --bind $(printf %q "$FORWARDER_ADDR")$args
 EOF
-  wait_for_regex "$RUN_DIR/signal.log" 'listening on http://127\.0\.0\.1:[0-9]+' 30 \
-    || fail "mock signal server did not start"
-  SIGNAL_URL="$(grep -Eo 'http://127\.0\.0\.1:[0-9]+' "$RUN_DIR/signal.log" | head -1)"
-  log "signal server: $SIGNAL_URL"
+  wait_for_regex "$RUN_DIR/forwarder.log" 'listening on 127\.0\.0\.1:[0-9]+' 30 \
+    || fail "mock link forwarder did not start on $FORWARDER_ADDR"
+  log "forwarder: $FORWARDER_ADDR"
+
+  for name in "$@"; do boot_owner "$name"; done
+}
+
+# Boot the long-lived owner driver for NAME.
+#
+# One process per enrolled pair, kept up for the whole suite. That is a
+# requirement, not a shortcut: SSP state lives in memory, so an owner that exited
+# between legs would come back at state 0 while the daemon still held state n,
+# and neither side's diffs would apply again (see the example's module docs).
+boot_owner() {
+  local name="$1"
+  launch "owner-$name" <<EOF
+exec $(printf %q "$OWNER_BIN") \
+  --state-dir $(printf %q "$RUN_DIR/owner-$name/link") \
+  --forwarder $(printf %q "$FORWARDER_ADDR") \
+  --serve $(printf %q "$RUN_DIR/queue-$name") \
+  --results $(printf %q "$RUN_DIR")
+EOF
+  wait_for_regex "$RUN_DIR/owner-$name.log" 'coordination_owner serving ' 30 \
+    || fail "owner driver for '$name' did not start"
 }
 
 # Boot the mock LLM; sets LLM_PORT and writes OC_CONFIG. Any extra args are
@@ -192,39 +291,49 @@ EOF
 # Boot one medulla daemon under a caller-chosen NAME.
 #   boot_daemon_named <name> <workspace-dir> [extra-daemon-flags]
 #
-# NAME must be a bash-identifier-safe token; it names the tmux window, the log
-# file, and the `WORKER_ID_<NAME>` global holding the scraped agent id (read it
-# via `worker_id <name>`). Each daemon gets its own MEDULLA_HOME, TINYPLACE_CONFIG
-# (so it onboards as a *distinct* tiny.place identity) and opencode HOME, which
-# is what lets several run against one Signal server without colliding.
+# NAME must be a bash-identifier-safe token and must already be enrolled (see
+# `boot_forwarder`); it names the tmux window, the log file, and the
+# `WORKER_NAME_<NAME>` global holding the label the daemon advertises. Each
+# daemon gets its own MEDULLA_HOME — which is where its link identity lives, so
+# each is a *distinct enrolled host* — plus its own opencode HOME.
 #
-# The mock LLM and Signal server are shared: those are the fixtures under test.
+# The mock LLM and the forwarder are shared: those are the fixtures under test.
 boot_daemon_named() {
   local name="$1" workspace="$2" extra_flags="${3:-}"
-  mkdir -p "$RUN_DIR/ochome-$name" "$RUN_DIR/mhome-$name" "$RUN_DIR/tp-$name"
+  local host_var="HOST_NODE_ID_$name"
+  [ -n "${!host_var:-}" ] || fail "daemon '$name' was never enrolled — call boot_forwarder $name"
+  mkdir -p "$RUN_DIR/ochome-$name"
   launch "$name" <<EOF
 export HOME=$(printf %q "$RUN_DIR/ochome-$name")
 export OPENCODE_CONFIG=$(printf %q "$OC_CONFIG")
 export OPENCODE_DISABLE_AUTOUPDATE=1
 export PATH=$(printf %q "$OPENCODE_DIR"):\$PATH
-export TINYPLACE_ENDPOINT=$(printf %q "$SIGNAL_URL")
-export TINYPLACE_CONFIG=$(printf %q "$RUN_DIR/tp-$name/config.json")
 export MEDULLA_HOME=$(printf %q "$RUN_DIR/mhome-$name")
-exec $(printf %q "$MEDULLA_BIN") daemon --providers opencode \
+export MEDULLA_USER=e2e
+export MEDULLA_LINK_OWNER=$(printf %q "orchestrator-$name")
+exec $(printf %q "$MEDULLA_BIN") daemon --providers opencode --no-pair \
+  --name $(printf %q "worker-$name") \
   --workspace $(printf %q "$workspace") --poll-ms 500 $extra_flags
 EOF
-  wait_for_regex "$RUN_DIR/$name.log" 'serving providers .* as .* on ' 90 \
+  wait_for_regex "$RUN_DIR/$name.log" 'serving providers .* as .* for ' 90 \
     || fail "medulla daemon '$name' did not reach the serving state"
-  local id
-  id="$(grep -Eo 'as [^ ]+ on ' "$RUN_DIR/$name.log" | head -1 | awk '{print $2}')"
-  [ -n "$id" ] || fail "could not scrape worker agent id from $name.log"
-  printf -v "WORKER_ID_$name" '%s' "$id"
-  log "daemon '$name' worker id: $id  workspace: $workspace"
+  local label
+  label="$(grep -Eo 'as [^ ]+ for ' "$RUN_DIR/$name.log" | head -1 | awk '{print $2}')"
+  [ -n "$label" ] || fail "could not scrape the advertised worker name from $name.log"
+  printf -v "WORKER_NAME_$name" '%s' "$label"
+  log "daemon '$name' node=${!host_var} advertises '$label'  workspace: $workspace"
 }
 
-# Echo the worker agent id registered by `boot_daemon_named <name>`.
+# Echo the worker *node id* of the pair enrolled for NAME — what an owner leg
+# addresses with --to (protocol §2: only the id ever travels on the wire).
 worker_id() {
-  local var="WORKER_ID_$1"
+  local var="HOST_NODE_ID_$1"
+  printf '%s' "${!var:-}"
+}
+
+# Echo the name the daemon advertises for NAME (scraped from its serving line).
+worker_name() {
+  local var="WORKER_NAME_$1"
   printf '%s' "${!var:-}"
 }
 
@@ -237,31 +346,64 @@ boot_daemon() {
   WORKER_ID="$(worker_id daemon)"
 }
 
-# Start an owner leg in its own tmux window and return immediately. Usage:
+# Echo the request-queue directory of the owner enrolled with a leg's `--to`.
+queue_for_leg() {
+  local to="" a prev=""
+  for a in "$@"; do
+    if [ "$prev" = "--to" ]; then to="$a"; break; fi
+    prev="$a"
+  done
+  [ -n "$to" ] || fail "owner leg has no --to <worker node id>"
+  local var="OWNER_FOR_$to"
+  local name="${!var:-}"
+  [ -n "$name" ] || fail "no enrolled owner for worker node $to"
+  printf '%s' "$RUN_DIR/queue-$name"
+}
+
+# Start an owner leg and return immediately. Usage:
 #   start_owner <label> <owner-arg>...
-# Pair with `await_owner <label>`. Splitting start from await is what lets a
-# scenario run several owner legs concurrently, or interfere with the stack
+#
+# The leg is a request file dropped into the queue of the owner driver enrolled
+# with the `--to` worker: one argument per line, written under a temporary name
+# and renamed into place so the driver never reads a half-written request. Pair
+# with `await_owner <label>`. Splitting start from await is what lets a scenario
+# run legs against several workers concurrently, or interfere with the stack
 # (e.g. kill a daemon) while a leg is still in flight.
 start_owner() {
   local label="$1"; shift
-  local args=""
-  local a
-  for a in "$@"; do args+=" $(printf %q "$a")"; done
-  launch "$label" <<EOF
-exec $(printf %q "$OWNER_BIN")$args
-EOF
+  local queue; queue="$(queue_for_leg "$@")"
+  rm -f "$RUN_DIR/$label.rc" "$RUN_DIR/$label.json"
+  printf '%s\n' "$@" > "$queue/$label.pending"
+  mv "$queue/$label.pending" "$queue/$label.req"
 }
 
-# Wait for a started owner leg to finish. Writes the terminal frame JSON to
-# RUN_DIR/<label>.json and sets OWNER_RC to the owner exit code. Never fails the
-# suite itself (the caller asserts on the JSON / rc), so error-path scenarios can
-# inspect the outcome. Pass a TIMEOUT (seconds, default 220) to bound the wait.
+# Ask the owner driver enrolled for NAME to rebuild its link, dispatching
+# nothing.
+#
+# Call this between killing a host and starting its replacement. The restarted
+# host comes back with empty SSP state, and a frame the old session was still
+# retransmitting would land on it and leave the two ends numbering from different
+# origins — so the orchestrator's side is torn down while nothing is listening.
+reset_owner_link() {
+  local name="$1"
+  local label="reset-$name-$RANDOM"
+  rm -f "$RUN_DIR/$label.rc"
+  printf '%s\n' --reset-only > "$RUN_DIR/queue-$name/$label.pending"
+  mv "$RUN_DIR/queue-$name/$label.pending" "$RUN_DIR/queue-$name/$label.req"
+  wait_for_regex "$RUN_DIR/$label.rc" '.' 60 || fail "owner '$name' did not rebuild its link"
+  log "owner '$name' rebuilt its link"
+}
+
+# Wait for a started owner leg to finish. The driver writes RUN_DIR/<label>.json
+# (the terminal frame) before RUN_DIR/<label>.rc (the exit code), so an rc that
+# exists means both are complete. Sets OWNER_RC. Never fails the suite itself
+# (the caller asserts on the JSON / rc), so error-path scenarios can inspect the
+# outcome. Pass a TIMEOUT (seconds, default 220) to bound the wait.
 await_owner() {
   local label="$1" timeout="${2:-220}"
   wait_for_regex "$RUN_DIR/$label.rc" '.' "$timeout" \
     || fail "owner leg '$label' did not finish within ${timeout}s"
-  OWNER_RC="$(cat "$RUN_DIR/$label.rc")"
-  grep -E '^\{.*"kind"' "$RUN_DIR/$label.log" | tail -1 > "$RUN_DIR/$label.json" || true
+  OWNER_RC="$(tr -d '[:space:]' < "$RUN_DIR/$label.rc")"
 }
 
 # Wait for an owner leg, tolerating non-completion. Sets OWNER_RC to the exit
@@ -270,12 +412,11 @@ await_owner() {
 await_owner_maybe() {
   local label="$1" timeout="${2:-60}"
   if wait_for_regex "$RUN_DIR/$label.rc" '.' "$timeout"; then
-    OWNER_RC="$(cat "$RUN_DIR/$label.rc")"
+    OWNER_RC="$(tr -d '[:space:]' < "$RUN_DIR/$label.rc")"
   else
     # shellcheck disable=SC2034  # read by the sourcing scenario scripts
     OWNER_RC=""
   fi
-  grep -E '^\{.*"kind"' "$RUN_DIR/$label.log" | tail -1 > "$RUN_DIR/$label.json" || true
 }
 
 # Run an owner leg to completion. Usage:
@@ -287,30 +428,37 @@ run_owner() {
 }
 
 # Hard-kill a named daemon's tmux window, simulating an agent crash. The daemon
-# holds no listening socket, so killing the window is a faithful stand-in for the
-# process dying: the Signal relay simply stops being drained by that identity.
+# holds no listening socket of its own, so killing the window is a faithful
+# stand-in for the process dying: its side of the link stops answering and the
+# forwarder's binding for it goes stale.
 kill_daemon() {
   local name="$1"
   tmux kill-window -t "$SESSION:$name" 2>/dev/null || true
   log "killed daemon '$name'"
 }
 
-# Confirm bidirectional encrypted delivery via the Signal /debug/stored surface.
+# Confirm delivery in BOTH directions across the forwarder, for the pair that
+# produced a terminal-frame JSON.
+#
+# The forwarder logs one line per datagram it moved, carrying only what a blind
+# forwarder is entitled to see: source, destination, sequence, size, and whether
+# the datagram was a heartbeat. That is enough to prove traffic crossed in each
+# direction and no more — it cannot tell a task frame from an acknowledgement,
+# which is the property the whole design rests on.
 assert_bidirectional_delivery() {
   local json="$1"
-  local owner_id to_worker to_owner
+  local owner_id host_id to_worker to_owner
   owner_id="$(grep -Eo '"ownerId"[[:space:]]*:[[:space:]]*"[^"]+"' "$json" \
     | sed -E 's/.*"ownerId"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$owner_id" ] || fail "could not read ownerId from $json"
-  # `|| fail` so a dead server / malformed JSON goes through dump_diagnostics
-  # instead of dying on a raw errexit pipeline failure.
-  to_worker="$(curl -s "$SIGNAL_URL/debug/stored?to=$WORKER_ID" | "$PYTHON_BIN" -c 'import sys,json;print(json.load(sys.stdin)["count"])')" \
-    || fail "could not read stored-envelope count for the worker from $SIGNAL_URL"
-  to_owner="$(curl -s "$SIGNAL_URL/debug/stored?to=$owner_id" | "$PYTHON_BIN" -c 'import sys,json;print(json.load(sys.stdin)["count"])')" \
-    || fail "could not read stored-envelope count for the owner from $SIGNAL_URL"
-  [ "${to_worker:-0}" -ge 1 ] || fail "no envelopes stored for the worker (owner→worker leg)"
-  [ "${to_owner:-0}" -ge 1 ]  || fail "no envelopes stored for the owner (worker→owner leg)"
-  log "  envelopes: owner→worker=$to_worker  worker→owner=$to_owner"
+  local var="HOST_FOR_$owner_id"
+  host_id="${!var:-}"
+  [ -n "$host_id" ] || fail "no enrolled host for owner node $owner_id"
+  to_worker="$(grep -c "forward src=$owner_id dst=$host_id .*kind=state" "$RUN_DIR/forwarder.log" || true)"
+  to_owner="$(grep -c "forward src=$host_id dst=$owner_id .*kind=state" "$RUN_DIR/forwarder.log" || true)"
+  [ "${to_worker:-0}" -ge 1 ] || fail "no state datagrams forwarded owner→worker"
+  [ "${to_owner:-0}" -ge 1 ]  || fail "no state datagrams forwarded worker→owner"
+  log "  datagrams: owner→worker=$to_worker  worker→owner=$to_owner"
 }
 
 # Drive a real interactive opencode TUI in its own tmux pane against the mock

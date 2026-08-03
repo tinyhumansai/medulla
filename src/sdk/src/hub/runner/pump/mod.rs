@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::tinyplace::{
+use crate::protocol::{
     decode_task_frame, parse_agent_capabilities, TaskFrame, TaskFrameKind, TokenUsage,
     WorkerSystemInfo,
 };
@@ -210,10 +210,10 @@ async fn route_screen(
     relay: &dyn Relay,
     screens: &crate::hub::ScreenStore,
     from: &str,
-    message: crate::tinyplace::ScreenMessage,
+    message: crate::protocol::ScreenMessage,
     log: &Option<HubLog>,
 ) {
-    let crate::tinyplace::ScreenMessage::Frame(frame) = message else {
+    let crate::protocol::ScreenMessage::Frame(frame) = message else {
         return;
     };
     let task_id = frame.task_id.clone();
@@ -230,7 +230,7 @@ async fn route_screen(
     // they look back at it.
     let outcome = screens.apply(from, &frame, crate::clock::now_millis());
 
-    if outcome == crate::tinyplace::ApplyOutcome::NeedsResync {
+    if outcome == crate::protocol::ApplyOutcome::NeedsResync {
         // Only ever asked for while watching. A resync request is a *subscribe*,
         // so sending one for a task nobody is watching restarts the stream that
         // was just stopped — which is how an unwatched stream used to come back
@@ -245,7 +245,7 @@ async fn route_screen(
             ));
         }
         let body =
-            crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Subscribe {
+            crate::protocol::encode_screen_message(&crate::protocol::ScreenMessage::Subscribe {
                 task_id,
                 max_fps: DEFAULT_SCREEN_FPS,
                 resync: true,
@@ -279,7 +279,7 @@ pub(super) async fn pump_loop(
         for msg in relay.drain_inbox(DRAIN_LIMIT).await {
             // Screen frames are claimed first — they share this channel with
             // task frames and would otherwise be dropped as unrecognised.
-            if let Some(screen) = crate::tinyplace::parse_screen_message(&msg.text) {
+            if let Some(screen) = crate::protocol::parse_screen_message(&msg.text) {
                 route_screen(relay.as_ref(), &screens, &msg.from, screen, &log).await;
                 continue;
             }

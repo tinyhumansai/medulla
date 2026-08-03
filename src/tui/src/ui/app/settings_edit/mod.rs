@@ -37,10 +37,6 @@ const fn count(min: u32, max: u32, step: u32, fallback: u32) -> SettingKind {
 
 impl App {
     /// The editable rows for the Config subpage, in display order.
-    ///
-    /// The tiny.place row appears only when a `[tinyplace]` section exists —
-    /// offering peer discovery when tiny.place is switched off entirely would
-    /// suggest a setting that does nothing.
     pub(crate) fn config_rows(&self) -> Vec<SettingRow> {
         let mut rows = vec![SettingRow {
             label: "Update check",
@@ -49,15 +45,6 @@ impl App {
             kind: SettingKind::Toggle,
             help: "Check for a newer Medulla release on startup.",
         }];
-        if self.loaded.config.tinyplace.is_some() {
-            rows.push(SettingRow {
-                label: "Auto-discover peers",
-                section: "tinyplace",
-                key: "autoDiscoverPeers",
-                kind: SettingKind::Toggle,
-                help: "Find tiny.place agents automatically instead of only configured peers.",
-            });
-        }
         rows.extend([
             SettingRow {
                 label: "Max passes",
@@ -126,12 +113,6 @@ impl App {
         let cfg = &self.loaded.config;
         match (row.section, row.key) {
             ("update", "check") => SettingValue::Flag(cfg.update.check),
-            ("tinyplace", "autoDiscoverPeers") => SettingValue::Flag(
-                cfg.tinyplace
-                    .as_ref()
-                    .map(|t| t.auto_discover_peers)
-                    .unwrap_or(false),
-            ),
             ("medulla", key) => opt_number(medulla_field(&cfg.medulla, key)),
             ("opencode", "maxConcurrency") => SettingValue::Number(
                 cfg.opencode
@@ -203,11 +184,6 @@ impl App {
         let cfg = &mut self.loaded.config;
         match (row.section, row.key, value) {
             ("update", "check", SettingValue::Flag(on)) => cfg.update.check = on,
-            ("tinyplace", "autoDiscoverPeers", SettingValue::Flag(on)) => {
-                if let Some(tp) = cfg.tinyplace.as_mut() {
-                    tp.auto_discover_peers = on;
-                }
-            }
             ("medulla", key, value) => {
                 let slot = medulla_field_mut(&mut cfg.medulla, key);
                 if let Some(slot) = slot {

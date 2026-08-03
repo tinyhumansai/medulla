@@ -1,6 +1,6 @@
 //! Answering a peer's capability probe from the cached snapshot.
 
-use crate::tinyplace::{AgentCapabilities, CustomHarnessAdvert, TaskFrame, TaskFrameKind};
+use crate::protocol::{AgentCapabilities, CustomHarnessAdvert, TaskFrame, TaskFrameKind};
 
 use super::super::capabilities::{probe_capabilities, ProbeOptions};
 use super::super::providers::Abort;

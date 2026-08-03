@@ -8,10 +8,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use medulla::config::{LoadedConfig, TinyplaceConfig};
+use medulla::config::{LinkConfig, LoadedConfig};
+use medulla::protocol::service::LinkObservation;
 use medulla::runtime::mock::MockRuntime;
-use medulla::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity, WorkerInfo};
-use medulla::tinyplace::service::TinyplaceObservation;
+use medulla::runtime::{AgentDescriptor, AgentPresence, LinkIdentity, WorkerInfo};
 use medulla_tui::ui::app::{App, TABS};
 
 use ratatui::backend::TestBackend;
@@ -29,10 +29,10 @@ fn render(app: &mut App, w: u16, h: u16) -> String {
         .collect()
 }
 
-/// A tiny.place peer descriptor named `id`.
+/// A linked-host peer descriptor named `id`.
 fn peer(id: &str) -> AgentDescriptor {
     let mut metadata = serde_json::Map::new();
-    metadata.insert("harness".into(), serde_json::json!("tinyplace"));
+    metadata.insert("harness".into(), serde_json::json!("link"));
     AgentDescriptor {
         id: id.into(),
         name: id.into(),
@@ -51,7 +51,7 @@ fn peer(id: &str) -> AgentDescriptor {
 fn agents_app(ids: &[&str], online: &[(&str, bool)]) -> App {
     let rt = Arc::new(MockRuntime::empty());
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-    l.config.tinyplace = Some(TinyplaceConfig::default());
+    l.config.link = Some(LinkConfig::default());
     let mut app = App::new(rt, l);
 
     let mut presence = HashMap::new();
@@ -65,12 +65,11 @@ fn agents_app(ids: &[&str], online: &[(&str, bool)]) -> App {
             },
         );
     }
-    app.set_tinyplace_observation(Arc::new(Mutex::new(TinyplaceObservation {
+    app.set_link_observation(Arc::new(Mutex::new(LinkObservation {
         notice: None,
-        identity: Some(TinyplaceIdentity {
-            agent_id: "me".into(),
-            public_key: "pk".into(),
-            handle: Some("@me".into()),
+        identity: Some(LinkIdentity {
+            node_name: "me".into(),
+            forwarder: "forwarder:41641".into(),
         }),
         roster: ids.iter().map(|id| peer(id)).collect(),
         presence,
@@ -127,7 +126,7 @@ fn local_worker(address: &str, label: Option<&str>) -> WorkerInfo {
 }
 
 /// An app on the Agents tab whose *registry* holds `workers` while the snapshot
-/// roster stays empty — the shape of a tiny.place worker added at runtime.
+/// roster stays empty — the shape of a linked host added at runtime.
 fn workers_app(workers: Vec<WorkerInfo>) -> App {
     let rt = MockRuntime::empty();
     rt.set_workers(workers);

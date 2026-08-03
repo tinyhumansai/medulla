@@ -1,6 +1,6 @@
 //! Detecting whether a harness is waiting on the operator.
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::super::dialog::blocking_dialog_for;
 use super::AttentionKind;

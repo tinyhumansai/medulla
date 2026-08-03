@@ -291,7 +291,7 @@ impl SessionManager {
         let provider = request.key.provider;
         let spec = InteractiveSpec {
             provider,
-            bin: crate::tinyplace::env::provider_bin(provider, &self.inner.config.env),
+            bin: crate::protocol::env::provider_bin(provider, &self.inner.config.env),
             cwd: workspace,
             env: self.inner.config.env.clone(),
             model: model.or_else(|| self.inner.config.model.clone()),

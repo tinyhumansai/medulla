@@ -18,7 +18,7 @@ use medulla::control_socket::{
 };
 use medulla::hub::{RunError, TaskOutcome, TaskRequest};
 use medulla::mcp::{backend::ProxyFleet, handle_request, McpSession, ToolMode};
-use medulla::tinyplace::TokenUsage;
+use medulla::protocol::TokenUsage;
 use medulla::workflows::{FileWorkflowStore, WorkflowStore};
 
 /// A fleet that settles every dispatch with a reply, recording what it got.

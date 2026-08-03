@@ -13,7 +13,7 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::types::{RunTaskOptions, RunTaskResult};
 use super::types::FoldState;
@@ -376,7 +376,7 @@ fn agent_for(options: &RunTaskOptions) -> AcpAgent {
         HarnessProvider::Codex => {
             AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/codex-acp@latest"])
         }
-        HarnessProvider::Opencode => AcpAgentConfig::new(crate::tinyplace::env::provider_bin(
+        HarnessProvider::Opencode => AcpAgentConfig::new(crate::protocol::env::provider_bin(
             HarnessProvider::Opencode,
             &options.env,
         ))
@@ -413,7 +413,7 @@ pub(super) fn acp_env(options: &RunTaskOptions) -> HashMap<String, String> {
     let attribution_env = crate::attribution::attribution_env(options.attribution, &env);
     env.extend(attribution_env);
     if let Some(router) = &options.router {
-        let injection = crate::tinyplace::env::router_env(options.provider, router);
+        let injection = crate::protocol::env::router_env(options.provider, router);
         for (key, value) in injection.env {
             env.insert(key, value);
         }

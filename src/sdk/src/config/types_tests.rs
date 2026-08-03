@@ -3,7 +3,7 @@
 //! [`super::core_socket_tests`].
 
 use super::*;
-use crate::tinyplace::BudgetWindow;
+use crate::protocol::BudgetWindow;
 use std::collections::HashMap;
 
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -83,18 +83,18 @@ fn harness_recent_workspaces_round_trip_as_picker_history() {
 }
 
 #[test]
-fn backend_and_tinyplace_parse() {
+fn backend_and_link_parse() {
     let cfg: TuiConfig = serde_json::from_str(
-        r#"{"backend":{"baseUrl":"http://x:1","token":"t"},"tinyplace":{"peers":[{"id":"p1","handle":"@a"}]}}"#,
+        r#"{"backend":{"baseUrl":"http://x:1","token":"t"},"link":{"peers":[{"id":"p1","handle":"@a"}]}}"#,
     )
     .unwrap();
     assert_eq!(cfg.backend.base_url, "http://x:1");
     assert_eq!(cfg.backend.token.as_deref(), Some("t"));
-    let tp = cfg.tinyplace.unwrap();
-    assert_eq!(tp.peers.len(), 1);
-    assert_eq!(tp.peers[0].protocol, "task");
-    // Serde default (no env resolution) is the prod tiny.place URL.
-    assert_eq!(tp.base_url, "https://api.tiny.place");
+    let link = cfg.link.unwrap();
+    assert_eq!(link.peers.len(), 1);
+    assert_eq!(link.peers[0].protocol, "task");
+    // Serde default (no env resolution) is the prod forwarder URL.
+    assert_eq!(link.forwarder_url, "https://api.tiny.place");
 }
 
 #[test]
@@ -105,8 +105,8 @@ fn harness_label() {
         ..Default::default()
     });
     assert_eq!(loaded.harness(), "OPENCODE");
-    loaded.config.tinyplace = Some(TinyplaceConfig::default());
-    assert_eq!(loaded.harness(), "TINYPLACE");
+    loaded.config.link = Some(LinkConfig::default());
+    assert_eq!(loaded.harness(), "LINK");
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn pretty_json_marks_token_set_when_env_present() {
 
 #[test]
 fn harness_defaults_to_worker_without_backends() {
-    // No tinyplace and no opencode → the generic WORKER label.
+    // No link and no opencode → the generic WORKER label.
     let loaded = LoadedConfig::defaults("x".into());
     assert_eq!(loaded.harness(), "WORKER");
 }

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
 
-use crate::daemon::transport::InboundMessage;
+use super::InboundMessage;
 
 use super::Bridge;
 

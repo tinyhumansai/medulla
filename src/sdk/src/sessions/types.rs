@@ -10,7 +10,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// How long a coding-agent session lives, and therefore whose context it carries.
 ///
@@ -116,7 +116,7 @@ impl SessionPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionDriver {
-    /// Turns arrive as `medulla-tinyplace/1` task frames: a `task` frame opens a
+    /// Turns arrive as `medulla-task/1` task frames: a `task` frame opens a
     /// turn, `input` frames steer the in-flight one, and the daemon answers with
     /// `status`/`reply`/`error`.
     Task,
@@ -305,7 +305,7 @@ impl SessionRecord {
 /// [`SessionInput`](super::input::SessionInput) normalization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnOrigin {
-    /// A `medulla-tinyplace/1` task frame from a peer.
+    /// A `medulla-task/1` task frame from a peer.
     Frame {
         /// The frame's cycle-scoped task id.
         task_id: String,

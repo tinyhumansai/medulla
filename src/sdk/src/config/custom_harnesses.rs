@@ -19,7 +19,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::RouterConfig;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// The default environment variable containing an OpenRouter API key.
 pub const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";

@@ -6,7 +6,7 @@ use super::{
     load_custom_harnesses, load_layered_custom_harnesses, CustomHarnessConfig,
     OPENROUTER_ANTHROPIC_URL, OPENROUTER_OPENAI_URL,
 };
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 #[test]
 fn editor_line_builds_a_claude_openrouter_preset() {

@@ -2,7 +2,7 @@
 
 use crate::daemon::providers::RunTaskFn;
 use crate::daemon::DaemonRuntime;
-use crate::tinyplace::{TaskFrameKind, WorkerSystemInfo};
+use crate::protocol::{TaskFrameKind, WorkerSystemInfo};
 
 use super::{base_config, decoded_frames, recording_send, task_frame};
 

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::config::RouterConfig;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// The child environment variable naming the loopback token.
 ///
@@ -69,7 +69,7 @@ pub enum UpstreamShape {
 impl UpstreamShape {
     /// The dialect a harness speaks when routed.
     ///
-    /// Matches [`crate::tinyplace::env::router_env`]'s own provider split: Claude
+    /// Matches [`crate::protocol::env::router_env`]'s own provider split: Claude
     /// Code is given an `ANTHROPIC_BASE_URL`, Codex and OpenCode an
     /// `OPENAI_BASE_URL`. Keeping the two in agreement is what makes a mount
     /// reachable at all.

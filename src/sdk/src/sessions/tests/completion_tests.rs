@@ -333,7 +333,7 @@ fn a_settled_turn_never_stalls() {
 //
 // Shapes taken from real `~/.codex/sessions/**` rollouts; text is synthetic.
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// A codex `event_msg` rollout record.
 fn event_msg(payload: serde_json::Value) -> String {

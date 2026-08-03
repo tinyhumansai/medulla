@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::super::super::pty::PtyManager;
 use super::super::types::{ExecutionMode, WorkerCmd, TAB_CONTACTS, TAB_REQUESTS};
 use super::helpers::{app_with, desk_with, desk_with_contacts, headless_app, key, sh};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 // ------------------------------------------------------------- navigation ---
 

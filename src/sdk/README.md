@@ -1,6 +1,6 @@
 # SDK
 
-The `medulla` library crate: reusable clients, runtimes, orchestration, persistence, tiny.place integration, and UI-facing state shared by Medulla applications.
+The `medulla` library crate: reusable clients, runtimes, orchestration, persistence, host-link integration, and UI-facing state shared by Medulla applications.
 
 ## Contents
 

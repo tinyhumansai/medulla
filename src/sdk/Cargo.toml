@@ -18,7 +18,9 @@ default = ["workflows"]
 workflows = ["dep:tinyflows"]
 
 [dependencies]
-tinyplace = { workspace = true }
+# The host-link transport (docs/host-link-protocol.md) — how this SDK reaches a
+# remote host. See `src/sdk/src/bridge/link.rs`.
+medulla-link = { workspace = true }
 # The backend transport. `client` is a typed surface over this, not a second
 # HTTP client: credential headers, the `{success,data}` envelope, path
 # percent-encoding, and the not-exposed-route gate all live in the SDK.
@@ -76,3 +78,7 @@ tempfile = { workspace = true }
 libc = "0.2"
 
 [dev-dependencies]
+# `test-util` gives the tests a paused clock. The host-link timeout gate
+# (docs/host-link-protocol.md §6.3) is tested over multi-second windows, which
+# only stay a unit test because time can be advanced rather than waited out.
+tokio = { workspace = true, features = ["test-util"] }

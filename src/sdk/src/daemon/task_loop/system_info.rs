@@ -1,6 +1,6 @@
 //! Answering a routing hub's lightweight worker system-information request.
 
-use crate::tinyplace::{capture_system_info, TaskFrame, TaskFrameKind};
+use crate::protocol::{capture_system_info, TaskFrame, TaskFrameKind};
 
 use super::super::types::DaemonRuntime;
 

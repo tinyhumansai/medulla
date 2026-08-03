@@ -10,7 +10,7 @@
 use serde_json::json;
 
 use crate::daemon::status_detail;
-use crate::tinyplace::HarnessEvent;
+use crate::protocol::HarnessEvent;
 
 use super::{classify, Progress};
 

@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use crate::tinyplace::{apply_frame, ApplyOutcome, ScreenFrame, ScreenGrid, ScreenView};
+use crate::protocol::{apply_frame, ApplyOutcome, ScreenFrame, ScreenGrid, ScreenView};
 
 /// How many screens to keep. Beyond this the least recently updated is dropped.
 ///

@@ -12,7 +12,7 @@ The Rust module tree for the `medulla` SDK crate. `lib.rs` defines the public su
 - [`config/`](./config/) — `medulla.tui.json`-compatible config — the subset the TUI reads, plus a `backend` section for the HTTP runtime. Permissive: missing fields take defaults, unknown fields are ignored.
 - [`contacts/`](./contacts/) — Incoming contact-request management for tiny.place peers.
 - [`core_host/`](./core_host/) — Boot the embedded OpenHuman core in this process.
-- [`daemon/`](./daemon/) — The headless `medulla daemon`: offer this machine's local coding-agent CLIs (Claude Code / Codex / OpenCode) as an addressable tiny.place agent over Signal end-to-end encrypted DMs, speaking both plain-text prompts and the `medulla-tinyplace/1` task protocol an orchestrator delegates with.
+- [`daemon/`](./daemon/) — The headless `medulla daemon`: offer this machine's local coding-agent CLIs (Claude Code / Codex / OpenCode) as an addressable tiny.place agent over Signal end-to-end encrypted DMs, speaking both plain-text prompts and the `medulla-task/1` task protocol an orchestrator delegates with.
 - [`flow_engine/`](./flow_engine/) — The adapter seam between Medulla and the `tinyflows` workflow engine.
 - [`harness_contract/`](./harness_contract/) — Public agent-harness wire-contract types.
 - [`harness_work/`](./harness_work/) — What a coding-agent harness is *working on*, in one vocabulary.
@@ -24,7 +24,7 @@ The Rust module tree for the `medulla` SDK crate. `lib.rs` defines the public su
 - [`runtime/`](./runtime/) — The `Runtime` trait the UI drives, plus its snapshot contract. Concrete implementations live alongside: `openhuman` (the embedded core, which the product runs on) and `mock` (tests and demos). The UI depends only on the trait and its types.
 - [`session_history/`](./session_history/) — Recent-session history for local harness sessions.
 - [`sessions/`](./sessions/) — Interactive coding-agent session management: the two lifetime classes, the two turn-source drivers, and the machinery that runs them.
-- [`tinyplace/`](./tinyplace/) — tinyplace protocol + agent-runtime layer for the medulla TUI/daemon.
+- [`protocol/`](./protocol/) — Medulla's own wire protocol for the medulla TUI/daemon.
 - [`ui/`](./ui/) — UI-facing data surface shared with the terminal app: `events` (the folded event log + `TuiEvent`), `agents` lane folding, `stream` token/thread derivations, the `chat_store`, the `work` panel over a harness's own todos and sub-agents, and small `util` helpers. Rendering-heavy screens (app, login, composer, theme) and the interactive onboarding screen live in the `medulla-tui` crate, which re-exports these data modules.
 - [`update/`](./update/) — Release update checking and self-update.
 - [`worker_profile/`](./worker_profile/) — The persisted first-run worker profile.

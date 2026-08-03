@@ -20,7 +20,7 @@
 //! written to fix.
 
 use crate::daemon::mappers::{HarnessLineMapper, HarnessSemanticEvent};
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::completion::{TurnSignal, TurnWatcher};
 
@@ -58,7 +58,7 @@ impl TurnStream {
     }
 
     /// Latest token usage the harness reported, if any.
-    pub fn usage(&self) -> Option<crate::tinyplace::TokenUsage> {
+    pub fn usage(&self) -> Option<crate::protocol::TokenUsage> {
         self.mapper.usage()
     }
 

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 use crate::harness_work::{WorkFold, WorkSnapshot};
-use crate::tinyplace::{HarnessEventKind, TaskFrame, TaskFrameKind};
+use crate::protocol::{HarnessEventKind, TaskFrame, TaskFrameKind};
 
 use super::super::mappers;
 use super::super::providers::{Abort, RunTaskOptions};

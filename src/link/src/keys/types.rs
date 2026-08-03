@@ -90,6 +90,12 @@ impl NodeId {
     pub fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }
+
+    /// Decode the 32-character hexadecimal form issued by enrollment.
+    pub fn from_hex(text: &str) -> Option<Self> {
+        let bytes: [u8; 16] = hex_decode(text)?.try_into().ok()?;
+        Some(NodeId(bytes))
+    }
 }
 
 impl fmt::Display for NodeId {
@@ -183,9 +189,36 @@ pub struct NodeState {
     pub forwarder_endpoint: String,
     /// The node id of the peer this link talks to (the orchestrator, for a host).
     pub peer_node_id: NodeId,
+    /// Every enrolled peer and its distinct pair key. Empty in version-1 files,
+    /// which fall back to `peer_node_id` and `pair_key` above.
+    #[serde(default)]
+    pub peers: Vec<EnrolledPeer>,
     /// The §3.1 reservation: every sequence **below** this value must be
     /// considered spent, whatever this process last used.
     pub seq_reservation: u64,
+}
+
+/// Secret session material for one enrolled peer.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct EnrolledPeer {
+    /// The peer's wire identifier.
+    pub node_id: NodeId,
+    /// The pair-specific end-to-end key.
+    pub pair_key: PairKey,
+}
+
+impl NodeState {
+    /// Return every enrolled peer, including the legacy single-peer fields.
+    pub fn enrolled_peers(&self) -> Vec<EnrolledPeer> {
+        if self.peers.is_empty() {
+            vec![EnrolledPeer {
+                node_id: self.peer_node_id,
+                pair_key: self.pair_key.clone(),
+            }]
+        } else {
+            self.peers.clone()
+        }
+    }
 }
 
 impl fmt::Debug for NodeState {

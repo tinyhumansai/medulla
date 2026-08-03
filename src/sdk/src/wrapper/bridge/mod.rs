@@ -1,6 +1,6 @@
-//! The tiny.place bridge for one wrapped session and its I/O helpers.
+//! The host-link bridge for one wrapped session and its I/O helpers.
 //!
-//! [`Bridge`] holds the encrypted transport plus the per-session
+//! [`Bridge`] holds the transport plus the per-session
 //! envelope/status/tailer state; [`build_bridge`] constructs it (or returns
 //! `None` for a plain passthrough). The free functions here fold transcript lines
 //! into events ([`pump_tailer`]) and route inbound owner DMs into the child
@@ -8,22 +8,21 @@
 //! drives these lives in [`run`](super::run).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
+use medulla_link::{Link, LinkConfig};
+
+use crate::bridge::LinkBridge;
+use crate::clock::iso_now;
 use crate::daemon::mappers::HarnessLineMapper;
-use crate::daemon::transport::SignalTransport;
-use crate::session_history::SessionAgentKind;
-use crate::tinyplace::{
-    config_path, decode_task_frame, load_or_create_identity, parse_harness_control_frame,
-    parse_screen_message, parse_session_envelope, reduce_status, tick_status, HarnessEvent,
-    HarnessProvider, SemanticEvent, SessionStatusState,
+use crate::protocol::{
+    decode_task_frame, parse_harness_control_frame, parse_screen_message, parse_session_envelope,
+    reduce_status, tick_status, HarnessEvent, HarnessProvider, SemanticEvent, SessionStatusState,
 };
-use ::tinyplace::auth::timestamp;
-use ::tinyplace::crypto::sha256_hex;
-use ::tinyplace::{Signer, TinyPlaceClient, TinyPlaceClientOptions};
+use crate::session_history::SessionAgentKind;
+use crate::update::sha256_hex;
 
 use super::control::frame_targets_session;
 use super::envelope::EnvelopeBuilder;
@@ -32,6 +31,9 @@ use super::types::{WrapperConfig, WrapperTimings};
 
 /// Maximum inbound messages drained from the mailbox per receive tick.
 const INBOX_LIMIT: i64 = 50;
+
+/// Publications buffered away from child and signal supervision.
+const PUBLISH_CAPACITY: usize = 256;
 
 /// The provider's transcript agent kind, or `None` for opencode (no tailing).
 pub(super) fn agent_kind(provider: HarnessProvider) -> Option<SessionAgentKind> {
@@ -54,14 +56,17 @@ pub(super) fn resolve_recipient(
     env: &HashMap<String, String>,
     profile_owner: Option<&str>,
 ) -> Option<String> {
-    crate::tinyplace::env::dm_recipient(provider, env)
+    crate::protocol::env::dm_recipient(provider, env)
         .or_else(|| profile_owner.map(str::to_string).filter(|s| !s.is_empty()))
 }
 
 /// Mint a wrapper session id: `tp-<provider>-<iso>-<rand>`, id-safe.
+///
+/// The random suffix disambiguates two sessions started in the same
+/// millisecond; it is a uniqueness tiebreak, not a secret.
 pub(super) fn mint_session_id(provider: HarnessProvider) -> String {
-    let iso = timestamp().replace([':', '.'], "-");
-    let short: String = sha256_hex(::tinyplace::auth::generate_nonce().as_bytes())
+    let iso = iso_now().replace([':', '.'], "-");
+    let short: String = sha256_hex(uuid::Uuid::new_v4().as_bytes())
         .chars()
         .take(12)
         .collect();
@@ -77,17 +82,36 @@ pub(super) fn now_ms() -> i64 {
 impl Bridge {
     /// Serialize and send `envelope` to the configured recipient (no-op when the
     /// bridge has no recipient or serialization fails).
-    pub(super) async fn publish(&self, envelope: &crate::tinyplace::SessionEnvelopeV2) {
-        let recipient = match &self.recipient {
-            Some(recipient) => recipient,
-            None => return,
-        };
+    ///
+    /// Enqueues without waiting for link backpressure. A dedicated publisher
+    /// task owns reliable link retries, so an offline recipient cannot stop the
+    /// wrapper from polling child completion or signals. A full publication
+    /// queue drops the new envelope; the tailer has already consumed the event,
+    /// so missing envelopes after a long outage are accepted rather than
+    /// blocking supervision.
+    pub(super) async fn publish(&self, envelope: &crate::protocol::SessionEnvelopeV2) {
+        if self.recipient.is_none() {
+            return;
+        }
         let body = match serde_json::to_string(envelope) {
             Ok(body) => body,
             Err(_) => return,
         };
-        if let Err(err) = self.transport.send(recipient, &body).await {
-            eprintln!("medulla wrapper: publish failed: {err}");
+        let Some(publish_tx) = self.publish_tx.as_ref() else {
+            return;
+        };
+        if let Err(err) = publish_tx.try_send(body) {
+            eprintln!("medulla wrapper: publication dropped: {err}");
+        }
+    }
+
+    /// Close the queue and wait briefly for its reliable sender to catch up.
+    pub(super) async fn finish_publications(&mut self, timeout: tokio::time::Duration) {
+        self.publish_tx.take();
+        if let Some(mut publisher) = self.publisher.take() {
+            if tokio::time::timeout(timeout, &mut publisher).await.is_err() {
+                publisher.abort();
+            }
         }
     }
 
@@ -145,7 +169,7 @@ impl Bridge {
     }
 
     /// Publish a status envelope unless the throttle window is still open.
-    async fn maybe_publish_status(&mut self, payload: crate::tinyplace::StatusPayload) {
+    async fn maybe_publish_status(&mut self, payload: crate::protocol::StatusPayload) {
         let now = now_ms();
         if now.saturating_sub(self.last_status_ms) < self.status_throttle_ms {
             return;
@@ -174,7 +198,7 @@ pub(super) async fn build_bridge(
     if config.no_bridge {
         return None;
     }
-    use crate::tinyplace::env as tp_env;
+    use crate::protocol::env as tp_env;
     // The persisted worker profile's owner is the recipient fallback when no env
     // owner is set (env still wins).
     let profile = crate::worker_profile::WorkerProfile::load(&crate::worker_profile::profile_path(
@@ -185,47 +209,76 @@ pub(super) async fn build_bridge(
     let receive_from = tp_env::receive_from(config.provider, &config.env, recipient.as_deref());
     if recipient.is_none() && receive_from.is_none() {
         eprintln!(
-            "medulla wrapper: no tiny.place owner configured (set TINYPLACE_HARNESS_DM_TO or TINYPLACE_OPENHUMAN_OWNER) — running as a plain passthrough"
+            "medulla wrapper: no link owner configured (set TINYPLACE_HARNESS_DM_TO or TINYPLACE_OPENHUMAN_OWNER) — running as a plain passthrough"
         );
         return None;
     }
 
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let config_file = config_path(&config.env, &home);
-    let (signer, tp_config) = match load_or_create_identity(&config_file, &config.env) {
-        Ok(pair) => pair,
+    // The host end of the link. Without an enrolled identity there is nothing to
+    // forward to, so the session runs as a plain passthrough rather than failing
+    // — a harness must still be usable on a machine that was never enrolled.
+    let home = crate::home::medulla_home(&config.env);
+    // Load the effective configuration to honor the configured link.stateDir if set.
+    let explicit_config = crate::config::explicit_config_from_env(&config.env);
+    if explicit_config.is_some_and(|path| !std::path::Path::new(path).is_file()) {
+        eprintln!(
+            "medulla wrapper: explicit configuration does not exist — running as a plain passthrough"
+        );
+        return None;
+    }
+    let link_state_dir = match crate::config::load_config(
+        explicit_config,
+        &config.env,
+        std::path::Path::new(&config.cwd),
+    ) {
+        Ok(loaded) => loaded
+            .config
+            .link
+            .map(|link_cfg| link_cfg.state_dir.into())
+            .unwrap_or_else(|| medulla_link::keys::link_dir(&home)),
+        Err(err) if explicit_config.is_some() => {
+            eprintln!(
+                "medulla wrapper: explicit configuration failed to load ({err}) — running as a plain passthrough"
+            );
+            return None;
+        }
+        Err(_) => medulla_link::keys::link_dir(&home),
+    };
+    let link = match Link::connect(LinkConfig::new(link_state_dir)).await {
+        Ok(link) => link,
         Err(err) => {
             eprintln!(
-                "medulla wrapper: identity load failed ({err}) — running as a plain passthrough"
+                "medulla wrapper: host link unavailable ({err}) — running as a plain passthrough"
             );
             return None;
         }
     };
-    let base_url = crate::tinyplace::resolve_endpoint(&config.env, &tp_config);
-    let signer = Arc::new(signer);
-    let client = TinyPlaceClient::new(TinyPlaceClientOptions {
-        base_url,
-        signer: Some(signer.clone() as Arc<dyn Signer>),
-        ..Default::default()
-    });
-    let identity_dir = config_file
-        .parent()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".tinyplace"));
-    let transport = SignalTransport::new(client, &signer, &identity_dir);
-    // Publish pre-keys so the owner can open an encrypted channel to us.
-    if let Err(err) = transport.publish_keys(&signer).await {
-        eprintln!("medulla wrapper: pre-key publish failed: {err}");
-    }
-    // The directory gates direct messages on an accepted contact relationship,
-    // so ask the owner for one before publishing any transcript envelope.
-    // Best-effort: the owner may not have accepted yet (or may never), and that
-    // must not stop the harness from running as a passthrough.
-    if let Some(peer) = recipient.as_deref() {
-        if let Err(err) = transport.request_contact(peer).await {
-            eprintln!("medulla wrapper: contact request to {peer} failed: {err}");
+    // The owner is the link's single peer: a host enrolls against exactly one
+    // orchestrator (protocol §7.3), and the recipient env var names it.
+    let owner = recipient.clone().or_else(|| receive_from.clone())?;
+    let transport = match LinkBridge::single_peer(Arc::new(link), owner.clone(), owner) {
+        Ok(bridge) => bridge,
+        Err(err) => {
+            eprintln!(
+                "medulla wrapper: host link is misconfigured ({err}) — running as a plain passthrough"
+            );
+            return None;
         }
-    }
+    };
+    let (publish_tx, mut publish_rx) = mpsc::channel::<String>(PUBLISH_CAPACITY);
+    let publish_transport = transport.clone();
+    let publish_recipient = recipient.clone();
+    let publisher = tokio::spawn(async move {
+        use crate::bridge::Bridge as _;
+        while let Some(body) = publish_rx.recv().await {
+            let Some(recipient) = publish_recipient.as_deref() else {
+                continue;
+            };
+            if let Err(err) = publish_transport.send(recipient, &body).await {
+                eprintln!("medulla wrapper: publish failed: {err}");
+            }
+        }
+    });
 
     let receive_active =
         receive_from.is_some() && tp_env::receive_enabled(config.provider, &config.env);
@@ -247,11 +300,13 @@ pub(super) async fn build_bridge(
 
     Some(Bridge {
         transport,
+        publish_tx: Some(publish_tx),
+        publisher: Some(publisher),
         recipient,
         receive_from,
         receive_active,
         builder,
-        status: crate::tinyplace::initial_status(start_ms),
+        status: crate::protocol::initial_status(start_ms),
         last_status_ms: i64::MIN,
         mapper: HarnessLineMapper::new(config.provider.as_str()),
         tailer,
@@ -295,6 +350,7 @@ pub(super) async fn drain_and_inject(
     bridge: &mut Bridge,
     stdin_tx: &mpsc::UnboundedSender<Vec<u8>>,
 ) {
+    use crate::bridge::Bridge as _;
     let inbound = bridge.transport.drain_inbox(INBOX_LIMIT).await;
     for message in inbound {
         let text = classify_inbound(bridge, &message);
@@ -309,10 +365,7 @@ pub(super) async fn drain_and_inject(
 /// Decide what (if anything) an inbound DM injects: a matching control frame's
 /// text, or a plain owner DM verbatim. Session envelopes and task frames are
 /// never injected.
-fn classify_inbound(
-    bridge: &Bridge,
-    message: &crate::daemon::transport::InboundMessage,
-) -> Option<String> {
+fn classify_inbound(bridge: &Bridge, message: &crate::bridge::InboundMessage) -> Option<String> {
     if let Some(frame) = parse_harness_control_frame(&message.text) {
         if frame_targets_session(
             &frame,

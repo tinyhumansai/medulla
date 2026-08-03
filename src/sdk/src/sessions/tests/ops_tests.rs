@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::daemon::providers::{RunTaskFn, RunTaskResult};
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::manager::{OpenSession, SessionConfig, SessionManager};
 use super::super::ops::SessionOp;

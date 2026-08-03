@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use medulla::daemon::{DaemonConfig, DaemonRuntime};
-use medulla::tinyplace::{HarnessProvider, TaskFrameKind};
+use medulla::protocol::{HarnessProvider, TaskFrameKind};
 use medulla_tui::ui::harness_pane::LocalHarnesses;
 use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
 
@@ -108,7 +108,7 @@ fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
 
 /// Dispatch a task frame into `runtime` as the hub would.
 fn dispatch(runtime: &DaemonRuntime, task_id: &str) {
-    let body = medulla::tinyplace::encode_task_frame(medulla::tinyplace::EncodeFrameInput {
+    let body = medulla::protocol::encode_task_frame(medulla::protocol::EncodeFrameInput {
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
         text: "do the thing".to_string(),
@@ -125,7 +125,7 @@ fn dispatch(runtime: &DaemonRuntime, task_id: &str) {
         conversation: None,
         fleet_depth: 0,
     });
-    let frame = medulla::tinyplace::decode_task_frame(&body);
+    let frame = medulla::protocol::decode_task_frame(&body);
     runtime.handle_message(HUB.to_string(), body, frame);
 }
 

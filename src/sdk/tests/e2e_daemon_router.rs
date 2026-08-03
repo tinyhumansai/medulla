@@ -13,7 +13,7 @@ mod support;
 use std::collections::HashMap;
 
 use medulla::daemon::providers::{run_provider_task, Abort, RunTaskOptions};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use support::fake_provider::TempDir;
 

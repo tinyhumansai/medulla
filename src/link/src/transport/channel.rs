@@ -24,6 +24,7 @@ pub const MAX_SENT_STATES: usize = 512;
 /// The sending and receiving state for one channel.
 pub struct Channel<S: SspState> {
     id: u8,
+    initial: S,
     current: S,
     current_num: u64,
     /// States `assumed_receiver_num ..= current_num`, oldest first. The front is
@@ -51,6 +52,7 @@ impl<S: SspState> Channel<S> {
         sent_states.push_back((0, initial.clone()));
         Channel {
             id,
+            initial: initial.clone(),
             current: initial.clone(),
             current_num: 0,
             sent_states,
@@ -61,6 +63,81 @@ impl<S: SspState> Channel<S> {
             last_sent_ms: None,
             max_sent_states,
         }
+    }
+
+    /// Rebase this channel after the peer process changes epoch.
+    ///
+    /// Unconsumed outbound state is preserved and becomes state 1 relative to
+    /// the shared initial state; inbound state restarts at 0.
+    ///
+    /// Channel 0 (MessageQueue) is not preserved: its internal base tracks absolute
+    /// message numbers which cannot be adjusted when renumbering states. The peer
+    /// will request the complete message sequence from state 0 after restart anyway.
+    pub fn reset_peer(&mut self) {
+        // Preserve pending unacknowledged states by renumbering them starting from 1.
+        // This ensures that if state layer fragmentation split a message into
+        // intermediate states, those states remain available instead of being
+        // collapsed into a single oversized state 1.
+        //
+        // Channel 0 (MessageQueue) is special: its base field tracks absolute
+        // message numbers that cannot simply be renumbered. The peer starts at
+        // state 0 after restart and will request the full sequence, so we don't
+        // preserve channel 0 states.
+        let mut new_sent_states = VecDeque::new();
+        new_sent_states.push_back((0, self.initial.clone()));
+
+        let mut new_num = 1u64;
+        if self.id == 0 {
+            for (old_num, state) in &self.sent_states {
+                if *old_num > self.assumed_receiver_num {
+                    let mut rebased = state.clone();
+                    rebased.release_through(self.assumed_receiver_num);
+                    let rebased_num = rebased
+                        .reset_origin()
+                        .expect("channel zero queue reports its rebased number");
+                    if rebased_num > 0
+                        && new_sent_states.back().map(|(num, _)| *num) != Some(rebased_num)
+                    {
+                        new_sent_states.push_back((rebased_num, rebased));
+                    }
+                }
+            }
+        } else {
+            for state in self.current.rebase_steps() {
+                new_sent_states.push_back((new_num, state));
+                self.current_num = new_num;
+                new_num += 1;
+            }
+        }
+
+        // Channel 0 rebases every retained intermediate queue state above. Its
+        // internal absolute base belongs to the retired peer session, while the
+        // sequence of prefixes is needed to keep every next diff datagram-sized.
+        if self.id == 0 {
+            self.current_num = self
+                .current
+                .reset_origin()
+                .expect("channel zero queue reports its rebased number");
+            if self.current_num > 0
+                && new_sent_states.back().map(|(num, _)| *num) != Some(self.current_num)
+            {
+                new_sent_states.push_back((self.current_num, self.current.clone()));
+            }
+        }
+
+        // If no pending states existed (or channel 0 deliberately collapsed
+        // them), current becomes state 1.
+        if new_num == 1 && self.id != 0 {
+            self.current_num = 1;
+            new_sent_states.push_back((1, self.current.clone()));
+        }
+
+        self.sent_states = new_sent_states;
+        self.assumed_receiver_num = 0;
+        self.received = self.initial.clone();
+        self.received_num = 0;
+        self.sent_num = 0;
+        self.last_sent_ms = None;
     }
 
     /// The channel id carried in an Instruction.

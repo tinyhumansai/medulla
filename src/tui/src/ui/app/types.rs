@@ -669,7 +669,7 @@ pub(super) enum PromptKind {
     CustomHarnessEdit(String),
     /// The working directory for a new local host, with the harness already
     /// chosen. Blank accepts the default — where this process is running.
-    LocalHostWorkspace(medulla::tinyplace::HarnessProvider),
+    LocalHostWorkspace(medulla::protocol::HarnessProvider),
     /// Reject a workflow proposal with the operator's explanation.
     RejectProposal {
         /// The workflow the proposal belongs to.
@@ -827,7 +827,7 @@ pub struct App {
     /// page that is drawn at the frame rate was doing filesystem work to answer
     /// a question whose answer cannot change while the process runs.
     pub(super) add_host_provider_cache:
-        std::cell::OnceCell<Vec<medulla::tinyplace::HarnessProvider>>,
+        std::cell::OnceCell<Vec<medulla::protocol::HarnessProvider>>,
     /// Selected row on the Routing Hosts page.
     pub(super) host_index: usize,
     /// Whether ↑↓ on the Hosts page drives the role toggles in the preview
@@ -1013,12 +1013,11 @@ pub struct App {
     // here and skips the platform writers (no `pbcopy`/OSC subprocess in tests).
     pub(super) copy_capture: Option<Arc<std::sync::Mutex<Vec<String>>>>,
 
-    // Optional observational overlay from the background tinyplace service:
-    // this TUI's own identity, its peer roster, and peer presence. Merged into
-    // the snapshot on every refresh so the Overview panel and Agents lanes light
-    // up without the runtime having to know about tiny.place.
-    pub(super) tinyplace_obs:
-        Option<Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>>,
+    // Optional observational overlay from the background host-link service:
+    // this endpoint's own identity, its peer roster, and peer presence. Merged
+    // into the snapshot on every refresh so the Overview panel and Agents lanes
+    // light up without the runtime having to know about the link.
+    pub(super) link_obs: Option<Arc<std::sync::Mutex<medulla::protocol::service::LinkObservation>>>,
     // A read-only view of the task host running on this device, when one is.
     // Read live at render rather than merged into the snapshot: its counters
     // move on the host's own schedule, and the snapshot is the *runtime's*

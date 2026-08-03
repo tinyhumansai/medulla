@@ -1,7 +1,8 @@
 //! Async effects emitted by the daemon TUI.
 
+use medulla::bridge::Bridge as _;
 use medulla::daemon::DaemonRuntime;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 use medulla_tui::worker::app::{ExecutionMode, WorkerApp, WorkerCmd};
 
 use super::{claude_preflight, spawn_inbox_drain, worker_runtime, StartWiring};
@@ -104,11 +105,7 @@ fn start_worker(
             })
         })
         .with_log(start.logs.sink());
-    // Best-effort push channel. Nothing below depends on it: it only shortens
-    // the wait between a peer sending and this loop looking.
-    let push = medulla::daemon::ws_inbox_enabled(&start.env)
-        .then(|| transport.spawn_inbox_listener(Some(start.logs.sink())));
-    *inbox = Some(spawn_inbox_drain(transport, daemon.clone(), screens, push));
+    *inbox = Some(spawn_inbox_drain(transport, daemon.clone(), screens));
     *runtime = Some(daemon);
     app.set_status(format!(
         "Serving peers · {} on {}",
@@ -141,19 +138,7 @@ async fn connect_master(app: &mut WorkerApp, start: &StartWiring, input: String)
     match transport.request_contact(&address).await {
         Ok(()) => {
             app.add_master(address.clone(), handle);
-            // Pairing is two-sided: the master answers with a contact request of
-            // its own, and the admission allowlist was seeded from
-            // `[tinyplace].peers` at boot — so without this the master the
-            // operator just added is a stranger to the running desk, its request
-            // waits in the queue, and the pairing only completes after a restart.
-            // The refresh is what makes the Master row settle now rather than on
-            // whichever poll tick happens to notice.
-            if let Some(desk) = app.contact_desk() {
-                desk.allow(address.clone());
-                desk.refresh().await;
-            }
-            if let Err(err) =
-                medulla::config::persist_tinyplace_peers(app.config_path(), app.masters())
+            if let Err(err) = medulla::config::persist_link_peers(app.config_path(), app.masters())
             {
                 app.set_status(format!(
                     "Contact requested, but config was not saved: {err}"

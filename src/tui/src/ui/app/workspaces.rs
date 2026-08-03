@@ -168,7 +168,7 @@ impl App {
     /// disappears on restart with nothing to explain it.
     pub(in crate::ui::app) fn add_local_host(
         &mut self,
-        harness: medulla::tinyplace::HarnessProvider,
+        harness: medulla::protocol::HarnessProvider,
         dir: &str,
     ) -> Option<super::types::Cmd> {
         let dir = dir.trim();

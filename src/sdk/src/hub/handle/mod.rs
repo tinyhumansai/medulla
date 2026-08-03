@@ -27,6 +27,7 @@ pub(super) fn is_handle(address: &str) -> bool {
 /// This exists because a mis-paste is silent otherwise: a stray `>` was accepted
 /// as an address, registered as a worker, and had a contact request sent to it.
 /// Nothing downstream can tell that from a real peer that never replies.
+#[cfg(test)]
 pub(super) fn is_plausible_address(address: &str) -> bool {
     let address = address.trim();
     if is_handle(address) {
@@ -54,10 +55,10 @@ pub(super) fn should_request_contact(address: &str, accepted: bool) -> bool {
 /// cached details for the affected ids.
 pub(super) fn cache_system_info_if_current(
     roster: &SharedRoster,
-    system_info: &Mutex<HashMap<String, crate::tinyplace::WorkerSystemInfo>>,
+    system_info: &Mutex<HashMap<String, crate::protocol::WorkerSystemInfo>>,
     id: &str,
     address: &str,
-    info: crate::tinyplace::WorkerSystemInfo,
+    info: crate::protocol::WorkerSystemInfo,
 ) -> bool {
     let workers = roster.lock().expect("roster lock");
     if !workers
@@ -86,7 +87,7 @@ impl HubHandle {
     /// subscription, and a delta against that would apply to the wrong base.
     pub async fn watch(&self, worker: &str, task_id: &str) -> Result<(), String> {
         let body =
-            crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Subscribe {
+            crate::protocol::encode_screen_message(&crate::protocol::ScreenMessage::Subscribe {
                 task_id: task_id.to_string(),
                 max_fps: 1,
                 resync: true,
@@ -117,11 +118,10 @@ impl HubHandle {
     /// showing a screen that will never update again reads as a hung worker
     /// rather than an ended subscription.
     pub async fn unwatch(&self, worker: &str, task_id: &str) -> Result<(), String> {
-        let body = crate::tinyplace::encode_screen_message(
-            &crate::tinyplace::ScreenMessage::Unsubscribe {
+        let body =
+            crate::protocol::encode_screen_message(&crate::protocol::ScreenMessage::Unsubscribe {
                 task_id: task_id.to_string(),
-            },
-        );
+            });
         let sent = self.relay.send(worker, &body).await;
         // Disarmed, not forgotten: looking away should not throw away a screen
         // that is already here. Looking back redraws it at once, with its age
@@ -142,11 +142,10 @@ impl HubHandle {
             .ok_or_else(|| {
                 format!("task {task_id} is not running with termination support on {worker}")
             })?;
-        let body =
-            crate::tinyplace::encode_screen_message(&crate::tinyplace::ScreenMessage::Kill {
-                task_id: wire_task_id,
-                correlation_id,
-            });
+        let body = crate::protocol::encode_screen_message(&crate::protocol::ScreenMessage::Kill {
+            task_id: wire_task_id,
+            correlation_id,
+        });
         (self.log)(&format!("hub: killing task {task_id} on {worker}"));
         self.relay.send(worker, &body).await
     }
@@ -157,7 +156,6 @@ impl HubHandle {
             roster: wiring.roster,
             socket: wiring.socket,
             address: wiring.address,
-            public_key: wiring.public_key,
             relay: wiring.relay,
             catalog: wiring.catalog,
             runner: wiring.runner,
@@ -185,16 +183,11 @@ impl HubHandle {
         }
     }
 
-    /// The hub's own tiny.place address (base58 cryptoId). This is the value an
-    /// operator sets as a worker's `TINYPLACE_OPENHUMAN_OWNER` / adds to its
-    /// `acceptContacts` allowlist.
+    /// The hub's own link node name. This is the value an operator sets as a
+    /// worker's `MEDULLA_LINK_OWNER`, because a worker only accepts a task from
+    /// the orchestrator it enrolled with.
     pub fn address(&self) -> &str {
         &self.address
-    }
-
-    /// The hub's own Ed25519 identity public key, base64.
-    pub fn public_key(&self) -> &str {
-        &self.public_key
     }
 
     /// A snapshot of the current roster.
@@ -217,7 +210,7 @@ impl HubHandle {
     }
 
     /// Latest captured system details for a worker, if it has been refreshed.
-    pub fn system_info(&self, id: &str) -> Option<crate::tinyplace::WorkerSystemInfo> {
+    pub fn system_info(&self, id: &str) -> Option<crate::protocol::WorkerSystemInfo> {
         self.system_info
             .lock()
             .expect("system info lock")
@@ -295,20 +288,18 @@ impl HubHandle {
         // its address is a name this process bound, so "does it exist" is
         // answerable exactly, and demanding base58 of it would make the host on
         // this very machine the one worker the roster refuses.
-        if !is_plausible_address(&worker.address)
-            && !self.relay.is_device_local(&worker.address).await
-        {
+        let enrolled_address = self.relay.resolve_handle(&worker.address).await;
+        let device_local = self.relay.is_device_local(&worker.address).await;
+        if !device_local && enrolled_address.is_none() {
             let given = worker.address.clone();
             (self.log)(&format!("hub: refused worker address {given:?}"));
-            anyhow::bail!(
-                "{given:?} is not a tiny.place address — expected a base58 cryptoId or an @handle"
-            );
+            anyhow::bail!("{given:?} is not an enrolled link peer");
         }
         // A handle is a directory alias; contacts, pre-key bundles and DMs are
         // all keyed on the cryptoId behind it. Storing the alias would register
         // a peer that nothing can address.
         if is_handle(&worker.address) {
-            match self.relay.resolve_handle(&worker.address).await {
+            match enrolled_address {
                 Some(crypto_id) => {
                     (self.log)(&format!("hub: resolved {} → {crypto_id}", worker.address));
                     if worker.id == worker.address {

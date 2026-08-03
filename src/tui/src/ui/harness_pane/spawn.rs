@@ -49,7 +49,7 @@ impl LocalHarnesses {
         }
 
         let provider = choice.provider;
-        let bin = medulla::tinyplace::env::provider_bin(provider, &self.env);
+        let bin = medulla::protocol::env::provider_bin(provider, &self.env);
         let (env, extra_args) = self.spawn_env(choice)?;
         let model = choice.preset.as_ref().map(|preset| preset.model.clone());
 
@@ -126,7 +126,7 @@ impl LocalHarnesses {
         let Some(router) = router else {
             return Ok((env, extra_args));
         };
-        let injection = medulla::tinyplace::env::router_env(choice.provider, &router);
+        let injection = medulla::protocol::env::router_env(choice.provider, &router);
         for (key, value) in injection.env {
             env.insert(key, value);
         }

@@ -6,7 +6,7 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use medulla::tinyplace::{BudgetWindow, HarnessBudget, HarnessReadiness};
+use medulla::protocol::{BudgetWindow, HarnessBudget, HarnessReadiness};
 
 use super::super::super::types::App;
 
@@ -66,7 +66,7 @@ impl App {
         } else {
             // Reserve the footer (and optional hub identity) before choosing the
             // host window so the selected row and action hints stay visible.
-            let footer_rows = 1 + usize::from(self.snapshot.tinyplace.is_some()) * 2;
+            let footer_rows = 1 + usize::from(self.snapshot.link.is_some()) * 2;
             let visible = usize::from(inner.height).saturating_sub(footer_rows).max(1);
             let start = crate::ui::selection::viewport_start(selected, hosts.len(), visible);
             for (index, host) in hosts.iter().enumerate().skip(start).take(visible) {
@@ -110,11 +110,11 @@ impl App {
                 )));
             }
         }
-        if let Some(identity) = &self.snapshot.tinyplace {
+        if let Some(identity) = &self.snapshot.link {
             lines.push(TLine::from(""));
             lines.push(TLine::from(vec![
                 Span::styled("this hub · ", Style::default().fg(Color::Cyan)),
-                Span::raw(identity.agent_id.clone()),
+                Span::raw(identity.node_name.clone()),
             ]));
         }
         lines.push(TLine::from(Span::styled(

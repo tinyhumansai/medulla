@@ -353,7 +353,7 @@ async fn a_timed_out_turn_stops_its_harness_instead_of_leaving_it_running() {
     );
     assert!(
         sessions
-            .claim_idle("peerA", medulla::tinyplace::HarnessProvider::Codex)
+            .claim_idle("peerA", medulla::protocol::HarnessProvider::Codex)
             .is_none(),
         "a timed-out session must not be reusable by the next task"
     );

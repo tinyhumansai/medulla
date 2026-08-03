@@ -4,9 +4,9 @@ Runnable examples that demonstrate narrow SDK contracts without becoming product
 
 ## Contents
 
-- [`coordination_owner.rs`](./coordination_owner.rs) — The owner side of the coordination e2e chain: create a fresh owner identity, publish Signal pre-keys, send a `medulla-tinyplace/1` task frame to the worker daemon over the mock Signal server, then drain the encrypted mailbox until a terminal (reply/error) frame comes back — decrypt it and print it as JSON on stdout for `run.sh` to assert the mock-LLM marker on.
 - [`harness_contract_decode.rs`](./harness_contract_decode.rs) — Decode one `TrackedTask` JSON value through medulla's Rust harness mirror.
-- [`mock_signal_server.rs`](./mock_signal_server.rs) — A runnable wrapper around the in-test mock tiny.place **Signal server** (`tests/support/mock_signal_server.rs`), so the coordination e2e suite can run the exact same server as a standalone process the `medulla daemon` and the owner helper talk to over loopback.
+- [`mock_link_forwarder.rs`](./mock_link_forwarder.rs) — A blind loopback UDP forwarder implementing `docs/host-link-protocol.md` §5, standing in for the backend in the coordination e2e harness.
+- [`coordination_owner.rs`](./coordination_owner.rs) — The orchestrator end of that harness: enrolls a pair, then dispatches task frames over the host link and prints the terminal frame as JSON.
 
 ## Maintenance
 

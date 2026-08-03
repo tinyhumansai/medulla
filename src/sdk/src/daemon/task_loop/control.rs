@@ -1,6 +1,6 @@
 //! Mid-run input, and stopping a task the requester has given up on.
 
-use crate::tinyplace::{TaskFrame, TaskFrameKind};
+use crate::protocol::{TaskFrame, TaskFrameKind};
 
 use super::super::types::DaemonRuntime;
 

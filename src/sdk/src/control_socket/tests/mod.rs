@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 #[cfg(unix)]
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
 #[cfg(unix)]
-use crate::tinyplace::{TokenUsage, WorkflowAdvert};
+use crate::protocol::{TokenUsage, WorkflowAdvert};
 
 #[cfg(unix)]
 use super::types::{FleetOps, FleetWorker};

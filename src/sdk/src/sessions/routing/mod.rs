@@ -8,7 +8,7 @@
 //! capabilities. Conflating them is how you end up asking `codex` to hold a
 //! conversation over a stdin channel it does not have.
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::types::{SessionClass, SessionPolicy};
 

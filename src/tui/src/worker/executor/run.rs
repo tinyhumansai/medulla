@@ -29,9 +29,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use medulla::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
+use medulla::protocol::HarnessProvider;
 use medulla::session_history::SessionAgentKind;
 use medulla::sessions::{SessionClass, TurnStream};
-use medulla::tinyplace::HarnessProvider;
 use medulla::wrapper::tail::SessionTailer;
 
 use super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
@@ -340,7 +340,7 @@ impl PtySessionExecutor {
         let (env, extra_args) = self.spawn_env(options)?;
         Ok(SessionPlan::Launch(LaunchSpec {
             provider: options.provider,
-            bin: medulla::tinyplace::env::provider_bin(options.provider, &self.env),
+            bin: medulla::protocol::env::provider_bin(options.provider, &self.env),
             cwd: options.cwd.clone(),
             env,
             extra_args,
@@ -412,7 +412,7 @@ impl PtySessionExecutor {
         let mut router = options.router.clone();
         medulla::inference_proxy::route_spawn(options.provider, &mut router, &mut env)?;
         if let Some(router) = &router {
-            let injection = medulla::tinyplace::env::router_env(options.provider, router);
+            let injection = medulla::protocol::env::router_env(options.provider, router);
             for (key, value) in injection.env {
                 env.insert(key, value);
             }

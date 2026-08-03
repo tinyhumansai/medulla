@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
-use crate::tinyplace::WorkflowAdvert;
+use crate::protocol::WorkflowAdvert;
 
 /// The control protocol version this build speaks.
 ///

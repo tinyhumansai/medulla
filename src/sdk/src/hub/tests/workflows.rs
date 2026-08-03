@@ -63,7 +63,7 @@ impl crate::flow_engine::caps::dispatch::HarnessDispatch for StubHarness {
     async fn dispatch(&self, _request: TaskRequest) -> Result<TaskOutcome, RunError> {
         Ok(TaskOutcome {
             reply: self.reply.clone(),
-            usage: crate::tinyplace::TokenUsage {
+            usage: crate::protocol::TokenUsage {
                 input_tokens: 0,
                 output_tokens: 0,
             },

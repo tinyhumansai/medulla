@@ -7,7 +7,7 @@
 
 use super::*;
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 /// A spec for a session the operator asked for, rather than a task frame.
 fn user_sh(script: &str) -> LaunchSpec {

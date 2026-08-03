@@ -5,9 +5,8 @@ The task-sender hub — the outbound half of the harness plane.
 ## Contents
 
 - [`activity/`](./activity/) — What the hub's workers are actually doing, recorded as it happens.
-- [`boot/`](./boot/) — Hub bootstrap: construct the remote tiny.place bridge + sender-runner, connect the Socket.IO harness client, and expose a live `HubHandle`.
+- [`boot/`](./boot/) — Hub bootstrap: bring up the host link, build the bridge + sender-runner, connect the Socket.IO harness client, and expose a live `HubHandle`.
 - [`handle/`](./handle/) — The live control handle over the hub's worker roster.
-- [`pairing/`](./pairing/) — Inbound pairing for the hub's own tiny.place identity.
 - [`probe/`](./probe/) — Building the `capabilities` payload the backend records for a worker.
 - [`roster/`](./roster/) — The hub's worker-roster data: the shared roster type, the `AgentDescriptor` payload the hub advertises, and the address resolution the socket layer uses to target a task. Pure and offline-testable; the live control handle that mutates the roster over the Socket.IO uplink lives in `handle`.
 - [`runner/`](./runner/) — The bridge-independent task sender — the outbound half of the harness plane.

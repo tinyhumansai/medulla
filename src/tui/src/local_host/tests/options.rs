@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use medulla::config::HostSection;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use crate::local_host::{
     host_address, host_enabled, options_from_config, options_from_config_with_custom,

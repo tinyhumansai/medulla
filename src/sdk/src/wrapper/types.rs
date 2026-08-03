@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use tokio::sync::{mpsc, oneshot};
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// What the app-side spawner needs in order to launch the harness on a PTY.
 pub struct PtyRequest {
@@ -57,7 +57,7 @@ pub struct PtyHarness {
 pub type PtySpawner = Box<dyn FnOnce(PtyRequest) -> anyhow::Result<PtyHarness> + Send + Sync>;
 
 /// Poll intervals and status timings for one wrapped session, resolved from the
-/// environment (see [`crate::tinyplace::env`]).
+/// environment (see [`crate::protocol::env`]).
 pub(super) struct WrapperTimings {
     /// How often the transcript tailer polls for new lines, in milliseconds.
     pub(super) tail_poll_ms: u64,
@@ -71,9 +71,9 @@ pub(super) struct WrapperTimings {
 
 impl WrapperTimings {
     /// Resolve all timings for `provider` from `env`, falling back to the
-    /// per-provider defaults in [`crate::tinyplace::env`].
+    /// per-provider defaults in [`crate::protocol::env`].
     pub(super) fn resolve(provider: HarnessProvider, env: &HashMap<String, String>) -> Self {
-        use crate::tinyplace::env as tp_env;
+        use crate::protocol::env as tp_env;
         WrapperTimings {
             tail_poll_ms: tp_env::session_poll_ms(provider, env),
             receive_poll_ms: tp_env::receive_poll_ms(provider, env),

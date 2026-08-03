@@ -154,25 +154,25 @@ fn persist_setting_preserves_unrelated_sections() {
     let path = dir.path().join("config.toml");
     std::fs::write(
         &path,
-        "[theme]\nprimary = \"cyan\"\n\n[tinyplace]\nhandle = \"me\"\n",
+        "[theme]\nprimary = \"cyan\"\n\n[link]\nnodeName = \"me\"\n",
     )
     .expect("seed");
 
     super::persist_setting(
         &path,
-        "tinyplace",
-        "autoDiscoverPeers",
-        toml::Value::Boolean(false),
+        "link",
+        "forwarderUrl",
+        toml::Value::String("https://f".into()),
     )
     .expect("write");
 
     let parsed: TuiConfig =
         toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
     assert_eq!(parsed.theme.primary.as_deref(), Some("cyan"));
-    let tinyplace = parsed.tinyplace.expect("tinyplace section");
-    assert!(!tinyplace.auto_discover_peers);
+    let link = parsed.link.expect("link section");
+    assert_eq!(link.forwarder_url, "https://f");
     assert_eq!(
-        tinyplace.handle.as_deref(),
+        link.node_name.as_deref(),
         Some("me"),
         "sibling key survives"
     );
@@ -439,11 +439,12 @@ fn daemon_master_roster_persists_public_peer_data_without_identity_secrets() {
     let path = dir.path().join("config.toml");
     std::fs::write(
         &path,
-        "[tinyplace]\nidentityDir = \"/worker-wallet\"\nbaseUrl = \"https://relay\"\n",
+        "[link]\nstateDir = \"/worker-link\"\nforwarderUrl = \"https://relay\"\n",
     )
     .unwrap();
     let peer = super::Peer {
         id: "master-id".into(),
+        node_id: Some("00112233445566778899aabbccddeeff".into()),
         name: Some("Primary master".into()),
         handle: Some("@master".into()),
         address: Some("master-id".into()),
@@ -452,22 +453,22 @@ fn daemon_master_roster_persists_public_peer_data_without_identity_secrets() {
         protocol: "task".into(),
     };
 
-    super::persist_tinyplace_peers(&path, &[peer]).unwrap();
+    super::persist_link_peers(&path, &[peer]).unwrap();
 
     let text = std::fs::read_to_string(path).unwrap();
     let saved: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(saved["link"]["stateDir"].as_str(), Some("/worker-link"));
     assert_eq!(
-        saved["tinyplace"]["identityDir"].as_str(),
-        Some("/worker-wallet")
-    );
-    assert_eq!(
-        saved["tinyplace"]["baseUrl"].as_str(),
+        saved["link"]["forwarderUrl"].as_str(),
         Some("https://relay")
     );
+    assert_eq!(saved["link"]["peers"][0]["id"].as_str(), Some("master-id"));
     assert_eq!(
-        saved["tinyplace"]["peers"][0]["id"].as_str(),
-        Some("master-id")
+        saved["link"]["peers"][0]["nodeId"].as_str(),
+        Some("00112233445566778899aabbccddeeff")
     );
+    // The pair key is never written to a config file (protocol §7.1).
+    assert!(!text.contains("pairKey"));
     assert!(!text.contains("private"));
     assert!(!text.contains("token"));
 }

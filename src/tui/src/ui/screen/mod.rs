@@ -13,7 +13,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use medulla::tinyplace::{
+use medulla::protocol::{
     Color as WireColor, RunStyle, ScreenGrid, ScreenRun, ATTR_BOLD, ATTR_INVERSE, ATTR_ITALIC,
     ATTR_UNDERLINE,
 };

@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use medulla::daemon::{DaemonConfig, DaemonRuntime};
 use medulla::hub::ScreenStore;
-use medulla::tinyplace::{
+use medulla::protocol::{
     parse_screen_message, ApplyOutcome, HarnessProvider, ScreenMessage, TaskFrameKind,
 };
 use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
@@ -112,7 +112,7 @@ fn runtime_serving(sessions: PtyManager, session_id: String) -> DaemonRuntime {
 
 /// Dispatch a task frame into `runtime` as `from`, and wait until it is running.
 async fn start_task(runtime: &DaemonRuntime, from: &str, task_id: &str) {
-    let body = medulla::tinyplace::encode_task_frame(medulla::tinyplace::EncodeFrameInput {
+    let body = medulla::protocol::encode_task_frame(medulla::protocol::EncodeFrameInput {
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
         text: "watch me".to_string(),
@@ -129,7 +129,7 @@ async fn start_task(runtime: &DaemonRuntime, from: &str, task_id: &str) {
         conversation: None,
         fleet_depth: 0,
     });
-    let frame = medulla::tinyplace::decode_task_frame(&body);
+    let frame = medulla::protocol::decode_task_frame(&body);
     runtime.handle_message(from.to_string(), body, frame);
 
     let deadline = Instant::now() + PATIENCE;

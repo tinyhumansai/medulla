@@ -3,7 +3,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::tinyplace::{HarnessProvider, TokenUsage};
+use crate::protocol::{HarnessProvider, TokenUsage};
 
 /// A line sink for hub diagnostics.
 ///

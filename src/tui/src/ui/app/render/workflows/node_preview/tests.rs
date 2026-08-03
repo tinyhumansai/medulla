@@ -183,7 +183,7 @@ fn http_preview_strips_url_credentials_query_and_fragment() {
 fn host_defaults(harness: &str, model: &str) -> AgentDefaults {
     let config = medulla::config::WorkflowsConfig {
         default_worker: "fallback".into(),
-        default_provider: medulla::tinyplace::HarnessProvider::from_wire(harness),
+        default_provider: medulla::protocol::HarnessProvider::from_wire(harness),
         default_model: model.into(),
         ..Default::default()
     };
@@ -194,7 +194,7 @@ fn host_defaults(harness: &str, model: &str) -> AgentDefaults {
 fn workflow_defaults(harness: &str, model: &str) -> AgentDefaults {
     let config = medulla::config::WorkflowsConfig {
         default_worker: "fallback".into(),
-        default_provider: Some(medulla::tinyplace::HarnessProvider::Claude),
+        default_provider: Some(medulla::protocol::HarnessProvider::Claude),
         default_model: "claude-opus-4".into(),
         ..Default::default()
     };

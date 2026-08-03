@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::tinyplace::{BudgetSource, BudgetWindow, HarnessProvider};
+use crate::protocol::{BudgetSource, BudgetWindow, HarnessProvider};
 
 use super::{evaluate_provider, probe_budgets, BudgetSeams, ConfiguredBudget, ProviderProbeInput};
 

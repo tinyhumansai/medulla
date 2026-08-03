@@ -1,9 +1,9 @@
 //! Tests for the entry module.
 
 use super::*;
-// `Flags`/`parse_provider`/`dedupe` come from `super::*`; the provider enum
-// is only needed by these tests, so import it explicitly here.
-use crate::tinyplace::HarnessProvider;
+// `Flags`/`parse_provider` come from `super::*`; the provider enum is only
+// needed by these tests, so import it explicitly here.
+use crate::protocol::HarnessProvider;
 
 fn args(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| s.to_string()).collect()
@@ -70,11 +70,4 @@ fn parse_provider_maps_wire_names() {
     assert_eq!(parse_provider("codex").unwrap(), HarnessProvider::Codex);
     let err = parse_provider("bogus").unwrap_err();
     assert!(err.contains("unknown provider"), "got: {err}");
-}
-
-#[test]
-fn dedupe_preserves_first_occurrence_order() {
-    let mut values = args(&["a", "b", "a", "c", "b"]);
-    dedupe(&mut values);
-    assert_eq!(values, vec!["a", "b", "c"]);
 }

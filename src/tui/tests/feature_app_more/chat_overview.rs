@@ -55,18 +55,18 @@ fn events_changed_flips_then_settles() {
     assert!(!app.events_changed(), "same length settles");
 }
 
-// --- tinyplace observation merge --------------------------------------------
+// --- host-link observation merge --------------------------------------------
 
 #[test]
-fn tinyplace_observation_merges_into_snapshot() {
-    use medulla::runtime::{AgentDescriptor, AgentPresence, TinyplaceIdentity};
-    use medulla::tinyplace::service::TinyplaceObservation;
+fn link_observation_merges_into_snapshot() {
+    use medulla::protocol::service::LinkObservation;
+    use medulla::runtime::{AgentDescriptor, AgentPresence, LinkIdentity};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
     let (mut app, _rt) = empty_app();
     let mut meta = serde_json::Map::new();
-    meta.insert("harness".into(), serde_json::json!("tinyplace"));
+    meta.insert("harness".into(), serde_json::json!("link"));
     let mut presence = HashMap::new();
     presence.insert(
         "peer-1".into(),
@@ -76,12 +76,11 @@ fn tinyplace_observation_merges_into_snapshot() {
             at: 1,
         },
     );
-    let obs = TinyplaceObservation {
+    let obs = LinkObservation {
         notice: None,
-        identity: Some(TinyplaceIdentity {
-            agent_id: "cid-xyz".into(),
-            public_key: "pk".into(),
-            handle: Some("@merged".into()),
+        identity: Some(LinkIdentity {
+            node_name: "merged-host".into(),
+            forwarder: "forwarder:41641".into(),
         }),
         roster: vec![AgentDescriptor {
             id: "peer-1".into(),
@@ -96,14 +95,14 @@ fn tinyplace_observation_merges_into_snapshot() {
         }],
         presence,
     };
-    app.set_tinyplace_observation(Arc::new(Mutex::new(obs)));
-    assert!(app.snapshot.tinyplace.is_some());
+    app.set_link_observation(Arc::new(Mutex::new(obs)));
+    assert!(app.snapshot.link.is_some());
     assert!(app.snapshot.roster.iter().any(|a| a.id == "peer-1"));
     assert!(app.snapshot.presence.contains_key("peer-1"));
-    // The Overview 'me' line reflects the merged handle.
+    // The Overview 'me' line reflects the merged node name.
     app.tab_index = 0;
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("@merged"), "merged identity should render");
+    assert!(out.contains("merged-host"), "merged identity should render");
 }
 
 // --- chat transcript folding: error + wrapped multi-line turns --------------

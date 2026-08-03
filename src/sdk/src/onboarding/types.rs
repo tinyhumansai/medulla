@@ -5,10 +5,7 @@
 //! Keeping these here lets [`super`] own only the async wiring while the app
 //! crate (which supplies the actual rendering) depends on stable public types.
 
-use std::sync::Arc;
-
 use crate::worker_profile::WorkerProfile;
-use ::tinyplace::LocalSigner;
 
 /// The result of an onboarding check.
 pub struct Registration {
@@ -18,22 +15,19 @@ pub struct Registration {
     pub newly_registered: bool,
 }
 
-/// Everything an interactive onboarding UI needs to render the worker-setup flow
-/// and run its identity step. The heavy lifting (minting the identity, writing
-/// the profile, the announce DM) stays in [`super::ensure_registered`]; the UI
-/// only chooses a `(name, owner)` and may call [`super::reverse_handle_lookup`].
+/// Everything an interactive onboarding UI needs to render the worker-setup
+/// flow. Writing the profile stays in [`super::ensure_registered`]; the UI only
+/// chooses a `(name, owner)`.
 pub struct OnboardingContext {
     /// The default worker name to prefill the name input with.
     pub default_name: String,
-    /// The OpenHuman owner resolved from env/config, prefilled into the owner input.
+    /// The owner resolved from env/config, prefilled into the owner input.
     pub prefill_owner: Option<String>,
-    /// The resolved tiny.place endpoint, shown in the confirm summary and used
-    /// for the reverse `@handle` lookup.
+    /// The forwarder endpoint this host links through, shown in the confirm
+    /// summary. Empty when the host has not enrolled yet.
     pub endpoint: String,
-    /// This worker's wallet address (already minted before the UI runs).
+    /// This worker's link node name, when it has enrolled.
     pub address: String,
-    /// The identity signer, used to authenticate the reverse-lookup client.
-    pub signer: Arc<LocalSigner>,
 }
 
 /// A boxed async callback that renders the interactive onboarding screen and

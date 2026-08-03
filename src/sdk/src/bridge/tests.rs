@@ -5,10 +5,11 @@ use super::{Bridge, BridgeKind, BridgeTransport, LocalBridgeNetwork};
 #[test]
 fn bridge_kind_parses_only_the_two_supported_scopes() {
     assert_eq!(BridgeKind::parse("local"), Some(BridgeKind::Local));
-    assert_eq!(BridgeKind::parse("Tiny.Place"), Some(BridgeKind::Tinyplace));
+    assert_eq!(BridgeKind::parse("  Link  "), Some(BridgeKind::Link));
     assert_eq!(BridgeKind::parse("remote"), None);
+    assert_eq!(BridgeKind::parse("tinyplace"), None);
     assert_eq!(BridgeKind::Local.as_str(), "local");
-    assert_eq!(BridgeKind::Tinyplace.as_str(), "tinyplace");
+    assert_eq!(BridgeKind::Link.as_str(), "link");
 }
 
 #[tokio::test]

@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use super::route_screen;
 use crate::hub::relay::Relay;
 use crate::hub::ScreenStore;
-use crate::tinyplace::{
+use crate::protocol::{
     build_frame, parse_screen_message, FrameDecision, ScreenGrid, ScreenMessage, ScreenRun,
 };
 
@@ -29,7 +29,7 @@ impl Relay for Recorder {
         Ok(())
     }
 
-    async fn drain_inbox(&self, _limit: i64) -> Vec<crate::daemon::transport::InboundMessage> {
+    async fn drain_inbox(&self, _limit: i64) -> Vec<crate::bridge::InboundMessage> {
         Vec::new()
     }
 
@@ -70,7 +70,7 @@ fn frame(
     next: &ScreenGrid,
     seq: i64,
     base: i64,
-) -> crate::tinyplace::ScreenFrame {
+) -> crate::protocol::ScreenFrame {
     match build_frame(previous, next, "w_1", seq, base) {
         FrameDecision::Send(frame) => frame,
         FrameDecision::Unchanged => panic!("expected a frame"),

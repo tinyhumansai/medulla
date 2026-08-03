@@ -1,12 +1,12 @@
 //! Address-routing bridge: one endpoint that speaks to device-local peers over
-//! the in-memory bus and to everyone else over tiny.place.
+//! the in-memory bus and to everyone else over the host link.
 //!
 //! This is what lets a single process be both orchestrator and host. The hub
 //! dispatches through one [`Bridge`], the embedded daemon binds a local address
 //! on the same [`LocalBridgeNetwork`](super::LocalBridgeNetwork), and work for
 //! this machine never leaves it — no relay round-trip, no contact graph, no
 //! encryption handshake — while a remote worker's address falls through to the
-//! tiny.place transport unchanged.
+//! link transport unchanged.
 //!
 //! Routing is by *binding*, not by spelling: an address routes locally exactly
 //! when the local network currently has an endpoint for it. A worker that goes
@@ -15,9 +15,7 @@
 
 use async_trait::async_trait;
 
-use crate::daemon::transport::InboundMessage;
-
-use super::{Bridge, LocalBridge};
+use super::{Bridge, BridgeLiveness, InboundMessage, LocalBridge};
 
 #[cfg(test)]
 #[path = "routing_tests.rs"]
@@ -45,7 +43,7 @@ impl RoutingBridge {
 
     /// Route local addresses only.
     ///
-    /// Used when this device has no tiny.place identity: the orchestrator still
+    /// Used when this device has no link identity: the orchestrator still
     /// reaches its own host, and a remote address reports that plainly rather
     /// than being accepted and dropped.
     pub fn local_only(local: LocalBridge) -> Self {
@@ -135,12 +133,12 @@ impl Bridge for RoutingBridge {
     /// live — it names something bound in this process, so it has no heartbeat
     /// to read and needs none. Only the rest are forwarded to the remote.
     async fn presence(&self, addresses: &[String]) -> std::collections::HashMap<String, bool> {
-        // A device-local address is answered here, not asked of the relay. It
+        // A device-local address is answered here, not asked of the remote. It
         // names something bound in this process, so its liveness is knowable
-        // exactly — and tiny.place has never heard of it, because it is not a
-        // tiny.place identity and never heartbeats. Forwarding it returns "no
-        // record", which reads as offline and takes every host on this machine
-        // out of the roster.
+        // exactly — and the link has never heard of it, because it is not an
+        // enrolled node and no datagram ever carries it. Forwarding it returns
+        // "no record", which reads as offline and takes every host on this
+        // machine out of the roster.
         let mut out = std::collections::HashMap::new();
         let mut remote_addresses = Vec::new();
         for address in addresses {
@@ -160,6 +158,21 @@ impl Bridge for RoutingBridge {
 
     async fn is_device_local(&self, address: &str) -> bool {
         self.is_local(address).await
+    }
+
+    /// A device-local peer is always live; a remote one answers for itself.
+    ///
+    /// Routing on liveness rather than defaulting to `Live` for everything is
+    /// what lets the caller's clocks pause for a remote worker mid-outage while
+    /// a task on this machine keeps being held to its normal window.
+    async fn liveness(&self, peer: &str) -> BridgeLiveness {
+        if self.is_local(peer).await {
+            return BridgeLiveness::Live;
+        }
+        match &self.remote {
+            Some(remote) => remote.liveness(peer).await,
+            None => BridgeLiveness::Live,
+        }
     }
 
     async fn contact_accepted(&self, peer: &str) -> bool {

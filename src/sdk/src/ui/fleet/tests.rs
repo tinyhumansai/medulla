@@ -330,8 +330,8 @@ fn workspace_detail_shows_its_medulla_md_profile() {
 
 // --- local registry → capacity ---------------------------------------------
 
+use crate::protocol::{BudgetSource, BudgetWindow, HarnessProvider, HarnessReadiness};
 use crate::runtime::WorkerInfo;
-use crate::tinyplace::{BudgetSource, BudgetWindow, HarnessProvider, HarnessReadiness};
 
 /// A registered peer with the capacity facts the Hosts page shows.
 fn peer(id: &str) -> WorkerInfo {
@@ -387,7 +387,7 @@ fn probed_readiness_and_budgets_split_into_one_harness_per_provider() {
             reason: Some("not authenticated".into()),
         },
     ];
-    p.budgets = vec![crate::tinyplace::HarnessBudget {
+    p.budgets = vec![crate::protocol::HarnessBudget {
         provider: HarnessProvider::Claude,
         seat: Some("seat-1".into()),
         window: BudgetWindow::FiveHour,

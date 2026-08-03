@@ -18,7 +18,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::bridge::Bridge;
-use crate::tinyplace::{decode_task_frame, TaskFrameKind};
+use crate::protocol::{decode_task_frame, TaskFrameKind};
 
 use super::providers::{detect_providers, run_provider_task, RunTaskFn, RunTaskOptions};
 use super::types::{DaemonConfig, DaemonRuntime, SendFn};
@@ -173,12 +173,12 @@ impl EmbeddedDaemon {
     }
 
     /// The coding-agent CLIs this host actually found and serves.
-    pub fn providers(&self) -> &[crate::tinyplace::HarnessProvider] {
+    pub fn providers(&self) -> &[crate::protocol::HarnessProvider] {
         &self.providers
     }
 
     /// The provider used when a task frame names none.
-    pub fn default_provider(&self) -> crate::tinyplace::HarnessProvider {
+    pub fn default_provider(&self) -> crate::protocol::HarnessProvider {
         self.default_provider
     }
 

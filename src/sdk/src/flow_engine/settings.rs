@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// Settings governing one workflow run's capabilities.
 #[derive(Debug, Clone)]

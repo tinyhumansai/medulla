@@ -26,11 +26,14 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+use std::collections::VecDeque;
+
 use crate::crypto;
 use crate::header::{OuterHeader, HEADER_LEN, MAX_DATAGRAM};
 use crate::keys::SeqSource;
 use crate::packet::{elapsed16, timestamp16, Packet, MAX_DIFF_LEN};
-use crate::state::{MessageQueue, RowGrid, CHANNEL_MESSAGES, CHANNEL_SCREEN};
+use crate::state::{MessageQueue, RowGrid, SspState, CHANNEL_MESSAGES, CHANNEL_SCREEN};
+use rand::RngCore;
 
 pub use channel::{Channel, MAX_SENT_STATES};
 pub use timing::{
@@ -79,6 +82,9 @@ pub struct Session {
     ack_pending: [bool; CHANNEL_COUNT],
     /// Alternates which channel is offered first, so neither can starve the other.
     rotate: bool,
+    local_epoch: u64,
+    peer_epoch: Option<u64>,
+    retired_peer_epochs: VecDeque<u64>,
 }
 
 impl Session {
@@ -98,6 +104,9 @@ impl Session {
             peer_timestamp: None,
             ack_pending: [false; CHANNEL_COUNT],
             rotate: false,
+            local_epoch: rand::thread_rng().next_u64(),
+            peer_epoch: None,
+            retired_peer_epochs: VecDeque::new(),
         }
     }
 
@@ -109,6 +118,11 @@ impl Session {
     /// The peer's node id.
     pub fn peer_node_id(&self) -> crate::keys::NodeId {
         self.config.peer_node_id
+    }
+
+    /// The current peer process epoch, once an authenticated datagram arrived.
+    pub fn peer_epoch(&self) -> Option<u64> {
+        self.peer_epoch
     }
 
     /// The round-trip estimator, for `status()` and for tests.
@@ -162,9 +176,19 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// [`TransportError::QueueOverflow`] when the sent-state history is at its
-    /// bound.
+    /// [`TransportError::DiffTooLarge`] when this update cannot fit as one state
+    /// step, or [`TransportError::QueueOverflow`] when the sent-state history is
+    /// at its bound.
     pub fn set_screen(&mut self, rows: Vec<Vec<u8>>) -> Result<(), TransportError> {
+        let mut next = self.screen.current().clone();
+        next.set_rows(rows.clone());
+        let size = next.diff_from(self.screen.current()).len();
+        if size > MAX_DIFF_LEN {
+            return Err(TransportError::DiffTooLarge {
+                size,
+                limit: MAX_DIFF_LEN,
+            });
+        }
         let mut rows = Some(rows);
         self.screen.advance(|grid| {
             grid.set_rows(rows.take().expect("advance runs the change once"));
@@ -313,6 +337,21 @@ impl Session {
         )?;
         let packet = Packet::decode(&plaintext)?;
 
+        if self.retired_peer_epochs.contains(&header.epoch) {
+            return Ok(false);
+        }
+        if self.peer_epoch.is_some_and(|epoch| epoch != header.epoch) {
+            self.retired_peer_epochs
+                .push_back(self.peer_epoch.expect("peer epoch is present"));
+            if self.retired_peer_epochs.len() > 8 {
+                self.retired_peer_epochs.pop_front();
+            }
+            self.messages.reset_peer();
+            self.screen.reset_peer();
+            self.ack_pending = [false; CHANNEL_COUNT];
+        }
+        self.peer_epoch = Some(header.epoch);
+
         self.last_heard_ms = Some(now_ms);
         self.peer_timestamp = Some((packet.send_ts, now_ms));
         if packet.reply_ts != 0 {
@@ -410,7 +449,8 @@ impl Session {
         let plaintext = packet.encode()?;
 
         let full_seq = seq.next_seq()? | self.config.role.direction_bit();
-        let mut header = OuterHeader::new(self.config.node_id, self.config.peer_node_id, full_seq);
+        let mut header = OuterHeader::new(self.config.node_id, self.config.peer_node_id, full_seq)
+            .epoch(self.local_epoch);
         if heartbeat {
             header = header.heartbeat();
         }

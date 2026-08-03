@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 
+use crate::protocol::HarnessProvider;
 use crate::session_history::SessionAgentKind;
-use crate::tinyplace::HarnessProvider;
 
 use super::args::parse_wrapper_args;
 use super::bridge::{agent_kind, mint_session_id, resolve_recipient};

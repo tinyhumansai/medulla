@@ -43,7 +43,7 @@
 
 use serde_json::Value;
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// A claude `stop_reason` meaning the assistant will continue working.
 const CONTINUES: &str = "tool_use";

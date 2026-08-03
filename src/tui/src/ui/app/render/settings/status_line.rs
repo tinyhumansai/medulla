@@ -15,7 +15,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use crate::ui::app::render::agents::RAIL_MAX_CONTENT;
 use crate::worker::pty::{HarnessControl, PtyState, SessionRow};

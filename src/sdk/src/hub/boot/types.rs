@@ -1,12 +1,50 @@
 //! Data types for the `boot` module.
 #[allow(unused_imports)]
 use super::*;
+
+use medulla_link::keys::{NodeId, PairKey};
+
+/// One enrolled peer on the host link.
+///
+/// Carries all three identifiers because they come from different places and
+/// none is derivable from the others: the name is the registry's, the id is the
+/// backend's, and the pair key is the user's (protocol §7.1) and never passed
+/// through an API.
+#[derive(Debug, Clone)]
+pub struct HubLinkPeer {
+    /// The bridge address callers use.
+    pub name: String,
+    /// The 16-byte identifier that travels on the wire.
+    pub node_id: NodeId,
+    /// The end-to-end key shared with this peer.
+    pub pair_key: PairKey,
+}
+
+/// How the hub brings up its host link.
+#[derive(Clone)]
+pub struct HubLinkConfig {
+    /// The link identity directory, normally `<medulla_home>/link`.
+    pub state_dir: PathBuf,
+    /// This endpoint's node name — the address peers send to.
+    pub node_name: String,
+    /// Overrides the forwarder endpoint recorded in `node.json`.
+    pub forwarder_endpoint: Option<String>,
+    /// The hosts this orchestrator has enrolled.
+    pub peers: Vec<HubLinkPeer>,
+    /// An already-open link owned by the embedding process.
+    ///
+    /// Embedded hubs share this handle with status observation because the
+    /// identity directory is exclusively locked. Standalone hubs leave it
+    /// unset and open the link during startup.
+    pub handle: Option<Arc<medulla_link::LinkHandle>>,
+}
+
 /// One worker the hub fronts on the backend roster.
 #[derive(Debug, Clone)]
 pub struct WorkerSpec {
-    /// The `agentId` the backend targets (defaults to the tiny.place address).
+    /// The `agentId` the backend targets (defaults to the worker's node name).
     pub id: String,
-    /// The worker's tiny.place address (base58 cryptoId or `@handle`).
+    /// The worker's bridge address — its link node name, or a device-local name.
     pub address: String,
     /// Display name for the roster entry.
     pub name: String,
@@ -16,7 +54,7 @@ pub struct WorkerSpec {
     pub harness: String,
     /// Absolute path of the workspace this worker runs tasks in, when the hub
     /// knows it — which is the case for a host in this same process, and not for
-    /// a remote tiny.place peer the operator merely named.
+    /// a remote host the operator merely named.
     ///
     /// Advertised as `metadata.workspace`; see [`HubWorker::workspace`].
     pub workspace: Option<String>,
@@ -30,8 +68,8 @@ pub struct HubConfig {
     pub backend_url: String,
     /// JWT for the Socket.IO handshake (from `medulla login`).
     pub jwt: String,
-    /// tiny.place identity directory (the hub's own wallet).
-    pub identity_dir: PathBuf,
+    /// The host link to bring up, or `None` for a device-local-only hub.
+    pub link: Option<HubLinkConfig>,
     /// The workers to advertise initially (may be empty; add more at runtime).
     pub workers: Vec<WorkerSpec>,
     /// The agent-role catalog, for resolving the roles a worker is toggled on
@@ -41,7 +79,7 @@ pub struct HubConfig {
     /// already loads, and a second read could disagree with what the operator
     /// is looking at on the Agent Templates page.
     pub agent_templates: Vec<crate::runtime::AgentTemplate>,
-    /// How often the runner drains the encrypted inbox.
+    /// How often the runner drains the inbox.
     pub poll: Duration,
     /// Where diagnostics go. Defaults to stderr; a TUI supplies its own so the
     /// hub never writes over a screen it does not own.
@@ -51,8 +89,8 @@ pub struct HubConfig {
     /// The device-local bus this hub also dispatches over.
     ///
     /// `Some` makes the hub bi-modal: a worker whose address is bound on this
-    /// network is reached in-process, and everything else still goes over
-    /// tiny.place. That is what lets one program be both the orchestrator and a
+    /// network is reached in-process, and everything else still goes over the
+    /// host link. That is what lets one program be both the orchestrator and a
     /// host for its own machine. `None` keeps every worker remote.
     pub local_network: Option<crate::bridge::LocalBridgeNetwork>,
     /// The address the hub binds on the local bus. Ignored without a
@@ -81,6 +119,4 @@ pub struct HubSession {
     pub handle: HubHandle,
     pub(super) _runner: Arc<TaskRunner>,
     pub(super) _client: Client,
-    /// The inbound-pairing poll, stopped with the session.
-    pub(super) _pairing: super::super::pairing::PairingPoll,
 }

@@ -306,7 +306,7 @@ fn sweep_retired_credentials(env: &std::collections::HashMap<String, String>) {
 
 /// `medulla hub`: run the orchestrator hub — bridge the hosted backend brain to
 /// tiny.place worker daemons. Takes the backend JWT from the core's app session
-/// and the worker roster from `MEDULLA_TINYPLACE_PEER` / `MEDULLA_HUB_WORKERS`.
+/// and the worker roster from `MEDULLA_LINK_PEER` / `MEDULLA_HUB_WORKERS`.
 pub(crate) async fn run_hub(_args: &[String]) -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let home = medulla::home::medulla_home(&env);
@@ -321,7 +321,7 @@ pub(crate) async fn run_hub(_args: &[String]) -> anyhow::Result<()> {
     ) {
         Some(config) => medulla::hub::run_hub(config).await,
         None => anyhow::bail!(
-            "hub: nothing to run — set MEDULLA_TINYPLACE_PEER (or MEDULLA_HUB_WORKERS) and run \
+            "hub: nothing to run — set MEDULLA_LINK_PEER (or MEDULLA_HUB_WORKERS) and run \
              `medulla login` first"
         ),
     }

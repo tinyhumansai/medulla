@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crate::bridge::{Bridge, LocalBridge, LocalBridgeNetwork};
 use crate::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
-use crate::tinyplace::{
+use crate::protocol::{
     decode_task_frame, encode_task_frame, EncodeFrameInput, HarnessProvider, TaskFrame,
     TaskFrameKind,
 };

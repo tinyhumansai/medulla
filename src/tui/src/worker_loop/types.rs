@@ -12,7 +12,7 @@ pub struct WorkerTuiConfig {
     pub contacts: Option<ContactDesk>,
     pub agent_id: Option<String>,
     pub startup_status: Option<String>,
-    pub transport: Option<SignalTransport>,
+    pub transport: Option<LinkBridge>,
     pub endpoint: Option<String>,
     pub theme: medulla_tui::ui::theme::Theme,
     pub trust_workspace: bool,
@@ -38,7 +38,7 @@ pub(in super::super) struct StartWiring {
     pub(in super::super) workspaces: Vec<String>,
     pub(in super::super) providers: Vec<HarnessProvider>,
     pub(in super::super) sessions: PtyManager,
-    pub(in super::super) transport: Option<SignalTransport>,
+    pub(in super::super) transport: Option<LinkBridge>,
     pub(in super::super) logs: LogBuffer,
     /// Whether to pre-trust the workspace with claude. `--no-trust-workspace`
     /// clears it for an operator who would rather answer the dialog themselves.

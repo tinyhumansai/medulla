@@ -1,7 +1,7 @@
 //! Binding-registry tests: the plan/record/reset lifecycle, per-provider
 //! isolation, LRU eviction, and which turns take the conversation chain.
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::registry::SessionRegistry;
 use super::super::types::{SessionClass, SessionKey};

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::hub::tests::dispatch::harness::{FakeWorker, Mode};
 use crate::hub::{HubWorker, RunError, TaskRunner};
-use crate::tinyplace::WorkerSystemInfo;
+use crate::protocol::WorkerSystemInfo;
 
 fn info() -> WorkerSystemInfo {
     WorkerSystemInfo {

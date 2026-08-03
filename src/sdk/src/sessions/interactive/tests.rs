@@ -7,7 +7,7 @@ use serde_json::json;
 use super::frames::{encode_interrupt, encode_user_message, map_stream_frame, StreamEvent};
 use super::session::{build_interactive_args, InteractiveSession, InteractiveSpec};
 use crate::daemon::providers::Abort;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 #[test]
 fn a_system_init_frame_announces_the_session_id() {

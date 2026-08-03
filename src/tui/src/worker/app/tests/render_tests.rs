@@ -6,7 +6,7 @@ use crossterm::event::KeyCode;
 use super::super::super::pty::PtyManager;
 use super::super::types::WorkerApp;
 use super::helpers::{app_at_setup, app_with, key, render, sh, wait_for};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::super::state::WorkerWiring;
 use super::super::types::{ExecutionMode, Screen, SetupStep, WorkerCmd, TAB_CONTACTS};

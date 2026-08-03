@@ -200,14 +200,14 @@ impl App {
     /// Kept to two lines — peers online and who this node is — because the panel
     /// it joins already spends most of its height on the run's own counters.
     pub(super) fn tinyplace_lines(&self) -> Vec<TLine<'static>> {
-        if self.loaded.config.tinyplace.is_none() {
+        if self.loaded.config.link.is_none() {
             return Vec::new();
         }
         let peers: Vec<_> = self
             .snapshot
             .roster
             .iter()
-            .filter(|a| a.metadata.get("harness").and_then(|v| v.as_str()) == Some("tinyplace"))
+            .filter(|a| a.metadata.get("harness").and_then(|v| v.as_str()) == Some("link"))
             .collect();
         let readings = peers
             .iter()
@@ -235,9 +235,8 @@ impl App {
                 peers.len()
             )));
         }
-        if let Some(me) = &self.snapshot.tinyplace {
-            let who = me.handle.clone().unwrap_or_else(|| clip(&me.agent_id, 24));
-            lines.push(TLine::from(format!("me {who}")));
+        if let Some(me) = &self.snapshot.link {
+            lines.push(TLine::from(format!("me {}", clip(&me.node_name, 24))));
         } else {
             lines.push(TLine::from(Span::styled(
                 "me · connecting…",

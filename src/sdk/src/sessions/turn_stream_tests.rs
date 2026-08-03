@@ -8,7 +8,7 @@
 //! stall backstop.
 
 use super::turn_stream::TurnStream;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// A claude assistant record that invokes a tool and states it will continue.
 const TOOL_LINE: &str = r#"{"type":"assistant","message":{"role":"assistant","id":"m1","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}"#;

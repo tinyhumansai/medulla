@@ -9,7 +9,7 @@
 use tokio::sync::mpsc;
 
 use crate::hub::{ActivityLog, HubHandle, RunError, TaskOutcome, TaskRequest};
-use crate::tinyplace::WorkflowAdvert;
+use crate::protocol::WorkflowAdvert;
 
 use super::super::types::{FleetOps, FleetWorker};
 use super::types::{FleetDefaults, HubSlot};

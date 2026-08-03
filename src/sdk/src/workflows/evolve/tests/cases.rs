@@ -40,7 +40,7 @@ impl HarnessDispatch for StubReviewer {
         }
         Ok(TaskOutcome {
             reply: self.reply.clone(),
-            usage: crate::tinyplace::TokenUsage {
+            usage: crate::protocol::TokenUsage {
                 input_tokens: 0,
                 output_tokens: 0,
             },

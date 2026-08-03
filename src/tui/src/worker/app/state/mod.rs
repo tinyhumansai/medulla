@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use medulla::config::Peer;
 use medulla::contacts::{ContactDesk, ContactRequest, RequestState};
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::super::pty::{PtyManager, SessionRow};
 use super::types::{Confirm, ExecutionMode, Screen, SetupStep, WorkerApp, TABS};
@@ -194,6 +194,10 @@ impl WorkerApp {
             }
             rows.push(Peer {
                 id: contact.agent_id.clone(),
+                // Issued at enrollment, not here — this row is a name the
+                // operator or the contact desk knows, and the wire id arrives
+                // with the enrollment response (protocol §2).
+                node_id: None,
                 name: Some(contact.display_name().to_string()),
                 handle: contact.handle,
                 address: Some(contact.agent_id),
@@ -234,6 +238,7 @@ impl WorkerApp {
         }
         self.masters.push(Peer {
             id: address.clone(),
+            node_id: None,
             name: Some("Master".into()),
             handle,
             address: Some(address),

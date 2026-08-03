@@ -13,9 +13,9 @@ pub use tokio::sync::{mpsc, Notify};
 
 pub use medulla::daemon::providers::{run_provider_task, RunTaskFn, RunTaskOptions, RunTaskResult};
 pub use medulla::daemon::{DaemonConfig, DaemonRuntime, SendFn};
-pub use medulla::tinyplace::{
+pub use medulla::protocol::{
     decode_task_frame, parse_agent_capabilities, HarnessProvider, TaskFrame, TaskFrameKind,
-    TINYPLACE_PROTO,
+    MEDULLA_TASK_PROTO,
 };
 
 /// Shared per-wait timeout for the daemon suites.
@@ -102,7 +102,7 @@ pub fn frame(
     TaskFrame {
         usage: None,
         work: None,
-        proto: TINYPLACE_PROTO.to_string(),
+        proto: MEDULLA_TASK_PROTO.to_string(),
         kind,
         task_id: task_id.to_string(),
         text: text.to_string(),

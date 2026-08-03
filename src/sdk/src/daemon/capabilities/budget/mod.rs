@@ -24,7 +24,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::tinyplace::{
+use crate::protocol::{
     BudgetSource, BudgetWindow, HarnessBudget, HarnessProvider, HarnessReadiness,
 };
 

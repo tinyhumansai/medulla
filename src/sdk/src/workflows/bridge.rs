@@ -36,7 +36,7 @@ use openhuman_core::openhuman::socket::medulla::payloads::{
 use openhuman_core::openhuman::socket::medulla::workflows::WorkflowBridge;
 
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 use crate::workflows::{
     ops, run_workflow, CopilotSession, RunContext, RunRecord, WorkflowError, WorkflowStore,
     WorkflowSummary,

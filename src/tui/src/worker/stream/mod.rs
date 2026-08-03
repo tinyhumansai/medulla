@@ -1,7 +1,7 @@
 //! Streaming a live harness session's screen to a watching orchestrator.
 //!
 //! The worker half of the `medulla.screen.v1` protocol, whose diff, fold and
-//! codec live in the SDK ([`medulla::tinyplace::screen`]). What is here is the
+//! codec live in the SDK ([`medulla::protocol::screen`]). What is here is the
 //! part that cannot be: the emulator lives in this crate, so both the
 //! translation out of `vt100` and the timer that samples it do too.
 //!

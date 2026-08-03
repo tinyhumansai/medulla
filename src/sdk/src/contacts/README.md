@@ -1,6 +1,6 @@
 # Contacts
 
-Incoming contact-request management for tiny.place peers.
+Incoming contact-request management.
 
 ## Contents
 
@@ -8,7 +8,7 @@ Incoming contact-request management for tiny.place peers.
 - [`desk/`](./desk/) — `ContactDesk` — the book, the relay, and the clock bundled into the one handle a UI holds.
 - [`service/`](./service/) — The relay side of contact management: poll incoming requests into a `ContactBook`, apply the admission policy, and perform operator decisions.
 - [`tests/`](./tests/) — Unit tests for contact-request admission, split by surface so no file exceeds the repo's 500-line ceiling: `policy` covers policy evaluation and the idempotent pending queue, `service` decision execution against a fake relay, and `health` what a poll reports about itself.
-- [`mod.rs`](./mod.rs) — Incoming contact-request management for tiny.place peers.
+- [`mod.rs`](./mod.rs) — Incoming contact-request management.
 - [`types.rs`](./types.rs) — Data model for incoming contact-request management: the admission policy, a pending request, and the operator's decision.
 
 ## Maintenance

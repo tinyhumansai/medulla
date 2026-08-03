@@ -83,7 +83,7 @@ fn harnesses(peer: &WorkerInfo, host_id: &str) -> Vec<HarnessDescriptor> {
 }
 
 /// One advertised harness budget as the chain's declared form.
-fn budget(source: &crate::tinyplace::HarnessBudget) -> HarnessBudget {
+fn budget(source: &crate::protocol::HarnessBudget) -> HarnessBudget {
     HarnessBudget {
         provider: source.provider.as_str().to_string(),
         window: window(source.window),
@@ -97,8 +97,8 @@ fn budget(source: &crate::tinyplace::HarnessBudget) -> HarnessBudget {
 }
 
 /// A metering window in the chain's open-vocabulary string form.
-fn window(window: crate::tinyplace::BudgetWindow) -> String {
-    use crate::tinyplace::BudgetWindow as W;
+fn window(window: crate::protocol::BudgetWindow) -> String {
+    use crate::protocol::BudgetWindow as W;
     match window {
         W::Daily => "daily",
         W::Weekly => "weekly",
@@ -109,8 +109,8 @@ fn window(window: crate::tinyplace::BudgetWindow) -> String {
 }
 
 /// How a budget's numbers were arrived at, in the chain's string form.
-fn budget_source(source: crate::tinyplace::BudgetSource) -> String {
-    use crate::tinyplace::BudgetSource as S;
+fn budget_source(source: crate::protocol::BudgetSource) -> String {
+    use crate::protocol::BudgetSource as S;
     match source {
         S::Estimate => "estimate",
         S::ProviderReported => "provider_reported",

@@ -117,7 +117,7 @@ pub(super) async fn handle_task_run(
     let agent_id = str_field(&obj, "agentId").unwrap_or_default();
     let requested_provider = str_field(&obj, "provider")
         .as_deref()
-        .and_then(crate::tinyplace::HarnessProvider::from_wire);
+        .and_then(crate::protocol::HarnessProvider::from_wire);
     let custom_harness = str_field(&obj, "customHarness").or_else(|| str_field(&obj, "harnessId"));
     let model = str_field(&obj, "model");
     // The frame's own `timeoutMs` is deliberately ignored: that is the BACKEND's

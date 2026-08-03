@@ -133,7 +133,7 @@ async fn admitting_a_replacement_preserves_a_settled_result_with_a_waiter() {
         let tracked = tasks.get_mut("abort-0").unwrap();
         tracked.entry.state = TaskState::Done(Box::new(TaskOutcome {
             reply: "kept".into(),
-            usage: crate::tinyplace::TokenUsage {
+            usage: crate::protocol::TokenUsage {
                 input_tokens: 0,
                 output_tokens: 0,
             },

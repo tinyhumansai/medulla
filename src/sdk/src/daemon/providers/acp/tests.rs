@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::daemon::providers::{Abort, RunTaskOptions};
 use crate::daemon::status_detail;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::types::FoldState;
 

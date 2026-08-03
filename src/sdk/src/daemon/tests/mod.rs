@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 use serde_json::json;
 use tokio::sync::{mpsc, Notify};
 
-use crate::tinyplace::{
-    decode_task_frame, HarnessEvent, HarnessProvider, TaskFrame, TaskFrameKind, TINYPLACE_PROTO,
+use crate::protocol::{
+    decode_task_frame, HarnessEvent, HarnessProvider, TaskFrame, TaskFrameKind, MEDULLA_TASK_PROTO,
 };
 
 use super::mappers::HarnessSemanticEvent;
@@ -86,7 +86,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
     TaskFrame {
         usage: None,
         work: None,
-        proto: TINYPLACE_PROTO.to_string(),
+        proto: MEDULLA_TASK_PROTO.to_string(),
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
         text: text.to_string(),

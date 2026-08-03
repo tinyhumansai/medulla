@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
-use crate::tinyplace::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert};
+use crate::protocol::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert};
 // `trigger_input` is shared with the cloud plane's adapter
 // ([`crate::workflows::bridge`]) rather than defined twice: a frame's text must
 // become the same trigger payload whether it arrived over tiny.place or over the
@@ -63,7 +63,7 @@ impl HarnessDispatch for RuntimeDispatch {
         // A node may name a provider through its `agent_ref`; anything this
         // worker does not offer falls back to the default rather than failing,
         // because a graph should be portable across workers.
-        let provider = crate::tinyplace::HarnessProvider::from_wire(&request.worker_address)
+        let provider = crate::protocol::HarnessProvider::from_wire(&request.worker_address)
             .filter(|p| inner.config.providers.contains(p))
             .or_else(|| self.runtime.select_provider(request.provider))
             .unwrap_or(inner.config.default_provider);

@@ -12,7 +12,7 @@ use crate::runtime::fleet::{
     HostResources, WorkspaceDescriptor,
 };
 use crate::runtime::{
-    AgentDescriptor, AgentPresence, CycleResultSummary, PeerSession, TinyplaceIdentity,
+    AgentDescriptor, AgentPresence, CycleResultSummary, LinkIdentity, PeerSession,
 };
 use crate::ui::chat_store::ChatMessage;
 use crate::ui::events::{TaskDigest, TuiEvent, Usage};
@@ -27,7 +27,7 @@ impl MockRuntime {
         {
             let mut s = rt.state.lock().unwrap();
             let mut meta = Map::new();
-            meta.insert("harness".into(), json!("tinyplace"));
+            meta.insert("harness".into(), json!("link"));
             meta.insert("handle".into(), json!("@dev-1"));
             meta.insert("protocol".into(), json!("openhuman"));
             s.roster = vec![AgentDescriptor {
@@ -52,10 +52,9 @@ impl MockRuntime {
                     at: now_millis(),
                 },
             );
-            s.tinyplace = Some(TinyplaceIdentity {
-                agent_id: "cid-abc123".into(),
-                public_key: "pk".into(),
-                handle: Some("@medulla".into()),
+            s.link = Some(LinkIdentity {
+                node_name: "medulla-orchestrator".into(),
+                forwarder: "forwarder.tinyhumans.ai:41641".into(),
             });
             s.tracing = true;
 

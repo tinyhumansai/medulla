@@ -154,9 +154,8 @@ fn add_host_page_renders_guidance_and_opens_the_prompt() {
 
     let out = render(&mut app, 120, 40);
     assert!(out.contains("Add a host for the orchestrator to delegate to."));
-    // The handle shortcut, which is the way to add a host without copying
-    // anything at all.
-    assert!(out.contains("@build-box"));
+    assert!(out.contains("Example: 7Kx…9fQ"));
+    assert!(!out.contains("@build-box"));
 
     assert!(app.on_event(key(KeyCode::Enter)).is_none());
     let (title, draft) = app.prompt_state().expect("add prompt");

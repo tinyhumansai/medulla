@@ -2,9 +2,9 @@
 //! [`ContactBook`], apply the admission policy, and perform operator decisions.
 //!
 //! The relay seam is a trait rather than a concrete client so the whole
-//! admission flow is testable offline; production wires
-//! [`TinyPlaceClient`](::tinyplace::TinyPlaceClient) through
-//! [`ClientContacts`].
+//! admission flow is testable offline. No production relay ships here: the host
+//! link has no contact graph to poll (protocol §7 — enrollment is the only
+//! handshake), so what remains is the queue model the worker TUI renders.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,87 +34,6 @@ pub trait ContactRelay: Send + Sync {
     fn decline(&self, agent_id: String) -> BoxFuture<'_, Result<(), String>>;
     /// Block `agent_id`, refusing this and future requests.
     fn block(&self, agent_id: String) -> BoxFuture<'_, Result<(), String>>;
-}
-
-impl ClientContacts {
-    /// Wrap an authenticated client.
-    pub fn new(client: ::tinyplace::TinyPlaceClient) -> Self {
-        ClientContacts { client }
-    }
-}
-
-impl ContactRelay for ClientContacts {
-    fn incoming(&self) -> BoxFuture<'_, Result<Vec<IncomingRequest>, String>> {
-        Box::pin(async move {
-            let response = self
-                .client
-                .contacts
-                .requests(None)
-                .await
-                .map_err(|err| err.to_string())?;
-            Ok(response
-                .incoming
-                .into_iter()
-                .filter(|view| !view.agent_id.is_empty())
-                .map(|view| IncomingRequest {
-                    agent_id: view.agent_id,
-                    handle: None,
-                })
-                .collect())
-        })
-    }
-
-    fn accepted(&self) -> BoxFuture<'_, Result<Vec<IncomingRequest>, String>> {
-        Box::pin(async move {
-            let response = self
-                .client
-                .contacts
-                .list(None)
-                .await
-                .map_err(|err| err.to_string())?;
-            Ok(response
-                .contacts
-                .into_iter()
-                .filter(|view| !view.agent_id.is_empty())
-                .map(|view| IncomingRequest {
-                    agent_id: view.agent_id,
-                    handle: None,
-                })
-                .collect())
-        })
-    }
-
-    fn accept(&self, agent_id: String) -> BoxFuture<'_, Result<(), String>> {
-        Box::pin(async move {
-            self.client
-                .contacts
-                .accept(&agent_id)
-                .await
-                .map(|_| ())
-                .map_err(|err| err.to_string())
-        })
-    }
-
-    fn decline(&self, agent_id: String) -> BoxFuture<'_, Result<(), String>> {
-        Box::pin(async move {
-            self.client
-                .contacts
-                .remove(&agent_id)
-                .await
-                .map_err(|err| err.to_string())
-        })
-    }
-
-    fn block(&self, agent_id: String) -> BoxFuture<'_, Result<(), String>> {
-        Box::pin(async move {
-            self.client
-                .contacts
-                .block(&agent_id)
-                .await
-                .map(|_| ())
-                .map_err(|err| err.to_string())
-        })
-    }
 }
 
 /// Poll `relay` for incoming requests, record them in `book`, and auto-settle
@@ -237,6 +156,5 @@ pub fn spawn_contact_poll(
 }
 
 mod types;
-pub use types::ClientContacts;
 pub use types::IncomingRequest;
 pub use types::NowFn;

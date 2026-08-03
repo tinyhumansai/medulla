@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, Mutex as TokioMutex, Notify, Semaphore};
 
-use crate::tinyplace::{AgentCapabilities, HarnessProvider};
+use crate::protocol::{AgentCapabilities, HarnessProvider};
 
 use super::providers::{Abort, RunTaskFn};
 
@@ -295,7 +295,7 @@ pub struct DaemonRuntime {
 #[derive(Debug, Clone, Default)]
 pub(super) struct FrameAttachments {
     /// Token counts the child harness reported, on reply frames.
-    pub(super) usage: Option<crate::tinyplace::TokenUsage>,
+    pub(super) usage: Option<crate::protocol::TokenUsage>,
     /// What the child harness is working on as of this frame.
     pub(super) work: Option<crate::harness_work::WorkSnapshot>,
 }

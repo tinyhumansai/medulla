@@ -1,9 +1,9 @@
 //! Driver-seam tests: task frames and session envelopes folded into one
 //! normalized turn, and the asymmetry between the two drivers.
 
-use ::tinyplace::types::{AnySessionEnvelope, SessionEnvelopeV1, SessionEnvelopeV2};
+use crate::protocol::envelope::{AnySessionEnvelope, SessionEnvelopeV1, SessionEnvelopeV2};
 
-use crate::tinyplace::{HarnessProvider, TaskFrame, TaskFrameKind, TINYPLACE_PROTO};
+use crate::protocol::{HarnessProvider, TaskFrame, TaskFrameKind, MEDULLA_TASK_PROTO};
 
 use super::super::input::{envelope_turn, fold, Folded, Observation, SessionInput};
 use super::super::types::{SessionClass, SessionDriver, SessionPolicy, TurnOrigin};
@@ -12,7 +12,7 @@ use super::super::types::{SessionClass, SessionDriver, SessionPolicy, TurnOrigin
 
 fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
     TaskFrame {
-        proto: TINYPLACE_PROTO.to_string(),
+        proto: MEDULLA_TASK_PROTO.to_string(),
         kind,
         task_id: task_id.to_string(),
         text: text.to_string(),

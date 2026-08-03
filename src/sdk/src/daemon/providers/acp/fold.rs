@@ -6,7 +6,7 @@ use agent_client_protocol::schema::v1::SessionUpdate;
 use serde_json::{json, Value};
 
 use crate::daemon::mappers::HarnessSemanticEvent;
-use crate::tinyplace::HarnessEvent;
+use crate::protocol::HarnessEvent;
 
 use super::super::types::OnEvent;
 use super::types::FoldState;

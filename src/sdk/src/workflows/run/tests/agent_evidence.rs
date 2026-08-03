@@ -78,7 +78,7 @@ async fn a_workflow_s_defaults_block_reaches_the_dispatch() {
     let seen = dispatch.seen.lock().unwrap();
     assert_eq!(
         seen[0].provider,
-        Some(crate::tinyplace::HarnessProvider::Codex)
+        Some(crate::protocol::HarnessProvider::Codex)
     );
     assert_eq!(seen[0].model.as_deref(), Some("gpt-5-codex"));
 }
@@ -118,7 +118,7 @@ async fn a_step_that_names_its_own_harness_overrides_the_workflow_s() {
     let seen = dispatch.seen.lock().unwrap();
     assert_eq!(
         seen[0].provider,
-        Some(crate::tinyplace::HarnessProvider::Claude)
+        Some(crate::protocol::HarnessProvider::Claude)
     );
     // The workflow's Codex model must not follow the step onto Claude Code.
     assert_eq!(seen[0].model, None);
@@ -229,7 +229,7 @@ async fn a_sub_workflow_s_own_defaults_reach_its_agent_step() {
     let seen = dispatch.seen.lock().unwrap();
     assert_eq!(
         seen[0].provider,
-        Some(crate::tinyplace::HarnessProvider::Codex),
+        Some(crate::protocol::HarnessProvider::Codex),
         "the child's own defaults, not the parent's, must reach its step"
     );
     assert_eq!(seen[0].model.as_deref(), Some("gpt-5-codex"));

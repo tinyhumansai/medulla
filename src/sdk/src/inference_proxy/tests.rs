@@ -12,7 +12,7 @@ use http::header::{HeaderMap, HeaderName, HeaderValue};
 use super::routing::{is_openrouter, resolve_key};
 use super::*;
 use crate::config::{RouterConfig, RouterProviderConfig};
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// Build a header map from `(name, value)` pairs.
 fn headers(pairs: &[(&str, &str)]) -> HeaderMap {

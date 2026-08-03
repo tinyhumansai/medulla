@@ -1,9 +1,9 @@
 //! Focused tests for startup-time local harness availability.
 
 use medulla::config::CustomHarnessConfig;
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
-use crate::app_loop::available_primary_presets;
+use crate::app_loop::{available_primary_presets, validate_explicit_config};
 
 fn preset(id: &str, base_harness: HarnessProvider, host_id: &str) -> CustomHarnessConfig {
     CustomHarnessConfig {
@@ -37,4 +37,15 @@ fn primary_presets_require_their_base_cli_to_be_available() {
             .collect::<Vec<_>>(),
         vec!["available"]
     );
+}
+
+#[test]
+fn a_missing_explicit_tui_config_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.toml");
+
+    let error = validate_explicit_config(missing.to_str()).unwrap_err();
+
+    assert!(error.to_string().contains("does not exist"));
+    assert!(validate_explicit_config(None).is_ok());
 }

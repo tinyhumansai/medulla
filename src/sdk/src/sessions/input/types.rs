@@ -5,7 +5,7 @@ use super::*;
 /// drivers named in [`SessionDriver`](crate::sessions::SessionDriver).
 #[derive(Debug, Clone)]
 pub enum SessionInput {
-    /// A decoded `medulla-tinyplace/1` frame from an authenticated sender.
+    /// A decoded `medulla-task/1` frame from an authenticated sender.
     Frame {
         /// The authenticated sender's cryptoId. **Never** taken from the frame
         /// body — a frame cannot name its own author.

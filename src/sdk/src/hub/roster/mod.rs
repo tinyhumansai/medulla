@@ -254,7 +254,7 @@ pub(super) fn remove_conflicting(
 /// is an action in itself, not an automatic re-selection.
 pub(super) fn worker_for_strategy(
     workers: &[HubWorker],
-    details: &HashMap<String, crate::tinyplace::WorkerSystemInfo>,
+    details: &HashMap<String, crate::protocol::WorkerSystemInfo>,
     strategy: crate::runtime::RoutingStrategy,
 ) -> Option<String> {
     use crate::runtime::RoutingStrategy;
@@ -286,9 +286,9 @@ pub(super) fn worker_for_strategy(
 /// provider reports remaining tokens, keeping budget metadata advisory and
 /// fail-open rather than blocking a valid host default.
 pub(super) fn subscription_for_strategy(
-    capabilities: &crate::tinyplace::AgentCapabilities,
+    capabilities: &crate::protocol::AgentCapabilities,
     strategy: crate::runtime::SubscriptionRoutingStrategy,
-) -> Option<crate::tinyplace::HarnessProvider> {
+) -> Option<crate::protocol::HarnessProvider> {
     use crate::runtime::SubscriptionRoutingStrategy;
 
     if strategy == SubscriptionRoutingStrategy::Manual {

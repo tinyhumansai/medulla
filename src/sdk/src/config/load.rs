@@ -13,32 +13,32 @@ use serde_json::Value;
 
 use crate::home::medulla_home;
 
-use super::types::{LoadedConfig, TinyplaceConfig, TuiConfig};
+use super::types::{LinkConfig, LoadedConfig, TuiConfig};
 use super::urls::{resolve_backend_base_url, resolve_tinyplace_base_url};
 
-/// The `[tinyplace]` section to use when the config file has none.
+/// The `[link]` section to use when the config file has none.
 ///
-/// [`load_config`] env-resolves `base_url` and the identity dir only for a
+/// [`load_config`] env-resolves `forwarder_url` and the state dir only for a
 /// section that is actually *present*. A caller that synthesizes its own with
-/// [`TinyplaceConfig::default`] therefore gets the **prod** relay even under
+/// [`LinkConfig::default`] therefore gets the **prod** backend even under
 /// `MEDULLA_STAGING=1`, because that field's serde default is a constant and
 /// constants cannot read the environment.
 ///
-/// That divergence is not cosmetic: a worker pointed at one relay and an
-/// orchestrator pointed at another both start cleanly, publish keys, and report
-/// healthy — they simply never see each other, because a contact request
-/// delivered to one relay does not exist on the other. Use this instead of
+/// That divergence is not cosmetic: a host pointed at one forwarder and an
+/// orchestrator pointed at another both start cleanly and report healthy — they
+/// simply never hear from each other, because the forwarder is what moves the
+/// datagram and neither one's is the other's. Use this instead of
 /// `Default::default()` anywhere a missing section is filled in, so running
-/// without a `[tinyplace]` section cannot strand a peer on a different relay
+/// without a `[link]` section cannot strand a host on a different forwarder
 /// than the rest of the deployment.
-pub fn default_tinyplace_config(env: &HashMap<String, String>) -> TinyplaceConfig {
-    TinyplaceConfig {
-        base_url: resolve_tinyplace_base_url(env, None),
-        identity_dir: medulla_home(env)
-            .join("tinyplace")
+pub fn default_link_config(env: &HashMap<String, String>) -> LinkConfig {
+    LinkConfig {
+        forwarder_url: resolve_tinyplace_base_url(env, None),
+        state_dir: medulla_home(env)
+            .join("link")
             .to_string_lossy()
             .into_owned(),
-        ..TinyplaceConfig::default()
+        ..LinkConfig::default()
     }
 }
 
@@ -128,10 +128,9 @@ fn config_file_layers(explicit_config: Option<&str>, home: &Path, cwd: &Path) ->
 ///
 /// Base-URL precedence is applied here rather than via serde defaults (which
 /// cannot see the environment): backend `MEDULLA_API_URL` > config `baseUrl` >
-/// staging/prod default; tiny.place config `baseUrl` > staging/prod default.
-/// `stateDir` and `tinyplace.identityDir` default to `<home>/state` and
-/// `<home>/tinyplace` when not explicitly configured; `MEDULLA_STATE_DIR`
-/// overrides `stateDir`.
+/// staging/prod default; link config `forwarderUrl` > staging/prod default.
+/// `stateDir` and `link.stateDir` default to `<home>/state` and `<home>/link`
+/// when not explicitly configured; `MEDULLA_STATE_DIR` overrides `stateDir`.
 ///
 /// `[fleet].agentTemplates` has one extra layer beneath it: when no config file
 /// names it, the `.medulla/agents` TOML store (see [`crate::agents`]) replaces
@@ -170,19 +169,19 @@ pub fn load_config(
         .and_then(|v| v.as_str());
     config.backend.base_url = resolve_backend_base_url(env, backend_url);
 
-    if let Some(tp) = config.tinyplace.as_mut() {
-        let tp_raw = merged.get("tinyplace");
-        let tp_url = tp_raw
-            .and_then(|t| t.get("baseUrl"))
+    if let Some(link) = config.link.as_mut() {
+        let link_raw = merged.get("link");
+        let link_url = link_raw
+            .and_then(|t| t.get("forwarderUrl"))
             .and_then(|v| v.as_str());
-        tp.base_url = resolve_tinyplace_base_url(env, tp_url);
-        // Home-derived identity dir unless the file set one explicitly.
-        let id_explicit = tp_raw
-            .and_then(|t| t.get("identityDir"))
+        link.forwarder_url = resolve_tinyplace_base_url(env, link_url);
+        // Home-derived state dir unless the file set one explicitly.
+        let dir_explicit = link_raw
+            .and_then(|t| t.get("stateDir"))
             .map(|v| !v.is_null())
             .unwrap_or(false);
-        if !id_explicit {
-            tp.identity_dir = home.join("tinyplace").to_string_lossy().into_owned();
+        if !dir_explicit {
+            link.state_dir = home.join("link").to_string_lossy().into_owned();
         }
     }
 

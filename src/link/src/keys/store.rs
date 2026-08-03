@@ -76,12 +76,30 @@ pub fn write_node_state(path: &Path, state: &NodeState) -> KeyResult<()> {
         file.sync_all()?;
         drop(file);
         set_owner_only(&temporary)?;
-        replace(&temporary, path)
+        replace(&temporary, path)?;
+        sync_parent(path)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
     Ok(result?)
+}
+
+/// Make the renamed directory entry durable as well as the file contents.
+#[cfg(unix)]
+fn sync_parent(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_parent(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Take the exclusive lock on `<dir>/node.lock`, creating the directory if

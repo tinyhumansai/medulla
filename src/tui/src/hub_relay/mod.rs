@@ -2,10 +2,10 @@
 //!
 //! When the TUI resolves the backend runtime it spawns the hub in-process (on by
 //! default) so a plain `medulla` run relays the hosted brain's delegated tasks to
-//! tiny.place workers — no separate process, no core-js. The hub is a tokio task
+//! linked hosts — no separate process, no core-js. The hub is a tokio task
 //! aborted when its guard drops (TUI exit / panic). It starts with an empty
 //! roster and you add workers live from the Workers tab (or pre-seed via
-//! `MEDULLA_TINYPLACE_PEER` / `MEDULLA_HUB_WORKERS`); `MEDULLA_HUB=0` opts out.
+//! `MEDULLA_LINK_PEER` / `MEDULLA_HUB_WORKERS`); `MEDULLA_HUB=0` opts out.
 //!
 //! The same [`build_hub_config`] powers the `medulla hub` subcommand, so the
 //! standalone and embedded hubs resolve identically.
@@ -16,7 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use medulla::auth::Credentials;
-use medulla::hub::{start_hub, HubConfig, HubSession, WorkerSpec};
+use medulla::hub::{start_hub, HubConfig, HubLinkConfig, HubLinkPeer, HubSession, WorkerSpec};
+use medulla_link::LinkHandle;
 
 /// Default inbox poll interval when `MEDULLA_HUB_POLL_MS` is unset.
 const DEFAULT_POLL_MS: u64 = 1500;
@@ -50,7 +51,7 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
         .map(|w| WorkerSpec {
             id: w.id,
             address: w.address,
-            name: w.label.unwrap_or_else(|| "tinyplace-worker".to_string()),
+            name: w.label.unwrap_or_else(|| "medulla-worker".to_string()),
             description: format!("{} daemon", w.harness),
             harness: w.harness,
             // Remembered rosters carry no workspace: the local host's is
@@ -59,6 +60,74 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
             workspace: None,
         })
         .collect()
+}
+
+/// Build the remote side of the hub from an enrolled link identity.
+///
+/// The current node-state schema carries the enrolled pair key. Every configured
+/// peer with a valid wire id is routed through the already-open link handle;
+/// absent such a row, the peer recorded in node state remains available.
+fn link_from_config(env: &HashMap<String, String>, home: &Path) -> Option<HubLinkConfig> {
+    let path = roster_path(home);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let config = medulla::config::load_config(path.to_str(), env, &cwd)
+        .ok()?
+        .config;
+    let link = config
+        .link
+        .unwrap_or_else(|| medulla::config::default_link_config(env));
+    link_from_resolved_config(&link, None)
+}
+
+/// Build hub link wiring from the same resolved config the TUI is displaying.
+fn link_from_resolved_config(
+    link: &medulla::config::LinkConfig,
+    handle: Option<Arc<LinkHandle>>,
+) -> Option<HubLinkConfig> {
+    let state_dir = PathBuf::from(&link.state_dir);
+    let state =
+        medulla_link::keys::read_node_state(&medulla_link::keys::node_path(&state_dir)).ok()?;
+    let enrolled: HashMap<_, _> = state
+        .enrolled_peers()
+        .into_iter()
+        .map(|peer| (peer.node_id, peer.pair_key))
+        .collect();
+    let mut peers: Vec<HubLinkPeer> = link
+        .peers
+        .iter()
+        .filter_map(|peer| {
+            let node_id = medulla_link::keys::NodeId::from_hex(peer.node_id.as_deref()?)?;
+            Some(HubLinkPeer {
+                name: peer
+                    .address
+                    .clone()
+                    .or_else(|| peer.name.clone())
+                    .unwrap_or_else(|| peer.id.clone()),
+                node_id,
+                pair_key: enrolled.get(&node_id)?.clone(),
+            })
+        })
+        .collect();
+    for (node_id, pair_key) in enrolled {
+        if peers.iter().any(|peer| peer.node_id == node_id) {
+            continue;
+        }
+        peers.push(HubLinkPeer {
+            name: node_id.to_string(),
+            node_id,
+            pair_key,
+        });
+    }
+    Some(HubLinkConfig {
+        state_dir,
+        node_name: link
+            .node_name
+            .clone()
+            .unwrap_or_else(|| state.node_id.to_string()),
+        forwarder_endpoint: None,
+        peers,
+        handle,
+    })
 }
 
 /// Subscription routing remembered beside the roster.
@@ -110,7 +179,7 @@ fn roster_sink(
 }
 
 /// Parse pre-seeded worker specs from the environment:
-/// `MEDULLA_HUB_WORKERS="id=addr,…"`, else a single `MEDULLA_TINYPLACE_PEER`
+/// `MEDULLA_HUB_WORKERS="id=addr,…"`, else a single `MEDULLA_LINK_PEER`
 /// (id == address). Empty is fine — the hub starts with an empty roster and
 /// workers are added live from the Workers tab.
 fn workers_from_env(env: &HashMap<String, String>) -> Vec<WorkerSpec> {
@@ -122,7 +191,7 @@ fn workers_from_env(env: &HashMap<String, String>) -> Vec<WorkerSpec> {
     let spec = |id: &str, addr: &str| WorkerSpec {
         id: id.to_string(),
         address: addr.to_string(),
-        name: "tinyplace-worker".to_string(),
+        name: "medulla-worker".to_string(),
         description: format!("{provider} daemon"),
         harness: provider.clone(),
         workspace: None,
@@ -143,7 +212,7 @@ fn workers_from_env(env: &HashMap<String, String>) -> Vec<WorkerSpec> {
             .collect();
     }
     if let Some(peer) = env
-        .get("MEDULLA_TINYPLACE_PEER")
+        .get("MEDULLA_LINK_PEER")
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
     {
@@ -237,7 +306,7 @@ fn workflow_bridge(
 
 /// Whether the hub should run. **On by default** in the backend runtime — a
 /// plain `medulla` login is enough, and workers are added live from the Workers
-/// tab (or pre-seeded via `MEDULLA_TINYPLACE_PEER` / `MEDULLA_HUB_WORKERS`).
+/// tab (or pre-seeded via `MEDULLA_LINK_PEER` / `MEDULLA_HUB_WORKERS`).
 /// `MEDULLA_HUB=0`/`false` is the explicit kill-switch; `MEDULLA_HUB=1`/`true`
 /// is the (redundant) explicit opt-in.
 fn hub_enabled(env: &HashMap<String, String>) -> bool {
@@ -281,6 +350,20 @@ pub(crate) fn build_hub_config_with_host(
     session: Option<&Credentials>,
     agent_templates: Vec<medulla::runtime::AgentTemplate>,
 ) -> Option<HubConfig> {
+    let link = link_from_config(env, home);
+    build_hub_config_with_host_and_link(env, home, log, local, session, agent_templates, link)
+}
+
+/// Build a hub using link wiring already resolved by the embedding process.
+fn build_hub_config_with_host_and_link(
+    env: &HashMap<String, String>,
+    home: &Path,
+    log: medulla::hub::HubLog,
+    local: Option<LocalDispatch>,
+    session: Option<&Credentials>,
+    agent_templates: Vec<medulla::runtime::AgentTemplate>,
+    link: Option<HubLinkConfig>,
+) -> Option<HubConfig> {
     if !hub_enabled(env) {
         return None;
     }
@@ -316,10 +399,6 @@ pub(crate) fn build_hub_config_with_host(
     // session, and a second lookup here could disagree with the runtime about
     // whether this process is signed in.
     let creds = session?.clone();
-    let identity_dir = env
-        .get("MEDULLA_HUB_IDENTITY_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join("tinyplace-hub"));
     let poll_ms = env
         .get("MEDULLA_HUB_POLL_MS")
         .and_then(|s| s.parse().ok())
@@ -336,7 +415,7 @@ pub(crate) fn build_hub_config_with_host(
         log,
         backend_url: creds.base_url,
         jwt: creds.jwt,
-        identity_dir,
+        link,
         workers,
         poll: Duration::from_millis(poll_ms),
         local_network,
@@ -357,14 +436,25 @@ pub(crate) async fn start(
     logs: medulla_tui::log::LogBuffer,
     local: Option<LocalDispatch>,
     session: Option<&Credentials>,
-    agent_templates: Vec<medulla::runtime::AgentTemplate>,
+    startup: StartupConfig,
 ) -> Option<HubSession> {
     // The hub must never write to the terminal here: the TUI owns the alternate
     // screen, and ratatui only repaints the cells it manages, so a stray line
     // lands on top of the UI and is never cleared. Capturing them keeps the
     // screen intact and the diagnostics readable.
-    let config =
-        build_hub_config_with_host(env, home, logs.sink(), local, session, agent_templates)?;
+    let link = startup
+        .link
+        .as_ref()
+        .and_then(|link| link_from_resolved_config(&link.config, Some(link.handle.clone())));
+    let config = build_hub_config_with_host_and_link(
+        env,
+        home,
+        logs.sink(),
+        local,
+        session,
+        startup.agent_templates,
+        link,
+    )?;
     match start_hub(config).await {
         Ok(session) => {
             *slot.lock().expect("hub slot") = Some(session.handle.clone());
@@ -382,3 +472,19 @@ mod tests;
 
 mod types;
 pub(crate) use types::{HubSlot, LocalDispatch};
+
+/// Inputs already resolved by the TUI's layered configuration load.
+pub(crate) struct StartupConfig {
+    /// Agent roles shown by the same running TUI.
+    pub agent_templates: Vec<medulla::runtime::AgentTemplate>,
+    /// The one link handle shared by observation and dispatch.
+    pub link: Option<ResolvedLink>,
+}
+
+/// A configured link and the handle that already owns its identity lock.
+pub(crate) struct ResolvedLink {
+    /// Effective `[link]` configuration after all layers are merged.
+    pub config: medulla::config::LinkConfig,
+    /// Link opened by the observation service.
+    pub handle: Arc<LinkHandle>,
+}

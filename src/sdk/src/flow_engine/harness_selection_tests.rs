@@ -17,7 +17,7 @@ use super::caps::{build_capabilities, HostServices};
 use super::settings::CapabilitySettings;
 use super::tests::{agent_graph, empty_resolver, settings, RecordingDispatch};
 use crate::hub::TaskRequest;
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 /// Run a one-agent-node graph with `config` under `settings` and return the task
 /// frame it dispatched.

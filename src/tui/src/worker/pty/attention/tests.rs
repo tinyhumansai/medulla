@@ -4,7 +4,7 @@
 //! carets, wrapped lines — because that layout is exactly what the matcher has
 //! to survive.
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 use super::detect::{detect, is_selected_option, is_working};
 use super::types::{AttentionKind, HarnessAttention};

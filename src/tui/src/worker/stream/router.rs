@@ -21,7 +21,7 @@
 //! with the work rather than outliving it.
 
 use medulla::daemon::{DaemonRuntime, LogFn, SendFn};
-use medulla::tinyplace::ScreenMessage;
+use medulla::protocol::ScreenMessage;
 
 use super::super::pty::PtyManager;
 use super::sampler::StreamRegistry;

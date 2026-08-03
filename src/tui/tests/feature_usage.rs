@@ -8,14 +8,14 @@ use ratatui::Terminal;
 use serde_json::json;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use medulla::config::{LoadedConfig, TinyplaceConfig};
+use medulla::config::{LinkConfig, LoadedConfig};
 use medulla::runtime::mock::MockRuntime;
 use medulla_tui::ui::app::{App, TABS};
 use medulla_tui::ui::events::{TaskDigest, TuiEvent, Usage};
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
-    l.config.tinyplace = Some(TinyplaceConfig::default());
+    l.config.link = Some(LinkConfig::default());
     l
 }
 

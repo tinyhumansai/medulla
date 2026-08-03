@@ -47,7 +47,7 @@
 //! cleared, so meeting one means preflight failed and the fix is a config change,
 //! not a keypress.
 
-use medulla::tinyplace::HarnessProvider;
+use medulla::protocol::HarnessProvider;
 
 /// A single Enter — confirms codex's trust dialog.
 ///

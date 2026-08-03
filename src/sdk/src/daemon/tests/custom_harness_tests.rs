@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use crate::daemon::DaemonRuntime;
-use crate::tinyplace::{HarnessProvider, TaskFrameKind};
+use crate::protocol::{HarnessProvider, TaskFrameKind};
 
 use super::{base_config, conversation_runner, decoded_frames, recording_send, task_frame};
 

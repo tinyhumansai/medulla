@@ -146,7 +146,7 @@ impl App {
             selection: None,
             copy_selection: false,
             last_events_len: 0,
-            tinyplace_obs: None,
+            link_obs: None,
             host_obs: None,
             harnesses: None,
             harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
@@ -308,13 +308,13 @@ impl App {
         sink
     }
 
-    /// Attach the background tinyplace service's shared observation. Its identity,
-    /// roster, and presence are merged into every snapshot refresh.
-    pub fn set_tinyplace_observation(
+    /// Attach the background host-link service's shared observation. Its
+    /// identity, roster, and presence are merged into every snapshot refresh.
+    pub fn set_link_observation(
         &mut self,
-        obs: Arc<std::sync::Mutex<medulla::tinyplace::service::TinyplaceObservation>>,
+        obs: Arc<std::sync::Mutex<medulla::protocol::service::LinkObservation>>,
     ) {
-        self.tinyplace_obs = Some(obs);
+        self.link_obs = Some(obs);
         self.refresh_snapshot();
     }
 
@@ -356,10 +356,10 @@ impl App {
         self.harness_focus.attached_to()
     }
 
-    /// Re-read the runtime snapshot and merge in the tiny.place observation.
+    /// Re-read the runtime snapshot and merge in the host-link observation.
     pub fn refresh_snapshot(&mut self) {
         self.snapshot = self.runtime.snapshot();
-        if let Some(obs) = &self.tinyplace_obs {
+        if let Some(obs) = &self.link_obs {
             if let Ok(obs) = obs.lock() {
                 obs.merge_into(&mut self.snapshot);
             }

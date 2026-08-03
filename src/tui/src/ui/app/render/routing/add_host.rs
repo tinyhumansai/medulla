@@ -24,9 +24,7 @@ impl App {
     /// What this machine actually has, not what the protocol knows about: a
     /// picker offering a CLI that is not installed produces a host that accepts
     /// work and fails every task.
-    pub(in crate::ui::app) fn add_host_providers(
-        &self,
-    ) -> Vec<medulla::tinyplace::HarnessProvider> {
+    pub(in crate::ui::app) fn add_host_providers(&self) -> Vec<medulla::protocol::HarnessProvider> {
         // Computed once per process. Detection stat-checks provider binaries on
         // `PATH`, and both the draw and the key handler call this — so without
         // the cache the page did that work every frame and every keystroke.
@@ -35,7 +33,7 @@ impl App {
                 let env: std::collections::HashMap<String, String> = std::env::vars().collect();
                 let detected = medulla::daemon::providers::detect_providers(&env, None, None);
                 if detected.is_empty() {
-                    vec![medulla::tinyplace::HarnessProvider::Claude]
+                    vec![medulla::protocol::HarnessProvider::Claude]
                 } else {
                     detected
                 }
@@ -149,7 +147,11 @@ impl App {
                 )));
                 lines.push(TLine::from(""));
                 lines.push(TLine::from(Span::styled(
-                    "    Press c to copy that line, then paste it into an SSH session.",
+                    "    Press c to copy the installer, then paste it into an SSH session.",
+                    dim,
+                )));
+                lines.push(TLine::from(Span::styled(
+                    "    Provision the host-link identity before starting `medulla daemon`.",
                     dim,
                 )));
                 lines.push(TLine::from(""));
@@ -166,10 +168,6 @@ impl App {
                 lines.push(TLine::from(""));
                 lines.push(TLine::from(Span::styled(
                     "    Example: 7Kx…9fQ Primary build machine",
-                    dim,
-                )));
-                lines.push(TLine::from(Span::styled(
-                    "    Or run `medulla daemon --handle build-box` and add `@build-box`.",
                     dim,
                 )));
             }

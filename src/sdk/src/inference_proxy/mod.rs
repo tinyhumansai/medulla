@@ -4,7 +4,7 @@
 //!
 //! When an operator supplies an OpenRouter key, Medulla points the harness at
 //! OpenRouter through [`crate::config::RouterConfig`] and
-//! [`crate::tinyplace::env::router_env`]. That works, but it hands OpenRouter a
+//! [`crate::protocol::env::router_env`]. That works, but it hands OpenRouter a
 //! request the *harness* composed — including the harness's own `HTTP-Referer`
 //! and `X-Title`, the two headers OpenRouter reads to decide which application
 //! to credit. Traffic Medulla orchestrated is therefore attributed to Claude

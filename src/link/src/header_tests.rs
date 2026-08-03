@@ -9,14 +9,15 @@ fn key() -> ForwarderKey {
 
 fn header() -> OuterHeader {
     OuterHeader::new(NodeId([1u8; 16]), NodeId([2u8; 16]), 0x8000_0000_0000_002A)
+        .epoch(0x1122_3344_5566_7788)
 }
 
 #[test]
-fn the_header_is_fifty_eight_bytes_with_the_tag_at_forty_two() {
+fn the_header_is_sixty_six_bytes_with_the_tag_at_fifty() {
     let encoded = header().encode(&key());
-    assert_eq!(encoded.len(), 58);
-    assert_eq!(HEADER_LEN, 58);
-    assert_eq!(TAG_OFFSET, 42);
+    assert_eq!(encoded.len(), 66);
+    assert_eq!(HEADER_LEN, 66);
+    assert_eq!(TAG_OFFSET, 50);
     assert_eq!(encoded[0], VERSION);
 }
 
@@ -28,6 +29,10 @@ fn fields_sit_at_their_documented_offsets() {
     assert_eq!(
         u64::from_be_bytes(encoded[34..42].try_into().unwrap()),
         0x8000_0000_0000_002A
+    );
+    assert_eq!(
+        u64::from_be_bytes(encoded[42..50].try_into().unwrap()),
+        0x1122_3344_5566_7788
     );
 }
 
@@ -71,8 +76,8 @@ fn a_short_datagram_is_rejected() {
 #[test]
 fn an_unknown_version_is_rejected() {
     let mut encoded = header().encode(&key()).to_vec();
-    encoded[0] = 2;
-    assert_eq!(OuterHeader::decode(&encoded), Err(HeaderError::Version(2)));
+    encoded[0] = 3;
+    assert_eq!(OuterHeader::decode(&encoded), Err(HeaderError::Version(3)));
 }
 
 #[test]

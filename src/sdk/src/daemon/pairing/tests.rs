@@ -60,7 +60,8 @@ fn the_remote_join_command_is_one_pasteable_line() {
     // continuation escapes in the literal are easy to get wrong.
     assert!(!REMOTE_JOIN_COMMAND.contains('\n'), "{REMOTE_JOIN_COMMAND}");
     assert!(!REMOTE_JOIN_COMMAND.contains("  "), "{REMOTE_JOIN_COMMAND}");
-    // Installing is guarded, and the line ends by starting the worker.
+    // Installation is guarded. Starting the daemon is intentionally not part
+    // of this line: a fresh host still needs a provisioned link identity.
     assert!(REMOTE_JOIN_COMMAND.starts_with("command -v medulla"));
-    assert!(REMOTE_JOIN_COMMAND.ends_with("medulla daemon"));
+    assert!(!REMOTE_JOIN_COMMAND.contains("medulla daemon"));
 }

@@ -2,7 +2,7 @@
 //! `tinyplace::status` tests do not reach: agent thinking/message derivations,
 //! the lifecycle phase ladder, and the empty-call-id path.
 
-use medulla::tinyplace::{
+use medulla::protocol::{
     initial_status, reduce_status, HarnessEventKind, LifecyclePayload, SemanticEvent, TextPayload,
     ToolCallPayload, STATE_IDLE, STATE_RUNNING, STATE_STOPPED,
 };

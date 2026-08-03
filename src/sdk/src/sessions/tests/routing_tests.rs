@@ -1,7 +1,7 @@
 //! Routing tests: which lifetime class a stimulus gets, and which transport
 //! follows from that class and the provider's capabilities.
 
-use crate::tinyplace::HarnessProvider;
+use crate::protocol::HarnessProvider;
 
 use super::super::routing::{
     can_resume, can_run_interactive, has_continuity, route_session_class, route_transport,

@@ -1,5 +1,5 @@
 //! **The driver seam.** Sessions are driven from exactly two sources — a
-//! `medulla-tinyplace/1` task frame, or a `tinyplace.harness.session.v*`
+//! `medulla-task/1` task frame, or a `tinyplace.harness.session.v*`
 //! envelope — and this module is the one place that knows the difference.
 //!
 //! Everything downstream ([`SessionRegistry`](super::registry::SessionRegistry),
@@ -23,11 +23,11 @@
 //! [`Folded`] rather than a bare [`TurnRequest`] — most envelope events
 //! are progress reports on a turn somebody else is running.
 
-use ::tinyplace::types::{
+use crate::protocol::envelope::{
     AnySessionEnvelope, HarnessEventKind, SessionEnvelopeV1, SessionEnvelopeV2,
 };
 
-use crate::tinyplace::{HarnessProvider, TaskFrame, TaskFrameKind};
+use crate::protocol::{HarnessProvider, TaskFrame, TaskFrameKind};
 
 use super::routing::{route_session_class, Stimulus};
 use super::types::{SessionClass, SessionKey, SessionPolicy, TurnOrigin, TurnRequest};
@@ -72,7 +72,7 @@ pub fn fold(
     }
 }
 
-/// Fold a `medulla-tinyplace/1` frame.
+/// Fold a `medulla-task/1` frame.
 fn fold_frame(
     from: &str,
     frame: TaskFrame,

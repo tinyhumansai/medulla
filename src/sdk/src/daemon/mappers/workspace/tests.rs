@@ -96,6 +96,16 @@ fn pr_commands_reject_chains_except_for_the_reported_worktree_cd() {
     assert!(pull_request_command("cd /other && gh pr create --fill", Some(cwd)).is_none());
     assert!(pull_request_command("gh pr create --fill", Some(cwd)).is_none());
     assert!(pull_request_command(
+        "cd /repo/w; cat /tmp/pr-url && gh pr create --fill",
+        Some("/repo/w; cat /tmp/pr-url")
+    )
+    .is_none());
+    assert!(pull_request_command(
+        "cd '/repo/w; cat /tmp/pr-url' && gh pr create --fill",
+        Some("/repo/w; cat /tmp/pr-url")
+    )
+    .is_some());
+    assert!(pull_request_command(
         "cd /repo/worktrees/fix-label && gh pr create --fill",
         Some(cwd)
     )

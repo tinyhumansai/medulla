@@ -14,36 +14,9 @@ use super::types::HarnessSemanticEvent;
 
 #[cfg(test)]
 mod tests;
+mod types;
 
-/// GitHub CLI operation whose output can authoritatively identify this PR.
-#[derive(Clone, Copy)]
-pub(super) enum PullRequestCommand {
-    /// `gh pr create` prints the newly created PR URL.
-    Create,
-    /// `gh pr view --json url` returns a structured URL property.
-    View,
-}
-
-/// A correlated PR command and the logical checkout where it started.
-pub(super) struct PendingPullRequestCall {
-    command: PullRequestCommand,
-    workspace_cwd: Option<String>,
-}
-
-impl PendingPullRequestCall {
-    /// Bind a recognized command to the current tool-reported checkout.
-    pub(super) fn new(command: PullRequestCommand, workspace_cwd: Option<&str>) -> Self {
-        Self {
-            command,
-            workspace_cwd: workspace_cwd.map(str::to_string),
-        }
-    }
-
-    /// Return the command only if the session has not moved since it started.
-    pub(super) fn command_in(self, workspace_cwd: Option<&str>) -> Option<PullRequestCommand> {
-        (self.workspace_cwd.as_deref() == workspace_cwd).then_some(self.command)
-    }
-}
+pub(super) use types::{PendingPullRequestCall, PullRequestCommand};
 
 /// Turn repository facts embedded in tool output into updated session facts.
 ///
@@ -106,9 +79,12 @@ pub(super) fn pull_request_command(
 fn command_after_cd<'a>(command: &'a str, workspace_cwd: &str) -> Option<&'a str> {
     let unquoted = format!("cd {workspace_cwd} && ");
     let quoted = format!("cd '{}' && ", workspace_cwd.replace('\'', "'\\''"));
-    command
-        .strip_prefix(&unquoted)
-        .or_else(|| command.strip_prefix(&quoted))
+    let unquoted_match = workspace_cwd
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-'))
+        .then(|| command.strip_prefix(&unquoted))
+        .flatten();
+    unquoted_match.or_else(|| command.strip_prefix(&quoted))
 }
 
 /// Recognize the argv prefix of a direct GitHub CLI PR operation.

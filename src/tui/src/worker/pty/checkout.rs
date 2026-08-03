@@ -27,11 +27,10 @@ fn metadata_identity(metadata: &std::fs::Metadata) -> Option<String> {
 #[cfg(windows)]
 fn metadata_identity(metadata: &std::fs::Metadata) -> Option<String> {
     use std::os::windows::fs::MetadataExt;
-    Some(format!(
-        "{}:{}",
-        metadata.volume_serial_number()?,
-        metadata.file_index()?
-    ))
+    // Stable Rust does not yet expose Windows' file index. Directory creation
+    // time is preserved while a checkout lives and changes when it is deleted
+    // and recloned at the same path, which is the replacement we must reject.
+    Some(format!("{}", metadata.creation_time()))
 }
 
 #[cfg(not(any(unix, windows)))]

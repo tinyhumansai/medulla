@@ -199,3 +199,39 @@ fn claude_bare_pr_after_worktree_report_is_not_attached() {
     );
     assert!(result.info.pull_request.is_none());
 }
+
+#[test]
+fn claude_batched_worktree_results_track_the_last_checkout() {
+    let result = snapshot(
+        "claude",
+        &[
+            claude_shell("worktree-1", "worktree first"),
+            claude_shell("worktree-2", "worktree second"),
+            json!({
+                "type": "user",
+                "message": { "role": "user", "content": [
+                    {
+                        "type": "tool_result", "tool_use_id": "worktree-1",
+                        "content": "[PASS] WORKTREE_READY\n  path: /repo/worktrees/first\n  branch: first\n"
+                    },
+                    {
+                        "type": "tool_result", "tool_use_id": "worktree-2",
+                        "content": "[PASS] WORKTREE_READY\n  path: /repo/worktrees/second\n  branch: second\n"
+                    }
+                ]}
+            }),
+            claude_shell(
+                "pr-second",
+                "cd /repo/worktrees/second && gh pr create --fill",
+            ),
+            claude_result(
+                "pr-second",
+                "https://github.com/tinyhumansai/medulla/pull/162",
+            ),
+        ],
+    );
+    assert_eq!(
+        result.info.pull_request.as_deref(),
+        Some("https://github.com/tinyhumansai/medulla/pull/162")
+    );
+}

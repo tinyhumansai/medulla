@@ -301,7 +301,7 @@ fn claude_pr_result_is_rejected_after_batched_workspace_switch() {
                 "message": { "role": "user", "content": [
                     {
                         "type": "tool_result", "tool_use_id": "worktree-b",
-                        "content": "[PASS] WORKTREE_READY\n  path: /repo/worktrees/workspace-b\n  branch: workspace-b\n"
+                        "content": "[PASS] WORKTREE_READY\n  path: /repo/worktrees/workspace-a\n  branch: workspace-b\n"
                     },
                     {
                         "type": "tool_result", "tool_use_id": "pr-a",
@@ -313,7 +313,8 @@ fn claude_pr_result_is_rejected_after_batched_workspace_switch() {
     );
     assert_eq!(
         result.info.cwd.as_deref(),
-        Some("/repo/worktrees/workspace-b")
+        Some("/repo/worktrees/workspace-a")
     );
+    assert_eq!(result.info.branch.as_deref(), Some("workspace-b"));
     assert!(result.info.pull_request.is_none());
 }

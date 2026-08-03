@@ -31,6 +31,7 @@ pub(super) fn codex_events_from_line(
     line: i64,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
+    workspace_branch: Option<&str>,
     gh_repo_is_set: bool,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
@@ -57,7 +58,7 @@ pub(super) fn codex_events_from_line(
                 ts,
                 line,
                 pull_request_calls,
-                workspace_cwd,
+                (workspace_cwd, workspace_branch),
                 gh_repo_is_set,
             )
         }
@@ -147,7 +148,7 @@ pub(super) fn codex_events_from_line(
             {
                 pull_request_calls.insert(
                     call_id.to_string(),
-                    PendingPullRequestCall::new(command, workspace_cwd),
+                    PendingPullRequestCall::new(command, workspace_cwd, workspace_branch),
                 );
             }
         }
@@ -197,7 +198,7 @@ pub(super) fn codex_events_from_line(
             &output,
             pull_request_calls
                 .remove(call_id)
-                .and_then(|call| call.command_in(workspace_cwd)),
+                .and_then(|call| call.command_in(workspace_cwd, workspace_branch)),
             line,
             ts,
             &format!("response_item:{}:workspace", payload_type.unwrap()),

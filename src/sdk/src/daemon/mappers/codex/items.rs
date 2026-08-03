@@ -33,7 +33,7 @@ pub(super) fn codex_item(
     ts: i64,
     line: i64,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
-    workspace_cwd: Option<&str>,
+    workspace: (Option<&str>, Option<&str>),
     gh_repo_is_set: bool,
 ) -> Vec<HarnessSemanticEvent> {
     let item = match record.get("item").and_then(Value::as_object) {
@@ -82,7 +82,7 @@ pub(super) fn codex_item(
             (line, ts),
             &tag("command_execution"),
             pull_request_calls,
-            (workspace_cwd, gh_repo_is_set),
+            (workspace.0, workspace.1, gh_repo_is_set),
         ),
         // Codex's own todo list, the closest thing it has to Claude's TodoWrite.
         // Emitted on both started and completed so a list that is written once
@@ -143,17 +143,17 @@ fn command_event(
     position: (i64, i64),
     record_type: &str,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
-    workspace: (Option<&str>, bool),
+    workspace: (Option<&str>, Option<&str>, bool),
 ) -> Vec<HarnessSemanticEvent> {
     let (line, ts) = position;
-    let (workspace_cwd, gh_repo_is_set) = workspace;
+    let (workspace_cwd, workspace_branch, gh_repo_is_set) = workspace;
     if !completed {
         let command = item.get("command").and_then(Value::as_str).unwrap_or("");
         if !id.is_empty() {
             if let Some(command) = pull_request_command(command, workspace_cwd, gh_repo_is_set) {
                 pull_request_calls.insert(
                     id.to_string(),
-                    PendingPullRequestCall::new(command, workspace_cwd),
+                    PendingPullRequestCall::new(command, workspace_cwd, workspace_branch),
                 );
             }
         }
@@ -187,7 +187,7 @@ fn command_event(
         output,
         pull_request_calls
             .remove(id)
-            .and_then(|call| call.command_in(workspace_cwd)),
+            .and_then(|call| call.command_in(workspace_cwd, workspace_branch)),
         line,
         ts,
         &format!("{record_type}:workspace"),

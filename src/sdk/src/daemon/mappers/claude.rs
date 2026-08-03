@@ -21,6 +21,7 @@ pub(super) fn claude_events_from_line(
     line: i64,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
+    workspace_branch: Option<&str>,
     gh_repo_is_set: bool,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
@@ -55,10 +56,17 @@ pub(super) fn claude_events_from_line(
             };
         }
         let mut current_cwd = workspace_cwd.map(str::to_string);
+        let mut current_branch = workspace_branch.map(str::to_string);
         let mut events = Vec::new();
         for block in as_array(message.get("content")) {
-            let block_events =
-                claude_user_block(&block, line, ts, pull_request_calls, current_cwd.as_deref());
+            let block_events = claude_user_block(
+                &block,
+                line,
+                ts,
+                pull_request_calls,
+                current_cwd.as_deref(),
+                current_branch.as_deref(),
+            );
             if let Some(cwd) = block_events.iter().rev().find_map(|event| {
                 (event.event.kind == kinds::SESSION_INFO
                     && event.record_type.ends_with(":workspace"))
@@ -66,6 +74,14 @@ pub(super) fn claude_events_from_line(
                 .flatten()
             }) {
                 current_cwd = Some(cwd.to_string());
+            }
+            if let Some(branch) = block_events.iter().rev().find_map(|event| {
+                (event.event.kind == kinds::SESSION_INFO
+                    && event.record_type.ends_with(":workspace"))
+                .then(|| event.event.payload.get("branch").and_then(Value::as_str))
+                .flatten()
+            }) {
+                current_branch = Some(branch.to_string());
             }
             events.extend(block_events);
         }
@@ -82,6 +98,7 @@ pub(super) fn claude_events_from_line(
                     ts,
                     pull_request_calls,
                     workspace_cwd,
+                    workspace_branch,
                     gh_repo_is_set,
                 )
             })
@@ -98,6 +115,7 @@ fn claude_user_block(
     ts: i64,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
+    workspace_branch: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
         Some(object) => object,
@@ -131,7 +149,7 @@ fn claude_user_block(
                 &output,
                 pull_request_calls
                     .remove(call_id)
-                    .and_then(|call| call.command_in(workspace_cwd)),
+                    .and_then(|call| call.command_in(workspace_cwd, workspace_branch)),
                 line,
                 ts,
                 "user:tool_result:workspace",
@@ -149,6 +167,7 @@ fn claude_assistant_block(
     ts: i64,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
+    workspace_branch: Option<&str>,
     gh_repo_is_set: bool,
 ) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
@@ -208,7 +227,7 @@ fn claude_assistant_block(
                 {
                     pull_request_calls.insert(
                         call_id.to_string(),
-                        PendingPullRequestCall::new(command, workspace_cwd),
+                        PendingPullRequestCall::new(command, workspace_cwd, workspace_branch),
                     );
                 }
             }

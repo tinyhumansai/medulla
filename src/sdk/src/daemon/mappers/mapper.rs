@@ -39,6 +39,7 @@ impl HarnessLineMapper {
             usage: None,
             pull_request_calls: Default::default(),
             workspace_cwd: None,
+            workspace_branch: None,
             gh_repo_is_set,
         }
     }
@@ -67,6 +68,7 @@ impl HarnessLineMapper {
                 line,
                 &mut self.pull_request_calls,
                 self.workspace_cwd.as_deref(),
+                self.workspace_branch.as_deref(),
                 self.gh_repo_is_set,
             ),
             Provider::Codex => codex_events_from_line(
@@ -74,6 +76,7 @@ impl HarnessLineMapper {
                 line,
                 &mut self.pull_request_calls,
                 self.workspace_cwd.as_deref(),
+                self.workspace_branch.as_deref(),
                 self.gh_repo_is_set,
             ),
             Provider::Opencode => opencode_events_from_line(raw, line),
@@ -85,6 +88,14 @@ impl HarnessLineMapper {
             .flatten()
         }) {
             self.workspace_cwd = Some(cwd.to_string());
+        }
+        if let Some(branch) = events.iter().rev().find_map(|event| {
+            (event.event.kind == crate::harness_work::kinds::SESSION_INFO
+                && event.record_type.ends_with(":workspace"))
+            .then(|| event.event.payload.get("branch").and_then(Value::as_str))
+            .flatten()
+        }) {
+            self.workspace_branch = Some(branch.to_string());
         }
         if self.provider != Provider::Codex {
             return events;

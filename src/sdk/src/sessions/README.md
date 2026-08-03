@@ -14,7 +14,7 @@ Interactive coding-agent session management: the two lifetime classes, the two t
 - [`tests/`](./tests/) — Unit tests for the session model, split by surface so no file exceeds the repo's 500-line ceiling: `routing_tests` covers class/transport routing and the provider capability matrix; `registry_tests` the binding registry and turn serialization; `input_tests` the task-frame/envelope driver seam; `completion_tests` interactive turn-completion detection; and `manager_tests` the session lifecycle and turn execution.
 - [`turn_stream/`](./turn_stream/) — `TurnStream` — the mode-independent half of running a turn.
 - [`mod.rs`](./mod.rs) — Interactive coding-agent session management: the two lifetime classes, the two turn-source drivers, and the machinery that runs them.
-- [`turn_stream_tests.rs`](./turn_stream_tests.rs) — Unit tests for `TurnStream`, the mode-independent fold.
+- [`turn_stream/tests.rs`](./turn_stream/tests.rs) — Unit tests for `TurnStream`, the mode-independent fold.
 - [`types.rs`](./types.rs) — The session data model: lifetime class, turn-source driver, routing policy, the per-session record the UI renders, and the turn request/outcome pair.
 
 ## Maintenance

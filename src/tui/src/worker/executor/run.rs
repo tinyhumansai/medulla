@@ -249,8 +249,18 @@ impl PtySessionExecutor {
     /// changes that lifetime: the PTY is now an interactive workspace, so the
     /// executor may release its busy claim but must not close the process.
     fn finish_turn(&self, id: &str, class: SessionClass, settled: bool) {
-        if class == SessionClass::Bounded && self.sessions.control(id) != Some(HarnessControl::User)
-        {
+        let control = self.sessions.control(id);
+        let running = self
+            .sessions
+            .row(id)
+            .is_some_and(|row| row.state.is_running());
+        if !retains_workspace_context(class, control, running) {
+            self.workspace_context
+                .lock()
+                .expect("workspace context lock poisoned")
+                .remove(id);
+        }
+        if class == SessionClass::Bounded && control != Some(HarnessControl::User) {
             self.sessions.close(id);
         } else {
             // Free it for the operator or this peer's next turn. Released on
@@ -286,6 +296,10 @@ impl PtySessionExecutor {
     /// composer, which is the failure that produces confidently wrong answers
     /// rather than an error.
     fn stop_turn(&self, id: &str) {
+        self.workspace_context
+            .lock()
+            .expect("workspace context lock poisoned")
+            .remove(id);
         self.sessions.stop_if_orchestrator(id);
     }
 
@@ -618,6 +632,15 @@ impl PtySessionExecutor {
             tokio::time::sleep(POLL).await;
         }
     }
+}
+
+/// Retain mapper state only while the PTY can serve a later turn.
+pub(super) fn retains_workspace_context(
+    class: SessionClass,
+    control: Option<HarnessControl>,
+    running: bool,
+) -> bool {
+    running && (class == SessionClass::Unbound || control == Some(HarnessControl::User))
 }
 
 /// The transcript dialect a provider writes, if this executor can read it.

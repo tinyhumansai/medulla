@@ -24,6 +24,9 @@ use crate::protocol::HarnessProvider;
 
 use super::completion::{TurnSignal, TurnWatcher};
 
+#[cfg(test)]
+mod tests;
+
 impl LineFold {
     /// Whether this line ended the turn.
     pub fn is_complete(&self) -> bool {

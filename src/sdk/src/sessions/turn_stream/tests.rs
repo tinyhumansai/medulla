@@ -7,7 +7,7 @@
 //! its message closes, and a turn with no stated reason still settles through the
 //! stall backstop.
 
-use super::turn_stream::TurnStream;
+use super::TurnStream;
 use crate::protocol::HarnessProvider;
 
 /// A claude assistant record that invokes a tool and states it will continue.

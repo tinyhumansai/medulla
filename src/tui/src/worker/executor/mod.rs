@@ -4,6 +4,8 @@
 //! behavior, while [`types`] owns the executor and session-planning data.
 
 mod run;
+#[cfg(test)]
+mod tests;
 mod types;
 
 pub use run::agent_kind;

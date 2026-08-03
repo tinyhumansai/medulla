@@ -68,7 +68,7 @@ fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
         return None;
     }
     match operation {
-        "create" if !has_explicit_head(&arguments) && !arguments.contains(&"--dry-run") => {
+        "create" if !has_explicit_head(&arguments) && !has_dry_run(&arguments) => {
             Some(PullRequestCommand::Create)
         }
         "view" if arguments == ["--json", "url"] => Some(PullRequestCommand::View),
@@ -141,8 +141,17 @@ fn has_explicit_head(arguments: &[&str]) -> bool {
     arguments.iter().any(|argument| {
         matches!(*argument, "--head" | "-H")
             || argument.starts_with("--head=")
-            || (argument.starts_with("-H") && argument.len() > 2)
+            || (argument.starts_with('-')
+                && !argument.starts_with("--")
+                && argument[1..].contains('H'))
     })
+}
+
+/// Whether PR creation is only simulating its result.
+fn has_dry_run(arguments: &[&str]) -> bool {
+    arguments
+        .iter()
+        .any(|argument| *argument == "--dry-run" || argument.starts_with("--dry-run="))
 }
 
 /// Read only the structured `url` property from `gh pr view --json url`.

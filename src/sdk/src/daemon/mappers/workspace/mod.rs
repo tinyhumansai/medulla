@@ -95,7 +95,8 @@ fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
     {
         return None;
     }
-    let mut words = command.split_whitespace();
+    let words = shell_words(command)?;
+    let mut words = words.iter().map(String::as_str);
     if words.next() != Some("gh") || words.next() != Some("pr") {
         return None;
     }
@@ -117,6 +118,42 @@ fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
         "view" if arguments == ["--json", "url"] => Some(PullRequestCommand::View),
         _ => None,
     }
+}
+
+/// Tokenize the conservative direct-command subset with shell quote semantics.
+fn shell_words(command: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in command.chars() {
+        if escaped {
+            word.push(ch);
+            escaped = false;
+            continue;
+        }
+        match (quote, ch) {
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (Some('\''), _) => word.push(ch),
+            (_, '\\') => escaped = true,
+            (Some('"'), _) => word.push(ch),
+            (None, '\'' | '"') => quote = Some(ch),
+            (None, ch) if ch.is_whitespace() => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            (None, _) => word.push(ch),
+            _ => unreachable!(),
+        }
+    }
+    if escaped || quote.is_some() {
+        return None;
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    Some(words)
 }
 
 /// Whether PR creation explicitly names a branch other than the current one.

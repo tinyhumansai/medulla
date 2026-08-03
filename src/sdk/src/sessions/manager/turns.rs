@@ -137,12 +137,14 @@ impl SessionManager {
                         );
                     }
                 }
-                if outcome.is_ok() {
-                    self.inner.registry.record_workspace_context(
-                        &request.key,
-                        workspace_context.lock().unwrap().clone(),
-                    );
-                }
+                // A resumed process may report authoritative workspace movement
+                // before failing. Refresh an existing binding even on that
+                // terminal path; on a failed first turn there is no binding,
+                // so `record_workspace_context` remains a no-op.
+                self.inner.registry.record_workspace_context(
+                    &request.key,
+                    workspace_context.lock().unwrap().clone(),
+                );
                 outcome
             }
         };

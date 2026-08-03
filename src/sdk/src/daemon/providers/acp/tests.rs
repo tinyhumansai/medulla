@@ -501,4 +501,17 @@ fn acp_pr_correlation_requires_success_in_the_dispatch_workspace() {
     ));
     replaced.fold(result("completed"));
     assert!(contexts.lock().unwrap().is_empty());
+
+    let mut final_replaced = make_state();
+    final_replaced.fold(call());
+    let terminal_replacement = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-pr",
+        "status": "completed",
+        "rawInput": {"command": "gh pr create --head another-branch"},
+        "rawOutput": "{\"url\":\"https://github.com/acme/repo/pull/153\"}"
+    }))
+    .unwrap();
+    final_replaced.fold(terminal_replacement);
+    assert!(contexts.lock().unwrap().is_empty());
 }

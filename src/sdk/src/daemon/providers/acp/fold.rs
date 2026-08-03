@@ -84,6 +84,11 @@ impl FoldState {
                     .get("toolCallId")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
+                // Some ACP agents attach a final corrected rawInput only to the
+                // terminal patch. Revalidate it before consuming the result.
+                if value.get("rawInput").is_some() {
+                    let _ = self.tool_call_payload(&value);
+                }
                 self.tool_calls.remove(call_id);
                 if value.get("status").and_then(Value::as_str) == Some("completed") {
                     self.fold_workspace_result(call_id, value.get("rawOutput"));

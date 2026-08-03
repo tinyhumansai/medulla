@@ -106,6 +106,50 @@ async fn a_failed_turn_keeps_the_session_alive() {
 }
 
 #[tokio::test]
+async fn a_failed_resumed_turn_retains_its_reported_workspace_context() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let run: RunTaskFn = {
+        let calls = calls.clone();
+        let seen = seen.clone();
+        Arc::new(move |options| {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            seen.lock().unwrap().push(options.workspace_context.clone());
+            if let Some(callback) = options.on_workspace_context {
+                callback(crate::sessions::WorkspaceContext {
+                    cwd: Some(format!("/workspace/{call}")),
+                    branch: Some(format!("branch-{call}")),
+                    pull_request: None,
+                });
+            }
+            let provider = options.provider;
+            Box::pin(async move {
+                if call == 1 {
+                    return Err("provider failed after moving workspace".to_string());
+                }
+                Ok(RunTaskResult {
+                    provider,
+                    reply: "done".to_string(),
+                    events: 1,
+                    usage: None,
+                    session_id: Some("thread-abc".to_string()),
+                })
+            })
+        })
+    };
+    let manager = manager(run);
+    let id = manager.open(OpenSession::operator("alice"));
+
+    manager.submit(&id, "first").await.unwrap();
+    assert!(manager.submit(&id, "second").await.is_err());
+    manager.submit(&id, "third").await.unwrap();
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[2].cwd.as_deref(), Some("/workspace/1"));
+    assert_eq!(seen[2].branch.as_deref(), Some("branch-1"));
+}
+
+#[tokio::test]
 async fn an_operator_opened_bounded_session_records_its_one_turn_then_closes() {
     // A bounded turn from a *frame* leaves no record. A bounded session the
     // operator opened has a row on screen, so its turn must appear in it —

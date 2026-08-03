@@ -50,10 +50,16 @@ impl App {
                 "{FOCUS_CHORD_LABEL} type into the selected harness (and take it from the orchestrator)"
             )),
             TLine::from("Ctrl-T start a harness of your own · Ctrl-G grab it or give it back"),
+            TLine::from("Esc focuses the agent rail · ↑↓ select a running harness task · K then y kills it"),
             TLine::from(Span::styled(
                 "While you hold a harness the orchestrator will not dispatch into it",
                 dim,
             )),
+            TLine::from(" "),
+            TLine::from(Span::styled("Changes", bold)),
+            TLine::from("Tab / Shift-Tab to the Changes view to inspect the Git diff since session start"),
+            TLine::from("↑↓ select files · j/k move by line · [/] jump hunks · PageUp/PageDown move faster"),
+            TLine::from("c comments on a line or hunk · C comments on the file · e edits · r refreshes"),
             TLine::from(" "),
             TLine::from(Span::styled("Copy", bold)),
             TLine::from("Ctrl-Y copies the whole chat · /copy last copies just the latest reply"),

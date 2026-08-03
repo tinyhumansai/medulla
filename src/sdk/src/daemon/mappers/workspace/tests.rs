@@ -1,6 +1,9 @@
 //! Focused tests for recognizing stable worktree helper reports.
 
-use super::{pull_request_command, pull_request_url, pull_request_url_from_json, text_report};
+use super::{
+    pull_request_command, pull_request_command_with_repo_override, pull_request_url,
+    pull_request_url_from_json, text_report,
+};
 
 #[test]
 fn text_report_ignores_fields_before_its_ready_marker() {
@@ -79,6 +82,12 @@ fn only_direct_github_pr_commands_may_report_a_pull_request() {
         None
     )
     .is_none());
+}
+
+#[test]
+fn inherited_github_repository_override_disqualifies_pr_commands() {
+    assert!(pull_request_command_with_repo_override("gh pr create --fill", None, true).is_none());
+    assert!(pull_request_command_with_repo_override("gh pr view --json url", None, true).is_none());
 }
 
 #[test]

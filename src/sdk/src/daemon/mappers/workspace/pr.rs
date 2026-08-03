@@ -9,6 +9,22 @@ pub(crate) fn pull_request_command(
     command: &str,
     workspace_cwd: Option<&str>,
 ) -> Option<PullRequestCommand> {
+    pull_request_command_with_repo_override(
+        command,
+        workspace_cwd,
+        std::env::var_os("GH_REPO").is_some(),
+    )
+}
+
+/// Recognize a PR command while accounting for an inherited repository override.
+pub(crate) fn pull_request_command_with_repo_override(
+    command: &str,
+    workspace_cwd: Option<&str>,
+    gh_repo_is_set: bool,
+) -> Option<PullRequestCommand> {
+    if gh_repo_is_set {
+        return None;
+    }
     let command = shell_inner_command(command).unwrap_or(command).trim();
     match workspace_cwd {
         Some(workspace_cwd) => {

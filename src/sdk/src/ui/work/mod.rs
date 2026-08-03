@@ -232,6 +232,12 @@ fn info_section(work: &WorkSnapshot, cols: usize, lines: &mut Vec<Line>) {
     if let Some(branch) = &info.branch {
         parts.push(format!("branch {branch}"));
     }
+    if let Some(pull_request) = &info.pull_request {
+        parts.push(format!(
+            "PR {}",
+            pull_request.rsplit('/').next().unwrap_or(pull_request)
+        ));
+    }
     if !info.mcp_servers.is_empty() {
         parts.push(format!("mcp {}", info.mcp_servers.join(", ")));
     }

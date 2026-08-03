@@ -31,6 +31,8 @@ mod types;
 mod work;
 
 #[cfg(test)]
+mod transcript_tests;
+#[cfg(test)]
 mod work_tests;
 
 use types::{AgentsPanes, Selection};

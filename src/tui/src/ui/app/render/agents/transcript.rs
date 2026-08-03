@@ -125,9 +125,10 @@ impl App {
         // was not reported — a bar at 0% claims a measurement nobody took.
         {
             let capacity = self.fleet_capacity();
+            let active_info = self.selected_work(selection).map(|work| &work.info);
+            let mut chip_parts = Vec::new();
             if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
                 let placement = capacity.placement(descriptor);
-                let active_info = self.selected_work(selection).map(|work| &work.info);
                 // Labelled, not bare: "this device · claude · /Users/me/repo"
                 // reads as three unexplained tokens, and the two an operator
                 // actually needs — which machine, which folder — are exactly the
@@ -162,13 +163,24 @@ impl App {
                     .and_then(|info| info.cwd.clone())
                     .or_else(|| placement.workspace.map(|w| w.path.clone()))
                     .or_else(|| meta("workspace"));
-                let chip = [
-                    host.map(|h| format!("host {h}")),
-                    placement
-                        .harness
-                        .map(|h| h.kind.clone())
-                        .or_else(|| meta("harness")),
-                    workspace.map(|w| format!("dir {w}")),
+                chip_parts.extend(
+                    [
+                        host.map(|h| format!("host {h}")),
+                        placement
+                            .harness
+                            .map(|h| h.kind.clone())
+                            .or_else(|| meta("harness")),
+                        workspace.map(|w| format!("dir {w}")),
+                        placement.template.map(|t| {
+                            format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))
+                        }),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                );
+            }
+            chip_parts.extend(
+                [
                     active_info
                         .and_then(|info| info.branch.as_ref())
                         .map(|branch| format!("branch {branch}")),
@@ -180,21 +192,23 @@ impl App {
                                 pull_request.rsplit('/').next().unwrap_or(pull_request)
                             )
                         }),
-                    placement
-                        .template
-                        .map(|t| format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))),
                 ]
                 .into_iter()
-                .flatten()
+                .flatten(),
+            );
+            let chip = chip_parts
+                .into_iter()
                 .filter(|part| !part.trim().is_empty())
                 .collect::<Vec<_>>()
                 .join(" · ");
-                if !chip.is_empty() {
-                    header.push(TLine::from(Span::styled(
-                        chip,
-                        Style::default().fg(Color::Cyan),
-                    )));
-                }
+            if !chip.is_empty() {
+                header.push(TLine::from(Span::styled(
+                    chip,
+                    Style::default().fg(Color::Cyan),
+                )));
+            }
+            if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
+                let placement = capacity.placement(descriptor);
                 if let Some(resources) = placement.host.and_then(|h| h.resources.as_ref()) {
                     for line in [
                         meters::cpu_meter(resources),

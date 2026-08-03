@@ -128,7 +128,10 @@ fn the_session_and_outcome_sections_report_what_was_measured() {
     let work = snapshot(&[
         (
             kinds::SESSION_INFO,
-            json!({ "model": "claude-opus-5", "cwd": "/repo", "tools": ["Bash", "Read"] }),
+            json!({
+                "model": "claude-opus-5", "cwd": "/repo", "tools": ["Bash", "Read"],
+                "pull_request": "https://github.com/acme/repo/pull/42"
+            }),
         ),
         (
             kinds::RUN_RESULT,
@@ -138,6 +141,7 @@ fn the_session_and_outcome_sections_report_what_was_measured() {
     let lines = text_of(&work_lines(&work, 60));
     assert!(lines.iter().any(|l| l.contains("claude-opus-5")));
     assert!(lines.iter().any(|l| l.contains("2 tools")));
+    assert!(lines.iter().any(|l| l.contains("PR 42")));
     assert!(lines.iter().any(|l| l.contains("/repo")));
     assert!(lines
         .iter()

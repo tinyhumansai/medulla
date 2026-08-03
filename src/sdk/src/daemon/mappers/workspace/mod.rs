@@ -59,10 +59,31 @@ pub(super) fn is_pull_request_command(command: &str) -> bool {
     // syntax here would also require correctly handling quotes and heredocs;
     // treating their contents as commands can attach a URL merely printed by
     // a fixture-building command.
+    direct_pull_request_command(command)
+        || shell_inner_command(command).is_some_and(direct_pull_request_command)
+}
+
+/// Recognize the argv prefix of a direct GitHub CLI PR operation.
+fn direct_pull_request_command(command: &str) -> bool {
     let mut words = command.split_whitespace();
     words.next() == Some("gh")
         && words.next() == Some("pr")
         && matches!(words.next(), Some("create" | "view"))
+}
+
+/// Unwrap the single-quoted `shell -lc '…'` shape recorded by Codex.
+///
+/// This is intentionally narrower than shell parsing: accepting only the
+/// captured launcher shape preserves quoting boundaries and never examines a
+/// heredoc or a quoted fixture body as executable syntax.
+fn shell_inner_command(command: &str) -> Option<&str> {
+    let command = command.trim();
+    let rest = ["/bin/zsh", "zsh", "/bin/bash", "bash", "/bin/sh", "sh"]
+        .iter()
+        .find_map(|shell| command.strip_prefix(shell))?
+        .trim_start();
+    let quoted = rest.strip_prefix("-lc")?.trim_start();
+    quoted.strip_prefix('\'')?.strip_suffix('\'')
 }
 
 /// Find a GitHub pull-request URL in ordinary or JSON `gh` output.

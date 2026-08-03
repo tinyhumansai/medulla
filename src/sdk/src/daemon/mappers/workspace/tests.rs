@@ -50,7 +50,13 @@ fn issues_and_malformed_pr_urls_are_not_session_context() {
 fn only_direct_github_pr_commands_may_report_a_pull_request() {
     assert!(is_pull_request_command("gh pr create --fill"));
     assert!(is_pull_request_command("  gh pr view --json url"));
+    assert!(is_pull_request_command(
+        "/bin/zsh -lc 'gh pr view --json url'"
+    ));
     assert!(!is_pull_request_command("rg 'gh pr view' fixtures"));
+    assert!(!is_pull_request_command(
+        "/bin/zsh -lc 'cat <<EOF\ngh pr view\nEOF'"
+    ));
     assert!(!is_pull_request_command(
         "cat <<'EOF'\ngh pr view\nhttps://github.com/acme/other/pull/7\nEOF"
     ));

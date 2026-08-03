@@ -3,6 +3,8 @@
 //! dispatch, and the Settings/Appearance mutators. These turn resolved input
 //! into runtime calls and follow-up [`Cmd`]s.
 
+mod changes;
+
 use crate::ui::agents::{AgentRow, TaskState};
 use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform, OSC_52};
 use crate::ui::command::{self, CopyScope, SlashCommand};
@@ -544,47 +546,6 @@ impl App {
                 "Applying {strategy:?} subscription strategy… (not persisted)"
             )),
         }
-    }
-
-    /// Submit a comment on a Changes tab selection, capturing context for drift detection.
-    fn submit_changes_comment(
-        &mut self,
-        path: &std::path::Path,
-        anchor: medulla::ui::git_review::CommentAnchor,
-        text: &str,
-    ) {
-        use medulla::ui::git_review::CommentAnchor;
-        let context = match anchor {
-            CommentAnchor::Line(i) => self
-                .changes
-                .patch
-                .get(i)
-                .map(String::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            CommentAnchor::Hunk(i) => self
-                .changes
-                .hunks
-                .get(i)
-                .and_then(|h| self.changes.patch.get(h.header))
-                .map(String::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            CommentAnchor::File => String::new(),
-        };
-        let kept = self
-            .changes
-            .comments
-            .upsert_with_context(path, anchor, text, &context);
-        self.set_status(if kept {
-            format!(
-                "Comment saved on {} · {}",
-                path.display(),
-                anchor.describe()
-            )
-        } else {
-            format!("Comment cleared on {}", path.display())
-        });
     }
 }
 

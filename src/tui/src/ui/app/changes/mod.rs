@@ -169,10 +169,10 @@ impl App {
 /// Return the immutable launch baseline, deriving Git's empty tree when the
 /// harness started before an unborn repository had its first commit.
 fn launch_baseline(cwd: &str, launch_commit: Option<&str>) -> Option<String> {
-    launch_commit.map(str::to_owned).or_else(|| {
-        let (root, _) = repository::discover_in(Path::new(cwd)).ok()?;
-        repository::empty_tree(&root).ok()
-    })
+    let (root, _) = repository::discover_in(Path::new(cwd)).ok()?;
+    launch_commit
+        .map(str::to_owned)
+        .or_else(|| repository::empty_tree(&root).ok())
 }
 
 /// Resolve the selected harness without silently substituting another

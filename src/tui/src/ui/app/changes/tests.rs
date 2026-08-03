@@ -224,6 +224,21 @@ fn a_selected_non_git_harness_is_not_replaced_by_another_repository() {
 }
 
 #[test]
+fn a_cached_launch_commit_does_not_bypass_checkout_revalidation() {
+    let directory = tempdir().expect("repository directory");
+    init_repo(directory.path());
+    let head = output(directory.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    fs::remove_dir_all(directory.path().join(".git")).expect("remove checkout metadata");
+
+    assert_eq!(
+        launch_baseline(&directory.path().to_string_lossy(), Some(&head)),
+        None
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn patch_treats_pathspec_magic_in_a_tracked_filename_literally() {
     let directory = tempdir().expect("temp repo");

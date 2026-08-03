@@ -53,6 +53,16 @@ fn only_direct_github_pr_commands_may_report_a_pull_request() {
     assert!(is_pull_request_command(
         "/bin/zsh -lc 'gh pr view --json url'"
     ));
+    assert!(!is_pull_request_command(
+        "gh pr view 123 --repo other/project"
+    ));
+    assert!(!is_pull_request_command("gh pr view feature-branch"));
+    assert!(!is_pull_request_command(
+        "gh pr view https://github.com/acme/other/pull/7"
+    ));
+    assert!(!is_pull_request_command(
+        "gh pr create --repo other/project --fill"
+    ));
     assert!(!is_pull_request_command("rg 'gh pr view' fixtures"));
     assert!(!is_pull_request_command(
         "/bin/zsh -lc 'cat <<EOF\ngh pr view\nEOF'"

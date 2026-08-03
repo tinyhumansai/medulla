@@ -66,9 +66,34 @@ pub(super) fn is_pull_request_command(command: &str) -> bool {
 /// Recognize the argv prefix of a direct GitHub CLI PR operation.
 fn direct_pull_request_command(command: &str) -> bool {
     let mut words = command.split_whitespace();
-    words.next() == Some("gh")
-        && words.next() == Some("pr")
-        && matches!(words.next(), Some("create" | "view"))
+    if words.next() != Some("gh") || words.next() != Some("pr") {
+        return false;
+    }
+    let Some(operation @ ("create" | "view")) = words.next() else {
+        return false;
+    };
+    let arguments = words.collect::<Vec<_>>();
+    if arguments.iter().any(|argument| {
+        matches!(*argument, "--repo" | "-R")
+            || argument.starts_with("--repo=")
+            || (argument.starts_with("-R") && argument.len() > 2)
+    }) {
+        return false;
+    }
+    operation == "create" || view_targets_current_branch(&arguments)
+}
+
+/// A `gh pr view` with no explicit PR selector, allowing display-only flags.
+fn view_targets_current_branch(arguments: &[&str]) -> bool {
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index] {
+            "--web" | "--comments" => index += 1,
+            "--json" | "--jq" | "--template" | "-q" | "-t" => index += 2,
+            _ => return false,
+        }
+    }
+    index == arguments.len()
 }
 
 /// Unwrap the single-quoted `shell -lc '…'` shape recorded by Codex.

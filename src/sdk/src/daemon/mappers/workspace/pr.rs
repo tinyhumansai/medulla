@@ -250,24 +250,27 @@ fn decode_single_quoted_word(word: &str) -> Option<String> {
 /// Find a GitHub pull-request URL in ordinary or JSON `gh` output.
 pub(crate) fn pull_request_url(output: &str) -> Option<String> {
     const PREFIX: &str = "https://github.com/";
-    output.match_indices(PREFIX).find_map(|(start, _)| {
-        let token = output[start..]
-            .split(|ch: char| {
-                ch.is_whitespace() || matches!(ch, '"' | '\'' | ')' | ',' | '}' | ']')
-            })
-            .next()?;
-        let url = token.strip_prefix(PREFIX)?;
-        let (repo, number) = url.rsplit_once("/pull/")?;
-        let mut parts = repo.split('/');
-        let owner = parts.next()?;
-        let name = parts.next()?;
-        if owner.is_empty() || name.is_empty() || parts.next().is_some() {
-            return None;
-        }
-        let number = number.trim_end_matches('/');
-        if number.is_empty() || !number.chars().all(|ch| ch.is_ascii_digit()) {
-            return None;
-        }
-        Some(format!("{PREFIX}{owner}/{name}/pull/{number}"))
-    })
+    output
+        .match_indices(PREFIX)
+        .filter_map(|(start, _)| {
+            let token = output[start..]
+                .split(|ch: char| {
+                    ch.is_whitespace() || matches!(ch, '"' | '\'' | ')' | ',' | '}' | ']')
+                })
+                .next()?;
+            let url = token.strip_prefix(PREFIX)?;
+            let (repo, number) = url.rsplit_once("/pull/")?;
+            let mut parts = repo.split('/');
+            let owner = parts.next()?;
+            let name = parts.next()?;
+            if owner.is_empty() || name.is_empty() || parts.next().is_some() {
+                return None;
+            }
+            let number = number.trim_end_matches('/');
+            if number.is_empty() || !number.chars().all(|ch| ch.is_ascii_digit()) {
+                return None;
+            }
+            Some(format!("{PREFIX}{owner}/{name}/pull/{number}"))
+        })
+        .last()
 }

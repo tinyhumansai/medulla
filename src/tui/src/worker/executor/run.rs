@@ -296,11 +296,15 @@ impl PtySessionExecutor {
     /// composer, which is the failure that produces confidently wrong answers
     /// rather than an error.
     fn stop_turn(&self, id: &str) {
-        self.workspace_context
-            .lock()
-            .expect("workspace context lock poisoned")
-            .remove(id);
-        self.sessions.stop_if_orchestrator(id);
+        let stopped = self.sessions.stop_if_orchestrator(id);
+        retire_stopped_workspace_context(
+            &mut self
+                .workspace_context
+                .lock()
+                .expect("workspace context lock poisoned"),
+            id,
+            stopped,
+        );
     }
 
     /// Decide which session serves this task: reuse an idle one, or launch.
@@ -641,6 +645,17 @@ pub(super) fn retains_workspace_context(
     running: bool,
 ) -> bool {
     running && (class == SessionClass::Unbound || control == Some(HarnessControl::User))
+}
+
+/// Forget mapper state only when the orchestrator actually won the stop race.
+pub(super) fn retire_stopped_workspace_context(
+    context: &mut HashMap<String, (Option<String>, Option<String>)>,
+    id: &str,
+    stopped: bool,
+) {
+    if stopped {
+        context.remove(id);
+    }
 }
 
 /// The transcript dialect a provider writes, if this executor can read it.

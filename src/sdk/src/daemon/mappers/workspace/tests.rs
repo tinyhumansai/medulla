@@ -44,6 +44,12 @@ fn github_pr_urls_are_normalized_from_plain_and_json_output() {
         pull_request_url("https://github.com/acme/pull/pull/42"),
         Some("https://github.com/acme/pull/pull/42".to_string())
     );
+    assert_eq!(
+        pull_request_url(
+            "hook: https://github.com/acme/dependency/pull/7\nhttps://github.com/acme/repo/pull/42\n"
+        ),
+        Some("https://github.com/acme/repo/pull/42".to_string())
+    );
 }
 
 #[test]

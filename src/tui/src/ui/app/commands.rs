@@ -124,6 +124,10 @@ impl App {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
+            PromptKind::ChangesBaseline => {
+                self.finish_change_baseline(&text, super::changes::types::BaselineSource::Manual);
+                None
+            }
             PromptKind::ChangesComment { path, anchor } => {
                 self.submit_changes_comment(&path, anchor, &text);
                 None

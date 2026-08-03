@@ -25,15 +25,35 @@ impl App {
         self.note_pane(panes[1]);
 
         let mut rows = vec![ListItem::new(Line::from(Span::styled(
-            format!("{} commit(s)", self.changes.commits.len()),
+            format!("From {}", self.changes.baseline_label()),
             Style::default().add_modifier(Modifier::BOLD),
         )))];
-        rows.extend(self.changes.commits.iter().map(|commit| {
-            ListItem::new(Line::from(Span::styled(
-                format!("  {commit}"),
+        if self.changes.picking_baseline {
+            let launch = self
+                .changes
+                .harness_baseline
+                .as_deref()
+                .map(|id| id.get(..7).unwrap_or(id))
+                .unwrap_or("unavailable");
+            rows.push(ListItem::new(format!("Harness launch  {launch}")));
+            rows.extend(
+                self.changes.recent_commits.iter().map(|commit| {
+                    ListItem::new(format!("{}  {}", commit.short_id(), commit.subject))
+                }),
+            );
+            rows.push(ListItem::new("Manual commit…"));
+        } else {
+            rows.push(ListItem::new(Line::from(Span::styled(
+                format!("{} commit(s) after baseline", self.changes.commits.len()),
                 Style::default().fg(Color::DarkGray),
-            )))
-        }));
+            ))));
+            rows.extend(self.changes.commits.iter().map(|commit| {
+                ListItem::new(Line::from(Span::styled(
+                    format!("  {commit}"),
+                    Style::default().fg(Color::DarkGray),
+                )))
+            }));
+        }
         rows.push(ListItem::new(""));
         rows.extend(self.changes.files.iter().map(|file| {
             let count = self.changes.comments.count_for(&file.path);
@@ -52,12 +72,18 @@ impl App {
             ])
         }));
         let list = List::new(rows)
-            .block(self.panel(" Changes since session start "))
+            .block(self.panel(if self.changes.picking_baseline {
+                " Select baseline "
+            } else {
+                " Git changes · b baseline "
+            }))
             .highlight_style(self.theme.selection())
             .highlight_symbol("› ");
         let mut state = ListState::default();
-        if !self.changes.files.is_empty() {
-            state.select(Some(self.changes.commits.len() + 2 + self.changes.selected));
+        if self.changes.picking_baseline {
+            state.select(Some(self.changes.baseline_index + 1));
+        } else if !self.changes.files.is_empty() {
+            state.select(Some(self.changes.commits.len() + 3 + self.changes.selected));
         }
         frame.render_stateful_widget(list, panes[0], &mut state);
 
@@ -107,7 +133,7 @@ impl App {
         if self.changes.files.is_empty() {
             return (
                 vec![Line::from(
-                    "No changes have been made since this session started.",
+                    "No changes from the selected baseline to the current worktree.",
                 )],
                 None,
             );

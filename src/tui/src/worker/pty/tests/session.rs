@@ -273,6 +273,53 @@ fn a_session_records_its_worktrees_branch() {
 }
 
 #[test]
+fn a_session_snapshots_head_before_the_harness_can_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    for args in [
+        &["init", "--quiet"][..],
+        &["config", "user.email", "test@example.com"][..],
+        &["config", "user.name", "Test"][..],
+    ] {
+        assert!(std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    std::fs::write(dir.path().join("tracked.txt"), "launch\n").unwrap();
+    assert!(std::process::Command::new("git")
+        .current_dir(dir.path())
+        .args(["add", "."])
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new("git")
+        .current_dir(dir.path())
+        .args(["commit", "--quiet", "-m", "launch"])
+        .status()
+        .unwrap()
+        .success());
+    let expected = std::process::Command::new("git")
+        .current_dir(dir.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    let expected = String::from_utf8_lossy(&expected.stdout).trim().to_owned();
+
+    let manager = PtyManager::new();
+    let mut spec = sh("sleep 30");
+    spec.cwd = dir.path().to_string_lossy().into_owned();
+    let id = manager.open(spec).unwrap();
+
+    assert_eq!(
+        manager.row(&id).unwrap().launch_commit.as_deref(),
+        Some(expected.as_str())
+    );
+    manager.close(&id);
+}
+
+#[test]
 fn a_session_outside_git_has_no_branch() {
     let dir = tempfile::tempdir().unwrap();
     let manager = PtyManager::new();

@@ -210,7 +210,7 @@ fn cancelled_changes_remain_visible_in_file_list() {
 
     // Despite aggregate diff showing no change, load() should include the file
     // because it has ChangeOrigin::Committed (from the earlier commit)
-    let (_, files) = repository::load(directory.path(), baseline.trim()).expect("load");
+    let (_, _, files) = repository::load(directory.path(), baseline.trim()).expect("load");
     assert!(
         !files.is_empty(),
         "File with cancelled changes should still appear"

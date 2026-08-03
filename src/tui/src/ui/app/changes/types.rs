@@ -14,6 +14,39 @@ use medulla::ui::git_review::{
 
 use super::repository;
 
+/// One commit offered by the baseline picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GitCommit {
+    /// Full object id used for Git commands.
+    pub(crate) id: String,
+    /// One-line subject shown beside the abbreviated id.
+    pub(crate) subject: String,
+}
+
+impl GitCommit {
+    /// Short object id suitable for the narrow Changes rail.
+    pub(crate) fn short_id(&self) -> &str {
+        self.id.get(..7).unwrap_or(&self.id)
+    }
+}
+
+/// Commits in the active range, selectable history, and changed paths.
+pub(crate) type LoadedChanges = (Vec<String>, Vec<GitCommit>, Vec<ChangedFile>);
+
+/// How the active comparison baseline was chosen.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum BaselineSource {
+    /// The app-start snapshot used until a harness becomes available.
+    #[default]
+    AppLaunch,
+    /// The commit captured immediately before the selected harness was spawned.
+    HarnessLaunch,
+    /// A commit chosen from repository history.
+    Commit,
+    /// A revision entered by the operator.
+    Manual,
+}
+
 /// One path changed relative to the session-start commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChangedFile {
@@ -39,6 +72,18 @@ pub(crate) struct GitChangesState {
     pub(crate) root: Option<PathBuf>,
     /// Commit checked out when the TUI session starts.
     pub(crate) baseline: Option<String>,
+    /// Human-visible origin of [`baseline`](Self::baseline).
+    pub(crate) baseline_source: BaselineSource,
+    /// Harness launch commit available as the quick-reset baseline.
+    pub(crate) harness_baseline: Option<String>,
+    /// Harness directory whose launch snapshot is currently tracked.
+    pub(crate) harness_root: Option<PathBuf>,
+    /// Recent repository history offered by the baseline picker.
+    pub(crate) recent_commits: Vec<GitCommit>,
+    /// Whether the baseline picker has keyboard focus.
+    pub(crate) picking_baseline: bool,
+    /// Highlighted picker row: launch, commits, then manual.
+    pub(crate) baseline_index: usize,
     /// Commits made after the baseline, newest first.
     pub(crate) commits: Vec<String>,
     /// Paths changed by commits or working-tree edits since the baseline.
@@ -87,8 +132,9 @@ impl GitChangesState {
             return;
         };
         match repository::load(root, baseline) {
-            Ok((commits, files)) => {
+            Ok((commits, recent_commits, files)) => {
                 self.commits = commits;
+                self.recent_commits = recent_commits;
                 self.files = files;
                 self.selected = self.selected.min(self.files.len().saturating_sub(1));
                 self.error = None;
@@ -96,6 +142,91 @@ impl GitChangesState {
             }
             Err(error) => self.error = Some(error),
         }
+    }
+
+    /// Follow a harness's immutable launch snapshot while launch mode is active.
+    pub(crate) fn follow_harness(&mut self, cwd: &Path, launch_commit: &str) {
+        let Ok((root, _)) = repository::discover_in(cwd) else {
+            return;
+        };
+        self.harness_root = Some(root.clone());
+        self.harness_baseline = Some(launch_commit.to_owned());
+        if matches!(
+            self.baseline_source,
+            BaselineSource::AppLaunch | BaselineSource::HarnessLaunch
+        ) && (self.root.as_ref() != Some(&root)
+            || self.baseline.as_deref() != Some(launch_commit))
+        {
+            self.root = Some(root);
+            self.baseline = Some(launch_commit.to_owned());
+            self.baseline_source = BaselineSource::HarnessLaunch;
+            self.selected = 0;
+            self.cursor = 0;
+            self.scroll = 0;
+            self.comments = ReviewComments::default();
+        }
+    }
+
+    /// Activate a validated baseline revision and reload the comparison.
+    pub(crate) fn choose_baseline(
+        &mut self,
+        revision: &str,
+        source: BaselineSource,
+    ) -> Result<(), String> {
+        let root = self
+            .root
+            .as_deref()
+            .ok_or_else(|| "No Git repository selected".to_owned())?;
+        let commit = repository::resolve_commit(root, revision)?;
+        self.baseline = Some(commit);
+        self.baseline_source = source;
+        self.picking_baseline = false;
+        self.selected = 0;
+        self.cursor = 0;
+        self.scroll = 0;
+        self.refresh();
+        Ok(())
+    }
+
+    /// Return to the selected harness's repository and captured launch commit.
+    pub(crate) fn choose_harness_baseline(&mut self) -> Result<(), String> {
+        let root = self
+            .harness_root
+            .clone()
+            .ok_or_else(|| "No harness Git repository is available".to_owned())?;
+        let baseline = self
+            .harness_baseline
+            .clone()
+            .ok_or_else(|| "No harness launch snapshot is available".to_owned())?;
+        self.root = Some(root);
+        self.choose_baseline(&baseline, BaselineSource::HarnessLaunch)
+    }
+
+    /// Display label for the active baseline.
+    pub(crate) fn baseline_label(&self) -> String {
+        let source = match self.baseline_source {
+            BaselineSource::AppLaunch => "app launch",
+            BaselineSource::HarnessLaunch => "harness launch",
+            BaselineSource::Commit => "commit",
+            BaselineSource::Manual => "manual",
+        };
+        let id = self
+            .baseline
+            .as_deref()
+            .map(|id| id.get(..7).unwrap_or(id))
+            .unwrap_or("none");
+        format!("{source} · {id}")
+    }
+
+    /// Number of rows in the launch/commit/manual baseline picker.
+    pub(crate) fn baseline_option_count(&self) -> usize {
+        self.recent_commits.len() + 2
+    }
+
+    /// Move the picker highlight without wrapping.
+    pub(crate) fn move_baseline_selection(&mut self, delta: isize) {
+        let last = self.baseline_option_count().saturating_sub(1);
+        self.baseline_index = self.baseline_index.saturating_add_signed(delta).min(last);
     }
 
     /// Reload only the selected file's patch, re-indexing its hunks.
@@ -207,7 +338,8 @@ impl GitChangesState {
     pub(crate) fn status_message(&self) -> String {
         self.error.clone().unwrap_or_else(|| {
             format!(
-                "Changes since session start · {} commit(s) · {} file(s) · {} comment(s)",
+                "Diff from {} · {} commit(s) · {} file(s) · {} comment(s)",
+                self.baseline_label(),
                 self.commits.len(),
                 self.files.len(),
                 self.comments.len()

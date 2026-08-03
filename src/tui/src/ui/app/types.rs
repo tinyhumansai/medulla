@@ -650,6 +650,8 @@ impl HandbackPolicy {
 
 /// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
 pub(super) enum PromptKind {
+    /// Select an arbitrary Git revision as the Changes comparison baseline.
+    ChangesBaseline,
     /// Attach a session-local review comment to a file, hunk, or patch line.
     ChangesComment {
         /// Repository-relative path being reviewed.
@@ -793,7 +795,7 @@ pub struct App {
     pub snapshot: RuntimeSnapshot,
     /// The active top-level tab index (into [`TABS`]).
     pub tab_index: usize,
-    /// Git changes made since this TUI session started.
+    /// Git changes from the selected harness or operator-chosen commit.
     pub(super) changes: super::changes::GitChangesState,
     pub(super) draft: Draft,
     pub(super) history: Vec<String>,

@@ -169,6 +169,12 @@ pub struct SessionRow {
     /// `None` means the directory is not in a repository or has a detached
     /// `HEAD`.
     pub branch: Option<String>,
+    /// Commit checked out in the working directory immediately before launch.
+    ///
+    /// This immutable snapshot anchors the Changes view even if the harness
+    /// creates commits while it runs. `None` means the directory was outside a
+    /// repository or the repository did not have a first commit yet.
+    pub launch_commit: Option<String>,
     /// The harness session id, once known — minted for claude, read back from
     /// the rollout for codex. This is what pins the transcript tailer.
     pub session_id: Option<String>,

@@ -23,12 +23,74 @@ pub(crate) use types::GitChangesState;
 use crate::ui::composer::{Draft, TextPrompt};
 
 use super::types::{App, PromptKind};
+use types::BaselineSource;
 
 impl App {
     /// Reload commits, changed paths, and the selected patch from Git.
     pub(super) fn refresh_changes(&mut self) {
+        let preferred_id = self
+            .attached_harness()
+            .map(str::to_owned)
+            .or_else(|| self.harness_pane_session.clone());
+        let latest = self.harnesses.as_ref().and_then(|harnesses| {
+            let rows: Vec<_> = harnesses
+                .sessions
+                .rows()
+                .into_iter()
+                .filter(|row| row.launch_commit.is_some())
+                .collect();
+            preferred_id
+                .as_deref()
+                .and_then(|id| rows.iter().find(|row| row.id == id).cloned())
+                .or_else(|| rows.into_iter().max_by_key(|row| row.started_at))
+                .and_then(|row| row.launch_commit.clone().map(|commit| (row, commit)))
+        });
+        if let Some((row, commit)) = latest {
+            self.changes.follow_harness(Path::new(&row.cwd), &commit);
+        }
         self.changes.refresh();
         self.set_status(self.changes.status_message());
+    }
+
+    /// Open the baseline selector over the launch snapshot and recent history.
+    pub(super) fn open_change_baseline_picker(&mut self) {
+        self.changes.picking_baseline = true;
+        self.changes.baseline_index = 0;
+        self.set_status("Baseline: ↑/↓ select · Enter apply · m manual · Esc cancel");
+    }
+
+    /// Apply the highlighted baseline option, opening manual input when needed.
+    pub(super) fn apply_change_baseline_selection(&mut self) {
+        let index = self.changes.baseline_index;
+        if index == 0 {
+            match self.changes.choose_harness_baseline() {
+                Ok(()) => self.set_status(self.changes.status_message()),
+                Err(error) => self.set_status(error),
+            }
+        } else if let Some(commit) = self.changes.recent_commits.get(index - 1) {
+            self.finish_change_baseline(&commit.id.clone(), BaselineSource::Commit);
+        } else {
+            self.open_manual_change_baseline();
+        }
+    }
+
+    /// Ask for an arbitrary commit id or revision.
+    pub(super) fn open_manual_change_baseline(&mut self) {
+        self.changes.picking_baseline = false;
+        self.prompt = Some(TextPrompt {
+            title: "Diff from commit or revision".to_owned(),
+            draft: Draft::new(),
+            kind: PromptKind::ChangesBaseline,
+        });
+        self.set_status("Enter a commit id or revision · Enter apply · Esc cancel");
+    }
+
+    /// Validate and activate a requested baseline, preserving errors in status.
+    pub(super) fn finish_change_baseline(&mut self, revision: &str, source: BaselineSource) {
+        match self.changes.choose_baseline(revision, source) {
+            Ok(()) => self.set_status(self.changes.status_message()),
+            Err(error) => self.set_status(error),
+        }
     }
 
     /// Open a comment prompt bound to the line or hunk under the cursor.

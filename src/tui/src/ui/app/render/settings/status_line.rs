@@ -159,6 +159,7 @@ fn sample_selected() -> SessionRow {
         state: PtyState::Running,
         cwd: "/home/you/work/tinyhumans/medulla-public".into(),
         branch: Some("feat/status-line".into()),
+        launch_commit: None,
         session_id: None,
         thread_name: Some("Ship the status line".into()),
         started_at: 0,

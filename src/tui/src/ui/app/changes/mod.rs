@@ -38,7 +38,8 @@ impl App {
         });
         match selected {
             Some(Ok(Some((row, commit)))) => {
-                self.changes.follow_harness(Path::new(&row.cwd), &commit);
+                let root = row.launch_root.as_deref().unwrap_or(&row.cwd);
+                self.changes.follow_harness(Path::new(root), &commit);
             }
             Some(Err(error)) => {
                 self.changes.clear_repository(error);
@@ -168,11 +169,21 @@ impl App {
 
 /// Return the immutable launch baseline, deriving Git's empty tree when the
 /// harness started before an unborn repository had its first commit.
-fn launch_baseline(cwd: &str, launch_commit: Option<&str>) -> Option<String> {
-    let (root, _) = repository::discover_in(Path::new(cwd)).ok()?;
-    launch_commit
-        .map(str::to_owned)
-        .or_else(|| repository::empty_tree(&root).ok())
+fn launch_baseline(
+    cwd: &str,
+    launch_root: Option<&str>,
+    launch_commit: Option<&str>,
+) -> Option<String> {
+    let launch_root = Path::new(launch_root?);
+    let (current_root, _) = repository::discover_in(Path::new(cwd)).ok()?;
+    if current_root != launch_root {
+        return None;
+    }
+    let (root, _) = repository::discover_in(launch_root).ok()?;
+    match launch_commit {
+        Some(commit) => repository::resolve_commit(&root, commit).ok(),
+        None => repository::empty_tree(&root).ok(),
+    }
 }
 
 /// Resolve the selected harness without silently substituting another
@@ -184,17 +195,24 @@ fn select_harness_baseline(
 ) -> Result<Option<(SessionRow, String)>, String> {
     if let Some(preferred) = preferred_id {
         if let Some(row) = rows.iter().find(|row| row.id == preferred).cloned() {
-            let commit =
-                launch_baseline(&row.cwd, row.launch_commit.as_deref()).ok_or_else(|| {
-                    format!("Selected harness {} is not in a Git repository", row.label)
-                })?;
+            let commit = launch_baseline(
+                &row.cwd,
+                row.launch_root.as_deref(),
+                row.launch_commit.as_deref(),
+            )
+            .ok_or_else(|| format!("Selected harness {} is not in a Git repository", row.label))?;
             return Ok(Some((row, commit)));
         }
     }
     Ok(rows
         .into_iter()
         .filter_map(|row| {
-            launch_baseline(&row.cwd, row.launch_commit.as_deref()).map(|commit| (row, commit))
+            launch_baseline(
+                &row.cwd,
+                row.launch_root.as_deref(),
+                row.launch_commit.as_deref(),
+            )
+            .map(|commit| (row, commit))
         })
         .max_by_key(|(row, _)| row.started_at))
 }

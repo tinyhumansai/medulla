@@ -139,7 +139,8 @@ fn an_unborn_harness_derives_an_empty_tree_launch_baseline() {
         &["commit", "-m", "first commit after launch"],
     );
 
-    let baseline = launch_baseline(&directory.path().to_string_lossy(), None)
+    let root = directory.path().to_string_lossy();
+    let baseline = launch_baseline(&root, Some(&root), None)
         .expect("unborn launch baseline after HEAD advances");
 
     assert_eq!(baseline, empty_tree);
@@ -198,6 +199,7 @@ fn a_selected_non_git_harness_is_not_replaced_by_another_repository() {
             state: PtyState::Running,
             cwd: cwd.to_string_lossy().into_owned(),
             branch: None,
+            launch_root: Some(cwd.to_string_lossy().into_owned()),
             launch_commit,
             session_id: None,
             thread_name: None,
@@ -233,9 +235,27 @@ fn a_cached_launch_commit_does_not_bypass_checkout_revalidation() {
     fs::remove_dir_all(directory.path().join(".git")).expect("remove checkout metadata");
 
     assert_eq!(
-        launch_baseline(&directory.path().to_string_lossy(), Some(&head)),
+        launch_baseline(
+            &directory.path().to_string_lossy(),
+            Some(&directory.path().to_string_lossy()),
+            Some(&head)
+        ),
         None
     );
+}
+
+#[test]
+fn a_replacement_repository_cannot_reuse_the_cached_launch_commit() {
+    let directory = tempdir().expect("repository directory");
+    init_repo(directory.path());
+    let head = output(directory.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    fs::remove_dir_all(directory.path().join(".git")).expect("remove original repository");
+    git(directory.path(), &["init"]);
+    let root = directory.path().to_string_lossy();
+
+    assert_eq!(launch_baseline(&root, Some(&root), Some(&head)), None);
 }
 
 #[test]

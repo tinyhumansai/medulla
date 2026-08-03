@@ -71,6 +71,7 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         state: PtyState::Running,
         cwd: cwd.into(),
         branch: Some("main".into()),
+        launch_root: None,
         launch_commit: None,
         session_id: None,
         thread_name: None,

@@ -312,9 +312,11 @@ fn a_session_snapshots_head_before_the_harness_can_commit() {
     spec.cwd = dir.path().to_string_lossy().into_owned();
     let id = manager.open(spec).unwrap();
 
+    let row = manager.row(&id).unwrap();
+    assert_eq!(row.launch_commit.as_deref(), Some(expected.as_str()));
     assert_eq!(
-        manager.row(&id).unwrap().launch_commit.as_deref(),
-        Some(expected.as_str())
+        row.launch_root.as_deref(),
+        Some(dir.path().to_string_lossy().as_ref())
     );
     manager.close(&id);
 }
@@ -328,6 +330,7 @@ fn a_session_outside_git_has_no_branch() {
     let id = manager.open(spec).unwrap();
 
     assert!(manager.row(&id).unwrap().branch.is_none());
+    assert!(manager.row(&id).unwrap().launch_root.is_none());
     manager.close(&id);
 }
 

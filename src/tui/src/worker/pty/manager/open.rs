@@ -31,7 +31,8 @@ impl PtyManager {
         // Before the pty, because it shells out to `git`: one more reason this
         // whole function belongs on a blocking thread.
         let branch = git_branch(&spec.cwd);
-        let launch_commit = git_head(&spec.cwd);
+        let launch_root = git_root(&spec.cwd);
+        let launch_commit = launch_root.as_deref().and_then(git_head);
         let pty = open_pty()?;
 
         // Mint the id *before* spawning, so the transcript this session writes is
@@ -94,6 +95,7 @@ impl PtyManager {
                 provider: spec.provider,
                 cwd: spec.cwd,
                 branch,
+                launch_root,
                 launch_commit,
                 started_at: now,
                 user_spawned: spec.user_spawned,
@@ -248,6 +250,20 @@ fn git_head(cwd: &str) -> Option<String> {
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
         .filter(|head| !head.is_empty())
+}
+
+/// Resolve the repository identity paired with the immutable launch commit.
+fn git_root(cwd: &str) -> Option<String> {
+    let output = Command::new("git")
+        .current_dir(cwd)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|root| !root.is_empty())
 }
 
 /// Allocate a pty, retrying only the failures that are actually transient.

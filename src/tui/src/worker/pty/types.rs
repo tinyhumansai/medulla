@@ -169,6 +169,8 @@ pub struct SessionRow {
     /// `None` means the directory is not in a repository or has a detached
     /// `HEAD`.
     pub branch: Option<String>,
+    /// Repository root captured immediately before launch.
+    pub launch_root: Option<String>,
     /// Commit checked out in the working directory immediately before launch.
     ///
     /// This immutable snapshot anchors the Changes view even if the harness

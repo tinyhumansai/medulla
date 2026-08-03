@@ -1038,6 +1038,11 @@ pub struct App {
     // is where the rail cursor is turned into a selection; cleared at the top of
     // every draw so it can never name a pane that is no longer on screen.
     pub(super) harness_pane_session: Option<String>,
+    // The harness selected on the Agents rail, retained while another tab is
+    // visible. Unlike `harness_pane_session`, this is navigation state rather
+    // than a keyboard-routing capability: Changes uses it to keep following
+    // the repository the operator selected after an intervening tab draw.
+    pub(super) selected_harness_session: Option<String>,
     /// The "start a harness" picker, while it is open.
     pub(super) harness_picker: Option<HarnessPicker>,
     /// The "you still hold this harness" confirmation, while it is open.

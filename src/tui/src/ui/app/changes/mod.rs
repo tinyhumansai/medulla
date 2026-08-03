@@ -31,7 +31,7 @@ impl App {
         let preferred_id = self
             .attached_harness()
             .map(str::to_owned)
-            .or_else(|| self.harness_pane_session.clone());
+            .or_else(|| self.selected_harness_session.clone());
         let latest = self.harnesses.as_ref().and_then(|harnesses| {
             let rows: Vec<_> = harnesses
                 .sessions

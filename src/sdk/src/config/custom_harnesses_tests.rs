@@ -62,8 +62,32 @@ fn invalid_presets_fail_loudly() {
     let error =
         CustomHarnessConfig::from_editor_line("id | name | gemini | model | | host").unwrap_err();
     assert!(error.contains("claude, codex or opencode"));
+    let error = CustomHarnessConfig::from_editor_line("id | name | openhuman | model | | host")
+        .unwrap_err();
+    assert!(error.contains("claude, codex or opencode"));
     let error = CustomHarnessConfig::from_editor_line("id | name | claude | model").unwrap_err();
     assert!(error.contains("expected:"));
+}
+
+#[test]
+fn persisted_openhuman_preset_is_rejected_during_normalization() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        r#"
+[[customHarnesses]]
+id = "native"
+name = "Native OpenHuman"
+baseHarness = "openhuman"
+model = "unused"
+hostId = "this-device"
+"#,
+    )
+    .unwrap();
+
+    let error = load_custom_harnesses(&path).unwrap_err();
+    assert!(error.to_string().contains("claude, codex or opencode"));
 }
 
 #[test]

@@ -17,6 +17,8 @@ pub(super) struct OpenedSession {
     pub(super) harness_session_id: Option<String>,
     /// Whether this task joined a session that was already running.
     pub(super) reused: bool,
+    /// Whether the already-running child has a GitHub repository override.
+    pub(super) gh_repo_is_set: bool,
 }
 /// What serving a task needs: an existing session, or a launch to perform.
 ///

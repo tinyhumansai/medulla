@@ -34,8 +34,13 @@ impl LineFold {
 impl TurnStream {
     /// A stream for one turn on `provider`.
     pub fn new(provider: HarnessProvider) -> Self {
+        Self::new_with_gh_repo_override(provider, std::env::var_os("GH_REPO").is_some())
+    }
+
+    /// Build a turn stream with explicit effective child `GH_REPO` state.
+    pub fn new_with_gh_repo_override(provider: HarnessProvider, gh_repo_is_set: bool) -> Self {
         TurnStream {
-            mapper: HarnessLineMapper::new(provider.as_str()),
+            mapper: HarnessLineMapper::new_with_gh_repo_override(provider.as_str(), gh_repo_is_set),
             watcher: TurnWatcher::for_provider(provider),
             line_no: 0,
             events_seen: 0,

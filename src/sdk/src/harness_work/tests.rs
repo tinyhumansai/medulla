@@ -228,16 +228,32 @@ fn repeating_the_same_branch_preserves_its_pull_request() {
                 "pull_request": "https://github.com/acme/repo/pull/42"
             }),
         ),
-        (
-            kinds::SESSION_INFO,
-            json!({ "branch": "same", "cwd": "/new/path" }),
-        ),
+        (kinds::SESSION_INFO, json!({ "branch": "same" })),
     ]);
 
     assert_eq!(
         snapshot.info.pull_request.as_deref(),
         Some("https://github.com/acme/repo/pull/42")
     );
+}
+
+#[test]
+fn a_new_checkout_clears_the_previous_checkouts_pull_request() {
+    let snapshot = fold_with(&[
+        (
+            kinds::SESSION_INFO,
+            json!({
+                "cwd": "/repo-a",
+                "branch": "main",
+                "pull_request": "https://github.com/acme/repo-a/pull/42"
+            }),
+        ),
+        (
+            kinds::SESSION_INFO,
+            json!({ "cwd": "/repo-b", "branch": "main" }),
+        ),
+    ]);
+    assert!(snapshot.info.pull_request.is_none());
 }
 
 #[test]

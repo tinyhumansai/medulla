@@ -154,6 +154,7 @@ impl PtySessionExecutor {
                 tailer.expecting(pinned.clone())
             };
         }
+        let gh_repo_is_set = opened.gh_repo_is_set;
         let id = opened.id;
         // Tell the daemon which session serves this task, as soon as it exists.
         // A screen subscription names a task, so until this lands there is
@@ -228,7 +229,14 @@ impl PtySessionExecutor {
         let on_event = options.on_event;
         let timeout_ms = options.timeout_ms;
         let outcome = self
-            .await_turn(&id, provider, tailer, abort, on_event, timeout_ms)
+            .await_turn(
+                &id,
+                (provider, gh_repo_is_set),
+                tailer,
+                abort,
+                on_event,
+                timeout_ms,
+            )
             .await;
         self.finish_turn(&id, class, outcome.is_ok());
         outcome
@@ -323,6 +331,7 @@ impl PtySessionExecutor {
                     id: row.id.clone(),
                     harness_session_id: row.session_id.clone(),
                     reused: true,
+                    gh_repo_is_set: self.sessions.gh_repo_is_set(&row.id).unwrap_or(false),
                 }));
             }
         }
@@ -365,6 +374,7 @@ impl PtySessionExecutor {
     /// it since they share one. So the launch goes to the blocking pool, which
     /// is what it is for.
     async fn launch(&self, spec: LaunchSpec) -> Result<OpenedSession, String> {
+        let gh_repo_is_set = spec.env.contains_key("GH_REPO");
         let sessions = self.sessions.clone();
         let id = tokio::task::spawn_blocking(move || sessions.open(spec))
             .await
@@ -374,6 +384,7 @@ impl PtySessionExecutor {
             id,
             harness_session_id,
             reused: false,
+            gh_repo_is_set,
         })
     }
 
@@ -457,13 +468,14 @@ impl PtySessionExecutor {
     async fn await_turn(
         &self,
         id: &str,
-        provider: HarnessProvider,
+        mapper_context: (HarnessProvider, bool),
         mut tailer: SessionTailer,
         abort: medulla::daemon::providers::Abort,
         mut on_event: Option<medulla::daemon::providers::OnEvent>,
         timeout_ms: u64,
     ) -> Result<RunTaskResult, String> {
-        let mut stream = TurnStream::new(provider);
+        let (provider, gh_repo_is_set) = mapper_context;
+        let mut stream = TurnStream::new_with_gh_repo_override(provider, gh_repo_is_set);
         let started = tokio::time::Instant::now();
         let mut last_line_at = medulla::clock::now_millis();
 

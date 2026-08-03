@@ -137,6 +137,11 @@ impl PtyManager {
         self.handle(id).map(|session| session.row())
     }
 
+    /// Whether the named session's child environment selects a GitHub repository.
+    pub(in crate::worker) fn gh_repo_is_set(&self, id: &str) -> Option<bool> {
+        self.handle(id).map(|session| session.gh_repo_is_set())
+    }
+
     /// How many sessions are still running.
     ///
     /// One relaxed atomic load per session, where it used to be a global lock

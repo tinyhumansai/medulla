@@ -84,6 +84,11 @@ impl SessionHandle {
         lock(&self.cold).session_id.clone()
     }
 
+    /// Whether this session's child environment selects a GitHub repository.
+    pub(in super::super) fn gh_repo_is_set(&self) -> bool {
+        self.meta.gh_repo_is_set
+    }
+
     /// Record the harness session id a tailer read back from the rollout.
     ///
     /// First writer wins: claude's is minted at spawn and never changes, so this

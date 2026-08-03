@@ -24,6 +24,17 @@ mod identity;
 mod scrollback;
 mod session;
 
+#[test]
+fn child_repository_override_is_retained_for_transcript_mapping() {
+    let manager = PtyManager::new();
+    let mut spec = sh("sleep 30");
+    spec.env
+        .insert("GH_REPO".to_string(), "other/project".to_string());
+    let id = manager.open(spec).unwrap();
+    assert_eq!(manager.gh_repo_is_set(&id), Some(true));
+    manager.close(&id);
+}
+
 /// A spec that runs `sh -c <script>` on a pty.
 fn sh(script: &str) -> LaunchSpec {
     let mut env = HashMap::new();

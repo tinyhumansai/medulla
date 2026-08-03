@@ -267,7 +267,10 @@ impl WorkFold {
         let before = self.snapshot.info.clone();
         let info = &mut self.snapshot.info;
         let reported_branch = text_field(payload, "branch");
-        if reported_branch.is_some() && reported_branch != info.branch {
+        let reported_cwd = text_field(payload, "cwd");
+        if (reported_branch.is_some() && reported_branch != info.branch)
+            || (reported_cwd.is_some() && reported_cwd != info.cwd)
+        {
             info.pull_request = None;
         }
         merge_text(&mut info.model, payload, "model");

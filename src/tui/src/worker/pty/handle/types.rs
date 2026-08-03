@@ -140,6 +140,8 @@ pub(crate) struct SessionMeta {
     /// `None` means the directory is not in a repository or has a detached
     /// `HEAD`.
     pub(crate) branch: Option<String>,
+    /// Whether the child environment contains a GitHub repository override.
+    pub(crate) gh_repo_is_set: bool,
     /// Epoch ms when the session started.
     pub(crate) started_at: i64,
     /// Whether an operator asked for this session rather than a task frame.

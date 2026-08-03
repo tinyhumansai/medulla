@@ -172,6 +172,14 @@ impl App {
                     active_info
                         .and_then(|info| info.branch.as_ref())
                         .map(|branch| format!("branch {branch}")),
+                    active_info
+                        .and_then(|info| info.pull_request.as_ref())
+                        .map(|pull_request| {
+                            format!(
+                                "PR {}",
+                                pull_request.rsplit('/').next().unwrap_or(pull_request)
+                            )
+                        }),
                     placement
                         .template
                         .map(|t| format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))),

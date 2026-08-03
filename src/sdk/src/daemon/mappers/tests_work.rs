@@ -132,6 +132,25 @@ fn claude_worktree_report_moves_the_session_to_the_created_branch() {
 }
 
 #[test]
+fn claude_pr_output_attaches_the_review_to_the_session() {
+    let events = map_all(
+        "claude",
+        &[json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": "pr-1",
+                "content": "https://github.com/tinyhumansai/medulla/pull/157"
+            }]}
+        })],
+    );
+    assert_eq!(
+        fold(&events).info.pull_request.as_deref(),
+        Some("https://github.com/tinyhumansai/medulla/pull/157")
+    );
+}
+
+#[test]
 fn claude_worktree_report_survives_a_later_command_failure() {
     let events = map_all(
         "claude",
@@ -290,6 +309,27 @@ fn codex_json_worktree_report_moves_the_session_to_the_created_branch() {
         Some("/repo/worktrees/fix-label")
     );
     assert_eq!(snapshot.info.branch.as_deref(), Some("fix-label"));
+}
+
+#[test]
+fn codex_pr_json_attaches_the_review_to_the_session() {
+    let events = map_all(
+        "codex",
+        &[json!({
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "id": "cmd-pr",
+                "command": "gh pr view --json url",
+                "aggregated_output": "{\"url\":\"https://github.com/tinyhumansai/medulla/pull/158\"}",
+                "exit_code": 0
+            }
+        })],
+    );
+    assert_eq!(
+        fold(&events).info.pull_request.as_deref(),
+        Some("https://github.com/tinyhumansai/medulla/pull/158")
+    );
 }
 
 #[test]

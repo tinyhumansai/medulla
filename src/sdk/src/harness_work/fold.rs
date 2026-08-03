@@ -269,6 +269,7 @@ impl WorkFold {
         merge_text(&mut info.model, payload, "model");
         merge_text(&mut info.cwd, payload, "cwd");
         merge_text(&mut info.branch, payload, "branch");
+        merge_text(&mut info.pull_request, payload, "pull_request");
         merge_text(&mut info.session_id, payload, "session_id");
         merge_text(&mut info.permission_mode, payload, "permission_mode");
         merge_list(&mut info.tools, payload, "tools");

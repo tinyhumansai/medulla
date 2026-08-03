@@ -272,6 +272,10 @@ pub struct HarnessSessionInfo {
     /// The Git branch checked out in [`Self::cwd`], when the harness moved work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// The pull request associated with [`Self::branch`], when the harness
+    /// created or inspected one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<String>,
     /// The harness's own session id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
@@ -295,6 +299,7 @@ impl HarnessSessionInfo {
         self.model.is_none()
             && self.cwd.is_none()
             && self.branch.is_none()
+            && self.pull_request.is_none()
             && self.session_id.is_none()
             && self.permission_mode.is_none()
             && self.tools.is_empty()

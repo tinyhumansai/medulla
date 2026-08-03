@@ -184,10 +184,20 @@ fn session_info_merges_rather_than_overwrites() {
             kinds::SESSION_INFO,
             json!({ "model": "claude-opus-5", "tools": ["Bash", "Read"] }),
         ),
-        (kinds::SESSION_INFO, json!({ "cwd": "/repo" })),
+        (
+            kinds::SESSION_INFO,
+            json!({
+                "cwd": "/repo",
+                "pull_request": "https://github.com/acme/repo/pull/42"
+            }),
+        ),
     ]);
     assert_eq!(snapshot.info.model.as_deref(), Some("claude-opus-5"));
     assert_eq!(snapshot.info.cwd.as_deref(), Some("/repo"));
+    assert_eq!(
+        snapshot.info.pull_request.as_deref(),
+        Some("https://github.com/acme/repo/pull/42")
+    );
     assert_eq!(snapshot.info.tools, vec!["Bash", "Read"]);
 }
 

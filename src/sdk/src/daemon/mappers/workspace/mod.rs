@@ -1,4 +1,4 @@
-//! Recognizes the stable report printed by the repository `worktree` helper.
+//! Recognizes repository context reported by Git and GitHub commands.
 //!
 //! A harness starts in the daemon's configured checkout, but may create and
 //! continue in a linked worktree. The harness process itself retains its launch
@@ -15,23 +15,68 @@ use super::types::HarnessSemanticEvent;
 #[cfg(test)]
 mod tests;
 
-/// Turn a successful `worktree` report embedded in tool output into updated
-/// session facts. Unrelated output and incomplete reports produce no event.
+/// Turn repository facts embedded in tool output into updated session facts.
+///
+/// A stable `worktree` report supplies the checkout and branch. GitHub CLI
+/// commands print the pull-request URL they created or inspected. Either fact
+/// is useful independently, and when one command prints both they travel in a
+/// single update.
 pub(super) fn workspace_event_from_output(
     output: &str,
     line: i64,
     ts: i64,
     record_type: &str,
 ) -> Option<HarnessSemanticEvent> {
-    let (cwd, branch) = json_report(output).or_else(|| text_report(output))?;
+    let checkout = json_report(output).or_else(|| text_report(output));
+    let pull_request = pull_request_url(output);
+    if checkout.is_none() && pull_request.is_none() {
+        return None;
+    }
+    let mut payload = serde_json::Map::new();
+    if let Some((cwd, branch)) = checkout {
+        payload.insert("cwd".into(), Value::String(cwd));
+        payload.insert("branch".into(), Value::String(branch));
+    }
+    if let Some(url) = pull_request {
+        payload.insert("pull_request".into(), Value::String(url));
+    }
     Some(semantic(
         line,
         ts,
         record_type,
         kinds::SESSION_INFO,
         "agent",
-        serde_json::json!({ "cwd": cwd, "branch": branch }),
+        Value::Object(payload),
     ))
+}
+
+/// Find a GitHub pull-request URL in ordinary or JSON `gh` output.
+///
+/// Tokens are trimmed only at punctuation which cannot belong to a URL. The
+/// `/pull/<number>` shape prevents an issue URL or an unrelated web link in a
+/// command's output from being mistaken for session context.
+fn pull_request_url(output: &str) -> Option<String> {
+    const PREFIX: &str = "https://github.com/";
+    output.match_indices(PREFIX).find_map(|(start, _)| {
+        let token = output[start..]
+            .split(|ch: char| {
+                ch.is_whitespace() || matches!(ch, '"' | '\'' | ')' | ',' | '}' | ']')
+            })
+            .next()?;
+        let url = token.strip_prefix(PREFIX)?;
+        let (repo, number) = url.split_once("/pull/")?;
+        let mut parts = repo.split('/');
+        let owner = parts.next()?;
+        let name = parts.next()?;
+        if owner.is_empty() || name.is_empty() || parts.next().is_some() {
+            return None;
+        }
+        let number = number.trim_end_matches('/');
+        if number.is_empty() || !number.chars().all(|ch| ch.is_ascii_digit()) {
+            return None;
+        }
+        Some(format!("{PREFIX}{owner}/{name}/pull/{number}"))
+    })
 }
 
 /// Read the `--json` report, allowing command output around the object.

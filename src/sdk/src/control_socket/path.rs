@@ -215,6 +215,9 @@ fn absolute_override(explicit: &str) -> Result<PathBuf, ControlSocketError> {
 
 /// Anchor any relative socket path before it crosses a process boundary.
 fn absolute_path(path: PathBuf) -> Result<PathBuf, ControlSocketError> {
+    if path.is_absolute() || path.has_root() {
+        return Ok(path);
+    }
     let cwd = std::env::current_dir().map_err(|error| ControlSocketError::Io(error.to_string()))?;
     Ok(absolute_path_from(path, &cwd))
 }

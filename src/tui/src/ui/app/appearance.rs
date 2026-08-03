@@ -35,7 +35,12 @@ impl App {
             self.persist_theme_now(THEME_ROLES[index]);
         } else if index == THEME_ROLES.len() {
             self.theme.attention_blink = !self.theme.attention_blink;
-            self.persist_theme_now("Attention blink");
+            let value = if self.theme.attention_blink {
+                "on"
+            } else {
+                "off"
+            };
+            self.persist_theme_value_now("Attention blink", value.into());
         } else {
             self.cycle_resource_display(index - THEME_ROLES.len() - ATTENTION_ROWS, forward);
         }
@@ -137,12 +142,17 @@ impl App {
     /// Write the current theme to the injected config path.
     fn persist_theme_now(&mut self, role: &str) {
         let value = color_to_string(self.theme.role(self.appearance_index));
+        self.persist_theme_value_now(role, value);
+    }
+
+    /// Persist the live theme and report the edited value in the status line.
+    fn persist_theme_value_now(&mut self, setting: &str, value: String) {
         match &self.config_path {
             Some(path) => match crate::ui::theme::persist_theme(path, &self.theme) {
-                Ok(()) => self.set_status(format!("Appearance · {role} → {value} (saved)")),
+                Ok(()) => self.set_status(format!("Appearance · {setting} → {value} (saved)")),
                 Err(error) => self.set_status(format!("Appearance · save failed: {error}")),
             },
-            None => self.set_status(format!("Appearance · {role} → {value} (not persisted)")),
+            None => self.set_status(format!("Appearance · {setting} → {value} (not persisted)")),
         }
     }
 }

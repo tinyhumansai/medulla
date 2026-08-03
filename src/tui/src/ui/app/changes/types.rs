@@ -150,6 +150,7 @@ impl GitChangesState {
     pub(crate) fn clear_repository(&mut self, error: String) {
         self.root = None;
         self.baseline = None;
+        self.baseline_source = BaselineSource::AppLaunch;
         self.harness_root = None;
         self.harness_baseline = None;
         self.recent_commits.clear();

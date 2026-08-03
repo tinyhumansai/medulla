@@ -239,6 +239,27 @@ fn a_cached_launch_commit_does_not_bypass_checkout_revalidation() {
 }
 
 #[test]
+fn a_valid_harness_recovers_after_a_non_git_selection_clears_manual_state() {
+    let directory = tempdir().expect("repository");
+    init_repo(directory.path());
+    let launch = output(directory.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    let mut state = GitChangesState {
+        baseline_source: BaselineSource::Manual,
+        ..GitChangesState::default()
+    };
+
+    state.clear_repository("selected harness is outside Git".to_owned());
+    state.follow_harness(directory.path(), &launch);
+    state.refresh();
+
+    assert_eq!(state.baseline_source, BaselineSource::HarnessLaunch);
+    assert_eq!(state.baseline.as_deref(), Some(launch.as_str()));
+    assert_eq!(state.error, None);
+}
+
+#[test]
 #[cfg(unix)]
 fn patch_treats_pathspec_magic_in_a_tracked_filename_literally() {
     let directory = tempdir().expect("temp repo");

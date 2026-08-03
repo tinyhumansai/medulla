@@ -39,6 +39,8 @@ pub struct HarnessLineMapper {
     pub(super) workspace_cwd: Option<String>,
     /// Latest branch authoritatively reported with [`Self::workspace_cwd`].
     pub(super) workspace_branch: Option<String>,
+    /// Latest pull request authoritatively reported for the checkout.
+    pub(super) workspace_pull_request: Option<String>,
     /// Whether the harness inherited a GitHub CLI repository override.
     pub(super) gh_repo_is_set: bool,
 }

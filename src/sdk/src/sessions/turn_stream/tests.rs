@@ -158,7 +158,7 @@ fn a_reused_turn_can_resume_the_previous_turns_workspace_context() {
     assert_eq!(context.0.as_deref(), Some("/repo/worktrees/fix"));
 
     let mut second = TurnStream::new_with_gh_repo_override(HarnessProvider::Claude, false);
-    second.set_workspace_context(context.0, context.1);
+    second.set_workspace_context(context.0, context.1, context.2);
     second.observe(
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"pr-1","name":"Bash","input":{"command":"cd /repo/worktrees/fix && gh pr create --fill"}}]}}"#,
     );
@@ -177,4 +177,17 @@ fn a_reused_turn_can_resume_the_previous_turns_workspace_context() {
     );
     assert_eq!(event.event.payload["cwd"], "/repo/worktrees/fix");
     assert_eq!(event.event.payload["branch"], "fix");
+
+    let retained = second.workspace_context();
+    let mut third = TurnStream::new_with_gh_repo_override(HarnessProvider::Claude, false);
+    third.set_workspace_context(retained.0, retained.1, retained.2);
+    let event = third
+        .retained_workspace_event()
+        .expect("a later task is seeded with repository context");
+    assert_eq!(event.event.payload["cwd"], "/repo/worktrees/fix");
+    assert_eq!(event.event.payload["branch"], "fix");
+    assert_eq!(
+        event.event.payload["pull_request"],
+        "https://github.com/acme/repo/pull/42"
+    );
 }

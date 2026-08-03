@@ -10,6 +10,9 @@ pub(crate) fn pull_request_command(
     workspace_cwd: Option<&str>,
     gh_repo_is_set: bool,
 ) -> Option<PullRequestCommand> {
+    if command.contains("\\\n") || command.contains("\\\r\n") {
+        return None;
+    }
     if gh_repo_is_set {
         return None;
     }

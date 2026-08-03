@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use super::super::pty::{LaunchSpec, PtyManager};
 
 /// Checkout and branch last reported by a reusable harness session.
-pub(super) type WorkspaceContext = (Option<String>, Option<String>);
+pub(super) type WorkspaceContext = (Option<String>, Option<String>, Option<String>);
 /// The session a task will run in, and whether it was already running.
 ///
 /// The distinction decides how its transcript is tailed: a fresh session writes

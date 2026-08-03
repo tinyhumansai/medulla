@@ -17,14 +17,24 @@ const CODEX_DUPLICATE_WINDOW_MS: i64 = 2000;
 
 impl HarnessLineMapper {
     /// Seed repository context retained by a reused interactive session.
-    pub fn set_workspace_context(&mut self, cwd: Option<String>, branch: Option<String>) {
+    pub fn set_workspace_context(
+        &mut self,
+        cwd: Option<String>,
+        branch: Option<String>,
+        pull_request: Option<String>,
+    ) {
         self.workspace_cwd = cwd;
         self.workspace_branch = branch;
+        self.workspace_pull_request = pull_request;
     }
 
     /// Repository context learned from authoritative worktree reports.
-    pub fn workspace_context(&self) -> (Option<String>, Option<String>) {
-        (self.workspace_cwd.clone(), self.workspace_branch.clone())
+    pub fn workspace_context(&self) -> (Option<String>, Option<String>, Option<String>) {
+        (
+            self.workspace_cwd.clone(),
+            self.workspace_branch.clone(),
+            self.workspace_pull_request.clone(),
+        )
     }
 
     /// Build a mapper for `provider` (`"claude" | "codex" | "opencode"`).
@@ -52,6 +62,7 @@ impl HarnessLineMapper {
             pull_request_calls: Default::default(),
             workspace_cwd: None,
             workspace_branch: None,
+            workspace_pull_request: None,
             gh_repo_is_set,
         }
     }
@@ -108,6 +119,20 @@ impl HarnessLineMapper {
             .flatten()
         }) {
             self.workspace_branch = Some(branch.to_string());
+        }
+        if let Some(pull_request) = events.iter().rev().find_map(|event| {
+            (event.event.kind == crate::harness_work::kinds::SESSION_INFO
+                && event.record_type.ends_with(":workspace"))
+            .then(|| {
+                event
+                    .event
+                    .payload
+                    .get("pull_request")
+                    .and_then(Value::as_str)
+            })
+            .flatten()
+        }) {
+            self.workspace_pull_request = Some(pull_request.to_string());
         }
         if self.provider != Provider::Codex {
             return events;

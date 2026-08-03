@@ -38,6 +38,7 @@ fn a_failed_orchestrator_stop_keeps_operator_owned_mapper_context() {
         (
             Some("/repo/worktrees/fix".to_string()),
             Some("fix".to_string()),
+            Some("https://github.com/acme/repo/pull/42".to_string()),
         ),
     )]);
     retire_stopped_workspace_context(&mut context, "pty-1", false);

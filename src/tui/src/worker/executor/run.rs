@@ -35,7 +35,7 @@ use medulla::sessions::{SessionClass, TurnStream};
 use medulla::wrapper::tail::SessionTailer;
 
 use super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
-use super::types::{OpenedSession, PtySessionExecutor, SessionPlan};
+use super::types::{OpenedSession, PtySessionExecutor, SessionPlan, WorkspaceContext};
 
 /// How often the transcript is polled while a turn runs.
 ///
@@ -495,14 +495,19 @@ impl PtySessionExecutor {
     ) -> Result<RunTaskResult, String> {
         let (provider, gh_repo_is_set) = mapper_context;
         let mut stream = TurnStream::new_with_gh_repo_override(provider, gh_repo_is_set);
-        if let Some((cwd, branch)) = self
+        if let Some((cwd, branch, pull_request)) = self
             .workspace_context
             .lock()
             .expect("workspace context lock poisoned")
             .get(id)
             .cloned()
         {
-            stream.set_workspace_context(cwd, branch);
+            stream.set_workspace_context(cwd, branch, pull_request);
+            if let (Some(callback), Some(event)) =
+                (on_event.as_mut(), stream.retained_workspace_event())
+            {
+                callback(&event);
+            }
         }
         let started = tokio::time::Instant::now();
         let mut last_line_at = medulla::clock::now_millis();
@@ -649,7 +654,7 @@ pub(super) fn retains_workspace_context(
 
 /// Forget mapper state only when the orchestrator actually won the stop race.
 pub(super) fn retire_stopped_workspace_context(
-    context: &mut HashMap<String, (Option<String>, Option<String>)>,
+    context: &mut HashMap<String, WorkspaceContext>,
     id: &str,
     stopped: bool,
 ) {

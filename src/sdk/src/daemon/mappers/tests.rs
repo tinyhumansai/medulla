@@ -2,7 +2,7 @@
 //! folds (claude/codex/opencode), the codex dedupe, the shared tool helpers, and
 //! the RFC3339 timestamp parser.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::protocol::TokenUsage;
 
@@ -464,4 +464,36 @@ fn parses_iso_timestamp() {
     // Offset handling: 01:00+01:00 is the same instant as 00:00Z.
     let offset = parse_iso_to_ms("2026-07-05T01:00:00+01:00").unwrap();
     assert_eq!(offset, 1_783_209_600_000);
+}
+
+#[test]
+fn failed_pr_commands_do_not_publish_a_url() {
+    for (provider, lines) in [
+        (
+            "claude",
+            vec![
+                json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"p","name":"Bash","input":{"command":"gh pr create --fill"}}]}}),
+                json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"p","is_error":true,"content":"https://github.com/acme/repo/pull/42"}]}}),
+            ],
+        ),
+        (
+            "codex",
+            vec![
+                json!({"type":"item.started","item":{"id":"p","type":"command_execution","command":"gh pr create --fill"}}),
+                json!({"type":"item.completed","item":{"id":"p","type":"command_execution","command":"gh pr create --fill","aggregated_output":"https://github.com/acme/repo/pull/42","exit_code":1}}),
+            ],
+        ),
+    ] {
+        let mut mapper = HarnessLineMapper::new_with_gh_repo_override(provider, false);
+        let events = lines
+            .iter()
+            .enumerate()
+            .flat_map(|(line, value)| mapper.map_line(&value.to_string(), line as i64));
+        assert!(
+            !events
+                .into_iter()
+                .any(|event| { event.event.kind == crate::harness_work::kinds::SESSION_INFO }),
+            "{provider}"
+        );
+    }
 }

@@ -40,7 +40,13 @@ impl App {
         match selected {
             Some(Ok(Some((row, commit)))) => {
                 let root = row.launch_root.as_deref().unwrap_or(&row.cwd);
-                self.changes.follow_harness(Path::new(root), &commit);
+                self.changes.follow_harness(
+                    Path::new(root),
+                    &commit,
+                    row.launch_checkout_identity
+                        .as_deref()
+                        .expect("validated harness identity"),
+                );
             }
             Some(Err(error)) => {
                 self.changes.clear_repository(error);

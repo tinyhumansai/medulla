@@ -78,6 +78,8 @@ pub(crate) struct GitChangesState {
     pub(crate) harness_baseline: Option<String>,
     /// Harness directory whose launch snapshot is currently tracked.
     pub(crate) harness_root: Option<PathBuf>,
+    /// Marker proving the tracked harness checkout has not been replaced.
+    pub(crate) harness_checkout_identity: Option<String>,
     /// Recent repository history offered by the baseline picker.
     pub(crate) recent_commits: Vec<GitCommit>,
     /// Whether the baseline picker has keyboard focus.
@@ -153,6 +155,7 @@ impl GitChangesState {
         self.baseline_source = BaselineSource::AppLaunch;
         self.harness_root = None;
         self.harness_baseline = None;
+        self.harness_checkout_identity = None;
         self.recent_commits.clear();
         self.commits.clear();
         self.files.clear();
@@ -167,12 +170,18 @@ impl GitChangesState {
     /// Follow a harness's immutable launch snapshot while launch mode is active.
     /// Review comments survive baseline changes within the same repository and
     /// are cleared only when the repository root changes.
-    pub(crate) fn follow_harness(&mut self, cwd: &Path, launch_commit: &str) {
+    pub(crate) fn follow_harness(
+        &mut self,
+        cwd: &Path,
+        launch_commit: &str,
+        checkout_identity: &str,
+    ) {
         let Ok((root, _)) = repository::discover_in(cwd) else {
             return;
         };
         self.harness_root = Some(root.clone());
         self.harness_baseline = Some(launch_commit.to_owned());
+        self.harness_checkout_identity = Some(checkout_identity.to_owned());
         if matches!(
             self.baseline_source,
             BaselineSource::AppLaunch | BaselineSource::HarnessLaunch
@@ -222,6 +231,13 @@ impl GitChangesState {
             .harness_baseline
             .clone()
             .ok_or_else(|| "No harness launch snapshot is available".to_owned())?;
+        let identity = self
+            .harness_checkout_identity
+            .as_deref()
+            .ok_or_else(|| "No harness checkout identity is available".to_owned())?;
+        if !crate::worker::pty::checkout::matches(&root, identity) {
+            return Err("Harness Git checkout changed since launch".to_owned());
+        }
         if self.root.as_ref() != Some(&root) {
             self.comments = ReviewComments::default();
         }

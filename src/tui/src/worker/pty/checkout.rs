@@ -1,39 +1,50 @@
-//! Captures filesystem identity for the Git directory behind a harness checkout.
+//! Captures a non-reusable identity for the Git checkout behind a harness.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Return an identity that changes when a checkout is deleted and replaced.
-pub(crate) fn identity(cwd: &Path) -> Option<String> {
+static NEXT_MARKER: AtomicU64 = AtomicU64::new(1);
+
+/// Create a launch marker inside Git metadata and return its opaque identity.
+///
+/// The marker is outside the worktree and cannot be committed. Deleting and
+/// replacing the checkout removes it, even when the filesystem reuses an inode.
+pub(crate) fn capture(cwd: &Path) -> Option<String> {
+    let git_dir = git_dir(cwd)?;
+    let nonce = format!(
+        "{}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()?
+            .as_nanos(),
+        NEXT_MARKER.fetch_add(1, Ordering::Relaxed)
+    );
+    let directory = git_dir.join("medulla-checkouts");
+    std::fs::create_dir_all(&directory).ok()?;
+    std::fs::write(directory.join(&nonce), nonce.as_bytes()).ok()?;
+    Some(nonce)
+}
+
+/// Verify that a launch marker still belongs to the checkout at `cwd`.
+pub(crate) fn matches(cwd: &Path, identity: &str) -> bool {
+    let Some(git_dir) = git_dir(cwd) else {
+        return false;
+    };
+    std::fs::read_to_string(git_dir.join("medulla-checkouts").join(identity))
+        .is_ok_and(|contents| contents == identity)
+}
+
+fn git_dir(cwd: &Path) -> Option<PathBuf> {
     let output = Command::new("git")
         .current_dir(cwd)
         .args(["rev-parse", "--absolute-git-dir"])
         .output()
         .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = std::str::from_utf8(&output.stdout).ok()?;
-    let metadata = Path::new(text.trim()).metadata().ok()?;
-    metadata_identity(&metadata)
-}
-
-#[cfg(unix)]
-fn metadata_identity(metadata: &std::fs::Metadata) -> Option<String> {
-    use std::os::unix::fs::MetadataExt;
-    Some(format!("{}:{}", metadata.dev(), metadata.ino()))
-}
-
-#[cfg(windows)]
-fn metadata_identity(metadata: &std::fs::Metadata) -> Option<String> {
-    use std::os::windows::fs::MetadataExt;
-    // Stable Rust does not yet expose Windows' file index. Directory creation
-    // time is preserved while a checkout lives and changes when it is deleted
-    // and recloned at the same path, which is the replacement we must reject.
-    Some(format!("{}", metadata.creation_time()))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn metadata_identity(metadata: &std::fs::Metadata) -> Option<String> {
-    Some(format!("{:?}", metadata.modified().ok()?))
+    output
+        .status
+        .success()
+        .then(|| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_owned()))
 }

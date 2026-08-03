@@ -19,8 +19,7 @@ pub(super) fn launch_baseline(
     if current_root != launch_root {
         return None;
     }
-    if crate::worker::pty::checkout::identity(Path::new(cwd)).as_deref() != launch_checkout_identity
-    {
+    if !crate::worker::pty::checkout::matches(Path::new(cwd), launch_checkout_identity?) {
         return None;
     }
     let (root, _) = repository::discover_in(launch_root).ok()?;

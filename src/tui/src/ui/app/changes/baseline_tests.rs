@@ -27,7 +27,7 @@ fn an_unborn_harness_derives_an_empty_tree_launch_baseline() {
         &directory.path().to_string_lossy(),
         Some(&root.to_string_lossy()),
         None,
-        crate::worker::pty::checkout::identity(directory.path()).as_deref(),
+        crate::worker::pty::checkout::capture(directory.path()).as_deref(),
     )
     .expect("unborn launch baseline");
 
@@ -47,6 +47,7 @@ fn choosing_a_harness_baseline_clears_comments_when_repository_changes() {
         root: Some(first_root),
         harness_root: Some(second_root.clone()),
         harness_baseline: Some(second_baseline.clone()),
+        harness_checkout_identity: crate::worker::pty::checkout::capture(second.path()),
         ..GitChangesState::default()
     };
     state.comments.upsert(
@@ -68,7 +69,8 @@ fn following_a_new_launch_commit_in_the_same_repository_preserves_comments() {
     init_repo(directory.path());
     let first = output(directory.path(), &["rev-parse", "HEAD"]);
     let mut state = GitChangesState::default();
-    state.follow_harness(directory.path(), &first);
+    let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
+    state.follow_harness(directory.path(), &first, &identity);
     state
         .comments
         .upsert(Path::new("src/main.rs"), CommentAnchor::File, "keep this");
@@ -78,10 +80,28 @@ fn following_a_new_launch_commit_in_the_same_repository_preserves_comments() {
     );
     let second = output(directory.path(), &["rev-parse", "HEAD"]);
 
-    state.follow_harness(directory.path(), &second);
+    state.follow_harness(directory.path(), &second, &identity);
 
     assert_eq!(state.baseline.as_deref(), Some(second.as_str()));
     assert_eq!(state.comments.count_for(Path::new("src/main.rs")), 1);
+}
+
+#[test]
+fn applying_harness_launch_revalidates_the_checkout_marker() {
+    let directory = tempdir().expect("repository");
+    init_repo(directory.path());
+    let launch = output(directory.path(), &["rev-parse", "HEAD"]);
+    let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
+    let mut state = GitChangesState::default();
+    state.follow_harness(directory.path(), &launch, &identity);
+    fs::remove_dir_all(directory.path().join(".git")).expect("remove checkout metadata");
+    git(directory.path(), &["init"]);
+
+    let error = state
+        .choose_harness_baseline()
+        .expect_err("replacement checkout must be rejected");
+
+    assert_eq!(error, "Harness Git checkout changed since launch");
 }
 
 #[test]
@@ -162,7 +182,7 @@ fn a_replacement_repository_cannot_reuse_the_cached_launch_commit() {
     git(parent.path(), &["clone", "--quiet", "source", "checkout"]);
     let head = output(&checkout, &["rev-parse", "HEAD"]);
     let root = repository::discover_in(&checkout).expect("root").0;
-    let launch_identity = crate::worker::pty::checkout::identity(&checkout);
+    let launch_identity = crate::worker::pty::checkout::capture(&checkout);
     fs::remove_dir_all(&checkout).expect("remove original checkout");
     git(parent.path(), &["clone", "--quiet", "source", "checkout"]);
 
@@ -188,7 +208,8 @@ fn a_valid_harness_recovers_after_a_non_git_selection_clears_manual_state() {
     };
 
     state.clear_repository("selected harness is outside Git".to_owned());
-    state.follow_harness(directory.path(), &launch);
+    let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
+    state.follow_harness(directory.path(), &launch, &identity);
     state.refresh();
 
     assert_eq!(state.baseline_source, BaselineSource::HarnessLaunch);
@@ -215,7 +236,7 @@ fn row(
             .ok()
             .map(|(root, _)| root.to_string_lossy().into_owned()),
         launch_commit,
-        launch_checkout_identity: crate::worker::pty::checkout::identity(cwd),
+        launch_checkout_identity: crate::worker::pty::checkout::capture(cwd),
         session_id: None,
         thread_name: None,
         started_at,

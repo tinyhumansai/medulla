@@ -81,7 +81,11 @@ fn has_executable_shell_operator(command: &str) -> bool {
             (Some('"'), '$' | '`') => return true,
             (Some('"'), _) => {}
             (None, '\'' | '"') => quote = Some(ch),
-            (None, '\n' | '\r' | ';' | '|' | '&' | '$' | '`' | '<' | '>') => return true,
+            (
+                None,
+                '\n' | '\r' | ';' | '|' | '&' | '$' | '`' | '<' | '>' | '{' | '}' | '*' | '?' | '['
+                | ']',
+            ) => return true,
             (None, _) => {}
             _ => unreachable!(),
         }

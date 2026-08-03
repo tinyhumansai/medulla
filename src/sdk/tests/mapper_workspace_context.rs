@@ -2,12 +2,11 @@
 
 use serde_json::json;
 
-use crate::harness_work::WorkFold;
-
-use super::HarnessLineMapper;
+use medulla::daemon::mappers::HarnessLineMapper;
+use medulla::harness_work::WorkFold;
 
 /// Map a transcript and fold its semantic events into session state.
-fn snapshot(provider: &str, lines: &[serde_json::Value]) -> crate::harness_work::WorkSnapshot {
+fn snapshot(provider: &str, lines: &[serde_json::Value]) -> medulla::harness_work::WorkSnapshot {
     let mut mapper = HarnessLineMapper::new_with_gh_repo_override(provider, false);
     let mut fold = WorkFold::new();
     for (line, value) in lines.iter().enumerate() {

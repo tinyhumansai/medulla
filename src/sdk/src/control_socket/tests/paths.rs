@@ -41,6 +41,9 @@ fn config_wins_over_the_home_derived_default() {
 
 #[test]
 fn a_relative_override_is_anchored_before_child_processes_receive_it() {
+    #[cfg(windows)]
+    let cwd = std::path::Path::new(r"C:\tmp\medulla-test");
+    #[cfg(not(windows))]
     let cwd = std::path::Path::new("/tmp/medulla-test");
     let resolved = absolute_path_from("run/control.sock".into(), cwd);
 

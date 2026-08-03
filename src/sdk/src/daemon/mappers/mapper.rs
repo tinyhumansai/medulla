@@ -104,48 +104,33 @@ impl HarnessLineMapper {
             ),
             Provider::Opencode => opencode_events_from_line(raw, line),
         };
-        let repository_moved = events.iter().rev().find_map(|event| {
-            (event.event.kind == crate::harness_work::kinds::SESSION_INFO
-                && event.record_type.ends_with(":workspace"))
-            .then(|| {
-                let cwd = event.event.payload.get("cwd").and_then(Value::as_str);
-                let branch = event.event.payload.get("branch").and_then(Value::as_str);
-                cwd.is_some_and(|cwd| self.workspace_cwd.as_deref() != Some(cwd))
-                    || branch.is_some_and(|branch| self.workspace_branch.as_deref() != Some(branch))
-            })
-        });
-        if repository_moved == Some(true) {
-            self.workspace_pull_request = None;
-        }
-        if let Some(cwd) = events.iter().rev().find_map(|event| {
-            (event.event.kind == crate::harness_work::kinds::SESSION_INFO
-                && event.record_type.ends_with(":workspace"))
-            .then(|| event.event.payload.get("cwd").and_then(Value::as_str))
-            .flatten()
-        }) {
-            self.workspace_cwd = Some(cwd.to_string());
-        }
-        if let Some(branch) = events.iter().rev().find_map(|event| {
-            (event.event.kind == crate::harness_work::kinds::SESSION_INFO
-                && event.record_type.ends_with(":workspace"))
-            .then(|| event.event.payload.get("branch").and_then(Value::as_str))
-            .flatten()
-        }) {
-            self.workspace_branch = Some(branch.to_string());
-        }
-        if let Some(pull_request) = events.iter().rev().find_map(|event| {
-            (event.event.kind == crate::harness_work::kinds::SESSION_INFO
-                && event.record_type.ends_with(":workspace"))
-            .then(|| {
-                event
-                    .event
-                    .payload
-                    .get("pull_request")
-                    .and_then(Value::as_str)
-            })
-            .flatten()
-        }) {
-            self.workspace_pull_request = Some(pull_request.to_string());
+        for event in &events {
+            if event.event.kind != crate::harness_work::kinds::SESSION_INFO
+                || !event.record_type.ends_with(":workspace")
+            {
+                continue;
+            }
+            let cwd = event.event.payload.get("cwd").and_then(Value::as_str);
+            let branch = event.event.payload.get("branch").and_then(Value::as_str);
+            if cwd.is_some_and(|cwd| self.workspace_cwd.as_deref() != Some(cwd))
+                || branch.is_some_and(|branch| self.workspace_branch.as_deref() != Some(branch))
+            {
+                self.workspace_pull_request = None;
+            }
+            if let Some(cwd) = cwd {
+                self.workspace_cwd = Some(cwd.to_string());
+            }
+            if let Some(branch) = branch {
+                self.workspace_branch = Some(branch.to_string());
+            }
+            if let Some(pull_request) = event
+                .event
+                .payload
+                .get("pull_request")
+                .and_then(Value::as_str)
+            {
+                self.workspace_pull_request = Some(pull_request.to_string());
+            }
         }
         if self.provider != Provider::Codex {
             return events;

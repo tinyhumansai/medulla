@@ -34,6 +34,21 @@ fn a_blank_line_folds_to_nothing_and_does_not_advance_the_stream() {
 }
 
 #[test]
+fn a_later_checkout_in_one_record_clears_an_earlier_pr() {
+    let mut stream = TurnStream::new_with_gh_repo_override(HarnessProvider::Claude, false);
+    stream.observe(
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"pr-1","name":"Bash","input":{"command":"gh pr create --fill"}}]}}"#,
+    );
+    stream.observe(
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"pr-1","content":"https://github.com/acme/repo/pull/42"},{"type":"tool_result","tool_use_id":"worktree-2","content":"[PASS] WORKTREE_READY\n  path: /repo/worktrees/next\n  branch: next"}]}}"#,
+    );
+    let context = stream.workspace_context();
+    assert_eq!(context.0.as_deref(), Some("/repo/worktrees/next"));
+    assert_eq!(context.1.as_deref(), Some("next"));
+    assert_eq!(context.2, None);
+}
+
+#[test]
 fn a_tool_call_is_surfaced_as_progress_but_does_not_end_the_turn() {
     let mut stream = TurnStream::new(HarnessProvider::Claude);
     let fold = stream.observe(TOOL_LINE);

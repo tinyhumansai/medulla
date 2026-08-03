@@ -1,6 +1,6 @@
 //! Focused tests for recognizing stable worktree helper reports.
 
-use super::{pull_request_url, text_report};
+use super::{is_pull_request_command, pull_request_url, text_report};
 
 #[test]
 fn text_report_ignores_fields_before_its_ready_marker() {
@@ -44,4 +44,14 @@ fn issues_and_malformed_pr_urls_are_not_session_context() {
         pull_request_url("https://github.com/tinyhumansai/medulla/pull/latest"),
         None
     );
+}
+
+#[test]
+fn only_direct_github_pr_commands_may_report_a_pull_request() {
+    assert!(is_pull_request_command("gh pr create --fill"));
+    assert!(is_pull_request_command("  gh pr view --json url"));
+    assert!(!is_pull_request_command("rg 'gh pr view' fixtures"));
+    assert!(!is_pull_request_command(
+        "cat <<'EOF'\ngh pr view\nhttps://github.com/acme/other/pull/7\nEOF"
+    ));
 }

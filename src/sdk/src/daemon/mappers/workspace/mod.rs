@@ -55,17 +55,14 @@ pub(super) fn workspace_event_from_output(
 
 /// Whether a completed shell call is a GitHub CLI PR create/view operation.
 pub(super) fn is_pull_request_command(command: &str) -> bool {
-    command
-        .split(['\n', ';'])
-        .flat_map(|part| part.split("&&"))
-        .flat_map(|part| part.split("||"))
-        .map(str::trim)
-        .any(|part| {
-            let mut words = part.split_whitespace();
-            words.next() == Some("gh")
-                && words.next() == Some("pr")
-                && matches!(words.next(), Some("create" | "view"))
-        })
+    // Deliberately recognize only a direct invocation. Parsing chained shell
+    // syntax here would also require correctly handling quotes and heredocs;
+    // treating their contents as commands can attach a URL merely printed by
+    // a fixture-building command.
+    let mut words = command.split_whitespace();
+    words.next() == Some("gh")
+        && words.next() == Some("pr")
+        && matches!(words.next(), Some("create" | "view"))
 }
 
 /// Find a GitHub pull-request URL in ordinary or JSON `gh` output.

@@ -114,7 +114,9 @@ fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
         return None;
     }
     match operation {
-        "create" if !has_explicit_head(&arguments) => Some(PullRequestCommand::Create),
+        "create" if !has_explicit_head(&arguments) && !arguments.contains(&"--dry-run") => {
+            Some(PullRequestCommand::Create)
+        }
         "view" if arguments == ["--json", "url"] => Some(PullRequestCommand::View),
         _ => None,
     }

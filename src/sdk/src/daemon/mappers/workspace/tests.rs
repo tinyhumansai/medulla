@@ -60,6 +60,11 @@ fn only_direct_github_pr_commands_may_report_a_pull_request() {
     assert!(pull_request_command("gh pr view --comments", None).is_none());
     assert!(pull_request_command("gh pr create --head other-branch", None).is_none());
     assert!(pull_request_command("gh pr create -Hother-branch", None).is_none());
+    assert!(pull_request_command(
+        "gh pr create --dry-run --body 'see https://github.com/acme/other/pull/7'",
+        None
+    )
+    .is_none());
     assert!(pull_request_command("rg 'gh pr view' fixtures", None).is_none());
     assert!(pull_request_command("/bin/zsh -lc 'cat <<EOF\ngh pr view\nEOF'", None).is_none());
     assert!(pull_request_command(

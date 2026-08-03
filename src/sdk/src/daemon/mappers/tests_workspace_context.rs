@@ -179,3 +179,23 @@ fn claude_pr_from_reported_worktree_attaches_the_review() {
         Some("https://github.com/tinyhumansai/medulla/pull/160")
     );
 }
+
+#[test]
+fn claude_bare_pr_after_worktree_report_is_not_attached() {
+    let result = snapshot(
+        "claude",
+        &[
+            claude_shell("worktree-1", "worktree fix-label"),
+            claude_result(
+                "worktree-1",
+                "[PASS] WORKTREE_READY\n  path: /repo/worktrees/fix-label\n  branch: fix-label\n",
+            ),
+            claude_shell("pr-launch-checkout", "gh pr create --fill"),
+            claude_result(
+                "pr-launch-checkout",
+                "https://github.com/tinyhumansai/medulla/pull/161",
+            ),
+        ],
+    );
+    assert!(result.info.pull_request.is_none());
+}

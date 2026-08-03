@@ -73,11 +73,12 @@ pub(super) fn pull_request_command(
     // treating their contents as commands can attach a URL merely printed by
     // a fixture-building command.
     let command = shell_inner_command(command).unwrap_or(command).trim();
-    direct_pull_request_command(command).or_else(|| {
-        let workspace_cwd = workspace_cwd?;
-        let command = command_after_cd(command, workspace_cwd)?;
-        direct_pull_request_command(command)
-    })
+    match workspace_cwd {
+        Some(workspace_cwd) => {
+            direct_pull_request_command(command_after_cd(command, workspace_cwd)?)
+        }
+        None => direct_pull_request_command(command),
+    }
 }
 
 /// Accept the central-worktree `cd <reported cwd> && gh ...` form only.

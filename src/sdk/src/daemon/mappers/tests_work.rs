@@ -11,7 +11,7 @@ use super::HarnessLineMapper;
 
 /// Map every line of a transcript, in order, as one stream.
 fn map_all(provider: &str, lines: &[serde_json::Value]) -> Vec<HarnessSemanticEvent> {
-    let mut mapper = HarnessLineMapper::new(provider);
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override(provider, false);
     lines
         .iter()
         .enumerate()

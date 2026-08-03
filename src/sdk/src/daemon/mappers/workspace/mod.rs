@@ -17,8 +17,6 @@ mod pr;
 mod tests;
 mod types;
 
-#[cfg(test)]
-pub(super) use pr::pull_request_command_with_repo_override;
 pub(super) use pr::{pull_request_command, pull_request_url, pull_request_url_from_json};
 pub(super) use types::{PendingPullRequestCall, PullRequestCommand};
 

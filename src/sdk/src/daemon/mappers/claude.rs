@@ -21,6 +21,7 @@ pub(super) fn claude_events_from_line(
     line: i64,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
+    gh_repo_is_set: bool,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
         Some(record) => record,
@@ -75,7 +76,14 @@ pub(super) fn claude_events_from_line(
         return as_array(message.get("content"))
             .iter()
             .flat_map(|block| {
-                claude_assistant_block(block, line, ts, pull_request_calls, workspace_cwd)
+                claude_assistant_block(
+                    block,
+                    line,
+                    ts,
+                    pull_request_calls,
+                    workspace_cwd,
+                    gh_repo_is_set,
+                )
             })
             .collect();
     }
@@ -141,6 +149,7 @@ fn claude_assistant_block(
     ts: i64,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
+    gh_repo_is_set: bool,
 ) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
         Some(object) => object,
@@ -189,10 +198,13 @@ fn claude_assistant_block(
             let call_id = object.get("id").and_then(Value::as_str).unwrap_or("");
             let input = object.get("input").cloned().unwrap_or(Value::Null);
             if matches!(tool_name, "Bash" | "Shell") && !call_id.is_empty() {
-                if let Some(command) = input
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .and_then(|command| pull_request_command(command, workspace_cwd))
+                if let Some(command) =
+                    input
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .and_then(|command| {
+                            pull_request_command(command, workspace_cwd, gh_repo_is_set)
+                        })
                 {
                     pull_request_calls.insert(
                         call_id.to_string(),

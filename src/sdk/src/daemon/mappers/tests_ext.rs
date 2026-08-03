@@ -11,7 +11,7 @@ use super::timestamp::parse_iso_to_ms;
 use super::types::{HarnessLineMapper, HarnessSemanticEvent};
 
 fn map_all(provider: &str, lines: &[&str]) -> Vec<HarnessSemanticEvent> {
-    let mut mapper = HarnessLineMapper::new(provider);
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override(provider, false);
     let mut out = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         out.extend(mapper.map_line(line, index as i64));

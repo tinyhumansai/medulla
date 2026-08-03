@@ -1,9 +1,14 @@
 //! Focused tests for recognizing stable worktree helper reports.
 
 use super::{
-    pull_request_command, pull_request_command_with_repo_override, pull_request_url,
+    pull_request_command as recognize_pull_request_command, pull_request_url,
     pull_request_url_from_json, text_report, workspace_event_from_output, PullRequestCommand,
 };
+
+/// Recognize commands with deterministic, explicitly clear `GH_REPO` state.
+fn pull_request_command(command: &str, workspace_cwd: Option<&str>) -> Option<PullRequestCommand> {
+    recognize_pull_request_command(command, workspace_cwd, false)
+}
 
 #[test]
 fn text_report_ignores_fields_before_its_ready_marker() {
@@ -70,6 +75,8 @@ fn only_direct_github_pr_commands_may_report_a_pull_request() {
     assert!(pull_request_command("gh pr create --head other-branch", None).is_none());
     assert!(pull_request_command("gh pr create -Hother-branch", None).is_none());
     assert!(pull_request_command("gh pr create -dHother-branch", None).is_none());
+    assert!(pull_request_command("gh pr create -dRother/project", None).is_none());
+    assert!(pull_request_command("gh pr create -tHotfix", None).is_some());
     assert!(pull_request_command("gh pr create '--head' other-branch", None).is_none());
     assert!(pull_request_command("gh pr create --hea\\d other-branch", None).is_none());
     assert!(pull_request_command(
@@ -93,8 +100,8 @@ fn only_direct_github_pr_commands_may_report_a_pull_request() {
 
 #[test]
 fn inherited_github_repository_override_disqualifies_pr_commands() {
-    assert!(pull_request_command_with_repo_override("gh pr create --fill", None, true).is_none());
-    assert!(pull_request_command_with_repo_override("gh pr view --json url", None, true).is_none());
+    assert!(recognize_pull_request_command("gh pr create --fill", None, true).is_none());
+    assert!(recognize_pull_request_command("gh pr view --json url", None, true).is_none());
 }
 
 #[test]

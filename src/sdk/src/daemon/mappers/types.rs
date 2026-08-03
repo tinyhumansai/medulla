@@ -37,6 +37,8 @@ pub struct HarnessLineMapper {
     pub(super) pull_request_calls: HashMap<String, super::workspace::PendingPullRequestCall>,
     /// Latest checkout authoritatively reported by a worktree helper.
     pub(super) workspace_cwd: Option<String>,
+    /// Whether the harness inherited a GitHub CLI repository override.
+    pub(super) gh_repo_is_set: bool,
 }
 
 /// Which provider's flat-run transcript shape a mapper folds.

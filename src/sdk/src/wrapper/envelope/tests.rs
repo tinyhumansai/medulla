@@ -53,7 +53,7 @@ fn event_id_is_stable_and_position_sensitive() {
 fn seq_advances_and_stamps_ids() {
     let mut b = builder();
     assert_eq!(b.next_seq(), 0);
-    let mut mapper = HarnessLineMapper::new("claude");
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override("claude", false);
     let line = r#"{"type":"assistant","timestamp":"2026-07-05T00:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}"#;
     let events = mapper.map_line(line, 0);
     let env0 = b.event_envelope(&events[0]);

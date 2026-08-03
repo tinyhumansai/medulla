@@ -69,7 +69,7 @@ fn scan_usage_finds_nested_counts_in_all_shapes() {
 
 #[test]
 fn mapper_accumulates_latest_usage() {
-    let mut mapper = HarnessLineMapper::new("codex");
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override("codex", false);
     assert_eq!(mapper.usage(), None);
     let _ = mapper.map_line(
         r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"output_tokens":1}}}}"#,
@@ -89,7 +89,7 @@ fn mapper_accumulates_latest_usage() {
 }
 
 fn map_all(provider: &str, lines: &[&str]) -> Vec<HarnessSemanticEvent> {
-    let mut mapper = HarnessLineMapper::new(provider);
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override(provider, false);
     let mut out = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         out.extend(mapper.map_line(line, index as i64));
@@ -169,7 +169,7 @@ fn codex_new_exec_json_stream_maps_message_command_and_usage() {
     // Real codex >= 0.140 `exec --json` shapes: a thread/turn/item event stream
     // with the detail on a nested `item` (not the older `event_msg`/`payload`),
     // captured verbatim from codex-cli 0.142.
-    let mut mapper = HarnessLineMapper::new("codex");
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override("codex", false);
     let lines = [
         r#"{"type":"thread.started","thread_id":"019f-abc"}"#,
         r#"{"type":"turn.started"}"#,

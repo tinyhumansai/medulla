@@ -8,7 +8,7 @@ use super::HarnessLineMapper;
 
 /// Map a transcript and fold its semantic events into session state.
 fn snapshot(provider: &str, lines: &[serde_json::Value]) -> crate::harness_work::WorkSnapshot {
-    let mut mapper = HarnessLineMapper::new(provider);
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override(provider, false);
     let mut fold = WorkFold::new();
     for (line, value) in lines.iter().enumerate() {
         for event in mapper.map_line(&value.to_string(), line as i64) {

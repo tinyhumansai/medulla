@@ -24,11 +24,14 @@ use super::workspace::{pull_request_command, workspace_event_from_output, Pendin
 ///
 /// `pull_request_calls` is mutated as PR commands start and finish, while
 /// `workspace_cwd` binds those calls to the checkout active at dispatch time.
+/// `gh_repo_is_set` prevents an inherited GitHub repository override from
+/// authorizing results for a different checkout.
 pub(super) fn codex_events_from_line(
     raw: &str,
     line: i64,
     pull_request_calls: &mut HashMap<String, PendingPullRequestCall>,
     workspace_cwd: Option<&str>,
+    gh_repo_is_set: bool,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
         Some(record) => record,
@@ -55,6 +58,7 @@ pub(super) fn codex_events_from_line(
                 line,
                 pull_request_calls,
                 workspace_cwd,
+                gh_repo_is_set,
             )
         }
         _ => {}
@@ -139,7 +143,7 @@ pub(super) fn codex_events_from_line(
             if let Some(command) = input
                 .get("command")
                 .and_then(Value::as_str)
-                .and_then(|command| pull_request_command(command, workspace_cwd))
+                .and_then(|command| pull_request_command(command, workspace_cwd, gh_repo_is_set))
             {
                 pull_request_calls.insert(
                     call_id.to_string(),

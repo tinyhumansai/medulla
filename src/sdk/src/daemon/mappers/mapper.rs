@@ -19,6 +19,14 @@ impl HarnessLineMapper {
     /// Build a mapper for `provider` (`"claude" | "codex" | "opencode"`).
     /// Unknown providers yield a mapper that emits nothing.
     pub fn new(provider: &str) -> Self {
+        Self::new_with_gh_repo_override(provider, std::env::var_os("GH_REPO").is_some())
+    }
+
+    /// Build a mapper with explicit inherited `GH_REPO` state.
+    ///
+    /// This injection seam keeps transcript tests deterministic without
+    /// mutating the process environment shared by parallel tests.
+    pub fn new_with_gh_repo_override(provider: &str, gh_repo_is_set: bool) -> Self {
         let provider = match provider {
             "claude" => Provider::Claude,
             "codex" => Provider::Codex,
@@ -31,6 +39,7 @@ impl HarnessLineMapper {
             usage: None,
             pull_request_calls: Default::default(),
             workspace_cwd: None,
+            gh_repo_is_set,
         }
     }
 
@@ -58,12 +67,14 @@ impl HarnessLineMapper {
                 line,
                 &mut self.pull_request_calls,
                 self.workspace_cwd.as_deref(),
+                self.gh_repo_is_set,
             ),
             Provider::Codex => codex_events_from_line(
                 raw,
                 line,
                 &mut self.pull_request_calls,
                 self.workspace_cwd.as_deref(),
+                self.gh_repo_is_set,
             ),
             Provider::Opencode => opencode_events_from_line(raw, line),
         };

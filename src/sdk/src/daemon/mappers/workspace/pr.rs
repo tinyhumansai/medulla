@@ -8,18 +8,6 @@ use super::PullRequestCommand;
 pub(crate) fn pull_request_command(
     command: &str,
     workspace_cwd: Option<&str>,
-) -> Option<PullRequestCommand> {
-    pull_request_command_with_repo_override(
-        command,
-        workspace_cwd,
-        std::env::var_os("GH_REPO").is_some(),
-    )
-}
-
-/// Recognize a PR command while accounting for an inherited repository override.
-pub(crate) fn pull_request_command_with_repo_override(
-    command: &str,
-    workspace_cwd: Option<&str>,
     gh_repo_is_set: bool,
 ) -> Option<PullRequestCommand> {
     if gh_repo_is_set {
@@ -63,7 +51,7 @@ fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
     if arguments.iter().any(|argument| {
         matches!(*argument, "--repo" | "-R")
             || argument.starts_with("--repo=")
-            || (argument.starts_with("-R") && argument.len() > 2)
+            || has_short_option(argument, 'R')
     }) {
         return None;
     }
@@ -141,10 +129,29 @@ fn has_explicit_head(arguments: &[&str]) -> bool {
     arguments.iter().any(|argument| {
         matches!(*argument, "--head" | "-H")
             || argument.starts_with("--head=")
-            || (argument.starts_with('-')
-                && !argument.starts_with("--")
-                && argument[1..].contains('H'))
+            || has_short_option(argument, 'H')
     })
+}
+
+/// Whether a pflag shorthand group contains `sought` before any joined value.
+fn has_short_option(argument: &str, sought: char) -> bool {
+    let Some(group) = argument
+        .strip_prefix('-')
+        .filter(|group| !group.starts_with('-'))
+    else {
+        return false;
+    };
+    for shorthand in group.chars() {
+        if shorthand == sought {
+            return true;
+        }
+        // Boolean shorthands may be bundled. Every other known create
+        // shorthand consumes the remainder as its joined value.
+        if !matches!(shorthand, 'd' | 'f' | 'w') {
+            return false;
+        }
+    }
+    false
 }
 
 /// Whether PR creation is only simulating its result.

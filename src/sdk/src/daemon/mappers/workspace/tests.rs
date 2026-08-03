@@ -78,6 +78,12 @@ fn pr_commands_reject_chains_except_for_the_reported_worktree_cd() {
     )
     .is_none());
     assert!(pull_request_command("gh pr create --fill; cat fixture", None).is_none());
+    assert!(pull_request_command(
+        "gh pr create --fill $(cat fixtures/pr_urls.txt >/dev/stderr) >/dev/null",
+        None
+    )
+    .is_none());
+    assert!(pull_request_command("gh pr create --body `cat fixture`", None).is_none());
     assert!(pull_request_command("cd /other && gh pr create --fill", Some(cwd)).is_none());
     assert!(pull_request_command(
         "cd /repo/worktrees/fix-label && gh pr create --fill",

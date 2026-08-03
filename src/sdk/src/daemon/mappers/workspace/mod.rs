@@ -93,7 +93,7 @@ fn command_after_cd<'a>(command: &'a str, workspace_cwd: &str) -> Option<&'a str
 fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
     if command
         .chars()
-        .any(|ch| matches!(ch, '\n' | '\r' | ';' | '|' | '&'))
+        .any(|ch| matches!(ch, '\n' | '\r' | ';' | '|' | '&' | '$' | '`' | '<' | '>'))
     {
         return None;
     }

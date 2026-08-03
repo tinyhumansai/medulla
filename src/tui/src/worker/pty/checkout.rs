@@ -12,6 +12,17 @@ static NEXT_MARKER: AtomicU64 = AtomicU64::new(1);
 /// The marker is outside the worktree and cannot be committed. Deleting and
 /// replacing the checkout removes it, even when the filesystem reuses an inode.
 pub(crate) fn capture(cwd: &Path) -> Option<String> {
+    capture_with(cwd, |directory, nonce| {
+        std::fs::create_dir_all(directory).is_ok()
+            && std::fs::write(directory.join(nonce), nonce.as_bytes()).is_ok()
+    })
+}
+
+/// Capture identity with an injectable marker writer for deterministic tests.
+pub(super) fn capture_with(
+    cwd: &Path,
+    write_marker: impl FnOnce(&Path, &str) -> bool,
+) -> Option<String> {
     let git_dir = git_dir(cwd)?;
     let nonce = format!(
         "{}-{}-{}",
@@ -23,9 +34,7 @@ pub(crate) fn capture(cwd: &Path) -> Option<String> {
         NEXT_MARKER.fetch_add(1, Ordering::Relaxed)
     );
     let directory = git_dir.join("medulla-checkouts");
-    if std::fs::create_dir_all(&directory).is_ok()
-        && std::fs::write(directory.join(&nonce), nonce.as_bytes()).is_ok()
-    {
+    if write_marker(&directory, &nonce) {
         return Some(format!("marker:{nonce}"));
     }
 

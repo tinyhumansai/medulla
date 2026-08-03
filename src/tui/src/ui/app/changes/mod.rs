@@ -5,11 +5,14 @@
 //! only the bridge: it turns an operator's request to comment into a prompt
 //! bound to the position the cursor is on.
 
+mod baseline;
 mod repository;
 /// Visible to the rest of `ui::app` so the render layer and its tests can name
 /// the row type they draw; the state itself is re-exported below.
 pub(super) mod types;
 
+#[cfg(test)]
+mod baseline_tests;
 #[cfg(test)]
 mod comment_tests;
 #[cfg(test)]
@@ -20,10 +23,9 @@ use std::path::Path;
 use medulla::ui::git_review::CommentAnchor;
 pub(crate) use types::GitChangesState;
 
-use crate::ui::composer::{Draft, TextPrompt};
-use crate::worker::pty::SessionRow;
-
 use super::types::{App, PromptKind};
+use crate::ui::composer::{Draft, TextPrompt};
+use baseline::select_harness_baseline;
 use types::BaselineSource;
 
 impl App {
@@ -165,56 +167,6 @@ impl App {
             kind: PromptKind::ChangesComment { path, anchor },
         });
     }
-}
-
-/// Return the immutable launch baseline, deriving Git's empty tree when the
-/// harness started before an unborn repository had its first commit.
-fn launch_baseline(
-    cwd: &str,
-    launch_root: Option<&str>,
-    launch_commit: Option<&str>,
-) -> Option<String> {
-    let launch_root = Path::new(launch_root?);
-    let (current_root, _) = repository::discover_in(Path::new(cwd)).ok()?;
-    if current_root != launch_root {
-        return None;
-    }
-    let (root, _) = repository::discover_in(launch_root).ok()?;
-    match launch_commit {
-        Some(commit) => repository::resolve_commit(&root, commit).ok(),
-        None => repository::empty_tree(&root).ok(),
-    }
-}
-
-/// Resolve the selected harness without silently substituting another
-/// repository. The newest eligible harness is only a default when no live
-/// preferred row exists.
-fn select_harness_baseline(
-    rows: Vec<SessionRow>,
-    preferred_id: Option<&str>,
-) -> Result<Option<(SessionRow, String)>, String> {
-    if let Some(preferred) = preferred_id {
-        if let Some(row) = rows.iter().find(|row| row.id == preferred).cloned() {
-            let commit = launch_baseline(
-                &row.cwd,
-                row.launch_root.as_deref(),
-                row.launch_commit.as_deref(),
-            )
-            .ok_or_else(|| format!("Selected harness {} is not in a Git repository", row.label))?;
-            return Ok(Some((row, commit)));
-        }
-    }
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| {
-            launch_baseline(
-                &row.cwd,
-                row.launch_root.as_deref(),
-                row.launch_commit.as_deref(),
-            )
-            .map(|commit| (row, commit))
-        })
-        .max_by_key(|(row, _)| row.started_at))
 }
 
 /// Describe an anchor for the prompt title, naming the hunk when there is one.

@@ -147,6 +147,10 @@ impl FoldState {
         if let Some(title) = value.get("title").and_then(Value::as_str) {
             call.title = title.to_string();
         }
+        let kind_changed = value
+            .get("kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| call.kind != kind);
         if let Some(kind) = value.get("kind").and_then(Value::as_str) {
             call.kind = kind.to_string();
         }
@@ -154,10 +158,11 @@ impl FoldState {
         if let Some(input) = value.get("rawInput") {
             call.input = input.clone();
         }
-        if input_changed {
+        let correlation_changed = input_changed || kind_changed;
+        if correlation_changed {
             self.pull_request_calls.remove(&call_id);
         }
-        if input_changed {
+        if correlation_changed && call.kind == "execute" {
             if let Some(command) = command_from_input(&call.input) {
                 if let Some(operation) = pull_request_command(
                     command,

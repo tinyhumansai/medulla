@@ -343,4 +343,49 @@ fn acp_pr_correlation_requires_success_in_the_dispatch_workspace() {
     .unwrap();
     final_replaced.fold(terminal_replacement);
     assert!(contexts.lock().unwrap().is_empty());
+
+    let mut non_execute = make_state();
+    non_execute.fold(update(
+        "tool_call",
+        "in_progress",
+        serde_json::json!({"command": "gh pr view --json url"}),
+    ));
+    let kind_replacement = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-pr",
+        "kind": "read",
+        "status": "in_progress"
+    }))
+    .unwrap();
+    non_execute.fold(kind_replacement);
+    non_execute.fold(result("completed"));
+    assert!(contexts.lock().unwrap().is_empty());
+
+    let read_call: agent_client_protocol::schema::v1::SessionUpdate =
+        serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-pr",
+        "title": "Read",
+        "kind": "read",
+        "status": "in_progress",
+        "rawInput": {"command": "cd /repo/worktrees/pr-153 && gh pr view --json url"}
+        }))
+        .unwrap();
+    let mut read_only = make_state();
+    read_only.fold(read_call.clone());
+    read_only.fold(result("completed"));
+    assert!(contexts.lock().unwrap().is_empty());
+
+    let mut becomes_execute = make_state();
+    becomes_execute.fold(read_call);
+    let execute_update = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-pr",
+        "kind": "execute",
+        "status": "in_progress"
+    }))
+    .unwrap();
+    becomes_execute.fold(execute_update);
+    becomes_execute.fold(result("completed"));
+    assert_eq!(contexts.lock().unwrap().len(), 1);
 }

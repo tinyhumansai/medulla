@@ -359,7 +359,13 @@ impl App {
                                 // pointed at.
                                 self.harness_pane_session = Some(session.to_string());
                                 self.open_harness_enter_prompt();
-                                return None;
+                                // Drop whatever task the previous row was
+                                // watching, exactly as the fall-through below
+                                // does for every other row. This branch returns
+                                // early, so without retargeting here a click
+                                // onto a harness leaves the last task's screen
+                                // streaming into a pane nobody is looking at.
+                                return self.retarget_watch();
                             }
                             // Clicking a task is the request to watch it.
                             if let Some(cmd) = self.retarget_watch() {

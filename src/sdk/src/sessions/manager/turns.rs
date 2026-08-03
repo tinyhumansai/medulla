@@ -137,6 +137,12 @@ impl SessionManager {
                         );
                     }
                 }
+                if outcome.is_ok() {
+                    self.inner.registry.record_workspace_context(
+                        &request.key,
+                        workspace_context.lock().unwrap().clone(),
+                    );
+                }
                 outcome
             }
         };

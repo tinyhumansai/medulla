@@ -6,7 +6,7 @@ use agent_client_protocol::schema::v1::SessionUpdate;
 use serde_json::{json, Value};
 
 use crate::daemon::mappers::{
-    pull_request_command, workspace_event_from_output, HarnessSemanticEvent,
+    pull_request_command, workspace_event_from_output, HarnessSemanticEvent, PendingPullRequestCall,
 };
 use crate::protocol::HarnessEvent;
 use crate::sessions::WorkspaceContext;
@@ -85,7 +85,11 @@ impl FoldState {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 self.tool_calls.remove(call_id);
-                self.fold_workspace_result(call_id, value.get("rawOutput"));
+                if value.get("status").and_then(Value::as_str) == Some("completed") {
+                    self.fold_workspace_result(call_id, value.get("rawOutput"));
+                } else {
+                    self.pull_request_calls.remove(call_id);
+                }
                 (
                     "tool_result",
                     "tool",
@@ -150,7 +154,14 @@ impl FoldState {
                 self.workspace_context.cwd.as_deref(),
                 self.gh_repo_is_set,
             ) {
-                self.pull_request_calls.insert(call_id.clone(), operation);
+                self.pull_request_calls.insert(
+                    call_id.clone(),
+                    PendingPullRequestCall::new(
+                        operation,
+                        self.workspace_context.cwd.as_deref(),
+                        self.workspace_context.branch.as_deref(),
+                    ),
+                );
             }
         }
         json!({
@@ -164,7 +175,12 @@ impl FoldState {
     /// Correlate a completed ACP terminal call with worktree or PR output.
     fn fold_workspace_result(&mut self, call_id: &str, output: Option<&Value>) {
         let output = output_text(output);
-        let operation = self.pull_request_calls.remove(call_id);
+        let operation = self.pull_request_calls.remove(call_id).and_then(|call| {
+            call.command_in(
+                self.workspace_context.cwd.as_deref(),
+                self.workspace_context.branch.as_deref(),
+            )
+        });
         let Some(event) = workspace_event_from_output(
             &output,
             operation,

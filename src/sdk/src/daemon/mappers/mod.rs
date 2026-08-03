@@ -32,7 +32,9 @@ mod types;
 mod usage;
 mod work;
 mod workspace;
-pub(crate) use workspace::{pull_request_command, workspace_event_from_output, PullRequestCommand};
+pub(crate) use workspace::{
+    pull_request_command, workspace_event_from_output, PendingPullRequestCall,
+};
 
 #[cfg(test)]
 mod tests;

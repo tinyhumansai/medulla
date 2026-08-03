@@ -19,6 +19,7 @@ use super::manager::PtyManager;
 use super::types::{HarnessControl, LaunchSpec, PtyState};
 
 mod attention;
+mod checkout;
 mod control;
 mod identity;
 mod scrollback;

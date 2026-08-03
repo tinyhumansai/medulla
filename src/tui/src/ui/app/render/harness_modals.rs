@@ -27,6 +27,7 @@ impl App {
                 picker.choices.len(),
                 "Choose harness — ↑/↓ · Enter workspace · Esc cancel",
             ),
+            HarnessPickerStep::Decision => (2, "Choose control — ↑/↓ · Enter confirm · Esc back"),
             HarnessPickerStep::Workspace => (
                 picker.workspace_choices.len(),
                 "Choose workspace — type to filter · Tab complete · Enter start · Esc back",
@@ -72,6 +73,65 @@ impl App {
                             ))
                         })
                         .collect()
+                }
+                HarnessPickerStep::Decision => {
+                    let selected = picker
+                        .choices
+                        .get(picker.index)
+                        .map(|choice| choice.display_name())
+                        .unwrap_or("harness");
+                    let managed = picker.managed;
+                    // The workspace was chosen on the previous step, so name it
+                    // here: this is the last screen before the harness starts,
+                    // and "in which directory" is the fact the operator has to
+                    // be sure of before answering.
+                    let ws_display = picker
+                        .workspace_choices
+                        .get(picker.workspace_index)
+                        .map(|choice| choice.path.as_str())
+                        .unwrap_or("(none)");
+                    vec![
+                        TLine::from(Span::styled(
+                            format!("  {selected}"),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        )),
+                        TLine::from(Span::styled(
+                            // Clipped from the left like the workspace list
+                            // itself: the leaf directory is what identifies a
+                            // path, and it is the end that a plain truncation
+                            // throws away.
+                            format!("  in {}", medulla::ui::util::clip_left(ws_display, 52)),
+                            Style::default().add_modifier(Modifier::DIM),
+                        )),
+                        TLine::from(""),
+                        TLine::from(Span::styled(
+                            format!(
+                                "{}Managed · orchestrator can dispatch into it",
+                                if managed { "❯ " } else { "  " }
+                            ),
+                            if managed {
+                                self.theme.selection()
+                            } else {
+                                Style::default()
+                            },
+                        )),
+                        TLine::from(Span::styled(
+                            format!(
+                                "{}Unmanaged · you hold it, orchestrator won't dispatch",
+                                if !managed { "❯ " } else { "  " }
+                            ),
+                            if !managed {
+                                self.theme.selection()
+                            } else {
+                                Style::default()
+                            },
+                        )),
+                        TLine::from(""),
+                        TLine::from(Span::styled(
+                            "  Enter confirm · Esc back",
+                            Style::default().add_modifier(Modifier::DIM),
+                        )),
+                    ]
                 }
                 HarnessPickerStep::Workspace => {
                     let selected_harness = picker
@@ -135,25 +195,33 @@ impl App {
         }
         // Said here as well as in the status line, because it is the one fact
         // that makes this different from every other way to start a harness.
-        lines.push(TLine::from(Span::styled(
-            "  unmanaged · the orchestrator will not dispatch into it",
-            Style::default().add_modifier(Modifier::DIM),
-        )));
+        // Skip on the Decision step — it already shows both options inline.
+        if picker.step != HarnessPickerStep::Decision {
+            lines.push(TLine::from(Span::styled(
+                "  unmanaged · the orchestrator will not dispatch into it",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 
-    /// Draw the "you still hold this harness" question.
+    /// Draw the harness handover question, in whichever direction it is asked.
     pub(super) fn draw_handback_prompt(&mut self, f: &mut Frame, area: Rect) {
         let Some(prompt) = &self.handback_prompt else {
             return;
         };
         let area = centered(area, 72, 12);
+        let title = if prompt.is_takeover {
+            "Take control of this harness"
+        } else {
+            "You still have this harness"
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(self.theme.accent))
             .title(Span::styled(
-                "You still have this harness",
+                title,
                 Style::default()
                     .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -161,6 +229,23 @@ impl App {
         let inner = block.inner(area);
         f.render_widget(Clear, area);
         f.render_widget(block, area);
+
+        // Taking over is the short question: there is no note to send and
+        // nothing to release, so the body says only what pressing Enter costs
+        // the orchestrator.
+        if prompt.is_takeover {
+            let lines = vec![
+                TLine::from("The orchestrator is using this harness."),
+                TLine::from("Take control to type into it."),
+                TLine::from(""),
+                TLine::from(Span::styled(
+                    "[Enter] take control · [Esc] cancel",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+            ];
+            f.render_widget(Paragraph::new(Text::from(lines)), inner);
+            return;
+        }
 
         // An operator who typed /takecontrol made a decision; one who simply
         // focused in may not know they are holding anything. The sentence says

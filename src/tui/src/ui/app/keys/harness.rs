@@ -24,7 +24,7 @@ use crate::ui::harness_pane::{
 use crate::worker::pty::launch::bracket_paste;
 use crate::worker::pty::HarnessControl;
 
-use super::super::types::App;
+use super::super::types::{AgentsFocus, App};
 
 impl App {
     /// Take the keyboard back from whatever harness has it.
@@ -86,12 +86,20 @@ impl App {
         }
         let enter_on_harness = key.code == KeyCode::Enter
             && key.modifiers == KeyModifiers::NONE
-            && self.harness_pane_session.is_some();
-        if is_focus_chord(key) || enter_on_harness {
+            && self.harness_pane_session.is_some()
+            && self.agents_focus == AgentsFocus::Rail;
+        // Enter asks first. It is a navigation key, and walking the rail onto a
+        // managed harness must not silently take it away from the orchestrator;
+        // the chord below is the deliberate spelling and still attaches outright.
+        if enter_on_harness {
+            self.open_harness_enter_prompt();
+            // Consumed either way: Enter reaches this branch only when the
+            // visible pane resolved to a harness, so it must not submit a
+            // hidden composer or return focus to one.
+            return true;
+        }
+        if is_focus_chord(key) {
             self.attach_to_pane_harness();
-            // Consumed either way. The chord is reserved, while Enter reaches
-            // this branch only when the visible pane resolved to a harness; it
-            // must not submit a hidden composer or return focus to one.
             return true;
         }
         false

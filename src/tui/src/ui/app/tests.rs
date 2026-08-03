@@ -150,7 +150,7 @@ fn typing_inserts_into_draft() {
 
 #[test]
 fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
-    use super::types::{HarnessPicker, HarnessPickerStep};
+    use super::types::{HarnessPicker, HarnessPickerStep, WorkspaceChoice};
     use crate::ui::harness_pane::HarnessChoice;
 
     let mut a = app();
@@ -171,8 +171,11 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
         workspace_choices: Vec::new(),
         workspace_index: 0,
         workspace_picked: false,
+        managed: true,
     });
 
+    // First Enter advances from Harness step to Workspace step: where the
+    // harness runs is asked before who holds it.
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(cmd.is_none());
@@ -182,24 +185,47 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
         Some(HarnessPickerStep::Workspace),
         "the picker should have advanced to its workspace step"
     );
+
+    // This app has no local harnesses, so nothing completes the empty query.
+    // Stand a choice in for the completion pass, which is what the workspace
+    // step's Enter reads.
+    if let Some(picker) = &mut a.harness_picker {
+        picker.workspace_choices = vec![WorkspaceChoice {
+            path: ".".into(),
+            source: "recent",
+        }];
+        picker.workspace_index = 0;
+    }
+
+    // Second Enter takes the workspace and advances to the decision step.
+    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(cmd.is_none());
+    assert_eq!(
+        a.harness_picker.as_ref().map(|picker| picker.step),
+        Some(HarnessPickerStep::Decision),
+        "the picker should have advanced to its decision step"
+    );
 }
 
 #[test]
-fn enter_on_a_harness_uses_the_attach_path_in_normal_mode() {
+fn enter_on_a_harness_asks_before_taking_it() {
     let mut a = app();
     a.tab_index = tab("Agents");
     a.focus_agents_rail();
-    // The render pass records the harness behind the visible pane. A vanished
-    // session exercises the refusal path without opening a real child here;
-    // importantly, Enter is still consumed as an attach attempt instead of
-    // returning to the composer or submitting a turn.
+    // The render pass records the harness behind the visible pane. This app
+    // hosts nothing, so the handover question has nothing to ask about and says
+    // so — the point being that Enter is consumed by the harness path rather
+    // than returning to the composer or submitting a turn, and that it never
+    // attaches on its own.
     a.harness_pane_session = Some("just-exited".to_string());
 
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(cmd.is_none());
     assert!(a.agents_rail_focused());
-    assert!(a.status().contains("harness has exited"), "{}", a.status());
+    assert!(a.status().contains("not hosting"), "{}", a.status());
+    assert!(a.handback_prompt.is_none());
     assert_eq!(a.attached_harness(), None);
 }
 

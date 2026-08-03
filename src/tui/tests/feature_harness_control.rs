@@ -184,6 +184,13 @@ fn ctrl_t_opens_the_picker_and_enter_starts_an_unmanaged_harness() {
     assert!(out.contains("Choose workspace"), "{out}");
     assert!(out.contains("/"), "{out}");
 
+    // Taking the workspace asks who holds the harness. It offers managed
+    // first, so unmanaged is one arrow away.
+    let _ = app.on_event(key(KeyCode::Enter));
+    let out = render(&mut app, 140, 44);
+    assert!(out.contains("Choose control"), "{out}");
+    let _ = app.on_event(key(KeyCode::Down));
+
     let _ = app.on_event(key(KeyCode::Enter));
     wait_for("the harness to open", || sessions.rows().len() == 1);
 
@@ -247,6 +254,8 @@ fn the_picker_directory_can_be_edited_before_starting() {
         "editing must not start the harness"
     );
 
+    // Enter takes the directory, and the control step confirms the start.
+    let _ = app.on_event(key(KeyCode::Enter));
     let _ = app.on_event(key(KeyCode::Enter));
     wait_for("the harness to open", || sessions.rows().len() == 1);
     assert_eq!(sessions.rows().remove(0).cwd, "/tmp");
@@ -302,6 +311,8 @@ fn workspace_picker_autocompletes_folders_and_remembers_successful_choices() {
         "{out}"
     );
 
+    // Enter takes the completed folder, and the control step confirms.
+    let _ = app.on_event(key(KeyCode::Enter));
     let _ = app.on_event(key(KeyCode::Enter));
     wait_for("the harness to open in the completed folder", || {
         sessions.rows().len() == 1

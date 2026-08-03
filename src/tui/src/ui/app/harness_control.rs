@@ -42,7 +42,7 @@ impl App {
         match provider.and_then(HarnessProvider::from_wire) {
             Some(provider) => {
                 let cwd = path.unwrap_or("").to_string();
-                self.spawn_harness(HarnessChoice::native(provider), &cwd);
+                self.spawn_harness(HarnessChoice::native(provider), &cwd, false);
             }
             None => {
                 let choices = harnesses.choices();
@@ -61,6 +61,7 @@ impl App {
                     workspace_choices: Vec::new(),
                     workspace_index: 0,
                     workspace_picked: false,
+                    managed: true,
                 });
             }
         }
@@ -76,7 +77,7 @@ impl App {
     /// Selecting the new row matters more than it sounds: a harness that
     /// appears somewhere below the fold, with the pane still showing whatever
     /// was selected before, reads as "nothing happened".
-    pub(super) fn spawn_harness(&mut self, choice: HarnessChoice, cwd: &str) {
+    pub(super) fn spawn_harness(&mut self, choice: HarnessChoice, cwd: &str, managed: bool) {
         let Some(harnesses) = self.harnesses.clone() else {
             self.set_status("This device is not hosting, so it has no harnesses to start");
             return;
@@ -87,14 +88,19 @@ impl App {
             Ok(id) => {
                 self.tab_index = tab_pos("Agents");
                 self.select_harness_row(&id);
+                let label = if managed { "managed" } else { "unmanaged" };
                 let mut status = format!(
-                    "Started {} · unmanaged, the orchestrator will not use it",
-                    choice.display_name()
+                    "Started {} · {label}, the orchestrator will{} use it",
+                    choice.display_name(),
+                    if managed { "" } else { " not" }
                 );
                 if let Err(error) = self.remember_harness_workspace(&workspace) {
                     status.push_str(&format!(" · {error}"));
                 }
                 self.set_status(status);
+                if managed {
+                    self.hand_back_session(&id, None);
+                }
             }
             // Surfaced, never swallowed: a spawn that fails silently leaves the
             // operator waiting for a pane that is never coming.
@@ -159,6 +165,46 @@ impl App {
             Some(HarnessControl::User) => self.hand_back_session(&session, None),
             Some(HarnessControl::Orchestrator) => self.take_harness_control(),
             None => self.set_status("That harness is gone"),
+        }
+    }
+
+    /// Open the take-control or hand-back prompt depending on who holds the harness.
+    ///
+    /// Enter on a harness row used to attach immediately, which is a control
+    /// change made by a navigation key: an operator walking the rail with the
+    /// arrows and pressing Enter to "look closer" took the harness out from
+    /// under the orchestrator without being asked. The question is the same one
+    /// either way — which side of the handover is this? — so it reuses the
+    /// hand-back prompt with the sentence turned around.
+    pub(crate) fn open_harness_enter_prompt(&mut self) {
+        let Some((harnesses, session)) = self.selected_harness() else {
+            return;
+        };
+        match harnesses.control(&session) {
+            // The operator already holds it, so the only decision left is
+            // whether to give it back.
+            Some(HarnessControl::User) => {
+                self.handback_prompt = Some(HandbackPrompt {
+                    session,
+                    took_control: false,
+                    note: Draft::default(),
+                    editing_note: false,
+                    is_takeover: false,
+                });
+            }
+            // The orchestrator holds it: typing into it means taking it first.
+            Some(HarnessControl::Orchestrator) => {
+                self.handback_prompt = Some(HandbackPrompt {
+                    session,
+                    took_control: false,
+                    note: Draft::default(),
+                    editing_note: false,
+                    is_takeover: true,
+                });
+            }
+            None => {
+                self.set_status("That harness is gone");
+            }
         }
     }
 
@@ -257,6 +303,7 @@ impl App {
                     took_control: self.harness_took_control,
                     note: Draft::default(),
                     editing_note: false,
+                    is_takeover: false,
                 });
                 false
             }
@@ -389,6 +436,10 @@ impl App {
             .as_ref()
             .map(|picker| picker.step)
             .unwrap_or(HarnessPickerStep::Harness);
+        if step == HarnessPickerStep::Decision {
+            self.handle_harness_decision_key(event);
+            return;
+        }
         if step == HarnessPickerStep::Workspace {
             self.handle_harness_workspace_key(event);
             return;
@@ -412,7 +463,46 @@ impl App {
                 self.open_harness_workspace_step(true);
             }
             KeyCode::Enter => {
+                // Go straight to workspace selection; managed/unmanaged comes after.
                 self.open_harness_workspace_step(false);
+            }
+            _ => {}
+        }
+    }
+
+    /// Route a key while choosing managed or unmanaged control.
+    fn handle_harness_decision_key(&mut self, event: KeyEvent) {
+        match event.code {
+            KeyCode::Esc => {
+                if let Some(picker) = &mut self.harness_picker {
+                    picker.step = HarnessPickerStep::Harness;
+                }
+            }
+            KeyCode::Up | KeyCode::Down => {
+                if let Some(picker) = &mut self.harness_picker {
+                    picker.managed = !picker.managed;
+                }
+            }
+            KeyCode::Enter => {
+                let Some(workspace) = self.selected_harness_workspace() else {
+                    self.set_status("Choose a workspace first");
+                    return;
+                };
+                let choice = self
+                    .harness_picker
+                    .as_ref()
+                    .and_then(|picker| picker.choices.get(picker.index).cloned());
+                let managed = self
+                    .harness_picker
+                    .as_ref()
+                    .map(|p| p.managed)
+                    .unwrap_or(false);
+                let Some(choice) = choice else {
+                    self.set_status("Choose a harness first");
+                    return;
+                };
+                self.harness_picker = None;
+                self.spawn_harness(choice, &workspace, managed);
             }
             _ => {}
         }
@@ -460,20 +550,14 @@ impl App {
                 self.refresh_harness_workspace_choices();
             }
             KeyCode::Enter => {
-                let Some(workspace) = self.selected_harness_workspace() else {
+                if self.selected_harness_workspace().is_none() {
                     self.set_status("Choose an existing directory");
                     return;
-                };
-                let choice = self
-                    .harness_picker
-                    .as_ref()
-                    .and_then(|picker| picker.choices.get(picker.index).cloned());
-                let Some(choice) = choice else {
-                    self.set_status("Choose a harness first");
-                    return;
-                };
-                self.harness_picker = None;
-                self.spawn_harness(choice, &workspace);
+                }
+                if let Some(picker) = &mut self.harness_picker {
+                    picker.step = HarnessPickerStep::Decision;
+                    picker.managed = true;
+                }
             }
             _ => {}
         }
@@ -488,6 +572,24 @@ impl App {
         let Some(prompt) = self.handback_prompt.as_ref() else {
             return;
         };
+        // The takeover direction has no note and nothing to release: the
+        // operator is not holding the harness yet, so the only two answers are
+        // "take it and start typing" and "leave it alone".
+        if prompt.is_takeover {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    self.handback_prompt = None;
+                    self.take_harness_control();
+                    self.attach_to_pane_harness();
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    self.handback_prompt = None;
+                    self.set_status("Cancelled");
+                }
+                _ => {}
+            }
+            return;
+        }
         let session = prompt.session.clone();
         // While the note is being typed, every key is text. `y` and `n` have to
         // keep meaning yes and no, so an operator whose note begins "no, the

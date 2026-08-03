@@ -574,6 +574,8 @@ pub(super) struct HarnessPicker {
     /// [`selected_harness_workspace`](App::selected_harness_workspace) to decide
     /// whether an entered directory outranks the completions listed under it.
     pub(super) workspace_picked: bool,
+    /// Whether to spawn managed (orchestrator can dispatch) or unmanaged.
+    pub(super) managed: bool,
 }
 
 /// Active stage of the manual harness launcher.
@@ -581,6 +583,8 @@ pub(super) struct HarnessPicker {
 pub(super) enum HarnessPickerStep {
     /// Choose an installed CLI or registered preset.
     Harness,
+    /// Choose managed or unmanaged control mode.
+    Decision,
     /// Choose or complete the working directory.
     Workspace,
 }
@@ -621,6 +625,14 @@ pub(super) struct HandbackPrompt {
     /// starts typing a note that begins with "no, ..." must not have the first
     /// letter answer the question for them.
     pub(super) editing_note: bool,
+    /// Which direction the question is about: `true` asks whether to take the
+    /// harness from the orchestrator, `false` whether to hand it back.
+    ///
+    /// One prompt for both because they are the same decision seen from either
+    /// side, and the answer is the same keystroke — but the sentence has to say
+    /// which way control is about to move, or the operator confirms the
+    /// opposite of what they meant.
+    pub(super) is_takeover: bool,
 }
 
 /// What to do when the operator releases a harness they hold.

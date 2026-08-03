@@ -80,6 +80,19 @@ impl HarnessProvider {
             _ => None,
         }
     }
+
+    /// Parse a provider that may receive delegated coding tasks.
+    ///
+    /// OpenHuman is intentionally excluded: its native TUI owns its own agent
+    /// loop and is only launchable by the operator-facing harness picker.
+    pub fn dispatchable_from_wire(value: &str) -> Option<Self> {
+        Self::from_wire(value).filter(|provider| provider.is_dispatchable())
+    }
+
+    /// Whether this provider accepts delegated coding-task frames.
+    pub fn is_dispatchable(self) -> bool {
+        !matches!(self, Self::Openhuman)
+    }
 }
 
 /// The frame kinds the daemon and orchestrator loop exchange.

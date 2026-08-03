@@ -113,15 +113,16 @@ pub struct LocalHarnesses {
 impl LocalHarnesses {
     /// Every launchable native CLI and registered preset in picker order.
     pub fn choices(&self) -> Vec<HarnessChoice> {
+        let openhuman = medulla::protocol::HarnessProvider::Openhuman;
+        let openhuman_bin = medulla::protocol::env::provider_bin(openhuman, &self.env);
+        let lookup = medulla::daemon::providers::make_path_lookup(&self.env);
         self.providers
             .iter()
             .copied()
             .map(HarnessChoice::native)
             // OpenHuman is part of this host, not a delegated coding provider,
-            // so it is offered independently of the daemon's detected list.
-            .chain(std::iter::once(HarnessChoice::native(
-                medulla::protocol::HarnessProvider::Openhuman,
-            )))
+            // so probe it independently of the daemon's detected list.
+            .chain(lookup(&openhuman_bin).then_some(HarnessChoice::native(openhuman)))
             .chain(
                 self.custom_harnesses
                     .iter()

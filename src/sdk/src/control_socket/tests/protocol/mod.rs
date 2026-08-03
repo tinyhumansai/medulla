@@ -182,6 +182,20 @@ async fn an_unknown_op_is_a_bad_request() {
 }
 
 #[tokio::test]
+async fn an_operator_only_harness_cannot_be_dispatched() {
+    let mut harness = Harness::new();
+    let response = harness
+        .call(
+            "task.dispatch",
+            json!({ "instruction": "do the thing", "harness": "openhuman" }),
+        )
+        .await;
+
+    assert_eq!(kind(&response), "badRequest");
+    assert!(harness.fake.dispatched.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn a_roster_read_returns_the_workers_and_the_default() {
     let response = Harness::new().call("worker.list", json!({})).await;
 

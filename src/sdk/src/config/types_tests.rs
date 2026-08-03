@@ -491,3 +491,12 @@ fn an_explicit_empty_template_catalog_opts_out_of_coding_defaults() {
     // substring match would read that as the `fleet` section coming back.
     assert!(!serde_json::to_string(&cfg).unwrap().contains("\"fleet\""));
 }
+
+#[test]
+fn workflows_reject_an_operator_only_default_provider() {
+    let error =
+        serde_json::from_str::<TuiConfig>(r#"{"workflows":{"defaultProvider":"openhuman"}}"#)
+            .unwrap_err();
+
+    assert!(error.to_string().contains("claude, codex, or opencode"));
+}

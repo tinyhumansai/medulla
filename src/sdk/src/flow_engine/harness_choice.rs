@@ -74,7 +74,13 @@ impl HarnessSelector {
             ));
         }
         if let Some(provider) = HarnessProvider::from_wire(&value.to_ascii_lowercase()) {
-            return Ok(Self::Builtin(provider));
+            if provider.is_dispatchable() {
+                return Ok(Self::Builtin(provider));
+            }
+            return Err(format!(
+                "`harness` is `{value}`, but OpenHuman is an operator-facing TUI and cannot run a workflow agent node — use {}, or a custom harness preset id.",
+                Self::builtin_names().join(", ")
+            ));
         }
         if value.len() > MAX_CUSTOM_HARNESS_LEN {
             return Err(format!(

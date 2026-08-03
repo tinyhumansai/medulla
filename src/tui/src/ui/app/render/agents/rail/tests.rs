@@ -12,7 +12,7 @@ use ratatui::text::{Line as TLine, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::App;
-use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
+use crate::worker::pty::{AttentionKind, HarnessAttention, HarnessControl, PtyState, SessionRow};
 
 use super::rows::{display_session_title, running_session_title};
 use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
@@ -25,6 +25,25 @@ pub(super) fn app() -> App {
 /// A fixed "now" for row rendering, so an elapsed-time suffix in an assertion
 /// does not depend on when the test ran.
 pub(super) const NOW: i64 = 10_000;
+
+#[test]
+fn attention_uses_the_configured_color_and_can_stay_solid() {
+    let mut app = app();
+    app.theme.attention = Color::LightMagenta;
+    app.theme.attention_blink = false;
+    let mut row = harness_row("/workspace/medulla");
+    row.attention = Some(HarnessAttention::new(
+        AttentionKind::Approval,
+        "codex is asking permission",
+        0,
+    ));
+
+    let lines = app.own_harness_lines(&row, false, 48, NOW);
+    let style = lines[0].spans[0].style;
+
+    assert_eq!(style.fg, Some(Color::LightMagenta));
+    assert!(!style.add_modifier.contains(Modifier::SLOW_BLINK));
+}
 
 /// No harness is waiting, which is what most of these rows assume.
 fn none_waiting() -> std::collections::HashSet<String> {

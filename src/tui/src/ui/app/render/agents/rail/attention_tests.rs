@@ -78,19 +78,6 @@ fn a_selected_harness_waiting_on_you_stays_blinking_yellow() {
 }
 
 #[test]
-fn attention_uses_the_configured_color_and_can_stay_solid() {
-    let mut app = app();
-    app.theme.attention = Color::LightMagenta;
-    app.theme.attention_blink = false;
-
-    let lines = app.own_harness_lines(&waiting_row("/workspace/medulla"), false, 48, NOW);
-    let style = lines[0].spans[0].style;
-
-    assert_eq!(style.fg, Some(Color::LightMagenta));
-    assert!(!style.add_modifier.contains(Modifier::SLOW_BLINK));
-}
-
-#[test]
 fn a_long_attention_reason_wraps_without_losing_words() {
     let app = app();
     let mut row = waiting_row("/workspace/medulla");

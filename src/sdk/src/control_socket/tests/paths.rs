@@ -49,6 +49,16 @@ fn a_relative_override_is_anchored_before_child_processes_receive_it() {
 
     assert!(resolved.is_absolute());
     assert_eq!(resolved, cwd.join("run/control.sock"));
+
+    let absolute = cwd.join("absolute/control.sock");
+    assert_eq!(absolute_path_from(absolute.clone(), cwd), absolute);
+
+    #[cfg(windows)]
+    {
+        let rooted = std::path::PathBuf::from(r"\tmp\medulla-test\rooted.sock");
+        assert!(rooted.has_root());
+        assert_eq!(absolute_path_from(rooted.clone(), cwd), rooted);
+    }
 }
 
 #[test]

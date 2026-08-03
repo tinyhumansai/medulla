@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
+use unicode_width::UnicodeWidthChar;
 
 use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
 use crate::ui::util::fmt_tokens;
@@ -15,6 +16,11 @@ use super::harness_line;
 use super::status::HarnessVisualState;
 use super::wrap::{home_dir, wrap_line};
 use super::CONT_INDENT;
+
+/// Maximum terminal-cell width reserved for a session title in an agent label.
+const SESSION_TITLE_MAX_CELLS: usize = 48;
+/// Memory bound for zero-width Unicode sequences in a session title.
+const SESSION_TITLE_MAX_CHARS: usize = 96;
 
 impl App {
     /// Format one operator-started harness using the configured status-line layout.
@@ -206,9 +212,38 @@ impl App {
         let harnesses = self.harnesses.as_ref()?;
         running_session_title(lane, |task_id| {
             let id = harnesses.session_for_task(task_id)?;
-            harnesses.sessions.row(&id)?.thread_name
+            harnesses
+                .sessions
+                .row(&id)?
+                .thread_name
+                .map(|title| display_session_title(&title))
         })
     }
+}
+
+/// Flatten and bound an untrusted harness title before rail wrapping.
+pub(super) fn display_session_title(title: &str) -> String {
+    let mut displayed = String::new();
+    let mut width = 0;
+    for (index, character) in title.chars().enumerate() {
+        if index >= SESSION_TITLE_MAX_CHARS {
+            displayed.push('…');
+            break;
+        }
+        let character = if character.is_control() {
+            ' '
+        } else {
+            character
+        };
+        let character_width = character.width().unwrap_or(0);
+        if width + character_width > SESSION_TITLE_MAX_CELLS.saturating_sub(1) {
+            displayed.push('…');
+            break;
+        }
+        displayed.push(character);
+        width += character_width;
+    }
+    displayed
 }
 
 /// Resolve the newest running task whose harness has advertised a title.

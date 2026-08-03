@@ -321,6 +321,27 @@ fn acp_pr_correlation_requires_success_in_the_dispatch_workspace() {
     moved.fold(result("completed"));
     assert!(contexts.lock().unwrap().is_empty());
 
+    let mut moved_with_repeated_input = make_state();
+    moved_with_repeated_input.fold(call());
+    moved_with_repeated_input.workspace_context = WorkspaceContext {
+        cwd: Some("/repo/worktrees/another-pr".to_string()),
+        branch: Some("another-branch".to_string()),
+        pull_request: None,
+    };
+    let repeated_terminal = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-pr",
+        "kind": "execute",
+        "status": "completed",
+        "rawInput": {
+            "command": "cd /repo/worktrees/pr-153 && gh pr view --json url"
+        },
+        "rawOutput": "{\"url\":\"https://github.com/acme/repo/pull/153\"}"
+    }))
+    .unwrap();
+    moved_with_repeated_input.fold(repeated_terminal);
+    assert!(contexts.lock().unwrap().is_empty());
+
     let mut replaced = make_state();
     replaced.fold(call());
     replaced.fold(update(

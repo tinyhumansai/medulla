@@ -154,7 +154,9 @@ impl FoldState {
         if let Some(kind) = value.get("kind").and_then(Value::as_str) {
             call.kind = kind.to_string();
         }
-        let input_changed = value.get("rawInput").is_some();
+        let input_changed = value
+            .get("rawInput")
+            .is_some_and(|input| call.input != *input);
         if let Some(input) = value.get("rawInput") {
             call.input = input.clone();
         }

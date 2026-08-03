@@ -4,6 +4,7 @@
 //! the logic now lives in sibling `detect`/`execute` modules.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::protocol::HarnessProvider;
@@ -15,7 +16,62 @@ use super::execute::{
     extract_claude_result, is_transient_lock, non_empty, rand_unit, tail_bytes, with_auth_hint,
     TAIL_CAP,
 };
-use super::types::{Abort, ExistsOnPath};
+use super::types::{Abort, ExistsOnPath, RunTaskOptions};
+
+#[cfg(unix)]
+#[tokio::test]
+async fn direct_runs_report_the_session_before_workspace_context() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let harness = dir.path().join("fake-claude");
+    std::fs::write(
+        &harness,
+        "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"direct-session\",\"cwd\":\"/repo\"}' '{\"type\":\"result\",\"result\":\"done\"}'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let options = RunTaskOptions {
+        conversation: "peer".into(),
+        session_class: crate::sessions::SessionClass::Unbound,
+        resume_session_id: None,
+        workspace_context: Default::default(),
+        provider: HarnessProvider::Claude,
+        prompt: "go".into(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        env: HashMap::from([(
+            "TINYPLACE_CLAUDE_BIN".into(),
+            harness.to_string_lossy().into_owned(),
+        )]),
+        timeout_ms: 1_000,
+        model: None,
+        agent: None,
+        extra_args: Vec::new(),
+        skip_permissions: false,
+        abort: Abort::new(),
+        router: None,
+        attribution: false,
+        on_event: None,
+        on_stdin: None,
+        on_session: Some({
+            let order = order.clone();
+            Box::new(move |session_id| order.lock().unwrap().push(format!("session:{session_id}")))
+        }),
+        on_workspace_context: Some({
+            let order = order.clone();
+            Box::new(move |_| order.lock().unwrap().push("workspace".into()))
+        }),
+    };
+
+    let result = super::execute::run_provider_task(options).await.unwrap();
+
+    assert_eq!(result.session_id.as_deref(), Some("direct-session"));
+    assert_eq!(
+        order.lock().unwrap().as_slice(),
+        ["session:direct-session", "workspace"]
+    );
+}
 
 #[test]
 fn build_run_args_per_provider() {

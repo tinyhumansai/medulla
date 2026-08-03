@@ -155,12 +155,7 @@ impl App {
                     .host
                     .map(|h| h.name.clone())
                     .or_else(|| Some(descriptor.name.clone()).filter(|n| !n.trim().is_empty()));
-                // An init record's cwd only repeats where the harness was
-                // launched and can disagree with the declared placement. A
-                // branch is added only by a completed worktree report, making
-                // that cwd authoritative for the live session.
                 let workspace = active_info
-                    .filter(|info| info.branch.is_some())
                     .and_then(|info| info.cwd.clone())
                     .or_else(|| placement.workspace.map(|w| w.path.clone()))
                     .or_else(|| meta("workspace"));
@@ -178,6 +173,16 @@ impl App {
                     ]
                     .into_iter()
                     .flatten(),
+                );
+            }
+            // Live session cwd is useful even for transcript-only lanes with
+            // no roster descriptor. Placement is only its fallback; it must
+            // not gate runtime context that the harness already reported.
+            if descriptor.is_none() {
+                chip_parts.extend(
+                    active_info
+                        .and_then(|info| info.cwd.as_ref())
+                        .map(|cwd| format!("dir {cwd}")),
                 );
             }
             chip_parts.extend(

@@ -42,7 +42,7 @@ fn the_agents_tab_shows_where_the_selected_agent_runs() {
     let _ = app.on_event(alt_key(KeyCode::Down));
     let out = render(&mut app, 160, 40);
     assert!(
-        out.contains("workshop") && out.contains("/srv/repos/medulla"),
+        out.contains("workshop") && out.contains("/srv/repos/auth"),
         "the agent lane names its host and workspace: {out}"
     );
 }
@@ -202,7 +202,7 @@ fn the_selected_agent_shows_its_placement_and_compact_meters() {
     // Where it runs — labelled, so the machine and the working directory are
     // identifiable rather than two of several bare tokens.
     assert!(out.contains("host workshop"), "host: {out}");
-    assert!(out.contains("dir /srv/repos/medulla"), "workspace: {out}");
+    assert!(out.contains("dir /srv/repos/auth"), "workspace: {out}");
     // …and how hard, as meters rather than bare numbers.
     assert!(out.contains("cpu"), "cpu meter: {out}");
     assert!(out.contains("2.10 load / 10 cores"), "{out}");

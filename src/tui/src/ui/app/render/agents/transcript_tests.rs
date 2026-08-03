@@ -36,6 +36,7 @@ fn descriptorless_lanes_still_show_their_pull_request_context() {
         active_tasks: 0,
         work: Some(Box::new(WorkSnapshot {
             info: HarnessSessionInfo {
+                cwd: Some("/repo/worktrees/fix-context".into()),
                 branch: Some("fix-context".into()),
                 pull_request: Some("https://github.com/acme/repo/pull/42".into()),
                 ..Default::default()
@@ -65,6 +66,10 @@ fn descriptorless_lanes_still_show_their_pull_request_context() {
         .collect();
 
     assert!(output.contains("branch fix-context"), "{output}");
+    assert!(
+        output.contains("dir /repo/worktrees/fix-context"),
+        "{output}"
+    );
     assert!(output.contains("PR 42"), "{output}");
 
     selection.lanes[0].work.as_mut().unwrap().info.pull_request = None;

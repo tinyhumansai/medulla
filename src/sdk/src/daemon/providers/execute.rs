@@ -67,6 +67,7 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
     }
     let mut on_event = options.on_event;
     let mut on_stdin = options.on_stdin;
+    let mut on_session = options.on_session;
     let router = options.router;
     let env = options.env;
     let spec = RunSpec {
@@ -92,7 +93,15 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
         // them, mirroring the rarity of that branch.
         let attempt_on_event = on_event.take();
         let attempt_on_stdin = on_stdin.take();
-        match run_provider_attempt(&spec, attempt_on_event, attempt_on_stdin).await {
+        let attempt_on_session = on_session.take();
+        match run_provider_attempt(
+            &spec,
+            attempt_on_event,
+            attempt_on_stdin,
+            attempt_on_session,
+        )
+        .await
+        {
             Ok(result) => return Ok(result),
             Err(message) => {
                 if !is_transient_lock(&message)
@@ -125,6 +134,7 @@ async fn run_provider_attempt(
     spec: &RunSpec,
     mut on_event: Option<OnEvent>,
     on_stdin: Option<OnStdin>,
+    mut on_session: Option<super::types::OnSession>,
 ) -> Result<RunTaskResult, String> {
     if spec.abort.is_aborted() {
         return Err(format!(
@@ -337,7 +347,15 @@ async fn run_provider_attempt(
                         stdout_tail.push('\n');
                         stdout_tail = tail_bytes(&stdout_tail);
                         if session_id.is_none() {
-                            session_id = extract_session_id(spec.provider, raw);
+                            if let Some(discovered) = extract_session_id(spec.provider, raw) {
+                                // Bind before folding this same record: it may
+                                // also carry the first workspace update, whose
+                                // persistence requires an existing session.
+                                if let Some(callback) = on_session.take() {
+                                    callback(discovered.clone());
+                                }
+                                session_id = Some(discovered);
+                            }
                         }
                         let produced = consume_line(
                             spec.provider,

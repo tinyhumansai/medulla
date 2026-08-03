@@ -180,6 +180,11 @@ fn help_explains_how_to_kill_a_harness_and_inspect_git_changes() {
         "help must explain the confirmed harness-kill binding: {out}"
     );
     assert!(
+        out.contains("empty composer Esc focuses the rail")
+            && out.contains("from a harness Ctrl-] releases to it"),
+        "help must explain how each input mode reaches the task rail: {out}"
+    );
+    assert!(
         out.contains("Changes view to inspect the Git diff since session start"),
         "help must make the Git changes view discoverable: {out}"
     );

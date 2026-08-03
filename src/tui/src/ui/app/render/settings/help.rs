@@ -50,7 +50,10 @@ impl App {
                 "{FOCUS_CHORD_LABEL} type into the selected harness (and take it from the orchestrator)"
             )),
             TLine::from("Ctrl-T start a harness of your own · Ctrl-G grab it or give it back"),
-            TLine::from("Esc focuses the agent rail · ↑↓ select a running harness task · K then y kills it"),
+            TLine::from(format!(
+                "From an empty composer Esc focuses the rail · from a harness {FOCUS_CHORD_LABEL} releases to it"
+            )),
+            TLine::from("On the rail ↑↓ select a running harness task · K then y kills it"),
             TLine::from(Span::styled(
                 "While you hold a harness the orchestrator will not dispatch into it",
                 dim,

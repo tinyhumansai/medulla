@@ -48,22 +48,42 @@ fn issues_and_malformed_pr_urls_are_not_session_context() {
 
 #[test]
 fn only_direct_github_pr_commands_may_report_a_pull_request() {
-    assert!(pull_request_command("gh pr create --fill").is_some());
-    assert!(pull_request_command("  gh pr view --json url").is_some());
-    assert!(pull_request_command("/bin/zsh -lc 'gh pr view --json url'").is_some());
-    assert!(pull_request_command("gh pr view 123 --repo other/project").is_none());
-    assert!(pull_request_command("gh pr view feature-branch").is_none());
-    assert!(pull_request_command("gh pr view https://github.com/acme/other/pull/7").is_none());
-    assert!(pull_request_command("gh pr create --repo other/project --fill").is_none());
-    assert!(pull_request_command("gh pr view --comments").is_none());
-    assert!(pull_request_command("gh pr create --head other-branch").is_none());
-    assert!(pull_request_command("gh pr create -Hother-branch").is_none());
-    assert!(pull_request_command("rg 'gh pr view' fixtures").is_none());
-    assert!(pull_request_command("/bin/zsh -lc 'cat <<EOF\ngh pr view\nEOF'").is_none());
+    assert!(pull_request_command("gh pr create --fill", None).is_some());
+    assert!(pull_request_command("  gh pr view --json url", None).is_some());
+    assert!(pull_request_command("/bin/zsh -lc 'gh pr view --json url'", None).is_some());
+    assert!(pull_request_command("gh pr view 123 --repo other/project", None).is_none());
+    assert!(pull_request_command("gh pr view feature-branch", None).is_none());
+    assert!(
+        pull_request_command("gh pr view https://github.com/acme/other/pull/7", None).is_none()
+    );
+    assert!(pull_request_command("gh pr create --repo other/project --fill", None).is_none());
+    assert!(pull_request_command("gh pr view --comments", None).is_none());
+    assert!(pull_request_command("gh pr create --head other-branch", None).is_none());
+    assert!(pull_request_command("gh pr create -Hother-branch", None).is_none());
+    assert!(pull_request_command("rg 'gh pr view' fixtures", None).is_none());
+    assert!(pull_request_command("/bin/zsh -lc 'cat <<EOF\ngh pr view\nEOF'", None).is_none());
     assert!(pull_request_command(
-        "cat <<'EOF'\ngh pr view\nhttps://github.com/acme/other/pull/7\nEOF"
+        "cat <<'EOF'\ngh pr view\nhttps://github.com/acme/other/pull/7\nEOF",
+        None
     )
     .is_none());
+}
+
+#[test]
+fn pr_commands_reject_chains_except_for_the_reported_worktree_cd() {
+    let cwd = "/repo/worktrees/fix-label";
+    assert!(pull_request_command(
+        "gh pr create --fill >/dev/null && cat fixtures/pr_urls.txt",
+        None
+    )
+    .is_none());
+    assert!(pull_request_command("gh pr create --fill; cat fixture", None).is_none());
+    assert!(pull_request_command("cd /other && gh pr create --fill", Some(cwd)).is_none());
+    assert!(pull_request_command(
+        "cd /repo/worktrees/fix-label && gh pr create --fill",
+        Some(cwd)
+    )
+    .is_some());
 }
 
 #[test]

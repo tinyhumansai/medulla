@@ -25,6 +25,7 @@ pub(super) fn codex_events_from_line(
     raw: &str,
     line: i64,
     pull_request_calls: &mut HashMap<String, PullRequestCommand>,
+    workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
         Some(record) => record,
@@ -44,7 +45,7 @@ pub(super) fn codex_events_from_line(
             return vec![codex_status(line, ts, record_type.unwrap(), "idle")]
         }
         Some("item.started") | Some("item.completed") => {
-            return codex_item(&record, record_type.unwrap(), ts, line)
+            return codex_item(&record, record_type.unwrap(), ts, line, workspace_cwd)
         }
         _ => {}
     }
@@ -128,7 +129,7 @@ pub(super) fn codex_events_from_line(
             if let Some(command) = input
                 .get("command")
                 .and_then(Value::as_str)
-                .and_then(pull_request_command)
+                .and_then(|command| pull_request_command(command, workspace_cwd))
             {
                 pull_request_calls.insert(call_id.to_string(), command);
             }

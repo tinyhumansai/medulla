@@ -153,3 +153,29 @@ fn legacy_codex_unrelated_output_cannot_replace_the_sessions_pull_request() {
     );
     assert!(result.info.pull_request.is_none());
 }
+
+#[test]
+fn claude_pr_from_reported_worktree_attaches_the_review() {
+    let result = snapshot(
+        "claude",
+        &[
+            claude_shell("worktree-1", "worktree fix-label"),
+            claude_result(
+                "worktree-1",
+                "[PASS] WORKTREE_READY\n  path: /repo/worktrees/fix-label\n  branch: fix-label\n",
+            ),
+            claude_shell(
+                "pr-worktree",
+                "cd /repo/worktrees/fix-label && gh pr create --fill",
+            ),
+            claude_result(
+                "pr-worktree",
+                "https://github.com/tinyhumansai/medulla/pull/160",
+            ),
+        ],
+    );
+    assert_eq!(
+        result.info.pull_request.as_deref(),
+        Some("https://github.com/tinyhumansai/medulla/pull/160")
+    );
+}

@@ -35,6 +35,8 @@ pub struct HarnessLineMapper {
     pub(super) usage: Option<TokenUsage>,
     /// Claude shell calls whose results may authoritatively report a PR URL.
     pub(super) pull_request_calls: HashMap<String, super::workspace::PullRequestCommand>,
+    /// Latest checkout authoritatively reported by a worktree helper.
+    pub(super) workspace_cwd: Option<String>,
 }
 
 /// Which provider's flat-run transcript shape a mapper folds.

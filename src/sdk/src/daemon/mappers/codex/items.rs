@@ -29,6 +29,7 @@ pub(super) fn codex_item(
     record_type: &str,
     ts: i64,
     line: i64,
+    workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let item = match record.get("item").and_then(Value::as_object) {
         Some(item) => item,
@@ -69,9 +70,15 @@ pub(super) fn codex_item(
                 serde_json::json!({ "text": text }),
             )]
         }
-        "command_execution" => {
-            command_event(item, id, completed, line, ts, &tag("command_execution"))
-        }
+        "command_execution" => command_event(
+            item,
+            id,
+            completed,
+            line,
+            ts,
+            &tag("command_execution"),
+            workspace_cwd,
+        ),
         // Codex's own todo list, the closest thing it has to Claude's TodoWrite.
         // Emitted on both started and completed so a list that is written once
         // and then ticked off still moves on screen.
@@ -131,6 +138,7 @@ fn command_event(
     line: i64,
     ts: i64,
     record_type: &str,
+    workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     if !completed {
         let command = item.get("command").and_then(Value::as_str).unwrap_or("");
@@ -164,7 +172,7 @@ fn command_event(
         output,
         item.get("command")
             .and_then(Value::as_str)
-            .and_then(pull_request_command),
+            .and_then(|command| pull_request_command(command, workspace_cwd)),
         line,
         ts,
         &format!("{record_type}:workspace"),

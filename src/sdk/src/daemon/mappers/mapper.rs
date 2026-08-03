@@ -30,6 +30,7 @@ impl HarnessLineMapper {
             last_at_ms: i64::MIN,
             usage: None,
             pull_request_calls: Default::default(),
+            workspace_cwd: None,
         }
     }
 
@@ -52,10 +53,27 @@ impl HarnessLineMapper {
             }
         }
         let events = match self.provider {
-            Provider::Claude => claude_events_from_line(raw, line, &mut self.pull_request_calls),
-            Provider::Codex => codex_events_from_line(raw, line, &mut self.pull_request_calls),
+            Provider::Claude => claude_events_from_line(
+                raw,
+                line,
+                &mut self.pull_request_calls,
+                self.workspace_cwd.as_deref(),
+            ),
+            Provider::Codex => codex_events_from_line(
+                raw,
+                line,
+                &mut self.pull_request_calls,
+                self.workspace_cwd.as_deref(),
+            ),
             Provider::Opencode => opencode_events_from_line(raw, line),
         };
+        if let Some(cwd) = events.iter().find_map(|event| {
+            (event.event.kind == "session_info")
+                .then(|| event.event.payload.get("cwd").and_then(Value::as_str))
+                .flatten()
+        }) {
+            self.workspace_cwd = Some(cwd.to_string());
+        }
         if self.provider != Provider::Codex {
             return events;
         }

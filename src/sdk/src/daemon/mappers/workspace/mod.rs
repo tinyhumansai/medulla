@@ -64,17 +64,39 @@ pub(super) fn workspace_event_from_output(
 }
 
 /// Whether a completed shell call is a GitHub CLI PR create/view operation.
-pub(super) fn pull_request_command(command: &str) -> Option<PullRequestCommand> {
+pub(super) fn pull_request_command(
+    command: &str,
+    workspace_cwd: Option<&str>,
+) -> Option<PullRequestCommand> {
     // Deliberately recognize only a direct invocation. Parsing chained shell
     // syntax here would also require correctly handling quotes and heredocs;
     // treating their contents as commands can attach a URL merely printed by
     // a fixture-building command.
-    direct_pull_request_command(command)
-        .or_else(|| shell_inner_command(command).and_then(direct_pull_request_command))
+    let command = shell_inner_command(command).unwrap_or(command).trim();
+    direct_pull_request_command(command).or_else(|| {
+        let workspace_cwd = workspace_cwd?;
+        let command = command_after_cd(command, workspace_cwd)?;
+        direct_pull_request_command(command)
+    })
+}
+
+/// Accept the central-worktree `cd <reported cwd> && gh ...` form only.
+fn command_after_cd<'a>(command: &'a str, workspace_cwd: &str) -> Option<&'a str> {
+    let unquoted = format!("cd {workspace_cwd} && ");
+    let quoted = format!("cd '{}' && ", workspace_cwd.replace('\'', "'\\''"));
+    command
+        .strip_prefix(&unquoted)
+        .or_else(|| command.strip_prefix(&quoted))
 }
 
 /// Recognize the argv prefix of a direct GitHub CLI PR operation.
 fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
+    if command
+        .chars()
+        .any(|ch| matches!(ch, '\n' | '\r' | ';' | '|' | '&'))
+    {
+        return None;
+    }
     let mut words = command.split_whitespace();
     if words.next() != Some("gh") || words.next() != Some("pr") {
         return None;

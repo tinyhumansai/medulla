@@ -20,6 +20,7 @@ pub(super) fn claude_events_from_line(
     raw: &str,
     line: i64,
     pull_request_calls: &mut HashMap<String, PullRequestCommand>,
+    workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
         Some(record) => record,
@@ -61,7 +62,9 @@ pub(super) fn claude_events_from_line(
     if record_type == Some("assistant") && source_role == Some("assistant") {
         return as_array(message.get("content"))
             .iter()
-            .flat_map(|block| claude_assistant_block(block, line, ts, pull_request_calls))
+            .flat_map(|block| {
+                claude_assistant_block(block, line, ts, pull_request_calls, workspace_cwd)
+            })
             .collect();
     }
 
@@ -122,6 +125,7 @@ fn claude_assistant_block(
     line: i64,
     ts: i64,
     pull_request_calls: &mut HashMap<String, PullRequestCommand>,
+    workspace_cwd: Option<&str>,
 ) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
         Some(object) => object,
@@ -173,7 +177,7 @@ fn claude_assistant_block(
                 if let Some(command) = input
                     .get("command")
                     .and_then(Value::as_str)
-                    .and_then(pull_request_command)
+                    .and_then(|command| pull_request_command(command, workspace_cwd))
                 {
                     pull_request_calls.insert(call_id.to_string(), command);
                 }

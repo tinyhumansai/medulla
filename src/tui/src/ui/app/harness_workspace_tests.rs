@@ -79,7 +79,7 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
     use super::types::{App, HarnessPicker, HarnessPickerStep};
 
     let mut loaded = medulla::config::LoadedConfig::defaults("medulla.tui.json".into());
-    loaded.config.tinyplace = Some(medulla::config::TinyplaceConfig::default());
+    loaded.config.link = Some(medulla::config::LinkConfig::default());
     let mut app = App::new(
         std::sync::Arc::new(medulla::runtime::mock::MockRuntime::empty()),
         loaded,
@@ -90,7 +90,7 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
         hub_address: "medulla-orchestrator".to_string(),
         env: std::collections::HashMap::new(),
         workspace: workspace.to_string_lossy().into_owned(),
-        providers: vec![medulla::tinyplace::HarnessProvider::Codex],
+        providers: vec![medulla::protocol::HarnessProvider::Codex],
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,

@@ -60,7 +60,9 @@ fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
         "create" if !has_explicit_head(&arguments) && !has_dry_run(&arguments) => {
             Some(PullRequestCommand::Create)
         }
-        "view" if arguments == ["--json", "url"] => Some(PullRequestCommand::View),
+        "view" if arguments == ["--json", "url"] || arguments == ["--json=url"] => {
+            Some(PullRequestCommand::View)
+        }
         _ => None,
     }
 }

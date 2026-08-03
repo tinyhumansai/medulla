@@ -190,4 +190,12 @@ fn a_reused_turn_can_resume_the_previous_turns_workspace_context() {
         event.event.payload["pull_request"],
         "https://github.com/acme/repo/pull/42"
     );
+
+    second.observe(
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"worktree-2","content":"[PASS] WORKTREE_READY\n  path: /repo/worktrees/next\n  branch: next"}]}}"#,
+    );
+    let moved = second.workspace_context();
+    assert_eq!(moved.0.as_deref(), Some("/repo/worktrees/next"));
+    assert_eq!(moved.1.as_deref(), Some("next"));
+    assert_eq!(moved.2, None, "a new checkout cannot inherit the old PR");
 }

@@ -308,13 +308,24 @@ pub(super) async fn build_bridge(
         builder,
         status: crate::protocol::initial_status(start_ms),
         last_status_ms: i64::MIN,
-        mapper: HarnessLineMapper::new(config.provider.as_str()),
+        mapper: wrapper_line_mapper(config.provider.as_str(), &config.env),
         tailer,
         wrapper_session_id: wrapper_session_id.to_string(),
         harness_session_id: wrapper_session_id.to_string(),
         status_throttle_ms: timings.status_throttle_ms,
         status_idle_ms: timings.status_idle_ms,
     })
+}
+
+/// Build the transcript mapper using the wrapped child's effective environment.
+///
+/// Wrapper configuration overlays, rather than clears, the host environment,
+/// so the effective child value may come from either source.
+fn wrapper_line_mapper(provider: &str, env: &HashMap<String, String>) -> HarnessLineMapper {
+    HarnessLineMapper::new_with_gh_repo_override(
+        provider,
+        env.contains_key("GH_REPO") || std::env::var_os("GH_REPO").is_some(),
+    )
 }
 
 /// Poll the tailer, latch the harness id on first sighting, and ingest new lines.

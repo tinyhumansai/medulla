@@ -25,14 +25,39 @@ pub(crate) fn pull_request_command(
 
 /// Accept the central-worktree `cd <reported cwd> && gh ...` form only.
 fn command_after_cd<'a>(command: &'a str, workspace_cwd: &str) -> Option<&'a str> {
-    let unquoted = format!("cd {workspace_cwd} && ");
-    let quoted = format!("cd '{}' && ", workspace_cwd.replace('\'', "'\\''"));
-    let unquoted_match = workspace_cwd
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-'))
-        .then(|| command.strip_prefix(&unquoted))
-        .flatten();
-    unquoted_match.or_else(|| command.strip_prefix(&quoted))
+    let separator = top_level_and_and(command)?;
+    let cd = command[..separator].trim();
+    if has_executable_shell_operator(cd) {
+        return None;
+    }
+    let words = shell_words(cd)?;
+    (words == ["cd", workspace_cwd]).then(|| command[separator + 2..].trim_start())
+}
+
+/// Locate the first `&&` outside shell quotes so the preceding `cd` can be decoded.
+fn top_level_and_and(command: &str) -> Option<usize> {
+    let mut quote = None;
+    let mut escaped = false;
+    let mut chars = command.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (quote, ch) {
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (Some('\''), _) => {}
+            (_, '\\') => escaped = true,
+            (Some('"'), _) => {}
+            (None, '\'' | '"') => quote = Some(ch),
+            (None, '&') if chars.peek().is_some_and(|(_, next)| *next == '&') => {
+                return Some(index);
+            }
+            (None, _) => {}
+            _ => unreachable!(),
+        }
+    }
+    None
 }
 
 /// Recognize the argv prefix of a direct GitHub CLI PR operation.

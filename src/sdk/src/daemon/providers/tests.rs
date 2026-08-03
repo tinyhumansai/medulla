@@ -236,6 +236,7 @@ fn make_path_lookup_resolves_windows_executable_suffixes() {
     let env = HashMap::from([("PATH".to_string(), dir.path().display().to_string())]);
 
     assert!(make_path_lookup(&env)("openhuman-core"));
+    assert!(make_path_lookup(&env)("openhuman-core.exe"));
 }
 
 #[test]

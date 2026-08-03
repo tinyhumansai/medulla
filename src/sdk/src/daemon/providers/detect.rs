@@ -41,6 +41,9 @@ pub fn make_path_lookup(env: &HashMap<String, String>) -> ExistsOnPath {
 }
 
 #[cfg(windows)]
+/// Mirror `Command::new` resolution: retain configured extensions and add only
+/// `.exe` to extensionless names, never advertising PATHEXT script shims that
+/// the direct process spawn cannot execute.
 fn is_executable_command(path: &std::path::Path) -> bool {
     if path.extension().is_some() {
         return is_executable(path);

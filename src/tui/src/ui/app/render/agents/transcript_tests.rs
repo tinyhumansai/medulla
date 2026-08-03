@@ -43,7 +43,7 @@ fn descriptorless_lanes_still_show_their_pull_request_context() {
             ..Default::default()
         })),
     };
-    let selection = Selection {
+    let mut selection = Selection {
         rows: Vec::new(),
         active: 0,
         lanes: vec![lane],
@@ -66,4 +66,18 @@ fn descriptorless_lanes_still_show_their_pull_request_context() {
 
     assert!(output.contains("branch fix-context"), "{output}");
     assert!(output.contains("PR 42"), "{output}");
+
+    selection.lanes[0].work.as_mut().unwrap().info.pull_request = None;
+    terminal
+        .draw(|frame| app.draw_agents_pane(frame, Rect::new(0, 0, 100, 12), &selection))
+        .unwrap();
+    let output_without_pr: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(output_without_pr.contains("branch fix-context"));
+    assert!(!output_without_pr.contains("PR 42"));
 }

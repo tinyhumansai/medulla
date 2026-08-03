@@ -27,8 +27,8 @@ mod tests;
 
 pub use fold::WorkFold;
 pub use types::{
-    FileChange, FileChangeKind, HarnessSessionInfo, RunOutcome, SubagentRun, SubagentStatus,
-    TodoItem, WorkItemStatus, WorkSnapshot,
+    pull_request_label, FileChange, FileChangeKind, HarnessSessionInfo, RunOutcome, SubagentRun,
+    SubagentStatus, TodoItem, WorkItemStatus, WorkSnapshot,
 };
 
 /// The semantic-event kinds this module understands.

@@ -126,9 +126,10 @@ impl App {
         {
             let capacity = self.fleet_capacity();
             let active_info = self.selected_work(selection).map(|work| &work.info);
+            let descriptor = lane.and_then(|lane| lane.descriptor.as_ref());
+            let placement = descriptor.map(|descriptor| capacity.placement(descriptor));
             let mut chip_parts = Vec::new();
-            if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
-                let placement = capacity.placement(descriptor);
+            if let (Some(descriptor), Some(placement)) = (descriptor, placement.as_ref()) {
                 // Labelled, not bare: "this device · claude · /Users/me/repo"
                 // reads as three unexplained tokens, and the two an operator
                 // actually needs — which machine, which folder — are exactly the
@@ -187,10 +188,7 @@ impl App {
                     active_info
                         .and_then(|info| info.pull_request.as_ref())
                         .map(|pull_request| {
-                            format!(
-                                "PR {}",
-                                pull_request.rsplit('/').next().unwrap_or(pull_request)
-                            )
+                            medulla::harness_work::pull_request_label(pull_request)
                         }),
                 ]
                 .into_iter()
@@ -207,8 +205,7 @@ impl App {
                     Style::default().fg(Color::Cyan),
                 )));
             }
-            if let Some(descriptor) = lane.and_then(|l| l.descriptor.as_ref()) {
-                let placement = capacity.placement(descriptor);
+            if let Some(placement) = placement.as_ref() {
                 if let Some(resources) = placement.host.and_then(|h| h.resources.as_ref()) {
                     for line in [
                         meters::cpu_meter(resources),

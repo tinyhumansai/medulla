@@ -70,20 +70,65 @@ fn claude_unrelated_output_cannot_replace_the_sessions_pull_request() {
 fn codex_pr_json_attaches_the_review_to_the_session() {
     let result = snapshot(
         "codex",
-        &[json!({
-            "type": "item.completed",
-            "item": {
-                "type": "command_execution", "id": "cmd-pr",
-                "command": "gh pr view --json url",
-                "aggregated_output": "{\"url\":\"https://github.com/tinyhumansai/medulla/pull/158\"}",
-                "exit_code": 0
-            }
-        })],
+        &[
+            json!({
+                "type": "item.started",
+                "item": {
+                    "type": "command_execution", "id": "cmd-pr",
+                    "command": "gh pr view --json url"
+                }
+            }),
+            json!({
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution", "id": "cmd-pr",
+                    "command": "gh pr view --json url",
+                    "aggregated_output": "{\"url\":\"https://github.com/tinyhumansai/medulla/pull/158\"}",
+                    "exit_code": 0
+                }
+            }),
+        ],
     );
     assert_eq!(
         result.info.pull_request.as_deref(),
         Some("https://github.com/tinyhumansai/medulla/pull/158")
     );
+}
+
+#[test]
+fn modern_codex_pr_result_is_rejected_after_workspace_switch() {
+    let result = snapshot(
+        "codex",
+        &[
+            json!({
+                "type": "item.started",
+                "item": {
+                    "type": "command_execution", "id": "pr-before-switch",
+                    "command": "gh pr create --fill"
+                }
+            }),
+            json!({
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution", "id": "worktree-switch",
+                    "command": "worktree switched",
+                    "aggregated_output": "[PASS] WORKTREE_READY\n  path: /repo/worktrees/switched\n  branch: switched\n",
+                    "exit_code": 0
+                }
+            }),
+            json!({
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution", "id": "pr-before-switch",
+                    "command": "gh pr create --fill",
+                    "aggregated_output": "https://github.com/tinyhumansai/medulla/pull/164",
+                    "exit_code": 0
+                }
+            }),
+        ],
+    );
+    assert_eq!(result.info.cwd.as_deref(), Some("/repo/worktrees/switched"));
+    assert!(result.info.pull_request.is_none());
 }
 
 #[test]

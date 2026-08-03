@@ -173,7 +173,8 @@ fn shell_inner_command(command: &str) -> Option<&str> {
         .find_map(|shell| command.strip_prefix(shell))?
         .trim_start();
     let quoted = rest.strip_prefix("-lc")?.trim_start();
-    quoted.strip_prefix('\'')?.strip_suffix('\'')
+    let inner = quoted.strip_prefix('\'')?.strip_suffix('\'')?;
+    (!inner.contains('\'')).then_some(inner)
 }
 
 /// Find a GitHub pull-request URL in ordinary or JSON `gh` output.

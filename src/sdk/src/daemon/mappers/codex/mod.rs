@@ -20,7 +20,10 @@ use super::types::HarnessSemanticEvent;
 use super::work::work_events_for_tool;
 use super::workspace::{pull_request_command, workspace_event_from_output, PendingPullRequestCall};
 
-/// Map one raw Codex JSONL line into zero or more semantic events.
+/// Map one raw Codex JSONL `raw` line at `line` into semantic events.
+///
+/// `pull_request_calls` is mutated as PR commands start and finish, while
+/// `workspace_cwd` binds those calls to the checkout active at dispatch time.
 pub(super) fn codex_events_from_line(
     raw: &str,
     line: i64,
@@ -45,7 +48,14 @@ pub(super) fn codex_events_from_line(
             return vec![codex_status(line, ts, record_type.unwrap(), "idle")]
         }
         Some("item.started") | Some("item.completed") => {
-            return codex_item(&record, record_type.unwrap(), ts, line, workspace_cwd)
+            return codex_item(
+                &record,
+                record_type.unwrap(),
+                ts,
+                line,
+                pull_request_calls,
+                workspace_cwd,
+            )
         }
         _ => {}
     }

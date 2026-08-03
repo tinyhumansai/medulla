@@ -59,9 +59,10 @@ pub(super) fn claude_events_from_line(
             let block_events =
                 claude_user_block(&block, line, ts, pull_request_calls, current_cwd.as_deref());
             if let Some(cwd) = block_events.iter().rev().find_map(|event| {
-                (event.event.kind == "session_info" && event.record_type.ends_with(":workspace"))
-                    .then(|| event.event.payload.get("cwd").and_then(Value::as_str))
-                    .flatten()
+                (event.event.kind == kinds::SESSION_INFO
+                    && event.record_type.ends_with(":workspace"))
+                .then(|| event.event.payload.get("cwd").and_then(Value::as_str))
+                .flatten()
             }) {
                 current_cwd = Some(cwd.to_string());
             }

@@ -68,9 +68,10 @@ impl HarnessLineMapper {
             Provider::Opencode => opencode_events_from_line(raw, line),
         };
         if let Some(cwd) = events.iter().rev().find_map(|event| {
-            (event.event.kind == "session_info" && event.record_type.ends_with(":workspace"))
-                .then(|| event.event.payload.get("cwd").and_then(Value::as_str))
-                .flatten()
+            (event.event.kind == crate::harness_work::kinds::SESSION_INFO
+                && event.record_type.ends_with(":workspace"))
+            .then(|| event.event.payload.get("cwd").and_then(Value::as_str))
+            .flatten()
         }) {
             self.workspace_cwd = Some(cwd.to_string());
         }

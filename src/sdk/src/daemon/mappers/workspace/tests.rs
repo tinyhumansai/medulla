@@ -2,7 +2,7 @@
 
 use super::{
     pull_request_command, pull_request_command_with_repo_override, pull_request_url,
-    pull_request_url_from_json, text_report,
+    pull_request_url_from_json, text_report, workspace_event_from_output, PullRequestCommand,
 };
 
 #[test]
@@ -66,6 +66,7 @@ fn only_direct_github_pr_commands_may_report_a_pull_request() {
     );
     assert!(pull_request_command("gh pr create --repo other/project --fill", None).is_none());
     assert!(pull_request_command("gh pr view --comments", None).is_none());
+    assert!(pull_request_command("gh pr view --json url,title", None).is_none());
     assert!(pull_request_command("gh pr create --head other-branch", None).is_none());
     assert!(pull_request_command("gh pr create -Hother-branch", None).is_none());
     assert!(pull_request_command("gh pr create -dHother-branch", None).is_none());
@@ -123,6 +124,7 @@ fn pr_commands_reject_chains_except_for_the_reported_worktree_cd() {
         Some("/repo/w; cat /tmp/pr-url")
     )
     .is_some());
+    assert!(pull_request_command("zsh -lc 'gh pr create --fill' ; cat 'x'", None).is_none());
     assert!(pull_request_command(
         "cd /repo/worktrees/fix-label && gh pr create --fill",
         Some(cwd)
@@ -144,4 +146,30 @@ fn structured_view_output_reads_only_the_url_property() {
         pull_request_url_from_json(r#"{"body":"https://github.com/acme/other/pull/7"}"#),
         None
     );
+}
+
+#[test]
+fn workspace_events_compose_checkout_and_pull_request_fields() {
+    let checkout = "[PASS] WORKTREE_READY\n  path: /repo/worktrees/fix\n  branch: fix\n";
+    let checkout_only = workspace_event_from_output(checkout, None, 1, 2, "test").unwrap();
+    assert_eq!(checkout_only.event.payload["cwd"], "/repo/worktrees/fix");
+    assert_eq!(checkout_only.event.payload["branch"], "fix");
+    assert!(checkout_only.event.payload.get("pull_request").is_none());
+
+    let url = "https://github.com/acme/repo/pull/42";
+    let pr_only =
+        workspace_event_from_output(url, Some(PullRequestCommand::Create), 1, 2, "test").unwrap();
+    assert_eq!(pr_only.event.payload["pull_request"], url);
+    assert!(pr_only.event.payload.get("branch").is_none());
+
+    let combined = workspace_event_from_output(
+        &format!("{checkout}{url}\n"),
+        Some(PullRequestCommand::Create),
+        1,
+        2,
+        "test",
+    )
+    .unwrap();
+    assert_eq!(combined.event.payload["cwd"], "/repo/worktrees/fix");
+    assert_eq!(combined.event.payload["pull_request"], url);
 }

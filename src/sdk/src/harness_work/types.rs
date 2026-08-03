@@ -293,6 +293,14 @@ pub struct HarnessSessionInfo {
     pub mcp_servers: Vec<String>,
 }
 
+/// Render the compact pull-request label shared by session views.
+pub fn pull_request_label(pull_request: &str) -> String {
+    format!(
+        "PR {}",
+        pull_request.rsplit('/').next().unwrap_or(pull_request)
+    )
+}
+
 impl HarnessSessionInfo {
     /// Whether anything at all was reported (an all-absent info renders nothing).
     pub fn is_empty(&self) -> bool {

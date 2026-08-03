@@ -102,3 +102,54 @@ fn codex_unrelated_output_cannot_replace_the_sessions_pull_request() {
     );
     assert!(result.info.pull_request.is_none());
 }
+
+#[test]
+fn legacy_codex_pr_output_attaches_the_review_by_call_id() {
+    let result = snapshot(
+        "codex",
+        &[
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call", "name": "shell", "call_id": "pr-legacy",
+                    "arguments": "{\"command\":\"gh pr view --json url\"}"
+                }
+            }),
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output", "call_id": "pr-legacy",
+                    "output": "{\"url\":\"https://github.com/tinyhumansai/medulla/pull/159\"}"
+                }
+            }),
+        ],
+    );
+    assert_eq!(
+        result.info.pull_request.as_deref(),
+        Some("https://github.com/tinyhumansai/medulla/pull/159")
+    );
+}
+
+#[test]
+fn legacy_codex_unrelated_output_cannot_replace_the_sessions_pull_request() {
+    let result = snapshot(
+        "codex",
+        &[
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call", "name": "shell", "call_id": "search-legacy",
+                    "arguments": "{\"command\":\"rg pull fixtures\"}"
+                }
+            }),
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output", "call_id": "search-legacy",
+                    "output": "https://github.com/tinyhumansai/other/pull/999"
+                }
+            }),
+        ],
+    );
+    assert!(result.info.pull_request.is_none());
+}

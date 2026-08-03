@@ -53,7 +53,7 @@ impl HarnessLineMapper {
         }
         let events = match self.provider {
             Provider::Claude => claude_events_from_line(raw, line, &mut self.pull_request_calls),
-            Provider::Codex => codex_events_from_line(raw, line),
+            Provider::Codex => codex_events_from_line(raw, line, &mut self.pull_request_calls),
             Provider::Opencode => opencode_events_from_line(raw, line),
         };
         if self.provider != Provider::Codex {

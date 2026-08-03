@@ -69,8 +69,8 @@ fn the_newest_running_harness_title_identifies_an_agent_lane() {
     let mut harness = lane();
     harness.tasks = vec![
         task(TaskStatus::Done, false, 1),
-        task(TaskStatus::Running, false, 2),
         task(TaskStatus::Running, false, 3),
+        task(TaskStatus::Running, false, 2),
     ];
 
     let title = running_session_title(&harness, |task_id| match task_id {

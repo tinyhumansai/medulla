@@ -218,7 +218,8 @@ pub(super) fn running_session_title(
 ) -> Option<String> {
     lane.tasks
         .iter()
-        .rev()
         .filter(|task| task.status == TaskStatus::Running)
-        .find_map(|task| resolve(&task.task_id))
+        .filter_map(|task| resolve(&task.task_id).map(|title| (task.last_at, title)))
+        .max_by_key(|(last_at, _)| *last_at)
+        .map(|(_, title)| title)
 }

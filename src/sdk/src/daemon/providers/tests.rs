@@ -228,6 +228,17 @@ fn make_path_lookup_resolves_pathish_and_bare_names() {
     assert!(!lookup("definitely-not-a-real-binary-xyz"));
 }
 
+#[cfg(windows)]
+#[test]
+fn make_path_lookup_resolves_windows_executable_suffixes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("openhuman-core.exe"), b"").unwrap();
+    let env = HashMap::from([("PATH".to_string(), dir.path().display().to_string())]);
+
+    assert!(make_path_lookup(&env)("openhuman-core"));
+    assert!(make_path_lookup(&env)("openhuman-core.exe"));
+}
+
 #[test]
 fn router_env_resolution_is_the_spawn_seams_source_of_truth() {
     // The executor folds exactly what the pure resolver emits: the per-provider

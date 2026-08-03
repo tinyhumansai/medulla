@@ -5,11 +5,14 @@
 //! only the bridge: it turns an operator's request to comment into a prompt
 //! bound to the position the cursor is on.
 
+mod baseline;
 mod repository;
 /// Visible to the rest of `ui::app` so the render layer and its tests can name
 /// the row type they draw; the state itself is re-exported below.
 pub(super) mod types;
 
+#[cfg(test)]
+mod baseline_tests;
 #[cfg(test)]
 mod comment_tests;
 #[cfg(test)]
@@ -20,13 +23,38 @@ use std::path::Path;
 use medulla::ui::git_review::CommentAnchor;
 pub(crate) use types::GitChangesState;
 
-use crate::ui::composer::{Draft, TextPrompt};
-
 use super::types::{App, PromptKind};
+use crate::ui::composer::{Draft, TextPrompt};
+use baseline::select_harness_baseline;
 
 impl App {
     /// Reload commits, changed paths, and the selected patch from Git.
     pub(super) fn refresh_changes(&mut self) {
+        let preferred_id = self
+            .attached_harness()
+            .map(str::to_owned)
+            .or_else(|| self.selected_harness_session.clone());
+        let selected = self.harnesses.as_ref().map(|harnesses| {
+            select_harness_baseline(harnesses.sessions.rows(), preferred_id.as_deref())
+        });
+        match selected {
+            Some(Ok(Some((row, commit)))) => {
+                let root = row.launch_root.as_deref().unwrap_or(&row.cwd);
+                self.changes.follow_harness(
+                    Path::new(root),
+                    &commit,
+                    row.launch_checkout_identity
+                        .as_deref()
+                        .expect("validated harness identity"),
+                );
+            }
+            Some(Err(error)) => {
+                self.changes.clear_repository(error);
+                self.set_status(self.changes.status_message());
+                return;
+            }
+            _ => {}
+        }
         self.changes.refresh();
         self.set_status(self.changes.status_message());
     }

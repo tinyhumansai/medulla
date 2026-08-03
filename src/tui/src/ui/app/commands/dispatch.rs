@@ -1,7 +1,4 @@
-//! Command execution for [`App`]: fleet/steering helpers, inline-prompt
-//! submission, clipboard copy, composer-line [`App::execute`], slash-command
-//! dispatch, and the Settings/Appearance mutators. These turn resolved input
-//! into runtime calls and follow-up [`Cmd`]s.
+//! Runtime, prompt, clipboard, slash-command, and settings command dispatch.
 
 use crate::ui::agents::{AgentRow, TaskState};
 use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform, OSC_52};
@@ -9,14 +6,14 @@ use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::Draft;
 use medulla::runtime::{WorkerInfo, WorkerOp};
 
-use super::types::{
+use super::super::types::{
     tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_HELP,
     SP_USAGE,
 };
 
 impl App {
     /// The worker under the Workers-list cursor, if the fleet is non-empty.
-    pub(super) fn selected_host(&self) -> Option<WorkerInfo> {
+    pub(in crate::ui::app) fn selected_host(&self) -> Option<WorkerInfo> {
         let ws = self.runtime.workers();
         if ws.is_empty() {
             return None;
@@ -29,16 +26,18 @@ impl App {
     /// Indexes the rail's rows, which is what `agent_index` counts — the lane
     /// list alone is shorter than the rail and reading it here would answer for
     /// whichever row happened to share the offset.
-    pub(super) fn selected_agent_task(&self) -> Option<TaskState> {
+    pub(in crate::ui::app) fn selected_agent_task(&self) -> Option<TaskState> {
         let rows = self.rail_rows();
         match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
-            Some(super::rail::RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
+            Some(super::super::rail::RailRow::Agent(AgentRow::Sub { task, .. })) => {
+                Some(task.clone())
+            }
             _ => None,
         }
     }
 
     /// Request cancellation of the selected running task, or note why it cannot.
-    pub(super) fn cancel_selected_task(&mut self) {
+    pub(in crate::ui::app) fn cancel_selected_task(&mut self) {
         match self.selected_agent_task() {
             Some(t) => {
                 let (cycle, task) = crate::ui::agents::parse_task_key(&t.task_id);
@@ -70,7 +69,7 @@ impl App {
     /// should treat the text as an ordinary instruction instead. The distinction
     /// matters: typing into an agent's lane must not silently start a new
     /// orchestrator cycle.
-    pub(super) fn answer_from_composer(&mut self, text: &str) -> Option<Option<Cmd>> {
+    pub(in crate::ui::app) fn answer_from_composer(&mut self, text: &str) -> Option<Option<Cmd>> {
         let task = self.selected_agent_task()?;
         let question_id = task.question_id.clone()?;
         let cycle_id = crate::ui::agents::parse_task_key(&task.task_id)
@@ -91,7 +90,7 @@ impl App {
         Some(None)
     }
 
-    pub(super) fn answer_selected_task(&mut self) {
+    pub(in crate::ui::app) fn answer_selected_task(&mut self) {
         match self.selected_agent_task() {
             Some(t) => match (
                 t.question_id.clone(),
@@ -120,10 +119,17 @@ impl App {
 
     /// Submit the open inline prompt, producing the follow-up command (if any) and
     /// closing the overlay.
-    pub(super) fn submit_prompt(&mut self) -> Option<Cmd> {
+    pub(in crate::ui::app) fn submit_prompt(&mut self) -> Option<Cmd> {
         let p = self.prompt.take()?;
         let text = p.draft.text.trim().to_string();
         match p.kind {
+            PromptKind::ChangesBaseline => {
+                self.finish_change_baseline(
+                    &text,
+                    super::super::changes::types::BaselineSource::Manual,
+                );
+                None
+            }
             PromptKind::ChangesComment { path, anchor } => {
                 self.submit_changes_comment(&path, anchor, &text);
                 None
@@ -293,7 +299,7 @@ impl App {
     /// keypress, and titled with the field name so a chain of several prompts
     /// says which one is on screen.
     #[cfg(feature = "workflows")]
-    pub(super) fn open_workflow_input_prompt(
+    pub(in crate::ui::app) fn open_workflow_input_prompt(
         &mut self,
         workflow_id: String,
         dry_run: bool,
@@ -329,7 +335,7 @@ impl App {
 
     /// Copy the requested chat scope to the clipboard (or the test capture sink),
     /// reporting the result in the status line.
-    pub(super) fn copy_chat(&mut self, scope: CopyScope) {
+    pub(in crate::ui::app) fn copy_chat(&mut self, scope: CopyScope) {
         let text = command::copy_text(&self.snapshot.chat_events, scope);
         if text.trim().is_empty() {
             self.set_status(match scope {
@@ -403,7 +409,7 @@ impl App {
     }
 
     /// Handle a submitted composer line (a plain turn or a slash command).
-    pub(super) fn execute(&mut self, value: String) -> Option<Cmd> {
+    pub(in crate::ui::app) fn execute(&mut self, value: String) -> Option<Cmd> {
         let clean = value.trim().to_string();
         if clean.is_empty() {
             return None;
@@ -425,7 +431,7 @@ impl App {
     /// follow-up [`Cmd`] the event loop must run (e.g. a lazy load). Parsing lives
     /// in the SDK ([`crate::ui::command::parse`]); this method owns only the
     /// UI-state mutations and runtime calls.
-    pub(super) fn dispatch_slash(&mut self, command: SlashCommand) -> Option<Cmd> {
+    pub(in crate::ui::app) fn dispatch_slash(&mut self, command: SlashCommand) -> Option<Cmd> {
         match command {
             SlashCommand::Quit => self.should_quit = true,
             SlashCommand::NewSession => {
@@ -470,7 +476,7 @@ impl App {
 
     /// Land on the Settings tab at subpage `index`, returning its lazy-load
     /// command (Usage and Context each fetch on entry).
-    pub(super) fn set_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
+    pub(in crate::ui::app) fn set_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
         self.tab_index = tab_pos("Settings");
         self.settings_index = index.min(SETTINGS_SUBPAGES.len() - 1);
         // An armed logout must not survive a jump to another subpage.
@@ -487,7 +493,7 @@ impl App {
     /// Used by the slash commands: `/feedback` is a request to work with the
     /// board, not to park on the nav next to it, so it should land ready to
     /// browse.
-    pub(super) fn enter_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
+    pub(in crate::ui::app) fn enter_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
         let cmd = self.set_settings_subpage(index);
         self.settings_focused = true;
         cmd
@@ -498,7 +504,7 @@ impl App {
     ///
     /// Mirrors the theme editor: a `None` config path applies live (the strategy is
     /// still sent to the runtime) but is not written to disk.
-    pub(super) fn persist_routing_strategy_now(
+    pub(in crate::ui::app) fn persist_routing_strategy_now(
         &mut self,
         strategy: medulla::runtime::RoutingStrategy,
     ) {
@@ -519,7 +525,7 @@ impl App {
     }
 
     /// Persist and remember the provider-subscription routing strategy.
-    pub(super) fn persist_subscription_strategy_now(
+    pub(in crate::ui::app) fn persist_subscription_strategy_now(
         &mut self,
         strategy: medulla::runtime::SubscriptionRoutingStrategy,
     ) {
@@ -540,47 +546,6 @@ impl App {
                 "Applying {strategy:?} subscription strategy… (not persisted)"
             )),
         }
-    }
-
-    /// Submit a comment on a Changes tab selection, capturing context for drift detection.
-    fn submit_changes_comment(
-        &mut self,
-        path: &std::path::Path,
-        anchor: medulla::ui::git_review::CommentAnchor,
-        text: &str,
-    ) {
-        use medulla::ui::git_review::CommentAnchor;
-        let context = match anchor {
-            CommentAnchor::Line(i) => self
-                .changes
-                .patch
-                .get(i)
-                .map(String::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            CommentAnchor::Hunk(i) => self
-                .changes
-                .hunks
-                .get(i)
-                .and_then(|h| self.changes.patch.get(h.header))
-                .map(String::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            CommentAnchor::File => String::new(),
-        };
-        let kept = self
-            .changes
-            .comments
-            .upsert_with_context(path, anchor, text, &context);
-        self.set_status(if kept {
-            format!(
-                "Comment saved on {} · {}",
-                path.display(),
-                anchor.describe()
-            )
-        } else {
-            format!("Comment cleared on {}", path.display())
-        });
     }
 }
 

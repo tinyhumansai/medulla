@@ -122,6 +122,7 @@ impl App {
             }
         }
         self.harness_pane_session = selection.harness.clone();
+        self.selected_harness_session = selection.harness.clone();
         selection
     }
 

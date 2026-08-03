@@ -479,10 +479,10 @@ impl App {
             "Tab views · TokenMaxxxing coming soon"
         } else if self.tab() == "TokenMaxxxing" {
             "Tab views · ↑↓ pages · ⏎ open · Esc menu · 1-3 jump"
+        } else if self.tab() == "Changes" {
+            "Tab views · ↑↓ files · j/k line · [ ] hunk · b baseline · c comment · C file · e edit · r refresh"
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
-        } else if self.tab() == "Changes" {
-            "Tab views · ↑↓ files · j/k line · [ ] hunk · c comment · C file · e edit · r refresh"
         } else {
             "Tab views · Esc/↑↓ rail · ⏎/^] harness · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
         };

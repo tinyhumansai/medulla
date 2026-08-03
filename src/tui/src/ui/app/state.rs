@@ -151,6 +151,7 @@ impl App {
             harnesses: None,
             harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
             harness_pane_session: None,
+            selected_harness_session: None,
             harness_picker: None,
             handback_prompt: None,
             help_scroll: 0,

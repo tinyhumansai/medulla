@@ -33,11 +33,29 @@ pub fn make_path_lookup(env: &HashMap<String, String>) -> ExistsOnPath {
         .collect();
     Box::new(move |bin: &str| {
         if bin.contains('/') || bin.contains('\\') {
-            return is_executable(std::path::Path::new(bin));
+            return is_executable_command(std::path::Path::new(bin));
         }
         dirs.iter()
-            .any(|dir| is_executable(&std::path::Path::new(dir).join(bin)))
+            .any(|dir| is_executable_command(&std::path::Path::new(dir).join(bin)))
     })
+}
+
+#[cfg(windows)]
+/// Mirror `Command::new` resolution: retain configured extensions and add only
+/// `.exe` to extensionless names, never advertising PATHEXT script shims that
+/// the direct process spawn cannot execute.
+fn is_executable_command(path: &std::path::Path) -> bool {
+    if path.extension().is_some() {
+        return is_executable(path);
+    }
+    let mut candidate = path.as_os_str().to_os_string();
+    candidate.push(".exe");
+    is_executable(std::path::Path::new(&candidate))
+}
+
+#[cfg(not(windows))]
+fn is_executable_command(path: &std::path::Path) -> bool {
+    is_executable(path)
 }
 
 #[cfg(windows)]

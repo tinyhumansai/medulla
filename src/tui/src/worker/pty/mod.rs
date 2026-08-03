@@ -32,6 +32,7 @@
 
 pub mod attention;
 pub mod cell_text;
+pub(crate) mod checkout;
 pub mod dialog;
 pub mod handle;
 pub mod inject;

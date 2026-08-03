@@ -8,7 +8,7 @@ use std::process::Command;
 
 use medulla::ui::git_review::ChangeOrigin;
 
-use super::types::ChangedFile;
+use super::types::{ChangedFile, GitCommit, LoadedChanges};
 
 /// Find the enclosing repository root and resolve its current commit.
 pub(super) fn discover() -> Result<(PathBuf, String), String> {
@@ -42,15 +42,19 @@ pub(super) fn discover_in(directory: &Path) -> Result<(PathBuf, String), String>
 pub(super) fn resolve_baseline(root: &Path) -> Result<String, String> {
     match git(root, &["rev-parse", "--verify", "HEAD"]) {
         Ok(head) => Ok(head.trim().to_owned()),
-        Err(_) => {
-            git(root, &["hash-object", "-t", "tree", "--stdin"]).map(|tree| tree.trim().to_owned())
-        }
+        Err(_) => empty_tree(root),
     }
 }
 
+/// Resolve Git's canonical empty-tree object for an unborn launch snapshot.
+pub(super) fn empty_tree(root: &Path) -> Result<String, String> {
+    git(root, &["hash-object", "-t", "tree", "--stdin"]).map(|tree| tree.trim().to_owned())
+}
+
 /// Load commits and files changed from `baseline` through the current worktree.
-pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<ChangedFile>), String> {
-    let commits = if has_head(root)? {
+pub(super) fn load(root: &Path, baseline: &str) -> Result<LoadedChanges, String> {
+    let head_exists = has_head(root)?;
+    let commits = if head_exists {
         git(
             root,
             &["log", "--format=%h %s", &format!("{baseline}..HEAD")],
@@ -58,6 +62,11 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
         .lines()
         .map(str::to_owned)
         .collect()
+    } else {
+        Vec::new()
+    };
+    let recent_commits = if head_exists {
+        parse_commits(&git(root, &["log", "-50", "--format=%H%x00%s"])?)
     } else {
         Vec::new()
     };
@@ -101,7 +110,35 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<(Vec<String>, Vec<Chan
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
 
-    Ok((commits, files))
+    Ok((commits, recent_commits, files))
+}
+
+/// Resolve a revision to a full commit id, rejecting trees, blobs, and typos.
+pub(super) fn resolve_commit(root: &Path, revision: &str) -> Result<String, String> {
+    let revision = revision.trim();
+    if revision.is_empty() {
+        return Err("Enter a commit id or revision".to_owned());
+    }
+    git(
+        root,
+        &["rev-parse", "--verify", &format!("{revision}^{{commit}}")],
+    )
+    .map(|id| id.trim().to_owned())
+    .map_err(|_| format!("Unknown commit or revision: {revision}"))
+}
+
+/// Parse full-id/NUL/subject records produced by the history command.
+fn parse_commits(output: &str) -> Vec<GitCommit> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let (id, subject) = line.split_once('\0')?;
+            Some(GitCommit {
+                id: id.to_owned(),
+                subject: subject.to_owned(),
+            })
+        })
+        .collect()
 }
 
 /// Classify where each changed path's content currently lives.

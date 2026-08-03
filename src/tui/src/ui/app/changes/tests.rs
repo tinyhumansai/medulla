@@ -7,7 +7,7 @@ use medulla::ui::git_review::{ChangeOrigin, CommentAnchor};
 use tempfile::tempdir;
 
 use super::repository;
-use super::types::{ChangedFile, GitChangesState};
+use super::types::{BaselineSource, ChangedFile, GitChangesState};
 
 #[test]
 fn name_status_keeps_simple_paths_and_rename_destinations() {
@@ -34,7 +34,7 @@ fn load_combines_committed_and_untracked_changes_since_baseline() {
 
     fs::write(directory.path().join("tracked.txt"), "two\n").expect("edit tracked");
     fs::write(directory.path().join("new.txt"), "new\n").expect("write untracked");
-    let (commits, files) = repository::load(directory.path(), baseline.trim()).expect("load");
+    let (commits, _, files) = repository::load(directory.path(), baseline.trim()).expect("load");
 
     assert!(commits.is_empty());
     assert_eq!(
@@ -113,7 +113,8 @@ fn load_an_unborn_repository_lists_initial_files_without_commits() {
     fs::write(directory.path().join("initial.txt"), "initial\n").expect("write initial file");
     let baseline = repository::resolve_baseline(directory.path()).expect("empty-tree baseline");
 
-    let (commits, files) = repository::load(directory.path(), &baseline).expect("load unborn repo");
+    let (commits, _, files) =
+        repository::load(directory.path(), &baseline).expect("load unborn repo");
 
     assert!(commits.is_empty());
     assert_eq!(files.len(), 1);
@@ -145,7 +146,7 @@ fn load_preserves_paths_that_git_would_quote() {
     fs::write(directory.path().join("café file.txt"), "new\n").expect("write unusual path");
     let baseline = output(directory.path(), &["rev-parse", "HEAD"]);
 
-    let (_, files) = repository::load(directory.path(), baseline.trim()).expect("load");
+    let (_, _, files) = repository::load(directory.path(), baseline.trim()).expect("load");
     assert_eq!(files[0].path, std::path::Path::new("café file.txt"));
     let patch = repository::patch(directory.path(), baseline.trim(), &files[0].path)
         .expect("untracked patch");
@@ -262,7 +263,7 @@ fn a_path_committed_then_edited_again_reports_both_origins() {
     git(directory.path(), &["commit", "-m", "session commit"]);
     fs::write(directory.path().join("both.txt"), "three\n").expect("edit again");
 
-    let (_, files) = repository::load(directory.path(), baseline.trim()).expect("load");
+    let (_, _, files) = repository::load(directory.path(), baseline.trim()).expect("load");
     let file = files
         .iter()
         .find(|file| file.path == std::path::Path::new("both.txt"))
@@ -287,7 +288,7 @@ fn the_baseline_stays_put_as_head_advances() {
         git(directory.path(), &["commit", "-m", &format!("step {step}")]);
     }
 
-    let (commits, files) = repository::load(directory.path(), &baseline).expect("load");
+    let (commits, _, files) = repository::load(directory.path(), &baseline).expect("load");
     assert_eq!(commits.len(), 3, "every session commit stays in view");
     assert_eq!(files.len(), 3, "and so does every file they touched");
 }
@@ -342,4 +343,66 @@ fn an_empty_patch_can_still_take_a_file_comment() {
     assert_eq!(state.cursor_anchor(), CommentAnchor::File);
     assert!(state.hunk_at_cursor().is_none());
     assert_eq!(state.selected_path(), None);
+}
+
+#[test]
+fn history_commits_are_selectable_by_full_id_and_subject() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    fs::write(directory.path().join("next.txt"), "next\n").expect("write");
+    git(directory.path(), &["add", "."]);
+    git(directory.path(), &["commit", "-m", "second snapshot"]);
+    let head = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    let (_, recent, _) = repository::load(directory.path(), head.trim()).expect("history");
+
+    assert_eq!(recent[0].id, head.trim());
+    assert_eq!(recent[0].subject, "second snapshot");
+    assert_eq!(
+        repository::resolve_commit(directory.path(), &head[..7]).expect("short id"),
+        head.trim()
+    );
+}
+
+#[test]
+fn manual_baseline_rejects_unknown_revisions_without_changing_selection() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    let head = output(directory.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    let mut state = GitChangesState {
+        root: Some(directory.path().to_owned()),
+        baseline: Some(head.clone()),
+        ..GitChangesState::default()
+    };
+
+    let error = state
+        .choose_baseline("definitely-not-a-commit", BaselineSource::Manual)
+        .expect_err("invalid revision");
+
+    assert!(error.contains("Unknown commit"));
+    assert_eq!(state.baseline.as_deref(), Some(head.as_str()));
+    assert_eq!(state.baseline_source, BaselineSource::AppLaunch);
+}
+
+#[test]
+fn following_a_harness_uses_its_launch_commit_until_operator_selects_another() {
+    let directory = tempdir().expect("temp repo");
+    init_repo(directory.path());
+    let launch = output(directory.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    let mut state = GitChangesState::default();
+    let expected_root = repository::discover_in(directory.path())
+        .expect("discover repository")
+        .0;
+
+    let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
+    state.follow_harness(directory.path(), &launch, &identity);
+    state.refresh();
+
+    assert_eq!(state.root.as_deref(), Some(expected_root.as_path()));
+    assert_eq!(state.baseline.as_deref(), Some(launch.as_str()));
+    assert_eq!(state.harness_baseline.as_deref(), Some(launch.as_str()));
 }

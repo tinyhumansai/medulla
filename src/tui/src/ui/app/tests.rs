@@ -70,6 +70,26 @@ fn every_tab_renders() {
 }
 
 #[test]
+fn drawing_an_intervening_tab_preserves_the_harness_selected_for_changes() {
+    let mut a = app();
+    a.selected_harness_session = Some("older-harness".to_owned());
+    a.harness_pane_session = Some("older-harness".to_owned());
+    a.tab_index = tab("Workflows");
+
+    render(&mut a);
+
+    assert_eq!(
+        a.harness_pane_session, None,
+        "hidden panes cannot receive keys"
+    );
+    assert_eq!(
+        a.selected_harness_session.as_deref(),
+        Some("older-harness"),
+        "tab navigation must not discard the Changes repository selection"
+    );
+}
+
+#[test]
 fn harnesses_page_renders_custom_openrouter_presets_and_editor_controls() {
     let mut a = app();
     a.tab_index = tab("Hosts");

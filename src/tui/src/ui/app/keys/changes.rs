@@ -12,6 +12,20 @@ use super::super::types::App;
 impl App {
     /// Handle Changes-specific navigation before generic list bindings.
     pub(super) fn on_changes_key(&mut self, code: KeyCode) -> bool {
+        if self.changes.picking_baseline {
+            match code {
+                KeyCode::Up | KeyCode::Char('k') => self.changes.move_baseline_selection(-1),
+                KeyCode::Down | KeyCode::Char('j') => self.changes.move_baseline_selection(1),
+                KeyCode::Enter => self.apply_change_baseline_selection(),
+                KeyCode::Char('m') => self.open_manual_change_baseline(),
+                KeyCode::Esc => {
+                    self.changes.picking_baseline = false;
+                    self.set_status(self.changes.status_message());
+                }
+                _ => return true,
+            }
+            return true;
+        }
         match code {
             KeyCode::Up => self.changes.select_file(-1),
             KeyCode::Down => self.changes.select_file(1),
@@ -33,6 +47,7 @@ impl App {
             KeyCode::PageUp => self.changes.move_cursor(-10),
             KeyCode::PageDown => self.changes.move_cursor(10),
             KeyCode::Char('r') => self.refresh_changes(),
+            KeyCode::Char('b') => self.open_change_baseline_picker(),
             KeyCode::Char('c') => self.comment_on_change(),
             KeyCode::Char('C') => self.comment_on_change_file(),
             KeyCode::Char('e') => self.edit_change_comment(),

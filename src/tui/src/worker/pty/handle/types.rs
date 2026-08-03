@@ -142,6 +142,12 @@ pub(crate) struct SessionMeta {
     pub(crate) branch: Option<String>,
     /// Whether the child environment contains a GitHub repository override.
     pub(crate) gh_repo_is_set: bool,
+    /// Repository root captured immediately before the harness was spawned.
+    pub(crate) launch_root: Option<String>,
+    /// Commit checked out immediately before the harness process was spawned.
+    pub(crate) launch_commit: Option<String>,
+    /// Filesystem identity of the launch checkout's Git directory.
+    pub(crate) launch_checkout_identity: Option<String>,
     /// Epoch ms when the session started.
     pub(crate) started_at: i64,
     /// Whether an operator asked for this session rather than a task frame.

@@ -13,7 +13,13 @@ use ratatui::style::{Color, Modifier, Style};
 use medulla::config::ThemeConfig;
 
 /// The editable theme roles, in Appearance-editor order.
-pub const THEME_ROLES: [&str; 4] = ["primary", "accent", "selection_fg", "dim_border"];
+pub const THEME_ROLES: [&str; 5] = [
+    "Primary",
+    "Accent",
+    "Selection text",
+    "Dim border",
+    "Attention",
+];
 
 /// A curated palette the Appearance editor cycles through. Named colors keep the
 /// persisted config readable; a `#rrggbb` custom value from config is folded in
@@ -38,6 +44,8 @@ impl Default for Theme {
             accent: Color::Magenta,
             selection_fg: Color::Black,
             dim_border: Color::DarkGray,
+            attention: Color::Yellow,
+            attention_blink: true,
         }
     }
 }
@@ -55,6 +63,8 @@ impl Theme {
             accent: pick(&cfg.accent, d.accent),
             selection_fg: pick(&cfg.selection_fg, d.selection_fg),
             dim_border: pick(&cfg.dim_border, d.dim_border),
+            attention: pick(&cfg.attention, d.attention),
+            attention_blink: cfg.attention_blink.unwrap_or(d.attention_blink),
         }
     }
 
@@ -73,7 +83,8 @@ impl Theme {
             0 => self.primary,
             1 => self.accent,
             2 => self.selection_fg,
-            _ => self.dim_border,
+            3 => self.dim_border,
+            _ => self.attention,
         }
     }
 
@@ -82,7 +93,8 @@ impl Theme {
             0 => self.primary = color,
             1 => self.accent = color,
             2 => self.selection_fg = color,
-            _ => self.dim_border = color,
+            3 => self.dim_border = color,
+            _ => self.attention = color,
         }
     }
 
@@ -196,6 +208,14 @@ pub fn persist_theme(path: &Path, theme: &Theme) -> anyhow::Result<()> {
     section.insert(
         "dimBorder".into(),
         Value::String(color_to_string(theme.dim_border)),
+    );
+    section.insert(
+        "attention".into(),
+        Value::String(color_to_string(theme.attention)),
+    );
+    section.insert(
+        "attentionBlink".into(),
+        Value::Boolean(theme.attention_blink),
     );
     medulla::config::persist_section(path, "theme", section)
 }

@@ -32,9 +32,12 @@ impl App {
         let waiting = self.harness_attention(row);
         let alerting = waiting.is_some();
         let style = if waiting.is_some() {
-            let attention = Style::default()
-                .fg(HarnessVisualState::NeedsInput.color())
-                .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
+            let mut attention = Style::default()
+                .fg(self.theme.attention)
+                .add_modifier(Modifier::BOLD);
+            if self.theme.attention_blink {
+                attention = attention.add_modifier(Modifier::SLOW_BLINK);
+            }
             if active {
                 attention.add_modifier(Modifier::REVERSED)
             } else {
@@ -115,9 +118,10 @@ impl App {
                     Style::default()
                 };
                 if needs_input {
-                    style = style
-                        .fg(HarnessVisualState::NeedsInput.color())
-                        .add_modifier(Modifier::SLOW_BLINK);
+                    style = style.fg(self.theme.attention);
+                    if self.theme.attention_blink {
+                        style = style.add_modifier(Modifier::SLOW_BLINK);
+                    }
                 }
                 let status_style = if active || needs_input {
                     style

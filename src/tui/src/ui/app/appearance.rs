@@ -20,8 +20,11 @@ use super::types::App;
 /// RAM, and disk I/O, then device CPU, RAM, and disk.
 pub(super) const RESOURCE_ROWS: usize = 6;
 
-/// Number of selectable rows on the Appearance page: theme roles plus resources.
-pub(super) const APPEARANCE_ROWS: usize = THEME_ROLES.len() + RESOURCE_ROWS;
+/// Number of behavior controls shown after the editable theme colors.
+pub(super) const ATTENTION_ROWS: usize = 1;
+
+/// Number of selectable rows: theme colors, attention behavior, and resources.
+pub(super) const APPEARANCE_ROWS: usize = THEME_ROLES.len() + ATTENTION_ROWS + RESOURCE_ROWS;
 
 impl App {
     /// Cycle the selected colour role and persist the theme.
@@ -30,8 +33,11 @@ impl App {
         if index < THEME_ROLES.len() {
             self.theme.cycle_role(index, forward);
             self.persist_theme_now(THEME_ROLES[index]);
+        } else if index == THEME_ROLES.len() {
+            self.theme.attention_blink = !self.theme.attention_blink;
+            self.persist_theme_now("Attention blink");
         } else {
-            self.cycle_resource_display(index - THEME_ROLES.len(), forward);
+            self.cycle_resource_display(index - THEME_ROLES.len() - ATTENTION_ROWS, forward);
         }
     }
 

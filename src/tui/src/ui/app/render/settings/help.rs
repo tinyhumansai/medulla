@@ -34,7 +34,7 @@ impl App {
             TLine::from(" "),
             TLine::from(Span::styled("Settings", bold)),
             TLine::from("↑↓ move between subpages · 1-9 jump straight to one"),
-            TLine::from("Appearance: j / k pick a theme role · ←/→ or Enter cycle its color (saved live)"),
+            TLine::from("Appearance: j / k pick an option · ←/→ or Enter change it (saved live)"),
             TLine::from(
                 "Status line: j / k pick a harness-row field · ←/→ or Enter cycle it (live preview)",
             ),

@@ -91,8 +91,14 @@ impl App {
         };
         if item.role == AgentRole::Agent {
             let state = self.harness_visual_state(item, waiting_sessions);
-            style = style.fg(state.color());
-            if state.flashes() {
+            style = style.fg(if state == HarnessVisualState::NeedsInput {
+                self.theme.attention
+            } else {
+                state.color()
+            });
+            if state.flashes()
+                && (state != HarnessVisualState::NeedsInput || self.theme.attention_blink)
+            {
                 style = style.add_modifier(Modifier::SLOW_BLINK);
             }
         } else {

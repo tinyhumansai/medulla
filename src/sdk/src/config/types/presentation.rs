@@ -20,6 +20,12 @@ pub struct ThemeConfig {
     /// Color used for inactive or secondary borders.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dim_border: Option<String>,
+    /// Color used when a harness or task needs operator attention.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attention: Option<String>,
+    /// Whether operator-attention cues blink.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attention_blink: Option<bool>,
 }
 
 /// Onboarding state: what the welcome flow has already shown this user.

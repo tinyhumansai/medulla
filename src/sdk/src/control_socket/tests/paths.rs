@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 #[cfg(unix)]
 use super::super::path::ControlSocketError;
-use super::super::path::{control_socket_path, CONTROL_SOCKET_ENV};
+use super::super::path::{absolute_path_from, control_socket_path, CONTROL_SOCKET_ENV};
 
 /// An environment map from pairs.
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -41,14 +41,11 @@ fn config_wins_over_the_home_derived_default() {
 
 #[test]
 fn a_relative_override_is_anchored_before_child_processes_receive_it() {
-    let resolved =
-        control_socket_path(&env(&[(CONTROL_SOCKET_ENV, "run/control.sock")]), None).unwrap();
+    let cwd = std::path::Path::new("/tmp/medulla-test");
+    let resolved = absolute_path_from("run/control.sock".into(), cwd);
 
     assert!(resolved.is_absolute());
-    assert_eq!(
-        resolved,
-        std::env::current_dir().unwrap().join("run/control.sock")
-    );
+    assert_eq!(resolved, cwd.join("run/control.sock"));
 }
 
 #[test]

@@ -87,6 +87,10 @@ impl CustomHarnessConfig {
             .map(|model| model.trim().to_string())
             .filter(|model| !model.is_empty());
 
+        if self.base_harness == HarnessProvider::Openhuman {
+            return Err("base harness must be claude, codex or opencode".into());
+        }
+
         if self.id.is_empty()
             || !self
                 .id
@@ -117,7 +121,9 @@ impl CustomHarnessConfig {
         } else {
             match self.base_harness {
                 HarnessProvider::Claude => OPENROUTER_ANTHROPIC_URL,
-                HarnessProvider::Codex | HarnessProvider::Opencode => OPENROUTER_OPENAI_URL,
+                HarnessProvider::Codex | HarnessProvider::Opencode | HarnessProvider::Openhuman => {
+                    OPENROUTER_OPENAI_URL
+                }
             }
         }
     }
@@ -183,6 +189,7 @@ impl CustomHarnessConfig {
             return Err(EDITOR_LINE_FORMAT.into());
         }
         let base_harness = HarnessProvider::from_wire(fields[2])
+            .filter(|provider| *provider != HarnessProvider::Openhuman)
             .ok_or_else(|| "base harness must be claude, codex or opencode".to_string())?;
         Self {
             id: fields[0].into(),

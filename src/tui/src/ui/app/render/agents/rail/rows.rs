@@ -4,8 +4,9 @@ use std::collections::HashSet;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
+use unicode_width::UnicodeWidthChar;
 
-use crate::ui::agents::{AgentLane, AgentRole, AgentRow};
+use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
 use crate::ui::util::fmt_tokens;
 use crate::worker::pty::{HarnessAttention, HarnessControl, SessionRow, ATTENTION_GLYPH};
 
@@ -15,6 +16,11 @@ use super::harness_line;
 use super::status::HarnessVisualState;
 use super::wrap::{home_dir, wrap_line};
 use super::CONT_INDENT;
+
+/// Maximum terminal-cell width reserved for a session title in an agent label.
+const SESSION_TITLE_MAX_CELLS: usize = 48;
+/// Memory bound for zero-width Unicode sequences in a session title.
+const SESSION_TITLE_MAX_CHARS: usize = 96;
 
 impl App {
     /// Format one operator-started harness using the configured status-line layout.
@@ -185,9 +191,13 @@ impl App {
                     .filter(|chip| !chip.is_empty())
                     .map(|chip| format!(" · {chip}"))
                     .unwrap_or_default();
+                let title_note = self
+                    .lane_session_title(item)
+                    .map(|title| format!(" · {title}"))
+                    .unwrap_or_default();
                 crate::ui::agent_lane::line(
                     marker,
-                    item.label.clone(),
+                    format!("{}{title_note}", item.label),
                     format!(
                         " · {}{ctx}{state}{sessions_note}{work_note}",
                         item.turns.len()
@@ -197,4 +207,58 @@ impl App {
             }
         }
     }
+
+    /// The title advertised by the live harness serving this lane's newest task.
+    fn lane_session_title(&self, lane: &AgentLane) -> Option<String> {
+        if !self.loaded.config.appearance.show_session_titles {
+            return None;
+        }
+        let harnesses = self.harnesses.as_ref()?;
+        running_session_title(lane, |task_id| {
+            let id = harnesses.session_for_task(task_id)?;
+            harnesses
+                .sessions
+                .row(&id)?
+                .thread_name
+                .map(|title| display_session_title(&title))
+        })
+    }
+}
+
+/// Flatten and bound an untrusted harness title before rail wrapping.
+pub(super) fn display_session_title(title: &str) -> String {
+    let mut displayed = String::new();
+    let mut width = 0;
+    for (index, character) in title.chars().enumerate() {
+        if index >= SESSION_TITLE_MAX_CHARS {
+            displayed.push('…');
+            break;
+        }
+        let character = if character.is_control() {
+            ' '
+        } else {
+            character
+        };
+        let character_width = character.width().unwrap_or(0);
+        if width + character_width > SESSION_TITLE_MAX_CELLS.saturating_sub(1) {
+            displayed.push('…');
+            break;
+        }
+        displayed.push(character);
+        width += character_width;
+    }
+    displayed
+}
+
+/// Resolve the newest running task whose harness has advertised a title.
+pub(super) fn running_session_title(
+    lane: &AgentLane,
+    mut resolve: impl FnMut(&str) -> Option<String>,
+) -> Option<String> {
+    lane.tasks
+        .iter()
+        .filter(|task| task.status == TaskStatus::Running)
+        .filter_map(|task| resolve(&task.task_id).map(|title| (task.last_at, title)))
+        .max_by_key(|(last_at, _)| *last_at)
+        .map(|(_, title)| title)
 }

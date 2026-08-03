@@ -183,6 +183,8 @@ pub fn build_resumed_run_args(
             args.extend(extra_args.iter().cloned());
             args.push(prompt);
         }
+        // Operator-only; daemon parsing rejects it before reaching this seam.
+        HarnessProvider::Openhuman => args.push("tui".to_string()),
     }
     args
 }
@@ -204,7 +206,7 @@ pub fn session_id_field(provider: HarnessProvider) -> Option<&'static str> {
     match provider {
         HarnessProvider::Claude => Some("session_id"),
         HarnessProvider::Codex => Some("thread_id"),
-        HarnessProvider::Opencode => None,
+        HarnessProvider::Opencode | HarnessProvider::Openhuman => None,
     }
 }
 

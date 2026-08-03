@@ -48,6 +48,15 @@ fn defaults_are_applied() {
     assert!(cfg.workflows.allow_code);
     assert!(cfg.appearance.show_harness_branch);
     assert!(cfg.appearance.show_harness_path);
+    assert!(cfg.appearance.show_session_titles);
+}
+
+#[test]
+fn appearance_session_titles_can_be_hidden() {
+    let cfg: TuiConfig =
+        serde_json::from_str(r#"{"appearance":{"showSessionTitles":false}}"#).unwrap();
+
+    assert!(!cfg.appearance.show_session_titles);
 }
 
 #[test]

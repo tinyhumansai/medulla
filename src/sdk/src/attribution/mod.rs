@@ -93,7 +93,9 @@ pub fn attribution_args(provider: HarnessProvider, enabled: bool) -> Vec<String>
     match provider {
         HarnessProvider::Claude => vec!["--settings".to_string(), claude_settings_json()],
         // No override exists for these; see the module docs.
-        HarnessProvider::Codex | HarnessProvider::Opencode => Vec::new(),
+        HarnessProvider::Codex | HarnessProvider::Opencode | HarnessProvider::Openhuman => {
+            Vec::new()
+        }
     }
 }
 

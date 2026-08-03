@@ -301,8 +301,9 @@ fn appearance_cycles_and_persists_device_indicators_independently() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows, attention blink, then three process indicators lands on Device CPU.
-    for _ in 0..9 {
+    // Five color rows, attention blink, three process indicators, and Session titles
+    // lands on Device CPU.
+    for _ in 0..10 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);

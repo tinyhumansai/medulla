@@ -129,10 +129,32 @@ impl App {
                         "  This device · Agents sidebar",
                         description,
                     )));
+                    let title_index = THEME_ROLES.len() + ATTENTION_ROWS + 3;
+                    if title_index == sel {
+                        selected_line_index = lines.len();
+                    }
+                    let style = if title_index == sel {
+                        self.theme.selection()
+                    } else {
+                        Style::default()
+                    };
+                    let marker = if title_index == sel { "▸ " } else { "  " };
+                    lines.push(TLine::from(Span::styled(
+                        format!(
+                            "{marker}{:<20} {}",
+                            "Session titles",
+                            if self.loaded.config.appearance.show_session_titles {
+                                "on"
+                            } else {
+                                "off"
+                            }
+                        ),
+                        style,
+                    )));
                 }
                 _ => {}
             }
-            let index = THEME_ROLES.len() + ATTENTION_ROWS + offset;
+            let index = THEME_ROLES.len() + ATTENTION_ROWS + offset + usize::from(offset >= 3);
             if index == sel {
                 selected_line_index = lines.len();
             }

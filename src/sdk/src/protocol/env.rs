@@ -97,11 +97,17 @@ fn bin_keys(provider: HarnessProvider) -> &'static [&'static str] {
         HarnessProvider::Claude => &["TINYVERSE_CLAUDE_BIN", "TINYPLACE_CLAUDE_BIN"],
         HarnessProvider::Codex => &["TINYPLACE_CODEX_BIN"],
         HarnessProvider::Opencode => &["TINYPLACE_OPENCODE_BIN"],
+        HarnessProvider::Openhuman => &["OPENHUMAN_BIN"],
     }
 }
 
 fn default_bin(provider: HarnessProvider) -> &'static str {
-    provider.as_str()
+    match provider {
+        // The crate's installed binary retains this historical name even
+        // though the product and picker label are simply OpenHuman.
+        HarnessProvider::Openhuman => "openhuman-core",
+        _ => provider.as_str(),
+    }
 }
 
 /// Resolve the provider binary: the first non-empty override, else the default
@@ -174,6 +180,9 @@ fn router_env_vars(provider: HarnessProvider) -> (&'static str, &'static str) {
         HarnessProvider::Claude => ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"),
         HarnessProvider::Codex => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
         HarnessProvider::Opencode => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
+        // OpenHuman uses the shared core's own provider/agent configuration;
+        // it is not redirected through a coding-harness router.
+        HarnessProvider::Openhuman => ("", ""),
     }
 }
 
@@ -193,6 +202,9 @@ fn router_env_vars(provider: HarnessProvider) -> (&'static str, &'static str) {
 /// env-var name, for the spawn layer to resolve.
 pub fn router_env(provider: HarnessProvider, router: &RouterConfig) -> RouterInjection {
     let mut injection = RouterInjection::default();
+    if provider == HarnessProvider::Openhuman {
+        return injection;
+    }
     let Some(base_url) = router.base_url_for(provider.as_str()) else {
         // No endpoint for this provider → nothing to inject (feature off here).
         return injection;
@@ -226,6 +238,7 @@ fn default_sessions_dir(provider: HarnessProvider) -> PathBuf {
             .join("share")
             .join("opencode")
             .join("sessions"),
+        HarnessProvider::Openhuman => home.join(".openhuman"),
     }
 }
 

@@ -117,6 +117,11 @@ impl LocalHarnesses {
             .iter()
             .copied()
             .map(HarnessChoice::native)
+            // OpenHuman is part of this host, not a delegated coding provider,
+            // so it is offered independently of the daemon's detected list.
+            .chain(std::iter::once(HarnessChoice::native(
+                medulla::protocol::HarnessProvider::Openhuman,
+            )))
             .chain(
                 self.custom_harnesses
                     .iter()

@@ -14,6 +14,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::ui::app::App;
 use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
 
+use super::rows::{display_session_title, running_session_title};
 use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
 
 pub(super) fn app() -> App {
@@ -61,6 +62,36 @@ fn task(status: TaskStatus, attention: bool, at: i64) -> TaskState {
         question_id: attention.then(|| "question-1".to_string()),
         work: None,
     }
+}
+
+#[test]
+fn the_newest_running_harness_title_identifies_an_agent_lane() {
+    let mut harness = lane();
+    harness.tasks = vec![
+        task(TaskStatus::Done, false, 1),
+        task(TaskStatus::Running, false, 3),
+        task(TaskStatus::Running, false, 2),
+    ];
+
+    let title = running_session_title(&harness, |task_id| match task_id {
+        "task-1" => Some("stale title".into()),
+        "task-2" => Some("older live title".into()),
+        "task-3" => Some("Fix session titles".into()),
+        _ => None,
+    });
+
+    assert_eq!(title.as_deref(), Some("Fix session titles"));
+}
+
+#[test]
+fn session_titles_are_flattened_and_bounded_before_rail_wrapping() {
+    let title = format!("first line\n{}", "wide title ".repeat(20));
+
+    let displayed = display_session_title(&title);
+
+    assert!(UnicodeWidthStr::width(displayed.as_str()) <= 48);
+    assert!(!displayed.contains('\n'));
+    assert!(displayed.ends_with('…'));
 }
 
 pub(super) fn harness_row(cwd: &str) -> SessionRow {

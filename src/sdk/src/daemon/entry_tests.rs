@@ -68,6 +68,11 @@ fn number_and_positive_validation() {
 fn parse_provider_maps_wire_names() {
     assert_eq!(parse_provider("claude").unwrap(), HarnessProvider::Claude);
     assert_eq!(parse_provider("codex").unwrap(), HarnessProvider::Codex);
+    let err = parse_provider("openhuman").unwrap_err();
+    assert!(
+        err.contains("unknown provider"),
+        "the operator-only TUI must not become dispatchable: {err}"
+    );
     let err = parse_provider("bogus").unwrap_err();
     assert!(err.contains("unknown provider"), "got: {err}");
 }

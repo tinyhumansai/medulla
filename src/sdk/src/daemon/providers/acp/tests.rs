@@ -10,6 +10,51 @@ use crate::sessions::WorkspaceContext;
 
 use super::types::FoldState;
 
+#[cfg(unix)]
+#[tokio::test]
+async fn a_new_acp_session_is_reported_before_the_task_completes() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("fake-opencode");
+    std::fs::write(
+        &agent,
+        r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([^,}]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1}}\n' "$id" ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"acp-session-1"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+  esac
+done
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let reported = Arc::new(Mutex::new(Vec::new()));
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Opencode;
+    options.cwd = dir.path().to_string_lossy().into_owned();
+    options.env.insert(
+        "TINYPLACE_OPENCODE_BIN".to_string(),
+        agent.to_string_lossy().into_owned(),
+    );
+    options.on_session = Some({
+        let reported = reported.clone();
+        Box::new(move |session_id| reported.lock().unwrap().push(session_id))
+    });
+
+    let result = super::execution::run_acp_task(options).await.unwrap();
+
+    assert_eq!(reported.lock().unwrap().as_slice(), ["acp-session-1"]);
+    assert_eq!(result.session_id.as_deref(), Some("acp-session-1"));
+}
+
 #[cfg(all(feature = "workflows", unix))]
 struct NoFleet;
 

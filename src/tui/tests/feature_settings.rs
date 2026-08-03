@@ -84,7 +84,9 @@ fn number_keys_jump_subpages() {
     // Help is the last subpage — ninth, now that Status line is on the nav.
     let _ = key(&mut app, KeyCode::Char('9'));
     assert_eq!(app.settings_subpage(), "Help");
-    let out = text_of(&draw(&mut app, 140, 40));
+    // Render the full help page: this test verifies numeric subpage navigation,
+    // while short-viewport scrolling has its own focused coverage.
+    let out = text_of(&draw(&mut app, 140, 64));
     assert!(out.contains("Commands"), "help subpage: {out}");
     // Jumping to Usage requests an account-usage fetch.
     let cmd = key(&mut app, KeyCode::Char('1'));

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ratatui::layout::Rect;
 
 use crate::ui::agents::{
-    derive_agent_lanes, merge_host_activity, merge_host_roster, AgentLane, AgentRole,
+    derive_agent_lanes, merge_host_activity, merge_host_roster, AgentLane, AgentRole, AgentRow,
 };
 use crate::ui::command::CommandSpec;
 use crate::ui::composer::Draft;
@@ -567,6 +567,29 @@ impl App {
             Some(_) => false,
             None => true,
         }
+    }
+
+    /// The rail index of the orchestrator's own lane row, when the rail has one.
+    ///
+    /// The inverse of [`on_orchestrator_lane`](Self::on_orchestrator_lane): that
+    /// asks whether the cursor is already there, this says where "there" is so
+    /// the cursor can be put on it. Only a `Lane` row ever matches — a task
+    /// sublane under the orchestrator is not the conversation, and the action
+    /// and harness rows are not lanes at all.
+    ///
+    /// `None` before the first fold has produced any lane row, which is the one
+    /// state with no conversation to move to.
+    pub(in crate::ui::app) fn orchestrator_row_index(&self) -> Option<usize> {
+        let lanes = self.lanes();
+        self.rail_rows().iter().position(|row| match row {
+            super::rail::RailRow::Agent(AgentRow::Lane { lane_index }) => lanes
+                .get(*lane_index)
+                .map(|lane| lane.role == AgentRole::Orchestrator)
+                // Matches the same fallback `on_orchestrator_lane` makes: with
+                // no lanes folded yet, the sole lane row is the orchestrator's.
+                .unwrap_or(true),
+            _ => false,
+        })
     }
 
     /// Scroll whichever transcript the Agents cursor is reading.

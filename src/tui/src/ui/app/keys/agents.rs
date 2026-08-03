@@ -115,28 +115,38 @@ impl App {
                 self.focus_agents_composer();
                 AgentsKey::Handled(None)
             }
-            // Typing lands in the composer and focus follows it — but only
-            // where there *is* a composer. It is drawn for the orchestrator
-            // lane and nowhere else, so doing this on an agent row moved the
-            // keyboard into an invisible input: the character vanished, and
-            // every arrow after it drove a caret nobody could see instead of
-            // the rail. That reads exactly like navigation having died.
-            KeyCode::Char(c) if !ctrl && !alt && self.on_orchestrator_lane() => {
+            // Typing goes to the conversation, from whatever row the cursor is
+            // on. The composer is drawn for the orchestrator lane and nowhere
+            // else, so anywhere else this moves the cursor there first — the
+            // character is what says where it was meant to go.
+            //
+            // It used to be refused instead, with a status line telling the
+            // operator to go and select that lane by hand. That left the only
+            // text box in the tab reachable only by arrowing to one specific
+            // row, and threw the keystroke away on the way. Focus still may not
+            // move to a composer that is not drawn (that was the older bug: an
+            // invisible input swallowing the character and every arrow after
+            // it), which is exactly why the cursor moves rather than the focus
+            // alone.
+            KeyCode::Char(c) if !ctrl && !alt => {
+                let mut cmd = None;
+                if !self.on_orchestrator_lane() {
+                    let Some(index) = self.orchestrator_row_index() else {
+                        self.set_status("No conversation to type into yet");
+                        return AgentsKey::Handled(None);
+                    };
+                    self.agent_index = index;
+                    self.agent_scroll = 0;
+                    self.chat_scroll = 0;
+                    // Leaving a task row drops its screen stream, exactly as
+                    // arrowing off it does. Read after the move, since the
+                    // target is derived from the cursor.
+                    cmd = self.retarget_watch();
+                }
                 self.focus_agents_composer();
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, &c.to_string());
                 self.command_index = 0;
-                AgentsKey::Handled(None)
-            }
-            // On any other row the rail keeps the keyboard and says why, rather
-            // than swallowing the key or stealing focus for a hidden box.
-            KeyCode::Char(c) if !ctrl && !alt => {
-                let _ = c;
-                if self.on_new_harness_row() {
-                    self.set_status("⏎ starts a harness of your own");
-                } else {
-                    self.set_status("Select the orchestrator lane to type an instruction");
-                }
-                AgentsKey::Handled(None)
+                AgentsKey::Handled(cmd)
             }
             // Backspace is typing too — it edits the draft it belongs to, and
             // only where that draft is on screen.

@@ -172,6 +172,9 @@ fn the_rail_keeps_the_keyboard_on_a_row_that_has_no_composer() {
     // is not on screen: arrows drove an invisible caret and characters landed
     // in a draft nobody could see. That reads as the keyboard having died,
     // which is exactly the report this pins.
+    //
+    // Navigation half: while the operator is *navigating*, the rail keeps the
+    // keyboard. Typing is the deliberate exception, covered below.
     let mut app = agents_app();
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Down);
@@ -183,18 +186,39 @@ fn the_rail_keeps_the_keyboard_on_a_row_that_has_no_composer() {
         "with no composer drawn, the rail keeps the keyboard"
     );
 
-    typed(&mut app, "zz");
-    assert_eq!(
-        app.draft_text(),
-        "",
-        "characters must not vanish into an invisible draft"
-    );
     key(&mut app, KeyCode::Up);
     assert_ne!(
         app.agent_index(),
         picked,
         "the arrows still walk the rail rather than an unseen caret"
     );
+}
+
+#[test]
+fn typing_on_a_row_with_no_composer_moves_to_the_conversation() {
+    // The character says where it was meant to go. Rather than refusing it and
+    // asking the operator to select the orchestrator lane by hand, the cursor
+    // moves there and the keystroke is kept.
+    //
+    // The invariant the older behaviour protected still holds, and is asserted
+    // directly: focus never lands on a composer that is not drawn. It is the
+    // *cursor* that moves, which is what puts a real composer on screen.
+    let mut app = agents_app();
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Down);
+    assert!(
+        !app.agents_composer_shown(),
+        "fixture must park the cursor on a row that draws no composer"
+    );
+
+    typed(&mut app, "zz");
+
+    assert!(
+        app.agents_composer_shown(),
+        "the composer the character landed in must actually be on screen"
+    );
+    assert!(!app.agents_rail_focused(), "and it must hold the keyboard");
+    assert_eq!(app.draft_text(), "zz", "the character is kept, not dropped");
 }
 
 #[test]

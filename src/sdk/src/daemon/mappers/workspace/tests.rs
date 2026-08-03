@@ -173,20 +173,33 @@ fn structured_view_output_reads_only_the_url_property() {
 #[test]
 fn workspace_events_compose_checkout_and_pull_request_fields() {
     let checkout = "[PASS] WORKTREE_READY\n  path: /repo/worktrees/fix\n  branch: fix\n";
-    let checkout_only = workspace_event_from_output(checkout, None, 1, 2, "test").unwrap();
+    let checkout_only =
+        workspace_event_from_output(checkout, None, None, None, 1, 2, "test").unwrap();
     assert_eq!(checkout_only.event.payload["cwd"], "/repo/worktrees/fix");
     assert_eq!(checkout_only.event.payload["branch"], "fix");
     assert!(checkout_only.event.payload.get("pull_request").is_none());
 
     let url = "https://github.com/acme/repo/pull/42";
-    let pr_only =
-        workspace_event_from_output(url, Some(PullRequestCommand::Create), 1, 2, "test").unwrap();
+    let pr_only = workspace_event_from_output(
+        url,
+        Some(PullRequestCommand::Create),
+        Some("/repo/worktrees/fix"),
+        Some("fix"),
+        1,
+        2,
+        "test",
+    )
+    .unwrap();
     assert_eq!(pr_only.event.payload["pull_request"], url);
+    assert_eq!(pr_only.event.payload["cwd"], "/repo/worktrees/fix");
+    assert_eq!(pr_only.event.payload["branch"], "fix");
     assert!(pr_only.event.payload.get("branch").is_none());
 
     let combined = workspace_event_from_output(
         &format!("{checkout}{url}\n"),
         Some(PullRequestCommand::Create),
+        None,
+        None,
         1,
         2,
         "test",

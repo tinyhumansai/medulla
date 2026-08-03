@@ -29,6 +29,8 @@ pub(super) use types::{PendingPullRequestCall, PullRequestCommand};
 pub(super) fn workspace_event_from_output(
     output: &str,
     pull_request_command: Option<PullRequestCommand>,
+    workspace_cwd: Option<&str>,
+    workspace_branch: Option<&str>,
     line: i64,
     ts: i64,
     record_type: &str,
@@ -45,6 +47,13 @@ pub(super) fn workspace_event_from_output(
     if let Some((cwd, branch)) = checkout {
         payload.insert("cwd".into(), Value::String(cwd));
         payload.insert("branch".into(), Value::String(branch));
+    } else if pull_request.is_some() {
+        if let Some(cwd) = workspace_cwd {
+            payload.insert("cwd".into(), Value::String(cwd.to_string()));
+        }
+        if let Some(branch) = workspace_branch {
+            payload.insert("branch".into(), Value::String(branch.to_string()));
+        }
     }
     if let Some(url) = pull_request {
         payload.insert("pull_request".into(), Value::String(url));

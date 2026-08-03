@@ -187,7 +187,10 @@ fn command_event(
         output,
         pull_request_calls
             .remove(id)
+            .filter(|_| !is_error)
             .and_then(|call| call.command_in(workspace_cwd, workspace_branch)),
+        workspace_cwd,
+        workspace_branch,
         line,
         ts,
         &format!("{record_type}:workspace"),

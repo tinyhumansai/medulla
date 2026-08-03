@@ -149,7 +149,10 @@ fn claude_user_block(
                 &output,
                 pull_request_calls
                     .remove(call_id)
+                    .filter(|_| !is_error)
                     .and_then(|call| call.command_in(workspace_cwd, workspace_branch)),
+                workspace_cwd,
+                workspace_branch,
                 line,
                 ts,
                 "user:tool_result:workspace",

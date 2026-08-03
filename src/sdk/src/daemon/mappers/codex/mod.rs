@@ -198,7 +198,10 @@ pub(super) fn codex_events_from_line(
             &output,
             pull_request_calls
                 .remove(call_id)
+                .filter(|_| !is_error)
                 .and_then(|call| call.command_in(workspace_cwd, workspace_branch)),
+            workspace_cwd,
+            workspace_branch,
             line,
             ts,
             &format!("response_item:{}:workspace", payload_type.unwrap()),

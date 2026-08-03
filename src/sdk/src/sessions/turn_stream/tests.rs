@@ -166,12 +166,15 @@ fn a_reused_turn_can_resume_the_previous_turns_workspace_context() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"pr-1","content":"https://github.com/acme/repo/pull/42"}]}}"#,
     );
 
-    assert!(fold.events.iter().any(|event| {
-        event
-            .event
-            .payload
-            .get("pull_request")
-            .and_then(serde_json::Value::as_str)
-            == Some("https://github.com/acme/repo/pull/42")
-    }));
+    let event = fold
+        .events
+        .iter()
+        .find(|event| event.event.payload.get("pull_request").is_some())
+        .expect("the successful PR command emits session context");
+    assert_eq!(
+        event.event.payload["pull_request"],
+        "https://github.com/acme/repo/pull/42"
+    );
+    assert_eq!(event.event.payload["cwd"], "/repo/worktrees/fix");
+    assert_eq!(event.event.payload["branch"], "fix");
 }

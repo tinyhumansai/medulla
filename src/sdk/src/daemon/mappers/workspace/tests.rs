@@ -193,7 +193,6 @@ fn workspace_events_compose_checkout_and_pull_request_fields() {
     assert_eq!(pr_only.event.payload["pull_request"], url);
     assert_eq!(pr_only.event.payload["cwd"], "/repo/worktrees/fix");
     assert_eq!(pr_only.event.payload["branch"], "fix");
-    assert!(pr_only.event.payload.get("branch").is_none());
 
     let combined = workspace_event_from_output(
         &format!("{checkout}{url}\n"),

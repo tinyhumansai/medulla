@@ -315,11 +315,13 @@ async fn run_provider_attempt(
             _ = spec.abort.cancelled() => {
                 let _ = child.start_kill();
                 let _ = child.wait().await;
+                report_workspace_context(&mapper, spec);
                 return Err(format!("{} task aborted", provider_name(spec.provider)));
             }
             _ = tokio::time::sleep_until(deadline) => {
                 let _ = child.start_kill();
                 let _ = child.wait().await;
+                report_workspace_context(&mapper, spec);
                 return Err(idle_error);
             }
             read = reader.read_until(b'\n', &mut buf) => {
@@ -364,6 +366,7 @@ async fn run_provider_attempt(
     // transient-lock marker the retry loop keys on.
     let _ = tokio::time::timeout(Duration::from_millis(500), stderr_task).await;
     if spec.abort.is_aborted() {
+        report_workspace_context(&mapper, spec);
         return Err(format!("{} task aborted", provider_name(spec.provider)));
     }
     let code = status.ok().and_then(|s| s.code());
@@ -383,6 +386,7 @@ async fn run_provider_attempt(
                 .into_iter()
                 .rev()
                 .collect();
+            report_workspace_context(&mapper, spec);
             return Err(format!(
                 "{} exited {code}: {}",
                 provider_name(spec.provider),
@@ -401,14 +405,7 @@ async fn run_provider_attempt(
             )
         });
 
-    let (cwd, branch, pull_request) = mapper.workspace_context();
-    if let Some(on_workspace_context) = spec.on_workspace_context.as_ref() {
-        on_workspace_context(crate::sessions::WorkspaceContext {
-            cwd,
-            branch,
-            pull_request,
-        });
-    }
+    report_workspace_context(&mapper, spec);
     Ok(RunTaskResult {
         provider: spec.provider,
         reply,
@@ -416,6 +413,18 @@ async fn run_provider_attempt(
         usage: mapper.usage(),
         session_id,
     })
+}
+
+/// Persist mapper state on every post-spawn terminal path, including errors.
+fn report_workspace_context(mapper: &HarnessLineMapper, spec: &RunSpec) {
+    let (cwd, branch, pull_request) = mapper.workspace_context();
+    if let Some(callback) = spec.on_workspace_context.as_ref() {
+        callback(crate::sessions::WorkspaceContext {
+            cwd,
+            branch,
+            pull_request,
+        });
+    }
 }
 
 /// Fold one raw JSONL line through the mapper, updating the accumulated reply

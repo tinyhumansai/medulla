@@ -437,7 +437,7 @@ fn acp_pr_correlation_requires_success_in_the_dispatch_workspace() {
             "kind": "execute",
             "status": status,
         });
-        update[if kind == "tool_call" {
+        update[if kind == "tool_call" || status == "in_progress" {
             "rawInput"
         } else {
             "rawOutput"
@@ -490,5 +490,15 @@ fn acp_pr_correlation_requires_success_in_the_dispatch_workspace() {
     moved.fold(call());
     moved.workspace_context.branch = Some("another-branch".to_string());
     moved.fold(result("completed"));
+    assert!(contexts.lock().unwrap().is_empty());
+
+    let mut replaced = make_state();
+    replaced.fold(call());
+    replaced.fold(update(
+        "tool_call_update",
+        "in_progress",
+        serde_json::json!({"command": "gh pr create --head another-branch"}),
+    ));
+    replaced.fold(result("completed"));
     assert!(contexts.lock().unwrap().is_empty());
 }

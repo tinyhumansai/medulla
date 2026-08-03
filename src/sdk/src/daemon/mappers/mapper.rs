@@ -108,7 +108,7 @@ impl HarnessLineMapper {
         // root in `system:init`. Retained worktree context is later, explicit
         // tool evidence, so the init cwd must not replace it in downstream
         // session snapshots.
-        if self.workspace_cwd.is_some() {
+        if self.workspace_cwd.is_some() || self.workspace_pull_request.is_some() {
             for event in &mut events {
                 if event.record_type == "system:init" {
                     event

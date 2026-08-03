@@ -145,23 +145,29 @@ impl FoldState {
         if let Some(kind) = value.get("kind").and_then(Value::as_str) {
             call.kind = kind.to_string();
         }
+        let input_changed = value.get("rawInput").is_some();
         if let Some(input) = value.get("rawInput") {
             call.input = input.clone();
         }
-        if let Some(command) = command_from_input(&call.input) {
-            if let Some(operation) = pull_request_command(
-                command,
-                self.workspace_context.cwd.as_deref(),
-                self.gh_repo_is_set,
-            ) {
-                self.pull_request_calls.insert(
-                    call_id.clone(),
-                    PendingPullRequestCall::new(
-                        operation,
-                        self.workspace_context.cwd.as_deref(),
-                        self.workspace_context.branch.as_deref(),
-                    ),
-                );
+        if input_changed {
+            self.pull_request_calls.remove(&call_id);
+        }
+        if input_changed {
+            if let Some(command) = command_from_input(&call.input) {
+                if let Some(operation) = pull_request_command(
+                    command,
+                    self.workspace_context.cwd.as_deref(),
+                    self.gh_repo_is_set,
+                ) {
+                    self.pull_request_calls.insert(
+                        call_id.clone(),
+                        PendingPullRequestCall::new(
+                            operation,
+                            self.workspace_context.cwd.as_deref(),
+                            self.workspace_context.branch.as_deref(),
+                        ),
+                    );
+                }
             }
         }
         json!({

@@ -289,4 +289,15 @@ fn resumed_claude_init_cannot_replace_retained_worktree_context() {
             Some("https://github.com/acme/repo/pull/153".to_string()),
         )
     );
+
+    mapper.set_workspace_context(
+        None,
+        None,
+        Some("https://github.com/acme/repo/pull/153".to_string()),
+    );
+    let launch_checkout = mapper.map_line(
+        r#"{"type":"system","subtype":"init","cwd":"/repo","session_id":"sess-1"}"#,
+        2,
+    );
+    assert!(launch_checkout[0].event.payload.get("cwd").is_none());
 }

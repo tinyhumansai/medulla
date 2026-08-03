@@ -16,12 +16,11 @@ use crate::ui::theme::{color_to_string, THEME_ROLES};
 
 use super::types::App;
 
-/// Resource-indicator rows the page lists after the theme roles: process CPU,
-/// RAM, and disk I/O, then device CPU, RAM, and disk.
-pub(super) const RESOURCE_ROWS: usize = 6;
+/// Non-theme rows: session titles, then process and device resource indicators.
+pub(super) const APPEARANCE_OPTION_ROWS: usize = 7;
 
 /// Number of selectable rows on the Appearance page: theme roles plus resources.
-pub(super) const APPEARANCE_ROWS: usize = THEME_ROLES.len() + RESOURCE_ROWS;
+pub(super) const APPEARANCE_ROWS: usize = THEME_ROLES.len() + APPEARANCE_OPTION_ROWS;
 
 impl App {
     /// Cycle the selected colour role and persist the theme.
@@ -31,8 +30,22 @@ impl App {
             self.theme.cycle_role(index, forward);
             self.persist_theme_now(THEME_ROLES[index]);
         } else {
-            self.cycle_resource_display(index - THEME_ROLES.len(), forward);
+            let option = index - THEME_ROLES.len();
+            if option == 3 {
+                self.toggle_session_titles();
+            } else {
+                let resource = if option < 3 { option } else { option - 1 };
+                self.cycle_resource_display(resource, forward);
+            }
         }
+    }
+
+    /// Toggle extracted harness titles on orchestrator-managed agent rows.
+    fn toggle_session_titles(&mut self) {
+        let appearance = &mut self.loaded.config.appearance;
+        appearance.show_session_titles = !appearance.show_session_titles;
+        let shown = appearance.show_session_titles;
+        self.persist_appearance_now("Session titles", if shown { "on" } else { "off" }.into());
     }
 
     /// Cycle and persist one resource indicator, process-scoped or device-wide.
@@ -88,6 +101,11 @@ impl App {
         *display = choices[next];
         let value = format!("{:?}", *display).to_ascii_lowercase();
 
+        self.persist_appearance_now(name, value);
+    }
+
+    /// Persist the complete appearance section after one live option changes.
+    fn persist_appearance_now(&mut self, name: &str, value: String) {
         match &self.config_path {
             Some(path) => {
                 // The whole section is rewritten on every change, so every
@@ -112,6 +130,10 @@ impl App {
                 })
                 .collect();
                 section.insert(
+                    "showSessionTitles".into(),
+                    toml::Value::Boolean(appearance.show_session_titles),
+                );
+                section.insert(
                     "showHarnessBranch".into(),
                     toml::Value::Boolean(self.loaded.config.appearance.show_harness_branch),
                 );
@@ -120,11 +142,11 @@ impl App {
                     toml::Value::Boolean(self.loaded.config.appearance.show_harness_path),
                 );
                 match medulla::config::persist_section(path, "appearance", section) {
-                    Ok(()) => self.set_status(format!("{name} indicator: {value} (saved)")),
+                    Ok(()) => self.set_status(format!("Appearance · {name} → {value} (saved)")),
                     Err(error) => self.set_status(format!("Appearance save failed: {error}")),
                 }
             }
-            None => self.set_status(format!("{name} indicator: {value} (not persisted)")),
+            None => self.set_status(format!("Appearance · {name} → {value} (not persisted)")),
         }
     }
 

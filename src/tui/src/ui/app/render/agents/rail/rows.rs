@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
 
-use crate::ui::agents::{AgentLane, AgentRole, AgentRow};
+use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
 use crate::ui::util::fmt_tokens;
 use crate::worker::pty::{HarnessAttention, HarnessControl, SessionRow, ATTENTION_GLYPH};
 
@@ -181,9 +181,13 @@ impl App {
                     .filter(|chip| !chip.is_empty())
                     .map(|chip| format!(" · {chip}"))
                     .unwrap_or_default();
+                let title_note = self
+                    .lane_session_title(item)
+                    .map(|title| format!(" · {title}"))
+                    .unwrap_or_default();
                 crate::ui::agent_lane::line(
                     marker,
-                    item.label.clone(),
+                    format!("{}{title_note}", item.label),
                     format!(
                         " · {}{ctx}{state}{sessions_note}{work_note}",
                         item.turns.len()
@@ -193,4 +197,28 @@ impl App {
             }
         }
     }
+
+    /// The title advertised by the live harness serving this lane's newest task.
+    fn lane_session_title(&self, lane: &AgentLane) -> Option<String> {
+        if !self.loaded.config.appearance.show_session_titles {
+            return None;
+        }
+        let harnesses = self.harnesses.as_ref()?;
+        running_session_title(lane, |task_id| {
+            let id = harnesses.session_for_task(task_id)?;
+            harnesses.sessions.row(&id)?.thread_name
+        })
+    }
+}
+
+/// Resolve the newest running task whose harness has advertised a title.
+pub(super) fn running_session_title(
+    lane: &AgentLane,
+    mut resolve: impl FnMut(&str) -> Option<String>,
+) -> Option<String> {
+    lane.tasks
+        .iter()
+        .rev()
+        .filter(|task| task.status == TaskStatus::Running)
+        .find_map(|task| resolve(&task.task_id))
 }

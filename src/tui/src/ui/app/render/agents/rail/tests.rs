@@ -14,6 +14,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::ui::app::App;
 use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
 
+use super::rows::running_session_title;
 use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
 
 pub(super) fn app() -> App {
@@ -61,6 +62,25 @@ fn task(status: TaskStatus, attention: bool, at: i64) -> TaskState {
         question_id: attention.then(|| "question-1".to_string()),
         work: None,
     }
+}
+
+#[test]
+fn the_newest_running_harness_title_identifies_an_agent_lane() {
+    let mut harness = lane();
+    harness.tasks = vec![
+        task(TaskStatus::Done, false, 1),
+        task(TaskStatus::Running, false, 2),
+        task(TaskStatus::Running, false, 3),
+    ];
+
+    let title = running_session_title(&harness, |task_id| match task_id {
+        "task-1" => Some("stale title".into()),
+        "task-2" => Some("older live title".into()),
+        "task-3" => Some("Fix session titles".into()),
+        _ => None,
+    });
+
+    assert_eq!(title.as_deref(), Some("Fix session titles"));
 }
 
 pub(super) fn harness_row(cwd: &str) -> SessionRow {

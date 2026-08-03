@@ -21,6 +21,8 @@ pub enum ResourceDisplay {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppearanceConfig {
+    /// Whether orchestrator-managed harness titles appear in the Agents sidebar.
+    pub show_session_titles: bool,
     /// Whether an operator-started harness row shows its Git branch.
     pub show_harness_branch: bool,
     /// Whether an operator-started harness row shows its shortened working path.
@@ -43,6 +45,7 @@ impl AppearanceConfig {
     /// Defaults used when the section is absent, including legacy harness fields.
     pub const fn with_defaults() -> Self {
         Self {
+            show_session_titles: true,
             show_harness_branch: true,
             show_harness_path: true,
             cpu: ResourceDisplay::Off,

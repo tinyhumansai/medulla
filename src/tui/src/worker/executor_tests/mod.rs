@@ -111,6 +111,7 @@ fn options(
             SessionClass::Unbound
         },
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider: HarnessProvider::Codex,
         prompt: "ship the fix".to_string(),
         cwd: cwd.to_string(),
@@ -126,6 +127,7 @@ fn options(
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
         attribution: true,
     }
 }

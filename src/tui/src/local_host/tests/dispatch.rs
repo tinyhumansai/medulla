@@ -29,11 +29,13 @@ fn dispatch_options(provider: HarnessProvider, bin_env_key: &str) -> RunTaskOpti
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         abort: Abort::new(),
         router: None,
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
         attribution: true,
     }
 }

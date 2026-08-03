@@ -45,6 +45,7 @@ fn router_options(
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider,
         prompt: "do it".to_string(),
         cwd: ".".to_string(),
@@ -60,6 +61,7 @@ fn router_options(
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
     }
 }
 

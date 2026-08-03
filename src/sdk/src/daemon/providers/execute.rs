@@ -80,9 +80,11 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
         extra_args: options.extra_args,
         skip_permissions: options.skip_permissions,
         resume_session_id: options.resume_session_id,
+        workspace_context: options.workspace_context,
         abort: options.abort,
         router,
         attribution: options.attribution,
+        on_workspace_context: options.on_workspace_context,
     };
     let mut attempt: u32 = 1;
     loop {
@@ -283,6 +285,11 @@ async fn run_provider_attempt(
         provider_name(spec.provider),
         merged_env.contains_key("GH_REPO"),
     );
+    mapper.set_workspace_context(
+        spec.workspace_context.cwd.clone(),
+        spec.workspace_context.branch.clone(),
+        spec.workspace_context.pull_request.clone(),
+    );
     let mut messages: Vec<String> = Vec::new();
     let mut claude_result: Option<String> = None;
     // First announcement wins — a run reports exactly one session.
@@ -394,6 +401,14 @@ async fn run_provider_attempt(
             )
         });
 
+    let (cwd, branch, pull_request) = mapper.workspace_context();
+    if let Some(on_workspace_context) = spec.on_workspace_context.as_ref() {
+        on_workspace_context(crate::sessions::WorkspaceContext {
+            cwd,
+            branch,
+            pull_request,
+        });
+    }
     Ok(RunTaskResult {
         provider: spec.provider,
         reply,

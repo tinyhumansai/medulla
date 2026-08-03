@@ -343,12 +343,24 @@ impl SessionManager {
             extra_args: self.inner.config.extra_args.clone(),
             skip_permissions: self.inner.config.skip_permissions,
             resume_session_id: resume.map(str::to_string),
+            workspace_context: self
+                .inner
+                .registry
+                .plan(&request.key, request.class)
+                .workspace_context,
             abort: abort.clone(),
             router: self.inner.config.router.clone(),
             attribution: self.inner.config.attribution,
             on_event: None,
             on_stdin: None,
             on_session: None,
+            on_workspace_context: {
+                let registry = self.inner.registry.clone();
+                let key = request.key.clone();
+                Some(Box::new(move |context| {
+                    registry.record_workspace_context(&key, context);
+                }))
+            },
         };
         let result = (self.inner.run_task)(options).await?;
         Ok(TurnOutcome {

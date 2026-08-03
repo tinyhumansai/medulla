@@ -76,6 +76,7 @@ impl HarnessDispatch for RuntimeDispatch {
             // would let a later node read an earlier one's prompt as context.
             session_class: crate::sessions::SessionClass::Bounded,
             resume_session_id: None,
+            workspace_context: Default::default(),
             provider,
             prompt: request.instruction,
             cwd: inner.config.workspace.clone(),
@@ -97,6 +98,7 @@ impl HarnessDispatch for RuntimeDispatch {
             on_event: None,
             on_stdin: None,
             on_session: None,
+            on_workspace_context: None,
         };
 
         // Workflow nodes and detached evolution reviews run outside the inbound

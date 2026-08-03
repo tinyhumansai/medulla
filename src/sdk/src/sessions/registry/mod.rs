@@ -21,8 +21,10 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
 
+use self::types::SessionBinding;
 use super::routing::can_resume;
 use super::types::{SessionClass, SessionKey};
+pub use types::WorkspaceContext;
 
 /// How many conversation bindings to remember before evicting the least recently
 /// used. Bindings are cheap (two short strings) but unbounded growth over a
@@ -35,24 +37,22 @@ impl TurnPlan {
         TurnPlan {
             class,
             resume_session_id: None,
+            workspace_context: WorkspaceContext::default(),
             bind: false,
         }
     }
 }
 
 impl Inner {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.bindings
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.as_str())
+    fn get(&self, key: &str) -> Option<&SessionBinding> {
+        self.bindings.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 
     /// Insert or refresh a binding, moving it to the most-recent end and
     /// evicting from the front while over `max`.
-    fn record(&mut self, key: String, session_id: String, max: usize) {
+    fn record(&mut self, key: String, binding: SessionBinding, max: usize) {
         self.bindings.retain(|(k, _)| k != &key);
-        self.bindings.push((key, session_id));
+        self.bindings.push((key, binding));
         while self.bindings.len() > max.max(1) {
             self.bindings.remove(0);
         }
@@ -96,16 +96,18 @@ impl SessionRegistry {
             return TurnPlan::stateless(class);
         }
         let map_key = key.map_key();
-        let existing = self.inner.lock().unwrap().get(&map_key).map(str::to_string);
+        let existing = self.inner.lock().unwrap().get(&map_key).cloned();
         match existing {
-            Some(session_id) => TurnPlan {
+            Some(binding) => TurnPlan {
                 class,
-                resume_session_id: Some(session_id),
+                resume_session_id: Some(binding.session_id),
+                workspace_context: binding.workspace_context,
                 bind: false,
             },
             None => TurnPlan {
                 class,
                 resume_session_id: None,
+                workspace_context: WorkspaceContext::default(),
                 bind: true,
             },
         }
@@ -117,10 +119,28 @@ impl SessionRegistry {
         if session_id.trim().is_empty() {
             return;
         }
-        self.inner
+        self.inner.lock().unwrap().record(
+            key.map_key(),
+            SessionBinding {
+                session_id,
+                workspace_context: WorkspaceContext::default(),
+            },
+            self.max_bindings,
+        );
+    }
+
+    /// Replace the workspace state attached to an existing binding.
+    pub fn record_workspace_context(&self, key: &SessionKey, context: WorkspaceContext) {
+        if let Some(binding) = self
+            .inner
             .lock()
             .unwrap()
-            .record(key.map_key(), session_id, self.max_bindings);
+            .bindings
+            .iter_mut()
+            .find_map(|(map_key, binding)| (map_key == &key.map_key()).then_some(binding))
+        {
+            binding.workspace_context = context;
+        }
     }
 
     /// The harness session id currently bound to `key`, if any.
@@ -129,7 +149,7 @@ impl SessionRegistry {
             .lock()
             .unwrap()
             .get(&key.map_key())
-            .map(str::to_string)
+            .map(|binding| binding.session_id.clone())
     }
 
     /// Drop `key`'s binding so the next turn starts a fresh session. This is

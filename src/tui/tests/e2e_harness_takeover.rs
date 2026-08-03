@@ -96,6 +96,7 @@ sleep 30
         conversation: "medulla-orchestrator".to_string(),
         session_class: SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         abort: Abort::new(),
         router: None,
         attribution: false,
@@ -104,6 +105,7 @@ sleep 30
         on_session: Some(Box::new(move |id| {
             let _ = session_tx.send(id);
         })),
+        on_workspace_context: None,
     }));
 
     let id = tokio::time::timeout(PATIENCE, session_rx)

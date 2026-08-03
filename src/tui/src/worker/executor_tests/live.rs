@@ -95,6 +95,7 @@ fn live_options(
         conversation: peer.to_string(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider: HarnessProvider::Codex,
         prompt: prompt.to_string(),
         cwd: cwd.to_string(),
@@ -109,6 +110,7 @@ fn live_options(
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
         attribution: true,
     }
 }

@@ -12,6 +12,7 @@ use tokio::sync::{mpsc, Notify};
 
 use crate::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use crate::daemon::DaemonRuntime;
+use crate::sessions::WorkspaceContext;
 
 use super::{base_config, recording_send, resume_runner, task_frame, wait_ready};
 
@@ -81,6 +82,54 @@ async fn a_second_task_in_one_conversation_resumes_the_first_ones_session() {
         resumed.lock().unwrap().clone(),
         vec![None, Some("sess-1".to_string())],
         "the first turn opens a session; the second continues it"
+    );
+}
+
+#[tokio::test]
+async fn a_resumed_task_restores_the_bound_sessions_workspace_context() {
+    let seen = Arc::new(StdMutex::new(Vec::new()));
+    let runner: RunTaskFn = {
+        let seen = seen.clone();
+        Arc::new(move |opts: RunTaskOptions| {
+            seen.lock().unwrap().push(opts.workspace_context.clone());
+            Box::pin(async move {
+                if let Some(on_session) = opts.on_session {
+                    on_session("sess-1".to_string());
+                }
+                if let Some(on_workspace_context) = opts.on_workspace_context {
+                    on_workspace_context(WorkspaceContext {
+                        cwd: Some("/repo/worktrees/pr-153".to_string()),
+                        branch: Some("fix/pr-context".to_string()),
+                        pull_request: Some("https://github.com/acme/repo/pull/153".to_string()),
+                    });
+                }
+                Ok(RunTaskResult {
+                    session_id: Some("sess-1".to_string()),
+                    usage: None,
+                    provider: opts.provider,
+                    reply: "done".to_string(),
+                    events: 0,
+                })
+            })
+        })
+    };
+    let (send, _recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), runner, send);
+
+    for (task_id, text) in [("t1", "open the PR"), ("t2", "update the PR")] {
+        runtime.handle_message(
+            "peer".into(),
+            String::new(),
+            Some(conversation_frame(task_id, text, "pane-1")),
+        );
+        runtime.idle().await;
+    }
+
+    assert_eq!(seen.lock().unwrap()[0], WorkspaceContext::default());
+    assert_eq!(
+        seen.lock().unwrap()[1].cwd.as_deref(),
+        Some("/repo/worktrees/pr-153"),
+        "the resumed mapper must start in the checkout selected by the first turn"
     );
 }
 

@@ -27,4 +27,7 @@ pub use detect::{
     supports_stdin, DAEMON_PROVIDERS,
 };
 pub use execute::{is_transient_lock, run_provider_task, with_auth_hint};
-pub use types::{Abort, ExistsOnPath, OnEvent, OnStdin, RunTaskFn, RunTaskOptions, RunTaskResult};
+pub use types::{
+    Abort, ExistsOnPath, OnEvent, OnStdin, OnWorkspaceContext, RunTaskFn, RunTaskOptions,
+    RunTaskResult,
+};

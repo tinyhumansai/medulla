@@ -358,6 +358,7 @@ fn attribution_options(attribution: bool) -> RunTaskOptions {
         conversation: String::new(),
         session_class: crate::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider: HarnessProvider::Claude,
         prompt: String::new(),
         cwd: ".".to_string(),
@@ -373,6 +374,7 @@ fn attribution_options(attribution: bool) -> RunTaskOptions {
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
     }
 }
 

@@ -51,6 +51,7 @@ async fn run(
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider: harness(provider),
         prompt: prompt.to_string(),
         cwd: ".".to_string(),
@@ -68,6 +69,7 @@ async fn run(
         })),
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
     };
     let result = run_provider_task(options).await;
     let events = kinds.lock().unwrap().clone();
@@ -171,6 +173,7 @@ async fn spawn_failure_for_missing_binary() {
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
         cwd: ".".to_string(),
@@ -186,6 +189,7 @@ async fn spawn_failure_for_missing_binary() {
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
     };
     let err = run_provider_task(options)
         .await
@@ -204,6 +208,7 @@ async fn abort_before_start_returns_immediately() {
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
         cwd: ".".to_string(),
@@ -219,6 +224,7 @@ async fn abort_before_start_returns_immediately() {
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
     };
     let err = run_provider_task(options).await.expect_err("aborted");
     assert!(err.contains("aborted before start"), "got: {err}");
@@ -241,6 +247,7 @@ async fn abort_mid_run_kills_child() {
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider: HarnessProvider::Claude,
         prompt: "x".to_string(),
         cwd: ".".to_string(),
@@ -256,6 +263,7 @@ async fn abort_mid_run_kills_child() {
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
     };
     let err = run_provider_task(options).await.expect_err("aborted");
     assert!(err.contains("aborted"), "got: {err}");
@@ -278,6 +286,7 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
             conversation: String::new(),
             session_class: medulla::sessions::SessionClass::Bounded,
             resume_session_id: None,
+            workspace_context: Default::default(),
             provider: harness(provider),
             prompt: "start".to_string(),
             cwd: ".".to_string(),
@@ -295,6 +304,7 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
                 *register.lock().unwrap() = Some(tx);
             })),
             on_session: None,
+            on_workspace_context: None,
         };
         // Feed stdin shortly after the run starts.
         let feeder = stdin_tx.clone();
@@ -331,6 +341,7 @@ async fn stdin_is_immediate_eof_for_batch_cli() {
             conversation: String::new(),
             session_class: medulla::sessions::SessionClass::Bounded,
             resume_session_id: None,
+            workspace_context: Default::default(),
             provider: harness(provider),
             prompt: "start".to_string(),
             cwd: ".".to_string(),
@@ -341,6 +352,7 @@ async fn stdin_is_immediate_eof_for_batch_cli() {
             extra_args: Vec::new(),
             skip_permissions: false,
             on_session: None,
+            on_workspace_context: None,
             abort: Abort::new(),
             router: None,
             attribution: true,

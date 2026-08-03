@@ -86,6 +86,7 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         // conversation's context.
         session_class: crate::sessions::SessionClass::Bounded,
         resume_session_id: None,
+        workspace_context: Default::default(),
         provider: options.provider,
         prompt,
         cwd: cwd.clone(),
@@ -105,6 +106,7 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         on_event: None,
         on_stdin: None,
         on_session: None,
+        on_workspace_context: None,
     };
 
     let reply = match (options.run_task)(run_options).await {

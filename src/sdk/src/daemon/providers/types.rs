@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, Notify};
 
 use crate::config::RouterConfig;
 use crate::protocol::HarnessProvider;
-use crate::sessions::SessionClass;
+use crate::sessions::{SessionClass, WorkspaceContext};
 use std::collections::HashMap;
 
 use super::super::mappers::HarnessSemanticEvent;
@@ -30,6 +30,8 @@ pub type OnStdin = Box<dyn FnOnce(mpsc::UnboundedSender<String>) + Send>;
 /// watch the task *while* it runs, which a session id delivered at the end
 /// cannot serve.
 pub type OnSession = Box<dyn FnOnce(String) + Send>;
+/// Reports the final workspace state accumulated by the stream mapper.
+pub type OnWorkspaceContext = Box<dyn Fn(WorkspaceContext) + Send + Sync>;
 
 /// A PATH-lookup predicate (injectable for tests).
 pub type ExistsOnPath = Box<dyn Fn(&str) -> bool + Send + Sync>;
@@ -144,6 +146,8 @@ pub struct RunTaskOptions {
     /// choosing makes `claude` refuse the second start with "Session ID … is
     /// already in use".
     pub resume_session_id: Option<String>,
+    /// Workspace state restored when resuming the bound harness session.
+    pub workspace_context: WorkspaceContext,
     /// The cooperative abort handle.
     pub abort: Abort,
     /// Optional custom OpenAI-compatible router. When `Some`, the executor layers
@@ -161,6 +165,8 @@ pub struct RunTaskOptions {
     pub on_stdin: Option<OnStdin>,
     /// Reports the session serving this task, once it exists.
     pub on_session: Option<OnSession>,
+    /// Persists repository context for a later resumed turn.
+    pub on_workspace_context: Option<OnWorkspaceContext>,
 }
 
 /// The outcome of a headless run.
@@ -207,7 +213,9 @@ pub(super) struct RunSpec {
     pub(super) extra_args: Vec<String>,
     pub(super) skip_permissions: bool,
     pub(super) resume_session_id: Option<String>,
+    pub(super) workspace_context: WorkspaceContext,
     pub(super) abort: Abort,
     pub(super) router: Option<RouterConfig>,
     pub(super) attribution: bool,
+    pub(super) on_workspace_context: Option<OnWorkspaceContext>,
 }

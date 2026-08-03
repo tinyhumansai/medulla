@@ -230,13 +230,10 @@ fn make_path_lookup_resolves_pathish_and_bare_names() {
 
 #[cfg(windows)]
 #[test]
-fn make_path_lookup_resolves_windows_pathext_suffixes() {
+fn make_path_lookup_resolves_windows_executable_suffixes() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("openhuman-core.EXE"), b"").unwrap();
-    let env = HashMap::from([
-        ("PATH".to_string(), dir.path().display().to_string()),
-        ("PATHEXT".to_string(), ".EXE;.CMD".to_string()),
-    ]);
+    std::fs::write(dir.path().join("openhuman-core.exe"), b"").unwrap();
+    let env = HashMap::from([("PATH".to_string(), dir.path().display().to_string())]);
 
     assert!(make_path_lookup(&env)("openhuman-core"));
 }

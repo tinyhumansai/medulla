@@ -26,15 +26,6 @@ pub fn provider_bin(provider: HarnessProvider, env: &HashMap<String, String>) ->
 /// searched across `$PATH` entries.
 pub fn make_path_lookup(env: &HashMap<String, String>) -> ExistsOnPath {
     let path = env.get("PATH").cloned().unwrap_or_default();
-    #[cfg(windows)]
-    let executable_extensions = env
-        .get("PATHEXT")
-        .map(String::as_str)
-        .unwrap_or(".COM;.EXE;.BAT;.CMD")
-        .split(';')
-        .filter(|extension| !extension.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
     let dirs: Vec<String> = path
         .split(path_separator())
         .filter(|d| !d.is_empty())
@@ -42,32 +33,21 @@ pub fn make_path_lookup(env: &HashMap<String, String>) -> ExistsOnPath {
         .collect();
     Box::new(move |bin: &str| {
         if bin.contains('/') || bin.contains('\\') {
-            return is_executable_command(
-                std::path::Path::new(bin),
-                #[cfg(windows)]
-                &executable_extensions,
-            );
+            return is_executable_command(std::path::Path::new(bin));
         }
-        dirs.iter().any(|dir| {
-            is_executable_command(
-                &std::path::Path::new(dir).join(bin),
-                #[cfg(windows)]
-                &executable_extensions,
-            )
-        })
+        dirs.iter()
+            .any(|dir| is_executable_command(&std::path::Path::new(dir).join(bin)))
     })
 }
 
 #[cfg(windows)]
-fn is_executable_command(path: &std::path::Path, extensions: &[String]) -> bool {
+fn is_executable_command(path: &std::path::Path) -> bool {
     if path.extension().is_some() {
         return is_executable(path);
     }
-    extensions.iter().any(|extension| {
-        let mut candidate = path.as_os_str().to_os_string();
-        candidate.push(extension);
-        is_executable(std::path::Path::new(&candidate))
-    })
+    let mut candidate = path.as_os_str().to_os_string();
+    candidate.push(".exe");
+    is_executable(std::path::Path::new(&candidate))
 }
 
 #[cfg(not(windows))]

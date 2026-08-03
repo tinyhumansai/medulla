@@ -91,6 +91,8 @@ fn only_direct_github_pr_commands_may_report_a_pull_request() {
     assert!(pull_request_command("gh pr create -eHother-branch", None).is_none());
     assert!(pull_request_command("gh pr create -eRother/project", None).is_none());
     assert!(pull_request_command("gh pr create -tHotfix", None).is_some());
+    assert!(pull_request_command("gh pr create --web", None).is_none());
+    assert!(pull_request_command("gh pr create -w", None).is_none());
     assert!(pull_request_command("gh pr create '--head' other-branch", None).is_none());
     assert!(pull_request_command("gh pr create --hea\\d other-branch", None).is_none());
     assert!(pull_request_command("gh pr create --he\\\nad other-branch", None).is_none());
@@ -159,6 +161,11 @@ fn pr_commands_reject_chains_except_for_the_reported_worktree_cd() {
         Some(cwd)
     )
     .is_some());
+    assert!(pull_request_command(
+        "cd \"/repo/worktrees/\\fix-label\" && gh pr create --fill",
+        Some(cwd)
+    )
+    .is_none());
 }
 
 #[test]

@@ -85,7 +85,11 @@ fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
         return None;
     }
     match operation {
-        "create" if !has_explicit_head(&arguments) && !has_dry_run(&arguments) => {
+        "create"
+            if !has_explicit_head(&arguments)
+                && !has_dry_run(&arguments)
+                && !has_web(&arguments) =>
+        {
             Some(PullRequestCommand::Create)
         }
         "view" if arguments == ["--json", "url"] || arguments == ["--json=url"] => {
@@ -128,18 +132,20 @@ fn shell_words(command: &str) -> Option<Vec<String>> {
     let mut words = Vec::new();
     let mut word = String::new();
     let mut quote = None;
-    let mut escaped = false;
-    for ch in command.chars() {
-        if escaped {
-            word.push(ch);
-            escaped = false;
-            continue;
-        }
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
         match (quote, ch) {
             (Some('\''), '\'') | (Some('"'), '"') => quote = None,
             (Some('\''), _) => word.push(ch),
-            (_, '\\') => escaped = true,
+            (Some('"'), '\\') => match chars.peek().copied() {
+                Some('$' | '`' | '"' | '\\') => word.push(chars.next().unwrap()),
+                Some('\n') => {
+                    chars.next();
+                }
+                _ => word.push('\\'),
+            },
             (Some('"'), _) => word.push(ch),
+            (None, '\\') => word.push(chars.next()?),
             (None, '\'' | '"') => quote = Some(ch),
             (None, ch) if ch.is_whitespace() => {
                 if !word.is_empty() {
@@ -150,7 +156,7 @@ fn shell_words(command: &str) -> Option<Vec<String>> {
             _ => unreachable!(),
         }
     }
-    if escaped || quote.is_some() {
+    if quote.is_some() {
         return None;
     }
     if !word.is_empty() {
@@ -194,6 +200,13 @@ fn has_dry_run(arguments: &[&str]) -> bool {
     arguments
         .iter()
         .any(|argument| *argument == "--dry-run" || argument.starts_with("--dry-run="))
+}
+
+/// Whether PR creation delegates completion to the browser.
+fn has_web(arguments: &[&str]) -> bool {
+    arguments.iter().any(|argument| {
+        *argument == "--web" || argument.starts_with("--web=") || has_short_option(argument, 'w')
+    })
 }
 
 /// Read only the structured `url` property from `gh pr view --json url`.

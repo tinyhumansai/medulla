@@ -264,3 +264,29 @@ fn parse_iso_rejects_malformed_separators_and_handles_fractions() {
     // A non-Z/offset trailing char is tolerated (treated like UTC).
     assert!(parse_iso_to_ms("2026-07-05T00:00:00X").is_some());
 }
+
+#[test]
+fn resumed_claude_init_cannot_replace_retained_worktree_context() {
+    let mut mapper = HarnessLineMapper::new("claude");
+    mapper.set_workspace_context(
+        Some("/repo/worktrees/pr-153".to_string()),
+        Some("fix/pr-context".to_string()),
+        Some("https://github.com/acme/repo/pull/153".to_string()),
+    );
+    let events = mapper.map_line(
+        r#"{"type":"system","subtype":"init","cwd":"/repo","model":"claude","session_id":"sess-1"}"#,
+        1,
+    );
+
+    assert_eq!(events.len(), 1);
+    assert!(events[0].event.payload.get("cwd").is_none());
+    assert_eq!(events[0].event.payload["model"], "claude");
+    assert_eq!(
+        mapper.workspace_context(),
+        (
+            Some("/repo/worktrees/pr-153".to_string()),
+            Some("fix/pr-context".to_string()),
+            Some("https://github.com/acme/repo/pull/153".to_string()),
+        )
+    );
+}

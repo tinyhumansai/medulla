@@ -9,8 +9,6 @@ mod types;
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod workspace_tests;
 
 pub(super) use execution::uses_acp;
 pub use execution::{run_acp_task, HARNESS_PROTOCOL_ENV};

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use crate::daemon::providers::{Abort, RunTaskOptions};
 use crate::daemon::status_detail;
 use crate::protocol::HarnessProvider;
+use crate::sessions::WorkspaceContext;
 
 use super::types::FoldState;
 
@@ -420,4 +421,74 @@ fn agent_env_strips_inherited_fleet_capabilities() {
 
     assert!(!env.contains_key(crate::control_socket::MCP_SOCKET_ENV));
     assert!(!env.contains_key(crate::control_socket::MCP_GRANT_ENV));
+}
+
+#[test]
+fn acp_pr_correlation_requires_success_in_the_dispatch_workspace() {
+    fn update(
+        kind: &str,
+        status: &str,
+        value: serde_json::Value,
+    ) -> agent_client_protocol::schema::v1::SessionUpdate {
+        let mut update = serde_json::json!({
+            "sessionUpdate": kind,
+            "toolCallId": "call-pr",
+            "title": "Terminal",
+            "kind": "execute",
+            "status": status,
+        });
+        update[if kind == "tool_call" {
+            "rawInput"
+        } else {
+            "rawOutput"
+        }] = value;
+        serde_json::from_value(update).unwrap()
+    }
+    let contexts = Arc::new(Mutex::new(Vec::new()));
+    let make_state = || {
+        let observed = contexts.clone();
+        FoldState::with_workspace(
+            None,
+            WorkspaceContext {
+                cwd: Some("/repo/worktrees/pr-153".to_string()),
+                branch: Some("fix/pr-context".to_string()),
+                pull_request: None,
+            },
+            false,
+            Some(Box::new(move |context| {
+                observed.lock().unwrap().push(context)
+            })),
+        )
+    };
+    let call = || {
+        update(
+            "tool_call",
+            "in_progress",
+            serde_json::json!({"command": "cd /repo/worktrees/pr-153 && gh pr view --json url"}),
+        )
+    };
+    let result = |status| {
+        update(
+            "tool_call_update",
+            status,
+            serde_json::json!("{\"url\":\"https://github.com/acme/repo/pull/153\"}"),
+        )
+    };
+
+    let mut completed = make_state();
+    completed.fold(call());
+    completed.fold(result("completed"));
+    assert_eq!(contexts.lock().unwrap().len(), 1);
+
+    contexts.lock().unwrap().clear();
+    let mut failed = make_state();
+    failed.fold(call());
+    failed.fold(result("failed"));
+    assert!(contexts.lock().unwrap().is_empty());
+
+    let mut moved = make_state();
+    moved.fold(call());
+    moved.workspace_context.branch = Some("another-branch".to_string());
+    moved.fold(result("completed"));
+    assert!(contexts.lock().unwrap().is_empty());
 }

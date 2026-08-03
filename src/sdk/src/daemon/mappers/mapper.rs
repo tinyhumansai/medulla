@@ -85,7 +85,7 @@ impl HarnessLineMapper {
                 }
             }
         }
-        let events = match self.provider {
+        let mut events = match self.provider {
             Provider::Claude => claude_events_from_line(
                 raw,
                 line,
@@ -104,6 +104,21 @@ impl HarnessLineMapper {
             ),
             Provider::Opencode => opencode_events_from_line(raw, line),
         };
+        // A resumed Claude process starts in its launch root and repeats that
+        // root in `system:init`. Retained worktree context is later, explicit
+        // tool evidence, so the init cwd must not replace it in downstream
+        // session snapshots.
+        if self.workspace_cwd.is_some() {
+            for event in &mut events {
+                if event.record_type == "system:init" {
+                    event
+                        .event
+                        .payload
+                        .as_object_mut()
+                        .map(|payload| payload.remove("cwd"));
+                }
+            }
+        }
         for event in &events {
             if event.event.kind != crate::harness_work::kinds::SESSION_INFO
                 || !event.record_type.ends_with(":workspace")

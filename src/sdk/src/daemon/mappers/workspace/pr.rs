@@ -13,7 +13,8 @@ pub(crate) fn pull_request_command(
     if gh_repo_is_set {
         return None;
     }
-    let command = shell_inner_command(command).unwrap_or(command).trim();
+    let inner = shell_inner_command(command);
+    let command = inner.as_deref().unwrap_or(command).trim();
     match workspace_cwd {
         Some(workspace_cwd) => {
             direct_pull_request_command(command_after_cd(command, workspace_cwd)?)
@@ -173,15 +174,46 @@ pub(crate) fn pull_request_url_from_json(output: &str) -> Option<String> {
 }
 
 /// Unwrap the single-quoted `shell -lc '…'` shape recorded by Codex.
-fn shell_inner_command(command: &str) -> Option<&str> {
+fn shell_inner_command(command: &str) -> Option<String> {
     let command = command.trim();
     let rest = ["/bin/zsh", "zsh", "/bin/bash", "bash", "/bin/sh", "sh"]
         .iter()
         .find_map(|shell| command.strip_prefix(shell))?
         .trim_start();
     let quoted = rest.strip_prefix("-lc")?.trim_start();
-    let inner = quoted.strip_prefix('\'')?.strip_suffix('\'')?;
-    (!inner.contains('\'')).then_some(inner)
+    decode_single_quoted_word(quoted)
+}
+
+/// Decode one shell word composed of single-quoted spans and escaped quotes.
+///
+/// Codex records `shell -lc` payloads as a single shell-quoted argument. A
+/// literal apostrophe is represented by closing the span, writing `\'`, and
+/// reopening it (`'Don'\''t'`). Reject every other unquoted form so decoding
+/// cannot broaden the accepted direct-command subset.
+fn decode_single_quoted_word(word: &str) -> Option<String> {
+    let mut decoded = String::new();
+    let mut chars = word.chars().peekable();
+    let mut quoted = false;
+    let mut saw_quote = false;
+    while let Some(ch) = chars.next() {
+        if quoted {
+            if ch == '\'' {
+                quoted = false;
+            } else {
+                decoded.push(ch);
+            }
+            continue;
+        }
+        match ch {
+            '\'' => {
+                quoted = true;
+                saw_quote = true;
+            }
+            '\\' if chars.next() == Some('\'') => decoded.push('\''),
+            _ => return None,
+        }
+    }
+    (saw_quote && !quoted).then_some(decoded)
 }
 
 /// Find a GitHub pull-request URL in ordinary or JSON `gh` output.

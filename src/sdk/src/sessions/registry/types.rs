@@ -1,6 +1,10 @@
 //! Data types for the `registry` module.
-#[allow(unused_imports)]
-use super::*;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use tokio::sync::Mutex as AsyncMutex;
+
+use crate::sessions::SessionClass;
 /// What one turn should do about session continuity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnPlan {

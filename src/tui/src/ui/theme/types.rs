@@ -12,4 +12,8 @@ pub struct Theme {
     pub selection_fg: Color,
     /// Dim panel border color.
     pub dim_border: Color,
+    /// Foreground used for cues that require operator attention.
+    pub attention: Color,
+    /// Whether cues that require operator attention blink.
+    pub attention_blink: bool,
 }

@@ -31,12 +31,16 @@ fn from_config_falls_back_per_field() {
         accent: Some("bogus".into()),
         selection_fg: None,
         dim_border: Some("blue".into()),
+        attention: Some("lightyellow".into()),
+        attention_blink: Some(false),
     };
     let t = Theme::from_config(&cfg);
     assert_eq!(t.primary, Color::Rgb(0x12, 0x34, 0x56));
     assert_eq!(t.accent, Theme::default().accent); // bogus → fallback
     assert_eq!(t.selection_fg, Theme::default().selection_fg); // none → fallback
     assert_eq!(t.dim_border, Color::Blue);
+    assert_eq!(t.attention, Color::LightYellow);
+    assert!(!t.attention_blink);
 }
 
 #[test]
@@ -101,7 +105,7 @@ fn color_to_string_covers_every_named_variant() {
 fn cycle_role_covers_all_roles_and_custom_backward() {
     let mut t = Theme::default();
     // Every role index round-trips through set_role.
-    for idx in 0..4 {
+    for idx in 0..THEME_ROLES.len() {
         let before = t.role(idx);
         t.cycle_role(idx, true);
         assert_ne!(t.role(idx), before, "role {idx} advanced");
@@ -152,4 +156,6 @@ fn persist_theme_preserves_unrelated_sections() {
     assert_eq!(reparsed["medulla"]["maxPasses"].as_integer(), Some(8));
     assert_eq!(reparsed["stateDir"].as_str(), Some("/tmp/state"));
     assert_eq!(reparsed["theme"]["primary"].as_str(), Some("cyan"));
+    assert_eq!(reparsed["theme"]["attention"].as_str(), Some("yellow"));
+    assert_eq!(reparsed["theme"]["attentionBlink"].as_bool(), Some(true));
 }

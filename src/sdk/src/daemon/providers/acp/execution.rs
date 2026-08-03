@@ -381,6 +381,9 @@ fn agent_for(options: &RunTaskOptions) -> AcpAgent {
             &options.env,
         ))
         .arg("acp"),
+        HarnessProvider::Openhuman => {
+            unreachable!("OpenHuman's operator TUI is not an ACP coding provider")
+        }
     };
     AcpAgent::new(config.envs(acp_env(options)))
 }

@@ -34,7 +34,7 @@ impl App {
             TLine::from(" "),
             TLine::from(Span::styled("Settings", bold)),
             TLine::from("↑↓ move between subpages · 1-9 jump straight to one"),
-            TLine::from("Appearance: j / k pick a theme role · ←/→ or Enter cycle its color (saved live)"),
+            TLine::from("Appearance: j / k pick an option · ←/→ or Enter change it (saved live)"),
             TLine::from(
                 "Status line: j / k pick a harness-row field · ←/→ or Enter cycle it (live preview)",
             ),
@@ -50,10 +50,21 @@ impl App {
                 "{FOCUS_CHORD_LABEL} type into the selected harness (and take it from the orchestrator)"
             )),
             TLine::from("Ctrl-T start a harness of your own · Ctrl-G grab it or give it back"),
+            TLine::from(format!(
+                "From an empty composer Esc focuses the rail · from a harness {FOCUS_CHORD_LABEL} releases to it"
+            )),
+            TLine::from("On the rail ↑↓ select a running harness task · K then y kills it"),
             TLine::from(Span::styled(
                 "While you hold a harness the orchestrator will not dispatch into it",
                 dim,
             )),
+            TLine::from(" "),
+            TLine::from(Span::styled("Changes", bold)),
+            TLine::from("Tab / Shift-Tab to the Changes view to inspect the Git diff since session start"),
+            TLine::from("↑↓ select files · j/k move by line · [/] jump hunks · PageUp/PageDown move faster"),
+            TLine::from(
+                "c comments on a line or hunk · e edits it · C comments on or edits the file · r refreshes",
+            ),
             TLine::from(" "),
             TLine::from(Span::styled("Copy", bold)),
             TLine::from("Ctrl-Y copies the whole chat · /copy last copies just the latest reply"),

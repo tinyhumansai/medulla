@@ -362,7 +362,11 @@ pub struct WorkflowsConfig {
     pub default_worker: String,
     /// The harness hint sent with each dispatch. Absent uses the worker's own
     /// default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_dispatch_provider"
+    )]
     pub default_provider: Option<HarnessProvider>,
     /// The model hint sent with each dispatch.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -393,6 +397,22 @@ pub struct WorkflowsConfig {
     /// Whether and how a workflow reviews its own history.
     #[serde(default)]
     pub evolve: EvolveSettings,
+}
+
+/// Reject operator-only harnesses at the persisted workflow-dispatch boundary.
+fn deserialize_dispatch_provider<'de, D>(
+    deserializer: D,
+) -> Result<Option<HarnessProvider>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let provider = Option::<HarnessProvider>::deserialize(deserializer)?;
+    match provider {
+        Some(provider) if !provider.is_dispatchable() => Err(serde::de::Error::custom(
+            "workflows.defaultProvider must be claude, codex, or opencode",
+        )),
+        provider => Ok(provider),
+    }
 }
 
 /// The `workflows.evolve` section: reviewing a workflow against its own runs.

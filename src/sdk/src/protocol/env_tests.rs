@@ -125,6 +125,15 @@ fn provider_bin_override_and_default() {
     // Whitespace-only override falls back to the default.
     let e = env(&[("TINYPLACE_CODEX_BIN", "   ")]);
     assert_eq!(provider_bin(HarnessProvider::Codex, &e), "codex");
+    assert_eq!(
+        provider_bin(HarnessProvider::Openhuman, &env(&[])),
+        "openhuman-core"
+    );
+    let e = env(&[("OPENHUMAN_BIN", " /opt/openhuman ")]);
+    assert_eq!(
+        provider_bin(HarnessProvider::Openhuman, &e),
+        "/opt/openhuman"
+    );
 }
 
 #[test]

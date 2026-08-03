@@ -169,6 +169,36 @@ fn help_lists_every_command_from_the_catalog() {
 }
 
 #[test]
+fn help_explains_how_to_kill_a_harness_and_inspect_git_changes() {
+    let mut app = agents_app();
+    type_str(&mut app, "/help");
+    let _ = app.on_event(key(KeyCode::Enter));
+
+    let out = render(&mut app, 160, 90);
+    assert!(
+        out.contains("K then y kills it"),
+        "help must explain the confirmed harness-kill binding: {out}"
+    );
+    assert!(
+        out.contains("empty composer Esc focuses the rail")
+            && out.contains("from a harness Ctrl-] releases to it"),
+        "help must explain how each input mode reaches the task rail: {out}"
+    );
+    assert!(
+        out.contains("Changes view to inspect the Git diff since session start"),
+        "help must make the Git changes view discoverable: {out}"
+    );
+    assert!(
+        out.contains("[/] jump hunks"),
+        "help must summarize diff navigation: {out}"
+    );
+    assert!(
+        out.contains("e edits it · C comments on or edits the file"),
+        "help must distinguish line/hunk comment editing from file comment editing: {out}"
+    );
+}
+
+#[test]
 fn help_scrolls_so_a_short_terminal_can_reach_the_commands() {
     // The page is longer than a small window, and a keyboard reference whose
     // bottom half is unreachable is not one.

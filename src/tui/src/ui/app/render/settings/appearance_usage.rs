@@ -11,11 +11,11 @@ use crate::ui::stream;
 use crate::ui::theme::{color_to_string, THEME_ROLES};
 use crate::ui::util::clip;
 
-use super::super::super::appearance::APPEARANCE_ROWS;
+use super::super::super::appearance::{APPEARANCE_ROWS, ATTENTION_ROWS};
 use super::super::super::types::App;
 
 impl App {
-    /// Draw the Appearance subpage: the theme role list with live-color swatches.
+    /// Draw Appearance as titled groups whose indented rows are the controls.
     pub(super) fn draw_appearance(&mut self, f: &mut Frame, area: Rect) {
         let block = self.panel("Appearance");
         let inner = block.inner(area);
@@ -23,7 +23,15 @@ impl App {
         let sel = self.appearance_index.min(APPEARANCE_ROWS - 1);
         let mut lines: Vec<TLine> = Vec::new();
         let mut selected_line_index: usize = 0;
-        for (i, role) in THEME_ROLES.iter().enumerate() {
+        let heading = Style::default().add_modifier(Modifier::BOLD);
+        let description = Style::default().add_modifier(Modifier::DIM);
+        lines.push(TLine::from(Span::styled("Interface colors", heading)));
+        lines.push(TLine::from(Span::styled(
+            "  Colors used across navigation, selections, and panel chrome.",
+            description,
+        )));
+        lines.push(TLine::from(""));
+        for (i, role) in THEME_ROLES[..4].iter().enumerate() {
             if i == sel {
                 selected_line_index = lines.len();
             }
@@ -33,19 +41,72 @@ impl App {
             } else {
                 Style::default()
             };
-            let marker = if i == sel { "▸ " } else { "  " };
+            let marker = if i == sel { "  ▸ " } else { "    " };
             lines.push(TLine::from(vec![
                 Span::styled(marker, text_style),
                 Span::styled("███ ", Style::default().fg(c)),
-                Span::styled(format!("{role:<13} {}", color_to_string(c)), text_style),
+                Span::styled(format!("{role:<17} {}", color_to_string(c)), text_style),
             ]));
         }
         lines.push(TLine::from(""));
-        // Headers, not rows: the cursor indexes the indicators alone, so these
-        // are drawn between them purely to say whose usage each group reports.
-        // Without the split, "CPU" above "CPU" invites reading the device's
-        // load as Medulla's own.
-        let header = Style::default().add_modifier(Modifier::DIM);
+        lines.push(TLine::from(Span::styled("Attention cues", heading)));
+        lines.push(TLine::from(Span::styled(
+            "  How Medulla highlights a task or harness waiting for you.",
+            description,
+        )));
+        lines.push(TLine::from(""));
+        let attention_index = THEME_ROLES.len() - 1;
+        if attention_index == sel {
+            selected_line_index = lines.len();
+        }
+        let attention_style = if attention_index == sel {
+            self.theme.selection()
+        } else {
+            Style::default()
+        };
+        lines.push(TLine::from(vec![
+            Span::styled(
+                if attention_index == sel {
+                    "  ▸ "
+                } else {
+                    "    "
+                },
+                attention_style,
+            ),
+            Span::styled("███ ", Style::default().fg(self.theme.attention)),
+            Span::styled(
+                format!("{:<17} {}", "Color", color_to_string(self.theme.attention)),
+                attention_style,
+            ),
+        ]));
+        let blink_index = THEME_ROLES.len();
+        if blink_index == sel {
+            selected_line_index = lines.len();
+        }
+        let blink_style = if blink_index == sel {
+            self.theme.selection()
+        } else {
+            Style::default()
+        };
+        lines.push(TLine::from(Span::styled(
+            format!(
+                "{}    Blink             {}",
+                if blink_index == sel { "  ▸ " } else { "    " },
+                if self.theme.attention_blink {
+                    "on"
+                } else {
+                    "off"
+                }
+            ),
+            blink_style,
+        )));
+        lines.push(TLine::from(""));
+        lines.push(TLine::from(Span::styled("Resource indicators", heading)));
+        lines.push(TLine::from(Span::styled(
+            "  Choose what system activity is visible and how it is displayed.",
+            description,
+        )));
+        lines.push(TLine::from(""));
         for (offset, (label, value)) in [
             ("Process CPU", self.loaded.config.appearance.cpu),
             ("Process RAM", self.loaded.config.appearance.ram),
@@ -59,19 +120,41 @@ impl App {
         {
             match offset {
                 0 => lines.push(TLine::from(Span::styled(
-                    "  Medulla process — status line",
-                    header,
+                    "  Medulla process · status line",
+                    description,
                 ))),
                 3 => {
                     lines.push(TLine::from(""));
                     lines.push(TLine::from(Span::styled(
-                        "  This device — Agents sidebar",
-                        header,
+                        "  This device · Agents sidebar",
+                        description,
+                    )));
+                    let title_index = THEME_ROLES.len() + ATTENTION_ROWS + 3;
+                    if title_index == sel {
+                        selected_line_index = lines.len();
+                    }
+                    let style = if title_index == sel {
+                        self.theme.selection()
+                    } else {
+                        Style::default()
+                    };
+                    let marker = if title_index == sel { "▸ " } else { "  " };
+                    lines.push(TLine::from(Span::styled(
+                        format!(
+                            "{marker}{:<20} {}",
+                            "Session titles",
+                            if self.loaded.config.appearance.show_session_titles {
+                                "on"
+                            } else {
+                                "off"
+                            }
+                        ),
+                        style,
                     )));
                 }
                 _ => {}
             }
-            let index = THEME_ROLES.len() + offset;
+            let index = THEME_ROLES.len() + ATTENTION_ROWS + offset + usize::from(offset >= 3);
             if index == sel {
                 selected_line_index = lines.len();
             }
@@ -80,7 +163,7 @@ impl App {
             } else {
                 Style::default()
             };
-            let marker = if index == sel { "▸ " } else { "  " };
+            let marker = if index == sel { "  ▸ " } else { "    " };
             lines.push(TLine::from(Span::styled(
                 format!(
                     "{marker}{label:<20} {}",

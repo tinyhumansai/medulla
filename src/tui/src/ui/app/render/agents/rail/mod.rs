@@ -215,8 +215,18 @@ impl App {
                 if thread.running {
                     style = style.fg(Color::Yellow);
                 }
+                if thread.attention > 0 {
+                    style = style.fg(self.theme.attention);
+                    if self.theme.attention_blink {
+                        style = style.add_modifier(Modifier::SLOW_BLINK);
+                    }
+                }
                 if thread.id == self.snapshot.active_thread_id {
-                    style = self.theme.selection();
+                    style = if thread.attention > 0 {
+                        style.bg(self.theme.primary).add_modifier(Modifier::BOLD)
+                    } else {
+                        self.theme.selection()
+                    };
                 }
                 TLine::from(Span::styled(
                     format!("{marker} {} · {}t{badge}", thread.name, thread.turns),

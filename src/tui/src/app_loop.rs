@@ -100,7 +100,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     if let Some(path) = args.config.as_deref() {
         std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
     }
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut loaded = load_config(args.config.as_deref(), &env, &cwd)?;
     prompt_for_update(&loaded.config.update, &env).await;
@@ -137,16 +137,38 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // the developer's real `~/.openhuman` even on a `MEDULLA_HOME=$(mktemp -d)`
     // scratch run — the recipe that exists precisely to avoid that. Cheap, and
     // a no-op when the operator set `OPENHUMAN_WORKSPACE` themselves.
-    medulla::core_host::bind_workspace(&env, &home);
+    let core_workspace = medulla::core_host::bind_workspace(&env, &home);
+    // Keep the subprocess snapshot in lockstep with the process environment.
+    // OpenHuman's picker entry inherits this map, so its native TUI opens the
+    // same persisted core and agents as Medulla instead of rediscovering the
+    // developer's default ~/.openhuman in the child.
+    env.insert(
+        medulla::core_host::OPENHUMAN_WORKSPACE_ENV.to_string(),
+        core_workspace.to_string_lossy().into_owned(),
+    );
     // Same binding discipline for the backend: the core must dial the endpoint
     // this host was configured for, or a staging/self-hosted install verifies a
     // token against one deployment and stores it against another.
-    medulla::core_host::bind_medulla_base_url(&env, &loaded.config.backend.base_url);
+    let medulla_base_url =
+        medulla::core_host::bind_medulla_base_url(&env, &loaded.config.backend.base_url);
+    if !medulla_base_url.is_empty() {
+        env.insert(
+            medulla::core_host::OPENHUMAN_MEDULLA_BASE_URL_ENV.to_string(),
+            medulla_base_url,
+        );
+    }
     // The core's own backend client needs the same treatment: it resolves
     // `/auth/me` from `BACKEND_URL`, which defaults to production and knows
     // nothing about `MEDULLA_STAGING`, so the in-app login screen would verify a
     // staging token and then have the core hand it to production to validate.
-    medulla::core_host::bind_backend_api_url(&env, &loaded.config.backend.base_url);
+    let backend_api_url =
+        medulla::core_host::bind_backend_api_url(&env, &loaded.config.backend.base_url);
+    if !backend_api_url.is_empty() {
+        env.insert(
+            medulla::core_host::OPENHUMAN_BACKEND_URL_ENV.to_string(),
+            backend_api_url,
+        );
+    }
 
     // Runtime selection.
     //
@@ -191,7 +213,14 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // `~/OpenHuman/projects`, which a Medulla operator has never used — their
     // repos are the configured workspace roots. Binding the first keeps the
     // agent writing where the operator actually works. Also non-overriding.
-    medulla::core_host::bind_action_dir(&env, workspace_roots.first().map(|p| p.as_path()));
+    if let Some(action_dir) =
+        medulla::core_host::bind_action_dir(&env, workspace_roots.first().map(|p| p.as_path()))
+    {
+        env.insert(
+            medulla::core_host::OPENHUMAN_ACTION_DIR_ENV.to_string(),
+            action_dir.to_string_lossy().into_owned(),
+        );
+    }
     // The hub narrates itself; those lines must not reach the terminal while the
     // TUI owns the screen, so they are captured here instead.
     let hub_logs = medulla_tui::log::LogBuffer::new();

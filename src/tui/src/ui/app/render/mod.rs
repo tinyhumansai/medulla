@@ -434,9 +434,10 @@ impl App {
                 // Only when the tab is not the one you are on: the selection
                 // style is how "you are here" is said, and blinking over it
                 // would trade a fact for a nag.
-                style = style
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
+                style = style.fg(self.theme.attention).add_modifier(Modifier::BOLD);
+                if self.theme.attention_blink {
+                    style = style.add_modifier(Modifier::SLOW_BLINK);
+                }
             }
             spans.push(Span::styled(label, style));
             spans.push(Span::raw(gap));

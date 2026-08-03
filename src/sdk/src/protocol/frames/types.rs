@@ -21,6 +21,13 @@ pub enum HarnessProvider {
     Codex,
     /// The `opencode` CLI harness.
     Opencode,
+    /// OpenHuman's native terminal UI.
+    ///
+    /// This is an operator-facing harness only. It is intentionally absent
+    /// from the daemon's dispatchable provider list: OpenHuman owns its agent
+    /// loop and shares the host's core state rather than accepting coding-task
+    /// frames.
+    Openhuman,
 }
 
 impl HarnessProvider {
@@ -30,6 +37,7 @@ impl HarnessProvider {
             HarnessProvider::Claude => "claude",
             HarnessProvider::Codex => "codex",
             HarnessProvider::Opencode => "opencode",
+            HarnessProvider::Openhuman => "openhuman",
         }
     }
 
@@ -42,6 +50,7 @@ impl HarnessProvider {
             HarnessProvider::Claude => "Claude Code",
             HarnessProvider::Codex => "Codex",
             HarnessProvider::Opencode => "OpenCode",
+            HarnessProvider::Openhuman => "OpenHuman",
         }
     }
 
@@ -57,6 +66,7 @@ impl HarnessProvider {
             HarnessProvider::Claude => "✳",
             HarnessProvider::Codex => "◆",
             HarnessProvider::Opencode => "◻",
+            HarnessProvider::Openhuman => "○",
         }
     }
 
@@ -66,8 +76,22 @@ impl HarnessProvider {
             "claude" => Some(HarnessProvider::Claude),
             "codex" => Some(HarnessProvider::Codex),
             "opencode" => Some(HarnessProvider::Opencode),
+            "openhuman" => Some(HarnessProvider::Openhuman),
             _ => None,
         }
+    }
+
+    /// Parse a provider that may receive delegated coding tasks.
+    ///
+    /// OpenHuman is intentionally excluded: its native TUI owns its own agent
+    /// loop and is only launchable by the operator-facing harness picker.
+    pub fn dispatchable_from_wire(value: &str) -> Option<Self> {
+        Self::from_wire(value).filter(|provider| provider.is_dispatchable())
+    }
+
+    /// Whether this provider accepts delegated coding-task frames.
+    pub fn is_dispatchable(self) -> bool {
+        !matches!(self, Self::Openhuman)
     }
 }
 

@@ -103,7 +103,7 @@ impl TurnWatcher {
             HarnessProvider::Claude => self.observe_claude(&record),
             HarnessProvider::Codex => self.observe_codex(&record),
             // No rollout format to read.
-            HarnessProvider::Opencode => None,
+            HarnessProvider::Opencode | HarnessProvider::Openhuman => None,
         }
     }
 

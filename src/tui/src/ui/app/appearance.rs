@@ -16,12 +16,15 @@ use crate::ui::theme::{color_to_string, THEME_ROLES};
 
 use super::types::App;
 
-/// Resource-indicator rows the page lists after the theme roles: process CPU,
-/// RAM, and disk I/O, then device CPU, RAM, and disk.
-pub(super) const RESOURCE_ROWS: usize = 6;
+/// Non-theme rows: session titles, then process and device resource indicators.
+pub(super) const APPEARANCE_OPTION_ROWS: usize = 7;
 
-/// Number of selectable rows on the Appearance page: theme roles plus resources.
-pub(super) const APPEARANCE_ROWS: usize = THEME_ROLES.len() + RESOURCE_ROWS;
+/// Number of behavior controls shown after the editable theme colors.
+pub(super) const ATTENTION_ROWS: usize = 1;
+
+/// Number of selectable rows: theme colors, attention behavior, and options.
+pub(super) const APPEARANCE_ROWS: usize =
+    THEME_ROLES.len() + ATTENTION_ROWS + APPEARANCE_OPTION_ROWS;
 
 impl App {
     /// Cycle the selected colour role and persist the theme.
@@ -30,9 +33,31 @@ impl App {
         if index < THEME_ROLES.len() {
             self.theme.cycle_role(index, forward);
             self.persist_theme_now(THEME_ROLES[index]);
+        } else if index == THEME_ROLES.len() {
+            self.theme.attention_blink = !self.theme.attention_blink;
+            let value = if self.theme.attention_blink {
+                "on"
+            } else {
+                "off"
+            };
+            self.persist_theme_value_now("Attention blink", value.into());
         } else {
-            self.cycle_resource_display(index - THEME_ROLES.len(), forward);
+            let option = index - THEME_ROLES.len() - ATTENTION_ROWS;
+            if option == 3 {
+                self.toggle_session_titles();
+            } else {
+                let resource = if option < 3 { option } else { option - 1 };
+                self.cycle_resource_display(resource, forward);
+            }
         }
+    }
+
+    /// Toggle extracted harness titles on orchestrator-managed agent rows.
+    fn toggle_session_titles(&mut self) {
+        let appearance = &mut self.loaded.config.appearance;
+        appearance.show_session_titles = !appearance.show_session_titles;
+        let shown = appearance.show_session_titles;
+        self.persist_appearance_now("Session titles", if shown { "on" } else { "off" }.into());
     }
 
     /// Cycle and persist one resource indicator, process-scoped or device-wide.
@@ -88,6 +113,11 @@ impl App {
         *display = choices[next];
         let value = format!("{:?}", *display).to_ascii_lowercase();
 
+        self.persist_appearance_now(name, value);
+    }
+
+    /// Persist the complete appearance section after one live option changes.
+    fn persist_appearance_now(&mut self, name: &str, value: String) {
         match &self.config_path {
             Some(path) => {
                 // The whole section is rewritten on every change, so every
@@ -112,6 +142,10 @@ impl App {
                 })
                 .collect();
                 section.insert(
+                    "showSessionTitles".into(),
+                    toml::Value::Boolean(appearance.show_session_titles),
+                );
+                section.insert(
                     "showHarnessBranch".into(),
                     toml::Value::Boolean(self.loaded.config.appearance.show_harness_branch),
                 );
@@ -120,23 +154,28 @@ impl App {
                     toml::Value::Boolean(self.loaded.config.appearance.show_harness_path),
                 );
                 match medulla::config::persist_section(path, "appearance", section) {
-                    Ok(()) => self.set_status(format!("{name} indicator: {value} (saved)")),
+                    Ok(()) => self.set_status(format!("Appearance · {name} → {value} (saved)")),
                     Err(error) => self.set_status(format!("Appearance save failed: {error}")),
                 }
             }
-            None => self.set_status(format!("{name} indicator: {value} (not persisted)")),
+            None => self.set_status(format!("Appearance · {name} → {value} (not persisted)")),
         }
     }
 
     /// Write the current theme to the injected config path.
     fn persist_theme_now(&mut self, role: &str) {
         let value = color_to_string(self.theme.role(self.appearance_index));
+        self.persist_theme_value_now(role, value);
+    }
+
+    /// Persist the live theme and report the edited value in the status line.
+    fn persist_theme_value_now(&mut self, setting: &str, value: String) {
         match &self.config_path {
             Some(path) => match crate::ui::theme::persist_theme(path, &self.theme) {
-                Ok(()) => self.set_status(format!("Appearance · {role} → {value} (saved)")),
+                Ok(()) => self.set_status(format!("Appearance · {setting} → {value} (saved)")),
                 Err(error) => self.set_status(format!("Appearance · save failed: {error}")),
             },
-            None => self.set_status(format!("Appearance · {role} → {value} (not persisted)")),
+            None => self.set_status(format!("Appearance · {setting} → {value} (not persisted)")),
         }
     }
 }

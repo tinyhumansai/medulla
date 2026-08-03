@@ -94,6 +94,9 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
 #[test]
 fn picker_choices_include_every_native_provider_and_registered_preset() {
     let mut harnesses = harnesses(PtyManager::new());
+    harnesses
+        .env
+        .insert("OPENHUMAN_BIN".to_string(), "/bin/sh".to_string());
     harnesses.providers = vec![
         HarnessProvider::Claude,
         HarnessProvider::Codex,
@@ -112,10 +115,28 @@ fn picker_choices_include_every_native_provider_and_registered_preset() {
 
     assert_eq!(
         labels,
-        ["Claude Code", "Codex", "OpenCode", "DeepSeek Codex"]
+        [
+            "Claude Code",
+            "Codex",
+            "OpenCode",
+            "OpenHuman",
+            "DeepSeek Codex"
+        ]
     );
-    assert_eq!(choices[3].id(), "deepseek");
-    assert_eq!(choices[3].provider, HarnessProvider::Codex);
+    assert_eq!(choices[3].id(), "openhuman");
+    assert_eq!(choices[3].provider, HarnessProvider::Openhuman);
+    assert_eq!(choices[4].id(), "deepseek");
+    assert_eq!(choices[4].provider, HarnessProvider::Codex);
+}
+
+#[test]
+fn picker_hides_openhuman_when_its_binary_is_unavailable() {
+    let harnesses = harnesses(PtyManager::new());
+
+    assert!(!harnesses
+        .choices()
+        .iter()
+        .any(|choice| choice.provider == HarnessProvider::Openhuman));
 }
 
 #[test]

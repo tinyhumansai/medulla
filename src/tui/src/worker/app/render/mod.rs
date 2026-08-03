@@ -293,7 +293,7 @@ impl WorkerApp {
             let start = crate::ui::selection::viewport_start(selected, rows.len(), visible);
             self.hit_rows = Some((inner, start));
             for (i, row) in rows.iter().enumerate().skip(start).take(visible) {
-                lines.push(session_line(row, i == selected, self.now()));
+                lines.push(session_line(row, i == selected, self.now(), &self.theme));
             }
         }
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
@@ -439,7 +439,12 @@ fn state_color(state: PtyState) -> Color {
 }
 
 /// One row of the session list.
-fn session_line(row: &SessionRow, selected: bool, now: i64) -> Line<'static> {
+fn session_line(
+    row: &SessionRow,
+    selected: bool,
+    now: i64,
+    theme: &crate::ui::theme::Theme,
+) -> Line<'static> {
     let idle = row.idle_ms(now);
     // A running session that has said nothing for a while is the signal an
     // operator is looking for, so it is called out rather than left to be
@@ -461,8 +466,11 @@ fn session_line(row: &SessionRow, selected: bool, now: i64) -> Line<'static> {
     let mut style = Style::default().fg(state_color(row.state));
     if waiting.is_some() {
         style = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
+            .fg(theme.attention)
+            .add_modifier(Modifier::BOLD);
+        if theme.attention_blink {
+            style = style.add_modifier(Modifier::SLOW_BLINK);
+        }
     }
     if selected {
         style = style.add_modifier(Modifier::REVERSED);

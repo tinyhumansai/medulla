@@ -105,12 +105,14 @@ fn build_request(
         ));
     }
     let provider = match optional_str(params, "harness") {
-        Some(name) => Some(HarnessProvider::from_wire(&name).ok_or_else(|| {
-            ControlFailure::new(
-                ErrorKind::BadRequest,
-                format!("`{name}` is not a harness; use claude, codex, or opencode"),
-            )
-        })?),
+        Some(name) => Some(
+            HarnessProvider::dispatchable_from_wire(&name).ok_or_else(|| {
+                ControlFailure::new(
+                    ErrorKind::BadRequest,
+                    format!("`{name}` is not a harness; use claude, codex, or opencode"),
+                )
+            })?,
+        ),
         None => None,
     };
     Ok(TaskRequest {

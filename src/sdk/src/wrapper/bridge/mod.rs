@@ -40,7 +40,7 @@ pub(super) fn agent_kind(provider: HarnessProvider) -> Option<SessionAgentKind> 
     match provider {
         HarnessProvider::Claude => Some(SessionAgentKind::Claude),
         HarnessProvider::Codex => Some(SessionAgentKind::Codex),
-        HarnessProvider::Opencode => None,
+        HarnessProvider::Opencode | HarnessProvider::Openhuman => None,
     }
 }
 

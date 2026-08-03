@@ -149,7 +149,7 @@ impl App {
         }
     }
 
-    /// Appearance: pick a theme role and cycle its color.
+    /// Appearance: pick an option and cycle its color, mode, or toggle.
     fn appearance_key(&mut self, code: KeyCode) -> SettingsKey {
         match code {
             KeyCode::Char('j') | KeyCode::Char('k') => {

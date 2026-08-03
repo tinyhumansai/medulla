@@ -98,16 +98,18 @@ impl Flags {
 /// Map a wire provider name to a [`HarnessProvider`], erroring with the set of
 /// known names on failure.
 pub(super) fn parse_provider(value: &str) -> Result<HarnessProvider, String> {
-    HarnessProvider::from_wire(value).ok_or_else(|| {
-        format!(
-            "unknown provider \"{value}\" (expected: {})",
-            DAEMON_PROVIDERS
-                .iter()
-                .map(|p| p.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    })
+    HarnessProvider::from_wire(value)
+        .filter(|provider| DAEMON_PROVIDERS.contains(provider))
+        .ok_or_else(|| {
+            format!(
+                "unknown provider \"{value}\" (expected: {})",
+                DAEMON_PROVIDERS
+                    .iter()
+                    .map(|p| p.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
 }
 
 mod types;

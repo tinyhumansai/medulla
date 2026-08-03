@@ -215,28 +215,25 @@ fn absolute_override(explicit: &str) -> Result<PathBuf, ControlSocketError> {
 
 /// Anchor any relative socket path before it crosses a process boundary.
 fn absolute_path(path: PathBuf) -> Result<PathBuf, ControlSocketError> {
+    if path.is_absolute() || path.has_root() {
+        return Ok(path);
+    }
+    let cwd = std::env::current_dir().map_err(|error| ControlSocketError::Io(error.to_string()))?;
+    Ok(absolute_path_from(path, &cwd))
+}
+
+/// Anchor `path` to a supplied working directory.
+///
+/// Keeping this pure makes relative-path behavior testable from deeply nested
+/// checkouts whose real current directory cannot fit in a Unix socket address.
+pub(super) fn absolute_path_from(path: PathBuf, cwd: &Path) -> PathBuf {
     // A rooted slash path is the Unix spelling accepted by the runtime. Treat
     // it as anchored in cross-platform unit tests too, even though Windows
     // requires a drive prefix for `is_absolute` to return true.
     if path.is_absolute() || path.has_root() {
-        return Ok(path);
+        return path;
     }
-    std::env::current_dir()
-        .map(|cwd| absolute_path_from(path, &cwd))
-        .map_err(|error| ControlSocketError::Io(error.to_string()))
-}
-
-/// Anchor a relative path to a known working directory.
-///
-/// Keeping this operation separate from [`std::env::current_dir`] lets tests
-/// exercise the process-boundary guarantee without depending on the checkout's
-/// own path length.
-pub(super) fn absolute_path_from(path: PathBuf, cwd: &Path) -> PathBuf {
-    if path.is_absolute() || path.has_root() {
-        path
-    } else {
-        cwd.join(path)
-    }
+    cwd.join(path)
 }
 
 /// Create the socket's parent directory, private to this user when newly made.

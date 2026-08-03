@@ -71,6 +71,14 @@ fn opencode_needs_its_tui_subcommand() {
 }
 
 #[test]
+fn openhuman_launches_its_native_tui_without_coding_harness_flags() {
+    assert_eq!(
+        interactive_args(HarnessProvider::Openhuman, None, true, Some("ignored"), &[]),
+        vec!["tui"]
+    );
+}
+
+#[test]
 fn extra_args_follow_the_base() {
     let args = interactive_args(
         HarnessProvider::Opencode,

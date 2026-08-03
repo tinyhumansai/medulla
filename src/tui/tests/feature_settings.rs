@@ -84,7 +84,9 @@ fn number_keys_jump_subpages() {
     // Help is the last subpage — ninth, now that Status line is on the nav.
     let _ = key(&mut app, KeyCode::Char('9'));
     assert_eq!(app.settings_subpage(), "Help");
-    let out = text_of(&draw(&mut app, 140, 40));
+    // Render the full help page: this test verifies numeric subpage navigation,
+    // while short-viewport scrolling has its own focused coverage.
+    let out = text_of(&draw(&mut app, 140, 64));
     assert!(out.contains("Commands"), "help subpage: {out}");
     // Jumping to Usage requests an account-usage fetch.
     let cmd = key(&mut app, KeyCode::Char('1'));
@@ -176,13 +178,31 @@ fn appearance_persists_theme_to_injected_path() {
 }
 
 #[test]
+fn appearance_blink_status_reports_the_boolean_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    for _ in 0..5 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Enter);
+
+    assert!(app.status().contains("Attention blink → off (saved)"));
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("attentionBlink = false"), "{saved}");
+}
+
+#[test]
 fn appearance_cycles_and_persists_process_indicators() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    for _ in 0..4 {
+    // Five color rows and the attention blink toggle precede resources.
+    for _ in 0..6 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);
@@ -203,7 +223,8 @@ fn appearance_persists_process_indicators_to_json() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    for _ in 0..4 {
+    // Five color rows and the attention blink toggle precede resources.
+    for _ in 0..6 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);
@@ -282,8 +303,9 @@ fn appearance_cycles_and_persists_device_indicators_independently() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Four theme roles, then three process indicators, lands on Device CPU.
-    for _ in 0..7 {
+    // Five color rows, attention blink, three process indicators, and Session titles
+    // lands on Device CPU.
+    for _ in 0..10 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);

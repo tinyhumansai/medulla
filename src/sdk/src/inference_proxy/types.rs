@@ -76,7 +76,9 @@ impl UpstreamShape {
     pub fn for_provider(provider: HarnessProvider) -> Self {
         match provider {
             HarnessProvider::Claude => Self::Anthropic,
-            HarnessProvider::Codex | HarnessProvider::Opencode => Self::OpenAi,
+            HarnessProvider::Codex | HarnessProvider::Opencode | HarnessProvider::Openhuman => {
+                Self::OpenAi
+            }
         }
     }
 

@@ -48,6 +48,15 @@ fn defaults_are_applied() {
     assert!(cfg.workflows.allow_code);
     assert!(cfg.appearance.show_harness_branch);
     assert!(cfg.appearance.show_harness_path);
+    assert!(cfg.appearance.show_session_titles);
+}
+
+#[test]
+fn appearance_session_titles_can_be_hidden() {
+    let cfg: TuiConfig =
+        serde_json::from_str(r#"{"appearance":{"showSessionTitles":false}}"#).unwrap();
+
+    assert!(!cfg.appearance.show_session_titles);
 }
 
 #[test]
@@ -490,4 +499,13 @@ fn an_explicit_empty_template_catalog_opts_out_of_coding_defaults() {
     // The key, not a bare substring: `[mcp]` carries a `fleetTools` flag, and a
     // substring match would read that as the `fleet` section coming back.
     assert!(!serde_json::to_string(&cfg).unwrap().contains("\"fleet\""));
+}
+
+#[test]
+fn workflows_reject_an_operator_only_default_provider() {
+    let error =
+        serde_json::from_str::<TuiConfig>(r#"{"workflows":{"defaultProvider":"openhuman"}}"#)
+            .unwrap_err();
+
+    assert!(error.to_string().contains("claude, codex, or opencode"));
 }

@@ -41,17 +41,24 @@ fn config_wins_over_the_home_derived_default() {
 
 #[test]
 fn a_relative_override_is_anchored_before_child_processes_receive_it() {
-    // Use an absolute path in the host platform's own syntax. A leading slash
-    // is rooted but not absolute on Windows because it has no drive prefix.
-    let cwd = if cfg!(windows) {
-        std::path::Path::new(r"C:\short\worktree")
-    } else {
-        std::path::Path::new("/short/worktree")
-    };
-    let resolved = absolute_path_from(std::path::PathBuf::from("run/control.sock"), cwd);
+    #[cfg(windows)]
+    let cwd = std::path::Path::new(r"C:\tmp\medulla-test");
+    #[cfg(not(windows))]
+    let cwd = std::path::Path::new("/tmp/medulla-test");
+    let resolved = absolute_path_from("run/control.sock".into(), cwd);
 
     assert!(resolved.is_absolute());
     assert_eq!(resolved, cwd.join("run/control.sock"));
+
+    let absolute = cwd.join("absolute/control.sock");
+    assert_eq!(absolute_path_from(absolute.clone(), cwd), absolute);
+
+    #[cfg(windows)]
+    {
+        let rooted = std::path::PathBuf::from(r"\tmp\medulla-test\rooted.sock");
+        assert!(rooted.has_root());
+        assert_eq!(absolute_path_from(rooted.clone(), cwd), rooted);
+    }
 }
 
 #[test]

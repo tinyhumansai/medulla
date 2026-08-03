@@ -23,7 +23,7 @@ use rust_socketio::asynchronous::{Client, ClientBuilder};
 use rust_socketio::{Event, Payload, TransportType};
 use serde_json::{json, Value};
 
-use openhuman_core::openhuman::socket::medulla::payloads::EVENT_WORKFLOW_REQUEST;
+use openhuman_core::openhuman::platform::socket::medulla::payloads::EVENT_WORKFLOW_REQUEST;
 
 use super::roster::{addresses_of, register_payload, unreachable_addresses};
 

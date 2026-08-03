@@ -79,7 +79,7 @@ fn plain_text_is_not_structured() {
 #[test]
 fn configured_github_repository_override_reaches_the_mapper() {
     let env = HashMap::from([("GH_REPO".to_string(), "other/project".to_string())]);
-    let mut mapper = wrapper_line_mapper("claude", &env);
+    let mut mapper = wrapper_line_mapper("claude", &env, false);
     let call = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"pr-1","name":"Bash","input":{"command":"gh pr create --fill"}}]}}"#;
     let result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"pr-1","content":"https://github.com/other/project/pull/7"}]}}"#;
     mapper.map_line(call, 0);

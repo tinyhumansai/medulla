@@ -16,6 +16,17 @@ use super::usage::scan_usage;
 const CODEX_DUPLICATE_WINDOW_MS: i64 = 2000;
 
 impl HarnessLineMapper {
+    /// Seed repository context retained by a reused interactive session.
+    pub fn set_workspace_context(&mut self, cwd: Option<String>, branch: Option<String>) {
+        self.workspace_cwd = cwd;
+        self.workspace_branch = branch;
+    }
+
+    /// Repository context learned from authoritative worktree reports.
+    pub fn workspace_context(&self) -> (Option<String>, Option<String>) {
+        (self.workspace_cwd.clone(), self.workspace_branch.clone())
+    }
+
     /// Build a mapper for `provider` (`"claude" | "codex" | "opencode"`).
     /// Unknown providers yield a mapper that emits nothing.
     pub fn new(provider: &str) -> Self {

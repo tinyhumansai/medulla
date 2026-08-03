@@ -308,7 +308,11 @@ pub(super) async fn build_bridge(
         builder,
         status: crate::protocol::initial_status(start_ms),
         last_status_ms: i64::MIN,
-        mapper: wrapper_line_mapper(config.provider.as_str(), &config.env),
+        mapper: wrapper_line_mapper(
+            config.provider.as_str(),
+            &config.env,
+            std::env::var_os("GH_REPO").is_some(),
+        ),
         tailer,
         wrapper_session_id: wrapper_session_id.to_string(),
         harness_session_id: wrapper_session_id.to_string(),
@@ -321,10 +325,14 @@ pub(super) async fn build_bridge(
 ///
 /// Wrapper configuration overlays, rather than clears, the host environment,
 /// so the effective child value may come from either source.
-fn wrapper_line_mapper(provider: &str, env: &HashMap<String, String>) -> HarnessLineMapper {
+fn wrapper_line_mapper(
+    provider: &str,
+    env: &HashMap<String, String>,
+    host_gh_repo_is_set: bool,
+) -> HarnessLineMapper {
     HarnessLineMapper::new_with_gh_repo_override(
         provider,
-        env.contains_key("GH_REPO") || std::env::var_os("GH_REPO").is_some(),
+        env.contains_key("GH_REPO") || host_gh_repo_is_set,
     )
 }
 

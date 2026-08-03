@@ -47,6 +47,16 @@ impl TurnStream {
         }
     }
 
+    /// Seed checkout context retained by a previous turn in the same PTY.
+    pub fn set_workspace_context(&mut self, cwd: Option<String>, branch: Option<String>) {
+        self.mapper.set_workspace_context(cwd, branch);
+    }
+
+    /// Checkout context learned while folding this turn.
+    pub fn workspace_context(&self) -> (Option<String>, Option<String>) {
+        self.mapper.workspace_context()
+    }
+
     /// How many semantic events this turn has produced.
     pub fn events(&self) -> usize {
         self.events_seen

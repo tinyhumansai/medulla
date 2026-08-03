@@ -147,3 +147,31 @@ fn an_outstanding_tool_call_holds_off_the_stall_backstop() {
         "a long-running tool is silence that means work, not a finished turn"
     );
 }
+
+#[test]
+fn a_reused_turn_can_resume_the_previous_turns_workspace_context() {
+    let mut first = TurnStream::new_with_gh_repo_override(HarnessProvider::Claude, false);
+    first.observe(
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"worktree-1","content":"[PASS] WORKTREE_READY\n  path: /repo/worktrees/fix\n  branch: fix"}]}}"#,
+    );
+    let context = first.workspace_context();
+    assert_eq!(context.0.as_deref(), Some("/repo/worktrees/fix"));
+
+    let mut second = TurnStream::new_with_gh_repo_override(HarnessProvider::Claude, false);
+    second.set_workspace_context(context.0, context.1);
+    second.observe(
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"pr-1","name":"Bash","input":{"command":"cd /repo/worktrees/fix && gh pr create --fill"}}]}}"#,
+    );
+    let fold = second.observe(
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"pr-1","content":"https://github.com/acme/repo/pull/42"}]}}"#,
+    );
+
+    assert!(fold.events.iter().any(|event| {
+        event
+            .event
+            .payload
+            .get("pull_request")
+            .and_then(serde_json::Value::as_str)
+            == Some("https://github.com/acme/repo/pull/42")
+    }));
+}

@@ -73,6 +73,7 @@ impl PtySessionExecutor {
             env,
             workspace,
             claims: Arc::new(Mutex::new(HashSet::new())),
+            workspace_context: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -476,6 +477,15 @@ impl PtySessionExecutor {
     ) -> Result<RunTaskResult, String> {
         let (provider, gh_repo_is_set) = mapper_context;
         let mut stream = TurnStream::new_with_gh_repo_override(provider, gh_repo_is_set);
+        if let Some((cwd, branch)) = self
+            .workspace_context
+            .lock()
+            .expect("workspace context lock poisoned")
+            .get(id)
+            .cloned()
+        {
+            stream.set_workspace_context(cwd, branch);
+        }
         let started = tokio::time::Instant::now();
         let mut last_line_at = medulla::clock::now_millis();
 
@@ -523,6 +533,10 @@ impl PtySessionExecutor {
             for line in poll.lines {
                 last_line_at = medulla::clock::now_millis();
                 let fold = stream.observe(&line.text);
+                self.workspace_context
+                    .lock()
+                    .expect("workspace context lock poisoned")
+                    .insert(id.to_string(), stream.workspace_context());
                 // The peer watches its task through these. Dropping them would
                 // leave it with an ack, silence, then a reply — which is what
                 // this executor used to do.

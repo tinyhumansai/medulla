@@ -53,7 +53,8 @@ pub(super) fn empty_tree(root: &Path) -> Result<String, String> {
 
 /// Load commits and files changed from `baseline` through the current worktree.
 pub(super) fn load(root: &Path, baseline: &str) -> Result<LoadedChanges, String> {
-    let commits = if has_head(root)? {
+    let head_exists = has_head(root)?;
+    let commits = if head_exists {
         git(
             root,
             &["log", "--format=%h %s", &format!("{baseline}..HEAD")],
@@ -64,7 +65,7 @@ pub(super) fn load(root: &Path, baseline: &str) -> Result<LoadedChanges, String>
     } else {
         Vec::new()
     };
-    let recent_commits = if has_head(root)? {
+    let recent_commits = if head_exists {
         parse_commits(&git(root, &["log", "-50", "--format=%H%x00%s"])?)
     } else {
         Vec::new()

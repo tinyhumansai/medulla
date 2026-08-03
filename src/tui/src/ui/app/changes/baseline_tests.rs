@@ -62,6 +62,28 @@ fn choosing_a_harness_baseline_clears_comments_when_repository_changes() {
 }
 
 #[test]
+fn following_a_new_launch_commit_in_the_same_repository_preserves_comments() {
+    let directory = tempdir().expect("repository");
+    init_repo(directory.path());
+    let first = output(directory.path(), &["rev-parse", "HEAD"]);
+    let mut state = GitChangesState::default();
+    state.follow_harness(directory.path(), &first);
+    state
+        .comments
+        .upsert(Path::new("src/main.rs"), CommentAnchor::File, "keep this");
+    git(
+        directory.path(),
+        &["commit", "--allow-empty", "-m", "later launch"],
+    );
+    let second = output(directory.path(), &["rev-parse", "HEAD"]);
+
+    state.follow_harness(directory.path(), &second);
+
+    assert_eq!(state.baseline.as_deref(), Some(second.as_str()));
+    assert_eq!(state.comments.count_for(Path::new("src/main.rs")), 1);
+}
+
+#[test]
 fn a_selected_non_git_harness_is_not_replaced_by_another_repository() {
     let outside = tempdir().expect("non-git directory");
     let repository_dir = tempdir().expect("git repository");

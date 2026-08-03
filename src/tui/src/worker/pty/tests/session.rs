@@ -322,6 +322,30 @@ fn a_session_snapshots_head_before_the_harness_can_commit() {
 }
 
 #[test]
+fn an_unborn_repository_records_its_root_without_a_launch_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(std::process::Command::new("git")
+        .current_dir(dir.path())
+        .args(["init", "--quiet"])
+        .status()
+        .unwrap()
+        .success());
+
+    let manager = PtyManager::new();
+    let mut spec = sh("sleep 30");
+    spec.cwd = dir.path().to_string_lossy().into_owned();
+    let id = manager.open(spec).unwrap();
+
+    let row = manager.row(&id).unwrap();
+    assert_eq!(
+        row.launch_root.as_deref(),
+        Some(dir.path().to_string_lossy().as_ref())
+    );
+    assert_eq!(row.launch_commit, None);
+    manager.close(&id);
+}
+
+#[test]
 fn a_session_outside_git_has_no_branch() {
     let dir = tempfile::tempdir().unwrap();
     let manager = PtyManager::new();

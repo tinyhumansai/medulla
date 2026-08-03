@@ -165,6 +165,8 @@ impl GitChangesState {
     }
 
     /// Follow a harness's immutable launch snapshot while launch mode is active.
+    /// Review comments survive baseline changes within the same repository and
+    /// are cleared only when the repository root changes.
     pub(crate) fn follow_harness(&mut self, cwd: &Path, launch_commit: &str) {
         let Ok((root, _)) = repository::discover_in(cwd) else {
             return;
@@ -177,13 +179,15 @@ impl GitChangesState {
         ) && (self.root.as_ref() != Some(&root)
             || self.baseline.as_deref() != Some(launch_commit))
         {
+            if self.root.as_ref() != Some(&root) {
+                self.comments = ReviewComments::default();
+            }
             self.root = Some(root);
             self.baseline = Some(launch_commit.to_owned());
             self.baseline_source = BaselineSource::HarnessLaunch;
             self.selected = 0;
             self.cursor = 0;
             self.scroll = 0;
-            self.comments = ReviewComments::default();
         }
     }
 

@@ -161,6 +161,7 @@ fn sample_selected() -> SessionRow {
         branch: Some("feat/status-line".into()),
         launch_root: None,
         launch_commit: None,
+        launch_checkout_identity: None,
         session_id: None,
         thread_name: Some("Ship the status line".into()),
         started_at: 0,

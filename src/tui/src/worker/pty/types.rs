@@ -177,6 +177,8 @@ pub struct SessionRow {
     /// creates commits while it runs. `None` means the directory was outside a
     /// repository or the repository did not have a first commit yet.
     pub launch_commit: Option<String>,
+    /// Filesystem identity of the Git directory captured at launch.
+    pub launch_checkout_identity: Option<String>,
     /// The harness session id, once known — minted for claude, read back from
     /// the rollout for codex. This is what pins the transcript tailer.
     pub session_id: Option<String>,

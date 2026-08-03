@@ -318,6 +318,7 @@ fn a_session_snapshots_head_before_the_harness_can_commit() {
         row.launch_root.as_deref(),
         Some(dir.path().to_string_lossy().as_ref())
     );
+    assert!(row.launch_checkout_identity.is_some());
     manager.close(&id);
 }
 
@@ -342,6 +343,7 @@ fn an_unborn_repository_records_its_root_without_a_launch_commit() {
         Some(dir.path().to_string_lossy().as_ref())
     );
     assert_eq!(row.launch_commit, None);
+    assert!(row.launch_checkout_identity.is_some());
     manager.close(&id);
 }
 

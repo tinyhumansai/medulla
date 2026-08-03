@@ -12,10 +12,15 @@ pub(super) fn launch_baseline(
     cwd: &str,
     launch_root: Option<&str>,
     launch_commit: Option<&str>,
+    launch_checkout_identity: Option<&str>,
 ) -> Option<String> {
     let launch_root = Path::new(launch_root?);
     let (current_root, _) = repository::discover_in(Path::new(cwd)).ok()?;
     if current_root != launch_root {
+        return None;
+    }
+    if crate::worker::pty::checkout::identity(Path::new(cwd)).as_deref() != launch_checkout_identity
+    {
         return None;
     }
     let (root, _) = repository::discover_in(launch_root).ok()?;
@@ -38,6 +43,7 @@ pub(super) fn select_harness_baseline(
                 &row.cwd,
                 row.launch_root.as_deref(),
                 row.launch_commit.as_deref(),
+                row.launch_checkout_identity.as_deref(),
             )
             .ok_or_else(|| format!("Selected harness {} is not in a Git repository", row.label))?;
             return Ok(Some((row, commit)));
@@ -52,6 +58,7 @@ pub(super) fn select_harness_baseline(
             &row.cwd,
             row.launch_root.as_deref(),
             row.launch_commit.as_deref(),
+            row.launch_checkout_identity.as_deref(),
         )
         .map(|commit| (row, commit))
     }))

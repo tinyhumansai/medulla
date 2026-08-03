@@ -27,6 +27,7 @@ fn an_unborn_harness_derives_an_empty_tree_launch_baseline() {
         &directory.path().to_string_lossy(),
         Some(&root.to_string_lossy()),
         None,
+        crate::worker::pty::checkout::identity(directory.path()).as_deref(),
     )
     .expect("unborn launch baseline");
 
@@ -144,7 +145,8 @@ fn a_cached_launch_commit_does_not_bypass_checkout_revalidation() {
         launch_baseline(
             &directory.path().to_string_lossy(),
             Some(&root.to_string_lossy()),
-            Some(&head)
+            Some(&head),
+            None,
         ),
         None
     );
@@ -152,18 +154,24 @@ fn a_cached_launch_commit_does_not_bypass_checkout_revalidation() {
 
 #[test]
 fn a_replacement_repository_cannot_reuse_the_cached_launch_commit() {
-    let directory = tempdir().expect("repository directory");
-    init_repo(directory.path());
-    let head = output(directory.path(), &["rev-parse", "HEAD"]);
-    let root = repository::discover_in(directory.path()).expect("root").0;
-    fs::remove_dir_all(directory.path().join(".git")).expect("remove repository");
-    git(directory.path(), &["init"]);
+    let parent = tempdir().expect("repository parent");
+    let source = parent.path().join("source");
+    let checkout = parent.path().join("checkout");
+    fs::create_dir(&source).expect("source directory");
+    init_repo(&source);
+    git(parent.path(), &["clone", "--quiet", "source", "checkout"]);
+    let head = output(&checkout, &["rev-parse", "HEAD"]);
+    let root = repository::discover_in(&checkout).expect("root").0;
+    let launch_identity = crate::worker::pty::checkout::identity(&checkout);
+    fs::remove_dir_all(&checkout).expect("remove original checkout");
+    git(parent.path(), &["clone", "--quiet", "source", "checkout"]);
 
     assert_eq!(
         launch_baseline(
-            &directory.path().to_string_lossy(),
+            &checkout.to_string_lossy(),
             Some(&root.to_string_lossy()),
-            Some(&head)
+            Some(&head),
+            launch_identity.as_deref(),
         ),
         None
     );
@@ -207,6 +215,7 @@ fn row(
             .ok()
             .map(|(root, _)| root.to_string_lossy().into_owned()),
         launch_commit,
+        launch_checkout_identity: crate::worker::pty::checkout::identity(cwd),
         session_id: None,
         thread_name: None,
         started_at,

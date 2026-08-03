@@ -33,6 +33,7 @@ impl PtyManager {
         let branch = git_branch(&spec.cwd);
         let launch_root = git_root(&spec.cwd);
         let launch_commit = launch_root.as_deref().and_then(git_head);
+        let launch_checkout_identity = super::super::checkout::identity(spec.cwd.as_ref());
         let pty = open_pty()?;
 
         // Mint the id *before* spawning, so the transcript this session writes is
@@ -97,6 +98,7 @@ impl PtyManager {
                 branch,
                 launch_root,
                 launch_commit,
+                launch_checkout_identity,
                 started_at: now,
                 user_spawned: spec.user_spawned,
             },

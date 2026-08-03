@@ -118,6 +118,7 @@ impl SessionHandle {
             branch: self.meta.branch.clone(),
             launch_root: self.meta.launch_root.clone(),
             launch_commit: self.meta.launch_commit.clone(),
+            launch_checkout_identity: self.meta.launch_checkout_identity.clone(),
             session_id: cold.session_id.clone(),
             thread_name: cold.thread_name.clone(),
             started_at: self.meta.started_at,

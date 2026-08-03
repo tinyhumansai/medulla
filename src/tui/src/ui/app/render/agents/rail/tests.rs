@@ -73,6 +73,7 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         branch: Some("main".into()),
         launch_root: None,
         launch_commit: None,
+        launch_checkout_identity: None,
         session_id: None,
         thread_name: None,
         started_at: 1,

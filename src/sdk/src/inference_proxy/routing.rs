@@ -79,6 +79,9 @@ pub(super) fn resolve_key(
     provider: HarnessProvider,
     env: &HashMap<String, String>,
 ) -> Option<(String, String)> {
+    if provider == HarnessProvider::Openhuman {
+        return None;
+    }
     if let Some(name) = router
         .api_key_env
         .as_deref()
@@ -95,6 +98,7 @@ pub(super) fn resolve_key(
     let provider_key = match provider {
         HarnessProvider::Claude => "ANTHROPIC_AUTH_TOKEN",
         HarnessProvider::Codex | HarnessProvider::Opencode => "OPENAI_API_KEY",
+        HarnessProvider::Openhuman => return None,
     };
     [OPENROUTER_API_KEY_ENV, provider_key]
         .into_iter()

@@ -112,10 +112,18 @@ fn picker_choices_include_every_native_provider_and_registered_preset() {
 
     assert_eq!(
         labels,
-        ["Claude Code", "Codex", "OpenCode", "DeepSeek Codex"]
+        [
+            "Claude Code",
+            "Codex",
+            "OpenCode",
+            "OpenHuman",
+            "DeepSeek Codex"
+        ]
     );
-    assert_eq!(choices[3].id(), "deepseek");
-    assert_eq!(choices[3].provider, HarnessProvider::Codex);
+    assert_eq!(choices[3].id(), "openhuman");
+    assert_eq!(choices[3].provider, HarnessProvider::Openhuman);
+    assert_eq!(choices[4].id(), "deepseek");
+    assert_eq!(choices[4].provider, HarnessProvider::Codex);
 }
 
 #[test]

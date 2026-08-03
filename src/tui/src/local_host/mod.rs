@@ -269,12 +269,14 @@ fn extra_options(
 
 /// Parse one configured provider name, naming the valid spellings on failure.
 fn parse_provider(name: &str) -> Result<HarnessProvider, String> {
-    HarnessProvider::from_wire(name.trim()).ok_or_else(|| {
-        format!(
-            "unknown harness \"{}\" in [host] — expected one of: claude, codex, opencode",
-            name.trim()
-        )
-    })
+    HarnessProvider::from_wire(name.trim())
+        .filter(|provider| medulla::daemon::providers::DAEMON_PROVIDERS.contains(provider))
+        .ok_or_else(|| {
+            format!(
+                "unknown harness \"{}\" in [host] — expected one of: claude, codex, opencode",
+                name.trim()
+            )
+        })
 }
 
 /// The roster entry describing a host running on this machine.

@@ -100,7 +100,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     if let Some(path) = args.config.as_deref() {
         std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
     }
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut loaded = load_config(args.config.as_deref(), &env, &cwd)?;
     prompt_for_update(&loaded.config.update, &env).await;
@@ -137,7 +137,15 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // the developer's real `~/.openhuman` even on a `MEDULLA_HOME=$(mktemp -d)`
     // scratch run — the recipe that exists precisely to avoid that. Cheap, and
     // a no-op when the operator set `OPENHUMAN_WORKSPACE` themselves.
-    medulla::core_host::bind_workspace(&env, &home);
+    let core_workspace = medulla::core_host::bind_workspace(&env, &home);
+    // Keep the subprocess snapshot in lockstep with the process environment.
+    // OpenHuman's picker entry inherits this map, so its native TUI opens the
+    // same persisted core and agents as Medulla instead of rediscovering the
+    // developer's default ~/.openhuman in the child.
+    env.insert(
+        medulla::core_host::OPENHUMAN_WORKSPACE_ENV.to_string(),
+        core_workspace.to_string_lossy().into_owned(),
+    );
     // Same binding discipline for the backend: the core must dial the endpoint
     // this host was configured for, or a staging/self-hosted install verifies a
     // token against one deployment and stores it against another.

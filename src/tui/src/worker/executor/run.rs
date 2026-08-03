@@ -600,6 +600,6 @@ pub fn agent_kind(provider: HarnessProvider) -> Option<SessionAgentKind> {
         HarnessProvider::Claude => Some(SessionAgentKind::Claude),
         HarnessProvider::Codex => Some(SessionAgentKind::Codex),
         // No flat transcript to tail, so no way to know a turn ended.
-        HarnessProvider::Opencode => None,
+        HarnessProvider::Opencode | HarnessProvider::Openhuman => None,
     }
 }

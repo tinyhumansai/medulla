@@ -117,7 +117,9 @@ impl CustomHarnessConfig {
         } else {
             match self.base_harness {
                 HarnessProvider::Claude => OPENROUTER_ANTHROPIC_URL,
-                HarnessProvider::Codex | HarnessProvider::Opencode => OPENROUTER_OPENAI_URL,
+                HarnessProvider::Codex | HarnessProvider::Opencode | HarnessProvider::Openhuman => {
+                    OPENROUTER_OPENAI_URL
+                }
             }
         }
     }

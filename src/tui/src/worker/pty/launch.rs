@@ -26,9 +26,12 @@ pub fn interactive_args(
     extra: &[String],
 ) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
-    if provider == HarnessProvider::Opencode {
-        // `opencode` needs its TUI subcommand; `claude` and `codex` paint by
-        // default when handed a tty.
+    if matches!(
+        provider,
+        HarnessProvider::Opencode | HarnessProvider::Openhuman
+    ) {
+        // OpenCode and OpenHuman need their TUI subcommand; Claude and Codex
+        // paint by default when handed a tty.
         args.push("tui".to_string());
     }
     if skip_permissions {
@@ -55,6 +58,9 @@ pub fn interactive_args(
                 args.push("-m".to_string());
                 args.push(model.to_string());
             }
+            // OpenHuman selects agents through its own shared configuration;
+            // a coding-provider model override has no meaning for it.
+            HarnessProvider::Openhuman => {}
         }
     }
     args.extend(extra.iter().cloned());
@@ -76,6 +82,7 @@ pub fn bypass_flag(provider: HarnessProvider) -> &'static [&'static str] {
         HarnessProvider::Claude => &["--dangerously-skip-permissions"],
         HarnessProvider::Codex => &["--dangerously-bypass-approvals-and-sandbox"],
         HarnessProvider::Opencode => &[],
+        HarnessProvider::Openhuman => &[],
     }
 }
 
@@ -100,7 +107,10 @@ pub fn mint_session_id(provider: HarnessProvider) -> Option<String> {
 pub fn paints_a_screen(provider: HarnessProvider) -> bool {
     matches!(
         provider,
-        HarnessProvider::Claude | HarnessProvider::Codex | HarnessProvider::Opencode
+        HarnessProvider::Claude
+            | HarnessProvider::Codex
+            | HarnessProvider::Opencode
+            | HarnessProvider::Openhuman
     )
 }
 

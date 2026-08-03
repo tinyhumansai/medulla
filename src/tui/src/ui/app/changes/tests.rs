@@ -394,11 +394,14 @@ fn following_a_harness_uses_its_launch_commit_until_operator_selects_another() {
         .trim()
         .to_owned();
     let mut state = GitChangesState::default();
+    let expected_root = repository::discover_in(directory.path())
+        .expect("discover repository")
+        .0;
 
     state.follow_harness(directory.path(), &launch);
     state.refresh();
 
-    assert_eq!(state.root.as_deref(), Some(directory.path()));
+    assert_eq!(state.root.as_deref(), Some(expected_root.as_path()));
     assert_eq!(state.baseline.as_deref(), Some(launch.as_str()));
     assert_eq!(state.harness_baseline.as_deref(), Some(launch.as_str()));
 }

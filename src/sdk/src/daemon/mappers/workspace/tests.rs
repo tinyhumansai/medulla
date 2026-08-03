@@ -1,6 +1,6 @@
 //! Focused tests for recognizing stable worktree helper reports.
 
-use super::{is_pull_request_command, pull_request_url, text_report};
+use super::{pull_request_command, pull_request_url, pull_request_url_from_json, text_report};
 
 #[test]
 fn text_report_ignores_fields_before_its_ready_marker() {
@@ -48,26 +48,36 @@ fn issues_and_malformed_pr_urls_are_not_session_context() {
 
 #[test]
 fn only_direct_github_pr_commands_may_report_a_pull_request() {
-    assert!(is_pull_request_command("gh pr create --fill"));
-    assert!(is_pull_request_command("  gh pr view --json url"));
-    assert!(is_pull_request_command(
-        "/bin/zsh -lc 'gh pr view --json url'"
-    ));
-    assert!(!is_pull_request_command(
-        "gh pr view 123 --repo other/project"
-    ));
-    assert!(!is_pull_request_command("gh pr view feature-branch"));
-    assert!(!is_pull_request_command(
-        "gh pr view https://github.com/acme/other/pull/7"
-    ));
-    assert!(!is_pull_request_command(
-        "gh pr create --repo other/project --fill"
-    ));
-    assert!(!is_pull_request_command("rg 'gh pr view' fixtures"));
-    assert!(!is_pull_request_command(
-        "/bin/zsh -lc 'cat <<EOF\ngh pr view\nEOF'"
-    ));
-    assert!(!is_pull_request_command(
+    assert!(pull_request_command("gh pr create --fill").is_some());
+    assert!(pull_request_command("  gh pr view --json url").is_some());
+    assert!(pull_request_command("/bin/zsh -lc 'gh pr view --json url'").is_some());
+    assert!(pull_request_command("gh pr view 123 --repo other/project").is_none());
+    assert!(pull_request_command("gh pr view feature-branch").is_none());
+    assert!(pull_request_command("gh pr view https://github.com/acme/other/pull/7").is_none());
+    assert!(pull_request_command("gh pr create --repo other/project --fill").is_none());
+    assert!(pull_request_command("gh pr view --comments").is_none());
+    assert!(pull_request_command("gh pr create --head other-branch").is_none());
+    assert!(pull_request_command("gh pr create -Hother-branch").is_none());
+    assert!(pull_request_command("rg 'gh pr view' fixtures").is_none());
+    assert!(pull_request_command("/bin/zsh -lc 'cat <<EOF\ngh pr view\nEOF'").is_none());
+    assert!(pull_request_command(
         "cat <<'EOF'\ngh pr view\nhttps://github.com/acme/other/pull/7\nEOF"
-    ));
+    )
+    .is_none());
+}
+
+#[test]
+fn structured_view_output_reads_only_the_url_property() {
+    let output = r#"{
+        "url":"https://github.com/acme/repo/pull/42",
+        "body":"see https://github.com/acme/other/pull/7"
+    }"#;
+    assert_eq!(
+        pull_request_url_from_json(output).as_deref(),
+        Some("https://github.com/acme/repo/pull/42")
+    );
+    assert_eq!(
+        pull_request_url_from_json(r#"{"body":"https://github.com/acme/other/pull/7"}"#),
+        None
+    );
 }

@@ -15,6 +15,15 @@ use super::types::HarnessSemanticEvent;
 #[cfg(test)]
 mod tests;
 
+/// GitHub CLI operation whose output can authoritatively identify this PR.
+#[derive(Clone, Copy)]
+pub(super) enum PullRequestCommand {
+    /// `gh pr create` prints the newly created PR URL.
+    Create,
+    /// `gh pr view --json url` returns a structured URL property.
+    View,
+}
+
 /// Turn repository facts embedded in tool output into updated session facts.
 ///
 /// A stable `worktree` report supplies the checkout and branch. GitHub CLI
@@ -23,15 +32,16 @@ mod tests;
 /// single update.
 pub(super) fn workspace_event_from_output(
     output: &str,
-    accept_pull_request: bool,
+    pull_request_command: Option<PullRequestCommand>,
     line: i64,
     ts: i64,
     record_type: &str,
 ) -> Option<HarnessSemanticEvent> {
     let checkout = json_report(output).or_else(|| text_report(output));
-    let pull_request = accept_pull_request
-        .then(|| pull_request_url(output))
-        .flatten();
+    let pull_request = pull_request_command.and_then(|command| match command {
+        PullRequestCommand::Create => pull_request_url(output),
+        PullRequestCommand::View => pull_request_url_from_json(output),
+    });
     if checkout.is_none() && pull_request.is_none() {
         return None;
     }
@@ -54,23 +64,23 @@ pub(super) fn workspace_event_from_output(
 }
 
 /// Whether a completed shell call is a GitHub CLI PR create/view operation.
-pub(super) fn is_pull_request_command(command: &str) -> bool {
+pub(super) fn pull_request_command(command: &str) -> Option<PullRequestCommand> {
     // Deliberately recognize only a direct invocation. Parsing chained shell
     // syntax here would also require correctly handling quotes and heredocs;
     // treating their contents as commands can attach a URL merely printed by
     // a fixture-building command.
     direct_pull_request_command(command)
-        || shell_inner_command(command).is_some_and(direct_pull_request_command)
+        .or_else(|| shell_inner_command(command).and_then(direct_pull_request_command))
 }
 
 /// Recognize the argv prefix of a direct GitHub CLI PR operation.
-fn direct_pull_request_command(command: &str) -> bool {
+fn direct_pull_request_command(command: &str) -> Option<PullRequestCommand> {
     let mut words = command.split_whitespace();
     if words.next() != Some("gh") || words.next() != Some("pr") {
-        return false;
+        return None;
     }
     let Some(operation @ ("create" | "view")) = words.next() else {
-        return false;
+        return None;
     };
     let arguments = words.collect::<Vec<_>>();
     if arguments.iter().any(|argument| {
@@ -78,22 +88,33 @@ fn direct_pull_request_command(command: &str) -> bool {
             || argument.starts_with("--repo=")
             || (argument.starts_with("-R") && argument.len() > 2)
     }) {
-        return false;
+        return None;
     }
-    operation == "create" || view_targets_current_branch(&arguments)
+    match operation {
+        "create" if !has_explicit_head(&arguments) => Some(PullRequestCommand::Create),
+        "view" if arguments == ["--json", "url"] => Some(PullRequestCommand::View),
+        _ => None,
+    }
 }
 
-/// A `gh pr view` with no explicit PR selector, allowing display-only flags.
-fn view_targets_current_branch(arguments: &[&str]) -> bool {
-    let mut index = 0;
-    while index < arguments.len() {
-        match arguments[index] {
-            "--web" | "--comments" => index += 1,
-            "--json" | "--jq" | "--template" | "-q" | "-t" => index += 2,
-            _ => return false,
-        }
-    }
-    index == arguments.len()
+/// Whether PR creation explicitly names a branch other than the current one.
+fn has_explicit_head(arguments: &[&str]) -> bool {
+    arguments.iter().any(|argument| {
+        matches!(*argument, "--head" | "-H")
+            || argument.starts_with("--head=")
+            || (argument.starts_with("-H") && argument.len() > 2)
+    })
+}
+
+/// Read only the structured `url` property from `gh pr view --json url`.
+fn pull_request_url_from_json(output: &str) -> Option<String> {
+    output.match_indices('{').find_map(|(start, _)| {
+        let value = serde_json::Deserializer::from_str(&output[start..])
+            .into_iter::<Value>()
+            .next()?
+            .ok()?;
+        pull_request_url(value.get("url")?.as_str()?)
+    })
 }
 
 /// Unwrap the single-quoted `shell -lc '…'` shape recorded by Codex.

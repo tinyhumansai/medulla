@@ -14,7 +14,7 @@ use crate::harness_work::kinds;
 use super::super::events::{semantic, tool_call_payload, tool_result_payload};
 use super::super::shared::text_from_content;
 use super::super::types::HarnessSemanticEvent;
-use super::super::workspace::{is_pull_request_command, workspace_event_from_output};
+use super::super::workspace::{pull_request_command, workspace_event_from_output};
 
 /// Map a codex `item.started`/`item.completed` record to semantic events.
 ///
@@ -164,7 +164,7 @@ fn command_event(
         output,
         item.get("command")
             .and_then(Value::as_str)
-            .is_some_and(is_pull_request_command),
+            .and_then(pull_request_command),
         line,
         ts,
         &format!("{record_type}:workspace"),

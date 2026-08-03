@@ -4,7 +4,7 @@
 //! events its `system`, `result`, and structured tool records imply.
 
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use crate::harness_work::kinds;
 
@@ -13,13 +13,13 @@ use super::shared::{as_array, parse_json_object};
 use super::timestamp::parse_timestamp_ms;
 use super::types::HarnessSemanticEvent;
 use super::work::work_events_for_tool;
-use super::workspace::{is_pull_request_command, workspace_event_from_output};
+use super::workspace::{pull_request_command, workspace_event_from_output, PullRequestCommand};
 
 /// Map one raw Claude JSONL line into zero or more semantic events.
 pub(super) fn claude_events_from_line(
     raw: &str,
     line: i64,
-    pull_request_calls: &mut HashSet<String>,
+    pull_request_calls: &mut HashMap<String, PullRequestCommand>,
 ) -> Vec<HarnessSemanticEvent> {
     let record = match parse_json_object(raw) {
         Some(record) => record,
@@ -73,7 +73,7 @@ fn claude_user_block(
     block: &Value,
     line: i64,
     ts: i64,
-    pull_request_calls: &mut HashSet<String>,
+    pull_request_calls: &mut HashMap<String, PullRequestCommand>,
 ) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
         Some(object) => object,
@@ -121,7 +121,7 @@ fn claude_assistant_block(
     block: &Value,
     line: i64,
     ts: i64,
-    pull_request_calls: &mut HashSet<String>,
+    pull_request_calls: &mut HashMap<String, PullRequestCommand>,
 ) -> Vec<HarnessSemanticEvent> {
     let object = match block.as_object() {
         Some(object) => object,
@@ -169,14 +169,14 @@ fn claude_assistant_block(
                 .unwrap_or("unknown");
             let call_id = object.get("id").and_then(Value::as_str).unwrap_or("");
             let input = object.get("input").cloned().unwrap_or(Value::Null);
-            if matches!(tool_name, "Bash" | "Shell")
-                && input
+            if matches!(tool_name, "Bash" | "Shell") && !call_id.is_empty() {
+                if let Some(command) = input
                     .get("command")
                     .and_then(Value::as_str)
-                    .is_some_and(is_pull_request_command)
-                && !call_id.is_empty()
-            {
-                pull_request_calls.insert(call_id.to_string());
+                    .and_then(pull_request_command)
+                {
+                    pull_request_calls.insert(call_id.to_string(), command);
+                }
             }
             // The tool_call always goes out; the work events are additive, so a
             // `TodoWrite` reads both as a call in the transcript and as the todo

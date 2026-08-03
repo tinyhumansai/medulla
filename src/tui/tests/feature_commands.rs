@@ -187,6 +187,10 @@ fn help_explains_how_to_kill_a_harness_and_inspect_git_changes() {
         out.contains("[/] jump hunks"),
         "help must summarize diff navigation: {out}"
     );
+    assert!(
+        out.contains("e edits it · C comments on or edits the file"),
+        "help must distinguish line/hunk comment editing from file comment editing: {out}"
+    );
 }
 
 #[test]

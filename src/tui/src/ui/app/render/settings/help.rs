@@ -59,7 +59,9 @@ impl App {
             TLine::from(Span::styled("Changes", bold)),
             TLine::from("Tab / Shift-Tab to the Changes view to inspect the Git diff since session start"),
             TLine::from("↑↓ select files · j/k move by line · [/] jump hunks · PageUp/PageDown move faster"),
-            TLine::from("c comments on a line or hunk · C comments on the file · e edits · r refreshes"),
+            TLine::from(
+                "c comments on a line or hunk · e edits it · C comments on or edits the file · r refreshes",
+            ),
             TLine::from(" "),
             TLine::from(Span::styled("Copy", bold)),
             TLine::from("Ctrl-Y copies the whole chat · /copy last copies just the latest reply"),

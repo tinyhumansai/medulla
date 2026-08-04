@@ -31,9 +31,11 @@ impl App {
     /// Open the Changes tab for the harness currently shown in the Agents pane.
     ///
     /// The draw path records the exact session resolved from the selected rail
-    /// row. Keeping that id before changing tabs lets [`refresh_changes`] pick
+    /// row. Keeping that id before changing tabs lets the forced refresh pick
     /// the matching launch snapshot instead of falling back to another, newer
-    /// harness in a different checkout.
+    /// harness in a different checkout. Unlike ordinary tab entry, this also
+    /// replaces an operator-selected commit or manual baseline: `d` means the
+    /// immutable launch diff for the harness under the cursor.
     pub(super) fn open_selected_harness_changes(&mut self) -> Option<Cmd> {
         let session = self.harness_pane_session.clone()?;
         self.selected_harness_session = Some(session);
@@ -42,11 +44,22 @@ impl App {
             .position(|tab| *tab == "Changes")
             .expect("Changes is a top-level tab");
         self.selected = 0;
-        self.tab_enter_cmd()
+        self.refresh_changes_from_selected_harness();
+        None
     }
 
     /// Reload commits, changed paths, and the selected patch from Git.
     pub(super) fn refresh_changes(&mut self) {
+        self.refresh_changes_with_harness(false);
+    }
+
+    /// Reload Changes and activate the selected harness's launch snapshot.
+    fn refresh_changes_from_selected_harness(&mut self) {
+        self.refresh_changes_with_harness(true);
+    }
+
+    /// Reload Changes, optionally overriding an operator-selected baseline.
+    fn refresh_changes_with_harness(&mut self, activate_harness: bool) {
         let preferred_id = self
             .attached_harness()
             .map(str::to_owned)
@@ -64,6 +77,14 @@ impl App {
                         .as_deref()
                         .expect("validated harness identity"),
                 );
+                if activate_harness {
+                    if let Err(error) = self.changes.choose_harness_baseline() {
+                        self.set_status(error);
+                    } else {
+                        self.set_status(self.changes.status_message());
+                    }
+                    return;
+                }
             }
             Some(Err(error)) => {
                 self.changes.clear_repository(error);

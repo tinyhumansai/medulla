@@ -27,7 +27,6 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
 
     let config = medulla::daemon::DaemonConfig {
         hooks: medulla::harness_hooks::HooksConfig::default(),
-        log: None,
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/".to_string(),
@@ -62,6 +61,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
 
     app.set_local_harnesses(LocalHarnesses {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),

@@ -53,7 +53,6 @@ fn sh(script: &str) -> LaunchSpec {
 fn harnesses(sessions: PtyManager) -> LocalHarnesses {
     let config = medulla::daemon::DaemonConfig {
         hooks: medulla::harness_hooks::HooksConfig::default(),
-        log: None,
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/".to_string(),
@@ -80,6 +79,7 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
     });
     LocalHarnesses {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),

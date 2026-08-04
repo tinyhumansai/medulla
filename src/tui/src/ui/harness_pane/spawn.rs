@@ -112,11 +112,8 @@ impl LocalHarnesses {
         // attribution depended on which door the session came through.
         let attribution_env = medulla::attribution::attribution_env(self.attribution, &env);
         env.extend(attribution_env);
-        let (launch_args, dropped) = medulla::harness_hooks::launch_args(
-            choice.provider,
-            self.attribution,
-            &self.hooks,
-        );
+        let (launch_args, dropped) =
+            medulla::harness_hooks::launch_args(choice.provider, self.attribution, &self.hooks);
         extra_args.extend(launch_args);
         for hook in dropped {
             tracing::warn!(event = ?hook.event, reason = %hook.reason, "dropping unsupported harness hook");

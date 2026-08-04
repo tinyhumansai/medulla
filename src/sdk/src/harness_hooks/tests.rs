@@ -133,7 +133,10 @@ fn codex_delivery_passes_an_inline_toml_override_without_bypassing_trust() {
     assert!(injection.args[1].starts_with("hooks="));
     assert!(injection.args[1].contains("SessionStart"));
     assert!(injection.args[1].contains("echo hi"));
-    assert!(!injection.args.iter().any(|arg| arg.contains("bypass-hook-trust")));
+    assert!(!injection
+        .args
+        .iter()
+        .any(|arg| arg.contains("bypass-hook-trust")));
 }
 
 #[test]

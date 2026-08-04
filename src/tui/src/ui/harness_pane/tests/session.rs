@@ -420,7 +420,9 @@ fn alternate_scroll_without_mouse_reporting_gets_arrow_scroll_events() {
     // reporting: while mode 1007 is active, a terminal translates each wheel
     // notch into cursor-key input for the child.
     let id = sessions
-        .open(sh("printf '\\033[?1049h\\033[?1007h'; sleep 0.3; cat -v; sleep 30"))
+        .open(sh(
+            "printf '\\033[?1049h\\033[?1007h'; sleep 0.3; cat -v; sleep 30",
+        ))
         .unwrap();
 
     wait_for("the child to enable alternate scrolling", || {

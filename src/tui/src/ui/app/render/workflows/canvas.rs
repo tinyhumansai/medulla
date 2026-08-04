@@ -302,7 +302,18 @@ impl App {
             // dropped when a case name is long: its first letters still
             // distinguish it from its siblings.
             if let Some(label) = &edge.label {
-                if !folds && gutter < entry {
+                if folds {
+                    // A folded arm writes its name along the row it comes back
+                    // on, just after the corner it turns at. Dropping it would
+                    // leave the reader unable to tell which arm of a branch
+                    // wrapped — the one thing the label exists to say.
+                    canvas.text(
+                        entry + 1,
+                        to_row.saturating_sub(1),
+                        &crate::ui::util::clip(label, LABEL_WIDTH),
+                        style,
+                    );
+                } else if gutter < entry {
                     canvas.text(
                         gutter + 1,
                         to_row,

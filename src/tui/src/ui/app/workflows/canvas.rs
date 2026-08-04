@@ -13,7 +13,9 @@
 
 use medulla::ui::workflows::{GraphLayout, Move, PlacedNode};
 
-use super::super::render::workflows::{BAND_GAP, LANE_STRIDE, LAYER_STRIDE, NODE_HEIGHT};
+use super::super::render::workflows::{
+    BAND_GAP, FOLD_MARGIN, LANE_STRIDE, LAYER_STRIDE, NODE_HEIGHT,
+};
 use super::super::types::App;
 
 impl App {
@@ -98,7 +100,7 @@ impl App {
         let per_band = self.layers_per_band();
         let (band, column) = (layer / per_band, layer % per_band);
         (
-            column * LAYER_STRIDE,
+            FOLD_MARGIN + column * LAYER_STRIDE,
             band * self.band_stride() + lane * LANE_STRIDE,
         )
     }
@@ -133,7 +135,8 @@ impl App {
         let rail = self.workflow_sidebar_width(self.area.width);
         let canvas = (self.area.width as usize)
             .saturating_sub(rail as usize)
-            .saturating_sub(BORDERS);
+            .saturating_sub(BORDERS)
+            .saturating_sub(FOLD_MARGIN);
         (canvas / super::super::render::workflows::LAYER_STRIDE).max(1)
     }
 
@@ -150,8 +153,4 @@ impl App {
         (self.area.height as usize).saturating_sub(CHROME).max(1)
     }
 
-    /// How many lanes of one band the canvas can show at once.
-    pub(in crate::ui::app) fn visible_lanes(&self) -> usize {
-        (self.visible_rows() / super::super::render::workflows::LANE_STRIDE).max(1)
-    }
 }

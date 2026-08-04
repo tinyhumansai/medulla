@@ -66,6 +66,14 @@ pub(in crate::ui::app) const LAYER_STRIDE: usize = NODE_WIDTH + 9;
 /// wires between two stacked nodes have a row to run along.
 pub(in crate::ui::app) const LANE_STRIDE: usize = NODE_HEIGHT + 1;
 
+/// Columns kept clear down the left of the canvas.
+///
+/// A wire that folds onto the next band arrives from above and turns into its
+/// target's left side, and the first column of a band starts at the canvas edge
+/// — so without a margin there is nowhere for that turn to happen, and the fold
+/// arrives with no arrowhead at all.
+pub(in crate::ui::app) const FOLD_MARGIN: usize = 2;
+
 /// Blank rows between one band of the folded graph and the next.
 ///
 /// One row, on top of the blank row every lane already ends with. That is the

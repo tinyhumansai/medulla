@@ -137,6 +137,13 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let (launch_args, dropped_hooks) =
         crate::harness_hooks::launch_args(config.provider, config.attribution, &config.hooks);
     child_args.extend(launch_args);
+    if config.provider == crate::protocol::HarnessProvider::Codex
+        && !config.hooks.for_provider(config.provider).is_empty()
+    {
+        tracing::warn!(
+            "Codex hook overrides remain subject to Codex's persisted hook trust; untrusted hooks will be skipped"
+        );
+    }
     for dropped in &dropped_hooks {
         tracing::warn!(
             event = dropped.event.as_str(),

@@ -105,7 +105,9 @@ impl HookEvent {
     pub fn supported_by(self, provider: HarnessProvider) -> bool {
         match provider {
             HarnessProvider::Claude => true,
-            HarnessProvider::Codex => self != HookEvent::Notification,
+            HarnessProvider::Codex => {
+                !matches!(self, HookEvent::Notification | HookEvent::SessionEnd)
+            }
             HarnessProvider::Opencode | HarnessProvider::Openhuman => false,
         }
     }

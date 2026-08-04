@@ -173,6 +173,12 @@ async fn run_provider_attempt(
     let (launch_args, dropped_hooks) =
         crate::harness_hooks::launch_args(spec.provider, spec.attribution, &spec.hooks);
     extra_args.extend(launch_args);
+    if spec.provider == HarnessProvider::Codex && !spec.hooks.for_provider(spec.provider).is_empty()
+    {
+        tracing::warn!(
+            "Codex hook overrides remain subject to Codex's persisted hook trust; untrusted hooks will be skipped"
+        );
+    }
     for dropped in &dropped_hooks {
         tracing::warn!(
             event = dropped.event.as_str(),

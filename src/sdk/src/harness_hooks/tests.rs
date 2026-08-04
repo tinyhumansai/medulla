@@ -155,6 +155,16 @@ fn codex_drops_notification_with_a_reason_and_keeps_the_rest() {
 }
 
 #[test]
+fn codex_drops_session_end_because_the_cli_does_not_expose_that_event() {
+    let hooks = config(vec![hook(HookEvent::SessionEnd, "*", "cleanup")]);
+    let injection = hook_injection(HarnessProvider::Codex, &hooks);
+
+    assert!(injection.args.is_empty());
+    assert_eq!(injection.dropped.len(), 1);
+    assert_eq!(injection.dropped[0].event, HookEvent::SessionEnd);
+}
+
+#[test]
 fn unadapted_providers_report_every_hook_rather_than_ignoring_it() {
     let hooks = config(vec![hook(HookEvent::PostToolUse, "*", "checkpoint")]);
     for provider in [HarnessProvider::Opencode, HarnessProvider::Openhuman] {

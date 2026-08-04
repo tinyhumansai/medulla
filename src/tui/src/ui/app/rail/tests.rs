@@ -356,11 +356,20 @@ fn a_row_answers_for_the_agent_and_the_lane_behind_it() {
                 assert_eq!(row.agent_id(), session.agent_id.as_deref());
                 assert_eq!(row.lane_index(), session.lane_index);
             }
-            // Hosts and the action row are about no agent and no lane.
+            // Hosts and the create action are about no agent and no lane.
             RailRow::Host(_) | RailRow::NewAgent => {
                 assert_eq!(row.agent_id(), None);
                 assert_eq!(row.lane_index(), None);
                 assert_eq!(row.session_id(), None);
+            }
+            // The per-agent action names its agent — that is what `^T` and
+            // Enter act on — but no lane and no session of its own.
+            RailRow::NewSession { agent_id } => {
+                assert_eq!(row.agent_id(), Some(agent_id.as_str()));
+                assert_eq!(row.new_session_agent(), Some(agent_id.as_str()));
+                assert_eq!(row.lane_index(), None);
+                assert_eq!(row.session_id(), None);
+                assert!(row.task().is_none());
             }
             RailRow::Lane(lane) => assert_eq!(row.lane_index(), lane.lane_index()),
         }
@@ -379,7 +388,10 @@ fn only_the_rows_that_name_something_take_the_cursor() {
     for row in app.rail_rows() {
         match row {
             RailRow::Host(_) => assert!(!row.selectable(), "a host header is a label"),
-            RailRow::Agent(_) | RailRow::Session(_) | RailRow::NewAgent => {
+            RailRow::Agent(_)
+            | RailRow::Session(_)
+            | RailRow::NewAgent
+            | RailRow::NewSession { .. } => {
                 assert!(row.selectable())
             }
             RailRow::Lane(_) => {}

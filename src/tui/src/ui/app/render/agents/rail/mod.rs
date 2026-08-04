@@ -17,7 +17,7 @@ use ratatui::Frame;
 use crate::ui::agents::{AgentLane, TaskStatus};
 use crate::worker::pty::ATTENTION_GLYPH;
 
-use super::super::super::rail::{RailRow, NEW_AGENT_LABEL};
+use super::super::super::rail::{RailRow, NEW_AGENT_LABEL, NEW_SESSION_LABEL};
 use super::super::super::types::App;
 use super::super::color;
 use super::types::{AgentsPanes, Selection};
@@ -343,6 +343,7 @@ impl App {
                 self.declared_agent_line(agent, lanes, active, waiting_sessions)
             }
             RailRow::NewAgent => self.new_agent_line(active),
+            RailRow::NewSession { .. } => self.new_session_line(active),
             RailRow::Session(session) => match (&session.task, &session.local) {
                 (Some(task), _) => self.agent_row_line(
                     &crate::ui::agents::AgentRow::Sub {
@@ -420,6 +421,23 @@ impl App {
         };
         TLine::from(vec![
             Span::styled(format!(" {NEW_AGENT_LABEL} "), style),
+            Span::styled(" ⏎", Style::default().add_modifier(Modifier::DIM)),
+        ])
+    }
+
+    /// Format the `+ new session` action row that closes an agent's group.
+    ///
+    /// Drawn as the group's last leaf — the same `└` the last session would have
+    /// carried — so it reads as part of that agent rather than as a second
+    /// machine-level button beside `+ New agent`.
+    fn new_session_line(&self, active: bool) -> TLine<'static> {
+        let style = if active {
+            self.theme.selection()
+        } else {
+            Style::default().fg(color("cyan"))
+        };
+        TLine::from(vec![
+            Span::styled(format!("   └ {NEW_SESSION_LABEL}"), style),
             Span::styled(" ⏎", Style::default().add_modifier(Modifier::DIM)),
         ])
     }

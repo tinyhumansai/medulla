@@ -52,6 +52,12 @@ pub use types::{AgentRailRow, HostRailRow, RailRow, SessionRailRow};
 /// declared `harness × workspace` identity that outlives the session it starts.
 pub(in crate::ui::app) const NEW_AGENT_LABEL: &str = "+ New agent";
 
+/// The label on the action row that opens a session under an agent.
+///
+/// Indented and lower-cased beside [`NEW_AGENT_LABEL`] because it is a leaf of
+/// one agent's group rather than an action on the machine.
+pub(in crate::ui::app) const NEW_SESSION_LABEL: &str = "+ new session";
+
 /// The most sessions listed under one agent before the rest are counted.
 const MAX_SESSIONS_PER_AGENT: usize = 8;
 
@@ -239,9 +245,21 @@ impl App {
         let mut rows: Vec<RailRow> = lane_rows.into_iter().map(RailRow::Lane).collect();
         // A device that hosts nothing cannot declare an agent on itself, so the
         // action is absent there rather than present and refusing.
-        if self.local_sessions.is_some() {
+        let hosting = self.local_sessions.is_some();
+        if hosting {
             rows.push(RailRow::NewAgent);
         }
+        // Which agents this machine may open a session under: a session is
+        // started by the host that owns the agent, so only the agents declared
+        // here get the action. Collected once rather than re-scanned per group.
+        let declared: Vec<String> = if hosting {
+            self.local_agent_declarations()
+                .into_iter()
+                .map(|declaration| declaration.agent_id)
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Progressive disclosure: one host is the common case, and a permanent
         // `mac-studio ▸` wrapper would add a level of nesting to the surface an
         // operator uses most.
@@ -251,7 +269,10 @@ impl App {
                 rows.push(RailRow::Host(host.row));
             }
             for group in &mut host.agents {
-                push_group(&mut rows, group);
+                let offers_session = declared
+                    .iter()
+                    .any(|agent_id| agent_id.trim() == group.row.agent_id.trim());
+                push_group(&mut rows, group, offers_session);
             }
         }
         rows.extend(orphans.into_iter().map(|mut session| {
@@ -408,12 +429,19 @@ fn unplaced_host(hosts: &[HostGroup], host_id: &str) -> Option<usize> {
 }
 
 /// Push one agent row and the sessions under it, capped and tree-marked.
-fn push_group(rows: &mut Vec<RailRow>, group: &mut AgentGroup) {
+///
+/// `offers_session` closes the group with the `+ New session` action. It is off
+/// for an agent this machine does not declare — a remote host's agent, or a lane
+/// the fold produced for an agent declared somewhere else — because the flow it
+/// opens reads the declaration for the harness and the directory to start in.
+fn push_group(rows: &mut Vec<RailRow>, group: &mut AgentGroup, offers_session: bool) {
     rows.push(RailRow::Agent(group.row.clone()));
     let shown = group.sessions.len().min(MAX_SESSIONS_PER_AGENT);
     let hidden = group.hidden + (group.sessions.len() - shown);
     for (index, session) in group.sessions.iter_mut().take(shown).enumerate() {
-        session.last = hidden == 0 && index + 1 == shown;
+        // The action row below closes the group when it is offered, so the last
+        // session is only the tree's last leaf when it is not.
+        session.last = !offers_session && hidden == 0 && index + 1 == shown;
         rows.push(RailRow::Session(Box::new(session.clone())));
     }
     if hidden > 0 {
@@ -421,5 +449,13 @@ fn push_group(rows: &mut Vec<RailRow>, group: &mut AgentGroup) {
             lane_index: group.row.lane_index.unwrap_or(0),
             hidden,
         }));
+    }
+    // Last, under the sessions it adds to: the group reads as a list of what
+    // this agent is running, and the action that starts one more belongs at the
+    // end of that list rather than above it.
+    if offers_session {
+        rows.push(RailRow::NewSession {
+            agent_id: group.row.agent_id.clone(),
+        });
     }
 }

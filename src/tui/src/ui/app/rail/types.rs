@@ -151,6 +151,20 @@ pub enum RailRow {
     /// agents declared has nothing else on that half of the rail to suggest the
     /// flow exists — which is the same as not having it.
     NewAgent,
+    /// The action row that opens a new session under the agent above it.
+    ///
+    /// The last row of an agent's group, under its sessions, because that is
+    /// where "and one more" belongs: the list you are reading is what the agent
+    /// is running, and this adds to it. Emitted only for an agent this machine
+    /// declares — a session is started on the host that owns the agent, so
+    /// offering the action on a remote one would be a button that refuses.
+    ///
+    /// `open_new_session` has existed since the tree landed and was reachable
+    /// only by `Ctrl-T`, i.e. only by an operator who already knew it was there.
+    NewSession {
+        /// The agent whose harness and workspace the session inherits.
+        agent_id: String,
+    },
     /// A fold row that is not an agent: the orchestrator's own conversation, the
     /// `── functions ──` divider, a function lane, or a `+N more` counter.
     ///
@@ -168,6 +182,7 @@ impl RailRow {
             RailRow::Agent(_) => true,
             RailRow::Session(_) => true,
             RailRow::NewAgent => true,
+            RailRow::NewSession { .. } => true,
             RailRow::Lane(row) => row.selectable(),
         }
     }
@@ -194,7 +209,7 @@ impl RailRow {
             RailRow::Agent(row) => row.lane_index,
             RailRow::Session(row) => row.lane_index,
             RailRow::Lane(row) => row.lane_index(),
-            RailRow::Host(_) | RailRow::NewAgent => None,
+            RailRow::Host(_) | RailRow::NewAgent | RailRow::NewSession { .. } => None,
         }
     }
 
@@ -203,6 +218,7 @@ impl RailRow {
         match self {
             RailRow::Agent(row) => Some(row.agent_id.as_str()),
             RailRow::Session(row) => row.agent_id.as_deref(),
+            RailRow::NewSession { agent_id } => Some(agent_id.as_str()),
             _ => None,
         }
     }
@@ -210,5 +226,13 @@ impl RailRow {
     /// Whether this row is the "declare an agent" action.
     pub fn is_new_agent(&self) -> bool {
         matches!(self, RailRow::NewAgent)
+    }
+
+    /// The agent a "start a session" action row would open one under.
+    pub fn new_session_agent(&self) -> Option<&str> {
+        match self {
+            RailRow::NewSession { agent_id } => Some(agent_id.as_str()),
+            _ => None,
+        }
     }
 }

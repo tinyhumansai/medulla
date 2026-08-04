@@ -79,6 +79,17 @@ pub(crate) fn run_skills_cmd(args: &[String]) -> anyhow::Result<()> {
         return refuse_blanket_uninstall(&parsed, &root, &targets, &opts);
     }
 
+    // `list` reports what is on disk and writes nothing; honouring --with-mcp
+    // there would make a read-only verb create two config files, which is the
+    // last thing an operator running `list` to find out what is installed
+    // expects. Refused rather than ignored, so the flag is never a silent no-op.
+    if parsed.with_mcp && parsed.action == SkillsAction::List {
+        anyhow::bail!(
+            "--with-mcp has nothing to do on `skills list`, which only reports what is already \
+             installed. Register the server with `medulla skills install --with-mcp`."
+        );
+    }
+
     // Asked for before anything is written: a registration that cannot serve
     // tools makes every skill we are about to install inert, and half-doing it
     // is worse than refusing.
@@ -197,9 +208,12 @@ fn project_dir(parsed: &SkillsArgs, root: &Path, cwd: &Path) -> PathBuf {
 ///
 /// A named id that the store does not have is an error rather than a silent
 /// omission — the operator asked for that workflow by name, and a success
-/// message listing three of the four files they expected teaches nothing.
-/// Disabled workflows are filtered by the installer itself, so they are passed
-/// through here.
+/// message listing three of the four files they expected teaches nothing. A
+/// named id that is *disabled* is an error for the same reason: the installer
+/// drops disabled workflows, so passing one through would print "nothing to
+/// do" and exit 0 at an operator who named exactly one workflow. Disabled
+/// workflows reached by an id-less run are still filtered silently, which is
+/// what "install everything installable" should mean.
 fn selected(
     store: &std::sync::Arc<dyn medulla::workflows::WorkflowStore>,
     ids: &[String],
@@ -214,6 +228,12 @@ fn selected(
             .iter()
             .find(|summary| &summary.id == id)
             .ok_or_else(|| anyhow::anyhow!("no workflow with id {id:?} is installed"))?;
+        if !found.enabled {
+            anyhow::bail!(
+                "workflow {id:?} is disabled, so it gets no skill. Enable it in Medulla first, \
+                 or leave it out of the command."
+            );
+        }
         chosen.push(found.clone());
     }
     Ok(chosen)

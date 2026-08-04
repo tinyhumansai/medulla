@@ -204,8 +204,13 @@ medulla skills install babysit --with-mcp    # one, and attach the server
 medulla skills install --dry-run             # what would change, writing nothing
 medulla skills list                          # what is installed, and where
 medulla skills sync --prune                  # match the store again
-medulla skills uninstall babysit
+medulla skills uninstall babysit             # one
+medulla skills uninstall --all               # every managed skill under the root
 ```
+
+A bare `medulla skills uninstall` with neither an id nor `--all` lists what it
+would remove and refuses: "remove everything" is one typo away from "remove this
+one", and the removal is not recoverable from the output.
 
 | flag | meaning |
 | --- | --- |
@@ -222,7 +227,10 @@ Claude gets `.claude/skills/medulla-<id>/SKILL.md`, Codex gets
 `.codex/skills/…`, and any other harness gets `.medulla/skills/…` to point at
 by hand. Generated files carry a `medulla:managed` marker line, and nothing
 without that marker is ever overwritten or deleted — a collision is reported and
-skipped, which means that workflow is *not* installed. Re-running is a no-op.
+skipped, which means that workflow is *not* installed, and the command exits
+non-zero so a wrapper notices. A file whose marker Medulla cannot fully parse
+counts as someone else's for the same reason; remove it by hand to let Medulla
+manage that path again. Re-running is a no-op.
 Disabled workflows get no skill: a workflow that may not run should not be
 advertised as runnable.
 

@@ -236,10 +236,43 @@ fn all_is_read_for_uninstall_and_is_off_by_default() {
 }
 
 #[test]
-fn unknown_flags_are_tolerated_the_way_the_other_parsers_tolerate_them() {
-    let parsed = parse(&["list", "--verbose", "--json"]);
-    assert_eq!(parsed.action, SkillsAction::List);
-    assert!(parsed.json);
+fn an_unknown_flag_is_refused_rather_than_ignored() {
+    // The rest of the CLI shrugs at an unknown flag. This verb must not: every
+    // flag it takes decides where files are written, so one that is dropped
+    // silently retargets the operation while still reporting success.
+    let error = parse_skills_args(&argv(&["list", "--verbose"])).expect_err("should be refused");
+    assert!(error.contains("--verbose"), "{error}");
+    let error = parse_skills_args(&argv(&["list", "--dirr=/tmp/x"])).expect_err("should refuse");
+    assert!(error.contains("--dirr"), "{error}");
+}
+
+#[test]
+fn the_equals_spelling_of_a_value_flag_is_the_same_request() {
+    // `--dir=/tmp/x` used to be discarded, which pointed the whole run at $HOME
+    // instead — and with `uninstall --all` that is the difference between
+    // clearing a scratch directory and clearing the operator's own.
+    let parsed = parse(&[
+        "install",
+        "--dir=/tmp/x",
+        "--harness=claude,codex",
+        "--scope=project",
+    ]);
+    assert_eq!(parsed.dir.as_deref(), Some("/tmp/x"));
+    assert_eq!(parsed.scope, SkillScope::Project);
+    assert_eq!(
+        parsed.targets,
+        Some(vec![SkillTarget::Claude, SkillTarget::Codex])
+    );
+    // A value containing `=` survives: only the flag token is split, on its
+    // first `=` alone.
+    assert_eq!(
+        parse(&["install", "--dir", "/srv/a=b"]).dir.as_deref(),
+        Some("/srv/a=b")
+    );
+    // And the bad spellings are errors, not silent no-ops.
+    assert!(parse_skills_args(&argv(&["install", "--dir="])).is_err());
+    assert!(parse_skills_args(&argv(&["install", "--json=true"])).is_err());
+    assert!(parse_skills_args(&argv(&["install", "--harness=cluade"])).is_err());
 }
 
 #[test]

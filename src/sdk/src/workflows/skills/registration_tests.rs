@@ -499,3 +499,35 @@ fn an_unparseable_config_is_left_untouched() {
         "a config we could not parse is left exactly as it was"
     );
 }
+
+#[test]
+fn a_config_that_is_not_utf8_is_skipped_rather_than_failing_the_run() {
+    // Registration happens *after* the skills are written, so returning an io
+    // error here left the operator with installed skills, no report, and — under
+    // --json — nothing on stdout to parse. A file we cannot decode is one we did
+    // not write: same verdict as one we cannot parse.
+    let dir = TempDir::new().unwrap();
+    let claude = dir.path().join(".mcp.json");
+    let codex = dir.path().join(".codex").join("config.toml");
+    fs::write(&claude, [0xff, 0xfe, 0x00, 0x9f]).unwrap();
+    fs::create_dir_all(dir.path().join(".codex")).unwrap();
+    fs::write(&codex, [0xe2, 0x28, 0xa1]).unwrap();
+
+    let outcomes = register(&opts(
+        dir.path(),
+        vec![SkillTarget::Claude, SkillTarget::Codex],
+        SkillScope::Project,
+    ))
+    .expect("undecodable configs must not fail the run");
+
+    for outcome in &outcomes {
+        assert_eq!(outcome.action, "skipped", "{outcome:?}");
+        let reason = outcome
+            .manual_command
+            .as_deref()
+            .expect("a skip says why, and names the file");
+        assert!(reason.contains("UTF-8"), "{reason}");
+    }
+    assert_eq!(fs::read(&claude).unwrap(), vec![0xff, 0xfe, 0x00, 0x9f]);
+    assert_eq!(fs::read(&codex).unwrap(), vec![0xe2, 0x28, 0xa1]);
+}

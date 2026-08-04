@@ -245,7 +245,21 @@ fn skipped(target: SkillTarget, path: &Path, reason: String) -> RegistrationOutc
 /// Merges `mcpServers.medulla` into `<project_dir>/.mcp.json`.
 fn register_claude_project(opts: &RegistrationOptions) -> io::Result<RegistrationOutcome> {
     let path = opts.project_dir.join(".mcp.json");
-    let existing = read_if_present(&path)?;
+    let existing = match read_if_present(&path)? {
+        Existing::Absent => None,
+        Existing::Unreadable => {
+            return Ok(skipped(
+                SkillTarget::Claude,
+                &path,
+                format!(
+                    "{} is not valid UTF-8; left untouched — add the medulla server by hand or \
+                     move the file aside",
+                    path.display()
+                ),
+            ));
+        }
+        Existing::Text(text) => Some(text),
+    };
 
     let mut document = match existing.as_deref() {
         None => Map::new(),
@@ -329,7 +343,21 @@ fn claude_entry(opts: &RegistrationOptions) -> Value {
 /// changed keys reassigned, and nothing else in the file moved.
 fn register_codex(opts: &RegistrationOptions) -> io::Result<RegistrationOutcome> {
     let path = opts.root.join(".codex").join("config.toml");
-    let existing = read_if_present(&path)?;
+    let existing = match read_if_present(&path)? {
+        Existing::Absent => None,
+        Existing::Unreadable => {
+            return Ok(skipped(
+                SkillTarget::Codex,
+                &path,
+                format!(
+                    "{} is not valid UTF-8; left untouched — add [mcp_servers.medulla] by hand \
+                     or move the file aside",
+                    path.display()
+                ),
+            ));
+        }
+        Existing::Text(text) => Some(text),
+    };
 
     let mut document = match existing.as_deref() {
         None => DocumentMut::new(),
@@ -483,12 +511,32 @@ fn outcome(target: SkillTarget, path: PathBuf, action: &str) -> RegistrationOutc
     }
 }
 
-/// Reads `path`, mapping "not found" to `None` so callers can distinguish a
-/// first registration from an update without a second stat.
-fn read_if_present(path: &Path) -> io::Result<Option<String>> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+/// What was found at a config path.
+///
+/// Three cases rather than two, because "exists but we cannot read it as text"
+/// must not be an error: registration runs *after* the skills have been
+/// written, so failing here would leave the operator with installed skills, no
+/// report, and — under `--json` — nothing on stdout to parse. It is reported as
+/// `skipped` for the same reason a malformed config is.
+enum Existing {
+    /// No file at the path: this is a first registration.
+    Absent,
+    /// A file that is not valid UTF-8. Left alone; never parsed, never written.
+    Unreadable,
+    /// The file's contents.
+    Text(String),
+}
+
+/// Reads `path`, distinguishing absent from present-but-undecodable so a first
+/// registration, an update, and a file we must not touch stay tellable apart.
+///
+/// Bytes rather than `fs::read_to_string`, mirroring `install::read_existing`:
+/// a config that is not UTF-8 is something we did not write and cannot safely
+/// rewrite.
+fn read_if_present(path: &Path) -> io::Result<Existing> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(String::from_utf8(bytes).map_or(Existing::Unreadable, Existing::Text)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Existing::Absent),
         Err(error) => Err(error),
     }
 }

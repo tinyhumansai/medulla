@@ -289,13 +289,74 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
     out
 }
 
+/// The `medulla skills` flags that take a value, as `--flag value`.
+#[cfg(feature = "workflows")]
+const SKILLS_VALUE_FLAGS: [&str; 4] = ["--harness", "--scope", "--dir", "--tools"];
+
+/// The `medulla skills` flags that take no value.
+#[cfg(feature = "workflows")]
+const SKILLS_BOOL_FLAGS: [&str; 6] = [
+    "--with-mcp",
+    "--with-commands",
+    "--dry-run",
+    "--prune",
+    "--all",
+    "--json",
+];
+
+/// Rewrite `--flag=value` into `--flag`, `value` so the main loop sees one
+/// spelling.
+///
+/// Only the flag token is split, and only on its *first* `=`, so a value that
+/// itself contains one (`--dir /srv/a=b`) is untouched.
+///
+/// # Errors
+///
+/// Returns an operator-facing sentence when a value flag is given no value
+/// (`--dir=`), when a boolean flag is given one (`--json=true`), or when the
+/// head of an `=` form is not a flag this verb has. Each of those is a request
+/// the operator meant, and honouring the rest of the command line while
+/// discarding it is how a scratch-directory run becomes a `$HOME` run.
+#[cfg(feature = "workflows")]
+fn split_skills_flag_values(args: &[String]) -> Result<Vec<String>, String> {
+    let mut out = Vec::with_capacity(args.len());
+    for arg in args {
+        let Some((head, value)) = arg.split_once('=') else {
+            out.push(arg.clone());
+            continue;
+        };
+        if !head.starts_with('-') {
+            out.push(arg.clone());
+            continue;
+        }
+        if SKILLS_VALUE_FLAGS.contains(&head) {
+            if value.is_empty() {
+                return Err(format!("{head} was given no value"));
+            }
+            out.push(head.to_string());
+            out.push(value.to_string());
+        } else if SKILLS_BOOL_FLAGS.contains(&head) {
+            return Err(format!("{head} takes no value (got `{arg}`)"));
+        } else {
+            return Err(format!(
+                "unknown flag `{head}` for `medulla skills`. Run `medulla help` for the flags \
+                 this verb takes."
+            ));
+        }
+    }
+    Ok(out)
+}
+
 /// Parse `medulla skills` flags out of the args following `skills`.
 ///
 /// Stricter than its sibling parsers, and deliberately so: every flag here
-/// decides *where files are written*, and a mistyped `--harness cluade` that
-/// was quietly ignored would install nothing while reporting success. So a bad
-/// enum value is an error, while an unknown flag is still tolerated the way the
-/// rest of the CLI tolerates it.
+/// decides *where files are written*, so a flag that does not arrive is not a
+/// harmless no-op. A `--dir=/tmp/x` that was quietly dropped retargets the
+/// whole operation at `$HOME` while still reporting success — and with
+/// `uninstall --all` that is the difference between clearing a scratch
+/// directory and clearing the operator's real one. So both spellings of a value
+/// flag are accepted, and an unrecognised flag is an error rather than a bare
+/// word, which is the opposite of what the rest of the CLI does.
 ///
 /// The first bare word selects the verb; every later bare word is a workflow id.
 ///
@@ -303,13 +364,16 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
 ///
 /// Returns an operator-facing sentence when `--harness`, `--scope`, or
 /// `--tools` is given a value that is not one of its accepted ones, when one of
-/// them is given no value at all, or when `--prune` is asked for alongside
-/// explicit workflow ids — a combination whose two possible meanings differ by
-/// which files get deleted.
+/// them is given no value at all, when a flag is not recognised or is given a
+/// value it does not take, or when `--prune` is asked for alongside explicit
+/// workflow ids — a combination whose two possible meanings differ by which
+/// files get deleted.
 #[cfg(feature = "workflows")]
 pub fn parse_skills_args(args: &[String]) -> Result<SkillsArgs, String> {
     use medulla::workflows::skills::{SkillScope, SkillTarget};
 
+    let args = split_skills_flag_values(args)?;
+    let args = args.as_slice();
     let mut out = SkillsArgs::default();
     let mut bare: Vec<String> = Vec::new();
     // Accumulated separately from `out.targets` so that "no --harness at all"
@@ -367,11 +431,13 @@ pub fn parse_skills_args(args: &[String]) -> Result<SkillsArgs, String> {
             "--prune" => out.prune = true,
             "--all" => out.all = true,
             "--json" => out.json = true,
-            other => {
-                if !other.starts_with('-') {
-                    bare.push(other.to_string());
-                }
+            other if other.starts_with('-') => {
+                return Err(format!(
+                    "unknown flag `{other}` for `medulla skills`. Run `medulla help` for the \
+                     flags this verb takes."
+                ));
             }
+            other => bare.push(other.to_string()),
         }
     }
 

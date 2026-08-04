@@ -685,3 +685,75 @@ fn the_nodes_sway_but_the_selected_one_holds_still() {
         );
     }
 }
+
+#[test]
+fn columns_are_sized_to_the_pane_and_tile_it() {
+    let mut long = diamond("long");
+    long.graph = serde_json::from_value(json!({
+        "nodes": (0..12).map(|index| json!({
+            "id": format!("n{index}"),
+            "kind": if index == 0 { "trigger" } else { "transform" },
+            "name": format!("Step {index}"),
+            "config": {},
+        })).collect::<Vec<_>>(),
+        "edges": (0..11).map(|index| json!({
+            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
+        })).collect::<Vec<_>>(),
+    }))
+    .expect("graph parses");
+    let (_home, mut app) = app_with(&[long], &[]);
+
+    for width in [100u16, 140, 200] {
+        render_sized(&mut app, width, 34);
+        let (per_band, node_width) = (app.layers_per_band(), app.node_width());
+        let canvas = app.canvas_width();
+
+        assert!(
+            (super::MIN_NODE_WIDTH..=super::MAX_NODE_WIDTH).contains(&node_width),
+            "at {width} columns a node is {node_width} wide"
+        );
+        // A full band fills the pane: the last column ends within one column's
+        // slack of the right edge rather than leaving a ragged margin.
+        let (last, _) = app.graph_cell(per_band - 1, 0);
+        let end = last + node_width;
+        assert!(
+            end <= canvas + super::FOLD_MARGIN,
+            "at {width} columns the band overflows: ends at {end} of {canvas}"
+        );
+        assert!(
+            end + super::GUTTER_SPAN >= canvas,
+            "at {width} columns the band leaves {} unused",
+            canvas.saturating_sub(end)
+        );
+    }
+}
+
+#[test]
+fn every_band_puts_its_columns_in_the_same_places() {
+    let mut long = diamond("long");
+    long.graph = serde_json::from_value(json!({
+        "nodes": (0..12).map(|index| json!({
+            "id": format!("n{index}"),
+            "kind": if index == 0 { "trigger" } else { "transform" },
+            "name": format!("Step {index}"),
+            "config": {},
+        })).collect::<Vec<_>>(),
+        "edges": (0..11).map(|index| json!({
+            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
+        })).collect::<Vec<_>>(),
+    }))
+    .expect("graph parses");
+    let (_home, mut app) = app_with(&[long], &[]);
+    render_sized(&mut app, 140, 34);
+
+    // Bands alternate direction, so the second band's columns are the first
+    // band's mirrored — the same set of x positions either way, which is what
+    // makes nodes line up vertically down the fold.
+    let per_band = app.layers_per_band();
+    let first: Vec<usize> = (0..per_band).map(|c| app.graph_cell(c, 0).0).collect();
+    let mut second: Vec<usize> = (per_band..per_band * 2)
+        .map(|c| app.graph_cell(c, 0).0)
+        .collect();
+    second.sort_unstable();
+    assert_eq!(first, second);
+}

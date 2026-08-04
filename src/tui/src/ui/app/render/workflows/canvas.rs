@@ -242,18 +242,24 @@ impl App {
             let in_reversed = self.layer_reversed(to.layer);
             let folds = self.band_of(to.layer) != self.band_of(from.layer);
 
+            // Wires leave and arrive at the *text*, not at the column slot: a
+            // connector that started a few cells past the end of a short name
+            // is what made the graph look ragged, however well the columns
+            // themselves lined up. The column a wire turns down in is still on
+            // the slot grid, so the turns of a whole column agree.
+            let (from_width, to_width) = (
+                self.label_width(from, overlay),
+                self.label_width(to, overlay),
+            );
             let (exit, gutter) = if out_reversed {
-                (
-                    fx.saturating_sub(1 + NODE_GAP),
-                    fx.saturating_sub(GUTTER_GAP),
-                )
+                (fx.saturating_sub(1), fx.saturating_sub(GUTTER_GAP))
             } else {
-                (fx + node_width + NODE_GAP, fx + node_width + GUTTER_GAP)
+                (fx + from_width, fx + node_width + GUTTER_GAP)
             };
             // The cell an arrowhead lands on: just outside the target's leading
             // edge, which is its right edge on a band that runs right to left.
             let entry = if in_reversed {
-                tx + node_width
+                tx + to_width
             } else {
                 tx.saturating_sub(1)
             };
@@ -352,12 +358,7 @@ impl App {
     /// The wires attach here, so this has to agree exactly with what
     /// [`paint_nodes`](Self::paint_nodes) drew — hence both going through
     /// [`label_of`].
-    fn label_width(
-        &self,
-        node: &PlacedNode,
-        _layout: &GraphLayout,
-        overlay: Option<&RunOverlay>,
-    ) -> usize {
+    fn label_width(&self, node: &PlacedNode, overlay: Option<&RunOverlay>) -> usize {
         let mark = overlay
             .map(|overlay| overlay.node(&node.id).state.glyph())
             .unwrap_or("");

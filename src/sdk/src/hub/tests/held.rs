@@ -1,4 +1,12 @@
-//! Refusing a task because a person is working in the workspace.
+//! Deferring a task because a person is working in the checkout.
+//!
+//! Narrower than it was. A dispatch no longer refuses on meeting a person —
+//! their session is simply not a candidate, and a dispatch with nothing else to
+//! run in queues behind the checkout's writer. `RunError::Held` is what that
+//! queue reports when it outlives the caller's budget, which is the one path
+//! left to it and the reason the shape below is unchanged: the backend already
+//! reads `harnessHeld` as retryable, and a task that was never attempted must
+//! not come back as one that failed.
 //!
 //! Two halves, and they have to agree. The daemon can only say so in the text of
 //! an `error` frame, so [`settle`](super::super::runner) has to recognise that

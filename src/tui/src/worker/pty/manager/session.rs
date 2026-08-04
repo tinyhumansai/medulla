@@ -52,31 +52,32 @@ impl PtyManager {
         Some(session.row())
     }
 
-    /// The operator-held session covering `cwd`, if there is one.
+    /// Every live session working in `cwd`, with who holds each.
     ///
-    /// The half of exclusivity [`claim_idle`](Self::claim_idle) cannot express.
-    /// `claim_idle` answers "may I reuse *this* session", which a caller can walk
-    /// straight past by opening a second harness in the same folder — and did:
-    /// taking over the only harness in a workspace made the next task frame spawn
-    /// a rival process in the same working tree, two agents editing one repo with
-    /// no mutual exclusion at all. This answers the question that actually
-    /// governs: "may anything start here right now".
+    /// A neutral question — "what is running in this directory" — and
+    /// deliberately not a policy. It replaced `operator_hold(cwd)`, which asked
+    /// "is this *workspace* held" and answered by scanning for a user-held
+    /// session in it. That was an artifact of the model where an agent had one
+    /// implicit session, in which "held session" and "held workspace" were the
+    /// same sentence. They are not: a **hold is on a session**, never on a
+    /// directory, and an agent now has as many sessions as its strategy allows.
     ///
-    /// A workspace with a person in it is not shared, however idle another
-    /// harness in it looks, so this is consulted *before* reuse rather than after.
+    /// What remains true is that sessions sharing one *checkout* share one
+    /// working tree, so how many of them may write at once is a property of the
+    /// agent's [`WorkspaceStrategy`](medulla::runtime::WorkspaceStrategy) — a
+    /// separate rule, applied by the executor, that this only supplies the facts
+    /// for. Under `worktree` (phase G) sessions in one declared workspace get
+    /// their own trees and the rule changes without this query changing at all.
     ///
     /// Walks a cloned list of handles rather than holding the registry, because
     /// `same_workspace` canonicalizes both paths and that is a filesystem call —
     /// exactly the blocking work no caller may hold the registry across.
-    pub fn operator_hold(&self, cwd: &str) -> Option<SessionRow> {
+    pub fn sessions_in(&self, cwd: &str) -> Vec<SessionRow> {
         self.handles()
             .into_iter()
-            .find(|session| {
-                session.control() == SessionControl::User
-                    && session.is_running()
-                    && same_workspace(session.cwd(), cwd)
-            })
+            .filter(|session| session.is_running() && same_workspace(session.cwd(), cwd))
             .map(|session| session.row())
+            .collect()
     }
 
     /// Who currently holds `id`, if it is a session we know about.

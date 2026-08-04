@@ -31,11 +31,15 @@ use super::{first_obj, str_field, wire_task_id};
 /// later" is the one answer that is certainly wrong. medulla bounds the
 /// re-dispatch with its own attempt ceiling and exponential backoff, so this
 /// cannot become a hot loop against a saturated worker.
-/// A workspace an operator is sitting in counts too. Nothing was attempted, and
-/// the harness will be usable again the moment they hand it back — so the task
-/// is deferred, not failed. It carries a `reason` on the wire (see
-/// [`result_frame`]) precisely so the orchestrator can route elsewhere instead
-/// of waiting on a person.
+/// A checkout an operator is sitting in counts too — in the one case that still
+/// reaches here. A dispatch no longer *refuses* on meeting a person: a held
+/// session is not a dispatch candidate at all, and a dispatch with nothing else
+/// to run in queues behind the checkout's writer instead of failing. What
+/// survives is that queue running out of budget: nothing was attempted, the tree
+/// will be usable again the moment the person is done, and the task is deferred
+/// rather than failed. It carries a `reason` on the wire (see [`result_frame`])
+/// precisely so the orchestrator can route elsewhere instead of waiting on
+/// somebody who may have left for the day.
 pub(in crate::hub) fn is_retryable(err: &RunError) -> bool {
     matches!(
         err,
@@ -96,10 +100,19 @@ pub(in crate::hub) fn result_frame(
             }
             frame
         }
-        // A held workspace is the one failure the orchestrator can act on
+        // An occupied checkout is the one failure the orchestrator can act on
         // *specifically*, so it is the one that names itself. `reason` and
         // `retryAfterMs` are additive and ignorable: a backend that has never
         // heard of either still reads this as an ordinary retryable failure.
+        //
+        // Deliberately kept, and kept byte-identical, even though the blanket
+        // refusal that used to produce it is gone. It is now reached by exactly
+        // one path — a dispatch that queued behind a person for its whole
+        // budget — and that path needs precisely this frame: the backend already
+        // treats `harnessHeld` as retryable, so replacing it with a terminal
+        // error would turn a task that was never attempted into one nobody
+        // retries. The rule is that a dispatch ends in a real result or a real
+        // error; this is the error half.
         Err(err @ RunError::Held(_)) => json!({
             "taskId": task_id,
             "ok": false,

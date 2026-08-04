@@ -164,7 +164,12 @@ fn user_sh_in(script: &str, cwd: &std::path::Path) -> LaunchSpec {
 }
 
 #[test]
-fn operator_hold_reports_the_session_holding_a_workspace() {
+fn sessions_in_reports_what_is_running_in_a_directory_and_who_holds_it() {
+    // A neutral question, and the replacement for the old `operator_hold(cwd)`.
+    // That one asked "is this *workspace* held" — an artifact of the model where
+    // an agent had one implicit session. A hold is on a session; a directory
+    // only ever has sessions *in* it, and what that implies is the strategy's
+    // business, not control's.
     let dir = tempfile::tempdir().unwrap();
     let manager = PtyManager::new();
     let id = manager.open(user_sh_in("sleep 30", dir.path())).unwrap();
@@ -172,19 +177,24 @@ fn operator_hold_reports_the_session_holding_a_workspace() {
         manager.row(&id).is_some_and(|r| r.state.is_running())
     });
 
-    let held = manager
-        .operator_hold(&dir.path().to_string_lossy())
-        .expect("a workspace the operator is working in must report its hold");
-    assert_eq!(held.id, id);
+    let running = manager.sessions_in(&dir.path().to_string_lossy());
+    assert_eq!(running.len(), 1);
+    assert_eq!(running[0].id, id);
+    assert_eq!(
+        running[0].control,
+        SessionControl::User,
+        "the answer carries who holds each session rather than filtering on it"
+    );
 
     manager.close(&id);
 }
 
 #[test]
-fn operator_hold_ignores_a_session_the_orchestrator_holds() {
-    // The whole point of the check: it must gate on *who holds it*, not on
-    // "is there a harness here". An orchestrator session in a folder is not a
-    // reason to refuse the orchestrator work in that folder.
+fn sessions_in_lists_an_orchestrator_session_too() {
+    // The old query dropped these, because it was really asking "may anything
+    // start here". This one reports them, so the caller applying the checkout's
+    // one-writer rule can see every writer rather than only the human one — the
+    // seam F3 needs to serialize orchestrator sessions without a new query.
     let dir = tempfile::tempdir().unwrap();
     let manager = PtyManager::new();
     let spec = LaunchSpec {
@@ -196,13 +206,15 @@ fn operator_hold_ignores_a_session_the_orchestrator_holds() {
         manager.row(&id).is_some_and(|r| r.state.is_running())
     });
 
-    assert_eq!(manager.operator_hold(&dir.path().to_string_lossy()), None);
+    let running = manager.sessions_in(&dir.path().to_string_lossy());
+    assert_eq!(running.len(), 1);
+    assert_eq!(running[0].control, SessionControl::Orchestrator);
 
     manager.close(&id);
 }
 
 #[test]
-fn operator_hold_ignores_a_workspace_nobody_is_in() {
+fn sessions_in_does_not_leak_across_directories() {
     let dir = tempfile::tempdir().unwrap();
     let other = tempfile::tempdir().unwrap();
     let manager = PtyManager::new();
@@ -211,19 +223,20 @@ fn operator_hold_ignores_a_workspace_nobody_is_in() {
         manager.row(&id).is_some_and(|r| r.state.is_running())
     });
 
-    assert_eq!(
-        manager.operator_hold(&other.path().to_string_lossy()),
-        None,
-        "a hold must not leak across workspaces"
+    assert!(
+        manager
+            .sessions_in(&other.path().to_string_lossy())
+            .is_empty(),
+        "a session must not be reported in a directory it is not running in"
     );
 
     manager.close(&id);
 }
 
 #[test]
-fn operator_hold_releases_when_the_session_exits() {
-    // A dead harness cannot be handed back, so a hold that outlived its process
-    // would wedge the workspace shut with no way to reopen it.
+fn sessions_in_forgets_a_session_that_exited() {
+    // A dead harness writes nothing, so counting it as a writer would wedge the
+    // checkout shut with no way to reopen it.
     let dir = tempfile::tempdir().unwrap();
     let manager = PtyManager::new();
     let id = manager.open(user_sh_in("true", dir.path())).unwrap();
@@ -231,15 +244,17 @@ fn operator_hold_releases_when_the_session_exits() {
         manager.row(&id).is_some_and(|r| !r.state.is_running())
     });
 
-    assert_eq!(manager.operator_hold(&dir.path().to_string_lossy()), None);
+    assert!(manager
+        .sessions_in(&dir.path().to_string_lossy())
+        .is_empty());
 
     manager.close(&id);
 }
 
 #[test]
-fn operator_hold_matches_the_same_directory_written_two_ways() {
+fn sessions_in_matches_the_same_directory_written_two_ways() {
     // The two sides arrive by different routes — an operator-spawned harness had
-    // its path expanded, a task frame's cwd is verbatim — so the hold has to
+    // its path expanded, a task frame's cwd is verbatim — so the match has to
     // survive a trailing slash and a symlinked path. Exclusivity that can be
     // defeated by spelling is not exclusivity.
     let dir = tempfile::tempdir().unwrap();
@@ -259,113 +274,12 @@ fn operator_hold_matches_the_same_directory_written_two_ways() {
         format!("{}/", real.to_string_lossy()),
         link.to_string_lossy().into_owned(),
     ] {
-        assert!(
-            manager.operator_hold(&spelling).is_some(),
-            "the hold was lost when the path was written as {spelling}"
+        assert_eq!(
+            manager.sessions_in(&spelling).len(),
+            1,
+            "the session was lost when the path was written as {spelling}"
         );
     }
 
-    manager.close(&id);
-}
-
-// ------------------------------------------------------------ provenance ---
-
-#[test]
-fn taking_a_dispatched_session_and_handing_it_back_never_changes_its_origin() {
-    // The distinction this whole field exists for. Control is a question about
-    // *now* and moves with every takeover; origin is a fact about how the
-    // session was born and moves never. A rail that read them as one thing would
-    // lose a dispatched session out of its agent's group the moment an operator
-    // pressed ctrl-g on it.
-    let manager = PtyManager::new();
-    let id = manager.open(sh("sleep 30")).unwrap();
-    let row = manager.row(&id).unwrap();
-    assert!(row.origin.is_orchestrator());
-    assert_eq!(row.control, SessionControl::Orchestrator);
-
-    assert!(manager.set_control(&id, SessionControl::User));
-    let taken = manager.row(&id).unwrap();
-    assert_eq!(taken.control, SessionControl::User, "the operator holds it");
-    assert!(
-        taken.origin.is_orchestrator(),
-        "holding a session is not having started it"
-    );
-
-    assert!(manager.set_control(&id, SessionControl::Orchestrator));
-    assert!(
-        manager.row(&id).unwrap().origin.is_orchestrator(),
-        "handing it back changes control, and only control"
-    );
-
-    manager.close(&id);
-}
-
-#[test]
-fn handing_an_operator_started_session_to_the_orchestrator_keeps_it_user_originated() {
-    // The mirror case, and the one that makes the two axes visibly independent:
-    // the session becomes dispatchable — a control fact — while still being one
-    // a person started.
-    let manager = PtyManager::new();
-    let id = manager.open(user_sh("sleep 30")).unwrap();
-    wait_for("session running", || {
-        manager.row(&id).is_some_and(|r| r.state.is_running())
-    });
-
-    assert!(manager.set_control(&id, SessionControl::Orchestrator));
-    let row = manager.row(&id).unwrap();
-    assert!(row.origin.is_user(), "origin is fixed at birth");
-    assert_eq!(row.control, SessionControl::Orchestrator);
-    assert!(
-        manager
-            .claim_idle("test", HarnessProvider::Codex)
-            .is_some_and(|claimed| claimed.id == id),
-        "a handed-over session is dispatchable however it was started"
-    );
-
-    manager.close(&id);
-}
-
-#[test]
-fn a_session_name_round_trips_and_a_blank_one_clears_it() {
-    // The name is the operator's label for a session they spun up; it is display
-    // identity only, and it never touches provenance or control.
-    let manager = PtyManager::new();
-    let id = manager
-        .open(LaunchSpec {
-            name: Some("debug login".to_string()),
-            ..user_sh("sleep 30")
-        })
-        .unwrap();
-    assert_eq!(
-        manager.row(&id).unwrap().name.as_deref(),
-        Some("debug login")
-    );
-
-    assert!(manager.set_name(&id, Some("chasing the 500".to_string())));
-    let renamed = manager.row(&id).unwrap();
-    assert_eq!(renamed.name.as_deref(), Some("chasing the 500"));
-    assert!(renamed.origin.is_user(), "renaming is not re-parenting");
-    assert_eq!(renamed.control, SessionControl::User);
-
-    // Blank is not a name: storing it would render as a gap in the rail.
-    assert!(manager.set_name(&id, Some("   ".to_string())));
-    assert_eq!(manager.row(&id).unwrap().name, None);
-    assert!(manager.set_name(&id, Some("back".to_string())));
-    assert!(manager.set_name(&id, None));
-    assert_eq!(manager.row(&id).unwrap().name, None);
-
-    assert!(!manager.set_name("w_nope", Some("ghost".to_string())));
-
-    manager.close(&id);
-}
-
-#[test]
-fn a_dispatched_session_is_born_unnamed() {
-    // Nothing to name it: the UI labels an orchestrator-originated session from
-    // the task it was created for, which is why this stays `None` rather than
-    // getting a synthetic string here.
-    let manager = PtyManager::new();
-    let id = manager.open(sh("sleep 30")).unwrap();
-    assert_eq!(manager.row(&id).unwrap().name, None);
     manager.close(&id);
 }

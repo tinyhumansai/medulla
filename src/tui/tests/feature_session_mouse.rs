@@ -31,8 +31,8 @@ use medulla::protocol::HarnessProvider;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 use medulla_tui::ui::app::{App, TABS};
-use medulla_tui::ui::harness_pane::LocalHarnesses;
-use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
+use medulla_tui::ui::harness_pane::LocalSessions;
+use medulla_tui::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 
 /// The terminal the assertions are written against.
 ///
@@ -82,7 +82,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
     }
     env.insert("TERM".to_string(), "xterm-256color".to_string());
 
-    app.set_local_harnesses(LocalHarnesses {
+    app.set_local_sessions(LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
         log: None,
         sessions,
@@ -103,7 +103,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
 /// A harness the operator holds, whose child asks for the mouse and echoes it.
 ///
 /// `stty raw -echo` first so the pty stops rewriting what arrives; the DECSET
-/// pair is what makes [`LocalHarnesses::takes_mouse`] true; `cat -v` renders the
+/// pair is what makes [`LocalSessions::takes_mouse`] true; `cat -v` renders the
 /// reports it receives as printable text, which is what the pane snapshot can
 /// then be searched for.
 fn mouse_reporting_session(sessions: &PtyManager) -> String {
@@ -115,6 +115,7 @@ fn mouse_reporting_session(sessions: &PtyManager) -> String {
     sessions
         .open(LaunchSpec {
             provider: HarnessProvider::Codex,
+            preset: None,
             bin: "/bin/sh".to_string(),
             cwd: "/".to_string(),
             env,
@@ -126,7 +127,7 @@ fn mouse_reporting_session(sessions: &PtyManager) -> String {
             label: "you:codex".to_string(),
             model: None,
             session_id: None,
-            control: HarnessControl::User,
+            control: SessionControl::User,
             origin: medulla_tui::worker::pty::SessionOrigin::User,
             name: None,
             mcp_grant_session: None,
@@ -135,7 +136,7 @@ fn mouse_reporting_session(sessions: &PtyManager) -> String {
 }
 
 /// The harness's whole screen as one string.
-fn screen(harnesses: &LocalHarnesses, id: &str) -> String {
+fn screen(harnesses: &LocalSessions, id: &str) -> String {
     harnesses
         .screen(id)
         .map(|snapshot| {
@@ -196,7 +197,7 @@ fn release(column: u16, row: u16) -> Event {
 /// Walk the rail to the first harness row and take the keyboard into it.
 ///
 /// Returns the session the pane resolved. The cursor is moved with the arrows
-/// and a frame is drawn after each step because `harness_pane_session` is
+/// and a frame is drawn after each step because `pane_session` is
 /// written during the draw — this is the same sequence an operator performs, and
 /// the only one that leaves the pane rect recorded for the pointer to use.
 fn attach_to_first_harness(app: &mut App) -> String {
@@ -205,14 +206,14 @@ fn attach_to_first_harness(app: &mut App) -> String {
     let _ = app.on_event(key(KeyCode::Esc));
     render(app);
     for _ in 0..16 {
-        if app.harness_pane_session_for_test().is_some() {
+        if app.pane_session_for_test().is_some() {
             break;
         }
         let _ = app.on_event(key(KeyCode::Down));
         render(app);
     }
     let session = app
-        .harness_pane_session_for_test()
+        .pane_session_for_test()
         .expect("the rail cursor to reach a harness row")
         .to_string();
     let _ = app.on_event(Event::Key(KeyEvent::new(
@@ -221,7 +222,7 @@ fn attach_to_first_harness(app: &mut App) -> String {
     )));
     render(app);
     assert_eq!(
-        app.attached_harness(),
+        app.attached_session(),
         Some(session.as_str()),
         "the chord must attach before the pointer cases begin"
     );
@@ -263,7 +264,7 @@ fn a_release_outside_the_pane_still_reaches_the_harness_that_took_the_press() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_harnesses().expect("harnesses").clone();
+    let harnesses = app.local_sessions().expect("harnesses").clone();
     wait_for("the child to paint", || {
         screen(&harnesses, &id).contains("READY")
     });
@@ -305,7 +306,7 @@ fn the_handback_question_does_not_swallow_the_release_of_a_press_it_interrupted(
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_harnesses().expect("harnesses").clone();
+    let harnesses = app.local_sessions().expect("harnesses").clone();
     wait_for("the child to paint", || {
         screen(&harnesses, &id).contains("READY")
     });
@@ -362,7 +363,7 @@ fn clicking_another_harness_row_asks_about_the_harness_being_left() {
     let mut app = app_with_harnesses(sessions.clone());
     let held = mouse_reporting_session(&sessions);
     let other = mouse_reporting_session(&sessions);
-    let harnesses = app.local_harnesses().expect("harnesses").clone();
+    let harnesses = app.local_sessions().expect("harnesses").clone();
     wait_for("both children to paint", || {
         screen(&harnesses, &held).contains("READY") && screen(&harnesses, &other).contains("READY")
     });
@@ -380,7 +381,7 @@ fn clicking_another_harness_row_asks_about_the_harness_being_left() {
 
     let _ = app.on_event(press(5, rows[1]));
     assert_eq!(
-        app.attached_harness(),
+        app.attached_session(),
         Some(held.as_str()),
         "the click is not applied until the question is answered"
     );
@@ -390,7 +391,7 @@ fn clicking_another_harness_row_asks_about_the_harness_being_left() {
         "leaving a harness by the rail must ask the same question: {out}"
     );
     assert_eq!(
-        app.attached_harness(),
+        app.attached_session(),
         Some(held.as_str()),
         "and the draw must not detach behind the question it is asking"
     );
@@ -398,16 +399,16 @@ fn clicking_another_harness_row_asks_about_the_harness_being_left() {
     let _ = app.on_event(key(KeyCode::Char('y')));
     assert_eq!(
         harnesses.control(&held),
-        Some(HarnessControl::Orchestrator),
+        Some(SessionControl::Orchestrator),
         "yes hands back the harness the operator was actually in"
     );
     assert_eq!(
         harnesses.control(&other),
-        Some(HarnessControl::User),
+        Some(SessionControl::User),
         "and never the one they merely clicked on"
     );
     assert_eq!(
-        app.attached_harness(),
+        app.attached_session(),
         None,
         "answering releases the keyboard"
     );
@@ -416,7 +417,7 @@ fn clicking_another_harness_row_asks_about_the_harness_being_left() {
 }
 
 #[test]
-fn clicking_the_attached_harness_own_row_neither_asks_nor_releases() {
+fn clicking_the_attached_session_own_row_neither_asks_nor_releases() {
     // The row you are already typing in is not a destination away from it. This
     // is the carve-out the rail rule above narrows to, and it has to survive:
     // raising a handover question over a pane the operator is mid-sentence in
@@ -424,7 +425,7 @@ fn clicking_the_attached_harness_own_row_neither_asks_nor_releases() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_harnesses().expect("harnesses").clone();
+    let harnesses = app.local_sessions().expect("harnesses").clone();
     wait_for("the child to paint", || {
         screen(&harnesses, &id).contains("READY")
     });
@@ -440,13 +441,13 @@ fn clicking_the_attached_harness_own_row_neither_asks_nor_releases() {
         "clicking your own row must ask nothing: {out}"
     );
     assert_eq!(
-        app.attached_harness(),
+        app.attached_session(),
         Some(attached.as_str()),
         "and must leave the keyboard where it was"
     );
     assert_eq!(
         harnesses.control(&attached),
-        Some(HarnessControl::User),
+        Some(SessionControl::User),
         "and must not change who holds the harness"
     );
 
@@ -462,7 +463,7 @@ fn the_handback_question_is_answered_by_clicking_its_answers() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_harnesses().expect("harnesses").clone();
+    let harnesses = app.local_sessions().expect("harnesses").clone();
     wait_for("the child to paint", || {
         screen(&harnesses, &id).contains("READY")
     });
@@ -486,7 +487,7 @@ fn the_handback_question_is_answered_by_clicking_its_answers() {
     );
     assert_eq!(
         harnesses.control(&attached),
-        Some(HarnessControl::User),
+        Some(SessionControl::User),
         "and must not answer the question on the way"
     );
 
@@ -505,10 +506,10 @@ fn the_handback_question_is_answered_by_clicking_its_answers() {
     let _ = app.on_event(press(x + 1, y));
     assert_eq!(
         harnesses.control(&attached),
-        Some(HarnessControl::Orchestrator),
+        Some(SessionControl::Orchestrator),
         "clicking [Y] must hand the harness back"
     );
-    assert_eq!(app.attached_harness(), None, "and release the keyboard");
+    assert_eq!(app.attached_session(), None, "and release the keyboard");
     assert!(
         !render(&mut app)
             .join("\n")
@@ -527,7 +528,7 @@ fn a_click_on_the_question_that_is_not_an_answer_answers_nothing() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_harnesses().expect("harnesses").clone();
+    let harnesses = app.local_sessions().expect("harnesses").clone();
     wait_for("the child to paint", || {
         screen(&harnesses, &id).contains("READY")
     });
@@ -546,7 +547,7 @@ fn a_click_on_the_question_that_is_not_an_answer_answers_nothing() {
     );
     assert_eq!(
         harnesses.control(&attached),
-        Some(HarnessControl::User),
+        Some(SessionControl::User),
         "and must answer nothing"
     );
 
@@ -560,7 +561,7 @@ fn a_click_on_the_question_that_is_not_an_answer_answers_nothing() {
     );
     assert_eq!(
         harnesses.control(&attached),
-        Some(HarnessControl::User),
+        Some(SessionControl::User),
         "and must answer nothing"
     );
 

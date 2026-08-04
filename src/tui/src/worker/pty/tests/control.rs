@@ -12,7 +12,7 @@ use medulla::protocol::HarnessProvider;
 /// A spec for a session the operator asked for, rather than a task frame.
 fn user_sh(script: &str) -> LaunchSpec {
     LaunchSpec {
-        control: HarnessControl::User,
+        control: SessionControl::User,
         origin: crate::worker::pty::SessionOrigin::User,
         name: None,
         ..sh(script)
@@ -47,7 +47,7 @@ fn handing_a_session_back_makes_it_claimable() {
     });
     assert!(manager.claim_idle("test", HarnessProvider::Codex).is_none());
 
-    assert!(manager.set_control(&id, HarnessControl::Orchestrator));
+    assert!(manager.set_control(&id, SessionControl::Orchestrator));
     let claimed = manager
         .claim_idle("test", HarnessProvider::Codex)
         .expect("a handed-back session is the orchestrator's to use");
@@ -66,7 +66,7 @@ fn handed_back_operator_session_adopts_the_first_real_conversation() {
         manager.row(&id).is_some_and(|r| r.state.is_running())
     });
 
-    assert!(manager.set_control(&id, HarnessControl::Orchestrator));
+    assert!(manager.set_control(&id, SessionControl::Orchestrator));
     let claimed = manager
         .claim_idle("peer@example", HarnessProvider::Codex)
         .expect("a handed-back session must be eligible for real dispatch");
@@ -104,7 +104,7 @@ fn taking_over_a_running_session_stops_further_dispatch() {
     );
     manager.release(&id);
 
-    assert!(manager.set_control(&id, HarnessControl::User));
+    assert!(manager.set_control(&id, SessionControl::User));
     assert_eq!(
         manager.claim_idle("test", HarnessProvider::Codex),
         None,
@@ -124,7 +124,7 @@ fn an_operator_spawned_session_opens_idle() {
     let row = manager.row(&id).unwrap();
     assert!(!row.busy, "an operator-spawned session opens idle");
     assert!(row.origin.is_user());
-    assert_eq!(row.control, HarnessControl::User);
+    assert_eq!(row.control, SessionControl::User);
     manager.close(&id);
 }
 
@@ -132,7 +132,7 @@ fn an_operator_spawned_session_opens_idle() {
 fn control_of_an_unknown_session_is_not_reported_or_settable() {
     let manager = PtyManager::new();
     assert_eq!(manager.control("w_nope"), None);
-    assert!(!manager.set_control("w_nope", HarnessControl::User));
+    assert!(!manager.set_control("w_nope", SessionControl::User));
 }
 
 #[test]
@@ -144,9 +144,9 @@ fn handover_leaves_a_running_turn_marked_busy() {
     let id = manager.open(sh("sleep 30")).unwrap();
     assert!(manager.row(&id).unwrap().busy, "a task launch claims it");
 
-    assert!(manager.set_control(&id, HarnessControl::User));
+    assert!(manager.set_control(&id, SessionControl::User));
     assert!(manager.row(&id).unwrap().busy);
-    assert!(manager.set_control(&id, HarnessControl::Orchestrator));
+    assert!(manager.set_control(&id, SessionControl::Orchestrator));
     assert!(
         manager.row(&id).unwrap().busy,
         "handback must not free a session whose turn is still running"
@@ -281,17 +281,17 @@ fn taking_a_dispatched_session_and_handing_it_back_never_changes_its_origin() {
     let id = manager.open(sh("sleep 30")).unwrap();
     let row = manager.row(&id).unwrap();
     assert!(row.origin.is_orchestrator());
-    assert_eq!(row.control, HarnessControl::Orchestrator);
+    assert_eq!(row.control, SessionControl::Orchestrator);
 
-    assert!(manager.set_control(&id, HarnessControl::User));
+    assert!(manager.set_control(&id, SessionControl::User));
     let taken = manager.row(&id).unwrap();
-    assert_eq!(taken.control, HarnessControl::User, "the operator holds it");
+    assert_eq!(taken.control, SessionControl::User, "the operator holds it");
     assert!(
         taken.origin.is_orchestrator(),
         "holding a session is not having started it"
     );
 
-    assert!(manager.set_control(&id, HarnessControl::Orchestrator));
+    assert!(manager.set_control(&id, SessionControl::Orchestrator));
     assert!(
         manager.row(&id).unwrap().origin.is_orchestrator(),
         "handing it back changes control, and only control"
@@ -311,10 +311,10 @@ fn handing_an_operator_started_session_to_the_orchestrator_keeps_it_user_origina
         manager.row(&id).is_some_and(|r| r.state.is_running())
     });
 
-    assert!(manager.set_control(&id, HarnessControl::Orchestrator));
+    assert!(manager.set_control(&id, SessionControl::Orchestrator));
     let row = manager.row(&id).unwrap();
     assert!(row.origin.is_user(), "origin is fixed at birth");
-    assert_eq!(row.control, HarnessControl::Orchestrator);
+    assert_eq!(row.control, SessionControl::Orchestrator);
     assert!(
         manager
             .claim_idle("test", HarnessProvider::Codex)
@@ -345,7 +345,7 @@ fn a_session_name_round_trips_and_a_blank_one_clears_it() {
     let renamed = manager.row(&id).unwrap();
     assert_eq!(renamed.name.as_deref(), Some("chasing the 500"));
     assert!(renamed.origin.is_user(), "renaming is not re-parenting");
-    assert_eq!(renamed.control, HarnessControl::User);
+    assert_eq!(renamed.control, SessionControl::User);
 
     // Blank is not a name: storing it would render as a gap in the rail.
     assert!(manager.set_name(&id, Some("   ".to_string())));

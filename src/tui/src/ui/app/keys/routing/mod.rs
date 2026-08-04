@@ -201,7 +201,7 @@ impl App {
         match crate::ui::app::TABS.iter().position(|tab| *tab == "Agents") {
             Some(index) => {
                 self.tab_index = index;
-                self.set_status(format!("New agent on {} · pick a harness", host.label));
+                self.set_status(format!("New agent on {} · pick a harness type", host.label));
             }
             None => self.set_status("Declare a new agent from the Agents tab"),
         }
@@ -413,7 +413,7 @@ impl App {
             KeyCode::Char('r') => {
                 self.reload_custom_harnesses();
                 self.refresh_credential_status_if_needed();
-                self.set_status("Harnesses refreshed");
+                self.set_status("Harness types refreshed");
                 RoutingKey::Handled(Some(Cmd::RefreshFleet))
             }
             _ => RoutingKey::Unhandled,

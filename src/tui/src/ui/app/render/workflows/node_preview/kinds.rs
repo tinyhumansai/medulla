@@ -157,7 +157,7 @@ fn agent_lines(config: &Value, defaults: &AgentDefaults) -> Vec<Line<'static>> {
             ),
         ]),
         Line::from(Span::styled(
-            "A fresh, bounded harness session is started for this step.",
+            "A fresh, bounded agent session is started for this step.",
             Style::default().add_modifier(Modifier::DIM),
         )),
     ];

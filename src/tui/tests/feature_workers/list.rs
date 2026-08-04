@@ -366,7 +366,7 @@ fn the_preview_follows_the_cursor_rather_than_repeating_every_host() {
 #[test]
 fn harnesses_page_names_credentials_per_runtime_without_values() {
     let mut app = app_with_workers(None);
-    app.focus_routing_subpage("Harnesses");
+    app.focus_routing_subpage("Harness Types");
     let out = render(&mut app, 120, 40);
     // Credentials read per harness kind, because that is what spends them.
     assert!(out.contains("Claude Code"));
@@ -385,7 +385,7 @@ fn harnesses_page_names_credentials_per_runtime_without_values() {
         app.on_event(key(KeyCode::Char('r'))),
         Some(Cmd::RefreshFleet)
     ));
-    assert_eq!(app.status(), "Harnesses refreshed");
+    assert_eq!(app.status(), "Harness types refreshed");
 }
 
 #[test]

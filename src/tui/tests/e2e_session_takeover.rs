@@ -1,4 +1,4 @@
-//! End-to-end coverage for taking a live harness back from the orchestrator.
+//! End-to-end coverage for taking a live session back from the orchestrator.
 //!
 //! A deterministic shell stands in for Codex, but everything around it is the
 //! production path: a task opens a real PTY, its prompt is injected, its rollout
@@ -15,7 +15,7 @@ use medulla::daemon::providers::{Abort, RunTaskOptions};
 use medulla::protocol::HarnessProvider;
 use medulla::sessions::SessionClass;
 use medulla_tui::worker::executor::PtySessionExecutor;
-use medulla_tui::worker::pty::{HarnessControl, PtyManager};
+use medulla_tui::worker::pty::{PtyManager, SessionControl};
 
 /// Maximum time for a real child process or PTY reader to make progress.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -118,7 +118,7 @@ sleep 30
     })
     .await;
 
-    assert!(sessions.set_control(&id, HarnessControl::User));
+    assert!(sessions.set_control(&id, SessionControl::User));
     let outcome = tokio::time::timeout(Duration::from_secs(2), run)
         .await
         .expect("the executor yields promptly when the operator takes control")
@@ -131,7 +131,7 @@ sleep 30
 
     let row = sessions.row(&id).expect("the taken-over session remains");
     assert!(row.state.is_running(), "the taken-over PTY must stay alive");
-    assert_eq!(row.control, HarnessControl::User);
+    assert_eq!(row.control, SessionControl::User);
     assert!(!row.busy, "the abandoned delegated turn must be released");
 
     sessions

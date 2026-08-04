@@ -48,10 +48,10 @@ impl App {
         // owns exactly one keypress: only a deliberate `y` proceeds.
         if let Some((worker, task_id)) = self.kill_armed.take() {
             if k.code == KeyCode::Char('y') && k.modifiers.is_empty() {
-                self.set_status(format!("Killing harness for {task_id}…"));
+                self.set_status(format!("Killing the session for {task_id}…"));
                 return Some(Cmd::KillTask { worker, task_id });
             }
-            self.set_status("Harness kill cancelled");
+            self.set_status("Session kill cancelled");
             return None;
         }
 
@@ -94,11 +94,11 @@ impl App {
         }
 
         // The harness picker owns navigation while open.
-        if self.harness_picker.is_some() {
+        if self.agent_picker.is_some() {
             if ctrl && k.code == KeyCode::Char('c') {
                 self.should_quit = true;
             } else {
-                self.handle_harness_picker_key(k);
+                self.handle_agent_picker_key(k);
             }
             return None;
         }
@@ -199,14 +199,14 @@ impl App {
                 KeyCode::Char('t') => {
                     match self.selected_agent_id().filter(|_| tab == "Agents") {
                         Some(agent_id) => self.open_new_session(&agent_id),
-                        None => self.open_harness_picker(),
+                        None => self.open_session_picker(),
                     }
                     return None;
                 }
                 // Grab or give: one chord for both directions, because the rail
                 // row and the pane title both say which way it will go.
                 KeyCode::Char('g') => {
-                    self.toggle_harness_control();
+                    self.toggle_session_control();
                     return None;
                 }
                 // Walk the open threads. The bare arrows belong to the composer,

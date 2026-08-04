@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use portable_pty::{Child, MasterPty};
 
 use super::super::sync::lock;
-use super::super::types::HarnessControl;
+use super::super::types::SessionControl;
 use super::types::{
     AttentionState, ColdFields, SessionIo, SessionMeta, TerminalModes, NO_EXIT_CODE, STATE_EXITED,
     STATE_RUNNING,
@@ -26,7 +26,7 @@ impl SessionHandle {
         label: String,
         name: Option<String>,
         session_id: Option<String>,
-        control: HarnessControl,
+        control: SessionControl,
         screen: vt100::Parser,
         master: Box<dyn MasterPty + Send>,
         writes: Sender<Vec<u8>>,
@@ -52,7 +52,7 @@ impl SessionHandle {
             last_output_at: AtomicI64::new(started_at),
             generation: AtomicU64::new(0),
             busy: AtomicBool::new(busy),
-            operator_held: AtomicBool::new(control == HarnessControl::User),
+            operator_held: AtomicBool::new(control == SessionControl::User),
             queued_bytes,
             cold: Mutex::new(ColdFields {
                 label,

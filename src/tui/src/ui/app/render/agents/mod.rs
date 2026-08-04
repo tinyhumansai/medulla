@@ -112,20 +112,20 @@ impl App {
             lane_index,
             task,
             on_orchestrator,
-            harness: None,
+            session: None,
         };
-        selection.harness = self.local_harness_session(&selection);
+        selection.session = self.local_session(&selection);
         // Focus follows the pane, not the other way round. If the cursor moved
         // off the attached session — or that session ended — the keyboard comes
         // back to the chrome, because keys landing in a harness the operator is
         // no longer looking at is the worst failure this feature can have.
         if let Some(attached) = self.harness_focus.attached_to() {
-            if selection.harness.as_deref() != Some(attached) {
-                self.release_harness();
+            if selection.session.as_deref() != Some(attached) {
+                self.release_session();
             }
         }
-        self.harness_pane_session = selection.harness.clone();
-        self.selected_harness_session = selection.harness.clone();
+        self.pane_session = selection.session.clone();
+        self.rail_session = selection.session.clone();
         selection
     }
 
@@ -180,7 +180,7 @@ impl App {
         // work panel goes for the same reason: the harness's own screen already
         // shows its todos and edits, and the columns are better spent on the
         // terminal than on our second-hand copy of it.
-        let embedded = selection.harness.is_some();
+        let embedded = selection.session.is_some();
         // The composer belongs to the orchestrator lane and nowhere else. That
         // lane *is* the conversation — typing into it is how work starts. Every
         // other row is something already running somewhere: an agent, a task, a

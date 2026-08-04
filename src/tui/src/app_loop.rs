@@ -528,8 +528,8 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         (primary.workspace().to_string(), providers, presets)
     });
     let started_hosts = std::sync::Arc::new(std::sync::Mutex::new(local_hosts));
-    let local_harnesses = primary_defaults.map(|(workspace, providers, custom_harnesses)| {
-        medulla_tui::ui::harness_pane::LocalHarnesses {
+    let local_sessions = primary_defaults.map(|(workspace, providers, custom_harnesses)| {
+        medulla_tui::ui::harness_pane::LocalSessions {
             sessions: harness_sessions.clone(),
             runtimes: host_runtimes.clone(),
             hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
@@ -678,7 +678,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // one host, so extras are served and dispatchable but not yet
                 // reflected there — a UI gap, not a hosting one.
                 host: primary_observation.clone(),
-                harnesses: local_harnesses.clone(),
+                local_sessions: local_sessions.clone(),
             },
         )
         .await;

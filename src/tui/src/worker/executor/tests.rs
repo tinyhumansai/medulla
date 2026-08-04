@@ -5,28 +5,28 @@ use medulla::sessions::SessionClass;
 use std::collections::HashMap;
 
 use super::run::{retains_workspace_context, retire_stopped_workspace_context};
-use crate::worker::pty::HarnessControl;
+use crate::worker::pty::SessionControl;
 
 #[test]
 fn mapper_context_survives_only_for_live_reusable_sessions() {
     assert!(retains_workspace_context(
         SessionClass::Unbound,
-        Some(HarnessControl::Orchestrator),
+        Some(SessionControl::Orchestrator),
         true,
     ));
     assert!(retains_workspace_context(
         SessionClass::Bounded,
-        Some(HarnessControl::User),
+        Some(SessionControl::User),
         true,
     ));
     assert!(!retains_workspace_context(
         SessionClass::Bounded,
-        Some(HarnessControl::Orchestrator),
+        Some(SessionControl::Orchestrator),
         true,
     ));
     assert!(!retains_workspace_context(
         SessionClass::Unbound,
-        Some(HarnessControl::Orchestrator),
+        Some(SessionControl::Orchestrator),
         false,
     ));
 }

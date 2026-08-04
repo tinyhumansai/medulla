@@ -87,7 +87,7 @@ pub(super) fn run_cmd(
         | Cmd::SubmitFeedback { .. } => {
             unreachable!("feedback commands return before main dispatch")
         }
-        Cmd::HandOffHarness(_) | Cmd::HoldHarness { .. } => {
+        Cmd::HandOffSession(_) | Cmd::HoldSession { .. } => {
             unreachable!("handoff commands return before main dispatch")
         }
         Cmd::Submit(input) => {

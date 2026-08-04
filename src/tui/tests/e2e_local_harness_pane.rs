@@ -87,7 +87,6 @@ fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
         custom_harnesses: Vec::new(),
         budget: None,
         attribution: true,
-        hooks: medulla::harness_hooks::HooksConfig::default(),
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
         let sessions = sessions.clone();
@@ -270,6 +269,7 @@ async fn a_task_that_names_no_session_shows_no_screen_rather_than_someone_elses(
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
     };
 
     dispatch(&runtime, "mine#0");

@@ -57,6 +57,7 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
         skip_permissions: false,
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         budget: None,
         custom_harnesses: Vec::new(),
     };

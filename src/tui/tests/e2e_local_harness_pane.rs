@@ -87,6 +87,7 @@ fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
         custom_harnesses: Vec::new(),
         budget: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
     };
     let run_task = Arc::new(move |options: medulla::daemon::providers::RunTaskOptions| {
         let sessions = sessions.clone();
@@ -181,6 +182,7 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
     };
 
     // Before dispatch there is nothing to show — the pane must not invent a
@@ -230,6 +232,7 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
     };
 
     dispatch(&runtime, task_id);

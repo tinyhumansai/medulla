@@ -43,6 +43,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
         skip_permissions: false,
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         budget: None,
         custom_harnesses: Vec::new(),
     };

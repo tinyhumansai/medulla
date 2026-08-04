@@ -7,10 +7,13 @@
 //! The cursor is an index into the layout's reading order, and moving it is the
 //! SDK's judgement ([`medulla::ui::workflows::GraphLayout::moved`]) — following
 //! edges rather than jumping columns. What this module adds is the *viewport*:
-//! keeping the selected node on screen by scrolling the canvas to it.
+//! the fold that wraps a long chain onto the next band down so the graph is
+//! never wider than its pane, and the vertical scroll that keeps the selected
+//! node on screen.
 
 use medulla::ui::workflows::{GraphLayout, Move, PlacedNode};
 
+use super::super::render::workflows::{BAND_GAP, LANE_STRIDE, LAYER_STRIDE, NODE_HEIGHT};
 use super::super::types::App;
 
 impl App {

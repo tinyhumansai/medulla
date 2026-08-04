@@ -66,6 +66,13 @@ pub(in crate::ui::app) const LAYER_STRIDE: usize = NODE_WIDTH + 9;
 /// wires between two stacked nodes have a row to run along.
 pub(in crate::ui::app) const LANE_STRIDE: usize = NODE_HEIGHT + 1;
 
+/// Blank rows between one band of the folded graph and the next.
+///
+/// One row, on top of the blank row every lane already ends with. That is the
+/// row a folded wire runs back along, so it does not have to cut across the
+/// band it is arriving at.
+pub(in crate::ui::app) const BAND_GAP: usize = 1;
+
 /// The most content columns the workflow rail may claim.
 ///
 /// Mirrors the Agents rail: labels may influence the width up to this point,

@@ -687,7 +687,54 @@ fn the_nodes_sway_but_the_selected_one_holds_still() {
 }
 
 #[test]
-fn columns_are_sized_to_the_pane_and_tile_it() {
+fn columns_are_sized_to_the_graphs_own_labels() {
+    // Short names: every column is the minimum width, so more steps fit across
+    // the pane than a fixed column width would have allowed.
+    let mut long = diamond("long");
+    long.graph = serde_json::from_value(json!({
+        "nodes": (0..12).map(|index| json!({
+            "id": format!("n{index}"),
+            "kind": if index == 0 { "trigger" } else { "transform" },
+            "name": format!("S{index}"),
+            "config": {},
+        })).collect::<Vec<_>>(),
+        "edges": (0..11).map(|index| json!({
+            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
+        })).collect::<Vec<_>>(),
+    }))
+    .expect("graph parses");
+    let (_home, mut app) = app_with(&[long], &[]);
+    render_sized(&mut app, 140, 34);
+    let narrow = (app.node_width(), app.layers_per_band());
+    assert_eq!(narrow.0, super::MIN_NODE_WIDTH, "short names, narrow columns");
+
+    // The same graph with long names takes wider columns, and fewer of them.
+    let mut wordy = diamond("wordy");
+    wordy.graph = serde_json::from_value(json!({
+        "nodes": (0..12).map(|index| json!({
+            "id": format!("n{index}"),
+            "kind": if index == 0 { "trigger" } else { "transform" },
+            "name": format!("A rather long step name {index}"),
+            "config": {},
+        })).collect::<Vec<_>>(),
+        "edges": (0..11).map(|index| json!({
+            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
+        })).collect::<Vec<_>>(),
+    }))
+    .expect("graph parses");
+    let (_home, mut app) = app_with(&[wordy], &[]);
+    render_sized(&mut app, 140, 34);
+    let wide = (app.node_width(), app.layers_per_band());
+
+    assert_eq!(wide.0, super::MAX_NODE_WIDTH, "long names are capped");
+    assert!(
+        wide.1 < narrow.1,
+        "wider columns means fewer of them: {wide:?} against {narrow:?}"
+    );
+}
+
+#[test]
+fn a_band_never_runs_past_the_pane() {
     let mut long = diamond("long");
     long.graph = serde_json::from_value(json!({
         "nodes": (0..12).map(|index| json!({
@@ -704,7 +751,7 @@ fn columns_are_sized_to_the_pane_and_tile_it() {
     let (_home, mut app) = app_with(&[long], &[]);
 
     for width in [100u16, 140, 200] {
-        render_sized(&mut app, width, 34);
+        let screen = render_sized(&mut app, width, 34);
         let (per_band, node_width) = (app.layers_per_band(), app.node_width());
         let canvas = app.canvas_width();
 
@@ -712,28 +759,19 @@ fn columns_are_sized_to_the_pane_and_tile_it() {
             (super::MIN_NODE_WIDTH..=super::MAX_NODE_WIDTH).contains(&node_width),
             "at {width} columns a node is {node_width} wide"
         );
-        // A full band never overflows the pane, and unless its columns hit the
-        // maximum width it fills the pane rather than leaving a ragged margin.
         let (last, _) = app.graph_cell(per_band - 1, 0);
-        let end = last + node_width;
         assert!(
-            end <= canvas + super::FOLD_MARGIN,
-            "at {width} columns the band overflows: ends at {end} of {canvas}"
+            last + node_width <= canvas + super::FOLD_MARGIN,
+            "at {width} columns the band overflows: ends at {} of {canvas}",
+            last + node_width
         );
-        if node_width < super::MAX_NODE_WIDTH {
+        // Columns spread into the pane, but only so far: two short names either
+        // side of half a pane of connector read as unrelated.
+        if per_band > 1 {
+            let stride = app.graph_cell(1, 0).0 - app.graph_cell(0, 0).0;
             assert!(
-                end + super::GUTTER_SPAN >= canvas,
-                "at {width} columns the band leaves {} unused",
-                canvas.saturating_sub(end)
-            );
-        } else {
-            // Capped: the slack is in the gutters, and the columns keep their
-            // own stride rather than being stretched apart to fill the pane.
-            let (first, _) = app.graph_cell(0, 0);
-            assert_eq!(
-                last - first,
-                (per_band - 1) * (super::MAX_NODE_WIDTH + super::GUTTER_SPAN),
-                "at {width} columns the capped stride is kept"
+                stride <= node_width + super::MAX_GUTTER_SPAN,
+                "at {width} columns the stride is {stride}: {screen}"
             );
         }
     }

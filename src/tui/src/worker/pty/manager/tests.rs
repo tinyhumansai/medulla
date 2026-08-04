@@ -21,6 +21,7 @@ fn a_stale_bell_sample_cannot_move_the_watermark_backwards() {
 #[derive(Debug)]
 struct RecordingChild {
     killed: Arc<AtomicBool>,
+    reaped: Arc<AtomicBool>,
 }
 
 impl ChildKiller for RecordingChild {
@@ -32,6 +33,7 @@ impl ChildKiller for RecordingChild {
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
         Box::new(RecordingChild {
             killed: self.killed.clone(),
+            reaped: self.reaped.clone(),
         })
     }
 }
@@ -42,6 +44,7 @@ impl Child for RecordingChild {
     }
 
     fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        self.reaped.store(true, Ordering::SeqCst);
         Ok(ExitStatus::with_exit_code(0))
     }
 
@@ -66,8 +69,10 @@ impl Child for RecordingChild {
 #[test]
 fn dropping_an_armed_launch_guard_kills_its_child() {
     let killed = Arc::new(AtomicBool::new(false));
+    let reaped = Arc::new(AtomicBool::new(false));
     let child: Box<dyn Child + Send + Sync> = Box::new(RecordingChild {
         killed: killed.clone(),
+        reaped: reaped.clone(),
     });
     let mut guard = LaunchGuard::new(Some("test-session".to_string()));
     guard.set_child(child);
@@ -78,6 +83,15 @@ fn dropping_an_armed_launch_guard_kills_its_child() {
         killed.load(Ordering::SeqCst),
         "an abandoned launch must kill the child it already spawned"
     );
+    // Killing is only half of it. This guard is the child's sole owner on the
+    // early-return path — the `SessionHandle::reap` that normally waits was
+    // never built — so a kill without a wait leaves a zombie holding a
+    // process slot until Medulla exits, which is worst exactly when pty setup
+    // is failing repeatedly.
+    assert!(
+        reaped.load(Ordering::SeqCst),
+        "a killed child must also be waited on, or it lingers as a zombie"
+    );
 }
 
 /// The success path must not kill the very child it just spawned: `disarm`
@@ -85,8 +99,10 @@ fn dropping_an_armed_launch_guard_kills_its_child() {
 #[test]
 fn disarming_a_launch_guard_hands_back_the_child_without_killing_it() {
     let killed = Arc::new(AtomicBool::new(false));
+    let reaped = Arc::new(AtomicBool::new(false));
     let child: Box<dyn Child + Send + Sync> = Box::new(RecordingChild {
         killed: killed.clone(),
+        reaped: reaped.clone(),
     });
     let mut guard = LaunchGuard::new(None);
     guard.set_child(child);
@@ -100,6 +116,10 @@ fn disarming_a_launch_guard_hands_back_the_child_without_killing_it() {
     assert!(
         !killed.load(Ordering::SeqCst),
         "a successful launch must not kill its own child"
+    );
+    assert!(
+        !reaped.load(Ordering::SeqCst),
+        "nor wait on it — the handle taking ownership is what reaps it later"
     );
 }
 

@@ -76,8 +76,22 @@ impl Drop for LaunchGuard {
         // before giving the grant back — a live child holding a revoked grant
         // is merely broken, but a live child holding one nobody revoked is
         // exactly the capability leak this guard exists to close.
+        //
+        // Then *wait* on it. This guard is the child's only owner on this path
+        // — `SessionHandle::reap`, which normally does the waiting, is never
+        // reached because the handle was never built — so dropping a killed
+        // child without reaping it leaves a zombie holding a process slot
+        // until Medulla itself exits. A run of pty setup failures is exactly
+        // the case where that accumulates, and it is also the case where the
+        // machine is already short of descriptors.
+        //
+        // Blocking here is safe: `open` runs on the blocking pool (see its
+        // docs), and the wait follows a kill, so it returns as soon as the
+        // signal is reaped rather than lasting as long as the session would
+        // have.
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
+            let _ = child.wait();
         }
         #[cfg(feature = "workflows")]
         if let Some(session) = &self.grant {

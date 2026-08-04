@@ -43,24 +43,30 @@ mod rail_tests;
 #[cfg(test)]
 mod tests;
 
-/// Width of one node's slot, in columns: its marker, a space, and its name.
+/// The narrowest a node's label may be squeezed to before the canvas folds
+/// rather than fitting another column in.
 ///
-/// A node is a marker and a label rather than a drawn box. Boxes cost four rows
-/// and twenty columns each to say what a coloured dot says in one row, and the
-/// graphs worth looking at are the ones with too many nodes to fit — so the
-/// space a box spends on its own border is exactly the space the graph needs.
-pub(in crate::ui::app) const NODE_WIDTH: usize = 17;
+/// Twelve columns still shows a marker and enough of a name to recognise it;
+/// below that the labels stop distinguishing anything and the graph is better
+/// off wrapping.
+pub(in crate::ui::app) const MIN_NODE_WIDTH: usize = 12;
+
+/// The widest a node's label is drawn, however much room there is.
+///
+/// A node is a marker and a short name. Past this the extra columns are trailing
+/// blanks that push the next column further away for nothing.
+pub(in crate::ui::app) const MAX_NODE_WIDTH: usize = 24;
+
+/// Columns between one node's label and the next column's, for the wire routed
+/// through the gap and the port name written along it.
+///
+/// Nine rather than the four a wire needs, because a branch's port name
+/// (`false`) is written there — and a truncated port name tells a reader nothing
+/// about which arm they are following.
+pub(in crate::ui::app) const GUTTER_SPAN: usize = 9;
 
 /// Height of one node, in rows. A marker and its label are one line.
 pub(in crate::ui::app) const NODE_HEIGHT: usize = 1;
-
-/// Columns from one layer's left edge to the next: a node plus the gutter its
-/// outgoing wires are routed through.
-///
-/// The gutter is nine columns rather than the four a wire needs, because a
-/// branch's port name (`false`) is written along it — and a truncated port name
-/// tells a reader nothing about which arm they are following.
-pub(in crate::ui::app) const LAYER_STRIDE: usize = NODE_WIDTH + 9;
 
 /// Rows from one lane's top edge to the next: a node plus a blank row, so the
 /// wires between two stacked nodes have a row to run along.
